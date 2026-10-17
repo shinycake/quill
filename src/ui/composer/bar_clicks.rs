@@ -29,6 +29,9 @@ impl QuillApp {
                     BarAction::PickQuote => {
                         this.apply_reply_option(ReplyOption::UpdateQuote, window, cx);
                     }
+                    BarAction::ReplyElsewhere => {
+                        this.apply_reply_option(ReplyOption::ReplyInAnotherChat, window, cx);
+                    }
                     BarAction::Nothing => {}
                 });
             }),
@@ -39,6 +42,7 @@ impl QuillApp {
     pub(in crate::ui) fn reply_bar_kind(&self, reply: &ComposerReplyTo) -> BarKind {
         BarKind::Reply {
             has_text: self.reply_message_text(reply).is_some(),
+            can_reply_elsewhere: self.reply_elsewhere_allowed(reply.chat_id, reply.message_id),
             same_chat: reply.target_chat.is_none() && self.open_chat_id() == Some(reply.chat_id),
         }
     }

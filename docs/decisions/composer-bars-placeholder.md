@@ -31,15 +31,19 @@ Three gaps from the composer audit (group B): C1, C2 and C5.
   `composer_ui.cancel_edit_confirm`) or cancels. The X still cancels.
 - `quill::composer::ComposerPlaceholder::for_facts` is a pure function of
   `PlaceholderFacts` (editing, Stars per message, broadcast, silent).
-  `sync_composer_placeholder` (frame upkeep) sets the field's placeholder when
-  the text it should show changes. `Session::paid_send_price` gives the Stars
+  `sync_composer_placeholder` (frame upkeep for the main window, and the
+  chat window body for each chat window) sets the field's placeholder when
+  the facts or the language change. It is derived per frame, not set at event
+  sites, because `set_placeholder` needs a `Window` and the Stars answer
+  arrives in `poll_live`. `Session::paid_send_price` gives the Stars
   price of one chat. Silent follows the composer's silent toggle, which is
   what tdesktop's bell writes (`silentPosts`).
 - `quill::composer::bar_click_action` maps a click to jump, quote picker or
   nothing. The icon and text of both bars are the click target; the options,
   replace and X buttons are not. Left click on an edit bar jumps to the
   message; left click on a reply bar opens Quill's quote picker (its
-  equivalent of the options box, offered when the message has text);
+  equivalent of the options box, offered when the message has text; a media
+  reply opens "reply in another chat" instead);
   Ctrl/Cmd+click or right click on a reply jumps when the reply is in the
   open chat.
 
@@ -54,7 +58,6 @@ Three gaps from the composer audit (group B): C1, C2 and C5.
   tdesktop shows the plain placeholder too.
 - Right click on the edit bar: tdesktop's media edit menu. Quill keeps those
   tools as buttons on the bar.
-- Chat windows keep their own composer and the default placeholder.
 
 ## How it was verified
 

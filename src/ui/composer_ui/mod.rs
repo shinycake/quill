@@ -6,6 +6,7 @@ use super::demo::{demo_file_json, demo_thumb_png_path};
 use super::pressable::PressableDiv;
 use super::*;
 use crate::ui::status_note::StatusNote;
+use gpui_kit::TestSupportExt;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::attachment::{
     Attachment, AttachmentActions, AttachmentContent, AttachmentDescription, AttachmentGroup,
@@ -362,6 +363,7 @@ fn composer_context_bar_rich(
     // The icon and text are one target; the trailing buttons are not.
     let target = div()
         .id((id, 1usize))
+        .test_support()
         .flex()
         .flex_1()
         .min_w_0()

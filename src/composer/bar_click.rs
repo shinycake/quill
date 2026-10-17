@@ -7,7 +7,11 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BarKind {
     Edit,
-    Reply { has_text: bool, same_chat: bool },
+    Reply {
+        has_text: bool,
+        can_reply_elsewhere: bool,
+        same_chat: bool,
+    },
 }
 
 /// How it was clicked.
@@ -26,6 +30,8 @@ pub enum BarAction {
     JumpToMessage,
     /// Pick the part of the replied message to quote.
     PickQuote,
+    /// Choose another chat for the reply (a message with nothing to quote).
+    ReplyElsewhere,
     Nothing,
 }
 
@@ -42,9 +48,19 @@ pub fn bar_click_action(kind: BarKind, click: BarClick) -> BarAction {
                 BarAction::Nothing
             }
         }
-        (BarKind::Reply { has_text, .. }, BarClick::Left) => {
+        // tdesktop opens the options box; Quill's first entry that applies.
+        (
+            BarKind::Reply {
+                has_text,
+                can_reply_elsewhere,
+                ..
+            },
+            BarClick::Left,
+        ) => {
             if has_text {
                 BarAction::PickQuote
+            } else if can_reply_elsewhere {
+                BarAction::ReplyElsewhere
             } else {
                 BarAction::Nothing
             }
@@ -58,6 +74,7 @@ mod tests {
 
     const TEXT_REPLY: BarKind = BarKind::Reply {
         has_text: true,
+        can_reply_elsewhere: true,
         same_chat: true,
     };
 
@@ -81,9 +98,19 @@ mod tests {
         );
         let media = BarKind::Reply {
             has_text: false,
+            can_reply_elsewhere: true,
             same_chat: true,
         };
-        assert_eq!(bar_click_action(media, BarClick::Left), BarAction::Nothing);
+        assert_eq!(
+            bar_click_action(media, BarClick::Left),
+            BarAction::ReplyElsewhere
+        );
+        let locked = BarKind::Reply {
+            has_text: false,
+            can_reply_elsewhere: false,
+            same_chat: true,
+        };
+        assert_eq!(bar_click_action(locked, BarClick::Left), BarAction::Nothing);
     }
 
     #[test]
@@ -95,6 +122,7 @@ mod tests {
             );
             let elsewhere = BarKind::Reply {
                 has_text: true,
+                can_reply_elsewhere: true,
                 same_chat: false,
             };
             assert_eq!(bar_click_action(elsewhere, click), BarAction::Nothing);

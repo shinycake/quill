@@ -59,7 +59,13 @@ fn open_chat(app: &Entity<QuillApp>, cx: &mut VisualTestContext, chat: ChatId) {
 }
 
 fn placeholder(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> String {
-    app.read_with(cx, |app, _| app.composer_ui.placeholder_text.clone())
+    app.read_with(cx, |app, cx| {
+        app.composer
+            .read(cx)
+            .presentation()
+            .placeholder()
+            .to_string()
+    })
 }
 
 fn begin_edit(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
@@ -96,10 +102,13 @@ fn set_field(app: &Entity<QuillApp>, cx: &mut VisualTestContext, text: &str) {
     frames(cx);
 }
 
-fn escape(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
-    cx.update(|window, cx| {
-        app.update(cx, |app, cx| app.request_cancel_edit(window, cx));
-    });
+fn escape(_app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
+    cx.update(|window, cx| window.press("escape", cx));
+    frames(cx);
+}
+
+fn click(cx: &mut VisualTestContext, id: &'static str) {
+    cx.update(|window, cx| window.click(id, cx));
     frames(cx);
 }
 
@@ -169,11 +178,9 @@ fn answering_no_keeps_the_edit_and_the_text(cx: &mut TestAppContext) {
     begin_edit(&app, vcx);
     set_field(&app, vcx, "something else entirely");
     escape(&app, vcx);
-    app.update(vcx, |app, cx| {
-        app.composer_ui.cancel_edit_confirm = false;
-        cx.notify();
-    });
-    frames(vcx);
+    assert!(confirm_open(&app, vcx));
+    click(vcx, "cancel-edit-no");
+    assert!(!confirm_open(&app, vcx));
     assert!(editing(&app, vcx));
     let text = app.read_with(vcx, |app, cx| app.composer.read(cx).value().to_string());
     assert_eq!(text, "something else entirely");
@@ -186,15 +193,26 @@ fn answering_yes_drops_the_edit(cx: &mut TestAppContext) {
     begin_edit(&app, vcx);
     set_field(&app, vcx, "something else entirely");
     escape(&app, vcx);
-    vcx.update(|window, cx| {
-        app.update(cx, |app, cx| {
-            app.composer_ui.cancel_edit_confirm = false;
-            app.clear_edit(window, cx);
-        });
-    });
-    frames(vcx);
+    click(vcx, "cancel-edit-yes");
     assert!(!editing(&app, vcx));
     assert!(!confirm_open(&app, vcx));
+}
+
+#[gpui_kit::test]
+fn a_second_escape_does_not_reopen_or_cancel(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    begin_edit(&app, vcx);
+    set_field(&app, vcx, "something else entirely");
+    escape(&app, vcx);
+    assert!(confirm_open(&app, vcx));
+    escape(&app, vcx);
+    assert!(
+        editing(&app, vcx),
+        "Escape on the box does not drop the edit"
+    );
+    escape(&app, vcx);
+    assert!(editing(&app, vcx));
 }
 
 #[gpui_kit::test]
@@ -203,9 +221,7 @@ fn the_x_button_cancels_without_asking(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     begin_edit(&app, vcx);
     set_field(&app, vcx, "something else entirely");
-    vcx.update(|window, cx| {
-        app.update(cx, |app, cx| app.clear_edit(window, cx));
-    });
+    click(vcx, "cancel-edit");
     assert!(!editing(&app, vcx));
     assert!(!confirm_open(&app, vcx));
 }
@@ -223,8 +239,27 @@ fn reply_to_ada(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
     frames(cx);
 }
 
+fn jump_ready(app: &Entity<QuillApp>, cx: &mut VisualTestContext, id: MessageId) -> bool {
+    app.read_with(cx, |app, _| {
+        app.session().is_some_and(|session| {
+            matches!(
+                session.search.chat_search.jump,
+                quill::state::ChatSearchJump::Ready { message_id } if message_id == id
+            )
+        })
+    })
+}
+
+fn clear_jump(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
+    app.update(cx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.search.chat_search.jump = quill::state::ChatSearchJump::None;
+        }
+    });
+}
+
 #[gpui_kit::test]
-fn reply_bar_left_click_opens_the_quote_picker(cx: &mut TestAppContext) {
+fn clicking_the_reply_bar_opens_the_quote_picker(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     reply_to_ada(&app, vcx);
@@ -233,34 +268,59 @@ fn reply_bar_left_click_opens_the_quote_picker(cx: &mut TestAppContext) {
             .reply()
             .map(|reply| app.reply_bar_kind(reply))
     });
-    assert_eq!(
+    assert!(matches!(
         kind,
         Some(BarKind::Reply {
             has_text: true,
-            same_chat: true
+            same_chat: true,
+            ..
         })
-    );
-    let clicks = app.update(vcx, |app, cx| app.bar_clicks(BarKind::Edit, None, cx));
-    vcx.update(|window, cx| (clicks.run)(BarAction::PickQuote, window, cx));
+    ));
+    vcx.update(|window, cx| window.click(("composer-reply-quote", 1usize), cx));
+    frames(vcx);
     assert!(app.read_with(vcx, |app, _| app.share.reply_quote_open));
 }
 
 #[gpui_kit::test]
-fn reply_bar_jump_scrolls_to_the_replied_message(cx: &mut TestAppContext) {
+fn right_clicking_the_reply_bar_jumps_to_the_replied_message(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     reply_to_ada(&app, vcx);
-    let clicks = app.update(vcx, |app, cx| {
-        app.bar_clicks(BarKind::Edit, Some(MessageId(10)), cx)
+    clear_jump(&app, vcx);
+    vcx.update(|window, cx| window.right_click(("composer-reply-quote", 1usize), cx));
+    frames(vcx);
+    assert!(jump_ready(&app, vcx, MessageId(10)));
+    assert!(
+        !app.read_with(vcx, |app, _| app.share.reply_quote_open),
+        "a right click does not open the picker"
+    );
+}
+
+#[gpui_kit::test]
+fn clicking_the_edit_bar_jumps_to_the_edited_message(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    begin_edit(&app, vcx);
+    let edited = app.read_with(vcx, |app, _| {
+        app.composer_ui
+            .pending_edit
+            .as_ref()
+            .map(|edit| edit.message_id)
     });
-    vcx.update(|window, cx| (clicks.run)(BarAction::JumpToMessage, window, cx));
-    let ready = app.read_with(vcx, |app, _| {
-        app.session().is_some_and(|session| {
-            matches!(
-                session.search.chat_search.jump,
-                quill::state::ChatSearchJump::Ready { message_id } if message_id == MessageId(10)
-            )
-        })
-    });
-    assert!(ready, "the jump to the replied message is ready");
+    assert_eq!(edited, Some(MessageId(11)));
+    clear_jump(&app, vcx);
+    vcx.update(|window, cx| window.click(("composer-edit-header", 1usize), cx));
+    frames(vcx);
+    assert!(jump_ready(&app, vcx, MessageId(11)));
+    assert!(editing(&app, vcx), "jumping leaves the edit open");
+}
+
+#[gpui_kit::test]
+fn the_bar_handler_for_a_media_reply_offers_another_chat(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    reply_to_ada(&app, vcx);
+    let clicks = app.update(vcx, |app, cx| app.bar_clicks(BarKind::Edit, None, cx));
+    vcx.update(|window, cx| (clicks.run)(BarAction::ReplyElsewhere, window, cx));
+    assert!(app.read_with(vcx, |app, _| app.share.reply_elsewhere_open));
 }

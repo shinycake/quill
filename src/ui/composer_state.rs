@@ -84,8 +84,9 @@ pub(crate) struct ComposerUi {
     pub(super) pending_edit: Option<ComposerEdit>,
     /// The "Cancel editing?" box is open (`DialogKind::CancelEditConfirm`).
     pub(super) cancel_edit_confirm: bool,
-    /// The placeholder last given to the compose field (`sync_composer_placeholder`).
-    pub(super) placeholder_text: String,
+    /// What the compose field's placeholder was last built from
+    /// (`sync_composer_placeholder`): the facts and the language.
+    pub(super) placeholder_shown: Option<(quill::composer::PlaceholderFacts, usize)>,
     /// Normal composer draft stashed while editing (`DraftType::Normal`).
     pub(super) saved_edit_draft: String,
     /// Reply that belonged to that normal draft. Restored with the text on cancel.
@@ -176,7 +177,7 @@ impl ComposerUi {
             draft_restore_pending: false,
             pending_edit: None,
             cancel_edit_confirm: false,
-            placeholder_text: String::new(),
+            placeholder_shown: None,
             saved_edit_draft: String::new(),
             saved_edit_reply: None,
             link_dialog: None,
