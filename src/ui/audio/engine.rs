@@ -429,6 +429,10 @@ fn build_player(
         // A source that can't seek starts from the top, and the probe
         // says so.
         let _ = source.try_seek(Duration::from_secs_f64(offset));
+        // The build's own seek is not one the engine handed to the audio
+        // thread; counting it hides the next real one from the tests.
+        #[cfg(test)]
+        probe.seeks_handled.store(0, Ordering::Relaxed);
     }
     let player = Player::connect_new(mixer);
     player.set_volume(volume);
@@ -1253,6 +1257,43 @@ mod tests {
         assert_eq!(engine.state(), EngineState::Paused, "the pause survives");
         let secs = engine.position_secs();
         assert!((3.95..=4.2).contains(&secs), "got {secs}");
+        assert_eq!(engine.error(), None);
+    }
+
+    /// The restart thread has finished building; `settle` has not taken it.
+    fn restart_built(engine: &AudioEngine) -> bool {
+        engine.restart.as_ref().is_some_and(|restart| {
+            restart
+                .slot
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_some()
+        })
+    }
+
+    #[test]
+    fn a_seek_right_after_a_restart_finished_building_still_settles() {
+        let (mut engine, mut device) = rig();
+        let path = track("restart-landed.wav", 8);
+        engine.start(&path, 0.0, 1.0, 1.0, 8.0).unwrap();
+        pull(&mut device, usize::try_from(RATE).unwrap());
+        let (_, probe) = engine.track_parts().unwrap();
+        probe
+            .refuse_seek
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        engine.seek(6.0, true).unwrap();
+        pull_until(&mut engine, &mut device, "restart building", |engine| {
+            engine.restart.is_some()
+        });
+        while !restart_built(&engine) {
+            std::thread::yield_now();
+        }
+        // The seek's own settle lands the rebuilt track at 6.0, and 2.0 is
+        // posted to it.
+        engine.seek(2.0, true).unwrap();
+        pull_until_settled(&mut engine, &mut device);
+        let secs = engine.position_secs();
+        assert!((1.95..=2.3).contains(&secs), "got {secs}");
         assert_eq!(engine.error(), None);
     }
 

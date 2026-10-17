@@ -42,3 +42,13 @@ Engine tests with the hand-driven mixer: a stalled track replaced by a new one (
 the device wakes, count goes 2 to 0, the old board has no outcome, the new seek lands); stopping cancels the board;
 a refused seek with a pause during the rebuild ends paused at the target; a seek during a rebuild retargets it.
 No UI change, so no screenshots: the voice row reads `audio.error()` and `position_secs()` exactly as before.
+
+## Follow-up: flaky `a_seek_while_a_restart_builds_retargets_it`
+
+Linux CI failed this test with "the seek never settled" while it passed locally. The cause was in the test harness, not the engine.
+
+`seek_awaits_device` (test only) decides whether the pull loop should feed the mixer: it compares seeks handed to the audio thread against `Probe::seeks_handled`. `build_player` seeks the new source to the restart offset, and that call went through `Counted::try_seek`, which bumped `seeks_handled` to 1 on the fresh probe. If the restart finished building before the test's second `seek`, that seek's own `settle` landed the rebuilt track and the new seek was posted to it. Handed was then 1 against handled 1, so the helper never pulled, the audio thread never answered `Player::try_seek`, and the loop ran into its 30 s deadline. Under CI load the build thread often wins that race; locally it rarely does.
+
+Production is unaffected: a real device always pulls, so the posted seek is answered and settles.
+
+Fix: `build_player` resets `seeks_handled` after its own seek (test builds only). `a_seek_right_after_a_restart_finished_building_still_settles` forces the losing order by waiting for the build to finish before seeking; it failed on the old code and passes now.
