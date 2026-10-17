@@ -109,7 +109,7 @@ impl QuillApp {
         // Parity slice: prefill the folder editor once its `getChatFolder`
         // spec arrives.
         self.maybe_prefill_folder_editor(window, cx);
-        self.resolve_pending_story_open(cx);
+        self.resolve_pending_story_open(window, cx);
         // `parity:platform-deep-links`: open the chat the deep link
         // resolved to (take-once; render owns the `Window`).
         if let Some((chat_id, action)) = self.links.pending_deep_link_open.take() {
@@ -202,7 +202,7 @@ impl QuillApp {
             })
         });
         if current_deleted {
-            self.stories.viewer.close();
+            self.release_story_viewer();
             self.stories.reaction_picker_open = false;
             self.stories.reply_open = false;
             self.connection

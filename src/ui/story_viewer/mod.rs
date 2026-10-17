@@ -687,9 +687,10 @@ impl QuillApp {
         }
     }
 
-    /// Phase 9.1: close the story viewer; `closeStory` marks the current
-    /// story as no longer being viewed.
-    pub(super) fn close_story_viewer(&mut self, cx: &mut Context<Self>) {
+    /// Close the viewer itself: `closeStory` for the story it showed, no
+    /// preloads, and no open still waiting for its story. Every close goes
+    /// through here, so TDLib's calls stay paired.
+    pub(super) fn release_story_viewer(&mut self) {
         if let Some(item) = self.stories.viewer.current().cloned()
             && let Some(live) = self.live.as_mut()
         {
@@ -697,11 +698,17 @@ impl QuillApp {
             let _ = live.driver.sync_story_preloads(&[], &[]);
         }
         self.stories.viewer.close();
+        self.chat_list.pending_story_open = None;
+    }
+
+    /// Phase 9.1: close the story viewer; `closeStory` marks the current
+    /// story as no longer being viewed.
+    pub(super) fn close_story_viewer(&mut self, cx: &mut Context<Self>) {
+        self.release_story_viewer();
         // A live story playing on in Picture-in-Picture stays joined.
         if self.stories.live.watching != self.live_pip_story() {
             self.leave_live_story_view(cx);
         }
-        self.chat_list.pending_story_open = None;
         self.stories.reaction_picker_open = false;
         self.end_story_reply(cx);
         self.stories.viewers_open = false;
@@ -738,6 +745,11 @@ impl QuillApp {
         self.stories.reaction_picker_open
             || self.stories.reply_open
             || self.stories.pause.is_paused()
+            // A repost's press waits for its story's answer.
+            || self
+                .chat_list
+                .pending_story_open
+                .is_some_and(|open| open.if_gone.is_some())
             || self.stories.share_open
             || self.stories.close_friends_edit.is_some()
     }
@@ -832,6 +844,7 @@ mod open;
 #[cfg(feature = "demo-capture")]
 mod open_tests;
 mod reply_media;
+mod repost;
 mod siblings;
 #[cfg(feature = "demo-capture")]
 mod story_demo;

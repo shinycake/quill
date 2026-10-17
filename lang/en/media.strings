@@ -626,6 +626,7 @@
 "qll_media_repost" = "Repost";
 "qll_media_repost_story" = "Repost story";
 "qll_media_reposted_from" = "Reposted from {origin}";
+"qll_media_reposted_story" = "Reposted story";
 "qll_media_request_already_in_flight" = "request already in flight";
 "qll_media_requests_access_to_set_your" = "{bot_name} requests access to set your emoji status. You will be able to revoke this access in the profile page of {bot_name_2}.";
 "qll_media_resolving" = "Resolving @{username}…";

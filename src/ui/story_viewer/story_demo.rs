@@ -1,7 +1,10 @@
 //! Screenshot demo of a photo story in the story viewer (injected, no live
 //! Telegram): the demo channel's first of three photo stories, posted two
 //! hours ago, edited, and shown to contacts only, so the header carries the
-//! age, "edited", the position and the privacy badge.
+//! age, "edited", the position and the privacy badge. The second story
+//! reposts the first, so it shows the "Reposted from" link; the third
+//! reposts a story the demo never caches (`ready-story-repost-gone` marks
+//! it gone).
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
@@ -16,7 +19,10 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 pub(super) const CHANNEL: i64 = 13;
-pub(super) const STORIES: [i32; 3] = [71, 72, 73];
+const ORIGIN: i32 = 71;
+/// The third story reposts one the demo never caches.
+pub(super) const GONE_ORIGIN: i32 = 70;
+pub(super) const STORIES: [i32; 3] = [ORIGIN, 72, 73];
 const PHOTO_FILE: i32 = 4471;
 
 register_demos![
@@ -25,9 +31,23 @@ register_demos![
         "screenshot demo — photo story with its age, edited mark and privacy badge"
     )
     .setup(QuillApp::demo_story_photo),
+    DemoSpec::chats(
+        "ready-story-repost-gone",
+        "screenshot demo — the photo stories, the third reposting a story known to be gone"
+    )
+    .setup(QuillApp::demo_story_repost_gone),
 ];
 
 impl QuillApp {
+    /// As `ready-story-photo`, with `getStory` having said the third
+    /// story's origin is gone, so its press opens the poster's profile.
+    fn demo_story_repost_gone(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.demo_story_photo(window, cx);
+        if let Some(session) = self.demo_session.as_mut() {
+            session.stories.missing.insert((CHANNEL, GONE_ORIGIN));
+        }
+    }
+
     fn demo_story_photo(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = self.demo_session.as_mut() else {
             return;
@@ -51,8 +71,15 @@ impl QuillApp {
             } else {
                 "null"
             };
+            // The second story reposts the first, for the "Reposted from"
+            // link; the third reposts one that is not cached.
+            let repost = match index {
+                1 => repost_info(ORIGIN),
+                2 => repost_info(GONE_ORIGIN),
+                _ => "null".to_string(),
+            };
             ingest(format!(
-                r#"{{"@type":"story","id":{id},"poster_chat_id":{CHANNEL},"date":{posted},"is_edited":{edited},"privacy_settings":{privacy},"content":{{"@type":"storyContentPhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"x","photo":{file},"width":1080,"height":1920,"progressive_sizes":[]}}]}}}},"caption":{{"@type":"formattedText","text":"Harbour at dusk","entities":[]}}}}"#,
+                r#"{{"@type":"story","id":{id},"poster_chat_id":{CHANNEL},"date":{posted},"is_edited":{edited},"privacy_settings":{privacy},"repost_info":{repost},"content":{{"@type":"storyContentPhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"x","photo":{file},"width":1080,"height":1920,"progressive_sizes":[]}}]}}}},"caption":{{"@type":"formattedText","text":"Harbour at dusk","entities":[]}}}}"#,
                 edited = index == 0,
             ));
         }
@@ -61,4 +88,10 @@ impl QuillApp {
         self.begin_story_viewer(items, 0, cx);
         cx.notify();
     }
+}
+
+fn repost_info(origin: i32) -> String {
+    format!(
+        r#"{{"@type":"storyRepostInfo","origin":{{"@type":"storyOriginPublicStory","chat_id":{CHANNEL},"story_id":{origin}}},"is_content_modified":false}}"#
+    )
 }

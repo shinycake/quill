@@ -135,24 +135,6 @@ impl QuillApp {
         Some(parts.join(" · "))
     }
 
-    /// Phase 9.5: "Reposted from …" line under the caption
-    /// (`story.repost_info`, `td_api.tl:6742`). "edited" is in the header.
-    pub(in crate::ui) fn story_viewer_meta_line(&self) -> Option<String> {
-        let story = self.current_story()?;
-        let repost = story.repost_info.as_ref()?;
-        let origin = match &repost.origin {
-            StoryOriginView::PublicStory { chat_id, .. } => self
-                .session()
-                .and_then(|s| s.chats.get(chat_id))
-                .map(|chat| chat.title.clone())
-                .unwrap_or_else(|| {
-                    tr_with(keys::Q_MEDIA_CHAT_2, &[("chat_id", &chat_id.to_string())])
-                }),
-            StoryOriginView::HiddenUser { poster_name } => poster_name.clone(),
-        };
-        Some(tr_with(keys::Q_MEDIA_REPOSTED_FROM, &[("origin", &origin)]))
-    }
-
     /// Phase 9.2+: the reaction picker popover fed by
     /// `getStoryAvailableReactions` (`availableReactions`,
     /// `schema/td_api.tl:13802`). Emoji taps set the reaction via

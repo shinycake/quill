@@ -112,13 +112,11 @@ impl QuillApp {
     /// story is open, drop the per-story panels and restart playback.
     fn story_changed(&mut self, prev: Option<(ChatId, i32)>, cx: &mut Context<Self>) {
         let next = self.stories.viewer.current().map(StoryViewerItem::key);
-        if let (Some(prev), Some(next)) = (prev, next)
-            && prev != next
-            && let Some(live) = self.live.as_mut()
-        {
-            let _ = live.driver.close_story(prev.0, prev.1);
-            let _ = live.driver.open_story(next.0, next.1);
+        if prev.is_some() && next.is_some() {
+            self.switch_open_story(prev, next);
         }
+        // The user moved on: a press still waiting for its story is dropped.
+        self.chat_list.pending_story_open = None;
         self.stories.reaction_picker_open = false;
         self.end_story_reply(cx);
         self.stories.stats_open = false;
@@ -131,6 +129,7 @@ impl QuillApp {
         self.sync_story_video(cx);
         self.ensure_story_tick(cx);
         self.ensure_story_download(cx);
+        self.fetch_story_repost_origin();
         self.ensure_story_custom_emoji_downloads();
         self.sync_live_story(cx);
         cx.notify();
