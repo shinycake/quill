@@ -115,7 +115,6 @@
 "qll_av_couldnt_save" = "couldn't save: {err}";
 "qll_av_couldnt_save_media_settings" = "couldn't save media settings: {err}";
 "qll_av_couldnt_send_the_message" = "Couldn't send the message.";
-"qll_av_couldnt_set_the_photo" = "Couldn't set the photo: {error}";
 "qll_av_couldnt_start_the_recording" = "Couldn't start the recording.";
 "qll_av_couldnt_start_the_video_chat" = "Couldn't start the video chat.";
 "qll_av_couldnt_stop_the_recording" = "Couldn't stop the recording.";

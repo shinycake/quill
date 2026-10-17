@@ -127,7 +127,7 @@ impl StoryUi {
         // suggested-reaction emoji (space-separated).
         let story_composer_link = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("https://… (optional, Premium)")
+                .placeholder(tr(keys::Q_STORIES_LINK_URL_PLACEHOLDER))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });

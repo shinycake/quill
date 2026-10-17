@@ -92,6 +92,8 @@ impl QuillApp {
             .icon(Icon::new(IconName::EllipsisVertical).with_size(px(22.)))
             .rounded(px(22.))
             .size(px(44.))
+            .tooltip(tr(keys::PROFILE_ACTION_SHORT_MORE))
+            .accessibility_label(tr(keys::PROFILE_ACTION_SHORT_MORE))
             .dropdown_menu(move |menu, _, _| {
                 let item = |label: &str,
                             action: fn(&mut QuillApp, &mut Window, &mut Context<QuillApp>)| {

@@ -268,7 +268,12 @@ impl QuillApp {
             let title: String;
             match stage {
                 OwnershipStage::Leave => {
-                    title = format!("Leave {}?", if place == "channel" { tr(keys::Q_OPS_CHANNEL) } else { tr(keys::Q_OPS_GROUP) });
+                    title = tr(if place == "channel" {
+                        keys::Q_OPS_LEAVE_CHANNEL_TITLE
+                    } else {
+                        keys::Q_OPS_LEAVE_GROUP_TITLE
+                    })
+                    .to_string();
                     let line = match ownership.owner_after_leaving.get(&chat_id.0) {
                         Some(OwnerLookup::Loaded(user_id)) => {
                             let name = this.contact_display_name(*user_id);
@@ -304,7 +309,11 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("own-leave")
-                                .label(format!("Leave {}", if place == "channel" { tr(keys::Q_OPS_CHANNEL) } else { tr(keys::Q_OPS_GROUP) }))
+                                .label(tr(if place == "channel" {
+                                    keys::Q_OPS_LEAVE_CHANNEL
+                                } else {
+                                    keys::Q_OPS_LEAVE_GROUP
+                                }))
                                 .danger()
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.leave_after_ownership(chat_id, window, cx);

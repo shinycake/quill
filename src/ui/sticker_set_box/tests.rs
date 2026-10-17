@@ -20,12 +20,20 @@ fn frames(vcx: &mut VisualTestContext) {
 }
 
 fn open_demo(cx: &mut TestAppContext) -> (Entity<QuillApp>, Entity<QuillShell>, VisualTestContext) {
+    open_demo_sized(cx, 1200., 1000.)
+}
+
+fn open_demo_sized(
+    cx: &mut TestAppContext,
+    width: f32,
+    height: f32,
+) -> (Entity<QuillApp>, Entity<QuillShell>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
     let demo = ScreenshotDemo::named("ready-sticker-set-owned");
-    let handle = cx.open_window(size(px(1200.), px(1000.)), move |window, cx| {
+    let handle = cx.open_window(size(px(width), px(height)), move |window, cx| {
         let view = cx.new(|cx| QuillApp::new_with_demo(window, cx, None, Some(demo)));
         let shell = cx.new(|_| QuillShell::new(view.clone()));
         *slot_in.borrow_mut() = Some((view, shell.clone()));
@@ -738,4 +746,33 @@ fn a_set_less_sticker_message_lists_the_owned_sets_to_join(cx: &mut TestAppConte
     vcx.update(|window, cx| window.click(("menu-add-to-set", 78u64), cx));
     frames(vcx);
     assert!(app.read_with(vcx, |app, _| app.message_ui.menu.is_none()));
+}
+
+#[gpui_kit::test]
+fn the_set_box_fits_the_narrowest_window(cx: &mut TestAppContext) {
+    // 380 px is the smallest window Quill allows; the box and its grid are
+    // wider than that by design and must shrink to it.
+    let (_app, shell, mut vcx) = open_demo_sized(cx, 380., 600.);
+    let vcx = &mut vcx;
+    assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
+        == Some(DialogKind::StickerSet)));
+    let window_width = vcx.update(|window, _| f32::from(window.viewport_size().width));
+    for id in ["sticker-set-edit", "sticker-set-add"] {
+        let bounds = vcx
+            .update(|window, _| window.try_find(id))
+            .expect("the footer button")
+            .bounds();
+        assert!(
+            f32::from(bounds.right()) <= window_width && f32::from(bounds.left()) >= 0.,
+            "{id} sits inside the {window_width} px window: {bounds:?}"
+        );
+    }
+    let cell = vcx
+        .update(|window, _| window.try_find(("sticker-set-cell", 5u64)))
+        .expect("a sticker cell")
+        .bounds();
+    assert!(
+        f32::from(cell.right()) <= window_width,
+        "the grid wraps inside the window: {cell:?}"
+    );
 }

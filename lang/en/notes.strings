@@ -92,3 +92,6 @@
 "qll_notes_failed_album_stories" = "Couldn't load the album stories.";
 "qll_notes_failed_translate" = "Couldn't translate the text.";
 "qll_notes_failed_set_wallpaper" = "Couldn't set the wallpaper.";
+"qll_notes_failed_save_folder" = "Couldn't save the folder.";
+"qll_notes_failed_save_folder_link" = "Couldn't save the link.";
+"qll_notes_failed_delete_folder_link" = "Couldn't delete the link.";

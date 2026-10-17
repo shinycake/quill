@@ -60,7 +60,7 @@ impl QuillApp {
             }
             Err(err) => {
                 if let Some(dialog) = self.folders.editor.as_mut() {
-                    dialog.error = Some(format!("could not save folder: {err:?}"));
+                    dialog.error = Some(user_error_for(keys::Q_NOTES_FAILED_SAVE_FOLDER, &err));
                 }
             }
         }

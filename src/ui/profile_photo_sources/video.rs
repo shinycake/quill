@@ -8,9 +8,10 @@
 use super::{QuillApp, run_ffmpeg, work_dir};
 use crate::ui::shell::DialogKind;
 use crate::ui::status_note::StatusNote;
+use crate::ui::user_error::user_error_for;
 use crate::ui::video_editor::EditorTarget;
 use gpui_kit::*;
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr};
 use quill::profile_photo_video::{encode_args, main_frame_secs};
 
 impl QuillApp {
@@ -82,12 +83,7 @@ impl QuillApp {
                     live.driver
                         .set_profile_photo_video(&path, main_frame_secs(&edits))
                         .map(|_| ())
-                        .map_err(|err| {
-                            tr_with(
-                                keys::Q_AV_COULDNT_SET_THE_PHOTO,
-                                &[("error", &format!("{err:?}"))],
-                            )
-                        })
+                        .map_err(|err| user_error_for(keys::Q_NOTES_FAILED_SET_PHOTO, &err))
                 });
                 match sent {
                     Ok(()) => {

@@ -446,9 +446,9 @@ impl QuillApp {
                                     .xsmall()
                                     .ghost()
                                     .text_color(panel_ink())
-                                    .accessibility_label(format!(
-                                        "Remove {}",
-                                        gift.gift.full_name()
+                                    .accessibility_label(tr_with(
+                                        keys::Q_OPS_REMOVE,
+                                        &[("title", &gift.gift.full_name())],
                                     ))
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.remove_craft_slot(index, cx);
