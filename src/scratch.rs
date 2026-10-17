@@ -26,19 +26,31 @@ extern "C" fn remove_all() {
     }
 }
 
-/// Records `dir` for removal at process exit.
-pub fn remove_at_exit(dir: PathBuf) {
+fn check_prefix(prefix: &str) {
+    debug_assert!(
+        !prefix.contains(['/', '\\']) && !prefix.contains(".."),
+        "scratch prefix must be a plain name: {prefix:?}"
+    );
+}
+
+fn register_hook() {
     HOOK.call_once(|| {
         // SAFETY: `remove_all` is a plain `extern "C" fn()` that never unwinds.
         // A failed registration only means the directory is left behind.
         let _ = unsafe { libc::atexit(remove_all) };
     });
+}
+
+/// Records `dir` for removal at process exit.
+pub fn remove_at_exit(dir: PathBuf) {
+    register_hook();
     dirs().push(dir);
 }
 
 /// A freshly created directory `<temp>/<prefix>-<pid>-<n>`, removed at exit.
 /// Every call returns a different directory.
 pub fn unique_dir(prefix: &str) -> PathBuf {
+    check_prefix(prefix);
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("{prefix}-{}-{n}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -51,13 +63,31 @@ pub fn unique_dir(prefix: &str) -> PathBuf {
 /// created on first use and removed at exit. Repeated calls return the same
 /// path, so it can hold fixtures that several tests reuse.
 pub fn process_dir(prefix: &str) -> PathBuf {
+    check_prefix(prefix);
     let dir = std::env::temp_dir().join(format!("{prefix}-{}", std::process::id()));
-    let known = dirs().contains(&dir);
-    if !known {
-        let _ = std::fs::create_dir_all(&dir);
-        remove_at_exit(dir.clone());
+    let _ = std::fs::create_dir_all(&dir);
+    register_hook();
+    let mut list = dirs();
+    if !list.contains(&dir) {
+        list.push(dir.clone());
     }
     dir
+}
+
+/// `<temp>/<name>`, a working directory the app itself creates (edited
+/// photos, sticker clips). Release builds return exactly that path and never
+/// remove anything. Test builds return `<temp>/<name>-<pid>` instead and remove
+/// it at exit, so a test can never delete the directory of a running app.
+pub fn temp_work_dir(name: &str) -> PathBuf {
+    check_prefix(name);
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        process_dir(name)
+    }
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
+        std::env::temp_dir().join(name)
+    }
 }
 
 #[cfg(test)]

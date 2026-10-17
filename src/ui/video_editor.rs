@@ -165,9 +165,11 @@ pub(super) struct VideoEditorDialog {
 /// `quill::video_edit`'s folder; a copy made by an earlier edit lives
 /// there and can be replaced.
 fn is_editor_copy(path: &Path) -> bool {
-    path.parent()
-        .and_then(Path::file_name)
-        .is_some_and(|dir| dir == "quill-video-edits")
+    let folder = quill::scratch::temp_work_dir("quill-video-edits");
+    // The folder name, not its full path: an attachment path may be
+    // canonicalized (`/private/var/...`, `\\?\...`) while the temp dir is not.
+    let name = path.parent().and_then(Path::file_name);
+    name.is_some() && name == folder.file_name()
 }
 
 /// A JPEG still as a GPUI picture, read off the UI thread.
@@ -679,9 +681,24 @@ mod tests {
 
     #[test]
     fn only_files_in_the_editor_folder_are_replaced() {
-        let dir = std::env::temp_dir().join("quill-video-edits");
+        let dir = quill::scratch::temp_work_dir("quill-video-edits");
         assert!(is_editor_copy(&dir.join("edit-1.mp4")));
         assert!(!is_editor_copy(Path::new("/home/me/clip.mp4")));
         assert!(!is_editor_copy(Path::new("clip.mp4")));
+    }
+
+    #[test]
+    fn a_canonicalized_editor_copy_is_still_recognised() {
+        let dir = quill::scratch::temp_work_dir("quill-video-edits");
+        let Some(name) = dir.file_name() else {
+            panic!("the editor folder has a name");
+        };
+        let moved = Path::new("/private/elsewhere")
+            .join(name)
+            .join("edit-1.mp4");
+        assert!(is_editor_copy(&moved));
+        assert!(!is_editor_copy(
+            &Path::new("/private/elsewhere").join("edit-1.mp4")
+        ));
     }
 }

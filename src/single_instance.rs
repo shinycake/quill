@@ -403,9 +403,7 @@ mod tests {
     use std::time::Duration;
 
     fn temp_root(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("quill-si-{tag}-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+        crate::scratch::process_dir(&format!("quill-si-{tag}"))
     }
 
     #[test]

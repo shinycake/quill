@@ -13,8 +13,7 @@ use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, px, size};
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
-    let root = std::env::temp_dir().join(format!("quill-first-run-ui-{}", std::process::id()));
-    let _ = std::fs::create_dir_all(&root);
+    let root = quill::scratch::process_dir("quill-first-run-ui");
     quill::settings::use_isolated_app_root(root);
     cx.update(gpui_kit::init);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));

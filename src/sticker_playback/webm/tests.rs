@@ -237,7 +237,7 @@ fn webm_decode_bench() {
             let mut times = Vec::new();
             let mut count = 0;
             for i in 0..7 {
-                let cache = std::env::temp_dir().join(format!("quill-webm-bench-{i}"));
+                let cache = crate::scratch::process_dir(&format!("quill-webm-bench-{i}"));
                 let start = Instant::now();
                 let decoded = crate::sticker_playback::decode_webm_sized(
                     path, &cache, edge, max, &child, &cancel,

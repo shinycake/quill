@@ -269,9 +269,7 @@ mod tests {
     }
 
     fn scratch(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("quill-start-{tag}-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+        crate::scratch::process_dir(&format!("quill-start-{tag}"))
     }
 
     #[test]
