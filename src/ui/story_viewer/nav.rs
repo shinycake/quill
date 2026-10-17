@@ -115,6 +115,8 @@ impl QuillApp {
         if prev.is_some() && next.is_some() {
             self.switch_open_story(prev, next);
         }
+        // The user moved on: a press still waiting for its story is dropped.
+        self.chat_list.pending_story_open = None;
         self.stories.reaction_picker_open = false;
         self.end_story_reply(cx);
         self.stories.stats_open = false;

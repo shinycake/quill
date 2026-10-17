@@ -147,3 +147,31 @@ fn a_repost_whose_origin_turns_out_gone_opens_the_poster_on_the_first_press(
         assert!(app.dialogs.profile_modal.is_some(), "the poster's profile");
     });
 }
+
+#[gpui_kit::test]
+fn a_step_drops_a_repost_press_still_waiting_and_playback_runs(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx, "ready-story-photo");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.step_story_viewer(1, cx);
+        app.step_story_viewer(1, cx);
+    });
+    frames(vcx);
+    let link = find(vcx, "story-viewer-repost").expect("the repost link");
+    vcx.simulate_click(link.center(), Modifiers::default());
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.story_playback_paused()));
+    app.update(vcx, |app, cx| app.step_story_viewer(-1, cx));
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        assert_eq!(
+            app.chat_list.pending_story_open, None,
+            "the press is dropped"
+        );
+        assert!(!app.story_playback_paused(), "playback runs again");
+        assert_eq!(
+            app.stories.viewer.current().map(|item| item.story_id),
+            super::story_demo::STORIES.get(1).copied()
+        );
+    });
+}

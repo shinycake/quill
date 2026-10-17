@@ -30,27 +30,31 @@ pub enum RepostGone {
 }
 
 /// The press for `origin`. `state` is the cache state of the origin story
-/// and `has_profile` whether its poster's profile can open. `None` means a
-/// press would do nothing, so the label is not a button.
+/// and `has_profile` whether its poster's profile can open; a gone story
+/// whose poster has none says it expired, whenever the answer came.
 pub fn press(
     origin: &StoryOriginView,
     state: impl Fn(i64, i32) -> StoryCardState,
     has_profile: impl Fn(i64) -> bool,
-) -> Option<RepostPress> {
+) -> RepostPress {
     match *origin {
         StoryOriginView::PublicStory { chat_id, story_id } if story_id != 0 => {
-            let profile = has_profile(chat_id).then_some(RepostGone::OpenPeer { chat_id });
+            let if_gone = if has_profile(chat_id) {
+                RepostGone::OpenPeer { chat_id }
+            } else {
+                RepostGone::Expired
+            };
             match state(chat_id, story_id) {
-                StoryCardState::Ready | StoryCardState::Loading => Some(RepostPress::OpenStory {
+                StoryCardState::Ready | StoryCardState::Loading => RepostPress::OpenStory {
                     chat_id,
                     story_id,
-                    if_gone: profile.unwrap_or(RepostGone::Expired),
-                }),
-                StoryCardState::Expired => profile.map(RepostPress::Gone),
+                    if_gone,
+                },
+                StoryCardState::Expired => RepostPress::Gone(if_gone),
             }
         }
         StoryOriginView::PublicStory { .. } | StoryOriginView::HiddenUser { .. } => {
-            Some(RepostPress::Gone(RepostGone::Expired))
+            RepostPress::Gone(RepostGone::Expired)
         }
     }
 }
@@ -88,33 +92,34 @@ mod tests {
         for state in [StoryCardState::Ready, StoryCardState::Loading] {
             assert_eq!(
                 press(&public(9), |_, _| state, |_| true),
-                Some(RepostPress::OpenStory {
+                RepostPress::OpenStory {
                     chat_id: 5,
                     story_id: 9,
                     if_gone: RepostGone::OpenPeer { chat_id: 5 },
-                })
+                }
             );
             assert_eq!(
                 press(&public(9), |_, _| state, |_| false),
-                Some(RepostPress::OpenStory {
+                RepostPress::OpenStory {
                     chat_id: 5,
                     story_id: 9,
                     if_gone: RepostGone::Expired,
-                }),
+                },
                 "no profile to show: the story expired"
             );
         }
     }
 
     #[test]
-    fn a_deleted_origin_opens_the_poster_or_does_nothing() {
+    fn a_deleted_origin_opens_the_poster_else_says_it_expired() {
         assert_eq!(
             press(&public(9), |_, _| StoryCardState::Expired, |_| true),
-            Some(RepostPress::Gone(RepostGone::OpenPeer { chat_id: 5 }))
+            RepostPress::Gone(RepostGone::OpenPeer { chat_id: 5 })
         );
         assert_eq!(
             press(&public(9), |_, _| StoryCardState::Expired, |_| false),
-            None
+            RepostPress::Gone(RepostGone::Expired),
+            "the same note as when the answer comes after the press"
         );
     }
 
@@ -123,7 +128,7 @@ mod tests {
         let hidden = StoryOriginView::HiddenUser {
             poster_name: "Someone".into(),
         };
-        let gone = Some(RepostPress::Gone(RepostGone::Expired));
+        let gone = RepostPress::Gone(RepostGone::Expired);
         assert_eq!(press(&hidden, |_, _| StoryCardState::Ready, |_| true), gone);
         assert_eq!(
             press(&public(0), |_, _| StoryCardState::Ready, |_| true),

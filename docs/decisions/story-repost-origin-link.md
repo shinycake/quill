@@ -33,17 +33,21 @@ falling back to "Chat 123" for a chat that is not loaded.
     `getStory` answer arrives (`pending_story_open`). The pending open
     carries `if_gone`, so if the answer says the story is gone, or the ask
     fails, the first press opens the poster's profile; with no profile it
-    shows the expired note. Playback holds while the open waits, so the
-    repost cannot end under it;
+    shows the expired note. Playback holds while that press waits, so the
+    repost cannot end under it. A step drops the press and playback runs
+    again, and a newer open replaces one still waiting, so a late answer
+    never moves the viewer after the user moved on;
   - known to be gone: the poster's profile, after the viewer closes, like
-    the "Stories" button;
+    the "Stories" button, or the expired note when the poster has no
+    profile (the same note as a press that waited for the answer);
   - no poster or no story id: the viewer note "This story has expired."
     (`lng_forwarded_story_expired`), the only case tdesktop toasts.
-- A press that would do nothing (the story is gone and the poster has no
-  profile) leaves the label plain text, without the button role or pointer.
 - Opening another story from the viewer sends `closeStory` for the story it
   replaces before `openStory`, as stepping does, so TDLib's calls stay
-  paired (`quill::story_viewer::story_open_switch`).
+  paired (`quill::story_viewer::story_open_switch`). Every close of the
+  viewer, including the passcode lock and a deleted current story, goes
+  through `release_story_viewer`: `closeStory`, and no open left waiting
+  for an answer that could open the viewer or a profile under the lock.
 - The label is `story-viewer-repost`, in `story_viewer/repost.rs`.
   "edited" is in the header (PR #947), not here.
 - Unloaded chat: the "Chat 123" fallback is gone. tdesktop has no

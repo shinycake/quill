@@ -30,12 +30,11 @@ impl QuillApp {
         })
     }
 
-    /// What a press on the label does now; `None` when it would do
-    /// nothing, so the label is plain text.
-    pub(in crate::ui) fn story_repost_press(&self) -> Option<RepostPress> {
+    /// What a press on the label does now.
+    fn story_repost_press(&self) -> Option<RepostPress> {
         let origin = self.current_story()?.repost_info?.origin;
         let session = self.session()?;
-        quill::story_repost::press(
+        Some(quill::story_repost::press(
             &origin,
             |chat, story| session.story_card_state(chat, story),
             |chat| {
@@ -43,7 +42,7 @@ impl QuillApp {
                     .avatar_profile_target(MessageSender::Chat { chat_id: chat })
                     .is_some()
             },
-        )
+        ))
     }
 
     /// The press. An origin not cached yet opens once its `getStory`

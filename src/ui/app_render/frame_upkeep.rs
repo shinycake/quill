@@ -202,7 +202,7 @@ impl QuillApp {
             })
         });
         if current_deleted {
-            self.stories.viewer.close();
+            self.release_story_viewer();
             self.stories.reaction_picker_open = false;
             self.stories.reply_open = false;
             self.connection

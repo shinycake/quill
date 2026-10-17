@@ -89,9 +89,9 @@ impl QuillApp {
                 )));
             }
         }
-        if !self.rebuild_story_viewer(open, cx) {
-            self.chat_list.pending_story_open = Some(open);
-        }
+        // A newer open replaces one still waiting.
+        let rebuilt = self.rebuild_story_viewer(open, cx);
+        self.chat_list.pending_story_open = (!rebuilt).then_some(open);
         cx.notify();
     }
 
