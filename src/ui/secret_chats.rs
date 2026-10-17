@@ -146,7 +146,7 @@ impl QuillApp {
                         });
                         if still_open && still_live {
                             // The badges are in the history rows.
-                            this.notify_tick(super::app_slice::SliceKind::Conversation, cx);
+                            this.notify_conversations(cx);
                             true
                         } else {
                             if this.history.self_destruct_tick_chat == Some(chat_id) {

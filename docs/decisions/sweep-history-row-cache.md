@@ -108,3 +108,13 @@ The `ready-thread` demo (`src/ui/threads_demo.rs`) is new. It gives the thread v
 - The Touch Bar resync during playback was not checked on hardware.
 - Tick scoping in separate chat windows is covered by the `notify_tick` logic only. No capture
   shows a detached window.
+
+## Review follow-ups
+- The seek slider entity value is now synced from the conversation slice render, so the hover and
+  drag knob and the a11y value follow playback without a root render (test:
+  `the_seek_slider_follows_a_position_tick_that_notifies_only_slices`).
+- The self-destruct tick calls `notify_conversations`, which reaches chat windows too. The timer
+  itself still starts only for the main window's open chat, so a secret chat open only in a
+  separate window gets no ticking badge (unchanged from main).
+- `rows_cache_tests.rs` is gated on `demo-capture`; CI's `tests (UI, headless)` job runs
+  `cargo test --features demo-capture --bin quill`, so they run on every PR.

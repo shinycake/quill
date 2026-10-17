@@ -249,6 +249,45 @@ fn voice_playback_keeps_the_rows_and_follows_the_position(cx: &mut TestAppContex
 }
 
 #[gpui_kit::test]
+fn the_seek_slider_follows_a_position_tick_that_notifies_only_slices(cx: &mut TestAppContext) {
+    use gpui_kit::component::slider::SliderValue;
+    let (app, mut vcx) = new_app(cx, "ready-voice-playing");
+    let vcx = &mut vcx;
+    frames(vcx);
+    let value = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, cx| {
+            app.playback
+                .seek_slider
+                .as_ref()
+                .map(|slider| slider.read(cx).value())
+        })
+    };
+    assert!(value(&app, vcx).is_some(), "the demo shows a seek slider");
+    let target = app.update(vcx, |app, _| {
+        let at = app.playback.active_position_secs().unwrap_or(0.0) + 3.0;
+        let _ = app.playback.audio.seek(at, true);
+        app.playback.active_position_secs()
+    });
+    let Some(target) = target else {
+        panic!("the demo has a track position");
+    };
+    // Only the slices are notified and drawn: no parking, which would run
+    // the playback timer (it also touches the app).
+    let _ = crate::ui::frame_clock::take_slice_renders();
+    app.update(vcx, |app, cx| app.notify_conversations(cx));
+    vcx.update(|window, cx| window.draw(cx).clear(cx));
+    let rendered = crate::ui::frame_clock::take_slice_renders();
+    assert!(rendered.contains_key("conversation"), "{rendered:?}");
+    assert!(!rendered.contains_key("(app notified)"), "{rendered:?}");
+    // The demo clock keeps running, so the slider is at or past the seek
+    // target, never left at the value before the tick.
+    let Some(SliderValue::Single(shown)) = value(&app, vcx) else {
+        panic!("the seek slider holds one value");
+    };
+    assert!(shown >= target as f32, "slider {shown} behind {target} {rendered:?}");
+}
+
+#[gpui_kit::test]
 fn a_thread_reuses_its_rows_until_a_reply_arrives(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-thread");
     let vcx = &mut vcx;

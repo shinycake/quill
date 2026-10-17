@@ -488,6 +488,9 @@ impl QuillApp {
             }
             SliceKind::Conversation => {
                 self.slices.conversation_rendered.set(true);
+                // Position ticks notify only the slices, so the knob and the
+                // a11y value follow playback from here, not the root render.
+                self.sync_seek_slider(window, cx);
                 div()
                     .size_full()
                     .flex()
