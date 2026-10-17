@@ -79,7 +79,7 @@ fn prefs_path() -> Option<PathBuf> {
 
 fn load_from_disk() -> NotifyPrefs {
     prefs_path()
-        .and_then(|path| std::fs::read(path).ok())
+        .and_then(|path| crate::settings::read_with_pending(&path).ok())
         .and_then(|bytes| serde_json::from_slice::<NotifyPrefs>(&bytes).ok())
         .unwrap_or_default()
 }

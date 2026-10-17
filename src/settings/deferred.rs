@@ -60,7 +60,10 @@ impl DeferredWriter {
             !std::mem::replace(&mut state.writer_running, true)
         };
         if start && !self.spawn_writer() {
-            self.drain();
+            // No thread to write on: keep the bytes queued (reads still see
+            // them), so the UI thread never waits for the disk. The next
+            // submit tries a thread again, and `flush` writes them at quit.
+            self.shared.lock().writer_running = false;
         }
     }
 
@@ -79,7 +82,8 @@ impl DeferredWriter {
     }
 
     /// Write what is queued until nothing is left, then mark the writer
-    /// stopped. Runs on the writer thread, or inline if none could start.
+    /// stopped. Runs on the writer thread, or inside `flush` if none could
+    /// start.
     fn drain(&self) {
         loop {
             let batch = {
@@ -105,6 +109,15 @@ impl DeferredWriter {
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
                 return;
+            }
+            if !state.writer_running {
+                // Queued with no writer (its thread never started): write
+                // here, the one place that is allowed to wait for the disk.
+                state.writer_running = true;
+                drop(state);
+                self.drain();
+                state = self.shared.lock();
+                continue;
             }
             state = match self.shared.idle.wait_timeout(state, left) {
                 Ok((guard, _)) => guard,
@@ -220,5 +233,22 @@ mod tests {
         writer.flush(Duration::from_secs(5));
         assert_eq!(std::fs::read(&path).ok(), Some(b"{\"a\":2}".to_vec()));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bytes_queued_without_a_writer_stay_readable_and_flush_writes_them() {
+        let (writer, log) = recording(None);
+        let path = PathBuf::from("/x/stuck.json");
+        // The state `submit` leaves when its writer thread cannot start.
+        writer
+            .shared
+            .lock()
+            .pending
+            .insert(path.clone(), b"q".to_vec());
+        assert_eq!(writer.pending(&path), Some(b"q".to_vec()));
+        assert_eq!(log.lock().map(|l| l.len()).unwrap_or(9), 0);
+        writer.flush(Duration::from_secs(5));
+        assert_eq!(log.lock().map(|l| l.len()).unwrap_or(0), 1);
+        assert_eq!(writer.pending(&path), None);
     }
 }

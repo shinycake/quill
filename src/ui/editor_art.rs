@@ -68,7 +68,7 @@ pub(super) fn sticker_pixels(path: &Path, format: StickerFormat) -> Option<RgbaI
             RgbaImage::from_raw(512, 512, bytes)?
         }
         StickerFormat::Webm => {
-            let dir = std::env::temp_dir().join("quill-editor-sticker");
+            let dir = quill::scratch::temp_work_dir("quill-editor-sticker");
             let child = std::sync::Arc::new(std::sync::Mutex::new(None));
             let frames =
                 quill::sticker_playback::decode_webm_sized(path, &dir, 512, 1, &child, &cancelled)

@@ -49,7 +49,7 @@ pub(crate) struct PhotoSources {
 }
 
 fn work_dir() -> PathBuf {
-    let dir = std::env::temp_dir().join("quill-profile-photo");
+    let dir = quill::scratch::temp_work_dir("quill-profile-photo");
     let _ = std::fs::create_dir_all(&dir);
     dir
 }

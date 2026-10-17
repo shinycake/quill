@@ -56,11 +56,20 @@ impl QuillApp {
         let (sender, events) = mpsc::channel();
         quill::thread_guard::spawn_guarded("quill-webview-reader", move || {
             let mut reader = std::io::BufReader::new(stdout);
-            let cap = quill_webview_protocol::MAX_IPC_MESSAGE_BYTES * 2;
+            // A message at the IPC limit can grow when JSON-escaped.
+            let cap = quill_webview_protocol::MAX_IPC_MESSAGE_BYTES * 4;
+            let mut logged_too_long = false;
             loop {
                 let line = match read_bounded_line(&mut reader, cap) {
                     Ok(Line::Text(line)) => line,
-                    Ok(Line::TooLong) => continue,
+                    Ok(Line::TooLong) => {
+                        if !std::mem::replace(&mut logged_too_long, true) {
+                            eprintln!(
+                                "mini app helper sent a line over {cap} bytes; dropping such lines"
+                            );
+                        }
+                        continue;
+                    }
                     Ok(Line::End) | Err(_) => break,
                 };
                 let Ok(line) = String::from_utf8(line) else {

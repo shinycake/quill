@@ -15,7 +15,7 @@ pub fn kill_and_reap(child: Child) {
 
 /// Give `child` up to `grace` to exit by itself, then kill it, all on a
 /// detached thread. If no thread can be started the child is killed here
-/// (a non-blocking call) and left to the OS to reap.
+/// and polled briefly (about 50 ms at most) for its exit, then left to the OS.
 pub fn reap_after(child: Child, grace: Duration) {
     let slot = Arc::new(Mutex::new(Some(child)));
     let worker = slot.clone();
@@ -31,6 +31,14 @@ pub fn reap_after(child: Child, grace: Duration) {
         let child = slot.lock().ok().and_then(|mut slot| slot.take());
         if let Some(mut child) = child {
             let _ = child.kill();
+            // Never block the caller: a few polls for the reap, then leave
+            // the child to the OS.
+            for _ in 0..5 {
+                if !matches!(child.try_wait(), Ok(None)) {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
         }
     }
 }

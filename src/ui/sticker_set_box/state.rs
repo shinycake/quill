@@ -30,13 +30,16 @@ pub(crate) struct CreateSticker {
 }
 
 /// The file is one Quill's editors wrote under its own temp folders
-/// (`quill-edits`, `quill-video-edits`, `quill-sticker-video`), never a
+/// (`quill-edits`, `quill-video-edits`, `quill-sticker-video`; in the
+/// private work root, or the shared temp dir of older versions), never a
 /// downloaded or picked file.
 fn is_editor_temp(path: &Path) -> bool {
     let Some(parent) = path.parent() else {
         return false;
     };
-    parent.parent() == Some(std::env::temp_dir().as_path())
+    let grandparent = parent.parent();
+    (grandparent == Some(std::env::temp_dir().as_path())
+        || grandparent == Some(quill::scratch::work_root().as_path()))
         && parent
             .file_name()
             .and_then(|name| name.to_str())
