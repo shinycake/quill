@@ -86,6 +86,43 @@ async fn run_step(step: &str, demo_window: AnyWindowHandle, cx: &mut AsyncApp) {
         }
         return;
     }
+    // `r:x,y` right-clicks (opens a context menu).
+    if let Some(at) = step.strip_prefix("r:") {
+        if let Some(position) = point_step(at) {
+            dispatch(
+                demo_window,
+                cx,
+                [
+                    PlatformInput::MouseMove(MouseMoveEvent {
+                        position,
+                        pressed_button: None,
+                        modifiers: Modifiers::default(),
+                    }),
+                    PlatformInput::MouseDown(MouseDownEvent {
+                        button: MouseButton::Right,
+                        position,
+                        modifiers: Modifiers::default(),
+                        click_count: 1,
+                        first_mouse: false,
+                    }),
+                ],
+                false,
+            );
+            pause(cx, 60).await;
+            dispatch(
+                demo_window,
+                cx,
+                [PlatformInput::MouseUp(MouseUpEvent {
+                    button: MouseButton::Right,
+                    position,
+                    modifiers: Modifiers::default(),
+                    click_count: 1,
+                })],
+                false,
+            );
+        }
+        return;
+    }
     // `m:x,y` moves the pointer without clicking (hover).
     if let Some(hover) = step.strip_prefix("m:") {
         if let Some(position) = point_step(hover) {

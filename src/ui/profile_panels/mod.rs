@@ -345,11 +345,28 @@ impl QuillApp {
                         .tab_index(0)
                         .hover(move |style| style.bg(hover))
                 })
-                .child(
+                .child(if row.id == "info-bio" {
+                    // The bio takes part in text selection, so the menu can
+                    // copy and translate just the selected part.
+                    div()
+                        .text_sm()
+                        .child(super::message_text::rich_text_line(
+                            &row.value,
+                            &[],
+                            (user_id, 0),
+                            false,
+                            &self.message_ui.spoiler_revealed,
+                            gpui_kit::px(14.0),
+                            &std::collections::HashMap::new(),
+                            cx,
+                        ))
+                        .into_any_element()
+                } else {
                     super::bidi_line::aligned_block(row.value.clone())
                         .text_sm()
-                        .when(row.hint, |this| this.text_color(muted)),
-                )
+                        .when(row.hint, |this| this.text_color(muted))
+                        .into_any_element()
+                })
                 .child(div().text_xs().text_color(muted).child(row.label.clone()));
             let tapped = base.on_click(cx.listener(move |this, _, window, cx| match &action {
                 RowAction::None => {
@@ -374,12 +391,24 @@ impl QuillApp {
                 ),
             }));
             let extra_copy = row.extra_copy.clone();
+            let bio = row.id == "info-bio";
             let fragment_note = fragment_url.clone().filter(|_| row.id == "info-phone");
             let element = match row.copy {
                 Some(copy) => {
                     let owner = cx.entity().downgrade();
                     tapped
-                        .context_menu(move |menu, _, _| {
+                        .context_menu(move |menu, window, cx| {
+                            if bio {
+                                return about_text::about_text_menu(
+                                    menu,
+                                    &owner,
+                                    ChatId(user_id),
+                                    &copy.text,
+                                    copy.toast,
+                                    window,
+                                    cx,
+                                );
+                            }
                             let menu =
                                 copy_menu(menu, &owner, std::iter::once(&copy).chain(&extra_copy));
                             match fragment_note.clone() {

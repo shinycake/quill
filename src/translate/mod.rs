@@ -851,5 +851,7 @@ pub fn bar_label(translated: bool, to: &str) -> String {
     }
 }
 
+pub mod about_menu;
+
 #[cfg(test)]
 mod tests;
