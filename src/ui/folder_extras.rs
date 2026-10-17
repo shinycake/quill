@@ -11,7 +11,7 @@ use super::folder_share::{chat_title, finish_dialog};
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error;
+use crate::ui::user_error::user_error_for;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -104,8 +104,10 @@ impl QuillApp {
         };
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.mark_folder_as_read(folder_id) {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_FOLDER_READ,
+                    &err,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             for chat in session.chats.values_mut() {
@@ -364,8 +366,10 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if let Err(err) = live.driver.process_folder_new_chats(folder_id, &[]) {
-                    self.connection
-                        .set_note(StatusNote::error(user_error(&err)));
+                    self.connection.set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_HIDE_NEW_CHATS,
+                        &err,
+                    )));
                 }
             }
             None => {
@@ -407,9 +411,10 @@ impl QuillApp {
                     1 => StatusNote::silent(tr(keys::Q_CHATLIST_JOINING_1_CHAT)),
                     n => StatusNote::silent(trn(keys::Q_CHATLIST_JOINING_CHATS, n)),
                 }),
-                Err(err) => self
-                    .connection
-                    .set_note(StatusNote::error(user_error(&err))),
+                Err(err) => self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_PROCESS_NEW_CHATS,
+                    &err,
+                ))),
             },
             None => {
                 if let Some(session) = self.demo_session.as_mut() {

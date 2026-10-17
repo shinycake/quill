@@ -11,7 +11,7 @@ use super::chat_row::{
 use super::notifications::notification_settings_json;
 use super::*;
 use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error;
+use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::tab::{Tab, TabBar};
@@ -244,8 +244,10 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.get_community_full_info(community_id)
         {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.connection.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_COMMUNITY_INFO,
+                &err,
+            )));
         }
         cx.notify();
     }
@@ -513,8 +515,10 @@ impl QuillApp {
             && let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_contacts()
         {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.connection.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_CONTACTS,
+                &err,
+            )));
         }
         cx.notify();
     }
@@ -527,13 +531,17 @@ impl QuillApp {
         self.chat_list.calls_tab_open = true;
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.fetch_call_history() {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_CALL_HISTORY,
+                    &err,
+                )));
             }
             for key in [PrivacySettingKey::AllowCalls, PrivacySettingKey::PeerToPeer] {
                 if let Err(err) = live.driver.fetch_privacy_rules(key) {
-                    self.connection
-                        .set_note(StatusNote::error(user_error(&err)));
+                    self.connection.set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_CALL_PRIVACY,
+                        &err,
+                    )));
                 }
             }
             // Slice S4: the call-settings "Use less data for calls"
@@ -551,8 +559,10 @@ impl QuillApp {
         if let (Some(live), Some(folder_id)) = (self.live.as_mut(), folder)
             && let Err(err) = live.driver.load_folder_chats(folder_id)
         {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.connection.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_FOLDER,
+                &err,
+            )));
         }
         // A shared folder: has its owner added chats?
         self.poll_folder_new_chats();
@@ -624,8 +634,10 @@ impl QuillApp {
         let ids = reorder.release(std::time::Instant::now());
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_pinned_chat_order(archived, ids) {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_PIN_REORDER,
+                    &err,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.reorder_pinned_chats(archived, &ids);
@@ -639,8 +651,10 @@ impl QuillApp {
     pub(super) fn mark_all_chats_as_read(&mut self, archived: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.mark_all_chats_as_read(archived) {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_MARK_ALL_READ,
+                    &err,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             // Demo: clear the badges directly so the fixture shows the
@@ -691,9 +705,10 @@ impl QuillApp {
                     )));
                 }
                 Ok(None) => {}
-                Err(err) => self
-                    .connection
-                    .set_note(StatusNote::error(user_error(&err))),
+                Err(err) => self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_SAVED_MESSAGES,
+                    &err,
+                ))),
             }
         } else {
             self.connection.set_note(StatusNote::silent(tr(

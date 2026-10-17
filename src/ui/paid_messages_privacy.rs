@@ -12,7 +12,7 @@ use super::chat_theme::{danger, text_muted, warning};
 use super::paid_messages_state::PriceSlider;
 use super::privacy::{PrivacyEditorTarget, PrivacyExceptionKind};
 use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error;
+use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::*;
@@ -448,8 +448,10 @@ impl QuillApp {
     fn apply_new_chat_settings(&mut self, settings: NewChatPrivacy, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_new_chat_settings(settings) {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_PRIVACY_UPDATE,
+                    &err,
+                )));
             }
         } else if let Some(demo) = self.demo_session.as_mut()
             && matches!(

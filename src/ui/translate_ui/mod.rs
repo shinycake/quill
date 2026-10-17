@@ -10,7 +10,7 @@ use super::message_text::rich_text_line;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error;
+use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
@@ -390,8 +390,10 @@ impl QuillApp {
                 if let Some(live) = self.live.as_mut()
                     && let Err(err) = live.driver.translate_message(chat_id, message_id, to)
                 {
-                    self.connection
-                        .set_note(StatusNote::error(user_error(&err)));
+                    self.connection.set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_TRANSLATE,
+                        &err,
+                    )));
                 }
             }
             Some(TranslateSource::Selection { text, .. }) => {
@@ -401,9 +403,10 @@ impl QuillApp {
                     }
                     match live.driver.translate_selection(&text, to) {
                         Ok(job) => dialog.job = Some(job),
-                        Err(err) => self
-                            .connection
-                            .set_note(StatusNote::error(user_error(&err))),
+                        Err(err) => self.connection.set_note(StatusNote::error(user_error_for(
+                            keys::Q_NOTES_FAILED_TRANSLATE,
+                            &err,
+                        ))),
                     }
                 }
             }

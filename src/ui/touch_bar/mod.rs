@@ -13,7 +13,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error;
+use crate::ui::user_error::user_error_for;
+use quill::lang::keys;
 pub(crate) mod model;
 
 mod mac;
@@ -307,8 +308,10 @@ impl QuillApp {
     fn touch_bar_reorder(&mut self, ids: Vec<i64>, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_pinned_chat_order(false, ids) {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_PIN_REORDER,
+                    &err,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.reorder_pinned_chats(false, &ids);

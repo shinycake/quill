@@ -5,8 +5,7 @@ use super::app::QuillApp;
 use super::privacy::PrivacyEditorTarget;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
-use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error;
+use crate::ui::{status_note::StatusNote, user_error::user_error_for};
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
@@ -83,8 +82,10 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.chat_list.archive_settings_open = true;
             if let Err(err) = live.driver.fetch_archive_chat_list_settings() {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_ARCHIVE_SETTINGS,
+                    &err,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.chat_list.archive_settings_open = true;
@@ -108,8 +109,10 @@ impl QuillApp {
             };
             archive_setting_set(&mut settings, index, on);
             if let Err(err) = live.driver.set_archive_chat_list_settings(settings) {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_ARCHIVE_SETTINGS,
+                    &err,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut()
             && let Some(mut settings) = session.chat_list.archive_chat_list_settings

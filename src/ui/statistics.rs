@@ -9,7 +9,7 @@ use super::chat_row::chat_avatar;
 use super::chat_theme::text_muted;
 use super::statistics_graph::{OverviewCell, overview_grid, stat_graph_block};
 use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error;
+use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::*;
@@ -353,8 +353,10 @@ impl QuillApp {
                 .driver
                 .refresh_chat_statistics(ChatId(chat_id), is_dark)
         {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.connection.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_STATISTICS,
+                &err,
+            )));
         }
         cx.notify();
     }

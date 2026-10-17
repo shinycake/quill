@@ -3,13 +3,19 @@
 //! dump; the raw error goes to the debug log instead.
 
 use quill::connect::ConnectSendError;
-use quill::lang::{keys, tr, tr_with, trn_with};
+use quill::lang::{Key, keys, tr, tr_with, trn_with};
 use quill::telegram::envelope::{ErrorClass, TdError};
 
 /// An error a screen can describe to the user.
 pub(crate) trait UserError: std::fmt::Debug {
     /// The localized sentence for this error.
     fn user_text(&self) -> String;
+
+    /// Whether [`Self::user_text`] only says "something went wrong", so a
+    /// sentence naming the failed action does not repeat it after itself.
+    fn is_generic(&self) -> bool {
+        false
+    }
 }
 
 impl UserError for ConnectSendError {
@@ -27,9 +33,22 @@ impl UserError for ConnectSendError {
             ),
         }
     }
+
+    fn is_generic(&self) -> bool {
+        matches!(self, Self::InvalidRequest)
+    }
 }
 
 impl UserError for TdError {
+    fn is_generic(&self) -> bool {
+        !self.is_flood()
+            && !matches!(
+                (self.class, self.code),
+                (ErrorClass::NotFound | ErrorClass::Unauthorized, _)
+                    | (_, 401 | 403 | 404 | 500..=599)
+            )
+    }
+
     fn user_text(&self) -> String {
         if self.is_flood() {
             return match self.flood_wait_secs {
@@ -56,6 +75,28 @@ impl UserError for TdError {
 pub(crate) fn user_error(err: &impl UserError) -> String {
     quill::advanced::debug_mode::debug_log(&format!("error shown to the user: {err:?}"));
     err.user_text()
+}
+
+/// "Couldn't <action>." from the lang key `action`, followed by the mapped
+/// cause (flood wait, not allowed, not found, server) when there is one, so
+/// the user always sees which action failed.
+pub(crate) fn user_error_for(action: Key, err: &impl UserError) -> String {
+    failed_action(tr(action).to_string(), err)
+}
+
+/// [`user_error_for`] for an action named at run time (`what`, a localized
+/// verb phrase such as "create story album").
+pub(crate) fn user_error_doing(what: &str, err: &impl UserError) -> String {
+    failed_action(tr_with(keys::Q_NOTES_COULDNT_DO, &[("what", what)]), err)
+}
+
+fn failed_action(sentence: String, err: &impl UserError) -> String {
+    quill::advanced::debug_mode::debug_log(&format!("error shown to the user: {err:?}"));
+    if err.is_generic() {
+        sentence
+    } else {
+        format!("{sentence} {}", err.user_text())
+    }
 }
 
 #[cfg(test)]
@@ -101,6 +142,22 @@ mod tests {
             TdError::from_code(400).user_text(),
             tr(keys::Q_NOTES_SOMETHING_WENT_WRONG)
         );
+    }
+
+    #[test]
+    fn a_failed_action_is_named_and_gets_the_cause_when_known() {
+        use super::{user_error_doing, user_error_for};
+        let generic = user_error_for(keys::Q_NOTES_FAILED_LOG_OUT, &TdError::from_code(400));
+        assert_eq!(generic, tr(keys::Q_NOTES_FAILED_LOG_OUT));
+        let mut flood = TdError::from_code(429);
+        flood.flood_wait_secs = Some(12);
+        let text = user_error_for(keys::Q_NOTES_FAILED_LOG_OUT, &flood);
+        assert!(text.starts_with(tr(keys::Q_NOTES_FAILED_LOG_OUT)), "{text}");
+        assert!(text.contains("12"), "{text}");
+        let denied = user_error_for(keys::Q_NOTES_FAILED_BLOCK, &TdError::from_code(403));
+        assert!(denied.ends_with(tr(keys::Q_NOTES_NOT_ALLOWED)), "{denied}");
+        let doing = user_error_doing("pin stories", &ConnectSendError::InvalidRequest);
+        assert_eq!(doing, "Couldn't pin stories.");
     }
 
     #[test]

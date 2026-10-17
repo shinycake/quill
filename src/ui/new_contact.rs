@@ -11,7 +11,7 @@ use super::app::QuillApp;
 use super::dialogs::contacts::AddContactDialog;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error;
+use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Textarea;
@@ -90,9 +90,10 @@ impl QuillApp {
                     }
                 }
             }
-            Err(err) => self
-                .connection
-                .set_note(StatusNote::error(user_error(&err))),
+            Err(err) => self.connection.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_ADD_CONTACT,
+                &err,
+            ))),
         }
         cx.notify();
     }

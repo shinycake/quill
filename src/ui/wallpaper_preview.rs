@@ -10,7 +10,7 @@ use super::chat_look_ui::is_wallpaper_image;
 use super::shell::{DialogKind, QuillShell};
 use super::wallpaper::{Wallpaper, session_wallpaper};
 use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error;
+use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
@@ -165,8 +165,10 @@ impl QuillApp {
                     live.driver
                         .set_default_background_local(&path.to_string_lossy(), blurred, dark)
                 {
-                    self.connection
-                        .set_note(StatusNote::error(user_error(&err)));
+                    self.connection.set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_SET_WALLPAPER,
+                        &err,
+                    )));
                     return;
                 }
             }
@@ -182,8 +184,10 @@ impl QuillApp {
                             live.driver
                                 .set_default_background(background.id, Some(&kind), dark)
                         {
-                            self.connection
-                                .set_note(StatusNote::error(user_error(&err)));
+                            self.connection.set_note(StatusNote::error(user_error_for(
+                                keys::Q_NOTES_FAILED_SET_WALLPAPER,
+                                &err,
+                            )));
                             return;
                         }
                     }

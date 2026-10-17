@@ -705,7 +705,7 @@ impl QuillApp {
                             &[("before", &before.to_string())],
                         ))
                     } else {
-                        StatusNote::silent(format!("attached {name}"))
+                        StatusNote::silent(tr_with(keys::Q_CHAT_ATTACHED_NAME, &[("name", &name)]))
                     });
             }
             None => {

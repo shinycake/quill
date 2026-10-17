@@ -10,7 +10,7 @@ use super::chat_theme::{danger, text_muted};
 use super::privacy::{PrivacyEditorTarget, new_chat_privacy_value};
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error;
+use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
@@ -325,8 +325,10 @@ impl QuillApp {
         edit(&mut next);
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_gift_settings(next) {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_GIFT_SETTINGS,
+                    &err,
+                )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.set_my_gift_settings_local(next);
@@ -427,8 +429,10 @@ impl QuillApp {
     pub(super) fn set_sensitive_content(&mut self, on: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_ignore_sensitive_content(on) {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_SENSITIVE_SETTING,
+                    &err,
+                )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.privacy_data.ignore_sensitive = Some(on);

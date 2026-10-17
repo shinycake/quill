@@ -9,7 +9,7 @@
 use super::app::QuillApp;
 
 use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error;
+use crate::ui::user_error::user_error_for;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 use std::path::Path;
@@ -112,8 +112,10 @@ impl QuillApp {
                 ProfileEdit::SetBio(bio) => live.driver.set_bio(bio),
             };
             if let Err(err) = sent {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_SAVE_PROFILE,
+                    &err,
+                )));
                 cx.notify();
                 return;
             }
@@ -160,9 +162,10 @@ impl QuillApp {
             Ok(_) => self.connection.set_note(StatusNote::silent(tr(
                 keys::Q_PEOPLE_PHOTO_UPDATE_REQUESTED,
             ))),
-            Err(err) => self
-                .connection
-                .set_note(StatusNote::error(user_error(&err))),
+            Err(err) => self.connection.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_SET_PHOTO,
+                &err,
+            ))),
         }
         cx.notify();
     }

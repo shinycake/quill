@@ -596,7 +596,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             self.connection
                 .set_note(match live.driver.revoke_video_chat_invite_link() {
-                    Ok(_) => StatusNote::info(tr(keys::Q_AV_REVOKING_INVITE_LINK)),
+                    Ok(_) => StatusNote::silent(tr(keys::Q_AV_REVOKING_INVITE_LINK)),
                     Err(_) => StatusNote::error(tr(keys::Q_AV_COULDNT_REVOKE_THE_INVITE_LINK)),
                 });
         } else {

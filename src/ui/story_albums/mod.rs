@@ -4,7 +4,7 @@
 use super::app::QuillApp;
 use super::*;
 use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error;
+use crate::ui::user_error::{user_error_doing, user_error_for};
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::radio::{Radio, RadioGroup};
@@ -41,19 +41,25 @@ impl QuillApp {
         self.stories.page = Some(StoryPage::new(chat_id, window, cx));
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.get_chat_story_albums(chat_id) {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_STORY_ALBUMS,
+                    &err,
+                )));
             }
             if let Err(err) = live
                 .driver
                 .get_chat_posted_to_chat_page_stories(chat_id, 0, 50)
             {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_CHAT_PAGE_STORIES,
+                    &err,
+                )));
             }
             if let Err(err) = live.driver.get_chat_archived_stories(chat_id, 0, 50) {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_ARCHIVED_STORIES,
+                    &err,
+                )));
             }
         } else {
             self.connection.set_note(StatusNote::silent(tr(
@@ -107,8 +113,10 @@ impl QuillApp {
                 .driver
                 .get_story_album_stories(chat_id, album_id, offset, 50)
             {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_ALBUM_STORIES,
+                    &err,
+                )));
             }
         } else {
             self.connection.set_note(StatusNote::silent(tr(
@@ -147,7 +155,7 @@ impl QuillApp {
         };
         if let Err(err) = f(live) {
             self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+                .set_note(StatusNote::error(user_error_doing(what, &err)));
         }
         cx.notify();
     }

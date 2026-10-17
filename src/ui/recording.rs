@@ -414,11 +414,13 @@ impl QuillApp {
             let result = live
                 .driver
                 .send_voice_note(&draft, caption.trim(), reply_to, play_once);
-            self.connection.set_note(match result {
-                Ok(_) => StatusNote::silent(tr(keys::Q_MISC_SENDING_VOICE_NOTE)),
-                Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_SEND_VOICE_NOTE)),
+            let ok = result.is_ok();
+            self.connection.set_note(if ok {
+                StatusNote::silent(tr(keys::Q_MISC_SENDING_VOICE_NOTE))
+            } else {
+                StatusNote::error(tr(keys::Q_MISC_COULD_NOT_SEND_VOICE_NOTE))
             });
-            if self.connection.status_note() == tr(keys::Q_MISC_SENDING_VOICE_NOTE) {
+            if ok {
                 self.composer_ui.set_reply(None);
                 self.composer_ui.clear_draft_on_success = Some(
                     self.live
@@ -541,11 +543,13 @@ impl QuillApp {
         let reply_to = self.recording_send_reply(reply.as_ref());
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.send_recorded_video_note(&draft, reply_to);
-            self.connection.set_note(match result {
-                Ok(_) => StatusNote::silent(tr(keys::Q_MISC_SENDING_VIDEO_NOTE)),
-                Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_SEND_VIDEO_NOTE)),
+            let ok = result.is_ok();
+            self.connection.set_note(if ok {
+                StatusNote::silent(tr(keys::Q_MISC_SENDING_VIDEO_NOTE))
+            } else {
+                StatusNote::error(tr(keys::Q_MISC_COULD_NOT_SEND_VIDEO_NOTE))
             });
-            if self.connection.status_note() == tr(keys::Q_MISC_SENDING_VIDEO_NOTE) {
+            if ok {
                 self.composer_ui.set_reply(None);
                 self.composer_ui.clear_draft_on_success = Some(
                     self.live

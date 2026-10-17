@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error;
+use crate::ui::user_error::user_error_for;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -94,8 +94,10 @@ impl QuillApp {
             && let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_chat_folder_chats_to_leave(folder_id)
         {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.connection.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_FOLDER_CHATS,
+                &err,
+            )));
         }
         cx.notify();
     }
@@ -131,7 +133,7 @@ impl QuillApp {
         };
         self.connection.set_note(match result {
             Ok(()) => StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_DELETED)),
-            Err(err) => StatusNote::error(user_error(&err)),
+            Err(err) => StatusNote::error(user_error_for(keys::Q_NOTES_FAILED_DELETE_FOLDER, &err)),
         });
         if self.folders.tab == Some(confirm.folder_id) {
             self.set_chat_list_view(self.chat_list.filter, None);
@@ -166,7 +168,9 @@ impl QuillApp {
         };
         self.connection.set_note(match result {
             Ok(()) => StatusNote::silent(tr(keys::Q_CHATLIST_FOLDERS_REORDERED)),
-            Err(err) => StatusNote::error(user_error(&err)),
+            Err(err) => {
+                StatusNote::error(user_error_for(keys::Q_NOTES_FAILED_REORDER_FOLDERS, &err))
+            }
         });
         cx.notify();
     }
@@ -186,9 +190,9 @@ impl QuillApp {
             }
         };
         self.connection.set_note(match result {
-            Ok(()) if enabled => StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_TAGS_ON)),
-            Ok(()) => StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_TAGS_OFF)),
-            Err(err) => StatusNote::error(user_error(&err)),
+            Ok(()) if enabled => StatusNote::info(tr(keys::Q_CHATLIST_FOLDER_TAGS_ON)),
+            Ok(()) => StatusNote::info(tr(keys::Q_CHATLIST_FOLDER_TAGS_OFF)),
+            Err(err) => StatusNote::error(user_error_for(keys::Q_NOTES_FAILED_FOLDER_TAGS, &err)),
         });
         cx.notify();
     }
@@ -198,8 +202,10 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_chat_lists_to_add_chat(chat_id)
         {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.connection.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_FOLDER_OPTIONS,
+                &err,
+            )));
         }
         cx.notify();
     }
@@ -246,7 +252,7 @@ impl QuillApp {
         let toast = self.membership_toast(chat_id, folder_id, true);
         self.connection.set_note(match result {
             Ok(()) => StatusNote::info(toast),
-            Err(err) => StatusNote::error(user_error(&err)),
+            Err(err) => StatusNote::error(user_error_for(keys::Q_NOTES_FAILED_ADD_TO_FOLDER, &err)),
         });
         self.folders.menu_open = false;
         cx.notify();
@@ -265,7 +271,10 @@ impl QuillApp {
         let toast = self.membership_toast(chat_id, folder_id, false);
         self.connection.set_note(match result {
             Ok(()) => StatusNote::info(toast),
-            Err(err) => StatusNote::error(user_error(&err)),
+            Err(err) => StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_REMOVE_FROM_FOLDER,
+                &err,
+            )),
         });
         self.folders.menu_open = false;
         cx.notify();
@@ -379,8 +388,10 @@ impl QuillApp {
                             if let Some(live) = this.live.as_mut()
                                 && let Err(err) = live.driver.unarchive_chat(chat_id)
                             {
-                                this.connection
-                                    .set_note(StatusNote::error(user_error(&err)));
+                                this.connection.set_note(StatusNote::error(user_error_for(
+                                    keys::Q_NOTES_FAILED_MOVE_CHAT,
+                                    &err,
+                                )));
                             }
                             this.folders.menu_open = false;
                             cx.notify();
@@ -389,8 +400,10 @@ impl QuillApp {
                             if let Some(live) = this.live.as_mut()
                                 && let Err(err) = live.driver.archive_chat(chat_id)
                             {
-                                this.connection
-                                    .set_note(StatusNote::error(user_error(&err)));
+                                this.connection.set_note(StatusNote::error(user_error_for(
+                                    keys::Q_NOTES_FAILED_ARCHIVE_CHAT,
+                                    &err,
+                                )));
                             }
                             this.folders.menu_open = false;
                             cx.notify();

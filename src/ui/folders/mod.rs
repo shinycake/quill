@@ -5,7 +5,7 @@ use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error;
+use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
@@ -806,7 +806,7 @@ impl QuillApp {
                 keys::Q_CHATLIST_FOLDER_ADDED_2,
                 &[("name", &spec.name.to_string())],
             )),
-            Err(err) => StatusNote::error(user_error(&err)),
+            Err(err) => StatusNote::error(user_error_for(keys::Q_NOTES_FAILED_ADD_FOLDER, &err)),
         });
         cx.notify();
     }
@@ -815,8 +815,10 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_recommended_chat_folders()
         {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.connection.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_RECOMMENDED_FOLDERS,
+                &err,
+            )));
         }
         self.folders.manage_open = true;
         self.folders.editor = None;
@@ -857,8 +859,10 @@ impl QuillApp {
         } else if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_chat_folder(folder_id)
         {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.connection.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_FOLDER,
+                &err,
+            )));
         }
         self.folders.editor = Some(dialog);
         cx.notify();

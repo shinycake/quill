@@ -5,7 +5,7 @@ use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error;
+use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::form::{field, v_form};
@@ -191,8 +191,10 @@ impl QuillApp {
         };
         live.driver.session.users_state.profile_edit_error = None;
         if let Err(err) = live.driver.check_username(&username) {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.connection.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_USERNAME_CHECK,
+                &err,
+            )));
         }
         cx.notify();
     }
@@ -236,9 +238,10 @@ impl QuillApp {
             Ok(_) => self.connection.set_note(StatusNote::silent(tr(
                 keys::Q_PEOPLE_USERNAME_UPDATE_REQUESTED,
             ))),
-            Err(err) => self
-                .connection
-                .set_note(StatusNote::error(user_error(&err))),
+            Err(err) => self.connection.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_SET_USERNAME,
+                &err,
+            ))),
         }
         cx.notify();
     }
@@ -279,8 +282,10 @@ impl QuillApp {
         };
         live.driver.session.users_state.profile_edit_error = None;
         if let Err(err) = live.driver.reorder_active_usernames(&new_order) {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.connection.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_REORDER_USERNAMES,
+                &err,
+            )));
         }
         cx.notify();
     }
@@ -304,9 +309,10 @@ impl QuillApp {
             Ok(_) => self.connection.set_note(StatusNote::silent(tr(
                 keys::Q_PEOPLE_USERNAME_UPDATE_REQUESTED,
             ))),
-            Err(err) => self
-                .connection
-                .set_note(StatusNote::error(user_error(&err))),
+            Err(err) => self.connection.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_USERNAME_TOGGLE,
+                &err,
+            ))),
         }
         cx.notify();
     }
@@ -338,9 +344,10 @@ impl QuillApp {
             Ok(_) => self.connection.set_note(StatusNote::silent(tr(
                 keys::Q_PEOPLE_PHOTO_REMOVAL_REQUESTED,
             ))),
-            Err(err) => self
-                .connection
-                .set_note(StatusNote::error(user_error(&err))),
+            Err(err) => self.connection.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_REMOVE_PHOTO,
+                &err,
+            ))),
         }
         cx.notify();
     }

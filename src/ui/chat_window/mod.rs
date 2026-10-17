@@ -29,7 +29,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error;
+use crate::ui::user_error::user_error_for;
 mod body;
 mod recording;
 mod saved;
@@ -302,8 +302,10 @@ impl QuillApp {
         // window lets go of it, so TDLib keeps it open.
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.open_chat_window(chat_id) {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_CHAT_WINDOW,
+                    &err,
+                )));
                 self.set_window_scope(outer);
                 cx.notify();
                 return;

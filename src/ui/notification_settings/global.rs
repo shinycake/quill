@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error;
+use crate::ui::user_error::user_error_for;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -385,8 +385,10 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_contact_joined_notifications(on) {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_NOTIFICATION_SETTING,
+                    &err,
+                )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.disable_contact_registered_notifications = !on;

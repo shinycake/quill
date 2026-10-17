@@ -408,7 +408,7 @@ impl QuillApp {
             let left = live.driver.leave_channel(chat_id);
             self.connection
                 .set_note(if reported.is_ok() && left.is_ok() {
-                    StatusNote::silent(tr(keys::REPORT_SPAM_DONE))
+                    StatusNote::info(tr(keys::REPORT_SPAM_DONE))
                 } else {
                     StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_REPORT_THE_CHAT))
                 });

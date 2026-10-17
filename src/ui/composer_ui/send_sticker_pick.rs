@@ -39,26 +39,27 @@ impl QuillApp {
         }
         let reply = self.send_reply_for(chat_id, cx);
         let sent = if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
-                match live.driver.send_sticker(
-                    chat_id,
-                    quill::telegram::requests::StickerSend {
-                        file_id,
-                        emoji: &emoji,
-                        width,
-                        height,
-                        thumb,
-                        reply_to: reply,
-                        // Parity slice 4: the driver addresses the open topic
-                        // from the session; the UI passes no topic.
-                        topic_id: None,
-                    },
-                ) {
-                    Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_STICKER_SENT)),
-                    Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_STICKER)),
+            let result = live.driver.send_sticker(
+                chat_id,
+                quill::telegram::requests::StickerSend {
+                    file_id,
+                    emoji: &emoji,
+                    width,
+                    height,
+                    thumb,
+                    reply_to: reply,
+                    // Parity slice 4: the driver addresses the open topic
+                    // from the session; the UI passes no topic.
+                    topic_id: None,
                 },
             );
-            self.connection.status_note() == tr(keys::Q_CHAT_STICKER_SENT)
+            let ok = result.is_ok();
+            self.connection.set_note(if ok {
+                StatusNote::silent(tr(keys::Q_CHAT_STICKER_SENT))
+            } else {
+                StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_STICKER))
+            });
+            ok
         } else if self.demo_session.is_some() {
             self.apply_demo_sticker(chat_id, &emoji, file_id, reply);
             self.connection

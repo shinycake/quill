@@ -146,7 +146,7 @@ impl QuillApp {
         let roots = self.media_display_roots();
         let Some(safe) = sandboxed_display_path(&path, &roots) else {
             self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_AV_GIF_FILE_IS_OUTSIDE_THE)));
+                .set_note(StatusNote::error(tr(keys::Q_AV_GIF_FILE_IS_OUTSIDE_THE)));
             cx.notify();
             return;
         };

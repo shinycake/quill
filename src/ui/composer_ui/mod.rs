@@ -320,25 +320,26 @@ impl QuillApp {
         }
         let reply = self.send_reply_for(chat_id, cx);
         let sent = if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
-                match live.driver.send_animation(
-                    chat_id,
-                    quill::telegram::requests::AnimationSend {
-                        file_id,
-                        duration,
-                        width,
-                        height,
-                        reply_to: reply,
-                        // Parity slice 4: the driver addresses the open topic
-                        // from the session; the UI passes no topic.
-                        topic_id: None,
-                    },
-                ) {
-                    Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_SENDING_GIF)),
-                    Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_GIF)),
+            let result = live.driver.send_animation(
+                chat_id,
+                quill::telegram::requests::AnimationSend {
+                    file_id,
+                    duration,
+                    width,
+                    height,
+                    reply_to: reply,
+                    // Parity slice 4: the driver addresses the open topic
+                    // from the session; the UI passes no topic.
+                    topic_id: None,
                 },
             );
-            self.connection.status_note() == tr(keys::Q_CHAT_SENDING_GIF)
+            let ok = result.is_ok();
+            self.connection.set_note(if ok {
+                StatusNote::silent(tr(keys::Q_CHAT_SENDING_GIF))
+            } else {
+                StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_GIF))
+            });
+            ok
         } else if self.demo_session.is_some() {
             self.apply_demo_gif(chat_id, file_id, duration, width, height, reply);
             self.connection.set_note(StatusNote::silent(tr(

@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error;
+use crate::ui::user_error::user_error_for;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
@@ -92,8 +92,10 @@ impl QuillApp {
                             if let Some(live) = this.live.as_mut()
                                 && let Err(err) = live.driver.fetch_call_history()
                             {
-                                this.connection
-                                    .set_note(StatusNote::error(user_error(&err)));
+                                this.connection.set_note(StatusNote::error(user_error_for(
+                                    keys::Q_NOTES_FAILED_CALL_HISTORY,
+                                    &err,
+                                )));
                             }
                             cx.notify();
                         })),
@@ -125,8 +127,10 @@ impl QuillApp {
                             if let Some(live) = this.live.as_mut()
                                 && let Err(err) = live.driver.fetch_more_call_history()
                             {
-                                this.connection
-                                    .set_note(StatusNote::error(user_error(&err)));
+                                this.connection.set_note(StatusNote::error(user_error_for(
+                                    keys::Q_NOTES_FAILED_CALL_HISTORY,
+                                    &err,
+                                )));
                             }
                             cx.notify();
                         })),

@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error;
+use crate::ui::user_error::user_error_for;
 use crate::ui::wallpaper::Wallpaper;
 use crate::ui::wallpaper_preview::PreviewSource;
 use gpui_kit::component::checkbox::Checkbox;
@@ -175,8 +175,10 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if let Err(err) = live.driver.remove_installed_background(background_id) {
-                    self.connection
-                        .set_note(StatusNote::error(user_error(&err)));
+                    self.connection.set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_REMOVE_WALLPAPER,
+                        &err,
+                    )));
                 }
             }
             None => {

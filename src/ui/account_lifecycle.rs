@@ -3,7 +3,7 @@ use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error;
+use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Textarea, TextareaState};
@@ -254,8 +254,10 @@ impl QuillApp {
             // N2 fix-up: a failed send must not silently close the
             // dialog — stay put and say so (near-impossible behind the
             // Ready guard).
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.connection.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_LOG_OUT,
+                &err,
+            )));
             cx.notify();
             return;
         }

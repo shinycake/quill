@@ -7,7 +7,7 @@ use super::app::QuillApp;
 use super::folder_share::finish_dialog;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error;
+use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
@@ -39,8 +39,10 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if let Err(err) = live.driver.clear_call_history(revoke) {
-                    self.connection
-                        .set_note(StatusNote::error(user_error(&err)));
+                    self.connection.set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_CLEAR_CALL_HISTORY,
+                        &err,
+                    )));
                 }
             }
             None => {

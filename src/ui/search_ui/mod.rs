@@ -19,7 +19,7 @@ pub(super) fn one_line_preview(text: &str) -> String {
 use super::app::{PaneMode, QuillApp};
 use super::pressable::PressableDiv;
 use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error;
+use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::menu::ContextMenuExt as _;
@@ -359,8 +359,10 @@ impl QuillApp {
     pub(super) fn clear_search_recents(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.clear_recently_found_chats() {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_CLEAR_RECENTS,
+                    &err,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.search.search.chat_ids.clear();
@@ -373,8 +375,10 @@ impl QuillApp {
     pub(super) fn remove_recent_search(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.remove_recent_search(chat_id) {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_REMOVE_RECENT,
+                    &err,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.search.search.remove_recent(chat_id);
@@ -386,8 +390,10 @@ impl QuillApp {
     pub(super) fn remove_top_chat(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.remove_top_chat(chat_id) {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_REMOVE_CONTACT,
+                    &err,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.search.search.remove_top_chat(chat_id);
@@ -399,8 +405,10 @@ impl QuillApp {
     pub(super) fn set_top_chats_disabled(&mut self, disabled: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_top_chats_disabled(disabled) {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_FREQUENT_CONTACTS,
+                    &err,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.search.search.top_chats_disabled = disabled;
@@ -502,8 +510,10 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_search_community_filter(community_id) {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_COMMUNITY_FILTER,
+                    &err,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.search.search.community_filter = community_id;
@@ -791,8 +801,10 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_search_filters(filters) {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_SEARCH_FILTERS,
+                    &err,
+                )));
             }
             if filters.scope == SearchScope::Apps {
                 let _ = live.driver.fetch_grossing_web_app_bots();

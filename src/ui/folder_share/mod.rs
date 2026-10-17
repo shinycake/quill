@@ -7,7 +7,7 @@ use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error;
+use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
@@ -118,12 +118,16 @@ impl QuillApp {
                 .contains_key(&folder_id)
                 && let Err(err) = live.driver.fetch_chat_folder(folder_id)
             {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_FOLDER,
+                    &err,
+                )));
             }
             if let Err(err) = live.driver.fetch_folder_share(folder_id) {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_FOLDER_LINKS,
+                    &err,
+                )));
             }
         }
         cx.notify();
@@ -770,8 +774,10 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.check_folder_invite_link(&link)
         {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.connection.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_CHECK_FOLDER_LINK,
+                &err,
+            )));
         }
         cx.notify();
     }

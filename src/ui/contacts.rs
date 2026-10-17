@@ -7,7 +7,7 @@ use super::pressable::PressableDiv;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error;
+use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Textarea, TextareaState};
@@ -241,8 +241,10 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_contacts()
         {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.connection.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_CONTACTS,
+                &err,
+            )));
         }
         cx.notify();
     }
@@ -342,8 +344,10 @@ impl QuillApp {
                 // Re-enable refetches the server list so the tab
                 // converges with TDLib immediately.
                 if let Err(err) = live.driver.fetch_contacts() {
-                    self.connection
-                        .set_note(StatusNote::error(user_error(&err)));
+                    self.connection.set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_CONTACTS,
+                        &err,
+                    )));
                 }
             }
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -426,8 +430,10 @@ impl QuillApp {
                     return;
                 }
                 Err(err) => {
-                    self.connection
-                        .set_note(StatusNote::error(user_error(&err)));
+                    self.connection.set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_IMPORT_CONTACTS,
+                        &err,
+                    )));
                     cx.notify();
                     return;
                 }
@@ -600,8 +606,10 @@ impl QuillApp {
                         .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_CONTACT_ADD_REQUESTED)));
                 }
                 Err(err) => {
-                    self.connection
-                        .set_note(StatusNote::error(user_error(&err)));
+                    self.connection.set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_ADD_CONTACT,
+                        &err,
+                    )));
                 }
             }
         } else {
