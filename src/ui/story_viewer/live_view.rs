@@ -1,15 +1,15 @@
 //! The live story's frame in the story viewer: the stream picture fitted
 //! as tdesktop's `DecideFrameResize` fits it, with the comments over its
-//! lower half (`live_comments`), the pinned paid comments, the "Stars
-//! Sent!" toast and the Stars effects; and the header's LIVE badge, viewer
-//! count and sound toggle (tdesktop `Header::setVideoStreamViewers`), the
-//! live controller's header layout (`VideoController::live`). The live
+//! lower half (`live_comments`), the pinned paid comments and the "Stars
+//! Sent!" toast; and the header's LIVE badge, viewer count and sound
+//! toggle (tdesktop `Header::setVideoStreamViewers`), the live
+//! controller's header layout (`VideoController::live`). The live
 //! states (opening spinner, stall, paused, failed with Retry) go over the
 //! picture from the same overlay code as the stream window.
 #![deny(clippy::indexing_slicing)]
 
-use super::live_comments::{MESSAGE_SKIP, live_pinned_strip};
-use super::live_state::{effect_progress, level_color, pinned_comments};
+use super::live_comments::live_pinned_strip;
+use super::live_state::pinned_comments;
 use super::*;
 use crate::ui::calls::stream_view::frame_expands;
 use crate::ui::calls::stream_volume::VolumeHost;
@@ -25,11 +25,10 @@ use gpui_kit::component::slider::SliderState;
 use quill::calls::engine::StreamState;
 use quill::calls::live_video::LiveSink;
 use quill::lang::{trn, trn_with};
-use quill::live_story::level_for_stars;
 use quill::premium_hub::group_digits;
 use quill::state::ActiveGroupCall;
 use quill::state::{Session, unix_ms_now};
-use quill::telegram::envelope::{GroupCallMessageLevel, ParsedGroupCallMessage};
+use quill::telegram::envelope::ParsedGroupCallMessage;
 use std::rc::Rc;
 
 /// The story frame (the viewer's media box).
@@ -232,7 +231,6 @@ impl QuillApp {
             .then(|| self.live_comments(session, messages, &levels, cx));
         let toast = self.live_stars_toast(session, cx);
         let pinned_strip = (!pinned.is_empty()).then(|| live_pinned_strip(session, &pinned, cx));
-        let effects = self.live_effects_layer(session, &levels, cx);
         // tdesktop `DecideFrameResize`: cover when little is cut off, else
         // the whole picture over its blurred copy.
         let size = player
@@ -328,7 +326,6 @@ impl QuillApp {
                         .children(pinned_strip),
                 )
                 .children(comments)
-                .children(effects)
                 .into_any_element(),
         )
     }
@@ -413,83 +410,6 @@ impl QuillApp {
                 )
                 .into_any_element(),
         )
-    }
-
-    /// Stars someone added rise from the Stars button and fade (tdesktop
-    /// `StarEffect`, 2 s): a badge with the sender and the count, and a
-    /// burst of small stars around it in place of tdesktop's Lottie.
-    fn live_effects_layer(
-        &self,
-        session: &Session,
-        levels: &[GroupCallMessageLevel],
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        if self.stories.live.flying.is_empty() {
-            return None;
-        }
-        let now = Instant::now();
-        let mut layer = div()
-            .absolute()
-            .right(px(8.))
-            .bottom(px(0.))
-            .w(px(140.))
-            .h(px(FRAME_H / 2.));
-        let mut running = false;
-        for (index, effect) in self.stories.live.flying.iter().enumerate() {
-            let Some(progress) = effect_progress(effect.started, now) else {
-                continue;
-            };
-            running = true;
-            let color = level_for_stars(levels, effect.stars).first_color;
-            let fade = if progress > 0.7 {
-                (1.0 - progress) / 0.3
-            } else {
-                1.0
-            };
-            let rise = progress * (FRAME_H / 2. - 40.);
-            let right = MESSAGE_SKIP + (index % 2) as f32 * 24.;
-            let burst = (0..6).map(move |ray| {
-                let angle = ray as f32 * std::f32::consts::TAU / 6.0 + progress;
-                let reach = 10. + progress * 36.;
-                div()
-                    .absolute()
-                    .left(px(30. + angle.cos() * reach))
-                    .top(px(8. + angle.sin() * reach))
-                    .text_size(px(10.))
-                    .text_color(chrome::stars_gold())
-                    .opacity((1.0 - progress).clamp(0.0, 1.0))
-                    .child("\u{2605}")
-            });
-            layer = layer.child(
-                div()
-                    .absolute()
-                    .right(px(right))
-                    .bottom(px(rise))
-                    .opacity(fade.clamp(0.0, 1.0))
-                    .child(
-                        div()
-                            .relative()
-                            .flex()
-                            .items_center()
-                            .gap(px(3.))
-                            .pl(px(1.))
-                            .pr(px(6.))
-                            .py(px(1.))
-                            .rounded_full()
-                            .bg(level_color(color, 1.0))
-                            .text_color(chrome::fg())
-                            .text_size(px(12.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(sender_avatar(session, effect.sender, 18.))
-                            .child(format!("\u{2605}{}", group_digits(effect.stars)))
-                            .children(burst),
-                    ),
-            );
-        }
-        if running {
-            self.request_animation_tick(60, cx);
-        }
-        Some(layer.into_any_element())
     }
 }
 

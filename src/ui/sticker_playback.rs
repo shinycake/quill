@@ -582,8 +582,25 @@ impl QuillApp {
         if !matches!(format, StickerFormat::Tgs | StickerFormat::Webm) || id.0 == 0 {
             return None;
         }
-        let clip = self
-            .playback_cache(size)
+        let clip = self.decoded_clip(id, size, looping);
+        let weak = cx.entity().downgrade();
+        cx.defer(move |cx| {
+            let _ = weak.update(cx, |this, cx| {
+                this.ensure_sticker_playback(id, format, size, cx)
+            });
+        });
+        clip
+    }
+
+    /// The clip of `id` when it is decoded, without asking for it; its
+    /// `started` is when the decode finished.
+    pub(super) fn decoded_clip(
+        &self,
+        id: FileId,
+        size: PlaybackSize,
+        looping: bool,
+    ) -> Option<LayeredClip> {
+        self.playback_cache(size)
             .clips
             .get(&id.0)
             .map(|clip| LayeredClip {
@@ -594,14 +611,7 @@ impl QuillApp {
                 looping,
                 loops: None,
                 shown: Some(clip.used.clone()),
-            });
-        let weak = cx.entity().downgrade();
-        cx.defer(move |cx| {
-            let _ = weak.update(cx, |this, cx| {
-                this.ensure_sticker_playback(id, format, size, cx)
-            });
-        });
-        clip
+            })
     }
 
     /// Images for the custom emoji among `entities`: animated when

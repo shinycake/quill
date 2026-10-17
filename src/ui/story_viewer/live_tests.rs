@@ -620,3 +620,27 @@ fn an_account_switch_closes_a_story_pip(cx: &mut TestAppContext) {
         assert!(app.stories.live.watching.is_none());
     });
 }
+
+/// tdesktop `setupStarsEffectsCanvas`: the effects rise through a 128 by
+/// 256 canvas centred on the Stars button, its bottom on the button's
+/// bottom, and are gone once their 2 s are up.
+#[gpui_kit::test]
+fn star_effects_rise_over_the_stars_button_and_go(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_live(cx, "ready-live-story-stars");
+    let vcx = &mut vcx;
+    let layer = find(vcx, "live-story-effects").expect("the effects in flight");
+    let stars = find(vcx, "live-story-stars").expect("the Stars button");
+    assert_eq!(layer.size.width, px(128.));
+    assert_eq!(layer.size.height, px(256.));
+    assert_eq!(layer.bottom(), stars.bottom());
+    assert_eq!(layer.center().x, stars.center().x);
+    assert!(find(vcx, "live-story-effect-badge").is_some());
+    app.update(vcx, |app, cx| {
+        let live = &mut app.stories.live;
+        live.pinned_now = live.pinned_now.map(|now| now + EFFECT_DURATION);
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(find(vcx, "live-story-effects").is_none());
+    assert!(find(vcx, "live-story-effect-badge").is_none());
+}
