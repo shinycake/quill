@@ -736,7 +736,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Battery-low and microphone-off indicators for the other person (partial: microphone-off shipped; battery-low blocked: ntgcalls encrypts its own signaling, so the battery flag never reaches Quill) <!-- parity:calls-peer-indicators -->
 - [x] Speaker and listener invite links for live streams <!-- parity:calls-speaker-links -->
 - [x] Watch channel live streams (RTMP): ntgcalls stream mode fed by getGroupCallStreamSegment, wide stream window, fullscreen, no-stream and connecting states, settings with speakers, stream key and revoke (#814, #823, #837; not tried on a live stream) <!-- parity:calls-rtmp-viewing -->
-- [ ] Live stream volume slider (ntgcalls has no playback volume API; only mute for me) <!-- parity:calls-rtmp-volume -->
+- [x] Live stream volume slider (ntgcalls has no playback volume API; only mute for me) <!-- parity:calls-rtmp-volume -->
 - [x] Live stream window: hide the cursor in fullscreen and draw the letter avatar when the channel has no photo <!-- parity:calls-rtmp-window-polish -->
 - [x] Picture-in-picture for live streams and live stories (LIVE badge with viewers, mute, enlarge back to the stream window or story, close; tdesktop has no live PiP, #883) <!-- parity:calls-live-pip -->
 - [x] Live PiP follows a feed change (a rejoin or presenter switch swaps the player in place; the PiP closes only when the source is gone or the automatic rejoins are spent, #892) <!-- parity:calls-live-pip-feed-follow -->

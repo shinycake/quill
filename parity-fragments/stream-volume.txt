@@ -1,2 +1,0 @@
-# stream volume slider: stream window bar and live story pill
-parity:calls-rtmp-volume
