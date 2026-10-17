@@ -2,7 +2,7 @@
 //! chat-id lists (groups in common, similar channels, personal channel
 //! candidates) and the profile photo gallery.
 use super::*;
-use crate::telegram::envelope::ParsedProfilePhoto;
+use crate::telegram::envelope::{ChannelMemberStatus, ParsedProfilePhoto};
 
 impl Session {
     /// The chat of a supergroup or channel, for the info panel's title and
@@ -10,6 +10,17 @@ impl Session {
     pub fn supergroup_chat(&self, supergroup_id: i64) -> Option<&ChatSummary> {
         self.chats.values().find(|chat| {
             matches!(chat.kind, ChatKind::Supergroup { supergroup_id: id, .. } if id == supergroup_id)
+        })
+    }
+
+    /// Whether the viewer is known not to be in the chat (left or banned),
+    /// which is when tdesktop shows Join Channel.
+    pub fn chat_not_joined(&self, chat_id: ChatId) -> bool {
+        self.chats.get(&chat_id.0).is_some_and(|chat| {
+            matches!(
+                chat.my_member_status,
+                Some(ChannelMemberStatus::Left | ChannelMemberStatus::Banned)
+            )
         })
     }
 

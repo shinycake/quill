@@ -45,6 +45,9 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_bot_chat(session, &self.demo_ui.sink, &self.demo_ui.seq);
+            if let Some(chat) = session.chats.get_mut(&BOT) {
+                chat.can_be_reported = true;
+            }
             let extra = session.request(RequestPurpose::GetUserFullInfo, Some(ChatId(BOT)));
             let info = format!(
                 r#"{{"@type":"userFullInfo","@extra":"{}","bot_info":{{"@type":"botInfo","short_description":"A demo bot","description":"Demo Bot answers questions.","privacy_policy_url":"https://example.com/privacy","commands":[{{"@type":"botCommand","command":"start","description":"Start the bot","is_ephemeral":false}},{{"@type":"botCommand","command":"help","description":"Show help","is_ephemeral":false}},{{"@type":"botCommand","command":"settings","description":"Settings","is_ephemeral":false}}]}}}}"#,
@@ -63,7 +66,7 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             let jsons = [
                 format!(
-                    r#"{{"@type":"updateNewChat","chat":{{"id":{CHANNEL},"title":"Open Channel","type":{{"@type":"chatTypeSupergroup","supergroup_id":{CHANNEL},"is_channel":true}},"unread_count":0}}}}"#
+                    r#"{{"@type":"updateNewChat","chat":{{"id":{CHANNEL},"title":"Open Channel","type":{{"@type":"chatTypeSupergroup","supergroup_id":{CHANNEL},"is_channel":true}},"can_be_reported":true,"unread_count":0}}}}"#
                 ),
                 format!(
                     r#"{{"@type":"updateChatPosition","chat_id":{CHANNEL},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"80","is_pinned":false}}}}"#

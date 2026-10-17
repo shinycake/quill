@@ -10,14 +10,13 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::*;
 use quill::bot_profile::{PrivacyTarget, find_command, privacy_target};
-use quill::composer::ComposerSnapshot;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
-use quill::telegram::envelope::{ChannelMemberStatus, ChatKind};
+use quill::telegram::envelope::ChatKind;
 
 impl QuillApp {
     /// The listed private chat with `user_id`, if there is one.
-    fn listed_private_chat(&self, user_id: i64) -> Option<ChatId> {
+    pub(in crate::ui) fn listed_private_chat(&self, user_id: i64) -> Option<ChatId> {
         self.session()?
             .chats
             .values()
@@ -28,9 +27,9 @@ impl QuillApp {
             .map(|chat| chat.id)
     }
 
-    /// Bot Help, Bot Settings and Bot Privacy Policy, then Report: the
-    /// block `if (CanReportBot(user))` of `fillUserActions`. `None` unless
-    /// the user is a bot other than the viewer.
+    /// Bot Help, Bot Settings and Bot Privacy Policy: the commands part of
+    /// the block `if (CanReportBot(user))` of `fillUserActions`. `None`
+    /// unless the user is a bot other than the viewer.
     pub(in crate::ui) fn bot_command_rows(
         &self,
         user_id: i64,
@@ -84,22 +83,35 @@ impl QuillApp {
                 this.open_bot_privacy_policy(user_id, window, cx);
             })),
         );
-        column = column.child(
+        Some(column.into_any_element())
+    }
+
+    /// Report on a bot, drawn like Block and placed right before it. Shown
+    /// once the bot's private chat is known and TDLib allows reporting it.
+    pub(in crate::ui) fn bot_report_row(
+        &self,
+        user_id: i64,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let session = self.session()?;
+        session.user(user_id).filter(|user| user.is_bot)?;
+        if session.my_user_id == Some(user_id) {
+            return None;
+        }
+        let chat_id = self.listed_private_chat(user_id)?;
+        session.chats.get(&chat_id.0)?.can_be_reported.then(|| {
             action_row(
                 "info-panel-bot-report",
                 Some(IconName::Flag),
                 tr(keys::PROFILE_REPORT),
-                false,
+                true,
                 cx,
             )
-            .on_click(cx.listener(move |this, _, window, cx| {
-                match this.listed_private_chat(user_id) {
-                    Some(chat_id) => this.open_message_report(chat_id, Vec::new(), cx),
-                    None => this.open_user_chat(user_id, window, cx),
-                }
-            })),
-        );
-        Some(column.into_any_element())
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.open_message_report(chat_id, Vec::new(), cx);
+            }))
+            .into_any_element()
+        })
     }
 
     /// Report on a broadcast channel the viewer does not own
@@ -110,22 +122,23 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let session = self.session()?;
-        if session.chat_is_owner(chat_id) {
-            return None;
-        }
-        Some(
+        let reportable = session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.can_be_reported && !session.chat_is_owner(chat_id));
+        reportable.then(|| {
             action_row(
                 "info-panel-channel-report",
                 Some(IconName::Flag),
                 tr(keys::PROFILE_REPORT),
-                false,
+                true,
                 cx,
             )
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.open_message_report(chat_id, Vec::new(), cx);
             }))
-            .into_any_element(),
-        )
+            .into_any_element()
+        })
     }
 
     /// Join Channel, shown while the viewer is not in the channel
@@ -135,12 +148,8 @@ impl QuillApp {
         chat_id: ChatId,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let left = self
-            .session()?
-            .chats
-            .get(&chat_id.0)
-            .is_some_and(|chat| chat.my_member_status == Some(ChannelMemberStatus::Left));
-        left.then(|| {
+        let not_in = self.session()?.chat_not_joined(chat_id);
+        not_in.then(|| {
             action_row(
                 "info-panel-channel-join",
                 Some(IconName::UserPlus),
@@ -156,8 +165,8 @@ impl QuillApp {
     }
 
     /// Send `/command` to the bot's private chat and show that chat
-    /// (`BotCommandClickHandler` with the bot as context). A bot without a
-    /// listed chat opens one first; the command is then tapped again.
+    /// (`BotCommandClickHandler` with the bot as context). The chat is
+    /// created when the bot's panel opens (`ensure_private_chat`).
     pub(in crate::ui) fn send_profile_bot_command(
         &mut self,
         user_id: i64,
@@ -170,24 +179,7 @@ impl QuillApp {
             return;
         };
         self.select_listed_chat(chat_id, window, cx);
-        let Some(view_generation) = self.session().map(|s| s.view_generation) else {
-            return;
-        };
-        if self.slow_mode_blocked(chat_id, cx) {
-            return;
-        }
-        let text = format!("/{command}");
-        if let Some(live) = self.live.as_mut() {
-            let snapshot = ComposerSnapshot::capture(chat_id, view_generation, &text);
-            let note = match live.driver.send_snapshot(&snapshot) {
-                Ok(_) => StatusNote::silent(tr(keys::Q_OPS_SENDING)),
-                Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_COMMAND)),
-            };
-            self.connection.set_note(note);
-        } else {
-            self.apply_demo_outgoing(&text, None, None);
-        }
-        cx.notify();
+        self.send_command_text(chat_id, &format!("/{command}"), cx);
     }
 
     /// Bot Privacy Policy: the published link, else `/privacy`, else the
@@ -223,12 +215,19 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if !blocked {
-            if let Some(live) = self.live.as_mut()
-                && live.driver.set_user_blocked(user_id, true).is_err()
+            if let Some(live) = self.live.as_mut() {
+                if live.driver.set_user_blocked(user_id, true).is_err() {
+                    self.connection.set_note(StatusNote::error(tr(
+                        keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
+                    )));
+                }
+            } else if let Some(chat_id) = self.listed_private_chat(user_id)
+                && let Some(chat) = self
+                    .demo_session
+                    .as_mut()
+                    .and_then(|session| session.chats.get_mut(&chat_id.0))
             {
-                self.connection.set_note(StatusNote::error(tr(
-                    keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
-                )));
+                chat.blocked = true;
             }
             cx.notify();
             return;
@@ -239,8 +238,12 @@ impl QuillApp {
                 self.select_listed_chat(chat_id, window, cx);
             }
             None => {
-                if let Some(live) = self.live.as_mut() {
-                    let _ = live.driver.set_user_blocked(user_id, false);
+                if let Some(live) = self.live.as_mut()
+                    && live.driver.set_user_blocked(user_id, false).is_err()
+                {
+                    self.connection.set_note(StatusNote::error(tr(
+                        keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
+                    )));
                 }
                 self.open_user_chat(user_id, window, cx);
             }

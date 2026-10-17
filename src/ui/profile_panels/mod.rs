@@ -976,6 +976,9 @@ crate::ui::shell::register_dialogs! {
 
 pub(super) mod action_row;
 pub(super) mod bot_rows;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod bot_rows_tests;
 mod change_phone_dialog;
 mod main_profile_tab_dialog;
 mod submit_personal_photo;

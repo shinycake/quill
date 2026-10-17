@@ -240,19 +240,34 @@ impl QuillApp {
             Some(bot) if in_group && !command.contains('@') => format!("{command}@{bot}"),
             _ => command.to_string(),
         };
-        let view_generation = session.view_generation;
+        self.send_command_text(chat_id, &text, cx);
+    }
+
+    /// Send `text` (a `/command`) to `chat_id`, unless slow mode holds it
+    /// back; a demo session applies it locally.
+    pub(in crate::ui) fn send_command_text(
+        &mut self,
+        chat_id: ChatId,
+        text: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let session = self.live.as_ref().map(|live| &live.driver.session);
+        let session = session.or(self.demo_session.as_ref());
+        let Some(view_generation) = session.map(|session| session.view_generation) else {
+            return;
+        };
         if self.slow_mode_blocked(chat_id, cx) {
             return;
         }
         if let Some(live) = self.live.as_mut() {
-            let snapshot = ComposerSnapshot::capture(chat_id, view_generation, &text);
+            let snapshot = ComposerSnapshot::capture(chat_id, view_generation, text);
             self.connection
                 .set_note(match live.driver.send_snapshot(&snapshot) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_OPS_SENDING)),
                     Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_COMMAND)),
                 });
         } else {
-            self.apply_demo_outgoing(&text, None, None);
+            self.apply_demo_outgoing(text, None, None);
             self.connection.set_note(StatusNote::silent(tr(
                 keys::Q_OPS_DEMO_SEND_APPLIED_LOCALLY_NO,
             )));

@@ -32,12 +32,20 @@ had no Join row in the info panel, and no Report row.
 - Order: bot rows and Report follow Quill's existing bot actions; Join comes
   before the channel's management section (which holds Leave) and Report after.
 
-## Known gaps
+## Bots without a chat
 
-A bot with no listed private chat: Help, Settings and `/privacy` open the chat
-first and need a second tap (tdesktop sends to a history it can create
-silently). Report on such a bot opens the chat instead.
+Opening a bot's panel runs `createPrivateChat` quietly (`ensure_private_chat`,
+purpose `EnsurePrivateChat`: the chat joins the session but is not opened), so
+Help, Settings, `/privacy`, Report and Restart work on the first tap, as in
+tdesktop. Report is drawn in red right before Block, and both Report rows show
+only when TDLib says `can_be_reported`. Join shows for any non-member status
+(left or banned). Sending reuses `send_command_text` (extracted from the
+entity-link command send) and `open_user_chat`.
+
+Not covered: tdesktop's support-account and verify-codes exclusions (Quill has
+no such flags).
 
 ## Verification
 
-Demos `ready-info-bot` and `ready-info-channel-left` in light and dark.
+Demos `ready-info-bot` and `ready-info-channel-left` in light and dark, and
+the UI tests in `bot_rows_tests.rs` (row order, Join on an unjoined channel).

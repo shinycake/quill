@@ -239,6 +239,7 @@ impl QuillApp {
             let blocked = info.as_ref().is_some_and(|i| i.blocked);
             let is_bot = user.as_ref().is_some_and(|u| u.is_bot);
             let mut danger = div().flex().flex_col().w_full().gap_0p5();
+            danger = danger.children(self.bot_report_row(user_id, cx));
             danger = danger.child(
                 action_row(
                     "info-panel-block-user",
