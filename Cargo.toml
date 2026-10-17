@@ -33,7 +33,7 @@ workspace = true
 
 [features]
 default = ["ui"]
-# Only enabled through the dev-dependency below; never part of a build.
+# Only enabled through the dev-dependency below; only for test targets.
 test-support = []
 ui = [
     "dep:gpui-kit",

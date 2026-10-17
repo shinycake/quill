@@ -165,9 +165,8 @@ pub(super) struct VideoEditorDialog {
 /// `quill::video_edit`'s folder; a copy made by an earlier edit lives
 /// there and can be replaced.
 fn is_editor_copy(path: &Path) -> bool {
-    path.parent()
-        .and_then(Path::file_name)
-        .is_some_and(|dir| dir == "quill-video-edits")
+    let folder = quill::scratch::temp_work_dir("quill-video-edits");
+    path.parent() == Some(folder.as_path())
 }
 
 /// A JPEG still as a GPUI picture, read off the UI thread.

@@ -74,22 +74,20 @@ pub fn process_dir(prefix: &str) -> PathBuf {
     dir
 }
 
-/// `<temp>/<name>`, a fixed-name working directory the app itself creates
-/// (edited photos, sticker clips). In test builds a directory that did not
-/// exist yet is removed at exit; one that is already there, for example from a
-/// running app, is never touched. Release builds just return the path.
+/// `<temp>/<name>`, a working directory the app itself creates (edited
+/// photos, sticker clips). Release builds return exactly that path and never
+/// remove anything. Test builds return `<temp>/<name>-<pid>` instead and remove
+/// it at exit, so a test can never delete the directory of a running app.
 pub fn temp_work_dir(name: &str) -> PathBuf {
     check_prefix(name);
-    let dir = std::env::temp_dir().join(name);
     #[cfg(any(test, feature = "test-support"))]
     {
-        register_hook();
-        let mut list = dirs();
-        if !list.contains(&dir) && !dir.exists() {
-            list.push(dir.clone());
-        }
+        process_dir(name)
     }
-    dir
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
+        std::env::temp_dir().join(name)
+    }
 }
 
 #[cfg(test)]
