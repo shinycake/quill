@@ -17,7 +17,9 @@ use quill::ids::{ChatId, FileId, MessageId};
 use quill::telegram::envelope::{MessageContent, PhotoContent, PhotoSizeView};
 use std::time::Duration;
 
-pub(super) fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+pub(in crate::ui::media_viewer) fn new_app(
+    cx: &mut TestAppContext,
+) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -75,14 +77,18 @@ fn add_captioned_photo(
     });
 }
 
-pub(super) fn settle(vcx: &mut VisualTestContext) {
+pub(in crate::ui::media_viewer) fn settle(vcx: &mut VisualTestContext) {
     for _ in 0..3 {
         vcx.update(|window, _| window.refresh());
         vcx.run_until_parked();
     }
 }
 
-pub(super) fn open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, id: i64) {
+pub(in crate::ui::media_viewer) fn open(
+    app: &Entity<QuillApp>,
+    vcx: &mut VisualTestContext,
+    id: i64,
+) {
     app.update_in(vcx, |app, _, cx| {
         app.privacy.open = false;
         app.open_media_viewer(ChatId(11), MessageId(id), cx);
@@ -90,7 +96,7 @@ pub(super) fn open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, id: i64)
     settle(vcx);
 }
 
-pub(super) fn notch(
+pub(in crate::ui::media_viewer) fn notch(
     vcx: &mut VisualTestContext,
     at: Point<Pixels>,
     lines: f32,
@@ -107,7 +113,10 @@ pub(super) fn notch(
     settle(vcx);
 }
 
-fn current(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> i64 {
+pub(in crate::ui::media_viewer) fn current(
+    app: &Entity<QuillApp>,
+    vcx: &mut VisualTestContext,
+) -> i64 {
     app.read_with(vcx, |app, _| {
         app.viewer.state.current().expect("an item").message_id.0
     })

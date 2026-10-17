@@ -177,6 +177,7 @@ impl QuillApp {
             video: item.kind == MediaViewerKind::Video,
             caption: caption.map_or(0.0, |caption| caption.plate_h),
             fullscreen,
+            strip: self.viewer_group_strip(viewport.0).is_some(),
         });
         let fit = area.size;
         // The media's own box inside the frame: sized from its natural

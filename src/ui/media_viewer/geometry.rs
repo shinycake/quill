@@ -3,6 +3,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::{VIEWER_SIDE_LANE, VIEWER_TOP_BAR};
+use quill::media_viewer::{GROUP_STRIP_PADDING, GROUP_THUMB_HEIGHT};
 
 /// Room under a video's picture for its 72 px controller and the bar's
 /// 16 px bottom padding.
@@ -11,6 +12,9 @@ const VIDEO_CONTROLS: f32 = 96.0;
 const ZOOM_CONTROLS: f32 = 72.0;
 /// The bottom bar's gap between the caption and the controls.
 pub(super) const CAPTION_GAP: f32 = 8.0;
+/// Room under the controls for an album's thumbnail strip: the thumbs and
+/// the space above them (the bar's gap included).
+pub(super) const GROUP_STRIP_ROOM: f32 = GROUP_STRIP_PADDING + GROUP_THUMB_HEIGHT;
 
 /// What decides where the media fits, in window points.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -22,6 +26,9 @@ pub(super) struct ViewerFrame {
     pub(super) caption: f32,
     /// Video full screen (tdesktop `_fullScreenVideo`).
     pub(super) fullscreen: bool,
+    /// An album's thumbnail strip sits at the bottom (hidden in full
+    /// screen).
+    pub(super) strip: bool,
 }
 
 /// The area the media fits into: its top-left and size.
@@ -57,18 +64,19 @@ pub(super) fn fit_area(frame: ViewerFrame) -> FitArea {
     } else {
         0.0
     };
+    let strip = if frame.strip { GROUP_STRIP_ROOM } else { 0.0 };
     FitArea {
         origin: (VIEWER_SIDE_LANE, VIEWER_TOP_BAR),
         size: (
             lane_width(width),
-            (height - VIEWER_TOP_BAR - controls - caption).max(200.0),
+            (height - VIEWER_TOP_BAR - controls - caption - strip).max(200.0),
         ),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{CAPTION_GAP, FitArea, VIDEO_CONTROLS, ViewerFrame, fit_area};
+    use super::{CAPTION_GAP, FitArea, GROUP_STRIP_ROOM, VIDEO_CONTROLS, ViewerFrame, fit_area};
     use crate::ui::media_viewer::{VIEWER_SIDE_LANE, VIEWER_TOP_BAR};
 
     fn frame(caption: f32, fullscreen: bool) -> ViewerFrame {
@@ -77,6 +85,7 @@ mod tests {
             video: true,
             caption,
             fullscreen,
+            strip: false,
         }
     }
 
@@ -96,6 +105,20 @@ mod tests {
     fn no_caption_keeps_no_room_for_one() {
         let area = fit_area(frame(0.0, false));
         assert_eq!(area.size.1, 1000.0 - VIEWER_TOP_BAR - VIDEO_CONTROLS);
+    }
+
+    #[test]
+    fn an_album_strip_takes_room_under_the_controls_but_not_in_full_screen() {
+        let strip = |fullscreen| ViewerFrame {
+            strip: true,
+            ..frame(0.0, fullscreen)
+        };
+        let area = fit_area(strip(false));
+        assert_eq!(
+            area.size.1,
+            1000.0 - VIEWER_TOP_BAR - VIDEO_CONTROLS - GROUP_STRIP_ROOM
+        );
+        assert_eq!(fit_area(strip(true)).size, (1600.0, 1000.0));
     }
 
     #[test]
