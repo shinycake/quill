@@ -8,6 +8,7 @@ use quill::ids::FileId;
 use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::power_saving;
+use quill::sticker_playback::Tint;
 use quill::telegram::envelope::StickerFormat;
 use smallvec::SmallVec;
 use std::cell::Cell;
@@ -110,13 +111,32 @@ pub(super) enum AnimatedVisual {
     Layered(LayeredClip),
 }
 
+/// A clip's place in a playback cache: its file, and the colour its frames
+/// are tinted with, if any (the live Stars burst's gold). A tinted clip is
+/// decoded and tinted by its own background job, and is budgeted and
+/// evicted like any other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct ClipKey {
+    pub(super) file: FileId,
+    pub(super) tint: Option<Tint>,
+}
+
+impl ClipKey {
+    pub(super) fn plain(file: FileId) -> Self {
+        Self { file, tint: None }
+    }
+}
+
 #[derive(Default)]
 pub(super) struct StickerPlayback {
-    clips: HashMap<i32, StickerClip>,
-    jobs: HashMap<i32, StickerJob>,
-    failed: std::collections::HashSet<i32>,
+    clips: HashMap<ClipKey, StickerClip>,
+    jobs: HashMap<ClipKey, StickerJob>,
+    failed: std::collections::HashSet<ClipKey>,
     epoch: u64,
 }
+
+/// Decoded straight-alpha BGRA frames and their rate.
+type DecodedFrames = Result<(Vec<image::RgbaImage>, f64), String>;
 impl Drop for StickerJob {
     fn drop(&mut self) {
         self.cancel.store(true, Ordering::SeqCst);
@@ -200,20 +220,19 @@ impl QuillApp {
 
     fn ensure_sticker_playback(
         &mut self,
-        id: FileId,
+        key: ClipKey,
         format: StickerFormat,
         size: PlaybackSize,
         cx: &mut Context<Self>,
     ) {
         // ponytail: sixteen resident clips and two decoders; larger visible grids may re-decode evicted images.
-        if let Some(clip) = self.playback_cache_mut(size).clips.get_mut(&id.0) {
+        if let Some(clip) = self.playback_cache_mut(size).clips.get_mut(&key) {
             clip.used.set(Instant::now());
             return;
         }
         let cache = self.playback_cache(size);
-        if cache.clips.contains_key(&id.0)
-            || cache.jobs.contains_key(&id.0)
-            || cache.failed.contains(&id.0)
+        if cache.jobs.contains_key(&key)
+            || cache.failed.contains(&key)
             || cache.jobs.len() >= size.decoders()
         {
             return;
@@ -221,6 +240,7 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return;
         };
+        let id = key.file;
         let path = session
             .media
             .files
@@ -236,120 +256,56 @@ impl QuillApp {
             }
             return;
         };
-        let epoch = cache.epoch;
-        // Full of clips on screen: this one stays a still.
+        let edge = size.edge();
+        let max_frames = size.max_frames();
+        let tint = key.tint.map_or_else(String::new, |Tint([b, g, r])| {
+            format!("-{r:02x}{g:02x}{b:02x}")
+        });
+        let dir = quill::animation::gif_frame_cache_dir(id.0)
+            .join(format!("sticker-{edge}-{}{tint}", cache.epoch));
+        self.spawn_clip_job(
+            key,
+            size,
+            move |cancel, child| {
+                let decoded = decode_frames(format, &path, &dir, edge, max_frames, child, cancel);
+                let _ = std::fs::remove_dir_all(dir);
+                decoded
+            },
+            cx,
+        );
+    }
+
+    /// Runs `decode` in the background, tints its frames there when `key`
+    /// asks for a tint, and stores the clip. Nothing is stored when the
+    /// cache is full of clips on screen (the caller shows a still).
+    pub(super) fn spawn_clip_job(
+        &mut self,
+        key: ClipKey,
+        size: PlaybackSize,
+        decode: impl FnOnce(&AtomicBool, &Arc<Mutex<Option<std::process::Child>>>) -> DecodedFrames
+        + Send
+        + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        let epoch = self.playback_cache(size).epoch;
         if !self.make_room(size, 0) {
             return;
         }
         let cancel = Arc::new(AtomicBool::new(false));
         let child = Arc::new(Mutex::new(None));
         self.playback_cache_mut(size).jobs.insert(
-            id.0,
+            key,
             StickerJob {
                 cancel: cancel.clone(),
                 child: child.clone(),
             },
         );
-        let edge = size.edge();
-        let max_frames = size.max_frames();
-        let dir =
-            quill::animation::gif_frame_cache_dir(id.0).join(format!("sticker-{edge}-{epoch}"));
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    let result = (|| {
-                        let (frames, fps) = match format {
-                            StickerFormat::Tgs => {
-                                let decoded = quill::sticker_playback::decode_tgs_sized(
-                                    &path,
-                                    edge as usize,
-                                    max_frames,
-                                    quill::sticker_playback::MAX_PLAYBACK_FPS,
-                                    &cancel,
-                                )?;
-                                let frames = decoded
-                                    .frames
-                                    .into_iter()
-                                    .map(|bytes| {
-                                        let mut rgba =
-                                            image::RgbaImage::from_raw(edge, edge, bytes)
-                                                .ok_or_else(|| {
-                                                    tr(keys::Q_AV_INVALID_STICKER_FRAME).to_string()
-                                                })?;
-                                        // rlottie is premultiplied; GPUI expects straight BGRA.
-                                        for pixel in rgba.as_chunks_mut::<4>().0 {
-                                            let alpha = u16::from(pixel[3]);
-                                            #[allow(clippy::manual_checked_ops)]
-                                            if alpha > 0 {
-                                                for channel in &mut pixel[..3] {
-                                                    *channel = (u16::from(*channel) * 255 / alpha)
-                                                        .min(255)
-                                                        as u8;
-                                                }
-                                            }
-                                        }
-                                        Ok::<_, String>(rgba)
-                                    })
-                                    .collect::<Result<Vec<_>, _>>()?;
-                                (frames, decoded.fps)
-                            }
-                            StickerFormat::Webm => {
-                                let decoded = quill::sticker_playback::decode_webm_sized(
-                                    &path,
-                                    &dir,
-                                    edge as usize,
-                                    max_frames,
-                                    &child,
-                                    &cancel,
-                                )
-                                .map_err(|error| {
-                                    if cancel.load(Ordering::SeqCst) {
-                                        tr(keys::Q_AV_STICKER_PLAYBACK_CANCELLED).to_string()
-                                    } else {
-                                        error
-                                    }
-                                })?;
-                                let fps = decoded.fps;
-                                // Already BGRA (GPUI's byte order), centered
-                                // on the transparent square.
-                                let frames = decoded
-                                    .into_squares(edge)
-                                    .into_iter()
-                                    .map(|bgra| {
-                                        image::RgbaImage::from_raw(edge, edge, bgra).ok_or_else(
-                                            || tr(keys::Q_AV_INVALID_STICKER_FRAME).to_string(),
-                                        )
-                                    })
-                                    .collect::<Result<Vec<_>, _>>()?;
-                                (frames, fps)
-                            }
-                            _ => return Err(tr(keys::Q_AV_UNSUPPORTED_ANIMATED_STICKER).into()),
-                        };
-                        if frames.is_empty() {
-                            return Err(tr(keys::Q_AV_STICKER_HAS_NO_FRAMES).to_string());
-                        }
-                        let duration = Duration::from_secs_f64(frames.len() as f64 / fps);
-                        let frames: Arc<[Arc<RenderImage>]> = frames
-                            .into_iter()
-                            .map(|rgba| {
-                                Arc::new(RenderImage::new(SmallVec::from_buf([image::Frame::new(
-                                    rgba,
-                                )])))
-                            })
-                            .collect::<Vec<_>>()
-                            .into();
-                        let bytes = frames
-                            .iter()
-                            .map(|frame| {
-                                let size = frame.size(0);
-                                size.width.0.max(0) as usize * size.height.0.max(0) as usize * 4
-                            })
-                            .sum();
-                        Ok((frames, bytes, fps, duration))
-                    })();
-                    let _ = std::fs::remove_dir_all(dir);
-                    result
+                    decode(&cancel, &child)
+                        .and_then(|(frames, fps)| finish_clip(frames, fps, key.tint))
                 })
                 .await;
             let duration = this
@@ -357,7 +313,7 @@ impl QuillApp {
                     if this.playback_cache(size).epoch != epoch {
                         return None;
                     }
-                    this.playback_cache_mut(size).jobs.remove(&id.0);
+                    this.playback_cache_mut(size).jobs.remove(&key);
                     let duration = match result {
                         Ok((frames, bytes, fps, duration)) => {
                             let clip = StickerClip {
@@ -372,11 +328,11 @@ impl QuillApp {
                             // cache then runs over until the next decode
                             // finds room.
                             let _ = this.make_room(size, bytes);
-                            this.playback_cache_mut(size).clips.insert(id.0, clip);
+                            this.playback_cache_mut(size).clips.insert(key, clip);
                             Some(duration)
                         }
                         Err(error) => {
-                            this.playback_cache_mut(size).failed.insert(id.0);
+                            this.playback_cache_mut(size).failed.insert(key);
                             this.connection.set_note(StatusNote::error(error));
                             None
                         }
@@ -397,6 +353,108 @@ impl QuillApp {
         })
         .detach();
     }
+}
+
+/// An animated sticker's frames at `edge` px, straight-alpha BGRA.
+fn decode_frames(
+    format: StickerFormat,
+    path: &std::path::Path,
+    dir: &std::path::Path,
+    edge: u32,
+    max_frames: usize,
+    child: &Arc<Mutex<Option<std::process::Child>>>,
+    cancel: &AtomicBool,
+) -> DecodedFrames {
+    match format {
+        StickerFormat::Tgs => {
+            let decoded = quill::sticker_playback::decode_tgs_sized(
+                path,
+                edge as usize,
+                max_frames,
+                quill::sticker_playback::MAX_PLAYBACK_FPS,
+                cancel,
+            )?;
+            let frames = decoded
+                .frames
+                .into_iter()
+                .map(|bytes| {
+                    let mut rgba = image::RgbaImage::from_raw(edge, edge, bytes)
+                        .ok_or_else(|| tr(keys::Q_AV_INVALID_STICKER_FRAME).to_string())?;
+                    // rlottie is premultiplied; GPUI expects straight BGRA.
+                    for pixel in rgba.as_chunks_mut::<4>().0 {
+                        let alpha = u16::from(pixel[3]);
+                        #[allow(clippy::manual_checked_ops)]
+                        if alpha > 0 {
+                            for channel in &mut pixel[..3] {
+                                *channel = (u16::from(*channel) * 255 / alpha).min(255) as u8;
+                            }
+                        }
+                    }
+                    Ok::<_, String>(rgba)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok((frames, decoded.fps))
+        }
+        StickerFormat::Webm => {
+            let decoded = quill::sticker_playback::decode_webm_sized(
+                path,
+                dir,
+                edge as usize,
+                max_frames,
+                child,
+                cancel,
+            )
+            .map_err(|error| {
+                if cancel.load(Ordering::SeqCst) {
+                    tr(keys::Q_AV_STICKER_PLAYBACK_CANCELLED).to_string()
+                } else {
+                    error
+                }
+            })?;
+            let fps = decoded.fps;
+            // Already BGRA (GPUI's byte order), centered on the transparent
+            // square.
+            let frames = decoded
+                .into_squares(edge)
+                .into_iter()
+                .map(|bgra| {
+                    image::RgbaImage::from_raw(edge, edge, bgra)
+                        .ok_or_else(|| tr(keys::Q_AV_INVALID_STICKER_FRAME).to_string())
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok((frames, fps))
+        }
+        _ => Err(tr(keys::Q_AV_UNSUPPORTED_ANIMATED_STICKER).into()),
+    }
+}
+
+/// Decoded frames as a clip: tinted when asked, one image per frame, with
+/// their size in bytes and the clip's length.
+fn finish_clip(
+    mut frames: Vec<image::RgbaImage>,
+    fps: f64,
+    tint: Option<Tint>,
+) -> Result<(Arc<[Arc<RenderImage>]>, usize, f64, Duration), String> {
+    if frames.is_empty() {
+        return Err(tr(keys::Q_AV_STICKER_HAS_NO_FRAMES).to_string());
+    }
+    if let Some(tint) = tint {
+        for frame in &mut frames {
+            tint.apply(frame);
+        }
+    }
+    let duration = Duration::from_secs_f64(frames.len() as f64 / fps);
+    let bytes = frames.iter().map(|frame| frame.as_raw().len()).sum();
+    let frames: Arc<[Arc<RenderImage>]> = frames
+        .into_iter()
+        .map(|rgba| {
+            Arc::new(RenderImage::new(SmallVec::from_buf([image::Frame::new(
+                rgba,
+            )])))
+        })
+        .collect::<Vec<_>>()
+        .into();
+    Ok((frames, bytes, fps, duration))
 }
 
 impl QuillApp {
@@ -582,27 +640,43 @@ impl QuillApp {
         if !matches!(format, StickerFormat::Tgs | StickerFormat::Webm) || id.0 == 0 {
             return None;
         }
-        let clip = self.decoded_clip(id, size, looping);
-        let weak = cx.entity().downgrade();
-        cx.defer(move |cx| {
-            let _ = weak.update(cx, |this, cx| {
-                this.ensure_sticker_playback(id, format, size, cx)
-            });
-        });
+        let key = ClipKey::plain(id);
+        let clip = self.decoded_clip(key, size, looping);
+        self.request_clip(key, format, size, cx);
         clip
     }
 
-    /// The clip of `id` when it is decoded, without asking for it; its
+    /// Starts decoding `key` after this frame unless it is cached, being
+    /// decoded or failed. A cached clip counts as shown just now.
+    pub(super) fn request_clip(
+        &self,
+        key: ClipKey,
+        format: StickerFormat,
+        size: PlaybackSize,
+        cx: &mut Context<QuillApp>,
+    ) {
+        if !matches!(format, StickerFormat::Tgs | StickerFormat::Webm) || key.file.0 == 0 {
+            return;
+        }
+        let weak = cx.entity().downgrade();
+        cx.defer(move |cx| {
+            let _ = weak.update(cx, |this, cx| {
+                this.ensure_sticker_playback(key, format, size, cx)
+            });
+        });
+    }
+
+    /// The clip of `key` when it is decoded, without asking for it; its
     /// `started` is when the decode finished.
     pub(super) fn decoded_clip(
         &self,
-        id: FileId,
+        key: ClipKey,
         size: PlaybackSize,
         looping: bool,
     ) -> Option<LayeredClip> {
         self.playback_cache(size)
             .clips
-            .get(&id.0)
+            .get(&key)
             .map(|clip| LayeredClip {
                 frames: clip.frames.clone(),
                 fps: clip.fps,
@@ -612,6 +686,13 @@ impl QuillApp {
                 loops: None,
                 shown: Some(clip.used.clone()),
             })
+    }
+
+    /// Whether `key` is decoded or failed to decode.
+    #[cfg(feature = "demo-capture")]
+    pub(super) fn clip_settled(&self, key: ClipKey, size: PlaybackSize) -> bool {
+        let cache = self.playback_cache(size);
+        cache.clips.contains_key(&key) || cache.failed.contains(&key)
     }
 
     /// Images for the custom emoji among `entities`: animated when
@@ -691,10 +772,10 @@ impl QuillApp {
         if !matches!(format, StickerFormat::Tgs | StickerFormat::Webm) || id.0 == 0 {
             return None;
         }
-        let entity = cx.entity();
         let app = self;
         let mut animating = false;
-        let image = app.playback_cache(size).clips.get(&id.0).and_then(|clip| {
+        let key = ClipKey::plain(id);
+        let image = app.playback_cache(size).clips.get(&key).and_then(|clip| {
             let elapsed = clip.started.elapsed();
             let looping = !once
                 && app
@@ -720,18 +801,11 @@ impl QuillApp {
             };
             let fps = image
                 .as_ref()
-                .and(app.playback_cache(size).clips.get(&id.0))
+                .and(app.playback_cache(size).clips.get(&key))
                 .map_or(fps, |clip| fps.min(clip.fps.ceil() as u32));
             app.request_animation_tick(fps, cx);
         }
-        {
-            let weak = entity.downgrade();
-            cx.defer(move |cx| {
-                let _ = weak.update(cx, |this, cx| {
-                    this.ensure_sticker_playback(id, format, size, cx)
-                });
-            });
-        }
+        app.request_clip(key, format, size, cx);
         image
     }
 }
@@ -744,7 +818,22 @@ fn over_budget(clips: usize, held: usize, adding: usize, capacity: usize, budget
 
 #[cfg(test)]
 mod tests {
-    use super::over_budget;
+    use super::{finish_clip, over_budget};
+    use quill::sticker_playback::Tint;
+
+    #[test]
+    fn a_tinted_clip_is_tinted_and_counted_in_the_budget() {
+        let white = image::RgbaImage::from_pixel(2, 2, image::Rgba([255; 4]));
+        let (frames, bytes, _, duration) =
+            finish_clip(vec![white; 3], 30., Some(Tint([0, 184, 255]))).unwrap();
+        assert_eq!(bytes, 3 * 2 * 2 * 4);
+        assert_eq!(duration, std::time::Duration::from_millis(100));
+        assert_eq!(
+            frames[2].as_bytes(0).unwrap().get(..4),
+            Some(&[0, 184, 255, 255][..])
+        );
+        assert!(finish_clip(Vec::new(), 30., None).is_err());
+    }
 
     #[test]
     fn clip_cache_is_bounded_by_count_and_bytes() {

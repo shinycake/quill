@@ -8,16 +8,16 @@ use super::live_state::{FlyingStars, effect_progress, level_color};
 use super::live_view::sender_avatar;
 use super::*;
 use crate::ui::anim_layer::LayeredClip;
-use crate::ui::sticker_playback::PlaybackSize;
+use crate::ui::sticker_playback::{ClipKey, PlaybackSize};
 use gpui_kit::assets::IconName;
 use quill::live_story::{
-    STAR_EFFECT_CANVAS_H, STAR_EFFECT_CANVAS_W, STAR_EFFECT_SIZE, StarEffectFrame, burst_order,
-    level_for_stars, star_effect_frame,
+    STAR_EFFECT_CANVAS_H, STAR_EFFECT_CANVAS_W, STAR_EFFECT_SIZE, StarEffectFrame,
+    burst_frame_index, burst_order, level_for_stars, ready_burst, star_effect_frame,
 };
 use quill::premium_hub::group_digits;
 use quill::state::Session;
+use quill::sticker_playback::Tint;
 use quill::telegram::envelope::StickerItem;
-use std::cell::RefCell;
 use std::sync::Arc;
 
 /// tdesktop `whoReadDateStyle`: the badge's 12 px font, on a 16 px line.
@@ -31,23 +31,34 @@ const BADGE_PAD_Y: f32 = 1.;
 /// tdesktop `groupCallEffectUserpicPadding`: left of and after the userpic.
 const USERPIC_PAD_LEFT: f32 = 1.;
 const USERPIC_PAD_RIGHT: f32 = 3.;
-/// One tinted clip per effect in flight.
-const TINTED_KEPT: usize = 4;
-/// Rec. 709 luma weights, in the frames' BGR order.
-const LUMA: [f32; 3] = [0.0722, 0.7152, 0.2126];
 
 pub(super) struct StarBurst<'a> {
-    candidates: &'a [StickerItem],
-    tint: Option<Hsla>,
+    pub(super) candidates: &'a [StickerItem],
+    tint: Option<Tint>,
+}
+
+impl StarBurst<'_> {
+    pub(super) fn key(&self, sticker: &StickerItem) -> ClipKey {
+        ClipKey {
+            file: sticker.file_id,
+            tint: self.tint,
+        }
+    }
 }
 
 /// The swap point for the burst's source: the server's generic reaction
 /// bursts tinted gold, in place of tdesktop's bundled star bursts.
-fn star_burst(session: &Session) -> StarBurst<'_> {
+pub(super) fn star_burst(session: &Session) -> StarBurst<'_> {
     StarBurst {
         candidates: session.stories.live_bursts.stickers(),
-        tint: Some(chrome::stars_gold()),
+        tint: Some(burst_tint()),
     }
+}
+
+/// `chrome::stars_gold()` as a tint for the burst's frames.
+pub(super) fn burst_tint() -> Tint {
+    let gold = chrome::stars_gold().to_rgb();
+    Tint([gold.b, gold.g, gold.r].map(|channel| (channel * 255.).round() as u8))
 }
 
 impl QuillApp {
@@ -101,37 +112,45 @@ impl QuillApp {
         )
     }
 
-    /// The burst `effect` plays (tdesktop `randomLoadedFrom`): the first in
-    /// its order decoded before it started, else the seed's own once it is
-    /// decoded. The seed's own is always asked for, so it downloads and
-    /// decodes for the next effects.
+    /// The burst `effect` plays (tdesktop `randomLoadedFrom`, resolved when
+    /// the effect starts): the first in its order whose tinted clip was
+    /// ready by then, else none. The seed's own is asked for while it is
+    /// missing, so later effects have it.
     fn burst_clip(
         &self,
         burst: &StarBurst<'_>,
         effect: &FlyingStars,
         cx: &mut Context<Self>,
     ) -> Option<LayeredClip> {
-        let mut order = burst_order(effect.seed, burst.candidates.len())
-            .filter_map(|i| burst.candidates.get(i));
-        let own = order.next()?;
-        let ready = std::iter::once(own).chain(order).find_map(|sticker| {
-            self.decoded_clip(sticker.file_id, PlaybackSize::Sticker, false)
-                .filter(|clip| clip.started <= effect.started)
-                .map(|clip| (sticker.file_id, clip))
-        });
-        let asked = self.layered_clip(own.file_id, own.format, PlaybackSize::Sticker, false, cx);
-        let (file, mut clip) = ready.or_else(|| asked.map(|clip| (own.file_id, clip)))?;
-        if let Some(tint) = burst.tint {
-            clip.frames = tinted_frames(file.0, tint, &clip.frames);
+        let mut clips: Vec<Option<LayeredClip>> = burst
+            .candidates
+            .iter()
+            .map(|sticker| self.decoded_clip(burst.key(sticker), PlaybackSize::Sticker, false))
+            .collect();
+        if let Some(own) = burst_order(effect.seed, clips.len()).next()
+            && clips.get(own).is_some_and(Option::is_none)
+            && let Some(sticker) = burst.candidates.get(own)
+        {
+            self.request_clip(
+                burst.key(sticker),
+                sticker.format,
+                PlaybackSize::Sticker,
+                cx,
+            );
         }
-        Some(clip)
+        let ready: Vec<Option<Instant>> = clips
+            .iter()
+            .map(|clip| clip.as_ref().map(|clip| clip.started))
+            .collect();
+        let pick = ready_burst(effect.seed, &ready, effect.started)?;
+        clips.get_mut(pick).and_then(Option::take)
     }
 }
 
 /// The burst's frame `age` into the effect: played once at the clip's own
 /// rate, gone after its last frame.
 fn burst_frame(clip: &LayeredClip, age: std::time::Duration) -> Option<Arc<RenderImage>> {
-    let index = (age.as_secs_f64() * clip.fps) as usize;
+    let index = burst_frame_index(age, clip.fps, clip.frames.len())?;
     let frame = clip.frames.get(index).cloned()?;
     if let Some(shown) = &clip.shown {
         shown.set(Instant::now());
@@ -156,21 +175,26 @@ fn effect_element(
         .justify_center()
         .child(badge.opacity(frame.opacity.clamp(0.0, 1.0)))
         .children(burst.map(|image| {
-            canvas(
-                |_, _, _| {},
-                move |bounds, (), window, _| {
-                    let _ = window.paint_image(
-                        bounds,
-                        bounds,
-                        Corners::default(),
-                        image.clone(),
-                        0,
-                        false,
-                    );
-                },
-            )
-            .absolute()
-            .inset_0()
+            div()
+                .debug_selector(|| "live-story-effect-burst".into())
+                .absolute()
+                .inset_0()
+                .child(
+                    canvas(
+                        |_, _, _| {},
+                        move |bounds, (), window, _| {
+                            let _ = window.paint_image(
+                                bounds,
+                                bounds,
+                                Corners::default(),
+                                image.clone(),
+                                0,
+                                false,
+                            );
+                        },
+                    )
+                    .size_full(),
+                )
         }))
         .into_any_element()
 }
@@ -205,104 +229,4 @@ fn badge(session: &Session, effect: &FlyingStars, color: u32, scale: f32) -> Div
                 .text_color(chrome::stars_gold()),
         )
         .child(group_digits(effect.stars))
-}
-
-thread_local! {
-    static TINTED: RefCell<Vec<((i32, u32), Arc<[Arc<RenderImage>]>)>> =
-        const { RefCell::new(Vec::new()) };
-}
-
-pub(super) fn release_tinted_bursts() {
-    let old = TINTED.with(|cache| std::mem::take(&mut *cache.borrow_mut()));
-    crate::ui::image_budget::retire_all(old.into_iter().flat_map(|(_, frames)| frames.to_vec()));
-}
-
-fn tinted_frames(
-    file: i32,
-    tint: Hsla,
-    frames: &Arc<[Arc<RenderImage>]>,
-) -> Arc<[Arc<RenderImage>]> {
-    let rgba = tint.to_rgb();
-    let key = (file, u32::from(rgba));
-    if let Some(found) = TINTED.with(|cache| {
-        cache
-            .borrow()
-            .iter()
-            .find(|(cached, _)| *cached == key)
-            .map(|(_, frames)| frames.clone())
-    }) {
-        return found;
-    }
-    let tinted = tint_frames(frames, [rgba.b, rgba.g, rgba.r]);
-    TINTED.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if cache.len() >= TINTED_KEPT {
-            let (_, old) = cache.remove(0);
-            crate::ui::image_budget::retire_all(old.iter().cloned());
-        }
-        cache.push((key, tinted.clone()));
-    });
-    tinted
-}
-
-/// Each pixel becomes `bgr` times its luminance, keeping its alpha.
-fn tint_frames(frames: &[Arc<RenderImage>], bgr: [f32; 3]) -> Arc<[Arc<RenderImage>]> {
-    frames
-        .iter()
-        .map(|frame| {
-            let width = frame.size(0).width.0.max(0) as u32;
-            let height = frame.size(0).height.0.max(0) as u32;
-            let tinted = frame.as_bytes(0).and_then(|bytes| {
-                image::RgbaImage::from_raw(width, height, tint_pixels(bytes, bgr))
-            });
-            match tinted {
-                Some(pixels) => Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
-                    image::Frame::new(pixels),
-                ]))),
-                None => frame.clone(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .into()
-}
-
-fn tint_pixels(bytes: &[u8], bgr: [f32; 3]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(bytes.len());
-    for &[b, g, r, a] in bytes.as_chunks::<4>().0 {
-        let [luma_b, luma_g, luma_r] = LUMA;
-        let luminance =
-            (luma_r * f32::from(r) + luma_g * f32::from(g) + luma_b * f32::from(b)) / 255.;
-        for channel in bgr {
-            out.push((channel * luminance * 255.).round().clamp(0., 255.) as u8);
-        }
-        out.push(a);
-    }
-    out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::tint_pixels;
-
-    const GOLD: [f32; 3] = [0.0, 0.72, 1.0];
-
-    #[test]
-    fn white_takes_the_full_tint_and_keeps_its_alpha() {
-        assert_eq!(
-            tint_pixels(&[255, 255, 255, 128], GOLD),
-            vec![0, 184, 255, 128]
-        );
-    }
-
-    #[test]
-    fn black_stays_black() {
-        assert_eq!(tint_pixels(&[0, 0, 0, 200], GOLD), vec![0, 0, 0, 200]);
-    }
-
-    #[test]
-    fn green_tints_brighter_than_blue() {
-        let green = tint_pixels(&[0, 255, 0, 255], GOLD);
-        let blue = tint_pixels(&[255, 0, 0, 255], GOLD);
-        assert!(green.get(2) > blue.get(2));
-    }
 }

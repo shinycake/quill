@@ -16,6 +16,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::{GroupCallMessageLevel, MessageSender, ParsedGroupCallMessage};
+use std::time::{Duration, Instant};
 
 /// tdesktop `kMaxShownVideoStreamMessages`.
 pub const MAX_SHOWN_COMMENTS: usize = 100;
@@ -387,6 +388,27 @@ pub fn star_effect_shift(random: u32) -> f32 {
 pub fn burst_order(seed: u64, count: usize) -> impl Iterator<Item = usize> {
     let start = usize::try_from(seed % u64::try_from(count.max(1)).unwrap_or(1)).unwrap_or(0);
     (0..count).map(move |step| (start + step) % count)
+}
+
+/// The burst an effect started at `started` plays (tdesktop
+/// `randomLoadedFrom`, resolved once, when the effect starts): the first in
+/// `seed`'s order whose clip was ready by then. `ready[i]` is when
+/// candidate `i`'s clip became ready, if it has.
+pub fn ready_burst(seed: u64, ready: &[Option<Instant>], started: Instant) -> Option<usize> {
+    burst_order(seed, ready.len()).find(|&i| {
+        ready
+            .get(i)
+            .copied()
+            .flatten()
+            .is_some_and(|at| at <= started)
+    })
+}
+
+/// The frame of a `count`-frame burst at `fps`, `age` into its effect: it
+/// plays once, so there is none after the last.
+pub fn burst_frame_index(age: Duration, fps: f64, count: usize) -> Option<usize> {
+    let index = (age.as_secs_f64() * fps) as usize;
+    (index < count).then_some(index)
 }
 
 #[cfg(test)]

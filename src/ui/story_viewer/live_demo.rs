@@ -9,12 +9,14 @@
 //! 1:1 call; and one that gave way to the call, showing Failed with Retry.
 #![deny(clippy::indexing_slicing)]
 
+use super::live_effects::{burst_tint, star_burst};
 use super::live_state::{EFFECT_DURATION, FlyingStars, StarsBoxMode};
 use crate::ui::app::QuillApp;
 use crate::ui::calls::demo_feed::{DemoFeed, demo_feed};
 use crate::ui::demo::{demo_file_json, demo_media_allowlist};
 use crate::ui::groups::apply_ready_channels;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
+use crate::ui::sticker_playback::{ClipKey, PlaybackSize};
 use gpui_kit::*;
 use quill::calls::engine::{GroupCallMode, StreamState};
 use quill::diagnostics::DiagnosticSink;
@@ -93,8 +95,55 @@ impl QuillApp {
             let sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
             seed_star_burst(session, &sink, &self.demo_ui.seq);
         }
-        // Three effects caught mid-flight, on a stopped clock.
-        let now = Instant::now();
+        if let Some(session) = self.session() {
+            let burst = star_burst(session);
+            for sticker in burst.candidates {
+                self.request_clip(
+                    burst.key(sticker),
+                    sticker.format,
+                    PlaybackSize::Sticker,
+                    cx,
+                );
+            }
+        }
+        // The bursts decode and tint in the background; the effects start
+        // once that settled, so they play them.
+        let placed = std::rc::Rc::new(std::cell::Cell::new(false));
+        cx.observe_self(move |this, cx| {
+            if placed.get() || !this.session().is_some_and(|s| this.star_bursts_settled(s)) {
+                return;
+            }
+            placed.set(true);
+            this.demo_star_effects();
+            cx.notify();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Whether every burst's tinted clip is decoded or failed.
+    fn star_bursts_settled(&self, session: &Session) -> bool {
+        let burst = star_burst(session);
+        burst
+            .candidates
+            .iter()
+            .all(|sticker| self.clip_settled(burst.key(sticker), PlaybackSize::Sticker))
+    }
+
+    /// Three effects caught mid-flight on a stopped clock, all started
+    /// after the burst was ready.
+    fn demo_star_effects(&mut self) {
+        let ready = self
+            .decoded_clip(
+                ClipKey {
+                    file: FileId(BURST_FILE),
+                    tint: Some(burst_tint()),
+                },
+                PlaybackSize::Sticker,
+                false,
+            )
+            .map_or_else(Instant::now, |clip| clip.started);
+        let now = ready + EFFECT_DURATION;
         self.stories.live.demo_clock = Some(now);
         for (user_id, stars, progress, shift) in [
             (801, 5, 0.1, 0.5),
@@ -110,7 +159,6 @@ impl QuillApp {
                 seed: 0,
             });
         }
-        cx.notify();
     }
 
     fn demo_live_story_box(&mut self, _window: &mut Window, cx: &mut Context<Self>) {

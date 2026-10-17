@@ -185,3 +185,30 @@ fn bursts_are_tried_from_the_seeds_pick_round() {
     assert_eq!(burst_order(u64::MAX, 2).collect::<Vec<_>>(), vec![1, 0]);
     assert_eq!(burst_order(7, 0).count(), 0);
 }
+
+#[test]
+fn an_effect_plays_the_first_burst_ready_when_it_started_in_seed_order() {
+    let start = Instant::now();
+    let at = |ms| start + Duration::from_millis(ms);
+    let ready = [Some(at(0)), None, Some(at(50)), Some(at(10))];
+    // Seed 2 tries 2, 3, 0, 1: 2 was not ready at 20 ms, 3 was.
+    assert_eq!(ready_burst(2, &ready, at(20)), Some(3));
+    assert_eq!(ready_burst(2, &ready, at(50)), Some(2));
+    // Seed 1's own is missing; 2 and 3 were not ready at 5 ms, 0 was.
+    assert_eq!(ready_burst(1, &ready, at(5)), Some(0));
+    // Ready only after the effect started: it plays none.
+    assert_eq!(ready_burst(0, &[Some(at(30))], at(20)), None);
+    assert_eq!(ready_burst(0, &[None, None], at(20)), None);
+    assert_eq!(ready_burst(5, &[], at(20)), None);
+}
+
+#[test]
+fn a_burst_plays_once_and_has_no_frame_after_its_last() {
+    let at = Duration::from_millis;
+    assert_eq!(burst_frame_index(at(0), 30., 30), Some(0));
+    assert_eq!(burst_frame_index(at(500), 30., 30), Some(15));
+    assert_eq!(burst_frame_index(at(999), 30., 30), Some(29));
+    assert_eq!(burst_frame_index(at(1000), 30., 30), None);
+    assert_eq!(burst_frame_index(at(1900), 30., 30), None);
+    assert_eq!(burst_frame_index(at(0), 30., 0), None);
+}

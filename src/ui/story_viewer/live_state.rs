@@ -177,7 +177,6 @@ impl LiveStoryUi {
         self.last_comment = None;
         self.overlay = Default::default();
         self.demo_clock = None;
-        super::live_effects::release_tinted_bursts();
     }
 
     /// The Stars effects' clock: the time, or the demo's stopped one.
