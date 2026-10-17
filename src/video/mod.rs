@@ -533,18 +533,27 @@ impl VideoNoteCapture {
         let log_file = std::fs::File::create(&log).map_err(|err| err.to_string())?;
         let size = round_video_size(hq);
         let preview = ROUND_PREVIEW_SIDE;
-        let job = crate::video_encoder::h264_job(
+        let started = crate::video_encoder::h264_job(
             "Video messages",
             &round_capture_args(&input, size, &path),
             size.unsigned_abs().saturating_mul(size.unsigned_abs()),
-        )?;
-        let mut child = crate::media_tools::spawn_capture(
-            &job.program,
-            &job.args,
-            Stdio::piped(),
-            Stdio::from(log_file),
         )
-        .map_err(|err| format!("Couldn't start ffmpeg ({err})."))?;
+        .and_then(|job| {
+            crate::media_tools::spawn_capture(
+                &job.program,
+                &job.args,
+                Stdio::piped(),
+                Stdio::from(log_file),
+            )
+            .map_err(|err| format!("Couldn't start ffmpeg ({err})."))
+        });
+        let mut child = match started {
+            Ok(child) => child,
+            Err(err) => {
+                let _ = std::fs::remove_file(&log);
+                return Err(err);
+            }
+        };
         let frames: PreviewFrame = Arc::default();
         if let Some(mut stdout) = child.stdout.take() {
             let frames = frames.clone();
@@ -618,8 +627,13 @@ impl VideoNoteCapture {
             return Err(reason);
         }
         let _ = std::fs::remove_file(&self.log);
-        let probe = probe_local_video(&self.path)
-            .map_err(|err| format!("recorded clip unreadable ({err})"))?;
+        let probe = match probe_local_video(&self.path) {
+            Ok(probe) => probe,
+            Err(err) => {
+                let _ = std::fs::remove_file(&self.path);
+                return Err(format!("recorded clip unreadable ({err})"));
+            }
+        };
         if probe.width != probe.height || probe.width != self.size {
             let _ = std::fs::remove_file(&self.path);
             return Err("recorded clip is not a square round video".into());
@@ -703,6 +717,11 @@ impl Drop for VideoNoteCapture {
             self.stop_child(false);
         }
         let _ = std::fs::remove_file(&self.log);
+        // A capture dropped without `finish` leaves no clip behind (`finish`
+        // hands the path over, leaving it empty).
+        if !self.path.as_os_str().is_empty() {
+            let _ = std::fs::remove_file(&self.path);
+        }
     }
 }
 

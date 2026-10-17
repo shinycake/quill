@@ -16,6 +16,7 @@
 "qll_notes_no_connection" = "Couldn't reach Telegram. Check your connection and try again.";
 "qll_notes_not_allowed" = "You don't have permission to do that.";
 "qll_notes_not_found" = "That is no longer available.";
+"qll_notes_voice_note_not_sent_window_closed" = "Voice message not sent: its chat window closed.";
 "qll_notes_password_submitted" = "Password submitted. Waiting for Telegram.";
 "qll_notes_phone_submitted" = "Phone number submitted. Waiting for Telegram.";
 "qll_notes_qr_login_requested" = "QR login requested. Scan the code with a signed-in Telegram app.";
