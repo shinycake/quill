@@ -86,6 +86,26 @@ context. `Single`, `Peer` and `Album` call `hideSiblings()`.
   in its place by id and the rest of the list stays live, instead of the
   whole list freezing.
 
+## Folded in from the re-review of #950
+
+- A `getStory` that fails with anything but 400 or 404 starts a retry
+  clock for that story (`StoriesState::story_retry`): 5 s, doubling per
+  failure up to 5 minutes, the same clock as tray paging. `get_story`
+  holds a prefetch back while the clock runs, so `follow_story_tray`
+  no longer re-sends it every frame. The story arriving clears the clock.
+- A user opening the story clears its clock and asks at once
+  (`get_story_now`). If that ask fails the same way, the pending open is
+  dropped: a `Link` open toasts `lng_stories_link_invalid`, as tdesktop
+  runs the same callback on any `Stories::resolve` failure
+  (`data_stories.cpp:861-867`); a card or tray open says "Couldn't load
+  the story." (`qll_media_story_load_failed`, tdesktop has no string for
+  it). Without this the open waited for an answer nothing would ask for.
+- A `loadActiveStories` page that answers `ok` clears the tray paging
+  clock, so the next failure starts again at 5 s.
+- No sibling narrower than 48 px: a very narrow window shows none.
+- The siblings hide while the reply row's media panel is open, since the
+  panel sits over the right one.
+
 ## Deviations
 
 - The viewer's panel is now exactly the story column (the 360 px frame

@@ -170,3 +170,73 @@ fn a_story_that_arrives_after_the_viewer_opened_joins_the_list(cx: &mut TestAppC
     frames(vcx);
     assert_eq!(shown(&app, vcx), (Some((ChatId(MAYA), 6)), Some((2, 2))));
 }
+
+/// What a pending open of `story` from `scope` leaves once its `getStory`
+/// failed with an error that may pass: the pending open and the note.
+fn open_then_fail(
+    app: &Entity<QuillApp>,
+    vcx: &mut VisualTestContext,
+    story: i32,
+    scope: StoryOpenScope,
+) -> (Option<PendingStoryOpen>, String) {
+    app.update(vcx, |app, cx| {
+        app.connection
+            .set_note(crate::ui::status_note::StatusNote::silent(""));
+        app.open_story_viewer(ChatId(POSTER), story, scope, cx);
+        if let Some(session) = app.demo_session.as_mut() {
+            session
+                .stories
+                .story_fetch_failed((POSTER, story), std::time::Instant::now());
+        }
+        cx.notify();
+    });
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        (
+            app.chat_list.pending_story_open,
+            app.connection.note().text().to_string(),
+        )
+    })
+}
+
+#[gpui_kit::test]
+fn an_open_whose_story_failed_to_load_says_so(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx, "ready-channels");
+    let vcx = &mut vcx;
+    for (story, scope, note) in [
+        (95, StoryOpenScope::Single, keys::Q_MEDIA_STORY_LOAD_FAILED),
+        (94, StoryOpenScope::Tray, keys::Q_MEDIA_STORY_LOAD_FAILED),
+        (93, StoryOpenScope::Link, keys::STORIES_LINK_INVALID),
+    ] {
+        let (pending, shown) = open_then_fail(&app, vcx, story, scope);
+        assert_eq!(pending, None, "{scope:?}: the open is dropped");
+        assert_eq!(shown, tr(note).to_string(), "{scope:?}");
+        assert!(app.read_with(vcx, |app, _| !app.stories.viewer.is_open()));
+    }
+}
+
+#[gpui_kit::test]
+fn opening_a_story_again_after_a_failure_waits_for_the_new_answer(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx, "ready-channels");
+    let vcx = &mut vcx;
+    open_then_fail(&app, vcx, 92, StoryOpenScope::Single);
+    app.update(vcx, |app, cx| {
+        app.open_story_viewer(ChatId(POSTER), 92, StoryOpenScope::Single, cx)
+    });
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        assert_eq!(
+            app.chat_list.pending_story_open,
+            Some(PendingStoryOpen {
+                chat_id: POSTER,
+                story_id: 92,
+                scope: StoryOpenScope::Single,
+            }),
+            "the earlier failure does not drop the new open"
+        );
+        let waiting = app
+            .session()
+            .is_some_and(|s| s.stories.story_retry.contains_key(&(POSTER, 92)));
+        assert!(!waiting, "the open cleared the retry clock");
+    });
+}

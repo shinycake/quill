@@ -53,14 +53,25 @@ impl QuillApp {
                     .collect()
             })
             .unwrap_or_default();
+        // The opened story is asked for at once, even while a failed ask
+        // waits out its retry clock; the poster's others are prefetches.
         if let Some(live) = self.live.as_mut() {
             for id in fetch {
-                let _ = live.driver.get_story(chat_id, id);
+                let _ = if id == story_id {
+                    live.driver.get_story_now(chat_id, id)
+                } else {
+                    live.driver.get_story(chat_id, id)
+                };
             }
-        } else if !fetch.is_empty() {
-            self.connection.set_note(StatusNote::silent(tr(
-                keys::Q_MEDIA_DEMO_GETSTORY_RUNS_WITH_LIVE,
-            )));
+        } else {
+            if let Some(session) = self.demo_session.as_mut() {
+                session.stories.story_retry.remove(&(chat_id.0, story_id));
+            }
+            if !fetch.is_empty() {
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_MEDIA_DEMO_GETSTORY_RUNS_WITH_LIVE,
+                )));
+            }
         }
         let open = PendingStoryOpen {
             chat_id: chat_id.0,
@@ -79,26 +90,44 @@ impl QuillApp {
     /// tdesktop's `lng_stories_link_invalid` toast after `Stories::resolve`
     /// (`window_session_controller.cpp:700-705`); a card or reply header
     /// shows the story as expired already, and tdesktop's `openPeerStory`
-    /// stays silent.
+    /// stays silent. An ask that failed for a reason that may pass (the
+    /// open cleared the story's retry clock, so a clock now means it
+    /// failed) drops the open too: a link gets the same toast, as tdesktop
+    /// runs the same callback on any failure, and any other open says the
+    /// story could not be loaded.
     pub(in crate::ui) fn resolve_pending_story_open(&mut self, cx: &mut Context<Self>) {
         let Some(open) = self.chat_list.pending_story_open else {
             return;
         };
-        match self
-            .session()
-            .map(|s| s.story_card_state(open.chat_id, open.story_id))
-        {
-            Some(StoryCardState::Ready) => {
+        let Some(session) = self.session() else {
+            return;
+        };
+        let failed = session
+            .stories
+            .story_retry
+            .contains_key(&(open.chat_id, open.story_id));
+        match session.story_card_state(open.chat_id, open.story_id) {
+            StoryCardState::Ready => {
                 self.chat_list.pending_story_open = None;
                 self.rebuild_story_viewer(open, cx);
             }
-            Some(StoryCardState::Expired) => {
+            StoryCardState::Expired => {
                 self.chat_list.pending_story_open = None;
                 if open.scope == StoryOpenScope::Link {
                     self.set_status_note(StatusNote::info(tr(keys::STORIES_LINK_INVALID)), cx);
                 }
             }
-            Some(StoryCardState::Loading) | None => {}
+            StoryCardState::Loading if failed => {
+                self.chat_list.pending_story_open = None;
+                let note = match open.scope {
+                    StoryOpenScope::Link => keys::STORIES_LINK_INVALID,
+                    StoryOpenScope::Single | StoryOpenScope::Tray => {
+                        keys::Q_MEDIA_STORY_LOAD_FAILED
+                    }
+                };
+                self.set_status_note(StatusNote::info(tr(note)), cx);
+            }
+            StoryCardState::Loading => {}
         }
     }
 

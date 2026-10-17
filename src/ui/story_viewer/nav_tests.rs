@@ -4,6 +4,7 @@
 //! Maya (Sam's stories are read). Nothing reaches Telegram.
 use super::open_tests::{frames, open_app};
 use crate::ui::app::QuillApp;
+use crate::ui::media_panel::PanelTab;
 use gpui_kit::{Entity, Modifiers, TestAppContext, VisualTestContext};
 use quill::ids::ChatId;
 use quill::story_sibling_layout::sibling_layout;
@@ -219,5 +220,30 @@ fn the_neighbour_sits_beside_the_panel_centred_on_the_story(cx: &mut TestAppCont
     assert!(
         (centre(right) - centre(frame)).abs() <= 1.,
         "centred on the story: {right:?} {frame:?}"
+    );
+}
+
+#[gpui_kit::test]
+fn the_reply_media_panel_hides_the_neighbours(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx, "ready-story-viewer");
+    let vcx = &mut vcx;
+    assert!(vcx.debug_bounds("story-sibling-right").is_some());
+    let toggle = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.update(vcx, |app, cx| {
+            app.stories.reply_open = true;
+            app.toggle_story_reply_panel(PanelTab::Emoji, cx);
+        });
+        frames(vcx);
+    };
+    toggle(&app, vcx);
+    assert!(app.read_with(vcx, |app, _| app.story_reply_panel_active()));
+    assert!(
+        vcx.debug_bounds("story-sibling-right").is_none(),
+        "the panel sits where Quill News was"
+    );
+    toggle(&app, vcx);
+    assert!(
+        vcx.debug_bounds("story-sibling-right").is_some(),
+        "back once it closes"
     );
 }

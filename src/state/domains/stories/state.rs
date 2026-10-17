@@ -94,6 +94,11 @@ pub struct StoriesState {
     /// After any other `loadActiveStories` failure: no page goes out before
     /// this instant, and the wait before it, which doubles per failure.
     pub stories_active_retry: Option<(Instant, Duration)>,
+    /// Stories `getStory` failed for with an error that may pass (a
+    /// timeout, FLOOD_WAIT, a 500): no prefetch asks again before the
+    /// instant, and the wait before it, which doubles per failure. A user
+    /// opening the story drops its entry and asks at once.
+    pub story_retry: HashMap<(i64, i32), (Instant, Duration)>,
     /// Stories replied to that `getStory` was already asked for, so a
     /// deleted one is not requested again on every refresh.
     pub reply_attempted: HashSet<(i64, i32)>,
@@ -139,6 +144,7 @@ impl StoriesState {
             stories_active_loaded: false,
             stories_active_exhausted: false,
             stories_active_retry: None,
+            story_retry: HashMap::new(),
             reply_attempted: HashSet::new(),
             missing: HashSet::new(),
             live: None,
@@ -149,10 +155,18 @@ impl StoriesState {
     }
 }
 
-/// The first wait after a failed `loadActiveStories`; each later failure
-/// doubles it, up to [`ACTIVE_STORIES_RETRY_MAX`].
-pub const ACTIVE_STORIES_RETRY_FIRST: Duration = Duration::from_secs(5);
-pub const ACTIVE_STORIES_RETRY_MAX: Duration = Duration::from_secs(5 * 60);
+/// The first wait after a failed `loadActiveStories` or `getStory`; each
+/// later failure doubles it, up to [`STORIES_RETRY_MAX`].
+pub const STORIES_RETRY_FIRST: Duration = Duration::from_secs(5);
+pub const STORIES_RETRY_MAX: Duration = Duration::from_secs(5 * 60);
+
+/// The retry clock after one more failure at `now`.
+fn next_retry(previous: Option<(Instant, Duration)>, now: Instant) -> (Instant, Duration) {
+    let wait = previous.map_or(STORIES_RETRY_FIRST, |(_, wait)| {
+        wait.saturating_mul(2).min(STORIES_RETRY_MAX)
+    });
+    (now.checked_add(wait).unwrap_or(now), wait)
+}
 
 impl StoriesState {
     /// Allow one more `loadActiveStories` page, which the driver otherwise
@@ -176,12 +190,20 @@ impl StoriesState {
             self.stories_active_exhausted = true;
             return;
         }
-        let wait = self
-            .stories_active_retry
-            .map_or(ACTIVE_STORIES_RETRY_FIRST, |(_, wait)| {
-                wait.saturating_mul(2).min(ACTIVE_STORIES_RETRY_MAX)
-            });
-        self.stories_active_retry = Some((now + wait, wait));
+        self.stories_active_retry = Some(next_retry(self.stories_active_retry, now));
+    }
+
+    /// `getStory` for `story` failed with an error that may pass.
+    pub fn story_fetch_failed(&mut self, story: (i64, i32), now: Instant) {
+        let previous = self.story_retry.get(&story).copied();
+        self.story_retry.insert(story, next_retry(previous, now));
+    }
+
+    /// Whether a prefetch of `story` still waits out a failed `getStory`.
+    pub fn story_fetch_waiting(&self, story: (i64, i32), now: Instant) -> bool {
+        self.story_retry
+            .get(&story)
+            .is_some_and(|(at, _)| now < *at)
     }
 
     /// A new Ready pages the tray from the start.

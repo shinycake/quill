@@ -33,12 +33,16 @@ impl QuillApp {
     }
 
     /// Both neighbours, positioned against the story frame they are
-    /// children of, for a window `window_width` wide.
+    /// children of, for a window `window_width` wide. None while the reply
+    /// row's media panel is open: it sits over the right one.
     pub(in crate::ui) fn story_sibling_layer(
         &self,
         window_width: f32,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
+        if self.story_reply_panel_active() {
+            return Vec::new();
+        }
         let Some(layout) = sibling_layout(window_width) else {
             return Vec::new();
         };

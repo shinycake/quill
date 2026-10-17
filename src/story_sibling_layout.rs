@@ -26,6 +26,9 @@ const WIDTH_MIN: f32 = 200.;
 const FIELD_MARGIN: f32 = 12.;
 /// `storiesControlSize`: the least gap between a sibling and the column.
 const CONTROL_SIZE: f32 = 64.;
+/// A sibling narrower than this is too small to read or hit, so a very
+/// narrow window shows none.
+const WIDTH_SHOWN_MIN: f32 = 48.;
 
 /// Both siblings' size and their left edges in window coordinates.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -53,17 +56,17 @@ fn frame_x(window_width: f32) -> f32 {
 }
 
 /// The siblings for a window `window_width` wide, or `None` when there is
-/// no room beside the column.
+/// no room beside the column for a sibling at least 48 px wide.
 pub fn sibling_layout(window_width: f32) -> Option<SiblingLayout> {
     let column_x = (window_width - STORY_COLUMN_WIDTH) / 2.;
     let width_for_siblings = window_width - STORY_COLUMN_WIDTH - 2. * FIELD_MARGIN;
     let width_max = width_for_siblings / (2. * (1. - OUTSIDE_PART));
     let preferred = MULTIPLIER_DEFAULT.max(WIDTH_MIN / STORY_WIDTH);
     let multiplier = preferred.min(MULTIPLIER_MAX).min(width_max / STORY_WIDTH);
-    if !multiplier.is_finite() || multiplier <= 0. {
+    let width = STORY_WIDTH * multiplier;
+    if !width.is_finite() || width < WIDTH_SHOWN_MIN {
         return None;
     }
-    let width = STORY_WIDTH * multiplier;
     let height = STORY_HEIGHT * multiplier;
     let left_available = column_x - width;
     let left_x = (left_available / 3.)
@@ -109,6 +112,18 @@ mod tests {
     fn a_window_no_wider_than_the_column_has_no_siblings() {
         assert_eq!(sibling_layout(STORY_COLUMN_WIDTH), None);
         assert_eq!(sibling_layout(300.), None);
+    }
+
+    #[test]
+    fn a_window_with_room_for_only_a_sliver_has_no_siblings() {
+        assert_eq!(sibling_layout(480.), None, "a 42 px sibling");
+        let layout = sibling_layout(500.).expect("room");
+        assert!(layout.width >= WIDTH_SHOWN_MIN, "{layout:?}");
+        for width in (400..3000).step_by(3) {
+            if let Some(layout) = sibling_layout(width as f32) {
+                assert!(layout.width >= WIDTH_SHOWN_MIN, "{width}: {layout:?}");
+            }
+        }
     }
 
     #[test]

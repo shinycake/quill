@@ -34,6 +34,9 @@ impl Session {
                     self.stories.post.outcome = StoryPostOutcome::Posting { story_id: story.id };
                 }
                 self.stories
+                    .story_retry
+                    .remove(&(story.poster_chat_id, story.id));
+                self.stories
                     .stories
                     .insert((story.poster_chat_id, story.id), story);
             }
@@ -220,6 +223,13 @@ impl Session {
                 // are the only source).
                 self.apply_update_story_stealth_mode(active_until_date, cooldown_until_date);
             }
+        }
+    }
+
+    /// A stories request answered `ok`.
+    pub(crate) fn apply_stories_ok(&mut self, pending: Option<&PendingRequest>) {
+        if pending.is_some_and(|p| p.purpose == RequestPurpose::LoadActiveStories) {
+            self.stories.stories_active_retry = None;
         }
     }
 }
