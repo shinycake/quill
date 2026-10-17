@@ -99,8 +99,9 @@ pub struct StoriesState {
     /// instant, and the wait before it, which doubles per failure. A user
     /// opening the story drops its entry and asks at once.
     pub story_retry: HashMap<(i64, i32), (Instant, Duration)>,
-    /// Stories replied to that `getStory` was already asked for, so a
-    /// deleted one is not requested again on every refresh.
+    /// Stories replied to that `getStory` was sent for, so one is not
+    /// requested again on every refresh. A failure that may pass takes the
+    /// story out again, to be asked for after its wait.
     pub reply_attempted: HashSet<(i64, i32)>,
     /// Stories `getStory` answered with an error (deleted, expired or not
     /// reachable): a forwarded-story card then says "This story has
@@ -193,10 +194,12 @@ impl StoriesState {
         self.stories_active_retry = Some(next_retry(self.stories_active_retry, now));
     }
 
-    /// `getStory` for `story` failed with an error that may pass.
+    /// `getStory` for `story` failed with an error that may pass. A card or
+    /// reply header showing it asks again once the wait is over.
     pub fn story_fetch_failed(&mut self, story: (i64, i32), now: Instant) {
         let previous = self.story_retry.get(&story).copied();
         self.story_retry.insert(story, next_retry(previous, now));
+        self.reply_attempted.remove(&story);
     }
 
     /// Whether a prefetch of `story` still waits out a failed `getStory`.
@@ -206,10 +209,12 @@ impl StoriesState {
             .is_some_and(|(at, _)| now < *at)
     }
 
-    /// A new Ready pages the tray from the start.
+    /// A new Ready pages the tray from the start, and the stories that
+    /// failed while offline are asked for again at once.
     pub fn reset_active_stories_paging(&mut self) {
         self.stories_active_loaded = false;
         self.stories_active_exhausted = false;
         self.stories_active_retry = None;
+        self.story_retry.clear();
     }
 }

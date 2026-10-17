@@ -247,3 +247,31 @@ fn the_reply_media_panel_hides_the_neighbours(cx: &mut TestAppContext) {
         "back once it closes"
     );
 }
+
+#[gpui_kit::test]
+fn a_poster_waiting_out_a_failed_fetch_is_passed_over(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx, "ready-story-viewer");
+    let vcx = &mut vcx;
+    assert_eq!(shown(&app, vcx), Some((LEO, 3)));
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.stories.stories.remove(&(NEWS, 1));
+            session
+                .stories
+                .story_fetch_failed((NEWS, 1), std::time::Instant::now());
+        }
+        cx.notify();
+    });
+    frames(vcx);
+    let next = app.read_with(vcx, |app, _| app.story_sibling_key(1));
+    assert_eq!(next, Some((ChatId(MAYA), 5)), "Quill News is skipped");
+    step(&app, vcx, 1);
+    assert_eq!(shown(&app, vcx), Some((MAYA, 5)), "Next does not close");
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.stories.story_retry.clear();
+        }
+    });
+    let back = app.read_with(vcx, |app, _| app.story_sibling_key(-1));
+    assert_eq!(back, Some((ChatId(NEWS), 1)), "once the wait is over");
+}

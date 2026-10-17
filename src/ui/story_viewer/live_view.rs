@@ -48,11 +48,21 @@ pub(super) fn sender_avatar(session: &Session, sender: MessageSender, size: f32)
 }
 
 impl QuillApp {
+    /// The stream being watched when it is the story the viewer shows, not
+    /// one playing on in Picture-in-Picture behind another story.
+    pub(super) fn live_story_shown(&self) -> Option<(ChatId, i32)> {
+        let shown = self.stories.viewer.current().map(StoryViewerItem::key);
+        self.stories
+            .live
+            .watching
+            .filter(|watched| shown == Some(*watched))
+    }
+
     pub(super) fn live_story_volume(
         &mut self,
         cx: &mut Context<Self>,
     ) -> Option<Entity<SliderState>> {
-        self.stories.live.watching?;
+        self.live_story_shown()?;
         let call_id = self
             .session()?
             .calls
@@ -66,7 +76,7 @@ impl QuillApp {
     /// badge and " {count} viewers" in the header's second line in place
     /// of the story's age (tdesktop `Header::setVideoStreamViewers`).
     pub(super) fn live_story_viewers(&self) -> Option<u32> {
-        self.stories.live.watching?;
+        self.live_story_shown()?;
         Some(self.session()?.calls.story_stream.as_ref()?.viewer_count)
     }
 
@@ -77,7 +87,7 @@ impl QuillApp {
         volume: Option<Entity<SliderState>>,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        self.stories.live.watching?;
+        self.live_story_shown()?;
         let call = self.session()?.calls.story_stream.as_ref()?;
         let muted = self.live_story_muted();
         let view = cx.entity().downgrade();

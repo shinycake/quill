@@ -179,7 +179,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// `downloadFile` of the first `limit` bytes (0 = the whole file) for
-    /// an automatic path. No-op if already local, in flight or stalled.
+    /// an automatic path. No-op if already local, in flight or stalled,
+    /// except that an automatic download over a story preload, running or
+    /// ended, asks again: TDLib replaces the running request's limit and
+    /// priority, and the intent turns automatic, so dropping the preload
+    /// no longer cancels it.
     fn send_auto_download(
         &mut self,
         file_id: FileId,
@@ -190,8 +194,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.should_download(file_id)
-            || self.session.media.downloads.is_stalled_auto(file_id.0)
+        let over_preload = origin != DownloadOrigin::Preload
+            && self.session.media.downloads.is_preload(file_id.0)
+            && self
+                .session
+                .media
+                .files
+                .get(&file_id.0)
+                .is_none_or(|file| file.needs_download());
+        if !over_preload
+            && (!self.session.should_download(file_id)
+                || self.session.media.downloads.is_stalled_auto(file_id.0))
         {
             return Ok(None);
         }

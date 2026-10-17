@@ -58,6 +58,40 @@ impl Harness {
     }
 }
 
+impl Harness {
+    /// The open chat shows a card for story `(7, story)`.
+    fn show_story_card(&mut self, story: i32) {
+        let json = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{},"chat_id":21,"is_outgoing":false,"date":1,"content":{{"@type":"messageStory","story_poster_chat_id":7,"story_id":{story},"via_mention":false}}}}}}"#,
+            400 + story
+        );
+        self.driver
+            .ingest(copy_and_parse(&json, &self.seq, &self.sink).unwrap())
+            .unwrap();
+        self.driver.session.open_chat = Some(ChatId(21));
+    }
+
+    /// The `@extra` of the last `getStory` sent.
+    fn last_get_story(&self) -> RequestId {
+        self.recorder
+            .snapshot()
+            .iter()
+            .rev()
+            .filter_map(|json| serde_json::from_str::<serde_json::Value>(json).ok())
+            .find(|v| v["@type"] == "getStory")
+            .and_then(|v| v["@extra"].as_str()?.parse().ok())
+            .map(RequestId)
+            .expect("a getStory")
+    }
+
+    /// The wait after a failure for `(7, story)` is over.
+    fn end_wait(&mut self, story: i32) {
+        if let Some(entry) = self.driver.session.stories.story_retry.get_mut(&(7, story)) {
+            entry.0 = std::time::Instant::now();
+        }
+    }
+}
+
 impl Drop for Harness {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.dir);
@@ -157,4 +191,54 @@ fn the_story_arriving_ends_the_wait() {
         "",
     );
     assert!(h.driver.session.stories.story_retry.is_empty());
+}
+
+/// Regression: the card counted as asked before `getStory` ran, so a 500
+/// left it on Loading for the session.
+#[test]
+fn a_card_whose_story_failed_asks_again_after_the_wait() {
+    let mut h = Harness::new();
+    h.show_story_card(5);
+    h.driver.maybe_fetch_replied_messages().unwrap();
+    h.driver.maybe_fetch_replied_messages().unwrap();
+    assert_eq!(h.get_story_sends(), 1, "asked once");
+    let extra = h.last_get_story();
+    h.fail(extra, 500);
+    h.driver.maybe_fetch_replied_messages().unwrap();
+    assert_eq!(h.get_story_sends(), 1, "not while waiting");
+    h.end_wait(5);
+    h.driver.maybe_fetch_replied_messages().unwrap();
+    assert_eq!(h.get_story_sends(), 2, "asked again after the wait");
+    let extra = h.last_get_story();
+    h.fail(extra, 404);
+    h.driver.maybe_fetch_replied_messages().unwrap();
+    assert_eq!(h.get_story_sends(), 2, "a gone story is not asked again");
+}
+
+/// Regression: a card whose story a viewer prefetch failed for was marked
+/// asked while the wait held its `getStory` back, so it never asked.
+#[test]
+fn a_card_behind_a_failed_prefetch_asks_once_the_wait_is_over() {
+    let mut h = Harness::new();
+    let extra = h.driver.get_story(ChatId(7), 6).unwrap().expect("sends");
+    h.fail(extra, 500);
+    h.show_story_card(6);
+    h.driver.maybe_fetch_replied_messages().unwrap();
+    assert_eq!(h.get_story_sends(), 1);
+    h.end_wait(6);
+    h.driver.maybe_fetch_replied_messages().unwrap();
+    assert_eq!(h.get_story_sends(), 2);
+}
+
+#[test]
+fn a_new_ready_ends_every_story_wait() {
+    let mut h = Harness::new();
+    let extra = h.driver.get_story(ChatId(7), 5).unwrap().expect("sends");
+    h.fail(extra, 500);
+    assert_eq!(h.driver.get_story(ChatId(7), 5), Ok(None));
+    h.driver.session.stories.reset_active_stories_paging();
+    assert!(
+        h.driver.get_story(ChatId(7), 5).unwrap().is_some(),
+        "asked at once after the reconnect"
+    );
 }

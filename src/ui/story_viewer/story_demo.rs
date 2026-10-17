@@ -48,7 +48,7 @@ impl QuillApp {
         }
     }
 
-    fn demo_story_photo(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn demo_story_photo(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
