@@ -33,7 +33,9 @@ static RESOLVED: LazyLock<Mutex<HashMap<String, Vec<PathBuf>>>> =
 /// the app binary (a bundled copy), then `PATH`, then the package-manager
 /// folders. Falls back to the bare name, so a missing tool fails as before.
 pub fn command(name: &str) -> Command {
-    Command::new(resolve(name))
+    let mut command = Command::new(resolve(name));
+    command.no_console();
+    command
 }
 
 /// Resolve the tools and list the encoders on a background thread, so the
@@ -249,12 +251,9 @@ pub fn consent_denies(reg_output: &str) -> bool {
     })
 }
 
-/// `command(name)` that won't flash a console window on Windows; for
-/// children run with `.output()` from the GUI (ffmpeg encodes, probes).
+/// Same as [`command`], which already hides the console window on Windows.
 pub fn quiet_command(name: &str) -> Command {
-    let mut command = command(name);
-    command.no_console();
-    command
+    command(name)
 }
 
 /// Hide the console window a child would flash on Windows GUI apps.

@@ -692,12 +692,22 @@ impl QuillApp {
     }
 
     /// Save the window geometry shortly after the last change (moves and
-    /// resizes arrive as a stream).
+    /// resizes arrive as a stream). The newest state is staged at once; the
+    /// write itself runs on a background thread, and quitting flushes it.
     pub(super) fn schedule_window_state_save(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.stage_window_state(window);
+        static QUIT_FLUSH: std::sync::Once = std::sync::Once::new();
+        QUIT_FLUSH.call_once(|| {
+            cx.on_app_quit(|_, _| {
+                quill::settings::flush_window_state();
+                async {}
+            })
+            .detach();
+        });
         if self.frame.window_state_save_pending {
             return;
         }
@@ -708,13 +718,14 @@ impl QuillApp {
                 .await;
             let _ = this.update_in(cx, |this, window, _| {
                 this.frame.window_state_save_pending = false;
-                this.save_window_state(window);
+                this.stage_window_state(window);
+                quill::settings::save_staged_window_state();
             });
         })
         .detach();
     }
 
-    fn save_window_state(&self, window: &Window) {
+    fn stage_window_state(&self, window: &Window) {
         let (bounds, maximized) = match window.window_bounds() {
             WindowBounds::Windowed(bounds) => (bounds, false),
             WindowBounds::Maximized(bounds) => (bounds, true),
@@ -731,7 +742,7 @@ impl QuillApp {
         };
         // Demo windows run on an isolated app root; nothing to protect.
         if let Some(state) = state.sanitized() {
-            let _ = quill::settings::save_window_state(&state);
+            quill::settings::stage_window_state(state);
         }
     }
 }
