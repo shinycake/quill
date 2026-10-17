@@ -112,11 +112,15 @@ impl WheelNav {
     }
 
     /// Whether this trackpad event belongs to a gesture that already
-    /// moved or zoomed (keeping that gesture alive).
+    /// moved or zoomed (keeping that gesture alive). A new gesture starts
+    /// from zero.
     fn continue_gesture(&mut self, source: WheelSource, at: Instant) -> bool {
         let WheelSource::Trackpad { begins_gesture } = source else {
             return false;
         };
+        if begins_gesture {
+            self.accum = 0.0;
+        }
         let spent = !begins_gesture
             && self.spent_at.is_some_and(|last| {
                 at.saturating_duration_since(last) < VIEWER_TRACKPAD_GESTURE_GAP
