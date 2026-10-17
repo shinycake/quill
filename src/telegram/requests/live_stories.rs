@@ -16,6 +16,16 @@ pub fn get_live_story_streamer(extra: RequestId, group_call_id: i32) -> String {
     .to_string()
 }
 
+/// `getCustomEmojiReactionAnimations = Stickers`: the generic reaction
+/// bursts the Stars effect plays.
+pub fn get_custom_emoji_reaction_animations(extra: RequestId) -> String {
+    json!({
+        "@type": "getCustomEmojiReactionAnimations",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
 /// `getLiveStoryTopDonors group_call_id:int32 = LiveStoryDonors`.
 pub fn get_live_story_top_donors(extra: RequestId, group_call_id: i32) -> String {
     json!({

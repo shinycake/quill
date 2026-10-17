@@ -602,23 +602,6 @@ impl QuillApp {
             body.push(this.appearance_close_behavior_section(cx));
         }
         body.extend(this.native_frame_section(super::window_frame::supported(), cx));
-        #[cfg(target_os = "macos")]
-        {
-            body.push(
-                this.appearance_section(
-                    cx,
-                    tr(keys::Q_PREFS_WARN_BEFORE_QUITTING),
-                    tr(keys::Q_PREFS_HOLD_Q_TO_QUIT_INSTEAD),
-                    Switch::new("general-mac-warn-before-quit")
-                        .checked(this.appearance.mac_warn_before_quit)
-                        .accessibility_label(tr(keys::Q_PREFS_WARN_BEFORE_QUITTING_WITH_COMMAND))
-                        .on_click(cx.listener(|this, &on, _, cx| {
-                            this.set_appearance(cx, |a| a.mac_warn_before_quit = on)
-                        }))
-                        .into_any_element(),
-                ),
-            );
-        }
         body
     }
 

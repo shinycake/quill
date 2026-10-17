@@ -8,8 +8,10 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+mod tint;
 mod webm;
 mod webm_ffi;
+pub use tint::Tint;
 pub use webm::WebmFrames;
 
 pub const STICKER_EDGE: usize = 128;

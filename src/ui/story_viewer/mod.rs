@@ -978,6 +978,7 @@ mod live_comments;
 mod live_composer;
 #[cfg(feature = "demo-capture")]
 mod live_demo;
+mod live_effects;
 mod live_stars_box;
 mod live_state;
 mod live_story;

@@ -151,7 +151,6 @@ pub mod proxy_sync;
 pub mod pull_next;
 pub mod quick_action;
 pub mod quick_replies;
-pub mod quit_guard;
 pub mod reaction_who;
 pub mod reply_options;
 pub mod request_share;

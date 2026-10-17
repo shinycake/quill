@@ -69,6 +69,7 @@ impl QuillApp {
                 .into_any_element()
         };
         let stars = self.live_stars_button(total, admin, cx);
+        let effects = self.live_effects_layer(session, BUTTON, cx);
         Some(
             div()
                 .id("live-story-composer")
@@ -80,7 +81,14 @@ impl QuillApp {
                 .items_center()
                 .children(toggle.map(|toggle| div().flex_none().mr(px(SKIP)).child(toggle)))
                 .child(main)
-                .child(div().flex_none().ml(px(SKIP)).child(stars))
+                .child(
+                    div()
+                        .flex_none()
+                        .relative()
+                        .ml(px(SKIP))
+                        .child(stars)
+                        .children(effects),
+                )
                 .into_any_element(),
         )
     }
