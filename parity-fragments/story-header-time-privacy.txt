@@ -1,0 +1,2 @@
+# Story viewer header: relative time, edited, privacy badge with its tooltip,
+# and a link to the poster's profile. README has no line for it yet.

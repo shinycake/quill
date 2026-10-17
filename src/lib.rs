@@ -193,6 +193,7 @@ pub mod stories_menu;
 pub mod stories_strip;
 pub mod story_composer;
 pub mod story_extras;
+pub mod story_header;
 pub mod story_page;
 pub mod story_restriction;
 pub mod story_ring;

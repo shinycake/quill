@@ -1,11 +1,13 @@
 //! Methods moved out of `story_viewer.rs` to keep files under 1000 lines.
 
 use super::*;
-use quill::lang::{keys, tr, tr_with};
+use crate::ui::chat_row::chat_avatar;
+use quill::lang::{keys, tr, tr_with, trn};
 
 impl QuillApp {
     /// Phase 9.1: fullscreen story overlay, modeled on
-    /// `media_viewer_overlay`: poster name + "Story N of M" header, the
+    /// `media_viewer_overlay`: the poster header (photo, name, position,
+    /// age, privacy badge), the
     /// photo (video shows its thumbnail; live/unsupported show a
     /// placeholder), the caption, and Prev / Next / Close controls. The
     /// backdrop click and Escape (see `cancel_search`) close it.
@@ -60,23 +62,6 @@ impl QuillApp {
             .chain(std::iter::once(&item.download_file_id))
             .any(|id| file_is_downloading(*id, &files, &downloading));
         let kind_label = item.kind.label();
-        // A live story's header is its poster, the LIVE badge and the
-        // viewer count (tdesktop `Header::setVideoStreamViewers`).
-        let header_label = if item.kind == StoryViewerKind::Live && item.live_call.is_some() {
-            poster.to_string()
-        } else if total > 1 {
-            tr_with(
-                keys::Q_MEDIA_OF,
-                &[
-                    ("poster", &poster.to_string()),
-                    ("kind_label", kind_label),
-                    ("position", &position.to_string()),
-                    ("total", &total.to_string()),
-                ],
-            )
-        } else {
-            format!("{poster} · {kind_label}")
-        };
         // `path` is the poster: a video story's `display_file_ids` hold
         // only its thumbnail (`quill::story_viewer`), never the clip.
         let video_frame = self.story_video_element(path.clone());
@@ -335,14 +320,7 @@ impl QuillApp {
                             .w(px(360.))
                             .items_center()
                             .justify_between()
-                            .child(
-                                div()
-                                    .font_semibold()
-                                    .text_color(chrome::fg())
-                                    .min_w_0()
-                                    .truncate()
-                                    .child(super::bidi_line::one_line_plain(header_label)),
-                            )
+                            .child(self.story_header_identity(&item, &poster, position, total, cx))
                             .children(live_header)
                             .child(
                                 div()
@@ -410,6 +388,117 @@ impl QuillApp {
             .children(reply_panel)
     }
 
+    /// tdesktop's story header (`media_stories_header.cpp`): the poster's
+    /// photo with a privacy badge, the name with the story's position, and
+    /// how long ago it was posted. Pressing it opens the poster's profile
+    /// (`:343-345`); hovering the badge says who can see the story
+    /// (`:738-765`). The age comes from the clock on every draw, and the
+    /// viewer's tick redraws it.
+    fn story_header_identity(
+        &self,
+        item: &StoryViewerItem,
+        poster: &str,
+        position: usize,
+        total: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let story = self.current_story();
+        let me = self.session().and_then(|s| s.my_user_id);
+        let is_self = self.session().is_some_and(|s| {
+            me.is_some()
+                && s.info_panel_target_for_chat(item.chat_id)
+                    == me.map(quill::state::InfoPanelTarget::User)
+        });
+        let name = if is_self {
+            tr(keys::STORIES_MY_NAME).to_string()
+        } else {
+            poster.to_owned()
+        };
+        let name = if total > 1 {
+            format!("{name} · {position}/{total}")
+        } else {
+            name
+        };
+        let photo = self
+            .session()
+            .and_then(|s| s.chat_photo_path(item.chat_id))
+            .and_then(|path| sandboxed_display_path(path, &self.media_display_roots()));
+        let badge = story
+            .as_ref()
+            .and_then(|story| quill::story_header::privacy_badge(story.privacy_settings.as_ref()));
+        let about = badge.map(|badge| story_privacy_about(badge, is_self, poster));
+        let detail = story.as_ref().map(|story| {
+            let mut detail = story_age_label(story.date);
+            if story.is_edited {
+                detail = format!("{detail} · {}", tr(keys::EDITED));
+            }
+            detail
+        });
+        let chat_id = item.chat_id.0;
+        let mut avatar = div()
+            .relative()
+            .flex_shrink_0()
+            .size(px(36.))
+            .child(chat_avatar(poster, photo.as_deref(), 36.));
+        if let (Some(badge), Some(about)) = (badge, about) {
+            avatar = avatar.child(story_privacy_badge(badge, about));
+        }
+        div()
+            .id("story-viewer-identity")
+            .role(gpui_kit::Role::Button)
+            .aria_label(name.clone())
+            .tab_index(0)
+            .cursor_pointer()
+            .flex()
+            .items_center()
+            .gap_2()
+            .min_w_0()
+            .child(avatar)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .font_semibold()
+                            .text_color(chrome::fg())
+                            .truncate()
+                            .child(super::bidi_line::one_line_plain(name)),
+                    )
+                    .children(detail.map(|detail| {
+                        div()
+                            .text_xs()
+                            .text_color(chrome::secondary())
+                            .truncate()
+                            .child(detail)
+                    })),
+            )
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.open_story_poster_profile(chat_id, window, cx);
+            }))
+            .into_any_element()
+    }
+
+    /// Pressing the header: the poster's profile, after the viewer closes
+    /// (the same hand-off as the "Stories" button).
+    fn open_story_poster_profile(
+        &mut self,
+        chat_id: i64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let sender = MessageSender::Chat { chat_id };
+        if self
+            .session()
+            .and_then(|s| s.avatar_profile_target(sender))
+            .is_some()
+        {
+            self.close_story_viewer(cx);
+            self.open_avatar_profile(sender, window, cx);
+        }
+    }
+
     /// Phase 9.6: segmented progress bar — one segment per story in the
     /// viewer sequence; viewed segments full, the current one fills with
     /// playback progress, upcoming ones dim. Matches Telegram Android's
@@ -451,4 +540,80 @@ impl QuillApp {
                     )
             }))
     }
+}
+
+/// "just now", "5 minutes ago", "3 hours ago", "today at 14:05" ...
+/// (tdesktop `ComposeTimestamp`), from the clock at this draw.
+fn story_age_label(date: i32) -> String {
+    use quill::local_time::{hhmm, now_unix, utc_offset_at};
+    use quill::story_header::{Age, age};
+    let (when, now) = (i64::from(date), now_unix());
+    let time = |t: &quill::local_time::CivilTime| hhmm(t);
+    match age(when, now, utc_offset_at(when), utc_offset_at(now)) {
+        Age::JustNow => tr(keys::MEDIAVIEW_JUST_NOW).to_string(),
+        Age::MinutesAgo(n) => trn(keys::MEDIAVIEW_MINUTES_AGO, n),
+        Age::HoursAgo(n) => trn(keys::MEDIAVIEW_HOURS_AGO, n),
+        Age::Today(t) => tr_with(keys::MEDIAVIEW_TODAY, &[("time", &time(&t))]),
+        Age::Yesterday(t) => tr_with(keys::MEDIAVIEW_YESTERDAY, &[("time", &time(&t))]),
+        Age::Date(t) => tr_with(
+            keys::MEDIAVIEW_DATE_TIME,
+            &[
+                (
+                    "date",
+                    &format!("{:02}.{:02}.{:02}", t.day, t.month, t.year.rem_euclid(100)),
+                ),
+                ("time", &time(&t)),
+            ],
+        ),
+    }
+}
+
+/// The tooltip text of the privacy badge (`lng_stories_about_*`), without
+/// the markup tdesktop bolds.
+fn story_privacy_about(
+    badge: quill::story_header::PrivacyBadge,
+    is_self: bool,
+    poster: &str,
+) -> String {
+    use quill::story_header::PrivacyBadge;
+    let key = match (badge, is_self) {
+        (PrivacyBadge::CloseFriends, true) => keys::STORIES_ABOUT_CLOSE_FRIENDS_MY,
+        (PrivacyBadge::CloseFriends, false) => keys::STORIES_ABOUT_CLOSE_FRIENDS,
+        (PrivacyBadge::Contacts, true) => keys::STORIES_ABOUT_CONTACTS_MY,
+        (PrivacyBadge::Contacts, false) => keys::STORIES_ABOUT_CONTACTS,
+        (PrivacyBadge::SelectedContacts, true) => keys::STORIES_ABOUT_SELECTED_CONTACTS_MY,
+        (PrivacyBadge::SelectedContacts, false) => keys::STORIES_ABOUT_SELECTED_CONTACTS,
+    };
+    tr_with(key, &[("user", poster)]).replace("**", "")
+}
+
+/// The badge on the photo's corner: a coloured disc with the audience's
+/// icon, as tdesktop's `UserpicBadge` (green close friends, blue contacts,
+/// orange selected).
+fn story_privacy_badge(badge: quill::story_header::PrivacyBadge, about: String) -> AnyElement {
+    use gpui_kit::assets::IconName;
+    use gpui_kit::component::tooltip::Tooltip;
+    use quill::story_header::PrivacyBadge;
+    let (icon, color) = match badge {
+        PrivacyBadge::CloseFriends => (IconName::Star, 0x4cab4a),
+        PrivacyBadge::Contacts => (IconName::User, 0x3d8fe0),
+        PrivacyBadge::SelectedContacts => (IconName::Users, 0xe08a3d),
+    };
+    div()
+        .id("story-viewer-privacy-badge")
+        .absolute()
+        .right(px(-3.))
+        .bottom(px(-3.))
+        .size(px(16.))
+        .rounded_full()
+        .border_2()
+        .border_color(chrome::frame_bg())
+        .bg(rgb(color))
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_color(chrome::fg())
+        .tooltip(move |window, cx| Tooltip::new(about.clone()).build(window, cx))
+        .child(gpui_kit::component::Icon::new(icon).size(px(10.)))
+        .into_any_element()
 }

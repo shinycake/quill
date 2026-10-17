@@ -107,31 +107,22 @@ impl QuillApp {
         Some(parts.join(" · "))
     }
 
-    /// Phase 9.5: "Reposted from …" / "edited" line under the caption
-    /// (`story.repost_info`, `story.is_edited`, `td_api.tl:6742`).
+    /// Phase 9.5: "Reposted from …" line under the caption
+    /// (`story.repost_info`, `td_api.tl:6742`). "edited" is in the header.
     pub(in crate::ui) fn story_viewer_meta_line(&self) -> Option<String> {
         let story = self.current_story()?;
-        let mut parts = Vec::new();
-        if let Some(repost) = &story.repost_info {
-            let origin = match &repost.origin {
-                StoryOriginView::PublicStory { chat_id, .. } => self
-                    .session()
-                    .and_then(|s| s.chats.get(chat_id))
-                    .map(|chat| chat.title.clone())
-                    .unwrap_or_else(|| {
-                        tr_with(keys::Q_MEDIA_CHAT_2, &[("chat_id", &chat_id.to_string())])
-                    }),
-                StoryOriginView::HiddenUser { poster_name } => poster_name.clone(),
-            };
-            parts.push(tr_with(
-                keys::Q_MEDIA_REPOSTED_FROM,
-                &[("origin", &origin.to_string())],
-            ));
-        }
-        if story.is_edited {
-            parts.push("edited".into());
-        }
-        (!parts.is_empty()).then(|| parts.join(" · "))
+        let repost = story.repost_info.as_ref()?;
+        let origin = match &repost.origin {
+            StoryOriginView::PublicStory { chat_id, .. } => self
+                .session()
+                .and_then(|s| s.chats.get(chat_id))
+                .map(|chat| chat.title.clone())
+                .unwrap_or_else(|| {
+                    tr_with(keys::Q_MEDIA_CHAT_2, &[("chat_id", &chat_id.to_string())])
+                }),
+            StoryOriginView::HiddenUser { poster_name } => poster_name.clone(),
+        };
+        Some(tr_with(keys::Q_MEDIA_REPOSTED_FROM, &[("origin", &origin)]))
     }
 
     /// Phase 9.2+: the reaction picker popover fed by
