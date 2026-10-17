@@ -49,11 +49,7 @@ impl QuillApp {
             tr(keys::MENU_CONTACTS),
             tr(keys::MENU_CALLS),
         ]);
-        let icon_only = tabs_icon_only(
-            f32::from(self.frame.sidebar_width),
-            side_buttons,
-            labelled_width,
-        );
+        let icon_only = tabs_icon_only(f32::from(self.list_width()), side_buttons, labelled_width);
         div()
             .flex()
             .items_center()

@@ -417,6 +417,7 @@ mod shared_media;
 mod shared_media_list;
 mod shared_media_profile;
 mod shell;
+mod shell_layout;
 mod shortcuts;
 mod showcase_demo;
 mod signin_ui;
