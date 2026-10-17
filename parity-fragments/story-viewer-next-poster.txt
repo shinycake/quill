@@ -1,3 +1,0 @@
-# Next and autoplay at a poster's last story move to the next poster in the tray, with side previews.
-# README wording after the tick: The story viewer moves on to the next poster, with neighbour previews beside the story
-parity:stories-viewer-next-poster

@@ -636,7 +636,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Story-restriction notices (TGX-verbatim `ChatDisabledStory` / `ChatRestrictedStory`): the `canPostStory` error channel delivers the Disabled notice for both the TDLib client-side-gate message ("Not enough rights to post stories in this group") and `CHAT_ADMIN_REQUIRED`, and the Restricted notice for `USER_RESTRICTED`; unrecognized errors keep the generic eligibility failure. No Until variant — the channel carries no until-date. <!-- parity:stories-restriction-notice -->
 - [x] Opening a deleted or expired story shows the broken-link toast <!-- parity:stories-viewer-missing-toast -->
 - [x] Stories that finish loading after the viewer opens join its list <!-- parity:stories-viewer-late-stories -->
-- [ ] The story viewer moves on to the next poster, with neighbour previews beside the story <!-- parity:stories-viewer-next-poster -->
+- [x] The story viewer moves on to the next poster, with neighbour previews beside the story <!-- parity:stories-viewer-next-poster -->
 - [ ] The story viewer preloads the next stories and the previous one <!-- parity:stories-viewer-preload -->
 - [ ] "Reposted from" opens the original story, or the poster's profile when it is gone <!-- parity:stories-repost-origin-link -->
 - [ ] Story header shows the posting time, "edited", a privacy badge, and opens the poster's profile <!-- parity:stories-viewer-header-meta -->
