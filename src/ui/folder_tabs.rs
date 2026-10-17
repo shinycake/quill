@@ -253,7 +253,7 @@ impl QuillApp {
         let key = RevealKey {
             selected,
             tab_count: slots.len(),
-            strip_width: f32::from(self.frame.sidebar_width) as i32,
+            strip_width: f32::from(self.list_width()) as i32,
         };
         if needs_reveal(self.folders.tabs_revealed.get(), key) {
             self.folders.tabs_revealed.set(Some(key));

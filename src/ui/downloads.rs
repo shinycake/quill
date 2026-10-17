@@ -191,20 +191,25 @@ impl QuillApp {
     /// live progress + cancel, and recently completed downloads with
     /// open / reveal actions. Sits beside the conversation like the info
     /// panel; toggled from the sidebar "Downloads" entry.
+    pub(super) fn downloads_panel_open(&self) -> bool {
+        self.session().is_some_and(|s| s.media.downloads_panel_open)
+    }
+
     pub(super) fn downloads_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let session = self.session()?;
-        if !session.media.downloads_panel_open {
+        if !self.downloads_panel_open() {
             return None;
         }
+        let session = self.session()?;
         let (active, recent) = (
             session.media.downloads.user_count(),
             session.media.downloads.recent(&session.media.files).count(),
         );
+        // Its width is the shell's (`shell_layout`).
         let mut panel = div()
             .id("downloads-panel")
-            .w(px(300.))
+            .flex_1()
+            .min_w_0()
             .h_full()
-            .flex_shrink_0()
             .border_l_1()
             .border_color(cx.theme().border)
             .bg(cx.theme().sidebar)

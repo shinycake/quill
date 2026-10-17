@@ -361,8 +361,10 @@ impl QuillApp {
             .justify_between()
             .gap_2()
             .child(
+                // The title truncates; the action buttons keep their size.
                 div()
                     .flex()
+                    .flex_1()
                     .items_center()
                     .gap_1()
                     .min_w_0()
@@ -371,6 +373,9 @@ impl QuillApp {
                     })
                     .when(saved_header.is_some(), |this| {
                         this.child(self.saved_back_button(cx))
+                    })
+                    .when(thread_header.is_none() && saved_header.is_none(), |this| {
+                        this.children(self.chat_back_button(cx))
                     })
                     .child(identity),
             )
@@ -397,6 +402,7 @@ impl QuillApp {
                 this.child(
                     div()
                         .flex()
+                        .flex_none()
                         .items_center()
                         .gap_1()
                         .when(view_in_chat, |this| {

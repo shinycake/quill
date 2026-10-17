@@ -467,20 +467,30 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The info panel is in the right column.
+    pub(super) fn info_panel_open(&self) -> bool {
+        !self.profile_modal_active()
+            && !self.earn_layer_open()
+            && self
+                .session()
+                .is_some_and(|s| s.users_state.open_info_panel.is_some())
+    }
+
     pub(super) fn info_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         // A profile opened from a sender avatar is presented as a modal
         // layer (`profile_modal_overlay`), not in the right column.
         // Earn pages open in their own layer (`earn_layer`).
-        if self.profile_modal_active() || self.earn_layer_open() {
+        if !self.info_panel_open() {
             return None;
         }
         let (title, content) = self.info_panel_parts(cx)?;
+        // Its width is the shell's (`shell_layout`).
         Some(
             div()
                 .id("info-panel")
-                .w(px(300.))
+                .flex_1()
+                .min_w_0()
                 .h_full()
-                .flex_shrink_0()
                 .border_l_1()
                 .border_color(cx.theme().border)
                 .bg(cx.theme().sidebar)

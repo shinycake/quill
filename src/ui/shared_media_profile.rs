@@ -431,9 +431,9 @@ impl QuillApp {
         let empty = playlist.is_none_or(|p| p.loaded && p.tracks.is_empty());
         div()
             .id("playlist-panel")
-            .w(px(320.))
+            .flex_1()
+            .min_w_0()
             .h_full()
-            .flex_shrink_0()
             .border_l_1()
             .border_color(cx.theme().border)
             .bg(cx.theme().sidebar)

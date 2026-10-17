@@ -99,7 +99,7 @@ impl QuillApp {
     /// Pixel width of the strip (the chat list inside the sidebar's
     /// horizontal padding and border).
     fn story_strip_width(&self) -> f32 {
-        (f32::from(self.frame.sidebar_width) - 25.).max(120.)
+        (f32::from(self.list_width()) - 25.).max(120.)
     }
 
     /// How far the chat list is scrolled down, px.

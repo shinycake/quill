@@ -89,9 +89,6 @@ impl Render for QuillApp {
         let active = window.is_window_active()
             || self.windows.any_active()
             || super::frame_clock::assume_active();
-        // The forum's topic list is a column of its own (tdesktop shows it
-        // where the chat list was).
-        let forum_column = self.forum_column_layout(window);
         if self.frame.window_active.replace(active) != active {
             self.playback.inline_videos.set_window_active(active);
         }
@@ -646,69 +643,15 @@ impl Render for QuillApp {
             .when(
                 self.pane_mode() != super::app::PaneMode::Connecting,
                 |this| {
-                    this.child(
-                        div()
-                            .id("quill-shell")
-                            .flex()
-                            .flex_1()
-                            .min_h_0()
-                            // The chat list follows its resize edge while dragged.
-                            .on_drag_move(cx.listener(
-                                |this,
-                                 event: &DragMoveEvent<super::navigation::SidebarResize>,
-                                 window,
-                                 cx| {
-                                    let left = event.bounds.origin.x;
-                                    this.set_sidebar_width(
-                                        event.event.position.x
-                                            - left
-                                            - px(this.folder_rail_width()),
-                                        window,
-                                        cx,
-                                    );
-                                },
-                            ))
-                            // Ready: the chat list and the conversation are
-                            // cached slices, redrawn on their own (`app_slice`).
-                            .map(|this| {
-                                if forum_column == quill::state::ForumColumn::Replacing {
-                                    this
-                                } else if self.pane_mode() == super::app::PaneMode::Ready {
-                                    this.child(self.sidebar_slot())
-                                } else {
-                                    this.child(self.sidebar(
-                                        &auth,
-                                        show_phone,
-                                        show_code,
-                                        show_password,
-                                        show_qr,
-                                        window,
-                                        cx,
-                                    ))
-                                }
-                            })
-                            .when(
-                                forum_column != quill::state::ForumColumn::Replacing,
-                                |this| this.child(self.sidebar_resize_handle(cx)),
-                            )
-                            .when(forum_column != quill::state::ForumColumn::Hidden, |this| {
-                                let open = self.session().and_then(|s| s.open_chat);
-                                this.child(self.forum_column_view(
-                                    open,
-                                    forum_column == quill::state::ForumColumn::Replacing,
-                                    cx,
-                                ))
-                            })
-                            .child(self.conversation_slot(cx))
-                            // Phase 6: user / group info panel beside the conversation.
-                            .when_some(self.info_panel(cx), |this, panel| this.child(panel))
-                            // MED3: downloads manager panel beside the conversation.
-                            .when_some(self.downloads_panel(cx), |this, panel| this.child(panel))
-                            // Slice media-shared-gallery: shared-media gallery panel.
-                            .when_some(self.shared_media_panel(cx), |this, panel| {
-                                this.child(panel)
-                            }),
-                    )
+                    this.child(self.shell_columns(
+                        &auth,
+                        show_phone,
+                        show_code,
+                        show_password,
+                        show_qr,
+                        window,
+                        cx,
+                    ))
                 },
             )
             // Screenshot demos keep their caption as a fixed footer line

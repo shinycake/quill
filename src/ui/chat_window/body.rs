@@ -49,7 +49,15 @@ impl QuillApp {
         let topics_only = forum_column == ForumColumn::Replacing && !topic_open;
         let column = (forum_column != ForumColumn::Hidden
             && !(forum_column == ForumColumn::Replacing && topic_open))
-            .then(|| self.forum_column_view(Some(chat_id), false, cx));
+            .then(|| {
+                self.forum_column_view(
+                    Some(chat_id),
+                    crate::ui::shell_layout::ForumPane::Column {
+                        chats_button: false,
+                    },
+                    cx,
+                )
+            });
         let drop_state = self.visible_drop_state(cx);
         let drop_overlay = drop_state.map(|state| self.drop_zone_overlay(state, cx));
         let top = self
