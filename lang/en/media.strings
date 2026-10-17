@@ -96,6 +96,7 @@
 "lng_stickers_featured_tab" = "Trending";
 "lng_stickers_remove_pack_confirm" = "Remove";
 "lng_stickers_set_is_full" = "This Sticker Set is full.";
+"lng_stories_link_invalid" = "This link is broken or has expired.";
 "lng_switch_emoji" = "Emoji";
 "lng_todo_create_allow_add" = "Allow Others to Add Tasks";
 "lng_todo_create_allow_mark" = "Allow Others to Mark As Done";

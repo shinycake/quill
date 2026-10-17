@@ -986,6 +986,9 @@ mod live_story;
 #[cfg(feature = "demo-capture")]
 mod live_tests;
 mod live_view;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod open_tests;
 mod reply_media;
 mod story_viewer_overlay;
 
