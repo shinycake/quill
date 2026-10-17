@@ -9,8 +9,10 @@ tdesktop's profile and info code writes a channel's count with
 `lng_chat_status_subscribers` and a group's with `lng_chat_status_members`,
 both with `lt_count_decimal` (`info_profile_status_label.cpp:50-60`,
 `info_profile_actions.cpp:3292`). `lt_count_decimal` is the full number with
-thousands separators ("12,345 subscribers"), not the compact "12.3K" form;
-the compact form is only the header subtitle's `lt_count_short`. Quill's
+thousands separators ("12,345 subscribers"), not the compact "12.3K" form.
+tdesktop never pairs `lt_count_short` with these keys, the chat header
+included (`history_view_top_bar_widget.cpp:1942-2004`); Quill's compact header
+and cover counts were a separate gap, fixed in `chat-count-decimal`. Quill's
 members block header printed "12345 members" for channels too. It now uses the
 two lang keys through `lang::trn_decimal`, so channels read "12,345
 subscribers", groups "12,345 members", and translations apply.
@@ -28,7 +30,9 @@ restamp the affected tabs. `fail` also clears `loading_more`.
 
 The input subscription ignores events whose entity is not the current
 `media_search.input`. When the field is swapped because the key changed,
-focus moves to the new field if the old one had it.
+focus moves to the new field if the old one had it and the new field is
+drawn (`shared_media_search_shown`); the focus call runs through
+`window.defer`, after the frame, so render only swaps the field.
 
 ## Common groups
 

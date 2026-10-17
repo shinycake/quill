@@ -161,10 +161,17 @@ impl QuillApp {
             .is_focused(window);
         self.media_search.input = SharedMediaSearchUi::fresh_input(window, cx);
         self.media_search.key = key;
-        if was_typing && key.is_some() {
-            self.media_search
-                .input
-                .update(cx, |input, cx| input.focus(window, cx));
+        // Only a field that is drawn takes the cursor, and focus moves after
+        // the frame (render itself only swaps the field).
+        let drawn = key.is_some_and(|(_, tab)| {
+            self.session()
+                .is_some_and(|session| session.shared_media_search_shown(tab))
+        });
+        if was_typing && drawn {
+            let input = self.media_search.input.clone();
+            window.defer(cx, move |window, cx| {
+                input.update(cx, |input, cx| input.focus(window, cx));
+            });
         }
     }
 }
