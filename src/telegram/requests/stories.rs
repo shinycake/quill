@@ -163,6 +163,8 @@ pub fn delete_story(extra: RequestId, chat_id: ChatId, story_id: i32) -> String 
 /// `query` filters by name/username/title (empty = all);
 /// `offset` is the previous page's `next_offset` (empty = first page).
 /// The schema places no explicit max on `limit`; the viewer pages 50.
+/// Viewers who reacted come first, as in Telegram Desktop
+/// (`f_reactions_first` in `data_stories.cpp`, no contacts or forwards flag).
 pub fn get_story_interactions(
     extra: RequestId,
     story_id: i32,
@@ -177,7 +179,7 @@ pub fn get_story_interactions(
         "query": query,
         "only_contacts": false,
         "prefer_forwards": false,
-        "prefer_with_reaction": false,
+        "prefer_with_reaction": true,
         "offset": offset,
         "limit": limit
     })

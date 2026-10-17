@@ -68,7 +68,7 @@ fn s4_story_requests_match_1_8_67() {
     assert_eq!(v["query"], "");
     assert_eq!(v["only_contacts"], false);
     assert_eq!(v["prefer_forwards"], false);
-    assert_eq!(v["prefer_with_reaction"], false);
+    assert_eq!(v["prefer_with_reaction"], true);
     assert_eq!(v["offset"], "");
     assert_eq!(v["limit"], 50);
 
