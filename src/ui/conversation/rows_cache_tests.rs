@@ -284,7 +284,10 @@ fn the_seek_slider_follows_a_position_tick_that_notifies_only_slices(cx: &mut Te
     let Some(SliderValue::Single(shown)) = value(&app, vcx) else {
         panic!("the seek slider holds one value");
     };
-    assert!(shown >= target as f32, "slider {shown} behind {target} {rendered:?}");
+    assert!(
+        shown >= target as f32,
+        "slider {shown} behind {target} {rendered:?}"
+    );
 }
 
 #[gpui_kit::test]
