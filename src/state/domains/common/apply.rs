@@ -166,7 +166,14 @@ impl Session {
                     }
                 }
             }
-            CommonPayload::UpdateConnectionState(state) => self.connection = state,
+            CommonPayload::UpdateConnectionState(state) => {
+                // Back online: stories that failed while offline are asked
+                // for again at once.
+                if state == ConnectionState::Ready && self.connection != ConnectionState::Ready {
+                    self.stories.story_retry.clear();
+                }
+                self.connection = state;
+            }
             CommonPayload::UpdateDiceEmojis { emojis } => self.sync.set_dice_emojis(emojis),
             CommonPayload::UpdateFreezeState(state) => self.sync.set_freeze(state),
             CommonPayload::UpdateSpeechRecognitionTrial(trial) => self.sync.set_speech_trial(trial),

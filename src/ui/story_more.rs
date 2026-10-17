@@ -46,7 +46,7 @@ impl QuillApp {
             || self.stories.privacy_edit.is_some()
             || self.stories.cover_target.is_some()
             // The live story's comment field, while it has the keyboard.
-            || (self.stories.live.watching.is_some()
+            || (self.live_story_shown().is_some()
                 && self.stories.live.input.focus_handle(cx).is_focused(window))
     }
 

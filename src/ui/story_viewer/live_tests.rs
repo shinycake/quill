@@ -645,6 +645,21 @@ fn a_stream_in_pip_leaves_the_header_of_another_story_alone(cx: &mut TestAppCont
     });
     assert!(find(vcx, "live-badge").is_none(), "no LIVE badge");
     assert!(find(vcx, "story-header-age").is_some(), "the story's age");
+    // The reply panel feeds the photo story's reply field, not the hidden
+    // live comment field.
+    app.update(vcx, |app, cx| {
+        app.stories.reply_open = true;
+        app.toggle_story_reply_panel(crate::ui::media_panel::PanelTab::Emoji, cx);
+    });
+    frames(vcx);
+    let routed = app.update_in(vcx, |app, window, cx| {
+        app.route_story_reply_emoji("👍", window, cx)
+    });
+    assert!(routed, "the panel is the story reply's");
+    app.read_with(vcx, |app, cx| {
+        assert_eq!(app.stories.reply_input.read(cx).value().to_string(), "👍");
+        assert!(app.stories.live.input.read(cx).value().is_empty());
+    });
 }
 
 /// tdesktop `setupStarsEffectsCanvas`.

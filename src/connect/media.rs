@@ -209,6 +209,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let extra = self.session.request_download(file_id);
+        let origin = if over_preload {
+            DownloadOrigin::AutoOverPreload
+        } else {
+            origin
+        };
         self.session.media.downloads.begin(file_id.0, origin);
         match self.sender.send_json(&download_file_range_request(
             extra, file_id, priority, limit,
@@ -236,10 +241,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        // A preload asked for a prefix at a low priority; TDLib replaces the
+        // A preload asked for a prefix at a low priority, and an automatic
+        // download that took one over runs at its own; TDLib replaces the
         // limit and priority of a running download with the new request's,
         // so the whole file is asked for again.
-        let preloaded = self.session.media.downloads.is_preload(file_id.0)
+        let preloaded = self.session.media.downloads.is_story_preloaded(file_id.0)
             && self
                 .session
                 .media

@@ -210,7 +210,7 @@ impl StoriesState {
     }
 
     /// A new Ready pages the tray from the start, and the stories that
-    /// failed while offline are asked for again at once.
+    /// failed before it are asked for again at once.
     pub fn reset_active_stories_paging(&mut self) {
         self.stories_active_loaded = false;
         self.stories_active_exhausted = false;

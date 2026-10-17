@@ -205,3 +205,52 @@ fn an_automatic_download_over_a_preload_takes_it_over() {
     h.driver.download_file(FileId(31), 5).expect("sent");
     assert_eq!(h.sent("downloadFile", 31).len(), 2, "asked once");
 }
+
+/// The path the automatic lists reach: a preload whose prefix is in.
+#[test]
+fn an_automatic_download_over_an_ended_preload_takes_it_over_once() {
+    let store = MemorySecretStore::new();
+    let mut h = Harness::new(&store);
+    h.file(31, 0, false);
+    h.driver
+        .sync_story_preloads(&[preload(31, 7, PREFIX)], &[])
+        .expect("sent");
+    h.file(31, PREFIX, true);
+    h.file(31, PREFIX, false);
+    h.driver
+        .download_file(FileId(31), 1)
+        .expect("sent")
+        .expect("a request for the whole file");
+    let requests = h.sent("downloadFile", 31);
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[1]["limit"], 0);
+    h.file(31, PREFIX, true);
+    h.driver.download_file(FileId(31), 1).expect("sent");
+    // The automatic download ends short of the whole file.
+    h.file(31, 5_000_000, false);
+    h.driver.download_file(FileId(31), 1).expect("sent");
+    assert_eq!(h.sent("downloadFile", 31).len(), 2, "not asked again");
+}
+
+/// Regression: once a thumbnail took the preload over, the story becoming
+/// current sent nothing and loaded at the thumbnail's priority.
+#[test]
+fn a_story_becoming_current_still_raises_a_taken_over_preload() {
+    let store = MemorySecretStore::new();
+    let mut h = Harness::new(&store);
+    h.file(31, 0, false);
+    h.driver
+        .sync_story_preloads(&[preload(31, 7, PREFIX)], &[])
+        .expect("sent");
+    h.file(31, PREFIX, true);
+    h.file(31, PREFIX, false);
+    h.driver.download_file(FileId(31), 1).expect("sent");
+    h.file(31, 5_000_000, true);
+    h.driver
+        .download_user_file(FileId(31), None)
+        .expect("sent")
+        .expect("a request at the user priority");
+    let requests = h.sent("downloadFile", 31);
+    assert_eq!(requests.len(), 3);
+    assert!(whole_file_at_user_priority(&requests[2]), "{}", requests[2]);
+}

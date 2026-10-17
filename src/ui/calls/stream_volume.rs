@@ -190,7 +190,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> bool {
         if !self.stories.viewer.is_open()
-            || self.stories.live.watching.is_none()
+            || self.live_story_shown().is_none()
             || self.story_text_input_open(window, cx)
         {
             return false;

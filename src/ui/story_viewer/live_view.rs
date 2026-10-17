@@ -50,7 +50,7 @@ pub(super) fn sender_avatar(session: &Session, sender: MessageSender, size: f32)
 impl QuillApp {
     /// The stream being watched when it is the story the viewer shows, not
     /// one playing on in Picture-in-Picture behind another story.
-    pub(super) fn live_story_shown(&self) -> Option<(ChatId, i32)> {
+    pub(in crate::ui) fn live_story_shown(&self) -> Option<(ChatId, i32)> {
         let shown = self.stories.viewer.current().map(StoryViewerItem::key);
         self.stories
             .live

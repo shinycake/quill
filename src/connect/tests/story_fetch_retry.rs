@@ -231,12 +231,22 @@ fn a_card_behind_a_failed_prefetch_asks_once_the_wait_is_over() {
 }
 
 #[test]
-fn a_new_ready_ends_every_story_wait() {
+fn coming_back_online_ends_every_story_wait() {
     let mut h = Harness::new();
+    let connection = |h: &mut Harness, state: &str| {
+        let json = format!(r#"{{"@type":"updateConnectionState","state":{{"@type":"{state}"}}}}"#);
+        h.driver
+            .ingest(copy_and_parse(&json, &h.seq, &h.sink).unwrap())
+            .unwrap();
+    };
+    connection(&mut h, "connectionStateReady");
     let extra = h.driver.get_story(ChatId(7), 5).unwrap().expect("sends");
     h.fail(extra, 500);
+    connection(&mut h, "connectionStateReady");
+    assert_eq!(h.driver.get_story(ChatId(7), 5), Ok(None), "still online");
+    connection(&mut h, "connectionStateConnecting");
     assert_eq!(h.driver.get_story(ChatId(7), 5), Ok(None));
-    h.driver.session.stories.reset_active_stories_paging();
+    connection(&mut h, "connectionStateReady");
     assert!(
         h.driver.get_story(ChatId(7), 5).unwrap().is_some(),
         "asked at once after the reconnect"
