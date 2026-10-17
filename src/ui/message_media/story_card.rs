@@ -20,7 +20,7 @@ const MENTION_SIDE: f32 = 72.0;
 /// First downloaded picture of a story preview inside the media roots.
 fn picture_path(
     preview: &StoryPreview,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     roots: &[PathBuf],
 ) -> Option<PathBuf> {
     preview.picture_ids.iter().find_map(|id| {
@@ -104,7 +104,7 @@ pub(in crate::ui) fn story_card(
     poster: ChatId,
     story_id: i32,
     session: Option<&Session>,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     media_roots: &[PathBuf],
     width_max: i32,
     cx: &mut Context<QuillApp>,
@@ -220,7 +220,7 @@ pub(in crate::ui) fn story_mention_extras(
     poster: ChatId,
     story_id: i32,
     session: Option<&Session>,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     media_roots: &[PathBuf],
     cx: &mut Context<QuillApp>,
 ) -> Option<AnyElement> {

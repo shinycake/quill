@@ -40,21 +40,19 @@ fn a_stale_request_never_shows_over_a_finished_file() {
     session.begin_user_download(FileId(61));
     assert_eq!(status(&session, 61), DownloadStatus::Downloading);
     // The completed snapshot lands without passing the update path.
-    session.media.files.insert(
-        61,
-        ParsedFile {
-            id: FileId(61),
-            size: 100,
-            expected_size: 100,
-            local: LocalFileState {
-                path: "/tmp/derived.bin".into(),
-                can_be_downloaded: true,
-                is_downloading_active: false,
-                is_downloading_completed: true,
-                downloaded_size: 100,
-            },
+    session.media.files.insert(ParsedFile {
+        id: FileId(61),
+        size: 100,
+        expected_size: 100,
+        uploading: false,
+        local: LocalFileState {
+            path: "/tmp/derived.bin".into(),
+            can_be_downloaded: true,
+            is_downloading_active: false,
+            is_downloading_completed: true,
+            downloaded_size: 100,
         },
-    );
+    });
     assert_eq!(status(&session, 61), DownloadStatus::Done);
 }
 
@@ -244,7 +242,7 @@ fn a_transfer_tdlib_already_runs_is_not_requested_again() {
 #[test]
 fn counts_follow_every_mutation() {
     let mut d = DownloadIntents::default();
-    let files = HashMap::new();
+    let files = FileMap::default();
     let counts = |d: &DownloadIntents| {
         (
             d.requested_count(),

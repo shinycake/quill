@@ -13,6 +13,9 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
 fn new_app(cx: &mut TestAppContext, demo: &str) -> (Entity<QuillApp>, VisualTestContext) {
+    // Default settings, not the saved window state (sidebar width) of the
+    // app installed on this machine.
+    quill::settings::use_isolated_app_root(quill::scratch::process_dir("quill-rows-cache-ui"));
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -155,11 +158,11 @@ fn a_read_receipt_patches_the_outgoing_row(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn an_edit_rebuilds_the_rows_with_the_new_text(cx: &mut TestAppContext) {
+fn an_edit_patches_only_its_row(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");
     let vcx = &mut vcx;
     open_group(&app, vcx);
-    let (built, _) = counts(&app, vcx);
+    let (built, patched) = counts(&app, vcx);
     apply(
         &app,
         vcx,
@@ -171,15 +174,19 @@ fn an_edit_rebuilds_the_rows_with_the_new_text(cx: &mut TestAppContext) {
         single(app, 202).map(|row| quill::state::effective_preview(&row.message))
     });
     assert_eq!(text.as_deref(), Some("Hi everyone."));
-    assert_eq!(counts(&app, vcx).0, built + 1);
+    assert_eq!(
+        counts(&app, vcx),
+        (built, patched + 1),
+        "one row patched, none rebuilt"
+    );
 }
 
 #[gpui_kit::test]
-fn a_reaction_rebuilds_the_rows_with_it(cx: &mut TestAppContext) {
+fn a_reaction_patches_only_its_row(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");
     let vcx = &mut vcx;
     open_group(&app, vcx);
-    let (built, _) = counts(&app, vcx);
+    let (built, patched) = counts(&app, vcx);
     apply(
         &app,
         vcx,
@@ -196,7 +203,7 @@ fn a_reaction_rebuilds_the_rows_with_it(cx: &mut TestAppContext) {
         })
     });
     assert!(reacted);
-    assert_eq!(counts(&app, vcx).0, built + 1);
+    assert_eq!(counts(&app, vcx), (built, patched + 1));
 }
 
 #[gpui_kit::test]
@@ -467,3 +474,44 @@ fn an_unpainted_history_is_seeded_from_its_pane_until_the_probe_measures(cx: &mu
     });
     assert_eq!(width(&app, vcx), HistoryWidth::WIDE);
 }
+
+#[gpui_kit::test]
+fn a_change_of_sender_or_album_does_not_keep_the_place(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    open_group(&app, vcx);
+    let old = app.read_with(vcx, |app, _| {
+        single(app, 202).map(|row| row.message.clone())
+    });
+    let Some(old) = old else {
+        panic!("row 202 is a single row");
+    };
+    assert!(super::same_place(&old, &old), "an unchanged message stays");
+    let mut other_sender = old.clone();
+    other_sender.sender = Some(quill::telegram::envelope::MessageSender::User { user_id: 9999 });
+    assert!(!super::same_place(&old, &other_sender), "sender moved");
+    let mut other_album = old.clone();
+    other_album.media_album_id = 77;
+    assert!(!super::same_place(&old, &other_album), "album id moved");
+}
+
+#[gpui_kit::test]
+fn an_edit_that_makes_a_message_album_media_builds_the_rows_again(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    open_group(&app, vcx);
+    let (built, patched) = counts(&app, vcx);
+    apply(
+        &app,
+        vcx,
+        &[
+            r#"{"@type":"updateMessageContent","chat_id":31,"message_id":202,"new_content":{"@type":"messagePhoto","photo":{"@type":"photo","has_stickers":false,"minithumbnail":null,"sizes":[{"@type":"photoSize","type":"x","photo":{"@type":"file","id":906,"size":10,"expected_size":10,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"r6","unique_id":"u6","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":10}},"width":1200,"height":800,"progressive_sizes":[]}]},"caption":{"@type":"formattedText","text":"","entities":[]},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}"#,
+        ],
+    );
+    let (built_after, patched_after) = counts(&app, vcx);
+    assert_eq!(patched_after, patched, "no row patched in place");
+    assert!(built_after > built, "the rows were built again");
+}
+
+#[path = "rows_cache_long_tests.rs"]
+mod long;

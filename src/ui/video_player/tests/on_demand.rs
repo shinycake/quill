@@ -114,8 +114,11 @@ fn autoplay_off(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext
 fn set_local(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, file: i32, local: bool) {
     app.update_in(vcx, |app, _, _| {
         let session = app.demo_session.as_mut().expect("the demo session");
-        let file = session.media.files.get_mut(&file).expect("the clip's file");
-        file.local.is_downloading_completed = local;
+        assert!(session.media.files.contains_key(&file), "the clip's file");
+        session
+            .media
+            .files
+            .update(file, |file| file.local.is_downloading_completed = local);
     });
 }
 

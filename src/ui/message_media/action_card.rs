@@ -58,7 +58,7 @@ pub(in crate::ui) fn is_bubble_card(content: &MessageContent) -> bool {
 pub(in crate::ui) fn action_card(
     message: &HistoryMessage,
     session: Option<&Session>,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     // The widest the card's picture may be (`BubbleRoom::media`).

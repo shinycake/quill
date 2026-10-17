@@ -13,7 +13,7 @@ pub(in crate::ui) fn video_note_attachment(
     message_id: MessageId,
     outgoing: bool,
     note: &quill::telegram::envelope::VideoNoteContent,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     inline: Option<crate::ui::inline_video::InlineFrame>,

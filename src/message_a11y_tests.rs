@@ -126,6 +126,7 @@ fn a_file_reads_its_kind_state_name_and_size() {
             id,
             size: 3 * 1024 * 1024 / 2,
             expected_size: 0,
+            uploading: false,
             local: LocalFileState {
                 path: "/tmp/report.pdf".into(),
                 can_be_downloaded: true,

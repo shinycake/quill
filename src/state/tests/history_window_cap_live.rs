@@ -12,6 +12,7 @@ fn file(id: i32) -> ParsedFile {
         id: FileId(id),
         size: 10,
         expected_size: 10,
+        uploading: false,
         local: LocalFileState {
             path: String::new(),
             can_be_downloaded: true,

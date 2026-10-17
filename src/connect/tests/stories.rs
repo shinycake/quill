@@ -586,7 +586,12 @@ fn driver_fetch_story_custom_emoji_stickers_dedupes_and_caches() {
         )
         .unwrap();
     assert_eq!(
-        driver.session.media.files[&77].usable_path(),
+        driver
+            .session
+            .media
+            .files
+            .get(&77)
+            .and_then(|f| f.usable_path()),
         Some("/tmp/custom-emoji.webp")
     );
     assert!(driver.download_file(display_file, 1).unwrap().is_none());

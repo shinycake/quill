@@ -12,7 +12,7 @@ use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::state::Session;
-use quill::telegram::envelope::{GameContent, ParsedFile};
+use quill::telegram::envelope::GameContent;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
@@ -26,7 +26,7 @@ pub(super) fn game_card(
     message_id: MessageId,
     game: &GameContent,
     session: Option<&Session>,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     revealed: &HashSet<(i64, u64, u64, bool)>,

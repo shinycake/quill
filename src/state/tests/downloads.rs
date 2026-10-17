@@ -13,6 +13,7 @@ fn sound_download_error_drops_pending_playback() {
             id: FileId(91),
             size: 0,
             expected_size: 100,
+            uploading: false,
             local: LocalFileState {
                 path: String::new(),
                 can_be_downloaded: true,
@@ -329,7 +330,10 @@ fn auto_download_skips_files_over_size_cap() {
     );
     assert_eq!(session.auto_download_media_file_ids(), vec![FileId(4)]);
     // File 4 balloons past the cap: skipped from here on.
-    session.media.files.get_mut(&4).unwrap().size = 100 * 1024 * 1024;
+    session
+        .media
+        .files
+        .update(4, |file| file.size = 100 * 1024 * 1024);
     assert!(session.auto_download_media_file_ids().is_empty());
 }
 
@@ -340,6 +344,7 @@ fn completed_user_downloads_land_in_recent_list() {
         id: FileId(id),
         size: 100,
         expected_size: 100,
+        uploading: false,
         local: LocalFileState {
             path: format!("/tmp/{id}.bin"),
             can_be_downloaded: true,
@@ -564,6 +569,7 @@ fn paused_download_survives_idle_file_updates_in_either_order() {
                 id: FileId(31),
                 size: 100,
                 expected_size: 100,
+                uploading: false,
                 local: LocalFileState {
                     path: String::new(),
                     can_be_downloaded: true,

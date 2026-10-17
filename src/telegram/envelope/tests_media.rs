@@ -140,6 +140,7 @@ fn download_progress_uses_downloaded_size_over_expected_size() {
         id: FileId(10),
         size: 0,
         expected_size: 0,
+        uploading: false,
         local: LocalFileState {
             path: String::new(),
             can_be_downloaded: true,

@@ -21,7 +21,7 @@ use quill::local_path::sandboxed_display_path;
 use quill::state::{StoryReportStage, event_log_relative_time};
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
 use quill::telegram::envelope::{
-    MessageSender, ParsedFile, ParsedStory, StoryAreaKind, StoryAvailableReactionKind,
+    MessageSender, ParsedStory, StoryAreaKind, StoryAvailableReactionKind,
     StoryChosenExtraReaction, StoryOriginView,
 };
 use std::collections::HashMap;

@@ -172,7 +172,7 @@ pub(in crate::ui) fn contact_row(
 pub(in crate::ui) fn dice_row(
     row_id: u64,
     dice: &quill::telegram::envelope::DiceContent,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     animated: Option<crate::ui::sticker_playback::AnimatedVisual>,
@@ -224,7 +224,7 @@ pub(in crate::ui) fn dice_row(
 fn slot_machine(
     row_id: u64,
     dice: &quill::telegram::envelope::DiceContent,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     layers: Vec<Option<crate::ui::sticker_playback::AnimatedVisual>>,

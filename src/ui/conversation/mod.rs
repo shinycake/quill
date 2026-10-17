@@ -28,7 +28,6 @@ use quill::state::{
 use quill::subsection_tabs::SubsectionTabsMode;
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{ChatKind, MessageContent, MessageSender};
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -645,6 +644,6 @@ mod conversation_part1;
 mod history_message_list;
 mod history_scroll_memory;
 mod render_history_row_body;
-mod row_chrome;
+pub(super) mod row_chrome;
 mod rows_cache;
-pub(super) use rows_cache::HistoryRowsKey;
+pub(super) use rows_cache::{HistoryRowsKey, RowsInput};

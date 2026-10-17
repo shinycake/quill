@@ -17,7 +17,7 @@ use quill::telegram::envelope::DocumentContent;
 pub(in crate::ui) fn picture_file_attachment(
     row_id: u64,
     doc: &DocumentContent,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     (chat_id, message_id): (ChatId, MessageId),

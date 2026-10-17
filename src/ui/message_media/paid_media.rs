@@ -205,7 +205,7 @@ pub(in crate::ui) fn paid_album_card(
     message: &HistoryMessage,
     unlocked: &[MessageContent],
     caption: &str,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     width_max: i32,

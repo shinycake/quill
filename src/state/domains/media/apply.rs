@@ -34,7 +34,11 @@ impl Session {
                 {
                     self.media.map_thumbs.answered(pending.id, file.id.0);
                 }
+                let paths = self.media.files.paths_revision();
                 self.upsert_file(file, true);
+                if self.media.files.paths_revision() == paths {
+                    self.media.files.note_quiet_update();
+                }
             }
             MediaPayload::UpdateFileDownload {
                 file_id,

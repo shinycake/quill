@@ -52,11 +52,23 @@ pub(crate) struct HistoryUi {
     pub(super) had_newer: bool,
     /// What `history_rows` were last built from (`None`: not built yet).
     pub(super) rows_key: Option<super::conversation::HistoryRowsKey>,
-    pub(super) chrome_session_revision: Option<u64>,
+    /// Generation of the rows' chrome (`HistoryRow::chrome_stamp`): rows
+    /// stamped with an older one are derived again when drawn.
+    pub(super) chrome_epoch: u64,
+    /// `Session::revision_without_file_progress` `chrome_epoch` stands for.
+    pub(super) chrome_seen: Option<u64>,
+    /// Rows drawn with stale chrome since the last render.
+    pub(super) chrome_due: std::cell::RefCell<Vec<usize>>,
+    /// A deferred notify for `chrome_due` is on its way (renders that skip
+    /// the kept-rows branch leave the list undrained).
+    pub(super) chrome_notify_pending: std::cell::Cell<bool>,
     pub(super) row_stats: RowCacheStats,
+    /// Tests: trust `Session::revision` the way a live session does.
+    #[cfg(test)]
+    pub(super) follow_revision_in_tests: bool,
     /// (ready files, downloading files) at the last history render; a
     /// change remeasures the virtualized rows (media grew in place).
-    pub(super) media_signature: (usize, usize),
+    pub(super) media_signature: (u64, usize),
     /// kit Phase 3: last chat-search highlight the scroller jumped to —
     /// avoids re-scrolling every frame while the highlight is set.
     pub(super) last_highlight: Option<MessageId>,
@@ -140,8 +152,13 @@ impl HistoryUi {
             scroll_memory: Default::default(),
             had_newer: false,
             rows_key: None,
-            chrome_session_revision: None,
+            chrome_epoch: 0,
+            chrome_seen: None,
+            chrome_due: Default::default(),
+            chrome_notify_pending: Default::default(),
             row_stats: RowCacheStats::default(),
+            #[cfg(test)]
+            follow_revision_in_tests: false,
             media_signature: (0, 0),
             last_highlight: None,
             highlight_fade: None,

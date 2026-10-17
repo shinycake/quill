@@ -22,10 +22,9 @@ use quill::local_path::sandboxed_display_path;
 use quill::premium_hub::{PremiumHub, ReceivedGift, StarTx, TxFilter, group_digits};
 use quill::state::Session;
 use quill::telegram::envelope::{
-    GiftCard, GiftCardKind, MessageSender, ParsedFile, ServiceAction, StickerContent,
+    GiftCard, GiftCardKind, MessageSender, ServiceAction, StickerContent,
 };
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -35,7 +34,7 @@ const GRID_TILE: f32 = 132.0;
 pub(in crate::ui) fn sticker_tile(
     id: (&'static str, u64),
     sticker: Option<&StickerContent>,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     media_roots: &[PathBuf],
     side: f32,
     fallback: &'static str,
