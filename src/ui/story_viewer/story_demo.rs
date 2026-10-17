@@ -1,7 +1,8 @@
 //! Screenshot demo of a photo story in the story viewer (injected, no live
 //! Telegram): the demo channel's first of three photo stories, posted two
 //! hours ago, edited, and shown to contacts only, so the header carries the
-//! age, "edited", the position and the privacy badge.
+//! age, "edited", the position and the privacy badge. The second story
+//! reposts the first, so it shows the "Reposted from" link.
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
@@ -16,7 +17,8 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 pub(super) const CHANNEL: i64 = 13;
-pub(super) const STORIES: [i32; 3] = [71, 72, 73];
+const ORIGIN: i32 = 71;
+pub(super) const STORIES: [i32; 3] = [ORIGIN, 72, 73];
 const PHOTO_FILE: i32 = 4471;
 
 register_demos![
@@ -51,8 +53,16 @@ impl QuillApp {
             } else {
                 "null"
             };
+            // The second story reposts the first, for the "Reposted from" link.
+            let repost = if index == 1 {
+                format!(
+                    r#"{{"@type":"storyRepostInfo","origin":{{"@type":"storyOriginPublicStory","chat_id":{CHANNEL},"story_id":{ORIGIN}}},"is_content_modified":false}}"#
+                )
+            } else {
+                "null".to_string()
+            };
             ingest(format!(
-                r#"{{"@type":"story","id":{id},"poster_chat_id":{CHANNEL},"date":{posted},"is_edited":{edited},"privacy_settings":{privacy},"content":{{"@type":"storyContentPhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"x","photo":{file},"width":1080,"height":1920,"progressive_sizes":[]}}]}}}},"caption":{{"@type":"formattedText","text":"Harbour at dusk","entities":[]}}}}"#,
+                r#"{{"@type":"story","id":{id},"poster_chat_id":{CHANNEL},"date":{posted},"is_edited":{edited},"privacy_settings":{privacy},"repost_info":{repost},"content":{{"@type":"storyContentPhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"x","photo":{file},"width":1080,"height":1920,"progressive_sizes":[]}}]}}}},"caption":{{"@type":"formattedText","text":"Harbour at dusk","entities":[]}}}}"#,
                 edited = index == 0,
             ));
         }

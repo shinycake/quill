@@ -550,6 +550,7 @@ impl QuillApp {
         Some(
             div()
                 .id("story-viewer-repost")
+                .debug_selector(|| "story-viewer-repost".into())
                 .role(gpui_kit::Role::Button)
                 .aria_label(label.clone())
                 .tab_index(0)
@@ -561,6 +562,8 @@ impl QuillApp {
                 .text_color(chrome::fg())
                 .child(label)
                 .on_click(cx.listener(|this, _, window, cx| {
+                    // The backdrop under the panel closes the viewer.
+                    cx.stop_propagation();
                     this.press_story_repost(window, cx);
                 })),
         )
