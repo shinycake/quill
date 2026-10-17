@@ -301,6 +301,8 @@ pub struct SharedMediaTabState {
     pub next_offset: String,
     /// A profile tab (Stories, Gifts, Playlist) has more pages.
     pub has_more: bool,
+    /// The search query the tab's items answer; empty for the plain list.
+    pub query: String,
 }
 
 impl SharedMediaTabState {
@@ -314,6 +316,7 @@ impl SharedMediaTabState {
         self.anchor_day = None;
         self.next_offset.clear();
         self.has_more = false;
+        self.query.clear();
     }
 
     /// Whether an older page exists and none is in flight.

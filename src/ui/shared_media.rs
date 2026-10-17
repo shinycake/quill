@@ -59,6 +59,7 @@ impl QuillApp {
         let tab = session.media.shared_media.tab_at(active_tab)?;
         let status = tab.status;
         let total_count = tab.total_count;
+        let searching = !tab.query.is_empty();
         // `error` stays an owned clone: the panel tree is boxed into
         // `AnyElement` (requires 'static), so borrowed `&str` children don't
         // compile here — same for the row labels below.
@@ -86,7 +87,10 @@ impl QuillApp {
                     .border_color(cx.theme().border)
                     .child(div().font_semibold().child(title))
                     .child(div().flex_1())
-                    .children(self.shared_media_calendar_button(active_tab, cx))
+                    .children(
+                        self.shared_media_calendar_button(active_tab, cx)
+                            .filter(|_| !searching),
+                    )
                     .child(
                         div()
                             .id("shared-media-close")
@@ -115,12 +119,15 @@ impl QuillApp {
                 for tab_option in &visible_tabs {
                     let is_active = *tab_option == active_tab;
                     let name = tab_option.label_in(is_channel);
-                    let label =
-                        if is_active && total_count > 0 && status == SharedMediaTabStatus::Ready {
-                            format!("{name} · {total_count}")
-                        } else {
-                            name.to_string()
-                        };
+                    let label = if is_active
+                        && !searching
+                        && total_count > 0
+                        && status == SharedMediaTabStatus::Ready
+                    {
+                        format!("{name} · {total_count}")
+                    } else {
+                        name.to_string()
+                    };
                     bar = bar.child(Tab::new().label(label));
                 }
                 let selected = visible_tabs
@@ -135,7 +142,8 @@ impl QuillApp {
                             });
                         }
                     })
-            });
+            })
+            .children(self.shared_media_search_row(active_tab, cx));
 
         let content: AnyElement = match status {
             SharedMediaTabStatus::Idle | SharedMediaTabStatus::Loading => div()
@@ -202,6 +210,9 @@ impl QuillApp {
                         })),
                 )
                 .into_any_element(),
+            SharedMediaTabStatus::Empty if searching => {
+                self.shared_media_search_empty_state(active_tab, cx)
+            }
             SharedMediaTabStatus::Empty => {
                 self.shared_media_empty_state(active_tab, is_channel, cx)
             }
@@ -346,7 +357,7 @@ impl QuillApp {
                     .set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_LOAD_THAT_TAB)));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.media.shared_media.select_tab(tab);
+            session.media.shared_media.select_tab_dropping_search(tab);
         }
         cx.notify();
     }

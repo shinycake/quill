@@ -422,6 +422,8 @@ mod shared_media_grid_state;
 mod shared_media_list;
 mod shared_media_profile;
 mod shared_media_row;
+mod shared_media_search;
+mod shared_media_search_state;
 mod shell;
 mod shell_layout;
 mod shortcuts;

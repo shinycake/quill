@@ -50,7 +50,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Slice media-shared-gallery: switch tabs; fetch only tabs that were
     /// never fetched (each tab caches its first page).
     pub fn select_shared_media_tab(&mut self, tab: SharedMediaTab) -> Result<(), ConnectSendError> {
-        if self.session.media.shared_media.select_tab(tab) {
+        if self
+            .session
+            .media
+            .shared_media
+            .select_tab_dropping_search(tab)
+        {
             self.fetch_shared_media(tab)?;
         }
         Ok(())
@@ -68,6 +73,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(chat_id) = self.session.media.shared_media.chat_id else {
             return Err(ConnectSendError::InvalidRequest);
         };
+        let query = self.shared_media_query(tab);
         let generation = self.session.media.shared_media.begin_fetch(tab);
         let extra = self.session.request(
             RequestPurpose::GetSharedMedia { tab, generation },
@@ -78,7 +84,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra,
             chat_id,
             &TopicId::None,
-            "",
+            &query,
             MessageId(0),
             0,
             SHARED_MEDIA_PAGE_SIZE,
@@ -117,6 +123,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return Ok(());
         };
+        let query = self.shared_media_query(tab);
         let extra = self.session.request(
             RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { tab, generation }),
             Some(chat_id),
@@ -126,7 +133,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra,
             chat_id,
             &TopicId::None,
-            "",
+            &query,
             from_message_id,
             0,
             SHARED_MEDIA_PAGE_SIZE,

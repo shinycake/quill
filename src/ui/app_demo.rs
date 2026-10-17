@@ -316,6 +316,7 @@ impl QuillApp {
             credentials,
             privacy: super::privacy_state::PrivacyState::new(window, cx),
             search_ui: super::search_state::SearchUi::new(search_input, chat_search_input),
+            media_search: super::shared_media_search_state::SharedMediaSearchUi::new(window, cx),
             share: super::share_state::ShareUi::new(window, cx, forward_search_input),
             start_files: super::start_files_state::StartFilesUi::new(window, cx),
             focus_sidebar: cx.focus_handle(),
