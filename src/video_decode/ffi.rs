@@ -22,6 +22,15 @@ const HW_OFF: i32 = 0;
 const HW_ALLOWED: i32 = 1;
 #[cfg(test)]
 const HW_FAIL_THIRD_PICTURE: i32 = 2;
+#[cfg(test)]
+const HW_FAIL_THIRD_PICTURE_AND_REOPEN: i32 = 3;
+
+/// The shim's stand-in hardware decoders (`QV_HW_FAIL_*`).
+#[cfg(test)]
+pub(super) enum StandIn {
+    FailThirdPicture,
+    FailThirdPictureAndReopen,
+}
 
 #[repr(C)]
 struct QvOptions {
@@ -334,11 +343,16 @@ impl FfiDemuxer {
     }
 
     #[cfg(test)]
-    pub(super) fn open_failing_hardware(
+    pub(super) fn open_stand_in(
         path: &Path,
         options: &OpenOptions,
+        stand_in: StandIn,
     ) -> Result<Self, String> {
-        Self::open_with(path, options, HW_FAIL_THIRD_PICTURE)
+        let hw = match stand_in {
+            StandIn::FailThirdPicture => HW_FAIL_THIRD_PICTURE,
+            StandIn::FailThirdPictureAndReopen => HW_FAIL_THIRD_PICTURE_AND_REOPEN,
+        };
+        Self::open_with(path, options, hw)
     }
 
     fn open_with(path: &Path, options: &OpenOptions, hw: i32) -> Result<Self, String> {
@@ -441,6 +455,7 @@ impl Demuxer for FfiDemuxer {
             return Ok(None);
         }
         if r < 0 {
+            self.refresh_hardware_flag();
             return Err(format!("decoding failed ({r})"));
         }
         let pts = if item.pts.is_finite() { item.pts } else { 0.0 };

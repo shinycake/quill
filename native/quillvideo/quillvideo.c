@@ -40,6 +40,7 @@ typedef struct Ctx {
   enum AVPixelFormat hw_fmt;
   AVFrame *sw_frame;
   int stand_in_pictures_left;
+  int stand_in_reopen_fails;
   /* File start time (seconds): pts are reported relative to it. */
   double start;
   int max_w;
@@ -301,8 +302,11 @@ void *qv_open(const char *path, const QvOptions *options, char *err,
     c->info.frame_rate = rate.num > 0 && rate.den > 0 ? av_q2d(rate) : 0.0;
     c->info.has_video = 1;
     c->info.hw = c->vdec->hw_device_ctx != NULL;
-    if (hw && options->hw == QV_HW_FAIL_THIRD_PICTURE) {
+    if (options->hw == QV_HW_FAIL_THIRD_PICTURE ||
+        options->hw == QV_HW_FAIL_THIRD_PICTURE_AND_REOPEN) {
       c->stand_in_pictures_left = 3;
+      c->stand_in_reopen_fails =
+          options->hw == QV_HW_FAIL_THIRD_PICTURE_AND_REOPEN;
       c->info.hw = 1;
     }
     snprintf(c->info.video_codec, sizeof c->info.video_codec, "%s",
@@ -700,9 +704,11 @@ static int fall_back_to_software(Ctx *c) {
   c->hw_fmt = AV_PIX_FMT_NONE;
   c->stand_in_pictures_left = 0;
   c->info.hw = 0;
-  int code = 0;
+  int code = AVERROR_DECODER_NOT_FOUND;
   AVCodecContext *dec =
-      open_decoder(c, c->fmt->streams[c->vidx], c->threads, 0, &code);
+      c->stand_in_reopen_fails
+          ? NULL
+          : open_decoder(c, c->fmt->streams[c->vidx], c->threads, 0, &code);
   if (!dec)
     return code;
   avcodec_free_context(&c->vdec);

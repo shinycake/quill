@@ -44,6 +44,9 @@ typedef struct QvOptions {
  * picture fails like a GPU transfer does, so the software fallback runs on
  * machines without a GPU. */
 #define QV_HW_FAIL_THIRD_PICTURE 2
+/* Tests: as QV_HW_FAIL_THIRD_PICTURE, and the software decoder then fails to
+ * open, so the hardware decoder has to stay in charge. */
+#define QV_HW_FAIL_THIRD_PICTURE_AND_REOPEN 3
 
 typedef struct QvInfo {
   /* Seconds; <= 0 when unknown. */

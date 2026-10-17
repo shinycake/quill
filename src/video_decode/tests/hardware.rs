@@ -3,7 +3,7 @@
 //! one (VideoToolbox on a Mac) the first test decodes on it.
 
 use super::{decoder, fixture};
-use crate::video_decode::ffi::FfiDemuxer;
+use crate::video_decode::ffi::{FfiDemuxer, StandIn};
 use crate::video_decode::{Demuxer, Item, MediaInfo, OpenOptions, PixelOutput, Pixels};
 
 struct Decoded {
@@ -97,7 +97,8 @@ fn a_failing_hardware_decoder_hands_over_to_software_without_losing_a_picture() 
         PixelOutput::Bgra,
     );
     let failing = decode(
-        FfiDemuxer::open_failing_hardware(&clip, &options(true)).expect("open"),
+        FfiDemuxer::open_stand_in(&clip, &options(true), StandIn::FailThirdPicture)
+            .expect("open"),
         PixelOutput::Bgra,
     );
     assert!(failing.opened.hardware, "the stand-in reports hardware");
@@ -105,4 +106,38 @@ fn a_failing_hardware_decoder_hands_over_to_software_without_losing_a_picture() 
     assert_eq!(failing.pts, software.pts, "no picture lost or repeated");
     let drift = failing.samples.abs_diff(software.samples);
     assert!(drift <= 2048, "sound kept: {drift} samples apart");
+}
+
+#[test]
+fn a_hardware_decoder_that_software_cannot_replace_stays_in_charge() {
+    if !decoder() {
+        return;
+    }
+    let clip = fixture("clip-h264-aac.mp4");
+    let software = decode(
+        FfiDemuxer::open(&clip, &options(false)).expect("open"),
+        PixelOutput::Bgra,
+    );
+    let mut demuxer =
+        FfiDemuxer::open_stand_in(&clip, &options(true), StandIn::FailThirdPictureAndReopen)
+            .expect("open");
+    let mut pictures = 0;
+    let failed = loop {
+        match demuxer.next() {
+            Ok(Some(Item::Video(_))) => pictures += 1,
+            Ok(Some(Item::Audio(_))) => {}
+            Ok(None) => break false,
+            Err(_) => break true,
+        }
+    };
+    assert!(failed, "the failed reopen ends decoding with an error");
+    assert_eq!(pictures, 2, "the third picture is the one that failed");
+    assert!(
+        demuxer.info().hardware,
+        "the hardware decoder is still the one installed"
+    );
+    demuxer.seek(0.0).expect("seek back");
+    let again = decode(demuxer, PixelOutput::Bgra);
+    assert_eq!(again.pts, software.pts, "a seek plays the whole clip on it");
+    assert!(again.finished.hardware);
 }
