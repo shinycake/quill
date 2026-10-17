@@ -280,6 +280,7 @@ impl QuillApp {
             menu_bar: AppMenuBar::new(cx),
             chat_list: super::chat_list_state::ChatListUi::new(window, cx),
             stories,
+            shared_media_grid: super::shared_media_grid_state::SharedMediaGridUi::new(),
             premium_preview: Default::default(),
             first_run: super::first_run_ui::initial_first_run(demo.is_some(), &credentials, cx),
             history: super::history_state::HistoryUi::new(cx),

@@ -301,6 +301,7 @@ pub fn story_item(
             width,
             height,
         },
+        meta: SharedMediaMeta::None,
     }
 }
 
@@ -320,6 +321,7 @@ pub fn gift_item(gift: &crate::premium_hub::ReceivedGift) -> SharedMediaItem {
         date: gift.date,
         action: SharedMediaAction::Gift,
         visual: SharedMediaVisual::Gift(Box::new(gift.clone())),
+        meta: SharedMediaMeta::None,
     }
 }
 
@@ -393,9 +395,10 @@ impl Session {
 
     /// Thumbnails the Stories and Gifts grids still need.
     pub fn take_profile_thumbs(&mut self) -> Vec<FileId> {
+        let mut seen = std::collections::HashSet::new();
         std::mem::take(&mut self.media.profile_thumbs_due)
             .into_iter()
-            .filter(|id| self.should_download(*id))
+            .filter(|id| seen.insert(*id) && self.should_download(*id))
             .collect()
     }
 
@@ -660,6 +663,7 @@ mod tests {
             date: 0,
             action: SharedMediaAction::Gift,
             visual: SharedMediaVisual::None,
+            meta: SharedMediaMeta::None,
         };
         let tab = SharedMediaTab::Gifts;
         gallery.begin_profile_fetch(tab);

@@ -23,6 +23,7 @@ mod forum_saved;
 mod group_admin;
 mod groups;
 mod groups_more;
+mod history_prune;
 mod history_window_cap;
 mod history_window_cap_live;
 mod inline_members;

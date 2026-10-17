@@ -182,12 +182,18 @@ impl Session {
         let topic_id = message.topic_id;
         let row = history_message(message, pending);
         self.index_poll(&row);
-        let history = self.histories.entry(chat_id.0).or_default();
+        let history = self.history_entry(chat_id);
         history.upsert(row.clone());
-        // Live updates keep landing in chats nobody is looking at; cap
-        // them like a page load does (the open chat is trimmed by page).
+        // Live updates keep landing in chats nobody is looking at: a chat
+        // no view uses keeps a bounded tail (`history_prune.rs`); one the UI
+        // still reads (a pending forward's source) keeps the page cap. The
+        // shown chats are trimmed by page.
         if !self.chat_is_shown(chat_id) {
-            self.trim_history_window(chat_id, WindowEnd::Oldest);
+            if self.chat_history_in_use(chat_id) || self.history_pruning.release_pending(chat_id) {
+                self.trim_history_window(chat_id, WindowEnd::Oldest);
+            } else {
+                self.note_closed_chat_update(chat_id);
+            }
         }
         // Parity slice 4: a message addressed to a forum topic also lands
         // in that topic's history when the topic is loaded (the topic view

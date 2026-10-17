@@ -18,6 +18,7 @@ mod payments;
 mod platform;
 mod privacy_media;
 mod security;
+pub(crate) mod shared_media;
 mod signin;
 mod status_toasts;
 mod stories;

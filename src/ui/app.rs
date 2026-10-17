@@ -24,6 +24,8 @@ pub struct QuillApp {
     pub(super) menu_bar: Entity<AppMenuBar>,
     /// Chat list: rows, filter, menus, pinning, preview and side tabs (`ui/chat_list_state.rs`).
     pub(super) chat_list: super::chat_list_state::ChatListUi,
+    /// Scroll positions of the shared-media grid tabs (`ui/shared_media_grid_state.rs`).
+    pub(super) shared_media_grid: super::shared_media_grid_state::SharedMediaGridUi,
     /// Stories UI state: the strip, viewer, composer, story page and their boxes.
     pub(super) stories: super::stories_state::StoryUi,
     /// The Premium feature preview's clip player (`ui/premium_preview_state.rs`).

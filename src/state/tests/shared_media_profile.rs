@@ -199,7 +199,7 @@ fn round_videos_and_polls_get_their_own_row_labels() {
         (
             SharedMediaTab::Voice,
             r#"{"id":70,"chat_id":6,"is_outgoing":false,"content":{"@type":"messageVideoNote","video_note":{"@type":"videoNote","duration":6,"waveform":"","length":240},"is_viewed":false,"is_secret":false}},{"id":71,"chat_id":6,"is_outgoing":false,"content":{"@type":"messageVoiceNote","voice_note":{"@type":"voiceNote","duration":3,"waveform":"","mime_type":"audio/ogg"},"caption":{"@type":"formattedText","text":"","entities":[]},"is_listened":true}}"#,
-            vec!["Round video", "Voice message"],
+            vec!["Video message", "Voice message"],
         ),
         (
             SharedMediaTab::Polls,

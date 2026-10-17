@@ -181,7 +181,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(chat_id) = self.session.open_chat else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        let history = self.session.histories.entry(chat_id.0).or_default();
+        let history = self.session.history_entry(chat_id);
         history.unread_anchor = None;
         if !history.has_newer {
             return Ok(None);

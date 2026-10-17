@@ -192,7 +192,8 @@ impl QuillApp {
                 Err(_) => StatusNote::error(tr(keys::Q_CHATLIST_COULD_NOT_OPEN_CHAT)),
             });
         } else if let Some(session) = self.demo_session.as_mut() {
-            // The demo history is all in memory: a saved position is in the
+            // The demo history is all in memory and never trimmed
+            // (`Session::keep_all_histories`): a saved position is in the
             // window already.
             session.open_chat(chat_id);
             if let quill::state::HistoryOpen::Message(message_id) = open {

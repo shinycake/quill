@@ -131,7 +131,7 @@ impl Session {
         else {
             return;
         };
-        let history = self.histories.entry(chat_id.0).or_default();
+        let history = self.history_entry(chat_id);
         // Tombstone, 404/error, or around-load without the id: deleted/inaccessible.
         self.search.chat_search.jump = if history.contains(message_id) {
             ChatSearchJump::Ready { message_id }

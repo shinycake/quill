@@ -30,6 +30,9 @@ pub(super) struct ViewerGeometry {
     pub(super) caption: Option<CaptionLayout>,
     /// The media's own box (fitted from its natural size).
     pub(super) media: (f32, f32),
+    /// What the bottom bar (caption and controls) takes from the window's
+    /// bottom edge.
+    pub(super) bottom_chrome: f32,
     /// Its top-left in the window (centered in the fit area).
     pub(super) origin: (f32, f32),
     /// The media at the current zoom, and its pan inside the box.
@@ -135,6 +138,16 @@ impl Render for ViewerVideoLayer {
 }
 
 impl QuillApp {
+    /// How far up from the window's bottom edge the open viewer's caption
+    /// and controls reach, as the frame lays them out (0 with no viewer
+    /// item). Overlays that float over the viewer (the status toast) clear it.
+    pub(in crate::ui) fn viewer_bottom_chrome(&mut self, window: &mut Window, cx: &App) -> Pixels {
+        let Some(item) = self.viewer.state.current().cloned() else {
+            return px(0.);
+        };
+        px(self.viewer_geometry(&item, window, cx).bottom_chrome)
+    }
+
     /// Tests: the media's box in the window, and whether the caption takes
     /// room under it, as the next frame lays them out.
     #[cfg(test)]
@@ -172,13 +185,14 @@ impl QuillApp {
             let width = geometry::lane_width(viewport.0);
             self.viewer_caption_layout(item, width, window, cx)
         };
-        let area = geometry::fit_area(geometry::ViewerFrame {
+        let frame = geometry::ViewerFrame {
             viewport,
             video: item.kind == MediaViewerKind::Video,
             caption: caption.map_or(0.0, |caption| caption.plate_h),
             fullscreen,
             strip: self.viewer_group_strip(viewport.0).is_some(),
-        });
+        };
+        let area = geometry::fit_area(frame);
         let fit = area.size;
         // The media's own box inside the frame: sized from its natural
         // dimensions (axes swapped for a quarter turn) rather than trusting
@@ -203,6 +217,7 @@ impl QuillApp {
             fit: area,
             caption,
             media,
+            bottom_chrome: geometry::bottom_chrome(frame),
             origin: (
                 area.origin.0 + (fit.0 - media.0) / 2.0,
                 area.origin.1 + (fit.1 - media.1) / 2.0,

@@ -280,8 +280,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let mut sent: Option<RequestId> = None;
         // TGX: viewing the newest known message reads the real unread
-        // history. Skipped when the chat was never opened (same as TGX's
-        // `chat.lastMessage == null` guard); the authoritative
+        // history. The loaded window has it when there is one; a chat whose
+        // history was dropped (closed chats keep a bounded set) or never
+        // loaded falls back to the chat summary's last message, which is
+        // what TGX views (`chat.lastMessage`). The authoritative
         // `updateChatReadInbox` then confirms.
         if unread {
             let newest = self
@@ -289,7 +291,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .histories
                 .get(&chat_id.0)
                 .and_then(|history| history.messages.keys().next_back().copied())
-                .map(MessageId);
+                .map(MessageId)
+                .or_else(|| {
+                    self.session
+                        .chats
+                        .get(&chat_id.0)
+                        .and_then(|chat| chat.last_message)
+                        .map(|last| last.id)
+                        .filter(|id| id.0 > 0)
+                });
             if let Some(id) = newest
                 && !self
                     .session
