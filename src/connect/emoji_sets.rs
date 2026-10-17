@@ -197,7 +197,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Unlike the status-panel variant this has no panel-open gate — message
     /// text renders in the normal chat view. Shares the status pipeline's
     /// purpose, cache, and attempted-set.
-    pub(crate) fn maybe_resolve_message_custom_emoji(&mut self) -> Result<(), ConnectSendError> {
+    pub(crate) fn maybe_resolve_message_custom_emoji(
+        &mut self,
+        open_chat_ids: &[i64],
+    ) -> Result<(), ConnectSendError> {
         if !self.chats_path_active()
             || self
                 .session
@@ -206,7 +209,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(());
         }
-        let mut ids = self.session.message_custom_emoji_ids_to_resolve();
+        let resolved = self.session.resolved_custom_emoji_ids();
+        let mut ids = self
+            .session
+            .unresolved_custom_emoji_ids_in(open_chat_ids.to_vec(), &resolved);
         ids.extend(
             self.session
                 .settings
@@ -221,13 +227,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         .emoji
                         .status_resolution_attempted
                         .contains(id)
-                        && !self
-                            .session
-                            .stickers
-                            .emoji
-                            .custom_emoji_stickers
-                            .iter()
-                            .any(|item| item.custom_emoji_id == Some(*id))
+                        && !resolved.contains(id)
                 }),
         );
         ids.sort_unstable();

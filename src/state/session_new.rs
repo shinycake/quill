@@ -21,6 +21,7 @@ impl Session {
             chats: HashMap::new(),
             main_order: Vec::new(),
             archive_order: Vec::new(),
+            chat_order_sync: Default::default(),
             chat_list: ChatListState::new(),
             chats_state: ChatsState::new(),
             histories: HashMap::new(),

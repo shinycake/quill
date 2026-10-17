@@ -6,7 +6,7 @@ use super::app::{ChatListFilter, PaneMode};
 use super::chat_row::PinnedChatDrag;
 use super::chat_row::{
     ChatListItem, chat_list_caption, chat_list_empty_state, chat_list_skeleton_row,
-    chat_row_height, chat_row_tags, static_chat_row,
+    chat_row_has_tags, chat_row_height, chat_row_height_tagged, chat_row_tags, static_chat_row,
 };
 use super::notifications::notification_settings_json;
 use super::*;
@@ -594,12 +594,7 @@ impl QuillApp {
                 return;
             };
             let ids = session.pinned_chat_ids(drag.archived);
-            let names: Vec<(i32, String, i32)> = session
-                .chat_list
-                .chat_folders
-                .iter()
-                .map(|f| (f.id, f.name.clone(), f.color_id))
-                .collect();
+            let names = quill::folder_limits::tag_names(&session.chat_list.chat_folders);
             let tags = session.chat_list.are_folder_tags_enabled;
             let viewing = self.folders.tab;
             let lines = self.appearance.preview_lines;

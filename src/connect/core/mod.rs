@@ -20,6 +20,7 @@ use crate::telegram::requests::{
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 
+pub(crate) mod batch;
 mod lifecycle;
 
 use std::sync::{Arc, Mutex};
@@ -766,11 +767,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.refresh_open_mask_lists()?;
         self.maybe_resolve_emoji_status_choices()?;
-        self.maybe_resolve_message_custom_emoji()?;
-        if !self.session.stickers.emoji.custom_emoji_stickers.is_empty() {
-            let files = self.session.open_chat_custom_emoji_files();
-            self.ensure_media_files(&files)?;
-        }
+        self.sync_open_chat_custom_emoji()?;
         if gif_bot_changed {
             self.cancel_gif_search_requests();
             self.session.stickers.gifs.search_results.clear();

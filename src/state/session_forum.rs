@@ -81,11 +81,19 @@ impl Session {
     /// Phase 5.1: topics for a forum chat, sorted by `order` descending
     /// (schema: "Topics must be sorted by the order in descending order").
     pub fn ordered_forum_topics(&self, chat_id: ChatId) -> Vec<ForumTopic> {
-        let mut topics: Vec<ForumTopic> = self
+        self.ordered_forum_topic_refs(chat_id)
+            .into_iter()
+            .cloned()
+            .collect()
+    }
+
+    /// [`Self::ordered_forum_topics`] without cloning the topics.
+    pub fn ordered_forum_topic_refs(&self, chat_id: ChatId) -> Vec<&ForumTopic> {
+        let mut topics: Vec<&ForumTopic> = self
             .threads
             .forum_topics
             .get(&chat_id.0)
-            .cloned()
+            .map(|topics| topics.iter().collect())
             .unwrap_or_default();
         topics.sort_by(|a, b| b.order.cmp(&a.order).then(a.name.cmp(&b.name)));
         topics

@@ -120,17 +120,18 @@ impl QuillApp {
     /// `&mut self` the tick needs.
     pub(super) fn ensure_self_destruct_tick(&mut self, cx: &mut Context<Self>) {
         let now_ms = unix_ms_now();
-        let Some(chat_id) = self
-            .session()
-            .and_then(|session| session.open_chat)
-            .filter(|_| {
-                self.session()
-                    .is_some_and(|session| session.open_chat_has_live_self_destruct(now_ms))
-            })
-        else {
+        let Some(chat_id) = self.session().and_then(|session| session.open_chat) else {
             return;
         };
+        // A running tick keeps itself alive: no need to scan the history
+        // again every frame.
         if self.history.self_destruct_tick_chat == Some(chat_id) {
+            return;
+        }
+        if !self
+            .session()
+            .is_some_and(|session| session.open_chat_has_live_self_destruct(now_ms))
+        {
             return;
         }
         self.history.self_destruct_tick_chat = Some(chat_id);

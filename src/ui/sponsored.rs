@@ -334,8 +334,8 @@ impl QuillApp {
             return None;
         }
         let look = self.bubble_look(cx);
-        let files: HashMap<i32, ParsedFile> = session.media.files.clone();
-        let downloading = session.media.downloads.clone();
+        let files = &session.media.files;
+        let downloading = &session.media.downloads;
         let media_roots = self.media_display_roots();
         let mut list = div()
             .id("sponsored-footer")
@@ -382,8 +382,8 @@ impl QuillApp {
             list = list.child(sponsored_message_row(
                 chat_id,
                 &ad,
-                &files,
-                &downloading,
+                files,
+                downloading,
                 &media_roots,
                 &self.message_ui.spoiler_revealed,
                 look,

@@ -352,8 +352,7 @@ impl QuillApp {
         // tdesktop `archiveInMainMenu`: the archive lives here instead of
         // on top of the chat list while there is something archived.
         let archive_in_menu = quill::chatlist_archive::show_in_main_menu(
-            self.session()
-                .is_some_and(|s| !s.ordered_archived_chats().is_empty()),
+            self.session().is_some_and(|s| s.has_archived_chats()),
             self.appearance.archive_in_main_menu,
         );
         let accounts_unread = self.other_accounts_unread();

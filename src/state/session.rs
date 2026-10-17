@@ -40,6 +40,8 @@ pub struct Session {
     pub chats: HashMap<i64, ChatSummary>,
     pub main_order: Vec<ChatId>,
     pub archive_order: Vec<ChatId>,
+    /// Whether the two orders above need a sort.
+    pub(crate) chat_order_sync: super::session_chatlist::ChatOrderSync,
     /// The chat list: folders, archive, unread counts, limits, suggestions and previews.
     /// Declared in `src/state/domains/chat_list/state.rs`.
     pub chat_list: ChatListState,

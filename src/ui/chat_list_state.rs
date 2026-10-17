@@ -9,6 +9,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use std::collections::HashSet;
+use std::rc::Rc;
 use std::time::Instant;
 
 pub(crate) struct ChatListUi {
@@ -18,6 +19,8 @@ pub(crate) struct ChatListUi {
     /// kit Phase 3: chat-list virtualization — the flat item list the
     /// `VirtualList` renders (main rows + archive section).
     pub(super) items: Vec<ChatListItem>,
+    /// Folder tag chip names the rows of `items` draw, built with them.
+    pub(super) folder_tags: Rc<super::chat_row::FolderTagContext>,
     /// Chat-row swipe gesture state (`quill::chat_swipe`).
     pub(super) swipe: super::chat_swipe_ui::ChatSwipeState,
     /// Slice CL1: right-click chat-row context menu target + window
@@ -88,6 +91,7 @@ impl ChatListUi {
             // kit Phase 3: chat list + message history virtualization.
             scroll: VirtualListScrollHandle::new(),
             items: Vec::new(),
+            folder_tags: Default::default(),
             swipe: Default::default(),
             menu: None,
             archive_menu: None,

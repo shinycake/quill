@@ -103,9 +103,16 @@ impl QuillApp {
 
     fn emoji_status_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
-        let panel = session
-            .map(|s| s.stickers.emoji.clone())
-            .unwrap_or_default();
+        let no_panel = quill::emoji::EmojiPanel::default();
+        let panel = session.map_or(&no_panel, |s| &s.stickers.emoji);
+        // Resolved custom emoji by id, built once for the lists below.
+        let mut resolved: std::collections::HashMap<i64, &quill::telegram::envelope::StickerItem> =
+            std::collections::HashMap::new();
+        for sticker in &panel.custom_emoji_stickers {
+            if let Some(id) = sticker.custom_emoji_id {
+                resolved.entry(id).or_insert(sticker);
+            }
+        }
         let premium = session.is_some_and(|s| {
             s.my_user_id
                 .and_then(|id| s.user(id))
@@ -241,11 +248,7 @@ impl QuillApp {
                 if id <= 0 || !seen.insert(id) {
                     continue;
                 }
-                let Some(sticker) = panel
-                    .custom_emoji_stickers
-                    .iter()
-                    .find(|s| s.custom_emoji_id == Some(id))
-                else {
+                let Some(sticker) = resolved.get(&id).copied() else {
                     continue;
                 };
                 let display = sticker.thumb_file_id.or_else(|| {
@@ -323,33 +326,35 @@ impl QuillApp {
                         cx.notify();
                     })),
             )
-            .child(div().text_xs().child(panel.status_note.unwrap_or_else(|| {
-                if busy {
-                    tr(keys::Q_MEDIA_UPDATING_EMOJI_STATUS).into()
-                } else if session.is_some_and(|s| {
-                    [
-                        RequestPurpose::GetRecentEmojiStatuses,
-                        RequestPurpose::GetThemedEmojiStatuses,
-                        RequestPurpose::GetDefaultEmojiStatuses,
-                        RequestPurpose::GetCustomEmojiStickers,
-                    ]
-                    .iter()
-                    .any(|p| s.requests.has_purpose(*p))
-                }) {
-                    tr(keys::Q_MEDIA_LOADING_EMOJI_STATUSES).into()
-                } else {
-                    tr(keys::Q_MEDIA_CHOOSE_A_DURATION_THEN_A).into()
-                }
-            })))
+            .child(
+                div()
+                    .text_xs()
+                    .child(panel.status_note.clone().unwrap_or_else(|| {
+                        if busy {
+                            tr(keys::Q_MEDIA_UPDATING_EMOJI_STATUS).into()
+                        } else if session.is_some_and(|s| {
+                            [
+                                RequestPurpose::GetRecentEmojiStatuses,
+                                RequestPurpose::GetThemedEmojiStatuses,
+                                RequestPurpose::GetDefaultEmojiStatuses,
+                                RequestPurpose::GetCustomEmojiStickers,
+                            ]
+                            .iter()
+                            .any(|p| s.requests.has_purpose(*p))
+                        }) {
+                            tr(keys::Q_MEDIA_LOADING_EMOJI_STATUSES).into()
+                        } else {
+                            tr(keys::Q_MEDIA_CHOOSE_A_DURATION_THEN_A).into()
+                        }
+                    })),
+            )
             .into_any_element()
     }
 
     fn emoji_sets_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let panel = self
-            .session()
-            .map(|s| s.stickers.emoji.clone())
-            .unwrap_or_default();
         let session = self.session();
+        let no_panel = quill::emoji::EmojiPanel::default();
+        let panel = session.map_or(&no_panel, |s| &s.stickers.emoji);
         let mutating =
             session.is_some_and(|s| s.requests.has_purpose(RequestPurpose::ChangeEmojiSet));
         let loading = session.is_some_and(|s| {

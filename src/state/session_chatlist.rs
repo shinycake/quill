@@ -1,6 +1,15 @@
 //! Chat-list management: pins, open chat, views, ordering.
 use super::*;
 
+/// Whether `Session::main_order` / `archive_order` are stale. While a poll
+/// batch is open (`deferred`), order changes only set `dirty`; closing the
+/// batch sorts once.
+#[derive(Debug, Default)]
+pub(crate) struct ChatOrderSync {
+    pub(crate) dirty: bool,
+    pub(crate) deferred: bool,
+}
+
 impl Session {
     pub fn request_download(&mut self, file_id: FileId) -> RequestId {
         let extra = self
@@ -25,13 +34,7 @@ impl Session {
         let mut pinned: Vec<(i64, i64)> = self
             .chats
             .values()
-            .filter(|c| {
-                if archived {
-                    c.in_archive && c.archive_is_pinned
-                } else {
-                    c.in_main_list && c.is_pinned
-                }
-            })
+            .filter(|c| Self::is_pinned_in(c, archived))
             .map(|c| {
                 let order = if archived { c.archive_order } else { c.order };
                 (c.id.0, order)
@@ -41,6 +44,24 @@ impl Session {
         // `rebuild_main_order`'s sort.
         pinned.sort_by(|a, b| b.1.cmp(&a.1).then(b.0.cmp(&a.0)));
         pinned.into_iter().map(|(id, _)| id).collect()
+    }
+
+    fn is_pinned_in(chat: &ChatSummary, archived: bool) -> bool {
+        if archived {
+            chat.in_archive && chat.archive_is_pinned
+        } else {
+            chat.in_main_list && chat.is_pinned
+        }
+    }
+
+    /// Whether `pinned_chat_ids(archived)` would hold at least two chats
+    /// (the pin drag needs a pair), without sorting them.
+    pub fn has_two_pinned_chats(&self, archived: bool) -> bool {
+        self.chats
+            .values()
+            .filter(|c| Self::is_pinned_in(c, archived))
+            .nth(1)
+            .is_some()
     }
 
     pub fn reorder_pinned_chats(&mut self, archived: bool, new_ids: &[i64]) -> Vec<(i64, i64)> {
@@ -77,9 +98,30 @@ impl Session {
     }
 
     pub(crate) fn rebuild_main_order(&mut self) {
-        // Runs on every position / last-message / draft update: sort the
-        // `(order, chat_id)` keys TDLib orders by (descending, schema
-        // 1.8.67 `chatPosition.order`), never clones of whole summaries.
+        self.chat_order_sync.dirty = true;
+        if !self.chat_order_sync.deferred {
+            self.flush_chat_order();
+        }
+    }
+
+    /// Open a poll batch: chat-order sorts wait for `end_update_batch`.
+    pub fn begin_update_batch(&mut self) {
+        self.chat_order_sync.deferred = true;
+    }
+
+    /// Close a poll batch and sort the chat lists if anything moved.
+    pub fn end_update_batch(&mut self) {
+        self.chat_order_sync.deferred = false;
+        if self.chat_order_sync.dirty {
+            self.flush_chat_order();
+        }
+    }
+
+    fn flush_chat_order(&mut self) {
+        self.chat_order_sync.dirty = false;
+        // Sort the `(order, chat_id)` keys TDLib orders by (descending,
+        // schema 1.8.67 `chatPosition.order`), never clones of whole
+        // summaries.
         let mut rows: Vec<(i64, ChatId)> = self
             .chats
             .values()
@@ -255,6 +297,15 @@ impl Session {
             .filter_map(|id| self.chats.get(&id.0))
             .filter(|chat| chat.in_main_list)
             .collect()
+    }
+
+    /// Whether the archive holds a chat (what `ordered_archived_chats` would
+    /// list is not empty), without collecting them.
+    pub fn has_archived_chats(&self) -> bool {
+        self.archive_order
+            .iter()
+            .filter_map(|id| self.chats.get(&id.0))
+            .any(|chat| chat.in_archive)
     }
 
     /// Chats in `chatListArchive`, highest TDLib order first (same as main).

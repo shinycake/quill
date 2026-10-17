@@ -2,22 +2,28 @@
 
 use super::*;
 use crate::ui::chat_list_keys::ListRow;
+use std::rc::Rc;
+
+/// What the chat rows need to draw folder tag chips: built once per list
+/// render (with the item list it belongs to) and shared by its rows.
+#[derive(Default)]
+pub(in crate::ui) struct FolderTagContext {
+    /// `(id, chip text, colour)` of the folders (`quill::folder_limits::tag_names`).
+    pub(in crate::ui) names: Vec<(i32, String, i32)>,
+    /// Tags are on (`are_folder_tags_enabled`).
+    pub(in crate::ui) show: bool,
+}
 
 impl QuillApp {
-    /// `(id, name, colour)` of the folders plus whether tags are on.
-    pub(in crate::ui) fn folder_tag_context(&self) -> (Vec<(i32, String, i32)>, bool) {
-        self.session()
-            .map(|s| {
-                (
-                    s.chat_list
-                        .chat_folders
-                        .iter()
-                        .map(|f| (f.id, f.name.clone(), f.color_id))
-                        .collect::<Vec<_>>(),
-                    s.chat_list.are_folder_tags_enabled,
-                )
-            })
-            .unwrap_or_default()
+    /// The folder chip names plus whether tags are on.
+    pub(in crate::ui) fn folder_tag_context(&self) -> Rc<FolderTagContext> {
+        Rc::new(
+            self.session()
+                .map_or_else(Default::default, |s| FolderTagContext {
+                    names: quill::folder_limits::tag_names(&s.chat_list.chat_folders),
+                    show: s.chat_list.are_folder_tags_enabled,
+                }),
+        )
     }
 
     /// kit Phase 3: resolve one virtualized chat-list item to its element.
@@ -43,8 +49,9 @@ impl QuillApp {
                 };
                 let open = self.session().and_then(|s| s.open_chat);
                 let selected = open == Some(chat.id);
-                // Parity slice: folder names + tags flag for chat-row chips.
-                let (folder_names, show_folder_tags) = self.folder_tag_context();
+                // Parity slice: folder names + tags flag for chat-row chips,
+                // built with the item list this row belongs to.
+                let folder_tags = Rc::clone(&self.chat_list.folder_tags);
                 // Parity slice: chat photos resolve per visible row and are
                 // sandboxed before display.
                 let media_roots = self.media_display_roots();
@@ -59,21 +66,19 @@ impl QuillApp {
                 // Slice CL2: pin drag runs only on the unfiltered list with
                 // at least two pinned chats (TGX `ChatsAdapter`); the
                 // archive has its own pinned set.
-                // (Pinned flag first: counting the pinned chats walks every
-                // chat, so only pinned rows pay for it.)
+                // (Pinned flag first: looking for a second pinned chat walks
+                // the chats, so only pinned rows pay for it.)
                 let draggable = if archived {
                     chat.archive_is_pinned
                         && self.chat_list.filter == ChatListFilter::Archived
-                        && self
-                            .session()
-                            .is_some_and(|s| s.pinned_chat_ids(true).len() >= 2)
+                        && self.session().is_some_and(|s| s.has_two_pinned_chats(true))
                 } else {
                     chat.is_pinned
                         && self.chat_list.filter == ChatListFilter::All
                         && self.folders.tab.is_none()
                         && self
                             .session()
-                            .is_some_and(|s| s.pinned_chat_ids(false).len() >= 2)
+                            .is_some_and(|s| s.has_two_pinned_chats(false))
                 };
                 // The activity indicator is clock-driven: keep ticking while
                 // a visible row shows one (the chat list's animation layer
@@ -137,9 +142,9 @@ impl QuillApp {
                 let row = session_chat_row(
                     chat,
                     selected,
-                    &folder_names,
+                    &folder_tags.names,
                     self.folders.tab,
-                    show_folder_tags,
+                    folder_tags.show,
                     photo.as_deref(),
                     draggable,
                     archived,

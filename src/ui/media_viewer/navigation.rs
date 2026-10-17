@@ -199,6 +199,7 @@ impl QuillApp {
         // MED1: orientation and playback error are per-item state.
         self.viewer.orientation = Default::default();
         self.viewer.rotated = None;
+        self.viewer.cancel_reorient();
         self.viewer.hdr.reset();
         self.playback.error = None;
         self.viewer.extra.share_at = None;
@@ -247,6 +248,7 @@ impl QuillApp {
         // Reopening the same item starts with its caption collapsed.
         self.viewer.extra.caption = Default::default();
         self.viewer.state.close();
+        self.viewer.cancel_reorient();
         self.viewer.hdr.reset();
         cx.notify();
     }

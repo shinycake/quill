@@ -17,6 +17,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         Self {
             session,
             sender,
+            batch: Default::default(),
             call_engine: None,
             signaling_outbox: Arc::new(Mutex::new(VecDeque::new())),
             transport_outbox: Arc::new(Mutex::new(VecDeque::new())),

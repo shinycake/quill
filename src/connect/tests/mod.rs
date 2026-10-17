@@ -109,6 +109,7 @@ mod threads;
 mod ton_wallet;
 mod ton_wallet_own;
 mod translate;
+mod update_batch;
 mod web_apps;
 
 pub(crate) use calls::{READY_CALL_JSON, group_call_test_driver};
