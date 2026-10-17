@@ -395,3 +395,9 @@ pub(crate) fn initials(title: &str) -> String {
 pub(crate) fn install(demo: bool, window: &mut Window, cx: &mut Context<QuillApp>) {
     mac::install(demo, window, cx);
 }
+
+/// Mirror the app again after a change that did not notify it (it
+/// mirrors on every app notify by itself).
+pub(crate) fn request_sync(cx: &mut Context<QuillApp>) {
+    mac::request_sync(cx);
+}

@@ -22,7 +22,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with, trn};
 use quill::local_path::sandboxed_display_path;
-use quill::state::{HistoryMessage, SAVED_TAG_LABEL_MAX, clean_tag_label};
+use quill::state::{SAVED_TAG_LABEL_MAX, clean_tag_label};
 use quill::telegram::envelope::{
     ReactionType, SavedMessagesTag, SavedMessagesTopic, SavedTopicKind,
 };
@@ -176,35 +176,20 @@ impl QuillApp {
         }
     }
 
-    /// The rows of a sublist or tag view.
-    pub(super) fn saved_rows(&self) -> Option<Vec<HistoryMessage>> {
-        let session = self.session()?;
+    /// The history a sublist or tag view shows, with the sublist it is in
+    /// (0: all of Saved Messages).
+    pub(super) fn saved_history(&self) -> Option<(i64, &quill::state::TopicHistory)> {
+        let saved = &self.session()?.threads.saved;
         match self.saved_mode()? {
             SavedMode::Sublists => None,
-            SavedMode::Sublist => Some(
-                session
-                    .threads
-                    .saved
-                    .sublist
-                    .as_ref()?
-                    .history
-                    .ordered()
-                    .into_iter()
-                    .cloned()
-                    .collect(),
-            ),
-            SavedMode::Tag => Some(
-                session
-                    .threads
-                    .saved
-                    .tag_search
-                    .as_ref()?
-                    .history
-                    .ordered()
-                    .into_iter()
-                    .cloned()
-                    .collect(),
-            ),
+            SavedMode::Sublist => saved
+                .sublist
+                .as_ref()
+                .map(|sublist| (sublist.topic_id, &sublist.history)),
+            SavedMode::Tag => saved
+                .tag_search
+                .as_ref()
+                .map(|search| (search.topic_id, &search.history)),
         }
     }
 

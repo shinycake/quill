@@ -35,6 +35,15 @@ thread_local! {
     /// Touches not yet run, and the task waiting for them.
     static INBOX: RefCell<(VecDeque<Command>, Option<Waker>)> =
         const { RefCell::new((VecDeque::new(), None)) };
+    static SYNC_SCHEDULER: RefCell<Option<Rc<dyn Fn(&mut Context<QuillApp>)>>> =
+        const { RefCell::new(None) };
+}
+
+pub(super) fn request_sync(cx: &mut Context<QuillApp>) {
+    let schedule = SYNC_SCHEDULER.with(|slot| slot.try_borrow().ok().and_then(|slot| slot.clone()));
+    if let Some(schedule) = schedule {
+        schedule(cx);
+    }
 }
 
 /// Hand a touch to the app.
@@ -161,6 +170,12 @@ pub(super) fn install(demo: bool, window: &mut Window, cx: &mut Context<QuillApp
             .detach();
         }
     };
+    let shared: Rc<dyn Fn(&mut Context<QuillApp>)> = Rc::new(schedule.clone());
+    SYNC_SCHEDULER.with(|slot| {
+        if let Ok(mut slot) = slot.try_borrow_mut() {
+            *slot = Some(shared);
+        }
+    });
     let on_app = schedule.clone();
     cx.observe_self(move |_, cx| on_app(cx)).detach();
     // The app is mid-update here, so its composer is read once it is not.
