@@ -253,6 +253,14 @@ impl Session {
         true
     }
 
+    /// A saved-position load was dropped unanswered (stale view, chat no
+    /// longer shown): nothing is left waiting for it.
+    pub(crate) fn drop_saved_open(&mut self, chat_id: Option<ChatId>) {
+        if let Some(history) = chat_id.and_then(|id| self.histories.get_mut(&id.0)) {
+            history.saved_open = None;
+        }
+    }
+
     /// The open chat missed its saved position and needs its default
     /// window loaded (taken once).
     pub fn take_saved_open_fallback(&mut self) -> Option<ChatId> {

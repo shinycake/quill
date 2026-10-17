@@ -64,6 +64,7 @@ impl Session {
         seq: u64,
     ) {
         if self.take_stale_history_request(pending) || self.history_view_stale(pending) {
+            self.drop_saved_open(pending.chat_id);
             self.diagnostics.record(Diagnostic {
                 category: "reducer",
                 type_name: Some("messages".into()),
@@ -77,6 +78,7 @@ impl Session {
             return;
         };
         if !self.chat_is_shown(chat_id) {
+            self.drop_saved_open(Some(chat_id));
             self.diagnostics.record(Diagnostic {
                 category: "reducer",
                 type_name: Some("messages".into()),

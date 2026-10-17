@@ -12,20 +12,29 @@ impl<S: JsonSender> ConnectDriver<S> {
         anchor: MessageId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         let extra = self.session.request_history_around(chat_id, anchor);
-        if let Err(err) = self.sender.send_json(&get_chat_history(
-            extra,
-            chat_id,
-            anchor,
-            HISTORY_AROUND_OFFSET,
-            HISTORY_AROUND_LIMIT,
-            false,
-        )) {
+        if self
+            .sender
+            .send_json(&get_chat_history(
+                extra,
+                chat_id,
+                anchor,
+                HISTORY_AROUND_OFFSET,
+                HISTORY_AROUND_LIMIT,
+                false,
+            ))
+            .is_err()
+        {
             self.session.requests.take(extra);
             if let Some(history) = self.session.histories.get_mut(&chat_id.0) {
                 history.saved_open = None;
             }
-            let _ = self.fetch_history_for(chat_id);
-            return Err(err);
+            // The default window answers for the open: a failed send of
+            // the around request is not a failed open.
+            let fallback = self.fetch_history_for(chat_id);
+            if fallback.is_err() {
+                self.mark_history_load_failed(chat_id);
+            }
+            return fallback;
         }
         Ok(Some(extra))
     }
@@ -37,6 +46,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(chat_id) = self.session.take_saved_open_fallback() else {
             return false;
         };
-        matches!(self.fetch_history_for(chat_id), Ok(Some(_)))
+        match self.fetch_history_for(chat_id) {
+            Ok(requested) => requested.is_some(),
+            Err(_) => {
+                self.mark_history_load_failed(chat_id);
+                false
+            }
+        }
+    }
+
+    /// The emptied window has nothing left to load it: show the usual
+    /// Retry row instead of the skeleton.
+    fn mark_history_load_failed(&mut self, chat_id: ChatId) {
+        if let Some(history) = self.session.histories.get_mut(&chat_id.0) {
+            history.load_failed = true;
+        }
     }
 }

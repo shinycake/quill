@@ -78,3 +78,20 @@ chat B, Demo chat A, twice. After both round trips the view equals the one left 
 to 9 at the same offsets), light and dark.
 Not shown: real TDLib round trips (the demo history is all in memory, so the restore there is the
 in-window case; the around-load is covered by the driver tests).
+
+## Known gap
+Other default openers (notification clicks, the profile "Message" button, chat windows) do not go
+through `QuillApp::chat_open_at`, so they open at the default position. The saved entry is then
+applied only if its row happens to be in that window and is forgotten otherwise; when it is in the
+window it can win over the unread divider. Harmless, and left for a follow-up that routes them
+through `chat_open_at`.
+
+## Fallback hardening (review round 4)
+- A failed default load after a missing saved message sets `load_failed` (the usual Retry row)
+  instead of leaving the skeleton up.
+- A failed send of the around request returns the default load's result, so the chat list does not
+  report "could not open chat" while the chat opens.
+- The fallback runs right after the reducer applies a payload, before any `?` return in the ingest.
+- A stale-view or chat-not-shown around page clears `saved_open` for its chat.
+- Tests in `connect::tests::history_window`: chat switch during the request, a swept request falls
+  back once, a live message in the empty window, an open with no history entry, and both error paths.

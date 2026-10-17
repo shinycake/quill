@@ -554,3 +554,211 @@ fn an_explicit_target_opens_highlighted_whatever_was_saved() {
         }
     );
 }
+
+fn chat_json(id: i64) -> String {
+    format!(
+        r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"Bob","type":{{"@type":"chatTypePrivate","user_id":{id}}},"unread_count":0}}}}"#
+    )
+}
+
+#[test]
+fn switching_chats_during_the_saved_open_leaves_the_other_chat_alone() {
+    let mut h = Harness::with_unread_chat();
+    h.ingest(&chat_json(8));
+    let around = h
+        .driver
+        .select_chat_open(ChatId(7), crate::state::HistoryOpen::Saved(MessageId(45)))
+        .unwrap()
+        .unwrap();
+    h.driver.select_chat(ChatId(8)).unwrap();
+    let before = history_requests(&h);
+
+    // The old chat's page comes back without its message.
+    h.answer(around, &[40, 50]);
+    assert_eq!(history_requests(&h), before, "no fallback for any chat");
+    assert_eq!(h.driver.session.open_chat, Some(ChatId(8)));
+    assert!(!h.driver.session.saved_open_pending(ChatId(7)));
+    assert!(
+        h.driver
+            .session
+            .histories
+            .get(&8)
+            .is_none_or(|b| b.messages.is_empty() && !b.load_failed)
+    );
+}
+
+#[test]
+fn a_swept_saved_open_falls_back_to_the_default_window_once() {
+    let mut h = Harness::with_unread_chat();
+    h.driver
+        .select_chat_open(ChatId(7), crate::state::HistoryOpen::Saved(MessageId(45)))
+        .unwrap()
+        .unwrap();
+    assert_eq!(history_requests(&h), 1);
+    h.ingest(r#"{"@type":"updateConnectionState","state":{"@type":"connectionStateReady"}}"#);
+
+    let late = std::time::Instant::now() + crate::state::PENDING_REQUEST_TTL * 2;
+    assert!(h.driver.request_tick(late));
+    assert!(!h.driver.session.saved_open_pending(ChatId(7)));
+    assert_eq!(history_requests(&h), 2);
+    assert_eq!(h.last_history_request()["from_message_id"], 30);
+
+    h.driver
+        .request_tick(late + std::time::Duration::from_secs(60));
+    assert_eq!(history_requests(&h), 2, "one fallback only");
+}
+
+#[test]
+fn a_live_message_in_the_empty_window_does_not_end_the_saved_open() {
+    let mut h = Harness::with_unread_chat();
+    let around = h
+        .driver
+        .select_chat_open(ChatId(7), crate::state::HistoryOpen::Saved(MessageId(45)))
+        .unwrap()
+        .unwrap();
+    h.ingest(&format!(
+        r#"{{"@type":"updateNewMessage","message":{}}}"#,
+        message_json(61, false)
+    ));
+    assert!(
+        h.driver.session.saved_open_pending(ChatId(7)),
+        "the anchoring still waits for the page"
+    );
+    assert_eq!(history_requests(&h), 1);
+
+    h.answer(around, &[40, 45, 50]);
+    assert!(!h.driver.session.saved_open_pending(ChatId(7)));
+    assert!(h.history().contains(MessageId(45)));
+    assert!(h.history().contains(MessageId(61)));
+    assert_eq!(history_requests(&h), 1, "no fallback");
+}
+
+#[test]
+fn a_saved_open_of_a_chat_without_a_history_entry_loads_around_the_message() {
+    let mut h = Harness::with_unread_chat();
+    h.ingest(&chat_json(8));
+    let first = h.driver.select_chat(ChatId(7)).unwrap().unwrap();
+    h.answer(first, &[20, 30, 40]);
+    h.driver.select_chat(ChatId(8)).unwrap();
+    // A closed chat's history is dropped from memory.
+    h.driver.session.histories.remove(&7);
+
+    let extra = h
+        .driver
+        .select_chat_open(ChatId(7), crate::state::HistoryOpen::Saved(MessageId(30)))
+        .unwrap()
+        .expect("loads around the saved message");
+    assert_eq!(h.last_history_request()["from_message_id"], 30);
+    assert!(h.driver.session.saved_open_pending(ChatId(7)));
+    h.answer(extra, &[20, 30, 40]);
+    assert!(!h.driver.session.saved_open_pending(ChatId(7)));
+    assert!(h.history().contains(MessageId(30)));
+
+    // A missing message still falls back with no entry to start from.
+    h.driver.select_chat(ChatId(8)).unwrap();
+    h.driver.session.histories.remove(&7);
+    let extra = h
+        .driver
+        .select_chat_open(ChatId(7), crate::state::HistoryOpen::Saved(MessageId(33)))
+        .unwrap()
+        .unwrap();
+    h.answer(extra, &[20, 40]);
+    assert_eq!(h.last_history_request()["from_message_id"], 30);
+}
+
+/// A sender that refuses requests containing `needle` and accepts the rest.
+struct RefusesContaining {
+    needle: &'static str,
+}
+
+impl JsonSender for RefusesContaining {
+    fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
+        if request.contains(self.needle) {
+            Err(ConnectSendError::Native)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+struct RefusingHarness {
+    driver: ConnectDriver<RefusesContaining>,
+    seq: AtomicU64,
+    sink: Arc<dyn DiagnosticSink>,
+    _dir: std::path::PathBuf,
+}
+
+impl RefusingHarness {
+    fn new(needle: &'static str) -> Self {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+        let session = Session::new(AccountKey::primary(), sink.clone());
+        let driver = ConnectDriver::new(
+            session,
+            RefusesContaining { needle },
+            test_credentials(),
+            prepared,
+        );
+        let mut h = RefusingHarness {
+            driver,
+            seq: AtomicU64::new(0),
+            sink,
+            _dir: dir,
+        };
+        h.ingest(r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#);
+        h.ingest(&format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":7,"title":"Alice","type":{{"@type":"chatTypePrivate","user_id":7}},"unread_count":3,"last_read_inbox_message_id":30,"last_message":{}}}}}"#,
+            message_json(60, false)
+        ));
+        h.ingest(r#"{"@type":"updateChatPosition","chat_id":7,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"9","is_pinned":false}}"#);
+        h
+    }
+
+    fn ingest(&mut self, json: &str) {
+        self.driver
+            .ingest(copy_and_parse(json, &self.seq, &self.sink).unwrap())
+            .unwrap();
+    }
+}
+
+#[test]
+fn a_refused_around_request_opens_through_the_default_window() {
+    let mut h = RefusingHarness::new(r#""from_message_id":45"#);
+    let opened = h
+        .driver
+        .select_chat_open(ChatId(7), crate::state::HistoryOpen::Saved(MessageId(45)));
+    assert!(
+        matches!(opened, Ok(Some(_))),
+        "the fallback's request is the open's result"
+    );
+    assert!(!h.driver.session.saved_open_pending(ChatId(7)));
+    assert!(!h.driver.session.history_load_failed(ChatId(7)));
+    assert!(
+        h.driver
+            .session
+            .requests
+            .has_purpose_for_chat(crate::state::RequestPurpose::GetHistoryAround, ChatId(7)),
+        "the default window loads around the read boundary"
+    );
+}
+
+#[test]
+fn a_refused_default_window_after_a_missing_saved_message_shows_retry() {
+    let mut h = RefusingHarness::new(r#""from_message_id":30"#);
+    let around = h
+        .driver
+        .select_chat_open(ChatId(7), crate::state::HistoryOpen::Saved(MessageId(45)))
+        .unwrap()
+        .unwrap();
+    let messages = [50, 40].map(|id| message_json(id, false)).join(",");
+    h.ingest(&format!(
+        r#"{{"@type":"messages","@extra":"{}","total_count":2,"messages":[{messages}]}}"#,
+        around.0
+    ));
+    assert!(!h.driver.session.saved_open_pending(ChatId(7)));
+    assert!(
+        h.driver.session.history_load_failed(ChatId(7)),
+        "the usual Retry row, not a skeleton"
+    );
+}

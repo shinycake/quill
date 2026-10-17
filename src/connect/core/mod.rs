@@ -507,6 +507,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let send_outcome = Self::send_outcome(&owned.envelope.payload);
         self.session.apply(owned);
         self.run_deferred_caption(send_outcome);
+        // A saved open that missed its message loads the default window
+        // on this tick, whatever the `?` returns below do.
+        self.load_default_after_saved_open();
         if paid_prices_change {
             self.sync_paid_guard();
         }
@@ -678,7 +681,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if view_after {
             self.maybe_view_open_messages()?;
         }
-        self.load_default_after_saved_open();
         // M2: full rich blocks replace the partial message's blocks in
         // history. Only `RichMessage` rows are touched — an unrelated
         // response can never clobber a different content kind.
