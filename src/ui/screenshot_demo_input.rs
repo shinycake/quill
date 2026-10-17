@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use gpui_kit::gpui::{
     AnyWindowHandle, AsyncApp, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, PlatformInput, Point, ScrollDelta,
-    ScrollWheelEvent, TouchPhase, point, px,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PinchEvent, Pixels, PlatformInput, Point,
+    ScrollDelta, ScrollWheelEvent, TouchPhase, point, px,
 };
 
 /// Runs the `QUILL_DEMO_CLICK=step[;step…]` script against the demo window,
@@ -133,6 +133,14 @@ async fn run_step(step: &str, demo_window: AnyWindowHandle, cx: &mut AsyncApp) {
         pause(cx, 40).await;
         return;
     }
+    // `z:` sends one trackpad pinch ([`pinch_step`]).
+    if let Some(pinch) = step.strip_prefix("z:") {
+        if let Some(event) = pinch_step(pinch) {
+            dispatch(demo_window, cx, [PlatformInput::Pinch(event)], false);
+        }
+        pause(cx, 40).await;
+        return;
+    }
     // `s:x,y,dy` scrolls by `dy` px at the point instead.
     if let Some(scroll) = step.strip_prefix("s:") {
         let parts: Vec<f32> = scroll
@@ -255,6 +263,26 @@ pub(crate) fn wheel_step(step: &str) -> Option<ScrollWheelEvent> {
         touch_phase,
     })
 }
+/// The `z:` step `x,y,delta`: one trackpad pinch centred on the point,
+/// `delta` as the platform reports it (0.1 is a tenth more magnification,
+/// negative pinches out). `None` when the step does not parse.
+pub(crate) fn pinch_step(step: &str) -> Option<PinchEvent> {
+    let parts: Vec<&str> = step.split(',').map(str::trim).collect();
+    let [x, y, delta] = parts.as_slice() else {
+        return None;
+    };
+    let delta: f32 = delta.parse().ok()?;
+    if !delta.is_finite() {
+        return None;
+    }
+    Some(PinchEvent {
+        position: point(px(x.parse().ok()?), px(y.parse().ok()?)),
+        delta,
+        modifiers: Modifiers::default(),
+        phase: TouchPhase::Moved,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,5 +302,16 @@ mod tests {
         assert_eq!(zoom.modifiers, Modifiers::secondary_key());
         assert!(wheel_step("10,20,0").is_none());
         assert!(wheel_step("10,20,x,40,e").is_none());
+    }
+
+    #[test]
+    fn a_pinch_step_parses_its_centre_and_delta() {
+        let pinch = pinch_step("800, 500, 0.6").expect("a step");
+        assert_eq!(pinch.position, point(px(800.), px(500.)));
+        assert_eq!(pinch.delta, 0.6);
+        assert_eq!(pinch.phase, TouchPhase::Moved);
+        assert!(pinch_step("800,500").is_none());
+        assert!(pinch_step("800,500,x").is_none());
+        assert!(pinch_step("800,500,inf").is_none());
     }
 }
