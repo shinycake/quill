@@ -1072,3 +1072,12 @@
 "qll_ops_youre_already_in_a_call" = "You're already in a call. Telegram doesn't support putting a call on hold — answering ends the current one.";
 "qll_ops_youre_offline_cant_start_a" = "You're offline — can't start a call";
 "qll_ops_server_error" = "Internal server error.";
+"lng_in_dlg_photo" = "Photo";
+"lng_in_dlg_video" = "Video";
+"lng_in_dlg_file" = "File";
+"lng_in_dlg_poll" = "Poll";
+"lng_in_dlg_audio" = "Voice message";
+"lng_duration_and_size" = "{duration}, {size}";
+"lng_date_and_duration" = "{date}, {duration}";
+"qll_ops_gif" = "GIF";
+"qll_ops_unknown_track" = "Unknown Track";

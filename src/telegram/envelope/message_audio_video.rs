@@ -22,6 +22,8 @@ pub struct AudioContent {
     pub album_cover_thumbnail: Option<AlbumCoverThumb>,
     pub external_album_covers: Vec<AlbumCoverThumb>,
     pub file_id: FileId,
+    /// File size in bytes (`0` when TDLib has not reported one).
+    pub size: i64,
 }
 
 impl AudioContent {
@@ -520,9 +522,11 @@ pub(crate) fn parse_message_audio(value: &Value) -> (MessageContent, Vec<ParsedF
         );
     };
     let mut files = Vec::new();
+    let mut size = 0;
     let file_id = match parse_file(audio.get("audio")) {
         Ok(file) => {
             let id = file.id;
+            size = file.display_size();
             files.push(file);
             id
         }
@@ -554,6 +558,7 @@ pub(crate) fn parse_message_audio(value: &Value) -> (MessageContent, Vec<ParsedF
             album_cover_thumbnail,
             external_album_covers,
             file_id,
+            size,
         }),
         files,
     )

@@ -1,5 +1,6 @@
 //! Shared-media gallery state types.
 use super::*;
+use crate::lang::{keys, tr};
 
 /// Slice media-shared-gallery: the per-chat shared-media gallery tabs. The
 /// message tabs map to one TDLib `searchChatMessages` filter constructor
@@ -199,6 +200,8 @@ pub struct SharedMediaItem {
     pub action: SharedMediaAction,
     /// What the grid tiles of the Stories and Gifts tabs draw.
     pub visual: SharedMediaVisual,
+    /// The facts a Files, Music, Voice or Links row prints.
+    pub meta: SharedMediaMeta,
 }
 
 impl SharedMediaItem {
@@ -207,25 +210,27 @@ impl SharedMediaItem {
     /// label their hits the same way.
     pub fn label_for(tab: SharedMediaTab, content: &MessageContent) -> String {
         match content {
-            MessageContent::Photo(c) => caption_or(&[&c.caption], "Photo"),
-            MessageContent::Video(c) => caption_or(&[&c.caption, &c.file_name], "Video"),
-            MessageContent::Document(c) => caption_or(&[&c.caption, &c.file_name], "File"),
-            MessageContent::Audio(c) => {
-                let performer_title = if !c.performer.is_empty() || !c.title.is_empty() {
-                    format!(
-                        "{} — {}",
-                        non_empty_or(&c.performer, "Unknown artist"),
-                        non_empty_or(&c.title, "Unknown track"),
-                    )
-                } else {
-                    String::new()
-                };
-                caption_or(&[&performer_title, &c.file_name], "Music")
+            MessageContent::Photo(c) => caption_or(&[&c.caption], tr(keys::IN_DLG_PHOTO)),
+            MessageContent::Video(c) => {
+                caption_or(&[&c.caption, &c.file_name], tr(keys::IN_DLG_VIDEO))
             }
-            MessageContent::VoiceNote(c) => caption_or(&[&c.caption], "Voice message"),
-            MessageContent::Animation(c) => caption_or(&[&c.caption, &c.file_name], "GIF"),
-            MessageContent::VideoNote(_) => "Round video".to_string(),
-            MessageContent::Poll(c) => caption_or(&[&c.poll.question], "Poll"),
+            MessageContent::Document(c) => {
+                caption_or(&[&c.caption, &c.file_name], tr(keys::IN_DLG_FILE))
+            }
+            MessageContent::Audio(c) => caption_or(
+                &[&super::shared_media_meta::song_name(
+                    &c.performer,
+                    &c.title,
+                    &c.file_name,
+                )],
+                tr(keys::Q_OPS_UNKNOWN_TRACK),
+            ),
+            MessageContent::VoiceNote(c) => caption_or(&[&c.caption], tr(keys::IN_DLG_AUDIO)),
+            MessageContent::Animation(c) => {
+                caption_or(&[&c.caption, &c.file_name], tr(keys::Q_OPS_GIF))
+            }
+            MessageContent::VideoNote(_) => tr(keys::IN_DLG_VIDEO_MESSAGE).to_string(),
+            MessageContent::Poll(c) => caption_or(&[&c.poll.question], tr(keys::IN_DLG_POLL)),
             MessageContent::Text(c) => {
                 let url = c
                     .entities
@@ -233,7 +238,7 @@ impl SharedMediaItem {
                     .find_map(|entity| entity.open_href(&c.text))
                     .unwrap_or_default();
                 let preview: String = c.text.chars().take(60).collect();
-                caption_or(&[url, &preview], "Link")
+                caption_or(&[url, &preview], tr(keys::INFO_LINK_LABEL))
             }
             _ => tab.label().to_string(),
         }
@@ -259,6 +264,7 @@ impl SharedMediaItem {
             date: message.date,
             action: SharedMediaAction::Message,
             visual: SharedMediaVisual::None,
+            meta: SharedMediaMeta::from_parsed(message),
         }
     }
 }

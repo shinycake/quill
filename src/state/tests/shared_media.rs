@@ -60,6 +60,13 @@ fn shared_media_empty_ready_failed_and_stale_drop() {
     assert_eq!(files.status, SharedMediaTabStatus::Ready);
     assert_eq!(files.items.len(), 1);
     assert_eq!(files.items[0].label, "report.pdf");
+    assert_eq!(
+        files.items[0].meta,
+        SharedMediaMeta::File {
+            name: "report.pdf".into(),
+            size: 1
+        }
+    );
     // Stale generation → dropped, tab keeps its old state.
     let generation = session
         .media
