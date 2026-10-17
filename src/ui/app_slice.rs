@@ -327,12 +327,12 @@ impl QuillApp {
         }
     }
 
-    /// The chat list, as a cached slice filling a `sidebar_width` column,
+    /// The chat list, as a cached slice filling its laid-out column,
     /// with its layer painting the animated content just above it.
     pub(super) fn sidebar_slot(&self) -> AnyElement {
         let column = div()
             .relative()
-            .w(self.frame.sidebar_width + px(self.folder_rail_width()))
+            .w(self.list_width() + px(self.folder_rail_width()))
             .flex_none()
             .h_full();
         match &self.slices.sidebar {

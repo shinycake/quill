@@ -352,8 +352,7 @@ impl QuillApp {
         // tdesktop `archiveInMainMenu`: the archive lives here instead of
         // on top of the chat list while there is something archived.
         let archive_in_menu = quill::chatlist_archive::show_in_main_menu(
-            self.session()
-                .is_some_and(|s| !s.ordered_archived_chats().is_empty()),
+            self.session().is_some_and(|s| s.has_archived_chats()),
             self.appearance.archive_in_main_menu,
         );
         let accounts_unread = self.other_accounts_unread();
@@ -680,10 +679,11 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let width = width.clamp(
-            px(quill::settings::MIN_SIDEBAR_WIDTH),
-            px(quill::settings::MAX_SIDEBAR_WIDTH),
-        );
+        // The conversation keeps its minimum beside the list.
+        let max = self
+            .max_list_width()
+            .min(px(quill::settings::MAX_SIDEBAR_WIDTH));
+        let width = width.min(max).max(px(quill::settings::MIN_SIDEBAR_WIDTH));
         if width != self.frame.sidebar_width {
             self.frame.sidebar_width = width;
             self.schedule_window_state_save(window, cx);

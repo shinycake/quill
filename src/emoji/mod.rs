@@ -7,6 +7,10 @@ use crate::telegram::envelope::{
 };
 use crate::telegram::envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusItem};
 use crate::text::TextEntityKind;
+use std::collections::{HashMap, HashSet};
+
+/// Most resolved custom emoji kept in `EmojiPanel::custom_emoji_stickers`.
+pub const CUSTOM_EMOJI_CACHE_CAP: usize = 4000;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum EmojiSetTab {
@@ -424,14 +428,65 @@ impl Session {
     }
 
     /// Slice S10: store a `getCustomEmojiStickers` answer in the emoji panel.
+    ///
+    /// A re-sent sticker replaces the old entry and moves to the end. Past
+    /// [`CUSTOM_EMOJI_CACHE_CAP`] entries the oldest are dropped, except ids
+    /// [`Self::open_chat_custom_emoji_ids`] says are on screen; a dropped
+    /// id is resolved again the next time it shows (its attempt mark is
+    /// cleared so the request goes out).
     pub fn accept_custom_emoji_stickers(&mut self, stickers: Vec<StickerItem>) {
-        // ponytail: linear merge of batches capped at 200; index by custom emoji ID if cache size grows.
-        for sticker in stickers {
-            self.stickers.emoji.custom_emoji_stickers.retain(|old| {
-                old.custom_emoji_id != sticker.custom_emoji_id
-                    || (old.custom_emoji_id.is_none() && old.file_id != sticker.file_id)
-            });
-            self.stickers.emoji.custom_emoji_stickers.push(sticker);
+        let emoji = &mut self.stickers.emoji;
+        // The last occurrence of an id wins, like the old retain + push.
+        let mut newest: HashMap<(Option<i64>, i64), usize> = HashMap::new();
+        for (ix, sticker) in stickers.iter().enumerate() {
+            newest.insert(Self::custom_emoji_key(sticker), ix);
+        }
+        emoji
+            .custom_emoji_stickers
+            .retain(|old| !newest.contains_key(&Self::custom_emoji_key(old)));
+        emoji.custom_emoji_stickers.extend(
+            stickers
+                .into_iter()
+                .enumerate()
+                .filter(|(ix, sticker)| newest.get(&Self::custom_emoji_key(sticker)) == Some(ix))
+                .map(|(_, sticker)| sticker),
+        );
+        let mut excess = self
+            .stickers
+            .emoji
+            .custom_emoji_stickers
+            .len()
+            .saturating_sub(CUSTOM_EMOJI_CACHE_CAP);
+        if excess == 0 {
+            return;
+        }
+        // What the screen shows right now is never evicted; derived from
+        // state each time, so there is no second list to keep in sync.
+        let wanted: HashSet<i64> = self.open_chat_custom_emoji_ids().into_iter().collect();
+        let emoji = &mut self.stickers.emoji;
+        let mut dropped_ids = Vec::new();
+        emoji.custom_emoji_stickers.retain(|sticker| {
+            let visible = sticker
+                .custom_emoji_id
+                .is_some_and(|id| wanted.contains(&id));
+            if excess == 0 || visible {
+                return true;
+            }
+            excess -= 1;
+            dropped_ids.extend(sticker.custom_emoji_id);
+            false
+        });
+        for id in dropped_ids {
+            emoji.status_resolution_attempted.remove(&id);
+        }
+    }
+
+    /// Identity of a resolved custom emoji: its id, or (for items without
+    /// one) the sticker's file.
+    fn custom_emoji_key(sticker: &StickerItem) -> (Option<i64>, i64) {
+        match sticker.custom_emoji_id {
+            Some(id) => (Some(id), 0),
+            None => (None, i64::from(sticker.file_id.0)),
         }
     }
 
@@ -539,24 +594,47 @@ impl Session {
     /// (`custom_emoji_stickers`) nor already attempted, capped at the
     /// server's 200-ids-per-call limit.
     pub fn message_custom_emoji_ids_to_resolve(&self) -> Vec<i64> {
-        let mut ids = self.open_chat_custom_emoji_ids();
+        self.unresolved_custom_emoji_ids(self.open_chat_custom_emoji_ids())
+    }
+
+    /// `ids` minus the resolved and already attempted ones, capped at 200.
+    pub fn unresolved_custom_emoji_ids(&self, ids: Vec<i64>) -> Vec<i64> {
+        self.unresolved_custom_emoji_ids_in(ids, &self.resolved_custom_emoji_ids())
+    }
+
+    /// [`Self::unresolved_custom_emoji_ids`] with the resolved set already
+    /// built by the caller.
+    pub fn unresolved_custom_emoji_ids_in(
+        &self,
+        mut ids: Vec<i64>,
+        resolved: &HashSet<i64>,
+    ) -> Vec<i64> {
         ids.retain(|id| {
-            !self.stickers.emoji.status_resolution_attempted.contains(id)
-                && !self
-                    .stickers
-                    .emoji
-                    .custom_emoji_stickers
-                    .iter()
-                    .any(|s| s.custom_emoji_id == Some(*id))
+            !self.stickers.emoji.status_resolution_attempted.contains(id) && !resolved.contains(id)
         });
         ids.truncate(200);
         ids
     }
 
+    /// Custom emoji ids `custom_emoji_stickers` already holds.
+    pub fn resolved_custom_emoji_ids(&self) -> HashSet<i64> {
+        self.stickers
+            .emoji
+            .custom_emoji_stickers
+            .iter()
+            .filter_map(|s| s.custom_emoji_id)
+            .collect()
+    }
+
     /// Image files of the open chat's resolved custom emoji that still need
     /// a download (the renderer shows the fallback emoji until they land).
     pub fn open_chat_custom_emoji_files(&self) -> Vec<crate::ids::FileId> {
-        let ids = self.open_chat_custom_emoji_ids();
+        self.custom_emoji_files_for(&self.open_chat_custom_emoji_ids())
+    }
+
+    /// [`Self::open_chat_custom_emoji_files`] for `ids` (sorted ascending,
+    /// as [`Self::open_chat_custom_emoji_ids`] returns them).
+    pub fn custom_emoji_files_for(&self, ids: &[i64]) -> Vec<crate::ids::FileId> {
         self.stickers
             .emoji
             .custom_emoji_stickers
@@ -609,6 +687,8 @@ impl Session {
     }
 }
 
+#[cfg(test)]
+mod cache_tests;
 #[cfg(test)]
 mod tests;
 

@@ -122,8 +122,12 @@ pub(crate) fn window_decorations() -> Option<WindowDecorations> {
 /// kit Phase 7: window options compatible with kit's `TitleBar`: the title
 /// bar owns dragging (double-click zoom included), so the platform must not
 /// also treat it as a system move region. The frame follows the saved choice.
+/// These are the main window's options (and its screenshot demos'), so they
+/// carry its minimum size; interface zoom scales it when the window opens.
 pub(crate) fn window_options(title: &str) -> WindowOptions {
+    use crate::ui::shell_layout::{WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH};
     WindowOptions {
+        window_min_size: Some(size(px(WINDOW_MIN_WIDTH), px(WINDOW_MIN_HEIGHT))),
         titlebar: Some(TitlebarOptions {
             title: Some(title.into()),
             appears_transparent: titlebar_hidden(),

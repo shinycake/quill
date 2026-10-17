@@ -231,14 +231,16 @@ impl QuillApp {
 
     /// The forum's topic list as its own column (tdesktop shows the topics
     /// where the chat list was): the forum's name and topic count on top,
-    /// then the topics. On a narrow window a "Chats" button brings the
-    /// chat list back.
+    /// then the topics. Where the topics replace the chat list a "Chats"
+    /// button brings it back; filling a one-column window, a back button
+    /// leaves the forum.
     pub(in crate::ui) fn forum_column_view(
         &self,
         open: Option<ChatId>,
-        replacing: bool,
+        pane: crate::ui::shell_layout::ForumPane,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        use crate::ui::shell_layout::ForumPane;
         let title = open
             .and_then(|id| self.session().and_then(|s| s.chats.get(&id.0)))
             .map(|chat| chat.title.clone())
@@ -250,8 +252,13 @@ impl QuillApp {
             .id("forum-column")
             .flex()
             .flex_col()
-            .flex_none()
-            .w(px(quill::state::FORUM_COLUMN_WIDTH))
+            .map(|this| {
+                if pane == ForumPane::Fill {
+                    this.flex_1().min_w_0()
+                } else {
+                    this.flex_none().w(px(quill::state::FORUM_COLUMN_WIDTH))
+                }
+            })
             .h_full()
             .border_r_1()
             .border_color(cx.theme().border)
@@ -265,7 +272,19 @@ impl QuillApp {
                     .py_2()
                     .border_b_1()
                     .border_color(cx.theme().border)
-                    .when(replacing, |this| {
+                    .when(pane == ForumPane::Fill, |this| {
+                        this.child(
+                            Button::new("forum-column-back")
+                                .icon(gpui_kit::assets::IconName::ChevronLeft)
+                                .ghost()
+                                .tooltip(tr(keys::Q_CHAT_BACK))
+                                .accessibility_label(tr(keys::Q_CHAT_BACK))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.back_to_chat_list(window, cx);
+                                })),
+                        )
+                    })
+                    .when(pane == ForumPane::Column { chats_button: true }, |this| {
                         this.child(
                             Button::new("forum-column-chats")
                                 .icon(gpui_kit::assets::IconName::ChevronLeft)

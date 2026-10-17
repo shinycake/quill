@@ -274,15 +274,36 @@ pub(super) fn chat_row_tags(
     )
 }
 
+/// Whether [`chat_row_tags`] would give `chat` any chip: all the list needs
+/// to size the row, without building the chips.
+pub(super) fn chat_row_has_tags(
+    chat: &ChatSummary,
+    folders: &[(i32, String, i32)],
+    show_tags: bool,
+    viewing: Option<i32>,
+) -> bool {
+    quill::folder_limits::row_has_tags(
+        |folder_id| chat.folder_positions.contains_key(&folder_id),
+        folders,
+        show_tags,
+        viewing,
+    )
+}
+
+/// [`chat_row_height`] from whether the row has tag chips.
+pub(super) fn chat_row_height_tagged(has_tags: bool, preview_lines: u8) -> Pixels {
+    px(quill::chatlist_style::chat_row_height_px(
+        has_tags,
+        preview_lines,
+    ))
+}
+
 /// kit Phase 3: chat rows render at a fixed height so the kit
 /// `VirtualList` can position them from declared sizes — 56px base
 /// (avatar 40 + the old py_2), 80px when the folder-tag strip is present.
 /// `session_chat_row` enforces the same height on the element.
 pub(super) fn chat_row_height(tags: &[FolderTag], preview_lines: u8) -> Pixels {
-    px(quill::chatlist_style::chat_row_height_px(
-        !tags.is_empty(),
-        preview_lines,
-    ))
+    chat_row_height_tagged(!tags.is_empty(), preview_lines)
 }
 
 impl QuillApp {}
@@ -907,6 +928,7 @@ pub(super) fn with_presence_dot_scaled(
 const CHAT_ROW_AVATAR: f32 = 46.;
 
 mod folder_tag_context;
+pub(in crate::ui) use folder_tag_context::FolderTagContext;
 mod with_call_badge;
 #[allow(unused_imports)]
 pub use with_call_badge::*;

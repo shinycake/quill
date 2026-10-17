@@ -262,6 +262,12 @@ impl QuillApp {
                     .on_mouse_move(cx.listener(|this, _: &MouseMoveEvent, _, cx| {
                         this.viewer_note_activity(false, cx);
                     }))
+                    .on_scroll_wheel(cx.listener(move |this, event: &ScrollWheelEvent, _, cx| {
+                        this.viewer_scroll_wheel(event, geometry.origin, cx);
+                    }))
+                    .on_pinch(cx.listener(move |this, event: &PinchEvent, _, cx| {
+                        this.viewer_pinch(event, geometry.origin, cx);
+                    }))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.viewer_backdrop_click(cx);
                     }))

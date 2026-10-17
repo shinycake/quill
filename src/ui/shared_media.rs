@@ -21,6 +21,17 @@ impl QuillApp {
     /// `searchMessagesFilter*` filter; tabs cache their first page. Loading,
     /// empty, and failed are three distinct per-tab states — the empty state
     /// never shows while a fetch is in flight.
+    /// The gallery (or a user's playlist) is in the right column.
+    pub(super) fn shared_media_panel_open(&self) -> bool {
+        self.session().is_some_and(|session| {
+            let media = &session.media.shared_media;
+            media.playlist_user.is_some()
+                || (media.open
+                    && media.chat_id.is_some()
+                    && media.tab_at(media.active_tab).is_some())
+        })
+    }
+
     pub(super) fn shared_media_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         if let Some(user_id) = session.media.shared_media.playlist_user {
@@ -53,11 +64,12 @@ impl QuillApp {
         // compile here — same for the row labels below.
         let error = tab.error.clone();
 
+        // Its width is the shell's (`shell_layout`).
         let mut panel = div()
             .id("shared-media-panel")
-            .w(px(320.))
+            .flex_1()
+            .min_w_0()
             .h_full()
-            .flex_shrink_0()
             .border_l_1()
             .border_color(cx.theme().border)
             .bg(cx.theme().sidebar)

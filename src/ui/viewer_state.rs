@@ -6,6 +6,7 @@ use quill::ids::FileId;
 use quill::ids::MessageId;
 use quill::media_viewer::MediaViewer;
 use quill::media_viewer::ViewerZoom;
+use quill::media_viewer::WheelNav;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -25,6 +26,8 @@ pub(crate) struct ViewerUi {
     /// Parity slice 5: drag-pan anchor — last mouse position in px while the
     /// left button is held over the zoomed visual.
     pub(super) drag: Option<(f32, f32)>,
+    /// Wheel and trackpad scrolling toward the next item.
+    pub(super) wheel: WheelNav,
     /// Parity slice 5: message whose video clip is playing in the viewer
     /// (sound playing) or paused (clock frozen, sound paused).
     pub(super) video: Option<MessageId>,
@@ -55,6 +58,12 @@ pub(crate) struct ViewerUi {
     /// `(path, orientation code)`; decoded eagerly by Rotate/Flip so the
     /// overlay render stays allocation-free.
     pub(super) rotated: Option<(PathBuf, u8, Arc<RenderImage>)>,
+    /// The orientation a background decode is producing; it replaces
+    /// `orientation` when the decode lands.
+    pub(super) reorient_pending: Option<quill::media_viewer::ViewerOrientation>,
+    /// Bumped by every Rotate/Flip press and when the viewer moves on, so
+    /// a late decode is dropped.
+    pub(super) reorient_gen: u64,
     /// HDR rendition of the current picture file (macOS).
     pub(super) hdr: super::hdr_image::HdrViewer,
     /// Counts viewer opens; keys the 200 ms fade-in so each open animates.
@@ -80,6 +89,12 @@ pub(crate) struct ViewerUi {
 }
 
 impl ViewerUi {
+    /// Drop a rotate/flip decode that is still running.
+    pub(super) fn cancel_reorient(&mut self) {
+        self.reorient_pending = None;
+        self.reorient_gen = self.reorient_gen.wrapping_add(1);
+    }
+
     pub(super) fn new() -> Self {
         Self {
             state: MediaViewer::closed(),
@@ -88,6 +103,7 @@ impl ViewerUi {
             zoom: ViewerZoom::new(),
             frame: (720.0, 480.0),
             drag: None,
+            wheel: WheelNav::default(),
             video: None,
             pip: None,
             video_path: None,
@@ -98,6 +114,8 @@ impl ViewerUi {
             pending_play: None,
             orientation: Default::default(),
             rotated: None,
+            reorient_pending: None,
+            reorient_gen: 0,
             hdr: Default::default(),
             open_gen: 0,
             pending_seek: None,

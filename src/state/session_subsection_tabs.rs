@@ -174,12 +174,12 @@ impl Session {
         if !self.chat_has_topics(chat_id) {
             return None;
         }
-        let names: Vec<String> = self
-            .ordered_forum_topics(chat_id)
+        let names: Vec<&str> = self
+            .ordered_forum_topic_refs(chat_id)
             .into_iter()
             .filter(|t| !t.is_hidden)
             .take(8)
-            .map(|t| t.name)
+            .map(|t| t.name.as_str())
             .filter(|name| !name.is_empty())
             .collect();
         (!names.is_empty()).then(|| names.join("  "))

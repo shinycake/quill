@@ -25,7 +25,7 @@ impl QuillApp {
         } else {
             queued.for_display()
         };
-        let icon = if locked {
+        let photo = if locked {
             None
         } else {
             self.background
@@ -33,9 +33,8 @@ impl QuillApp {
                 .and_then(|client| client.live.as_ref())
                 .and_then(|live| live.driver.session.chat_photo_path(notification.chat_id))
                 .map(PathBuf::from)
-                .and_then(|path| super::avatar_icon::circular_icon_for(&path))
         };
-        self.show_notification_as(Some(account), notification, icon, locked, cx);
+        self.show_notification_with_photo(Some(account.clone()), notification, photo, locked, cx);
     }
 
     /// Play a background account's notification sound: a custom sound is

@@ -439,7 +439,8 @@ impl QuillApp {
                     .into_any_element()
             });
         // Only the rows themselves take the pointer, not the band around
-        // them, so the picture under the bar stays clickable.
+        // them, so the picture under the bar stays clickable. The band
+        // still keeps the wheel, so a scroll there does not change the item.
         let rows = [
             ("media-viewer-caption-row", caption),
             ("media-viewer-error-row", error),
@@ -450,12 +451,15 @@ impl QuillApp {
             row.map(|row| {
                 div()
                     .id(id)
+                    .debug_selector(move || id.into())
                     .on_mouse_move(over_controls(cx))
                     .occlude()
                     .child(row)
             })
         });
         let bottom_bar = div()
+            .debug_selector(|| "media-viewer-bottom-band".into())
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
             .absolute()
             .left_0()
             .right_0()

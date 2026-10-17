@@ -57,6 +57,7 @@ mod subsection_tabs;
 mod threads;
 mod topic_load;
 mod unread_totals;
+mod update_batches;
 mod updates_sync;
 mod users;
 mod window_chats;

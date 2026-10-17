@@ -481,6 +481,19 @@ impl QuillApp {
         self.focus_opened_chat(window, cx);
     }
 
+    /// Close the open chat and give the list the keyboard (Escape in the
+    /// chat, and the one-column back button).
+    pub(super) fn back_to_chat_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(chat) = self.session().and_then(|s| s.open_chat) {
+            // The closed chat's row becomes the selection (tdesktop
+            // keeps `_selected` on it), the one state the list paints
+            // and the next key steps from.
+            self.select_list_row(ListRow::Chat(chat));
+            self.leave_open_chat(window, cx);
+            window.focus(&self.focus_sidebar, cx);
+        }
+    }
+
     /// Escape with no layer open.
     pub(super) fn escape_to_chat_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.shortcut_blocked(window, cx) || self.windows.scope.is_some() {
@@ -489,15 +502,9 @@ impl QuillApp {
         let open = self.session().and_then(|s| s.open_chat);
         if !self.focus_sidebar.contains_focused(window, cx) {
             // `HistoryWidget::escape` → `handleHistoryBack`: close the chat
-            // (`clearSectionStack`) and give the list the keyboard.
-            if let Some(chat) = open {
-                // The closed chat's row becomes the selection (tdesktop
-                // keeps `_selected` on it), the one state the list paints
-                // and the next key steps from.
-                self.select_list_row(ListRow::Chat(chat));
-                self.leave_open_chat(window, cx);
-                window.focus(&self.focus_sidebar, cx);
-            }
+            // (`clearSectionStack`) and give the list the keyboard; in a
+            // one-column forum the topic list comes first.
+            self.step_back(window, cx);
             return;
         }
         // `Widget::escape`: leave the opened folder (Quill's archive view)

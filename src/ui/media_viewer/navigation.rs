@@ -195,10 +195,12 @@ impl QuillApp {
     pub(in crate::ui) fn reset_viewer_item_state(&mut self, cx: &mut Context<Self>) {
         self.viewer.zoom.reset();
         self.viewer.drag = None;
+        self.viewer.wheel.new_item();
         self.viewer_leave_video_fullscreen();
         // MED1: orientation and playback error are per-item state.
         self.viewer.orientation = Default::default();
         self.viewer.rotated = None;
+        self.viewer.cancel_reorient();
         self.viewer.hdr.reset();
         self.playback.error = None;
         self.viewer.extra.share_at = None;
@@ -247,6 +249,7 @@ impl QuillApp {
         // Reopening the same item starts with its caption collapsed.
         self.viewer.extra.caption = Default::default();
         self.viewer.state.close();
+        self.viewer.cancel_reorient();
         self.viewer.hdr.reset();
         cx.notify();
     }
@@ -259,6 +262,68 @@ impl QuillApp {
         }
         self.viewer_note_activity(false, cx);
         self.reset_viewer_item_state(cx);
+        cx.notify();
+    }
+
+    /// A wheel or trackpad scroll over the viewer moves to the next or
+    /// previous item, or zooms at the pointer (`WheelNav`). `origin` is
+    /// the window position of the visual's top-left.
+    pub(in crate::ui) fn viewer_scroll_wheel(
+        &mut self,
+        event: &ScrollWheelEvent,
+        origin: (f32, f32),
+        cx: &mut Context<Self>,
+    ) {
+        let (dx, dy, source) = match event.delta {
+            ScrollDelta::Pixels(p) => (
+                f32::from(p.x),
+                f32::from(p.y),
+                WheelSource::Trackpad {
+                    begins_gesture: event.touch_phase == TouchPhase::Started,
+                },
+            ),
+            ScrollDelta::Lines(l) => (
+                l.x * VIEWER_WHEEL_NOTCH_PX,
+                l.y * VIEWER_WHEEL_NOTCH_PX,
+                WheelSource::Wheel,
+            ),
+        };
+        self.viewer_note_activity(false, cx);
+        let action = self.viewer.wheel.feed(WheelInput {
+            dx,
+            dy,
+            primary: event.modifiers.secondary(),
+            source,
+            zoomed: self.viewer.zoom.is_zoomed(),
+            at: cx.background_executor().now(),
+        });
+        match action {
+            WheelAction::None => {}
+            WheelAction::Zoom { delta_y } => {
+                self.viewer_zoom_scroll(delta_y, viewer_anchor(event.position, origin), cx);
+            }
+            WheelAction::Next if self.viewer.state.has_next() => self.step_media_viewer(1, cx),
+            WheelAction::Previous if self.viewer.state.has_prev() => {
+                self.step_media_viewer(-1, cx);
+            }
+            WheelAction::Next | WheelAction::Previous => {}
+        }
+    }
+
+    /// A trackpad pinch zooms at the event position (tdesktop
+    /// `handleNativeGesture`).
+    pub(in crate::ui) fn viewer_pinch(
+        &mut self,
+        event: &PinchEvent,
+        origin: (f32, f32),
+        cx: &mut Context<Self>,
+    ) {
+        self.viewer_note_activity(false, cx);
+        self.viewer.zoom.zoom_at(
+            pinch_zoom_factor(event.delta),
+            viewer_anchor(event.position, origin),
+            self.viewer.frame,
+        );
         cx.notify();
     }
 
@@ -358,3 +423,16 @@ fn shared_tab_items(tab: SharedMediaTab, messages: &[HistoryMessage]) -> Vec<Med
         collect_media_items(messages)
     }
 }
+
+/// A window point relative to the visual's top-left (`origin`).
+fn viewer_anchor(position: Point<Pixels>, origin: (f32, f32)) -> (f32, f32) {
+    (
+        f32::from(position.x) - origin.0,
+        f32::from(position.y) - origin.1,
+    )
+}
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "wheel_ui_tests.rs"]
+mod wheel_ui_tests;

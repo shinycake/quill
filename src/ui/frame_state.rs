@@ -33,6 +33,8 @@ pub(crate) struct FrameUi {
     pub(super) motion: super::motion::MotionState,
     /// Chat list column width (drag its right edge; double-click resets).
     pub(super) sidebar_width: Pixels,
+    /// The main window's content width as last drawn (`shell_layout`).
+    pub(super) main_width: Pixels,
     /// A debounced `window_state.json` save is scheduled.
     pub(super) window_state_save_pending: bool,
     /// Whether the main window is currently excluded from screen capture.
@@ -63,6 +65,7 @@ impl FrameUi {
                 .map_or(quill::settings::DEFAULT_SIDEBAR_WIDTH, |state| {
                     state.sidebar_width
                 })),
+            main_width: px(0.),
             window_state_save_pending: false,
             capture_blocked: false,
             capture_notice_dismissed: false,

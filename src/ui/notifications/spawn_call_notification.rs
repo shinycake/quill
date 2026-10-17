@@ -189,21 +189,19 @@ impl QuillApp {
         } else {
             queued.for_display()
         };
-        let icon = self.notification_avatar(notification.chat_id, locked);
-        self.show_os_notification(notification, icon, locked, cx);
+        let photo = self.notification_photo(notification.chat_id, locked);
+        self.show_notification_with_photo(None, notification, photo, locked, cx);
     }
 
-    /// The chat's circular avatar PNG for its notification: only an
-    /// already-downloaded small photo, and never while locked (the locked
-    /// toast hides the sender).
-    fn notification_avatar(&self, chat_id: ChatId, locked: bool) -> Option<PathBuf> {
+    /// The chat's already-downloaded small photo for its notification's
+    /// avatar, never while locked (the locked toast hides the sender).
+    fn notification_photo(&self, chat_id: ChatId, locked: bool) -> Option<PathBuf> {
         if locked {
             return None;
         }
         self.session()
             .and_then(|s| s.chat_photo_path(chat_id))
             .map(PathBuf::from)
-            .and_then(|path| super::avatar_icon::circular_icon_for(&path))
     }
 
     /// Show one notification with its avatar through the platform backend

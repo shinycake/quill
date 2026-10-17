@@ -417,7 +417,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 - [x] Fullscreen photo/video viewer overlay with prev/next navigation (arrow keys) and "N of M" counter (src/media_viewer.rs:74-124) <!-- parity:media-viewer -->
 - [x] Zoom viewer image via `=`/`-` keys, Cmd/Ctrl+wheel and pinch at the cursor, drag-pan when zoomed, `0` resets to fit (src/media_viewer/transform.rs) <!-- parity:media-viewer-zoom -->
-- [ ] Media viewer: a plain wheel or trackpad scroll goes to the next or previous item, one item per notch or flick; Cmd/Ctrl+wheel and pinch zoom (tdesktop `handleWheelEvent`; horizontal swipe paging is still open) <!-- parity:media-viewer-wheel-nav -->
+- [x] Media viewer: a plain wheel or trackpad scroll goes to the next or previous item, one item per notch or flick; Cmd/Ctrl+wheel and pinch zoom (tdesktop `handleWheelEvent`) <!-- parity:media-viewer-wheel-nav -->
+- [ ] Media viewer: a horizontal trackpad swipe pulls a round arrow in from the edge and, let go past the threshold, pages to the next or previous item; one gesture moves at most one item (tdesktop `setupSwipeNavigation`) <!-- parity:media-viewer-swipe-nav -->
 - [x] Rotate photo in the viewer — Rotate button cycles 0/90/180/270, per-item, cached (media_viewer.rs `rotate_rgba_quarter_turns`) <!-- parity:media-viewer-rotate -->
 - [x] Picture-in-picture for video playback — tdesktop's PiP window on the shared player on macOS, Windows and Linux: snapping, aspect-locked resize, chrome fade, seek and volume lines, handoff to and from the viewer (`src/ui/video_player/controls/pip/`, `src/media_viewer/pip/`, docs/decisions/video-pip.md) <!-- parity:media-video-pip -->
 - [x] Viewer auto-downloads the current item when not local and resumes a parked play once `downloadFile` lands (ui/mod.rs:4926, 5179) <!-- parity:media-viewer-autodownload -->
@@ -607,7 +608,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 #### View stories
 - [x] Active-story tray above the chat list, unread ring vs muted read ring (ui/mod.rs:7566 story_tray; DECISIONS.md Phase 9.1) <!-- parity:stories-tray -->
-- [x] Tap a tray entry opens fullscreen viewer on the latest story; missing details prefetched via getStory (ui/mod.rs:5427 open_story_viewer) <!-- parity:stories-viewer-open -->
+- [x] Tap a tray entry opens fullscreen viewer on the first unread story (tdesktop `toOpen`), or the first story when all are read; missing details prefetched via getStory (ui/mod.rs:5427 open_story_viewer) <!-- parity:stories-viewer-open -->
 - [x] Viewer renders photo stories at full size and video stories (video shows thumbnail only; full clip not renderable by the img element) (src/story_viewer.rs; DECISIONS.md Phase 9.1) <!-- parity:stories-viewer-photo-video -->
 - [x] Viewer shows poster name + "Story N of M" + caption with formatted entities (src/story_viewer.rs:55-56 caption fields) <!-- parity:stories-viewer-caption -->
 - [x] Viewer Prev / Next / Close; Escape closes viewer before other overlays (DECISIONS.md Phase 9.1) <!-- parity:stories-viewer-nav -->
@@ -620,7 +621,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Chosen custom-emoji and paid reactions render in the viewer; picker offers emoji and custom emoji (paid reactions cannot be set via setStoryReaction) <!-- parity:stories-custom-reactions -->
 - [x] Reaction removal (setStoryReaction with null; request asserts, telegram/requests.rs:2556) <!-- parity:stories-reaction-remove -->
 - [x] Interaction counters (views / hearts / reposts, non-zero, when can_get_interactions) (ui/mod.rs Phase 9.2) <!-- parity:stories-interaction-counters -->
-- [x] Detailed viewers list (getStoryInteractions, gated on can_get_interactions; paginated panel with reactions, forwards, Load more; ui/mod.rs Phase 9.5) <!-- parity:stories-viewers-list -->
+- [x] Detailed viewers list (getStoryInteractions, gated on can_get_interactions; paginated panel with reactions, forwards, Load more; viewers who reacted come first; ui/mod.rs Phase 9.5) <!-- parity:stories-viewers-list -->
 - [x] Text reply to a story via sendMessage + inputMessageReplyToStory, gated on can_be_replied (telegram/requests.rs Phase 9.2; ui/mod.rs Reply row) <!-- parity:stories-reply -->
 - [x] Delete own story, gated on can_be_deleted; viewer closes when the story leaves the cache; updateStoryDeleted handled (telegram/requests.rs:2584, telegram/envelope.rs:4660) <!-- parity:stories-delete -->
 - [x] Report story (reportStory multi-step flow: option picker → optional/required text → Reported/Failed; state.rs + connect.rs + ui/mod.rs Phase 9.5) <!-- parity:stories-report -->
@@ -631,6 +632,12 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Clickable story areas (location, venue, suggested reaction, message, link, weather, gift) — parsed from `story.areas` (telegram/envelope.rs), rendered as clickable chips on the viewer, taps perform each area's action (ui/mod.rs Phase 9.8) <!-- parity:stories-areas-view -->
 - [x] Story notification settings (mute stories per chat, story sound, show story poster) — per-chat controls and scope-default fallback <!-- parity:stories-notify-settings -->
 - [x] Story-restriction notices (TGX-verbatim `ChatDisabledStory` / `ChatRestrictedStory`): the `canPostStory` error channel delivers the Disabled notice for both the TDLib client-side-gate message ("Not enough rights to post stories in this group") and `CHAT_ADMIN_REQUIRED`, and the Restricted notice for `USER_RESTRICTED`; unrecognized errors keep the generic eligibility failure. No Until variant — the channel carries no until-date. <!-- parity:stories-restriction-notice -->
+- [x] Opening a deleted or expired story shows the broken-link toast <!-- parity:stories-viewer-missing-toast -->
+- [x] Stories that finish loading after the viewer opens join its list <!-- parity:stories-viewer-late-stories -->
+- [ ] The story viewer moves on to the next poster, with neighbour previews beside the story <!-- parity:stories-viewer-next-poster -->
+- [ ] The story viewer preloads the next stories and the previous one <!-- parity:stories-viewer-preload -->
+- [ ] "Reposted from" opens the original story, or the poster's profile when it is gone <!-- parity:stories-repost-origin-link -->
+- [ ] Story header shows the posting time, "edited", a privacy badge, and opens the poster's profile <!-- parity:stories-viewer-header-meta -->
 
 #### Post stories
 - [x] Story composer: photo picker (path entry — native file picker deferred; `postStory` via td_api.tl:13715) <!-- parity:stories-post-photo-composer -->

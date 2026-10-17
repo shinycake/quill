@@ -9,7 +9,7 @@
 //! (the tag colour row).
 #![deny(clippy::indexing_slicing)]
 
-use crate::telegram::envelope::OptionValue;
+use crate::telegram::envelope::{ChatFolderInfo, OptionValue};
 
 /// Which limit a box talks about (or, for `Tags`, which Premium feature).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -403,8 +403,31 @@ pub struct FolderTag {
     pub color_id: i32,
 }
 
+/// `(id, chip text, colour)` of each folder, the text upper-cased once so
+/// the rows of a list do not repeat it per chat (`row_tags`).
+pub fn tag_names(folders: &[ChatFolderInfo]) -> Vec<(i32, String, i32)> {
+    folders
+        .iter()
+        .map(|f| (f.id, f.name.to_uppercase(), f.color_id))
+        .collect()
+}
+
+/// Whether `row_tags` would give a chat any chip.
+pub fn row_has_tags(
+    chat_in_folder: impl Fn(i32) -> bool,
+    folders: &[(i32, String, i32)],
+    tags_enabled: bool,
+    viewing: Option<i32>,
+) -> bool {
+    tags_enabled
+        && folders
+            .iter()
+            .any(|(id, _, color)| *color >= 0 && Some(*id) != viewing && chat_in_folder(*id))
+}
+
 /// The tag chips of a chat: folders it is in that have a colour, in folder
 /// order, minus the folder being viewed (tdesktop `hasChatsFilterTags`).
+/// `folders` come from `tag_names`, with the chip text already upper-case.
 pub fn row_tags(
     chat_in_folder: impl Fn(i32) -> bool,
     folders: &[(i32, String, i32)],
@@ -417,8 +440,8 @@ pub fn row_tags(
     folders
         .iter()
         .filter(|(id, _, color)| *color >= 0 && Some(*id) != viewing && chat_in_folder(*id))
-        .map(|(_, name, color)| FolderTag {
-            text: name.to_uppercase(),
+        .map(|(_, text, color)| FolderTag {
+            text: text.clone(),
             color_id: *color,
         })
         .collect()
@@ -597,11 +620,38 @@ mod tests {
     }
 
     #[test]
+    fn tag_names_upper_case_once_and_row_has_tags_matches_row_tags() {
+        let info = |id: i32, name: &str, color_id: i32| ChatFolderInfo {
+            id,
+            name: name.into(),
+            icon_name: String::new(),
+            color_id,
+            is_shareable: false,
+            has_my_invite_links: false,
+        };
+        let names = tag_names(&[info(1, "Work", 2), info(2, "News", -1), info(3, "Ärzte", 5)]);
+        assert_eq!(names[2].1, "ÄRZTE");
+        for (in_folder, enabled, viewing) in [
+            (1, true, None),
+            (2, true, None),
+            (3, true, Some(3)),
+            (3, false, None),
+            (9, true, None),
+        ] {
+            let member = |id: i32| id == in_folder;
+            assert_eq!(
+                row_has_tags(member, &names, enabled, viewing),
+                !row_tags(member, &names, enabled, viewing).is_empty()
+            );
+        }
+    }
+
+    #[test]
     fn row_tags_need_a_colour_and_skip_the_viewed_folder() {
         let folders = vec![
-            (1, "Work".to_string(), 2),
-            (2, "News".to_string(), -1),
-            (3, "Family".to_string(), 5),
+            (1, "WORK".to_string(), 2),
+            (2, "NEWS".to_string(), -1),
+            (3, "FAMILY".to_string(), 5),
         ];
         let all = |_: i32| true;
         let tags = row_tags(all, &folders, true, None);

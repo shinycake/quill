@@ -22,10 +22,12 @@ impl QuillApp {
         self.reorient_viewer_photo(|o| o.flip_vertical(), cx);
     }
 
-    /// Apply an orientation change and decode the re-oriented pixels
-    /// eagerly into `viewer_rotated`, so the overlay render stays
-    /// allocation-free; reset on open/step. A photo that is not local or
-    /// cannot be decoded keeps its previous orientation.
+    /// Apply an orientation change: the re-oriented pixels decode on a
+    /// background thread and the new orientation takes effect together
+    /// with them (`finish_viewer_reorient`), so the overlay render stays
+    /// allocation-free and the picture never shows a half-applied turn. A
+    /// photo that is not local or cannot be decoded keeps its previous
+    /// orientation.
     fn reorient_viewer_photo(
         &mut self,
         change: impl FnOnce(&mut ViewerOrientation),
@@ -36,37 +38,68 @@ impl QuillApp {
         if !item.kind.is_picture() {
             return;
         }
-        let previous = (self.viewer.orientation, self.viewer.rotated.clone());
-        change(&mut self.viewer.orientation);
-        self.viewer.rotated = None;
-        if self.viewer.orientation.is_identity() {
+        // Presses queued while a decode runs build on the pending target.
+        let mut target = self
+            .viewer
+            .reorient_pending
+            .unwrap_or(self.viewer.orientation);
+        change(&mut target);
+        self.viewer.reorient_gen = self.viewer.reorient_gen.wrapping_add(1);
+        let generation = self.viewer.reorient_gen;
+        if target.is_identity() {
+            self.viewer.reorient_pending = None;
+            self.viewer.orientation = target;
+            self.viewer.rotated = None;
             cx.notify();
             return;
         }
-        let files: HashMap<i32, ParsedFile> = self
-            .session()
-            .map(|s| s.media.files.clone())
-            .unwrap_or_default();
+        let no_files = HashMap::new();
+        let files = self.session().map_or(&no_files, |s| &s.media.files);
         let roots = self.media_display_roots();
-        let path = viewer_display_path(&item, &files, &roots);
-        let orientation = self.viewer.orientation;
-        match path {
-            Some(path) => match Self::rotated_render_image(&path, orientation) {
-                Some(image) => {
-                    self.viewer.rotated = Some((path, orientation.code(), image));
-                }
-                None => {
-                    self.connection
-                        .set_note(StatusNote::error(tr(keys::Q_AV_COULDNT_ROTATE_THIS_PHOTO)));
-                    (self.viewer.orientation, self.viewer.rotated) = previous;
-                }
-            },
-            None => {
-                self.connection.set_note(StatusNote::silent(tr(
-                    keys::Q_AV_DOWNLOAD_THE_PHOTO_FIRST_TO,
-                )));
-                (self.viewer.orientation, self.viewer.rotated) = previous;
+        let path = viewer_display_path(&item, files, &roots);
+        let Some(path) = path else {
+            self.viewer.reorient_pending = None;
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_AV_DOWNLOAD_THE_PHOTO_FIRST_TO,
+            )));
+            cx.notify();
+            return;
+        };
+        self.viewer.reorient_pending = Some(target);
+        let decode_path = path.clone();
+        let job =
+            cx.background_spawn(async move { Self::rotated_render_image(&decode_path, target) });
+        self.spawn_scoped(cx, async move |this, cx| {
+            let image = job.await;
+            let _ = this.update(cx, |this, cx| {
+                this.finish_viewer_reorient(generation, path, target, image, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// The decode started by `reorient_viewer_photo` finished: apply it
+    /// unless the viewer moved on (another press, a step, a close).
+    fn finish_viewer_reorient(
+        &mut self,
+        generation: u64,
+        path: PathBuf,
+        target: ViewerOrientation,
+        image: Option<Arc<RenderImage>>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.viewer.reorient_gen != generation || !self.viewer.state.is_open() {
+            return;
+        }
+        self.viewer.reorient_pending = None;
+        match image {
+            Some(image) => {
+                self.viewer.orientation = target;
+                self.viewer.rotated = Some((path, target.code(), image));
             }
+            None => self
+                .connection
+                .set_note(StatusNote::error(tr(keys::Q_AV_COULDNT_ROTATE_THIS_PHOTO))),
         }
         cx.notify();
     }
@@ -119,14 +152,12 @@ impl QuillApp {
         if self.viewer_is_timed() || self.refuse_protected_copy(item.chat_id, cx) {
             return;
         }
-        let files: HashMap<i32, ParsedFile> = self
-            .session()
-            .map(|s| s.media.files.clone())
-            .unwrap_or_default();
+        let no_files = HashMap::new();
+        let files = self.session().map_or(&no_files, |s| &s.media.files);
         let path = match item.kind {
             MediaViewerKind::Photo => {
                 let roots = self.media_display_roots();
-                viewer_display_path(&item, &files, &roots)
+                viewer_display_path(&item, files, &roots)
             }
             // Video: save the full clip only — falling back to the
             // thumbnail would write a JPEG as the "video". If the clip
@@ -320,39 +351,48 @@ impl QuillApp {
         if self.viewer_is_timed() || self.refuse_protected_copy(item.chat_id, cx) {
             return;
         }
-        let files: HashMap<i32, ParsedFile> = self
-            .session()
-            .map(|s| s.media.files.clone())
-            .unwrap_or_default();
+        let no_files = HashMap::new();
+        let files = self.session().map_or(&no_files, |s| &s.media.files);
         let roots = self.media_display_roots();
         let orientation = self.viewer.orientation;
-        let png = viewer_display_path(&item, &files, &roots)
-            .ok_or(tr(keys::Q_AV_DOWNLOAD_THE_PHOTO_FIRST_TO_2))
-            .and_then(|path| {
-                let rgba = crate::ui::image_decode::decode_file(&path, DecodeSize::FULL)
-                    .map_err(|_| tr(keys::Q_AV_COULDNT_COPY_THIS_PHOTO))?;
-                let (pixels, width, height) =
-                    orient_rgba(rgba.as_raw(), rgba.width(), rgba.height(), orientation);
-                let oriented = image::RgbaImage::from_raw(width, height, pixels)
-                    .ok_or(tr(keys::Q_AV_COULDNT_COPY_THIS_PHOTO))?;
-                let mut bytes = std::io::Cursor::new(Vec::new());
-                image::DynamicImage::ImageRgba8(oriented)
-                    .write_to(&mut bytes, image::ImageFormat::Png)
-                    .map_err(|_| tr(keys::Q_AV_COULDNT_COPY_THIS_PHOTO))?;
-                Ok(bytes.into_inner())
+        let Some(path) = viewer_display_path(&item, files, &roots) else {
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_AV_DOWNLOAD_THE_PHOTO_FIRST_TO_2,
+            )));
+            cx.notify();
+            return;
+        };
+        // Decode, orient and PNG-encode off the main thread.
+        let job = cx.background_spawn(async move {
+            let rgba = crate::ui::image_decode::decode_file(&path, DecodeSize::FULL).ok()?;
+            let (pixels, width, height) =
+                orient_rgba(rgba.as_raw(), rgba.width(), rgba.height(), orientation);
+            let oriented = image::RgbaImage::from_raw(width, height, pixels)?;
+            let mut bytes = std::io::Cursor::new(Vec::new());
+            image::DynamicImage::ImageRgba8(oriented)
+                .write_to(&mut bytes, image::ImageFormat::Png)
+                .ok()?;
+            Some(bytes.into_inner())
+        });
+        self.spawn_scoped(cx, async move |this, cx| {
+            let png = job.await;
+            let _ = this.update(cx, |this, cx| {
+                match png {
+                    Some(bytes) => {
+                        cx.write_to_clipboard(ClipboardItem::new_image(
+                            &gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Png, bytes),
+                        ));
+                        this.connection
+                            .set_note(StatusNote::info(tr(keys::Q_AV_PHOTO_COPIED)));
+                    }
+                    None => this
+                        .connection
+                        .set_note(StatusNote::error(tr(keys::Q_AV_COULDNT_COPY_THIS_PHOTO))),
+                }
+                cx.notify();
             });
-        match png {
-            Ok(bytes) => {
-                cx.write_to_clipboard(ClipboardItem::new_image(&gpui_kit::Image::from_bytes(
-                    gpui_kit::ImageFormat::Png,
-                    bytes,
-                )));
-                self.connection
-                    .set_note(StatusNote::info(tr(keys::Q_AV_PHOTO_COPIED)));
-            }
-            Err(note) => self.connection.set_note(StatusNote::error(note)),
-        }
-        cx.notify();
+        })
+        .detach();
     }
 
     /// "Copy Frame": the video frame on screen to the clipboard as an

@@ -111,6 +111,7 @@
 "lng_stories_about_contacts_my" = "Only your contacts can view this story.";
 "lng_stories_about_selected_contacts" = "Only some users {user} selected can view this story.";
 "lng_stories_about_selected_contacts_my" = "Only some users you selected can view this story.";
+"lng_stories_link_invalid" = "This link is broken or has expired.";
 "lng_stories_my_name" = "My Story";
 "lng_switch_emoji" = "Emoji";
 "lng_todo_create_allow_add" = "Allow Others to Add Tasks";

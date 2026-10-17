@@ -29,6 +29,7 @@ mod quality;
 mod save;
 mod transform;
 mod ttl;
+mod wheel;
 
 pub use boost::{
     BOOST_STALE_MS, BoostPress, BoostRelease, BoostState, SPEED_BOOST_HOLD_MS, SPEED_BOOST_RATE,
@@ -55,9 +56,13 @@ pub use save::{
 pub use transform::{
     VIEWER_WHEEL_MAX_NOTCHES, VIEWER_WHEEL_NOTCH_PX, VIEWER_ZOOM_MAX, VIEWER_ZOOM_MIN,
     VIEWER_ZOOM_STEP, ViewerOrientation, ViewerZoom, fit_within, flip_rgba, orient_rgba,
-    rotate_rgba_quarter_turns, wheel_zoom_factor,
+    pinch_zoom_factor, rotate_rgba_quarter_turns, wheel_zoom_factor,
 };
 pub use ttl::{ViewerTtl, disappearing_label, seconds_tiny, viewer_ttl};
+pub use wheel::{
+    VIEWER_TRACKPAD_GESTURE_GAP, VIEWER_TRACKPAD_STEP_PX, WheelAction, WheelInput, WheelNav,
+    WheelSource,
+};
 
 /// Media kinds the viewer opens this slice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

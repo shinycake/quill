@@ -163,7 +163,7 @@ impl QuillApp {
             .when(mode != PaneMode::Ready, |this| this.overflow_y_scroll())
             .track_focus(&self.focus_sidebar)
             .map(|this| self.chat_list_key_handlers(this, cx))
-            .w(self.frame.sidebar_width)
+            .w(self.list_width())
             .flex_none()
             .h_full()
             .p_3()
@@ -253,7 +253,7 @@ impl QuillApp {
                         let filter = self.chat_list.filter;
                         // Parity slice: folder names + tags flag for chat-row
                         // chips.
-                        let (folder_names, show_folder_tags) = self.folder_tag_context();
+                        let folder_tags = self.folder_tag_context();
                         let mut chats: Vec<&ChatSummary> = self.listed_main_chats();
                         // Slice CL2: the Archived category shows only the
                         // archive section.
@@ -341,8 +341,13 @@ impl QuillApp {
                         // per visible row in `chat_list_item_element`.
                         // Rebuilt every render; the list below only reads it.
                         let row_height = |chat: &ChatSummary| {
-                            chat_row_height(
-                                &chat_row_tags(chat, &folder_names, show_folder_tags, folder),
+                            chat_row_height_tagged(
+                                chat_row_has_tags(
+                                    chat,
+                                    &folder_tags.names,
+                                    folder_tags.show,
+                                    folder,
+                                ),
                                 self.appearance.preview_lines,
                             )
                         };
@@ -354,9 +359,7 @@ impl QuillApp {
                         // Opening it shows the archive (here: the Archived
                         // category). The archived chats themselves never
                         // sit inside the main list.
-                        let has_archived = self
-                            .session()
-                            .is_some_and(|s| !s.ordered_archived_chats().is_empty());
+                        let has_archived = self.session().is_some_and(|s| s.has_archived_chats());
                         // tdesktop's stories strip is the first row: it
                         // scrolls away with the list (and collapses).
                         if !self.stories.strip.tiles.is_empty() {
@@ -468,6 +471,7 @@ impl QuillApp {
                                 .collect(),
                         );
                         self.chat_list.items = items;
+                        self.chat_list.folder_tags = folder_tags;
                         list = list.child(
                             div()
                                 .relative()
@@ -532,7 +536,7 @@ impl QuillApp {
                 return div()
                     .id("sidebar-with-folder-rail")
                     .flex()
-                    .w(self.frame.sidebar_width + px(self.folder_rail_width()))
+                    .w(self.list_width() + px(self.folder_rail_width()))
                     .flex_none()
                     .h_full()
                     .child(self.folder_rail(cx))

@@ -229,6 +229,8 @@ pub enum InstantViewOutcome {
 pub struct ConnectDriver<S: JsonSender> {
     pub session: Session,
     pub(crate) sender: S,
+    /// Poll-batch state (`begin_batch` / `end_batch`).
+    pub(crate) batch: super::core::batch::BatchState,
     pub(crate) call_engine: Option<Box<dyn CallEngine>>,
     pub(crate) signaling_outbox: SignalingOutbox,
     pub(crate) transport_outbox: TransportOutbox,

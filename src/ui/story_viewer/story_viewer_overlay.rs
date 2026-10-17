@@ -46,21 +46,19 @@ impl QuillApp {
             .unwrap_or_else(|| {
                 tr_with(keys::Q_MEDIA_CHAT_3, &[("0", &item.chat_id.0.to_string())])
             });
-        let files: HashMap<i32, ParsedFile> = self
-            .session()
-            .map(|s| s.media.files.clone())
-            .unwrap_or_default();
-        let downloading: quill::state::DownloadIntents = self
-            .session()
-            .map(|s| s.media.downloads.clone())
-            .unwrap_or_default();
+        let no_files = HashMap::new();
+        let no_downloads = quill::state::DownloadIntents::default();
+        let (files, downloading): (&HashMap<i32, ParsedFile>, &quill::state::DownloadIntents) =
+            self.session().map_or((&no_files, &no_downloads), |s| {
+                (&s.media.files, &s.media.downloads)
+            });
         let roots = self.media_display_roots();
-        let path = story_viewer_display_path(&item, &files, &roots);
+        let path = story_viewer_display_path(&item, files, &roots);
         let downloading_now = item
             .display_file_ids
             .iter()
             .chain(std::iter::once(&item.download_file_id))
-            .any(|id| file_is_downloading(*id, &files, &downloading));
+            .any(|id| file_is_downloading(*id, files, downloading));
         let kind_label = item.kind.label();
         // `path` is the poster: a video story's `display_file_ids` hold
         // only its thumbnail (`quill::story_viewer`), never the clip.
