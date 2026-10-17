@@ -391,11 +391,11 @@ pub fn acquire(
 mod tests {
     #[test]
     fn windows_root_keys_ignore_case_slashes_and_verbatim_prefix() {
-        let a = windows_root_key(r"C:\Users\Me\AppData\Quill");
-        assert_eq!(a, windows_root_key(r"c:\users\me\appdata\quill\"));
-        assert_eq!(a, windows_root_key("c:/users/me/appdata/quill"));
-        assert_eq!(a, windows_root_key(r"\\?\C:\Users\Me\AppData\Quill"));
-        assert_ne!(a, windows_root_key(r"C:\Users\Me\AppData\Other"));
+        let a = super::windows_root_key(r"C:\Users\Me\AppData\Quill");
+        assert_eq!(a, super::windows_root_key(r"c:\users\me\appdata\quill\"));
+        assert_eq!(a, super::windows_root_key("c:/users/me/appdata/quill"));
+        assert_eq!(a, super::windows_root_key(r"\\?\C:\Users\Me\AppData\Quill"));
+        assert_ne!(a, super::windows_root_key(r"C:\Users\Me\AppData\Other"));
     }
 
     use super::{Acquired, ClientSlots, Endpoint, acquire, root_digest};
