@@ -108,6 +108,8 @@ impl QuillApp {
             || self.uses_screen_chooser();
         Button::new("group-call-menu")
             .icon(IconName::EllipsisVertical)
+            .tooltip(tr(keys::PROFILE_ACTION_SHORT_MORE))
+            .accessibility_label(tr(keys::PROFILE_ACTION_SHORT_MORE))
             .ghost()
             .small()
             .text_color(white())
@@ -345,6 +347,8 @@ impl QuillApp {
             .child(
                 Button::new(SharedString::from(format!("{row_id}-more")))
                     .icon(IconName::EllipsisVertical)
+                    .tooltip(tr(keys::PROFILE_ACTION_SHORT_MORE))
+                    .accessibility_label(tr(keys::PROFILE_ACTION_SHORT_MORE))
                     .ghost()
                     .xsmall()
                     .text_color(rgb(MEMBER_NOT_JOINED))

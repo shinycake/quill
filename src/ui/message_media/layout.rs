@@ -184,7 +184,7 @@ pub(in crate::ui) fn media_disc(id: impl Into<ElementId>, state: MediaDisc) -> S
             .color(gpui_kit::white())
             .loading(fraction.is_none())
             .value(fraction.unwrap_or(0.) * 100.)
-            .accessibility_label("Downloading")
+            .accessibility_label(quill::lang::tr(quill::lang::keys::SR_MESSAGE_DOWNLOADING))
             .into_any_element(),
         MediaDisc::Download | MediaDisc::Play | MediaDisc::Pause => {
             let icon = match state {

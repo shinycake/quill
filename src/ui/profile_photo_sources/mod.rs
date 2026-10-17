@@ -13,6 +13,7 @@ mod gradient_editor;
 mod video;
 
 use super::app::QuillApp;
+use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -184,7 +185,9 @@ impl QuillApp {
                 )));
                 self.close_photo_source(cx);
             }
-            Err(err) => self.photo_source_note(format!("Couldn't set the photo: {err:?}"), cx),
+            Err(err) => {
+                self.photo_source_note(user_error_for(keys::Q_NOTES_FAILED_SET_PHOTO, &err), cx)
+            }
         }
     }
 

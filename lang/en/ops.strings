@@ -377,7 +377,6 @@
 "qll_ops_changed_the_description_to" = "changed the description to {quote}";
 "qll_ops_changed_the_title_to" = "changed the title to {quote}";
 "qll_ops_changing_sender" = "changing sender…";
-"qll_ops_channel" = "Channel";
 "qll_ops_chat" = "Chat {chat_id}";
 "qll_ops_chat_2" = "Chat";
 "qll_ops_chat_automation" = "Chat Automation";
@@ -638,7 +637,6 @@
 "qll_ops_go_to_the_original_post" = "Go to the original post";
 "qll_ops_greeting_message" = "Greeting Message";
 "qll_ops_greeting_message_settings" = "greeting message settings";
-"qll_ops_group" = "Group";
 "qll_ops_group_call" = "Group call";
 "qll_ops_h_m" = "%H:%M";
 "qll_ops_hang_up" = "Hang up";
@@ -1119,3 +1117,8 @@
 "lng_media_selected_poll#other" = "{count} Polls";
 "lng_media_selected_message#one" = "{count} Message";
 "lng_media_selected_message#other" = "{count} Messages";
+"qll_ops_leave_channel" = "Leave channel";
+"qll_ops_leave_group" = "Leave group";
+"qll_ops_leave_channel_title" = "Leave channel?";
+"qll_ops_leave_group_title" = "Leave group?";
+"qll_polls_link_url" = "URL";

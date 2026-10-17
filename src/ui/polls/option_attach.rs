@@ -591,7 +591,7 @@ impl QuillApp {
             .unwrap_or_default();
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("URL")
+                .placeholder(tr(keys::Q_POLLS_LINK_URL))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });

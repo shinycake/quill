@@ -253,7 +253,10 @@ impl QuillApp {
                     dialog.error = None;
                 }
             }
-            Err(err) => fail(self, &format!("Couldn't save the link: {err:?}")),
+            Err(err) => fail(
+                self,
+                &user_error_for(keys::Q_NOTES_FAILED_SAVE_FOLDER_LINK, &err),
+            ),
         }
         cx.notify();
     }
@@ -318,7 +321,10 @@ impl QuillApp {
         if let Some(dialog) = self.folders.share.as_mut() {
             dialog.confirm_delete = None;
             if let Err(err) = result {
-                dialog.error = Some(format!("Couldn't delete the link: {err:?}"));
+                dialog.error = Some(user_error_for(
+                    keys::Q_NOTES_FAILED_DELETE_FOLDER_LINK,
+                    &err,
+                ));
             }
         }
         cx.notify();
@@ -896,7 +902,7 @@ impl QuillApp {
                 Err(err) => {
                     if let Some(session) = self.session_mut_any() {
                         session.chat_list.folder_invite_error =
-                            Some(format!("Couldn't add the folder: {err:?}"));
+                            Some(user_error_for(keys::Q_NOTES_FAILED_ADD_FOLDER, &err));
                     }
                 }
             },

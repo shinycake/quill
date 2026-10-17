@@ -17,6 +17,7 @@ use super::shell::{DialogKind, QuillShell};
 use super::wallpaper::{paint_wallpaper, session_wallpaper};
 use super::wallpaper_cache::Slot;
 use crate::ui::status_note::StatusNote;
+use crate::ui::user_error::user_error;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
@@ -306,7 +307,7 @@ impl QuillApp {
                         Ok(_) => sent += 1,
                         Err(err) => {
                             live.driver.session.chats_state.background_error =
-                                Some(format!("could not send the change ({err:?})"));
+                                Some(user_error(&err));
                         }
                     }
                 }

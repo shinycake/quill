@@ -386,7 +386,7 @@ impl QuillApp {
                     let kind = SetKind::of(is_emoji);
                     let count = stickers.len();
                     let reordering = this.sticker_box.reordering;
-                    let mut grid = div().flex().flex_wrap().gap_1().w(px(380.));
+                    let mut grid = div().flex().flex_wrap().gap_1().w(px(380.)).max_w_full();
                     for (index, item) in stickers.iter().enumerate() {
                         grid = grid
                             .child(this.sticker_set_cell(set_id, kind, is_owned, index, item, cx));
