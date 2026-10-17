@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 
+use crate::ui::status_note::StatusNote;
 pub(crate) use camera::CameraDraft;
 pub(crate) use emoji::EmojiBuilder;
 
@@ -178,7 +179,9 @@ impl QuillApp {
         live.driver.session.users_state.profile_edit_error = None;
         match send(&mut live.driver) {
             Ok(_) => {
-                self.connection.status_note = tr(keys::Q_PEOPLE_PHOTO_UPDATE_REQUESTED).into();
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_PEOPLE_PHOTO_UPDATE_REQUESTED,
+                )));
                 self.close_photo_source(cx);
             }
             Err(err) => self.photo_source_note(format!("Couldn't set the photo: {err:?}"), cx),

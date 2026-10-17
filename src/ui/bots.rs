@@ -4,6 +4,7 @@
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -153,17 +154,18 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if answer.url.is_empty() {
-            self.connection.status_note = if answer.text.is_empty() {
-                tr(keys::Q_MEDIA_BOT_ANSWERED).into()
+            self.connection.set_note(if answer.text.is_empty() {
+                StatusNote::silent(tr(keys::Q_MEDIA_BOT_ANSWERED))
             } else {
-                answer.text
-            };
+                StatusNote::info(answer.text)
+            });
         } else {
-            self.connection.status_note = if quill::platform::open_external_url(&answer.url) {
-                tr(keys::Q_MEDIA_OPENED_LINK).into()
-            } else {
-                tr(keys::Q_MEDIA_COULD_NOT_OPEN_LINK).into()
-            };
+            self.connection
+                .set_note(if quill::platform::open_external_url(&answer.url) {
+                    StatusNote::info(tr(keys::Q_MEDIA_OPENED_LINK))
+                } else {
+                    StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_OPEN_LINK))
+                });
         }
         cx.notify();
     }
@@ -246,7 +248,10 @@ impl QuillApp {
         // use; speculative zeroization was removed (DECISIONS.md).
         drop(password);
         if !matches!(sent, Some(Ok(_))) {
-            self.set_status_note(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN), cx);
+            self.set_status_note(
+                StatusNote::error(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
+                cx,
+            );
         }
         cx.notify();
     }
@@ -264,7 +269,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(game_short_name) = game_short_name.filter(|name| !name.is_empty()) else {
-            self.set_status_note(tr(keys::Q_MEDIA_GAME_DATA_MISSING_CANT_LAUNCH), cx);
+            self.set_status_note(
+                StatusNote::error(tr(keys::Q_MEDIA_GAME_DATA_MISSING_CANT_LAUNCH)),
+                cx,
+            );
             return;
         };
         let sent = self.live.as_mut().map(|live| {
@@ -272,7 +280,10 @@ impl QuillApp {
                 .send_game_callback_query(chat_id, message_id, &game_short_name)
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.set_status_note(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN), cx);
+            self.set_status_note(
+                StatusNote::error(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
+                cx,
+            );
         }
     }
 
@@ -307,7 +318,10 @@ impl QuillApp {
             .map(|live| live.driver.create_private_chat_for(user_id));
         match sent {
             Some(Ok(Some(_))) => {}
-            _ => self.set_status_note(tr(keys::Q_MEDIA_COULDNT_OPEN_THE_USERS_CHAT), cx),
+            _ => self.set_status_note(
+                StatusNote::error(tr(keys::Q_MEDIA_COULDNT_OPEN_THE_USERS_CHAT)),
+                cx,
+            ),
         }
     }
 
@@ -631,7 +645,10 @@ impl QuillApp {
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
-                        this.set_status_note(tr(keys::Q_MEDIA_BOT_LINK_COPIED), cx);
+                        this.set_status_note(
+                            StatusNote::info(tr(keys::Q_MEDIA_BOT_LINK_COPIED)),
+                            cx,
+                        );
                     })),
             );
         }
@@ -746,15 +763,16 @@ impl QuillApp {
             {
                 Ok(Some(_)) => {
                     live.driver.session.bots.bot_start_params.remove(&chat_id.0);
-                    tr(keys::Q_MEDIA_STARTING_BOT).to_string()
+                    StatusNote::silent(tr(keys::Q_MEDIA_STARTING_BOT))
                 }
-                Ok(None) => tr(keys::Q_MEDIA_REQUEST_ALREADY_IN_FLIGHT).to_string(),
-                Err(_) => tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN).to_string(),
+                Ok(None) => StatusNote::silent(tr(keys::Q_MEDIA_REQUEST_ALREADY_IN_FLIGHT)),
+                Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
             }
         });
         self.set_status_note(
-            note.as_deref()
-                .unwrap_or(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
+            note.unwrap_or_else(|| {
+                StatusNote::error(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN))
+            }),
             cx,
         );
     }
@@ -773,14 +791,15 @@ impl QuillApp {
                         .similar_bots
                         .entry(bot_id)
                         .or_insert(SimilarBotsFetch::Loading);
-                    tr(keys::Q_MEDIA_LOADING_SIMILAR_BOTS).to_string()
+                    StatusNote::silent(tr(keys::Q_MEDIA_LOADING_SIMILAR_BOTS))
                 }
-                Ok(None) => tr(keys::Q_MEDIA_ALREADY_LOADING).to_string(),
-                Err(_) => tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN).to_string(),
+                Ok(None) => StatusNote::silent(tr(keys::Q_MEDIA_ALREADY_LOADING)),
+                Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
             });
         self.set_status_note(
-            note.as_deref()
-                .unwrap_or(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
+            note.unwrap_or_else(|| {
+                StatusNote::error(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN))
+            }),
             cx,
         );
     }

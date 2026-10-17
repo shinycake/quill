@@ -7,6 +7,7 @@
 use super::app::QuillApp;
 use super::chat_theme::{danger, success, text_muted};
 use super::stat_chart::{StatChartView, ZoomedDay, parsed_chart};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
@@ -56,7 +57,9 @@ impl QuillApp {
                 .zoom_stat_graph(ChatId(chat_id), token, x)
                 .is_err()
             {
-                self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_LOAD_THE_CHART).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_MONEY_COULD_NOT_LOAD_THE_CHART,
+                )));
             }
         } else if let Some(session) = self.stats_session_mut() {
             session.groups.stats.zoomed.insert(token.to_string(), x);

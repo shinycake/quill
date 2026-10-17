@@ -46,6 +46,7 @@ use super::video_player::controls::{
     VideoController, hide_cursor, live_key_action, live_label, live_pill, live_pill_text_size,
     live_pill_width, stream_label_box,
 };
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_kit::component::slider::SliderState;
@@ -667,7 +668,7 @@ impl QuillApp {
                 if let Some(call_id) = call_id
                     && let Err(err) = live.driver.set_group_call_playback_muted(call_id, !muted)
                 {
-                    self.connection.status_note = err.to_string();
+                    self.connection.set_note(StatusNote::error(err.to_string()));
                 }
             }
             None => self.group_call.stream.demo_muted = !muted,

@@ -4,6 +4,7 @@
 use super::app::QuillApp;
 use super::request_share::RequestShareKind;
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -176,8 +177,8 @@ impl QuillApp {
     }
 
     /// B1: set the status-bar note and refresh.
-    pub(super) fn set_status_note(&mut self, note: &str, cx: &mut Context<Self>) {
-        self.connection.status_note = note.into();
+    pub(super) fn set_status_note(&mut self, note: StatusNote, cx: &mut Context<Self>) {
+        self.connection.set_note(note);
         cx.notify();
     }
 
@@ -226,7 +227,10 @@ impl QuillApp {
                             RequestShareKind::Phone { bot_user_id },
                             cx,
                         ),
-                        None => this.set_status_note(tr(keys::Q_MISC_ONLY_A_BOT_CAN_ASK), cx),
+                        None => this.set_status_note(
+                            StatusNote::info(tr(keys::Q_MISC_ONLY_A_BOT_CAN_ASK)),
+                            cx,
+                        ),
                     }
                 }))
             }

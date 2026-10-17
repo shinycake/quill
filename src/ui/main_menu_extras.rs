@@ -7,6 +7,7 @@
 use super::app::QuillApp;
 use super::folder_share::finish_dialog;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
@@ -51,7 +52,9 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.load_emoji_status_choices().is_err()
         {
-            self.connection.status_note = tr(keys::Q_MISC_COULD_NOT_LOAD_EMOJI_STATUSES).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MISC_COULD_NOT_LOAD_EMOJI_STATUSES,
+            )));
         }
         cx.notify();
     }
@@ -71,11 +74,12 @@ impl QuillApp {
     /// Set `id` as the status for `secs` (`0` keeps it until removed).
     pub(super) fn change_emoji_status_for(&mut self, id: i64, secs: i32, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.change_emoji_status(Some(id), secs) {
-                Ok(Some(_)) => tr(keys::Q_MISC_UPDATING_EMOJI_STATUS).into(),
-                Ok(None) => tr(keys::Q_MISC_AN_EMOJI_STATUS_IS_ALREADY).into(),
-                Err(_) => tr(keys::Q_MISC_COULD_NOT_UPDATE_EMOJI_STATUS).into(),
-            };
+            self.connection
+                .set_note(match live.driver.change_emoji_status(Some(id), secs) {
+                    Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MISC_UPDATING_EMOJI_STATUS)),
+                    Ok(None) => StatusNote::silent(tr(keys::Q_MISC_AN_EMOJI_STATUS_IS_ALREADY)),
+                    Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_UPDATE_EMOJI_STATUS)),
+                });
         }
         cx.notify();
     }
@@ -104,8 +108,9 @@ impl QuillApp {
                 PopupMenuItem::new(EMOJI_STATUS_OTHER).on_click(move |_, _, cx| {
                     let _ = owner.update(cx, |this, cx| {
                         this.chat_list.status_other_for = Some(id);
-                        this.connection.status_note =
-                            tr(keys::Q_MISC_ENTER_THE_HOURS_BELOW_THEN).into();
+                        this.connection.set_note(StatusNote::silent(tr(
+                            keys::Q_MISC_ENTER_THE_HOURS_BELOW_THEN,
+                        )));
                         cx.notify();
                     });
                 }),

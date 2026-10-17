@@ -6,6 +6,7 @@ use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::suggested_posts_state::{BalanceFor, PriceBox, SuggestTarget, TimeBox, TimeTarget};
 use super::suggested_posts_ui::price_amount;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::date_picker::DatePicker;
 use gpui_kit::component::dialog::Dialog;
@@ -126,10 +127,10 @@ impl QuillApp {
                     BalanceFor::Offer => tr(keys::Q_MONEY_OFFER_THIS_PRICE),
                     BalanceFor::Accept => tr(keys::Q_MONEY_ACCEPT_THIS_POST),
                 };
-                self.connection.status_note = tr_with(
+                self.connection.set_note(StatusNote::info(tr_with(
                     keys::Q_MONEY_YOU_NEED_TO,
                     &[("label", &(price.label()).to_string()), ("what", what)],
-                );
+                )));
                 self.open_stars(cx);
             }
             SuggestedPrice::TonCents(_) => {
@@ -212,13 +213,13 @@ impl QuillApp {
                 chat_id,
                 message_id,
             } => {
-                self.connection.status_note = match self.live.as_mut() {
+                self.connection.set_note(match self.live.as_mut() {
                     Some(live) => match live.driver.add_offer(chat_id, message_id, terms) {
-                        Ok(_) => tr(keys::Q_MONEY_SENDING_THE_OFFER).into(),
-                        Err(_) => tr(keys::Q_MONEY_COULDNT_SEND_THE_OFFER).into(),
+                        Ok(_) => StatusNote::silent(tr(keys::Q_MONEY_SENDING_THE_OFFER)),
+                        Err(_) => StatusNote::error(tr(keys::Q_MONEY_COULDNT_SEND_THE_OFFER)),
                     },
-                    None => tr(keys::Q_MONEY_OFFER_SENT_DEMO).into(),
-                };
+                    None => StatusNote::silent(tr(keys::Q_MONEY_OFFER_SENT_DEMO)),
+                });
                 cx.notify();
             }
         }

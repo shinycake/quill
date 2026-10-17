@@ -10,6 +10,7 @@ use super::app::{QuillApp, pane_placeholder};
 use super::chat_row::{chat_avatar, saved_messages_avatar};
 use super::pressable::PressableDiv;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -255,7 +256,9 @@ impl QuillApp {
                 .toggle_view_as_topics(chat_id, view_as_topics)
                 .is_err()
             {
-                self.connection.status_note = tr(keys::Q_PEOPLE_COULD_NOT_CHANGE_THE_VIEW).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_PEOPLE_COULD_NOT_CHANGE_THE_VIEW,
+                )));
             } else if view_as_topics && live.driver.session.is_saved_messages(chat_id) {
                 let _ = live.driver.load_saved_topics();
             }
@@ -268,7 +271,9 @@ impl QuillApp {
     pub(super) fn open_saved_sublist_ui(&mut self, topic_id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_saved_sublist(topic_id).is_err() {
-                self.connection.status_note = tr(keys::Q_PEOPLE_COULD_NOT_OPEN_THE_SAVED).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_PEOPLE_COULD_NOT_OPEN_THE_SAVED,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_saved_sublist(topic_id);
@@ -283,10 +288,14 @@ impl QuillApp {
                 .toggle_saved_topic_pinned(topic_id, pinned)
                 .is_err()
             {
-                self.connection.status_note = tr(keys::Q_PEOPLE_COULD_NOT_PIN_THE_SAVED).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_PEOPLE_COULD_NOT_PIN_THE_SAVED,
+                )));
             }
         } else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_PINNING_NEEDS_A_LIVE_CONNECTION).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_PINNING_NEEDS_A_LIVE_CONNECTION,
+            )));
         }
         cx.notify();
     }
@@ -299,7 +308,9 @@ impl QuillApp {
         match (self.live.as_mut(), tag) {
             (Some(live), Some(tag)) => {
                 if live.driver.filter_saved_by_tag(tag).is_err() {
-                    self.connection.status_note = tr(keys::Q_PEOPLE_COULD_NOT_FILTER_BY_TAG).into();
+                    self.connection.set_note(StatusNote::error(tr(
+                        keys::Q_PEOPLE_COULD_NOT_FILTER_BY_TAG,
+                    )));
                 }
             }
             (Some(live), None) => live.driver.clear_saved_tag_filter(),
@@ -716,14 +727,15 @@ impl QuillApp {
         let label = clean_tag_label(dialog.input.read(cx).value().as_ref());
         match self.live.as_mut() {
             Some(live) => {
-                self.connection.status_note = match live.driver.set_saved_tag_label(&tag, &label) {
-                    Ok(_) => tr(keys::Q_PEOPLE_TAG_NAME_SAVED).into(),
-                    Err(_) => tr(keys::Q_PEOPLE_COULD_NOT_RENAME_THE_TAG).into(),
-                };
+                self.connection
+                    .set_note(match live.driver.set_saved_tag_label(&tag, &label) {
+                        Ok(_) => StatusNote::silent(tr(keys::Q_PEOPLE_TAG_NAME_SAVED)),
+                        Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_RENAME_THE_TAG)),
+                    });
             }
-            None => {
-                self.connection.status_note = tr(keys::Q_PEOPLE_NAMING_TAGS_NEEDS_A_LIVE).into()
-            }
+            None => self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_NAMING_TAGS_NEEDS_A_LIVE,
+            ))),
         }
         self.dialogs.saved_tag_dialog = None;
         cx.notify();

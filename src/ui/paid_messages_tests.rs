@@ -169,7 +169,7 @@ fn charging_needs_premium(cx: &mut TestAppContext) {
         session.payments.premium_option = Some(false);
         app.open_charge_draft(cx);
         assert!(app.paid_messages.charge.is_none());
-        assert!(app.connection.status_note.contains("Premium"));
+        assert!(app.connection.status_note().contains("Premium"));
     });
 }
 

@@ -9,6 +9,7 @@
 use super::app::QuillApp;
 use super::dialogs::{OwnershipDialog, OwnershipStage};
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Input, InputContentType};
@@ -169,11 +170,11 @@ impl QuillApp {
         });
         input.update(cx, |input, cx| input.set_value("", window, cx));
         drop(password);
-        self.connection.status_note = match sent {
-            Some(Ok(Some(_))) => tr(keys::Q_OPS_TRANSFERRING_OWNERSHIP).into(),
-            Some(_) => tr(keys::Q_OPS_OWNERSHIP_CANT_BE_TRANSFERRED_RIGHT).into(),
-            None => tr(keys::Q_OPS_TRANSFERRING_OWNERSHIP_NEEDS_A_LIVE).into(),
-        };
+        self.connection.set_note(match sent {
+            Some(Ok(Some(_))) => StatusNote::silent(tr(keys::Q_OPS_TRANSFERRING_OWNERSHIP)),
+            Some(_) => StatusNote::error(tr(keys::Q_OPS_OWNERSHIP_CANT_BE_TRANSFERRED_RIGHT)),
+            None => StatusNote::info(tr(keys::Q_OPS_TRANSFERRING_OWNERSHIP_NEEDS_A_LIVE)),
+        });
         cx.notify();
     }
 
@@ -213,10 +214,10 @@ impl QuillApp {
         } else {
             "group"
         };
-        self.connection.status_note = tr_with(
+        self.connection.set_note(StatusNote::silent(tr_with(
             keys::Q_OPS_IS_NOW_THE_OWNER_OF,
             &[("name", &name.to_string()), ("place", place)],
-        );
+        )));
         self.admin.ownership_dialog = None;
         if leave_after {
             self.leave_channel(ChatId(done.chat_id), cx);

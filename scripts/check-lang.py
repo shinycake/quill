@@ -5,7 +5,9 @@ Fails when:
 - a UI file has more hard-coded English text than its entry in the
   baseline (scripts/lang-baseline.txt, "<count> <path>"); files not listed
   must have none;
-- a key in lang/en/*.strings is not used anywhere in src/.
+- a key in lang/en/*.strings is not used anywhere in src/;
+- a status note (set_note / set_status_note / StatusNote::*) is built from a
+  Rust Debug dump (`{err:?}`): map the error with user_error() instead.
 
 Text is a string literal of at least two words that starts with a capital
 letter, outside test files and the lines of logs, panics and attributes.
@@ -80,6 +82,25 @@ def unused_keys():
     return sorted(set(out))
 
 
+NOTE_START = re.compile(r'\b(?:set_note|set_status_note|StatusNote::\w+)\(')
+DEBUG_DUMP = re.compile(r'\{[^{}]*:#?\?\}')
+
+
+def debug_dump_notes(path):
+    """Statements that build a status note from a Debug format."""
+    text = open(path, encoding='utf-8').read()
+    cut = text.find('#[cfg(test)]')
+    if cut >= 0:
+        text = text[:cut]
+    out = []
+    for m in NOTE_START.finditer(text):
+        end = text.find(';', m.end())
+        statement = text[m.start():end if end >= 0 else len(text)]
+        if DEBUG_DUMP.search(statement):
+            out.append(text.count('\n', 0, m.start()) + 1)
+    return sorted(set(out))
+
+
 def main():
     update = '--update' in sys.argv
     baseline = load_baseline()
@@ -97,6 +118,10 @@ def main():
             if count:
                 lines.append('%d %s' % (count, path))
         open(BASELINE, 'w', encoding='utf-8').write('\n'.join(lines) + '\n')
+    for path in ui_files():
+        for line in debug_dump_notes(path):
+            failed = True
+            print('DEBUG-NOTE %s:%d: a status note shows a Debug dump. Use user_error(&err) (src/ui/user_error.rs).' % (path, line))
     for key in unused_keys():
         failed = True
         print('UNUSED %s: no keys:: use in src/. Remove it.' % key)

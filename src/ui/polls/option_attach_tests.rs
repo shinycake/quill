@@ -39,7 +39,7 @@ fn a_link_is_attached_with_done_and_an_empty_one_is_refused(cx: &mut TestAppCont
         app.start_poll_option_link(AttachTarget::Row(1), window, cx);
         app.finish_poll_option_link(AttachTarget::Row(1), cx);
         assert_eq!(slot(app, 1), OptionMediaSlot::None);
-        assert!(app.connection.status_note.contains("link"));
+        assert!(app.connection.status_note().contains("link"));
 
         let input = app.composer_ui.poll_dialog.as_ref().unwrap().attach[1]
             .link_input
@@ -103,7 +103,7 @@ fn a_picked_photo_is_read_then_ready_and_a_text_file_is_refused(cx: &mut TestApp
         app.open_poll_dialog(window, cx);
         app.take_poll_option_file(AttachTarget::Row(0), PathBuf::from("/tmp/notes.txt"), cx);
         assert_eq!(slot(app, 0), OptionMediaSlot::None);
-        assert!(app.connection.status_note.contains("photo or a video"));
+        assert!(app.connection.status_note().contains("photo or a video"));
 
         app.take_poll_option_file(AttachTarget::Row(0), photo, cx);
         assert_eq!(slot(app, 0), OptionMediaSlot::Preparing(shown.clone()));

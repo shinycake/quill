@@ -10,6 +10,7 @@ use super::groups::{ADMIN_RIGHT_LABELS, admin_right_get, admin_right_set};
 use super::message_payments::button_is_pressable;
 use super::pressable::action_row;
 use super::shell::DialogKind;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -261,7 +262,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> bool {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_MODE_ADDING_A_BOT).into();
+            self.connection
+                .set_note(StatusNote::info(tr(keys::Q_MEDIA_DEMO_MODE_ADDING_A_BOT)));
             cx.notify();
             return true;
         };
@@ -294,14 +296,14 @@ impl QuillApp {
             .get(&chat_id)
             .map(|chat| chat.title.clone())
             .unwrap_or_default();
-        self.connection.status_note = match sent {
-            Ok(Some(_)) => tr_with(
+        self.connection.set_note(match sent {
+            Ok(Some(_)) => StatusNote::silent(tr_with(
                 keys::Q_MEDIA_ADDING_THE_BOT_TO,
                 &[("title", &title.to_string())],
-            ),
-            Ok(None) => tr(keys::Q_MEDIA_YOU_CANT_ADD_THE_BOT).into(),
-            Err(_) => tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN).into(),
-        };
+            )),
+            Ok(None) => StatusNote::error(tr(keys::Q_MEDIA_YOU_CANT_ADD_THE_BOT)),
+            Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
+        });
         cx.notify();
         matches!(sent, Ok(Some(_)))
     }
@@ -591,7 +593,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> bool {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_MODE_SHARING_NEEDS_A).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_MEDIA_DEMO_MODE_SHARING_NEEDS_A,
+            )));
             cx.notify();
             return true;
         };
@@ -600,11 +604,14 @@ impl QuillApp {
             .send_game_message(ChatId(chat_id), bot_id, game_short_name)
         {
             Ok(_) => {
-                self.connection.status_note = tr(keys::Q_MEDIA_GAME_SENT).into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_MEDIA_GAME_SENT)));
                 true
             }
             Err(_) => {
-                self.connection.status_note = tr(keys::Q_MEDIA_COULDNT_SEND_THE_GAME_HERE).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_MEDIA_COULDNT_SEND_THE_GAME_HERE,
+                )));
                 cx.notify();
                 false
             }
@@ -754,9 +761,12 @@ impl QuillApp {
         match link {
             Some(link) => {
                 cx.write_to_clipboard(ClipboardItem::new_string(link));
-                self.set_status_note(tr(keys::SHARE_GAME_LINK_COPIED), cx);
+                self.set_status_note(StatusNote::info(tr(keys::SHARE_GAME_LINK_COPIED)), cx);
             }
-            None => self.set_status_note(tr(keys::Q_MEDIA_THIS_GAME_HAS_NO_SHAREABLE), cx),
+            None => self.set_status_note(
+                StatusNote::info(tr(keys::Q_MEDIA_THIS_GAME_HAS_NO_SHAREABLE)),
+                cx,
+            ),
         }
     }
 

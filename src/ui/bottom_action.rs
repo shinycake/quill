@@ -9,6 +9,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 
+use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::chat_bottom_bar::{BarFacts, BottomBar, ChannelFacts, bottom_bar};
 use quill::ids::ChatId;
@@ -118,11 +119,11 @@ impl QuillApp {
             BottomBar::PremiumRequired => self.open_premium(cx),
             BottomBar::JoinGroup | BottomBar::ApplyToJoin => {
                 self.join_channel(chat_id, cx);
-                self.connection.status_note = if bar == BottomBar::ApplyToJoin {
-                    tr(keys::Q_MEDIA_JOIN_REQUEST_SENT).into()
+                self.connection.set_note(if bar == BottomBar::ApplyToJoin {
+                    StatusNote::silent(tr(keys::Q_MEDIA_JOIN_REQUEST_SENT))
                 } else {
-                    tr(keys::Q_MEDIA_JOINING_GROUP).into()
-                };
+                    StatusNote::silent(tr(keys::Q_MEDIA_JOINING_GROUP))
+                });
             }
             BottomBar::JoinChannel | BottomBar::MuteUnmute { .. } => {}
         }
@@ -134,16 +135,17 @@ impl QuillApp {
     fn unblock_peer(&mut self, chat_id: ChatId, restart: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let note = match live.driver.set_chat_user_blocked(chat_id, false) {
-                Ok(Some(_)) => tr(keys::Q_MEDIA_UNBLOCKING_USER),
-                Ok(None) => tr(keys::Q_MEDIA_REQUEST_ALREADY_IN_FLIGHT),
-                Err(_) => tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN),
+                Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MEDIA_UNBLOCKING_USER)),
+                Ok(None) => StatusNote::silent(tr(keys::Q_MEDIA_REQUEST_ALREADY_IN_FLIGHT)),
+                Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
             };
             self.set_status_note(note, cx);
         } else if let Some(session) = self.demo_session.as_mut() {
             if let Some(chat) = session.chats.get_mut(&chat_id.0) {
                 chat.blocked = false;
             }
-            self.connection.status_note = tr(keys::Q_MEDIA_UNBLOCKED_DEMO).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_MEDIA_UNBLOCKED_DEMO)));
         }
         if restart {
             self.start_bot_from_bar(chat_id, cx);
@@ -167,7 +169,8 @@ impl QuillApp {
         if self.live.is_some() {
             self.press_bot_start(chat_id, bot_id, parameter, cx);
         } else {
-            self.connection.status_note = tr(keys::Q_MEDIA_BOT_STARTED_DEMO).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_MEDIA_BOT_STARTED_DEMO)));
         }
     }
 }

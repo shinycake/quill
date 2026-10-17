@@ -5,6 +5,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::groups::{apply_ready_channels, apply_ready_channels_admin};
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use crate::ui::sponsored::apply_ready_sponsored;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use std::sync::atomic::Ordering;
 
@@ -42,7 +43,8 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_channels(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.connection.status_note = "screenshot demo — broadcast channel".into();
+        self.connection
+            .set_note(StatusNote::silent("screenshot demo — broadcast channel"));
     }
 
     fn demo_ready_channels_admin(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -53,7 +55,9 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_channels_admin(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.connection.status_note = "screenshot demo — broadcast channel admin".into();
+        self.connection.set_note(StatusNote::silent(
+            "screenshot demo — broadcast channel admin",
+        ));
     }
 
     fn demo_ready_sponsored(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -61,6 +65,7 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_sponsored(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.connection.status_note = "screenshot demo — sponsored messages".into();
+        self.connection
+            .set_note(StatusNote::silent("screenshot demo — sponsored messages"));
     }
 }

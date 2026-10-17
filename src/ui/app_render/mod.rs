@@ -191,7 +191,8 @@ impl Render for QuillApp {
                         .press(now, this.appearance.mac_warn_before_quit)
                     {
                         QuitDecision::Warn => {
-                            this.connection.status_note = quill::quit_guard::WARNING.to_string();
+                            this.connection
+                                .set_note(StatusNote::info(quill::quit_guard::WARNING.to_string()));
                             cx.notify();
                             return;
                         }
@@ -735,7 +736,7 @@ impl Render for QuillApp {
             // (`QUILL_DEMO_HIDE_STATUS=1` hides it, for recordings).
             .when(
                 self.live.is_none()
-                    && !self.connection.status_note.is_empty()
+                    && !self.connection.status_note().is_empty()
                     && std::env::var_os("QUILL_DEMO_HIDE_STATUS").is_none(),
                 |this| {
                     this.child(
@@ -745,10 +746,10 @@ impl Render for QuillApp {
                             .min_h(px(24.))
                             .px_3()
                             .role(Role::Label)
-                            .aria_label(self.connection.status_note.clone())
+                            .aria_label(self.connection.status_note().to_string())
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(self.connection.status_note.clone()),
+                            .child(self.connection.status_note().to_string()),
                     )
                 },
             )
@@ -772,7 +773,7 @@ impl Render for QuillApp {
                             div()
                                 .id("status-toast")
                                 .role(Role::Label)
-                                .aria_label(self.connection.status_note.clone())
+                                .aria_label(self.connection.status_note().to_string())
                                 .max_w(px(520.))
                                 .px_3()
                                 .py_1p5()
@@ -784,7 +785,7 @@ impl Render for QuillApp {
                                 .shadow_md()
                                 .text_sm()
                                 .truncate()
-                                .child(self.connection.status_note.clone()),
+                                .child(self.connection.status_note().to_string()),
                         ),
                 )
             })
@@ -958,33 +959,7 @@ impl Render for QuillApp {
 
 mod frame_upkeep;
 mod status_toast;
+#[cfg(target_os = "macos")]
+use crate::ui::status_note::StatusNote;
 #[allow(unused_imports)]
 use status_toast::*;
-
-#[cfg(test)]
-mod toast_tests {
-    use super::status_note_is_toast;
-
-    #[test]
-    fn only_failures_restrictions_and_invisible_confirmations_toast() {
-        for shown in [
-            "could not send rich message",
-            "Custom emoji need Telegram Premium",
-            "Slow mode: wait 12s before sending",
-            "copied to clipboard",
-            "Couldn't send the message.",
-            "You have 1 free transcription left until November 21.",
-        ] {
-            assert!(status_note_is_toast(shown), "{shown}");
-        }
-        for silent in [
-            "sending…",
-            "sticker sent",
-            "reaction updated",
-            "updating reaction…",
-            "react",
-        ] {
-            assert!(!status_note_is_toast(silent), "{silent}");
-        }
-    }
-}

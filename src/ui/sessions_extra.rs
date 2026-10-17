@@ -7,6 +7,8 @@ use super::app::QuillApp;
 use super::chat_theme::danger;
 use super::format_helpers::format_session_last_active;
 use super::security::quiet_danger;
+use crate::ui::status_note::StatusNote;
+use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::*;
@@ -79,8 +81,10 @@ impl QuillApp {
     fn set_session_ttl(&mut self, days: i32, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_inactive_session_ttl(days) {
-                self.connection.status_note =
-                    format!("couldn't change the session timeout: {err:?}");
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_SESSION_TIMEOUT,
+                    &err,
+                )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.privacy_data.inactive_session_ttl_days = Some(days);
@@ -306,14 +310,16 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.device_prefs = prefs;
             if let Err(err) = live.driver.save_device_prefs() {
-                self.connection.status_note = tr_with(
+                self.connection.set_note(StatusNote::error(tr_with(
                     keys::Q_PREFS_COULDNT_SAVE_DEVICE_NAME,
                     &[("err", &err.to_string())],
-                );
+                )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.device_prefs = prefs;
-            self.connection.status_note = tr(keys::Q_PREFS_DEMO_DEVICE_NAME_IS_NOT).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_PREFS_DEMO_DEVICE_NAME_IS_NOT,
+            )));
         }
         self.privacy.extra.renaming_device = false;
         cx.notify();

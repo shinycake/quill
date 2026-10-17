@@ -10,6 +10,7 @@ use super::app::QuillApp;
 use super::chat_theme::{accent, bg_canvas, danger};
 use super::pressable::PressableDiv;
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
@@ -31,7 +32,9 @@ impl QuillApp {
 
     pub(super) fn open_share_contact_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.share_target().is_none() {
-            self.connection.status_note = tr(keys::Q_OPS_YOU_CANT_SEND_CONTACTS_HERE).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_OPS_YOU_CANT_SEND_CONTACTS_HERE,
+            )));
             cx.notify();
             return;
         }
@@ -49,7 +52,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if self.share_target().is_none() {
-            self.connection.status_note = tr(keys::Q_OPS_YOU_CANT_SEND_LOCATIONS_HERE).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_OPS_YOU_CANT_SEND_LOCATIONS_HERE,
+            )));
             cx.notify();
             return;
         }
@@ -90,7 +95,9 @@ impl QuillApp {
         let options = self.composer_send_options();
         let Some(live) = self.live.as_mut() else {
             self.share.content_dialog = None;
-            self.connection.status_note = tr(keys::Q_OPS_SHARING_NEEDS_A_LIVE_CONNECTION).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_OPS_SHARING_NEEDS_A_LIVE_CONNECTION,
+            )));
             cx.notify();
             return;
         };
@@ -101,11 +108,12 @@ impl QuillApp {
             Ok(_) => {
                 self.share.content_dialog = None;
                 self.composer_ui.set_reply(None);
-                self.connection.status_note = tr(keys::Q_OPS_SENDING_CONTACT).into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_OPS_SENDING_CONTACT)));
             }
-            Err(_) => {
-                self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_SEND_THE_CONTACT).into()
-            }
+            Err(_) => self.connection.set_note(StatusNote::error(tr(
+                keys::Q_OPS_COULD_NOT_SEND_THE_CONTACT,
+            ))),
         }
         cx.notify();
     }
@@ -121,7 +129,8 @@ impl QuillApp {
         let reply_to = self.send_reply_for(chat_id, cx);
         let options = self.composer_send_options();
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_OPS_SENDING_DICE_NEEDS_A_LIVE).into();
+            self.connection
+                .set_note(StatusNote::info(tr(keys::Q_OPS_SENDING_DICE_NEEDS_A_LIVE)));
             cx.notify();
             return;
         };
@@ -131,9 +140,12 @@ impl QuillApp {
         {
             Ok(_) => {
                 self.composer_ui.set_reply(None);
-                self.connection.status_note = tr(keys::Q_OPS_ROLLING).into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_OPS_ROLLING)));
             }
-            Err(_) => self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_SEND_THE_DICE).into(),
+            Err(_) => self
+                .connection
+                .set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_DICE))),
         }
         cx.notify();
     }
@@ -170,7 +182,9 @@ impl QuillApp {
         let options = self.composer_send_options();
         let Some(live) = self.live.as_mut() else {
             self.share.content_dialog = None;
-            self.connection.status_note = tr(keys::Q_OPS_SHARING_NEEDS_A_LIVE_CONNECTION).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_OPS_SHARING_NEEDS_A_LIVE_CONNECTION,
+            )));
             cx.notify();
             return;
         };
@@ -181,11 +195,12 @@ impl QuillApp {
             Ok(_) => {
                 self.share.content_dialog = None;
                 self.composer_ui.set_reply(None);
-                self.connection.status_note = tr(keys::Q_OPS_SENDING_LOCATION).into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_OPS_SENDING_LOCATION)));
             }
-            Err(_) => {
-                self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_SEND_THE_LOCATION).into()
-            }
+            Err(_) => self.connection.set_note(StatusNote::error(tr(
+                keys::Q_OPS_COULD_NOT_SEND_THE_LOCATION,
+            ))),
         }
         cx.notify();
     }

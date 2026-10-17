@@ -28,6 +28,8 @@
 //! one of `Session::window_chats`.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ui::status_note::StatusNote;
+use crate::ui::user_error::user_error_for;
 mod body;
 mod recording;
 mod saved;
@@ -287,7 +289,8 @@ impl QuillApp {
             return;
         };
         if !self.can_open_chat_window(&chat) {
-            self.connection.status_note = tr(keys::Q_MISC_THIS_CHAT_CANT_OPEN_IN).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_MISC_THIS_CHAT_CANT_OPEN_IN)));
             cx.notify();
             return;
         }
@@ -299,7 +302,10 @@ impl QuillApp {
         // window lets go of it, so TDLib keeps it open.
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.open_chat_window(chat_id) {
-                self.connection.status_note = format!("could not open the chat window: {err:?}");
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_CHAT_WINDOW,
+                    &err,
+                )));
                 self.set_window_scope(outer);
                 cx.notify();
                 return;
@@ -329,8 +335,9 @@ impl QuillApp {
                 Ok(opened) => opened,
                 Err(_) => {
                     owner.update(cx, |app, cx| {
-                        app.connection.status_note =
-                            tr(keys::Q_MISC_COULDNT_OPEN_THE_CHAT_WINDOW).into();
+                        app.connection.set_note(StatusNote::error(tr(
+                            keys::Q_MISC_COULDNT_OPEN_THE_CHAT_WINDOW,
+                        )));
                         app.chat_window_closed(chat_id, None, cx);
                     });
                     return;

@@ -14,6 +14,7 @@ mod editor;
 pub(crate) mod kit_colors;
 
 use super::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::app_theme::{
     BuiltinTheme, Palette, PaletteKey, ThemeBackground, ThemeFile, ThemeId, custom_palette, store,
@@ -337,7 +338,8 @@ impl QuillApp {
         let auto_disagrees =
             self.appearance.auto_night != AutoNight::Off && self.night_mode_now(cx) != night;
         if auto_disagrees {
-            self.connection.status_note = tr(keys::Q_MISC_AUTO_NIGHT_MODE_IS_OFF).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_MISC_AUTO_NIGHT_MODE_IS_OFF)));
         }
         self.set_appearance(cx, |a| {
             if night {

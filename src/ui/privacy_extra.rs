@@ -9,6 +9,8 @@ use super::app::QuillApp;
 use super::chat_theme::{danger, text_muted};
 use super::privacy::{PrivacyEditorTarget, new_chat_privacy_value};
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
+use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
@@ -310,8 +312,9 @@ impl QuillApp {
             .session()
             .is_some_and(|s| s.payments.premium_option == Some(true));
         if !premium {
-            self.connection.status_note =
-                tr(keys::Q_PREFS_CHANGING_GIFT_SETTINGS_NEEDS_TELEGRAM).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PREFS_CHANGING_GIFT_SETTINGS_NEEDS_TELEGRAM,
+            )));
             cx.notify();
             return;
         }
@@ -322,7 +325,10 @@ impl QuillApp {
         edit(&mut next);
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_gift_settings(next) {
-                self.connection.status_note = format!("gift settings update failed: {err:?}");
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_GIFT_SETTINGS,
+                    &err,
+                )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.set_my_gift_settings_local(next);
@@ -423,7 +429,10 @@ impl QuillApp {
     pub(super) fn set_sensitive_content(&mut self, on: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_ignore_sensitive_content(on) {
-                self.connection.status_note = format!("couldn't change the 18+ setting: {err:?}");
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_SENSITIVE_SETTING,
+                    &err,
+                )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.privacy_data.ignore_sensitive = Some(on);
@@ -548,7 +557,9 @@ impl QuillApp {
             prefs.ip_reveal_warning = ip;
         });
         self.privacy.editor = None;
-        self.connection.status_note = tr(keys::Q_PREFS_FILE_OPEN_SETTINGS_SAVED).into();
+        self.connection.set_note(StatusNote::silent(tr(
+            keys::Q_PREFS_FILE_OPEN_SETTINGS_SAVED,
+        )));
         cx.notify();
     }
 
@@ -568,11 +579,12 @@ impl QuillApp {
     }
 
     fn open_file_now(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
-        self.connection.status_note = if quill::platform::open_local_file(path) {
-            tr(keys::Q_PREFS_OPENED_FILE).into()
-        } else {
-            tr(keys::Q_PREFS_COULD_NOT_OPEN_THE_FILE).into()
-        };
+        self.connection
+            .set_note(if quill::platform::open_local_file(path) {
+                StatusNote::silent(tr(keys::Q_PREFS_OPENED_FILE))
+            } else {
+                StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_OPEN_THE_FILE))
+            });
         cx.notify();
     }
 
@@ -738,13 +750,16 @@ impl QuillApp {
                 .spawn(async move { std::fs::copy(&src, &dest).map(|_| dest) })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.connection.status_note = match copied {
-                    Ok(dest) => format!(
+                this.connection.set_note(match copied {
+                    Ok(dest) => StatusNote::info(format!(
                         "saved to {}",
                         dest.file_name().and_then(|n| n.to_str()).unwrap_or("file")
-                    ),
-                    Err(err) => tr_with(keys::Q_PREFS_COULDNT_SAVE, &[("err", &err.to_string())]),
-                };
+                    )),
+                    Err(err) => StatusNote::error(tr_with(
+                        keys::Q_PREFS_COULDNT_SAVE,
+                        &[("err", &err.to_string())],
+                    )),
+                });
                 cx.notify();
             });
         })
@@ -1010,7 +1025,7 @@ mod dispatch_tests {
             app.update_gift_settings(|g| g.limited_gifts = false, cx);
         });
         assert_eq!(app.read_with(vcx, |app, _| limited(app)), Some(true));
-        let note = app.read_with(vcx, |app, _| app.connection.status_note.clone());
+        let note = app.read_with(vcx, |app, _| app.connection.status_note().to_string());
         assert!(note.contains("Premium"), "{note}");
     }
 

@@ -9,6 +9,7 @@ use super::groups::{
 use super::scheduled::picked_unix;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::date_picker::DatePicker;
@@ -44,7 +45,8 @@ impl QuillApp {
                 .fetch_supergroup_members(chat_id, MemberListFilter::Recent, "")
                 .is_err()
         {
-            self.connection.status_note = tr(keys::Q_PEOPLE_COULD_NOT_LOAD_MEMBERS).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_LOAD_MEMBERS)));
         }
         cx.notify();
     }
@@ -72,10 +74,14 @@ impl QuillApp {
                 .refresh_supergroup_members(chat_id, filter, query.trim())
                 .is_err()
             {
-                self.connection.status_note = tr(keys::Q_PEOPLE_COULD_NOT_SEARCH_MEMBERS).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_PEOPLE_COULD_NOT_SEARCH_MEMBERS,
+                )));
             }
         } else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_MEMBER_SEARCH_NEEDS_A_LIVE).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_MEMBER_SEARCH_NEEDS_A_LIVE,
+            )));
         }
         cx.notify();
     }
@@ -100,7 +106,9 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.fetch_admin_rights(chat_id, user_id).is_err()
         {
-            self.connection.status_note = tr(keys::Q_PEOPLE_COULD_NOT_LOAD_ADMIN_RIGHTS).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_PEOPLE_COULD_NOT_LOAD_ADMIN_RIGHTS,
+            )));
         }
         cx.notify();
     }
@@ -162,8 +170,9 @@ impl QuillApp {
             AdminDialogKind::EditRights { user_id, rights } => {
                 let Some(rights) = rights else {
                     self.admin.admin_dialog = Some(dialog);
-                    self.connection.status_note =
-                        tr(keys::Q_PEOPLE_RIGHTS_ARE_STILL_LOADING).into();
+                    self.connection.set_note(StatusNote::silent(tr(
+                        keys::Q_PEOPLE_RIGHTS_ARE_STILL_LOADING,
+                    )));
                     cx.notify();
                     return;
                 };
@@ -200,7 +209,7 @@ impl QuillApp {
         if keep_dialog {
             self.admin.admin_dialog = Some(dialog);
         }
-        self.connection.status_note = note;
+        self.connection.set_note(StatusNote::info(note));
         cx.notify();
     }
 
@@ -307,23 +316,23 @@ impl QuillApp {
                     // say so instead of claiming it happened.
                     Ok(Some(_)) => {
                         if dialog.ban {
-                            tr(keys::Q_PEOPLE_MEMBER_BANNED).into()
+                            StatusNote::silent(tr(keys::Q_PEOPLE_MEMBER_BANNED))
                         } else {
-                            tr(keys::Q_PEOPLE_MEMBER_RESTRICTED).into()
+                            StatusNote::silent(tr(keys::Q_PEOPLE_MEMBER_RESTRICTED))
                         }
                     }
                     Ok(None) | Err(_) => {
                         self.admin.restrict_dialog = Some(dialog);
-                        tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_MEMBER_STATUS).into()
+                        StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_MEMBER_STATUS))
                     }
                 }
             }
             None => {
                 self.admin.restrict_dialog = Some(dialog);
-                tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE).into()
+                StatusNote::info(tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE))
             }
         };
-        self.connection.status_note = note;
+        self.connection.set_note(note);
         cx.notify();
     }
 
@@ -334,13 +343,13 @@ impl QuillApp {
             // Slice G1 fix-up: `Ok(None)` is a driver refusal, not
             // success — report it honestly.
             Some(live) => match live.driver.unban_chat_member(chat_id, user_id) {
-                Ok(Some(_)) => tr(keys::Q_PEOPLE_MEMBER_UNBANNED).into(),
-                Ok(None) => tr(keys::Q_PEOPLE_COULD_NOT_UNBAN_MEMBER).into(),
-                Err(_) => tr(keys::Q_PEOPLE_COULD_NOT_UNBAN_MEMBER).into(),
+                Ok(Some(_)) => StatusNote::silent(tr(keys::Q_PEOPLE_MEMBER_UNBANNED)),
+                Ok(None) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UNBAN_MEMBER)),
+                Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UNBAN_MEMBER)),
             },
-            None => tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE).into(),
+            None => StatusNote::info(tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE)),
         };
-        self.connection.status_note = note;
+        self.connection.set_note(note);
         self.refresh_member_dialog(cx);
     }
 
@@ -382,18 +391,18 @@ impl QuillApp {
                 .driver
                 .set_chat_permissions(dialog.chat_id, &dialog.permissions)
             {
-                Ok(_) => tr(keys::Q_PEOPLE_PERMISSIONS_UPDATED).into(),
+                Ok(_) => StatusNote::silent(tr(keys::Q_PEOPLE_PERMISSIONS_UPDATED)),
                 Err(_) => {
                     self.admin.permissions_dialog = Some(dialog);
-                    tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_PERMISSIONS).into()
+                    StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_PERMISSIONS))
                 }
             },
             None => {
                 self.admin.permissions_dialog = Some(dialog);
-                tr(keys::Q_PEOPLE_PERMISSIONS_NEED_A_LIVE_CONNECTION).into()
+                StatusNote::info(tr(keys::Q_PEOPLE_PERMISSIONS_NEED_A_LIVE_CONNECTION))
             }
         };
-        self.connection.status_note = note;
+        self.connection.set_note(note);
         cx.notify();
     }
 

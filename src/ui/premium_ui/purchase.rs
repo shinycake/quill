@@ -3,6 +3,7 @@
 //! open the in-app payment form of the configured invoice link.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::premium_hub::promo::PromoPage;
@@ -57,7 +58,7 @@ impl QuillApp {
                     if sent.is_err() {
                         live.driver.session.payments.hub.auto_start = None;
                         self.set_status_note(
-                            tr(keys::Q_MONEY_COULDNT_REACH_TELEGRAM_TRY_AGAIN),
+                            StatusNote::error(tr(keys::Q_MONEY_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
                             cx,
                         );
                     }
@@ -72,7 +73,10 @@ impl QuillApp {
                 if let Some(live) = self.live.as_mut() {
                     let _ = live.driver.ensure_earn_app_config();
                 }
-                self.set_status_note(tr(keys::Q_MONEY_PREMIUM_ISNT_AVAILABLE_TO_BUY), cx);
+                self.set_status_note(
+                    StatusNote::info(tr(keys::Q_MONEY_PREMIUM_ISNT_AVAILABLE_TO_BUY)),
+                    cx,
+                );
             }
         }
     }

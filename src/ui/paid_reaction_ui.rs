@@ -12,6 +12,7 @@ use super::app::QuillApp;
 use super::chat_theme::{accent, bg_canvas, bg_subtle, text_muted, warning};
 use super::paid_reaction_state::PaidBox;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
@@ -46,7 +47,7 @@ impl QuillApp {
                 .driver
                 .add_paid_reaction(chat_id, message_id, stars, sender, now);
             if let Some(note) = live.driver.session.payments.paid.note.clone() {
-                self.connection.status_note = note;
+                self.connection.set_note(StatusNote::info(note));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             let balance = session.payments.hub.balance.map(|b| b.stars);
@@ -55,7 +56,9 @@ impl QuillApp {
                 None => {
                     paid.add(chat_id.0, message_id.0, stars, sender, now);
                 }
-                Some(refusal) => self.connection.status_note = refusal.message().to_string(),
+                Some(refusal) => self
+                    .connection
+                    .set_note(StatusNote::error(refusal.message().to_string())),
             }
         }
         cx.notify();

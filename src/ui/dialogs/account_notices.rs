@@ -8,6 +8,7 @@
 use super::super::app::QuillApp;
 use super::super::shell::{DialogKind, QuillShell};
 use super::super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
@@ -72,7 +73,9 @@ impl QuillApp {
             .and_then(|live| live.driver.session.settings.notices.review_outcome.take());
         match outcome {
             Some(LoginReview::Allowed) => {
-                self.connection.status_note = tr(keys::Q_OPS_NEW_LOGIN_ALLOWED_YOU_CAN).into();
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_OPS_NEW_LOGIN_ALLOWED_YOU_CAN,
+                )));
             }
             Some(LoginReview::Prevented { places }) => self.auth_ui.login_prevented = Some(places),
             None => {}

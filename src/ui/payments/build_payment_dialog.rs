@@ -1,6 +1,7 @@
 //! Methods moved out of `payments.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -345,7 +346,9 @@ impl QuillApp {
             live.driver.maybe_fetch_star_subscriptions()
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_LOAD_SUBSCRIPTIONS).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULD_NOT_LOAD_SUBSCRIPTIONS,
+            )));
         }
         cx.notify();
     }
@@ -367,8 +370,9 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.fetch_more_star_subscriptions());
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.status_note =
-                tr(keys::Q_MONEY_COULD_NOT_LOAD_MORE_SUBSCRIPTIONS).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULD_NOT_LOAD_MORE_SUBSCRIPTIONS,
+            )));
         }
         cx.notify();
     }
@@ -397,8 +401,9 @@ impl QuillApp {
             live.driver.edit_star_subscription(&id, true)
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.status_note =
-                tr(keys::Q_MONEY_COULD_NOT_CANCEL_THE_SUBSCRIPTION).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULD_NOT_CANCEL_THE_SUBSCRIPTION,
+            )));
         }
         cx.notify();
     }
@@ -420,7 +425,8 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.edit_star_subscription(&id, false));
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_RE_ENABLE_THE).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_RE_ENABLE_THE)));
         }
         cx.notify();
     }
@@ -434,8 +440,9 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.reuse_star_subscription(&id));
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.status_note =
-                tr(keys::Q_MONEY_COULD_NOT_REJOIN_THE_SUBSCRIPTION).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULD_NOT_REJOIN_THE_SUBSCRIPTION,
+            )));
         }
         cx.notify();
     }

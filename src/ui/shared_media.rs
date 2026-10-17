@@ -4,6 +4,7 @@
 use super::app::{PaneMode, QuillApp};
 use super::pressable::PressableDiv;
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -260,16 +261,19 @@ impl QuillApp {
         let opened = if let Some(live) = self.live.as_mut() {
             match live.driver.open_shared_media() {
                 Ok(true) => {
-                    self.connection.status_note = tr(keys::Q_OPS_SHARED_MEDIA).into();
+                    self.connection
+                        .set_note(StatusNote::silent(tr(keys::Q_OPS_SHARED_MEDIA)));
                     true
                 }
                 Ok(false) => {
-                    self.connection.status_note = tr(keys::Q_OPS_SELECT_A_CHAT_TO_BROWSE).into();
+                    self.connection
+                        .set_note(StatusNote::silent(tr(keys::Q_OPS_SELECT_A_CHAT_TO_BROWSE)));
                     false
                 }
                 Err(_) => {
-                    self.connection.status_note =
-                        tr(keys::Q_OPS_COULD_NOT_OPEN_SHARED_MEDIA).into();
+                    self.connection.set_note(StatusNote::error(tr(
+                        keys::Q_OPS_COULD_NOT_OPEN_SHARED_MEDIA,
+                    )));
                     false
                 }
             }
@@ -277,11 +281,13 @@ impl QuillApp {
             match session.open_chat {
                 Some(chat_id) => {
                     session.media.shared_media.open_for(chat_id);
-                    self.connection.status_note = tr(keys::Q_OPS_SHARED_MEDIA).into();
+                    self.connection
+                        .set_note(StatusNote::silent(tr(keys::Q_OPS_SHARED_MEDIA)));
                     true
                 }
                 None => {
-                    self.connection.status_note = tr(keys::Q_OPS_SELECT_A_CHAT_TO_BROWSE).into();
+                    self.connection
+                        .set_note(StatusNote::silent(tr(keys::Q_OPS_SELECT_A_CHAT_TO_BROWSE)));
                     false
                 }
             }
@@ -299,7 +305,8 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.media.shared_media.close();
         }
-        self.connection.status_note = tr(keys::Q_OPS_SHARED_MEDIA_CLOSED).into();
+        self.connection
+            .set_note(StatusNote::silent(tr(keys::Q_OPS_SHARED_MEDIA_CLOSED)));
         cx.notify();
     }
 
@@ -312,7 +319,8 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.select_shared_media_tab(tab).is_err() {
-                self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_LOAD_THAT_TAB).into();
+                self.connection
+                    .set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_LOAD_THAT_TAB)));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.media.shared_media.select_tab(tab);
@@ -324,7 +332,9 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let tab = live.driver.session.media.shared_media.active_tab;
             if live.driver.fetch_shared_media(tab).is_err() {
-                self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_RETRY_LOADING_SHARED).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_OPS_COULD_NOT_RETRY_LOADING_SHARED,
+                )));
             }
         }
         cx.notify();
@@ -339,10 +349,12 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             match live.driver.jump_to_shared_media_item(message_id) {
-                Ok(_) => self.connection.status_note = tr(keys::Q_OPS_JUMPED_TO_MESSAGE).into(),
-                Err(_) => {
-                    self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_OPEN_THAT_MESSAGE).into()
-                }
+                Ok(_) => self
+                    .connection
+                    .set_note(StatusNote::silent(tr(keys::Q_OPS_JUMPED_TO_MESSAGE))),
+                Err(_) => self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_OPS_COULD_NOT_OPEN_THAT_MESSAGE,
+                ))),
             }
         }
         cx.notify();

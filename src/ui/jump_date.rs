@@ -7,6 +7,7 @@
 
 use super::QuillApp;
 use super::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
@@ -28,7 +29,8 @@ impl QuillApp {
     pub(super) fn open_jump_date_ui(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_history_calendar().is_err() {
-                self.connection.status_note = tr(keys::Q_MISC_OPEN_A_CHAT_TO_JUMP).into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_MISC_OPEN_A_CHAT_TO_JUMP)));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_history_calendar(now_unix());
@@ -60,10 +62,11 @@ impl QuillApp {
 
     fn jump_date_pick(&mut self, day: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.jump_to_date(day) {
-                Ok(_) => tr(keys::Q_MISC_JUMPING_TO_DATE).into(),
-                Err(_) => tr(keys::Q_MISC_COULD_NOT_JUMP_TO_THAT).into(),
-            };
+            self.connection
+                .set_note(match live.driver.jump_to_date(day) {
+                    Ok(_) => StatusNote::silent(tr(keys::Q_MISC_JUMPING_TO_DATE)),
+                    Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_JUMP_TO_THAT)),
+                });
         } else if let Some(session) = self.demo_session.as_mut() {
             session.close_history_calendar();
         }

@@ -12,6 +12,7 @@ use super::dialogs::{BirthdayDialog, EditContactDialog, ProfileDialog};
 use super::group_panels::format_phone;
 use super::pressable::action_row;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -105,7 +106,7 @@ impl QuillApp {
     /// "Phone number copied to clipboard" and friends).
     pub(super) fn copy_profile_text(&mut self, text: &str, toast: &str, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()));
-        self.connection.status_note = toast.into();
+        self.connection.set_note(StatusNote::info(toast));
         cx.notify();
     }
 
@@ -734,7 +735,9 @@ impl QuillApp {
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_PROFILE_PHOTOS_NEED_A_LIVE).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_PROFILE_PHOTOS_NEED_A_LIVE,
+            )));
             cx.notify();
             return;
         };
@@ -755,10 +758,9 @@ impl QuillApp {
         }
         match live.driver.fetch_user_profile_photos(user_id) {
             Ok(_) => self.dialogs.pending_profile_gallery = Some(user_id),
-            Err(_) => {
-                self.connection.status_note =
-                    tr(keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN).into()
-            }
+            Err(_) => self.connection.set_note(StatusNote::error(tr(
+                keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
+            ))),
         }
         cx.notify();
     }
@@ -788,14 +790,15 @@ impl QuillApp {
             }
             ProfilePhotosFetch::Loaded { .. } => {
                 self.dialogs.pending_profile_gallery = None;
-                self.connection.status_note = tr(keys::Q_PEOPLE_NO_PROFILE_PHOTOS).into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_NO_PROFILE_PHOTOS)));
             }
             ProfilePhotosFetch::Failed(reason) => {
                 self.dialogs.pending_profile_gallery = None;
-                self.connection.status_note = tr_with(
+                self.connection.set_note(StatusNote::error(tr_with(
                     keys::Q_PEOPLE_COULDNT_LOAD_PROFILE_PHOTOS,
                     &[("reason", &reason.to_string())],
-                );
+                )));
             }
         }
         true
@@ -823,16 +826,19 @@ impl QuillApp {
     /// (`setProfilePhoto` with the suggestion's `chatPhoto.id`).
     pub(super) fn accept_suggested_photo(&mut self, photo_id: i64, cx: &mut Context<Self>) {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_PROFILE_PHOTO_CHANGES_NEED_A).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_PROFILE_PHOTO_CHANGES_NEED_A,
+            )));
             cx.notify();
             return;
         };
         match live.driver.set_profile_photo_previous(photo_id) {
-            Ok(_) => self.connection.status_note = tr(keys::Q_PEOPLE_PROFILE_PHOTO_UPDATED).into(),
-            Err(_) => {
-                self.connection.status_note =
-                    tr(keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN).into()
-            }
+            Ok(_) => self
+                .connection
+                .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_PROFILE_PHOTO_UPDATED))),
+            Err(_) => self.connection.set_note(StatusNote::error(tr(
+                keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
+            ))),
         }
         cx.notify();
     }
@@ -843,19 +849,22 @@ impl QuillApp {
             return;
         };
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_PROFILE_PHOTO_CHANGES_NEED_A).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_PROFILE_PHOTO_CHANGES_NEED_A,
+            )));
             cx.notify();
             return;
         };
         match live.driver.set_profile_photo_previous(photo_id) {
             Ok(_) => {
-                self.connection.status_note = tr(keys::Q_PEOPLE_MAIN_PROFILE_PHOTO_UPDATED).into();
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_PEOPLE_MAIN_PROFILE_PHOTO_UPDATED,
+                )));
                 self.close_media_viewer(cx);
             }
-            Err(_) => {
-                self.connection.status_note =
-                    tr(keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN).into()
-            }
+            Err(_) => self.connection.set_note(StatusNote::error(tr(
+                keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
+            ))),
         }
         cx.notify();
     }
@@ -887,7 +896,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_REPORTS_NEED_A).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_DEMO_MODE_REPORTS_NEED_A,
+            )));
             cx.notify();
             return;
         };
@@ -895,11 +906,12 @@ impl QuillApp {
             .driver
             .report_profile_photo(user_id, file_id, reason.td_type())
         {
-            Ok(_) => self.connection.status_note = tr(keys::Q_PEOPLE_REPORT_SENT).into(),
-            Err(_) => {
-                self.connection.status_note =
-                    tr(keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN).into()
-            }
+            Ok(_) => self
+                .connection
+                .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_REPORT_SENT))),
+            Err(_) => self.connection.set_note(StatusNote::error(tr(
+                keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
+            ))),
         }
         cx.notify();
     }
@@ -933,8 +945,8 @@ impl QuillApp {
             {
                 let _ = this.update(cx, |this, cx| {
                     if !is_profile_photo_file(&path) {
-                        this.connection.status_note =
-                            tr(keys::Q_PEOPLE_CHOOSE_A_JPEG_PNG_OR).into();
+                        this.connection
+                            .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_CHOOSE_A_JPEG_PNG_OR)));
                         cx.notify();
                         return;
                     }

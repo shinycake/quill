@@ -9,6 +9,7 @@
 
 use super::app::QuillApp;
 use super::chat_row::compact_count;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
@@ -67,10 +68,11 @@ impl QuillApp {
 
     pub(super) fn jump_to_unread_marker(&mut self, kind: UnreadJumpKind, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.jump_to_unread_marker(kind) {
-                Ok(()) => String::new(),
-                Err(_) => tr(keys::Q_MISC_COULD_NOT_FIND_THE_MESSAGE).into(),
-            };
+            self.connection
+                .set_note(match live.driver.jump_to_unread_marker(kind) {
+                    Ok(()) => StatusNote::default(),
+                    Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_FIND_THE_MESSAGE)),
+                });
             cx.notify();
         }
     }
@@ -83,21 +85,23 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note =
+            self.connection.set_note(
                 match live.driver.read_all_chat_unread_markers(chat_id, kind) {
-                    Ok(()) => String::new(),
-                    Err(_) => tr(keys::Q_MISC_COULD_NOT_MARK_AS_READ).into(),
-                };
+                    Ok(()) => StatusNote::default(),
+                    Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_MARK_AS_READ)),
+                },
+            );
         }
         cx.notify();
     }
 
     pub(super) fn read_all_unread_markers(&mut self, kind: UnreadJumpKind, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.read_all_unread_markers(kind) {
-                Ok(()) => String::new(),
-                Err(_) => tr(keys::Q_MISC_COULD_NOT_MARK_AS_READ).into(),
-            };
+            self.connection
+                .set_note(match live.driver.read_all_unread_markers(kind) {
+                    Ok(()) => StatusNote::default(),
+                    Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_MARK_AS_READ)),
+                });
             cx.notify();
         }
     }

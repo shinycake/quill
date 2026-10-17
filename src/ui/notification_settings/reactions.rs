@@ -1,6 +1,7 @@
 //! Reaction notification settings.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -23,8 +24,9 @@ impl QuillApp {
                 .reaction_notification_settings
                 .clone()
             else {
-                self.connection.status_note =
-                    tr(keys::Q_PREFS_REACTION_SETTINGS_STILL_LOADING).into();
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_PREFS_REACTION_SETTINGS_STILL_LOADING,
+                )));
                 cx.notify();
                 return;
             };
@@ -34,10 +36,14 @@ impl QuillApp {
                 ReactionSourceKind::PollVote => settings.poll_vote_source = source,
             }
             let result = live.driver.send_reaction_notification_settings(&settings);
-            self.connection.status_note = match result {
-                Ok(_) => tr(keys::Q_PREFS_REACTION_NOTIFICATION_SETTING_UPDATED).into(),
-                Err(_) => tr(keys::Q_PREFS_COULD_NOT_CHANGE_REACTION_NOTIFICATION).into(),
-            };
+            self.connection.set_note(match result {
+                Ok(_) => {
+                    StatusNote::silent(tr(keys::Q_PREFS_REACTION_NOTIFICATION_SETTING_UPDATED))
+                }
+                Err(_) => {
+                    StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_CHANGE_REACTION_NOTIFICATION))
+                }
+            });
         } else if let Some(session) = self.demo_session.as_mut() {
             // Screenshot demo: apply locally so the dialog reflects it.
             let mut settings = session
@@ -51,8 +57,9 @@ impl QuillApp {
                 ReactionSourceKind::PollVote => settings.poll_vote_source = source,
             }
             session.settings.reaction_notification_settings = Some(settings);
-            self.connection.status_note =
-                tr(keys::Q_PREFS_REACTION_NOTIFICATION_SETTING_UPDATED_2).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_PREFS_REACTION_NOTIFICATION_SETTING_UPDATED_2,
+            )));
         }
         cx.notify();
     }
@@ -72,17 +79,18 @@ impl QuillApp {
                 .reaction_notification_settings
                 .clone()
             else {
-                self.connection.status_note =
-                    tr(keys::Q_PREFS_REACTION_SETTINGS_STILL_LOADING).into();
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_PREFS_REACTION_SETTINGS_STILL_LOADING,
+                )));
                 cx.notify();
                 return;
             };
             settings.sound_id = sound_id;
             let result = live.driver.send_reaction_notification_settings(&settings);
-            self.connection.status_note = match result {
-                Ok(_) => tr(keys::Q_PREFS_REACTION_SOUND_UPDATED).into(),
-                Err(_) => tr(keys::Q_PREFS_COULD_NOT_CHANGE_REACTION_SOUND).into(),
-            };
+            self.connection.set_note(match result {
+                Ok(_) => StatusNote::silent(tr(keys::Q_PREFS_REACTION_SOUND_UPDATED)),
+                Err(_) => StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_CHANGE_REACTION_SOUND)),
+            });
         } else if let Some(session) = self.demo_session.as_mut() {
             // Screenshot demo: apply locally so the dialog reflects it.
             let mut settings = session
@@ -92,7 +100,9 @@ impl QuillApp {
                 .unwrap_or_default();
             settings.sound_id = sound_id;
             session.settings.reaction_notification_settings = Some(settings);
-            self.connection.status_note = tr(keys::Q_PREFS_REACTION_SOUND_UPDATED_2).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_PREFS_REACTION_SOUND_UPDATED_2,
+            )));
         }
         cx.notify();
     }
@@ -115,17 +125,18 @@ impl QuillApp {
                 .reaction_notification_settings
                 .clone()
             else {
-                self.connection.status_note =
-                    tr(keys::Q_PREFS_REACTION_SETTINGS_STILL_LOADING).into();
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_PREFS_REACTION_SETTINGS_STILL_LOADING,
+                )));
                 cx.notify();
                 return;
             };
             settings.show_preview = show_preview;
             let result = live.driver.send_reaction_notification_settings(&settings);
-            self.connection.status_note = match result {
-                Ok(_) => tr(keys::Q_PREFS_REACTION_PREVIEW_UPDATED).into(),
-                Err(_) => tr(keys::Q_PREFS_COULD_NOT_CHANGE_REACTION_PREVIEW).into(),
-            };
+            self.connection.set_note(match result {
+                Ok(_) => StatusNote::silent(tr(keys::Q_PREFS_REACTION_PREVIEW_UPDATED)),
+                Err(_) => StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_CHANGE_REACTION_PREVIEW)),
+            });
         } else if let Some(session) = self.demo_session.as_mut() {
             // Screenshot demo: apply locally so the dialog reflects it.
             let mut settings = session
@@ -135,7 +146,9 @@ impl QuillApp {
                 .unwrap_or_default();
             settings.show_preview = show_preview;
             session.settings.reaction_notification_settings = Some(settings);
-            self.connection.status_note = tr(keys::Q_PREFS_REACTION_PREVIEW_UPDATED_2).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_PREFS_REACTION_PREVIEW_UPDATED_2,
+            )));
         }
         cx.notify();
     }

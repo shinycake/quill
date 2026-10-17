@@ -3,6 +3,7 @@
 //! sorted "Programs" list, with the rows the programs box reuses.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{ContextMenuExt, DropdownMenu, PopupMenuItem};
@@ -171,8 +172,8 @@ impl QuillApp {
                                 .on_click(move |_, _, cx| {
                                     cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
                                     let _ = copy.update(cx, |this, cx| {
-                                        this.connection.status_note =
-                                            tr(keys::STICKERS_COPIED).into();
+                                        this.connection
+                                            .set_note(StatusNote::info(tr(keys::STICKERS_COPIED)));
                                         cx.notify();
                                     });
                                 }),

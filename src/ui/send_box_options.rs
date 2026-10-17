@@ -10,6 +10,7 @@
 use super::app::QuillApp;
 use super::composer_sends::{SendSlot, TrayItem};
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Input, InputState};
@@ -328,7 +329,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(cover) = cover_send_path(path) else {
-            self.connection.status_note = quill::composer::EDIT_MEDIA_INVALID_FILE.into();
+            self.connection
+                .set_note(StatusNote::silent(quill::composer::EDIT_MEDIA_INVALID_FILE));
             cx.notify();
             return;
         };
@@ -344,8 +346,10 @@ impl QuillApp {
         {
             return;
         }
-        self.connection.status_note =
-            tr_with(keys::Q_OPS_COVER_WILL_BE_SENT_WITH, &[("unwrap_or", &name)]);
+        self.connection.set_note(StatusNote::silent(tr_with(
+            keys::Q_OPS_COVER_WILL_BE_SENT_WITH,
+            &[("unwrap_or", &name)],
+        )));
         cx.notify();
     }
 
@@ -354,7 +358,8 @@ impl QuillApp {
             .update_pending_attachment(index, |attachment| attachment.extras.cover = None)
             .is_some()
         {
-            self.connection.status_note = tr(keys::Q_OPS_COVER_CLEARED).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_OPS_COVER_CLEARED)));
             cx.notify();
         }
     }
@@ -415,14 +420,14 @@ impl QuillApp {
                 self.composer_ui.send_box.price = None;
                 self.composer_sends
                     .update(&slot, |send| send.paid_stars = price);
-                self.connection.status_note = if price > 0 {
-                    tr_with(
+                self.connection.set_note(if price > 0 {
+                    StatusNote::silent(tr_with(
                         keys::Q_OPS_THE_MEDIA_WILL_UNLOCK_FOR,
                         &[("price", &price.to_string())],
-                    )
+                    ))
                 } else {
-                    tr(keys::Q_OPS_PAID_MEDIA_OFF).into()
-                };
+                    StatusNote::silent(tr(keys::Q_OPS_PAID_MEDIA_OFF))
+                });
                 cx.notify();
                 true
             }

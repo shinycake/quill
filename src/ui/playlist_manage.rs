@@ -15,6 +15,7 @@ use super::app::QuillApp;
 use super::folder_share::finish_dialog;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -121,7 +122,7 @@ impl QuillApp {
         let Some(file_id) = self.playback.playlist_remove.take() else {
             return;
         };
-        self.connection.status_note = REMOVED_TOAST.into();
+        self.connection.set_note(StatusNote::silent(REMOVED_TOAST));
         match self.live.as_mut() {
             Some(live) => {
                 let _ = live.driver.remove_profile_audio_track(file_id);
@@ -150,7 +151,9 @@ impl QuillApp {
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.ensure_media_files(&[file_id]);
             }
-            self.connection.status_note = tr(keys::Q_AV_DOWNLOADING_CHOOSE_SAVE_AS_AGAIN).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_AV_DOWNLOADING_CHOOSE_SAVE_AS_AGAIN,
+            )));
             cx.notify();
             return;
         };
@@ -176,13 +179,16 @@ impl QuillApp {
                 .spawn(async move { std::fs::copy(&path, &dest).map(|_| dest) })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.connection.status_note = match copied {
-                    Ok(dest) => format!(
+                this.connection.set_note(match copied {
+                    Ok(dest) => StatusNote::info(format!(
                         "saved to {}",
                         dest.file_name().and_then(|n| n.to_str()).unwrap_or("file")
-                    ),
-                    Err(err) => tr_with(keys::Q_AV_COULDNT_SAVE, &[("err", &err.to_string())]),
-                };
+                    )),
+                    Err(err) => StatusNote::error(tr_with(
+                        keys::Q_AV_COULDNT_SAVE,
+                        &[("err", &err.to_string())],
+                    )),
+                });
                 cx.notify();
             });
         })
@@ -195,35 +201,37 @@ impl QuillApp {
         };
         match self.live.as_mut() {
             Some(live) => {
-                self.connection.status_note = match live.driver.save_audio_to_profile(
-                    file_id,
-                    track.duration,
-                    &track.title,
-                    &track.performer,
-                    &track.file_name,
-                ) {
-                    Ok(_) => ADDED_TOAST.into(),
-                    Err(_) => tr(keys::Q_AV_COULD_NOT_SAVE_TO_YOUR).into(),
-                };
+                self.connection.set_note(
+                    match live.driver.save_audio_to_profile(
+                        file_id,
+                        track.duration,
+                        &track.title,
+                        &track.performer,
+                        &track.file_name,
+                    ) {
+                        Ok(_) => StatusNote::info(ADDED_TOAST),
+                        Err(_) => StatusNote::error(tr(keys::Q_AV_COULD_NOT_SAVE_TO_YOUR)),
+                    },
+                );
             }
             None => {
                 if let Some(session) = self.demo_session.as_mut() {
                     session.local_save_profile_audio(track);
                 }
-                self.connection.status_note = ADDED_TOAST.into();
+                self.connection.set_note(StatusNote::silent(ADDED_TOAST));
             }
         }
         cx.notify();
     }
 
     fn save_playlist_track_to_saved_messages(&mut self, file_id: FileId, cx: &mut Context<Self>) {
-        self.connection.status_note = match self.live.as_mut() {
+        self.connection.set_note(match self.live.as_mut() {
             Some(live) => match live.driver.send_track_to_saved_messages(file_id) {
-                Ok(_) => tr(keys::Q_AV_SAVED_TO_SAVED_MESSAGES).into(),
-                Err(_) => tr(keys::Q_AV_COULD_NOT_SAVE_TO_SAVED).into(),
+                Ok(_) => StatusNote::info(tr(keys::Q_AV_SAVED_TO_SAVED_MESSAGES)),
+                Err(_) => StatusNote::error(tr(keys::Q_AV_COULD_NOT_SAVE_TO_SAVED)),
             },
-            None => tr(keys::Q_AV_DEMO_SAVED_MESSAGES_NEEDS_LIVE).into(),
-        };
+            None => StatusNote::info(tr(keys::Q_AV_DEMO_SAVED_MESSAGES_NEEDS_LIVE)),
+        });
         cx.notify();
     }
 

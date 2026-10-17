@@ -11,6 +11,7 @@ use super::chat_theme::fill_muted;
 use super::gift_market_state::MarketBox;
 use super::premium_ui::sticker_tile;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -179,7 +180,9 @@ impl QuillApp {
             Some(live) => match live.driver.fetch_gift_auction(auction_id) {
                 Ok(_) => self.gift_market.pending_auction = true,
                 Err(_) => {
-                    self.connection.status_note = tr(keys::Q_MONEY_COULDNT_LOAD_THE_AUCTION).into();
+                    self.connection.set_note(StatusNote::error(tr(
+                        keys::Q_MONEY_COULDNT_LOAD_THE_AUCTION,
+                    )));
                 }
             },
             None => self.show_auction_box(gift_id, cx),
@@ -271,10 +274,12 @@ impl QuillApp {
         let toasts = std::mem::take(&mut market.toasts);
         let low = std::mem::take(&mut market.balance_low);
         if let Some(note) = notes.into_iter().last() {
-            self.connection.status_note = note;
+            self.connection.set_note(StatusNote::info(note));
         }
         if low {
-            self.connection.status_note = tr(keys::Q_MONEY_YOUR_STARS_BALANCE_IS_TOO).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MONEY_YOUR_STARS_BALANCE_IS_TOO,
+            )));
             self.open_stars(cx);
         }
         for (title, text) in toasts {

@@ -9,6 +9,8 @@ use super::app::QuillApp;
 use super::message_text::rich_text_line;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
+use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
@@ -164,10 +166,10 @@ impl QuillApp {
             &Self::appearance_paths(),
             &self.settings.translate.prefs,
         ) {
-            self.connection.status_note = tr_with(
+            self.connection.set_note(StatusNote::error(tr_with(
                 keys::Q_MISC_COULDNT_SAVE_TRANSLATION_SETTINGS,
                 &[("err", &err.to_string())],
-            );
+            )));
         }
         cx.notify();
     }
@@ -388,7 +390,10 @@ impl QuillApp {
                 if let Some(live) = self.live.as_mut()
                     && let Err(err) = live.driver.translate_message(chat_id, message_id, to)
                 {
-                    self.connection.status_note = format!("Translate failed: {err:?}");
+                    self.connection.set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_TRANSLATE,
+                        &err,
+                    )));
                 }
             }
             Some(TranslateSource::Selection { text, .. }) => {
@@ -398,9 +403,10 @@ impl QuillApp {
                     }
                     match live.driver.translate_selection(&text, to) {
                         Ok(job) => dialog.job = Some(job),
-                        Err(err) => {
-                            self.connection.status_note = format!("Translate failed: {err:?}")
-                        }
+                        Err(err) => self.connection.set_note(StatusNote::error(user_error_for(
+                            keys::Q_NOTES_FAILED_TRANSLATE,
+                            &err,
+                        ))),
                     }
                 }
             }
@@ -661,8 +667,8 @@ impl QuillApp {
                         .accessibility_label(tr(keys::Q_MISC_COPY_TRANSLATION))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-                            this.connection.status_note =
-                                tr(keys::Q_MISC_TRANSLATION_COPIED).into();
+                            this.connection
+                                .set_note(StatusNote::info(tr(keys::Q_MISC_TRANSLATION_COPIED)));
                             cx.notify();
                         })),
                 )

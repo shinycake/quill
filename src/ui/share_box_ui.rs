@@ -11,6 +11,7 @@ use super::chat_row::chat_avatar;
 use super::pressable::PressableDiv;
 use super::scheduled::ScheduleTarget;
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::Textarea;
@@ -143,7 +144,7 @@ impl QuillApp {
         // Phase A1: slow-mode gate applies to forwards — forwarding sends
         // messages to the destination chat.
         if self.slow_mode_blocked(dest, cx) {
-            return Some(self.connection.status_note.clone());
+            return Some(self.connection.status_note().to_string());
         }
         None
     }
@@ -156,13 +157,14 @@ impl QuillApp {
         };
         let dests: Vec<ChatId> = self.share.selection.chats().to_vec();
         if dests.is_empty() {
-            self.connection.status_note = tr(keys::Q_OPS_CHOOSE_A_CHAT_TO_FORWARD).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_OPS_CHOOSE_A_CHAT_TO_FORWARD)));
             cx.notify();
             return;
         }
         for dest in &dests {
             if let Some(note) = self.share_dest_refusal(*dest, cx) {
-                self.connection.status_note = note;
+                self.connection.set_note(StatusNote::error(note));
                 cx.notify();
                 return;
             }
@@ -197,14 +199,14 @@ impl QuillApp {
                     failed += 1;
                 }
             }
-            self.connection.status_note = if failed == 0 {
-                share_done_label(draft.count(), &titles)
+            self.connection.set_note(if failed == 0 {
+                StatusNote::info(share_done_label(draft.count(), &titles))
             } else {
-                tr_with(
+                StatusNote::error(tr_with(
                     keys::Q_OPS_COULD_NOT_FORWARD_TO_CHAT,
                     &[("failed", &failed.to_string())],
-                )
-            };
+                ))
+            });
         } else if self.demo_session.is_some() {
             for dest in &dests {
                 self.apply_demo_forward(*dest, &draft);
@@ -248,7 +250,7 @@ impl QuillApp {
             return;
         };
         if let Some(note) = self.share_dest_refusal(dest, cx) {
-            self.connection.status_note = note;
+            self.connection.set_note(StatusNote::error(note));
             cx.notify();
             return;
         }
@@ -263,7 +265,9 @@ impl QuillApp {
         if !comment.is_empty() {
             self.set_composer_markup(&comment, window, cx);
         }
-        self.connection.status_note = tr(keys::Q_OPS_FORWARD_BAR_READY_PRESS_SEND).into();
+        self.connection.set_note(StatusNote::silent(tr(
+            keys::Q_OPS_FORWARD_BAR_READY_PRESS_SEND,
+        )));
         cx.notify();
     }
 
@@ -291,7 +295,7 @@ impl QuillApp {
             return;
         };
         if let Some(note) = self.share_dest_refusal(dest, cx) {
-            self.connection.status_note = note;
+            self.connection.set_note(StatusNote::error(note));
             cx.notify();
             return;
         }
@@ -313,16 +317,17 @@ impl QuillApp {
                 .forward_messages_with_options(dest, &draft, &options);
             match result {
                 Ok(_) => {
-                    self.connection.status_note = tr(keys::Q_OPS_FORWARDING).into();
+                    self.connection
+                        .set_note(StatusNote::silent(tr(keys::Q_OPS_FORWARDING)));
                     self.share.pending_forward = None;
                     self.share.forward_bar_dest = None;
                     self.update_pending_send(|send| {
                         send.scheduling = quill::composer::ComposerScheduling::None
                     });
                 }
-                Err(_) => {
-                    self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_FORWARD_MESSAGES).into()
-                }
+                Err(_) => self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_OPS_COULD_NOT_FORWARD_MESSAGES,
+                ))),
             }
         } else if self.demo_session.is_some() {
             self.apply_demo_forward(dest, &draft);
@@ -735,16 +740,18 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if locked {
-            self.connection.status_note = tr(keys::Q_OPS_SUBSCRIBE_TO_TELEGRAM_PREMIUM_TO).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_OPS_SUBSCRIBE_TO_TELEGRAM_PREMIUM_TO,
+            )));
             cx.notify();
             return;
         }
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.set_chat_message_sender(chat_id, sender)
-            {
-                Ok(()) => tr(keys::Q_OPS_CHANGING_SENDER).into(),
-                Err(_) => tr(keys::Q_OPS_COULD_NOT_CHANGE_THE_SENDER).into(),
-            };
+            self.connection
+                .set_note(match live.driver.set_chat_message_sender(chat_id, sender) {
+                    Ok(()) => StatusNote::silent(tr(keys::Q_OPS_CHANGING_SENDER)),
+                    Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_CHANGE_THE_SENDER)),
+                });
         } else {
             self.apply_demo_message_sender(chat_id, sender);
         }

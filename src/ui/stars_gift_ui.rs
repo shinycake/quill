@@ -7,6 +7,7 @@
 use super::app::QuillApp;
 use super::link_info_boxes::finish;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Input;
@@ -39,7 +40,9 @@ impl QuillApp {
             .update(cx, |input, cx| input.set_value("", window, cx));
         let opened = self.live.as_mut().map(|live| live.driver.open_stars_gift());
         if !matches!(opened, Some(Ok(()))) {
-            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_OPEN_GIFT_STARS).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULD_NOT_OPEN_GIFT_STARS,
+            )));
         }
         cx.notify();
     }
@@ -66,7 +69,8 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.choose_stars_gift_user(user_id, &name));
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_LOAD_THE_STAR).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_LOAD_THE_STAR)));
         }
         cx.notify();
     }
@@ -87,7 +91,10 @@ impl QuillApp {
         });
         match invoice {
             Some(invoice) => self.start_invoice_checkout(invoice, window, cx),
-            None => self.set_status_note(tr(keys::Q_MONEY_THAT_STARS_OPTION_IS_NO), cx),
+            None => self.set_status_note(
+                StatusNote::silent(tr(keys::Q_MONEY_THAT_STARS_OPTION_IS_NO)),
+                cx,
+            ),
         }
     }
 

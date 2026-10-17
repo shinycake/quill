@@ -9,6 +9,7 @@
 use super::app::QuillApp;
 use super::dialogs::{AdminDialog, AdminDialogKind, GroupConfirmAction};
 use super::shell::DialogKind;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::*;
 use quill::ids::ChatId;
@@ -209,7 +210,9 @@ impl QuillApp {
             .and_then(|s| s.user(user_id))
             .map(|user| (user.username.clone(), user.display_name()))
         else {
-            self.connection.status_note = tr(keys::Q_OPS_CANT_MENTION_THIS_MEMBER_YET).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_OPS_CANT_MENTION_THIS_MEMBER_YET,
+            )));
             cx.notify();
             return;
         };

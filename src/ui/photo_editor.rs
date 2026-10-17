@@ -9,6 +9,7 @@ use super::app::QuillApp;
 use super::composer_sends::TrayItem;
 use super::photo_edit::{CropRect, Placed, Stroke, flip, render, rotate_ccw};
 use super::photo_editor_items::ItemDrag;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -318,10 +319,9 @@ impl QuillApp {
                                 Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
                         }
                     }
-                    Err(_) => {
-                        this.connection.status_note =
-                            tr(keys::Q_MISC_COULDNT_OPEN_THIS_IMAGE_FOR).into()
-                    }
+                    Err(_) => this.connection.set_note(StatusNote::error(tr(
+                        keys::Q_MISC_COULDNT_OPEN_THIS_IMAGE_FOR,
+                    ))),
                 }
                 cx.notify();
             },
@@ -360,7 +360,9 @@ impl QuillApp {
         let placed: Vec<Placed> = editor.placed.iter().map(|(item, _)| item.clone()).collect();
         let edited = render(&editor.working, editor.crop, &editor.strokes, &placed);
         let Some(saved) = super::edit_media_tools::write_edited_png(&edited) else {
-            self.connection.status_note = tr(keys::Q_MISC_COULDNT_SAVE_THE_EDITED_PHOTO).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MISC_COULDNT_SAVE_THE_EDITED_PHOTO,
+            )));
             cx.notify();
             return;
         };

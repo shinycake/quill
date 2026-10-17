@@ -8,6 +8,7 @@ use super::app::QuillApp;
 use super::message_text::kit_avatar_element;
 use super::nested_click::SwallowPress;
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -128,7 +129,8 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.open_thread(chat_id, message_id).is_err()
         {
-            self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_OPEN_COMMENTS).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_OPEN_COMMENTS)));
         }
         cx.notify();
     }

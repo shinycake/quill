@@ -7,6 +7,7 @@ use super::app::QuillApp;
 use super::navigation::NavigationAction;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::theme::ActiveTheme;
@@ -61,7 +62,9 @@ impl QuillApp {
             DeepLinkUi::StickerSet { set_id } => self.view_message_sticker_set(set_id, cx),
             DeepLinkUi::Share { text } => {
                 self.share.link_text = Some(text);
-                self.connection.status_note = tr(keys::Q_MISC_CHOOSE_A_CHAT_TO_SHARE_2).into();
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_MISC_CHOOSE_A_CHAT_TO_SHARE_2,
+                )));
             }
             DeepLinkUi::Proxy { link } => {
                 if !self.handle_proxy_link(&link, cx) {
@@ -87,8 +90,9 @@ impl QuillApp {
                     None => self.settings.open = true,
                 }
                 if target == SettingsTarget::Unsupported {
-                    self.connection.status_note =
-                        tr(keys::Q_MISC_THAT_SETTINGS_PAGE_ISNT_SUPPORTED).into();
+                    self.connection.set_note(StatusNote::silent(tr(
+                        keys::Q_MISC_THAT_SETTINGS_PAGE_ISNT_SUPPORTED,
+                    )));
                 }
             }
         }

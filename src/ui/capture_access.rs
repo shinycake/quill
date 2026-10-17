@@ -5,6 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
 use std::time::Duration;
@@ -131,15 +132,16 @@ impl QuillApp {
             match access(device) {
                 Access::Granted => {}
                 Access::Denied => {
-                    self.connection.status_note = denied_note(device);
+                    self.connection
+                        .set_note(StatusNote::error(denied_note(device)));
                     cx.notify();
                     return;
                 }
                 Access::Undetermined => {
-                    self.connection.status_note = format!(
+                    self.connection.set_note(StatusNote::silent(format!(
                         "Allow Quill to use the {} to record.",
                         if device { "camera" } else { "microphone" }
-                    );
+                    )));
                     cx.notify();
                     let (sender, answer) = std::sync::mpsc::channel();
                     request(device, sender);
@@ -161,7 +163,8 @@ impl QuillApp {
                             if granted {
                                 this.with_capture_access(camera, start, cx);
                             } else {
-                                this.connection.status_note = denied_note(device);
+                                this.connection
+                                    .set_note(StatusNote::error(denied_note(device)));
                                 cx.notify();
                             }
                         });

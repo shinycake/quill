@@ -793,7 +793,10 @@ fn closing_a_chat_window_ends_the_recording_made_there(cx: &mut TestAppContext) 
     cx.run_until_parked();
     assert!(h.other_windows(cx).is_empty());
     let (active, note) = h.app.read_with(cx, |app, _| {
-        (app.recording_active(), app.connection.status_note.clone())
+        (
+            app.recording_active(),
+            app.connection.status_note().to_string(),
+        )
     });
     assert!(!active, "the recording ended with its window");
     assert_eq!(
@@ -829,7 +832,7 @@ fn a_sent_recording_leaves_no_window_behind_for_the_next_one(cx: &mut TestAppCon
     record_in_window(&h, None, CaptureFor::StoryReply, cx);
     let note_before = h
         .app
-        .read_with(cx, |app, _| app.connection.status_note.clone());
+        .read_with(cx, |app, _| app.connection.status_note().to_string());
     let in_other = h.app.update(cx, |app, cx| {
         app.in_window_scope(Some(OTHER), cx, |app, _| app.recording_here())
     });
@@ -846,7 +849,7 @@ fn a_sent_recording_leaves_no_window_behind_for_the_next_one(cx: &mut TestAppCon
         (
             app.recording_active(),
             app.recording_here(),
-            app.connection.status_note.clone(),
+            app.connection.status_note().to_string(),
         )
     });
     assert!(active, "the story reply still records");

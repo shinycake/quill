@@ -6,6 +6,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -56,7 +57,7 @@ impl QuillApp {
         if let Some(toast) =
             speech_trial_toast(previous, trial, premium, quill::local_time::now_unix())
         {
-            self.connection.status_note = toast;
+            self.connection.set_note(StatusNote::info(toast));
         }
     }
 

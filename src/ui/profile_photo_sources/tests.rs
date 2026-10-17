@@ -120,6 +120,6 @@ fn a_video_avatar_opens_the_full_editor(cx: &mut TestAppContext) {
         app.composer_ui.send_box.video_editor.is_none()
     }));
     assert!(app.read_with(vcx, |app, _| {
-        app.connection.status_note.contains("at least 1 second")
+        app.connection.status_note().contains("at least 1 second")
     }));
 }

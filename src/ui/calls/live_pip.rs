@@ -21,6 +21,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use crate::ui::video_player::VideoPlayer;
 use crate::ui::video_player::controls::pip::{
     LivePip, LivePipFacts, PipHooks, PipOpen, PipWindow, open_pip_window,
@@ -160,7 +161,8 @@ impl QuillApp {
                     (None, Some(window)) => close_window(window, false, cx),
                     (_, None) => {
                         app.group_call.live_pip = None;
-                        app.connection.status_note = tr(keys::Q_MEDIA_PIP_FAILED).into();
+                        app.connection
+                            .set_note(StatusNote::error(tr(keys::Q_MEDIA_PIP_FAILED)));
                         app.check_live_pip(cx);
                     }
                 }

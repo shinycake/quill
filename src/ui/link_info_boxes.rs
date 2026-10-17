@@ -11,6 +11,7 @@
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_base::{Disableable, StyledExt};
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::*;
@@ -111,11 +112,13 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if live.driver.request_gift_code_info(&code).is_err() {
-                    self.connection.status_note = tr(keys::Q_REST_COULD_NOT_CHECK_THE_GIFT).into();
+                    self.connection
+                        .set_note(StatusNote::error(tr(keys::Q_REST_COULD_NOT_CHECK_THE_GIFT)));
                 }
             }
             None => {
-                self.connection.status_note = tr(keys::Q_REST_GIFT_CODES_NEED_A_SIGNED).into();
+                self.connection
+                    .set_note(StatusNote::info(tr(keys::Q_REST_GIFT_CODES_NEED_A_SIGNED)));
             }
         }
         cx.notify();
@@ -126,11 +129,14 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if live.driver.request_language_pack_info(&id).is_err() {
-                    self.connection.status_note = tr(keys::Q_REST_COULD_NOT_LOOK_UP_THE).into();
+                    self.connection
+                        .set_note(StatusNote::error(tr(keys::Q_REST_COULD_NOT_LOOK_UP_THE)));
                 }
             }
             None => {
-                self.connection.status_note = tr(keys::Q_REST_LANGUAGE_LINKS_NEED_A_SIGNED).into();
+                self.connection.set_note(StatusNote::info(tr(
+                    keys::Q_REST_LANGUAGE_LINKS_NEED_A_SIGNED,
+                )));
             }
         }
         cx.notify();
@@ -155,7 +161,8 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.apply_gift_code().is_err()
         {
-            self.connection.status_note = tr(keys::Q_REST_COULD_NOT_USE_THE_GIFT).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_REST_COULD_NOT_USE_THE_GIFT)));
         }
         cx.notify();
     }

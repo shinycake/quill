@@ -10,6 +10,7 @@ use super::chat_list_keys::ListRow;
 use super::chat_row::chat_row_height;
 use super::pressable::PressableDiv;
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -125,7 +126,9 @@ impl QuillApp {
         if moved {
             // Quill's menu is a dropdown (no right click on its entries),
             // so the toast names the way back instead.
-            self.connection.status_note = tr(keys::Q_CHATLIST_ARCHIVE_MOVED_TO_THE_MAIN).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_CHATLIST_ARCHIVE_MOVED_TO_THE_MAIN,
+            )));
         }
         // Leaving the folder view when the row it came from is gone would
         // strand nobody: the Archived tab stays available.

@@ -1,6 +1,7 @@
 //! Methods moved out of `conversation.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
@@ -371,7 +372,8 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.retry_history().is_err()
         {
-            self.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_LOAD_HISTORY).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_LOAD_HISTORY)));
         }
         cx.notify();
     }

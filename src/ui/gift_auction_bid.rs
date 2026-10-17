@@ -9,6 +9,7 @@ use super::chat_theme::success;
 use super::gift_market_state::{BidSliderUi, CustomBidUi, MarketBox};
 use super::gift_market_ui::BoxView;
 use super::shell::DialogKind;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::{Input, InputState};
@@ -245,7 +246,9 @@ impl QuillApp {
             BidAction::Place(n) | BidAction::Increase(n) => n,
         };
         let Some(MessageSender::User { user_id }) = self.auction_recipient() else {
-            self.connection.status_note = tr(keys::Q_MONEY_AUCTION_GIFTS_CAN_ONLY_BE).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_MONEY_AUCTION_GIFTS_CAN_ONLY_BE,
+            )));
             cx.notify();
             return;
         };
@@ -255,7 +258,9 @@ impl QuillApp {
             .and_then(|s| s.payments.hub.balance)
             .is_some_and(|balance| balance.stars < add);
         if poor {
-            self.connection.status_note = tr(keys::Q_MONEY_YOUR_STARS_BALANCE_IS_TOO).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MONEY_YOUR_STARS_BALANCE_IS_TOO,
+            )));
             self.open_stars(cx);
             cx.notify();
             return;
@@ -273,7 +278,8 @@ impl QuillApp {
                 .bid_gift_auction(gift_id, stars, user_id, &text, hide)
                 .is_ok(),
             None => {
-                self.connection.status_note = tr(keys::Q_MONEY_BIDS_NEED_A_SIGNED_IN).into();
+                self.connection
+                    .set_note(StatusNote::info(tr(keys::Q_MONEY_BIDS_NEED_A_SIGNED_IN)));
                 false
             }
         };
@@ -287,7 +293,8 @@ impl QuillApp {
                 )
             });
         } else if self.live.is_some() {
-            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_PLACE_THE_BID).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_PLACE_THE_BID)));
         }
         cx.notify();
     }

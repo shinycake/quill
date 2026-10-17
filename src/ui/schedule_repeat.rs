@@ -12,6 +12,7 @@
 
 use super::app::QuillApp;
 use super::scheduled::{ScheduleTarget, using_test_dc};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
@@ -85,8 +86,9 @@ impl QuillApp {
             // `showPremiumPromo`: the lock explains instead of opening.
             button
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.connection.status_note =
-                        tr(keys::Q_MISC_SUBSCRIBE_TO_TELEGRAM_PREMIUM_TO_2).into();
+                    this.connection.set_note(StatusNote::info(tr(
+                        keys::Q_MISC_SUBSCRIBE_TO_TELEGRAM_PREMIUM_TO_2,
+                    )));
                     cx.notify();
                 }))
                 .into_any_element()

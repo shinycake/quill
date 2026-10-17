@@ -1,6 +1,7 @@
 //! Methods moved out of `composer_ui.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -38,7 +39,7 @@ impl QuillApp {
         }
         let reply = self.send_reply_for(chat_id, cx);
         let sent = if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.send_sticker(
+            let result = live.driver.send_sticker(
                 chat_id,
                 quill::telegram::requests::StickerSend {
                     file_id,
@@ -51,14 +52,18 @@ impl QuillApp {
                     // from the session; the UI passes no topic.
                     topic_id: None,
                 },
-            ) {
-                Ok(_) => tr(keys::Q_CHAT_STICKER_SENT).into(),
-                Err(_) => tr(keys::Q_CHAT_COULD_NOT_SEND_STICKER).into(),
-            };
-            self.connection.status_note == tr(keys::Q_CHAT_STICKER_SENT)
+            );
+            let ok = result.is_ok();
+            self.connection.set_note(if ok {
+                StatusNote::silent(tr(keys::Q_CHAT_STICKER_SENT))
+            } else {
+                StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_STICKER))
+            });
+            ok
         } else if self.demo_session.is_some() {
             self.apply_demo_sticker(chat_id, &emoji, file_id, reply);
-            self.connection.status_note = tr(keys::Q_CHAT_STICKER_SENT).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_CHAT_STICKER_SENT)));
             true
         } else {
             false
@@ -183,7 +188,9 @@ impl QuillApp {
                 if let Some(live) = this.live.as_mut()
                     && live.driver.request_composer_link_preview(&url).is_err()
                 {
-                    this.connection.status_note = tr(keys::Q_CHAT_COULDNT_LOAD_LINK_PREVIEW).into();
+                    this.connection.set_note(StatusNote::error(tr(
+                        keys::Q_CHAT_COULDNT_LOAD_LINK_PREVIEW,
+                    )));
                 }
                 cx.notify();
             })
@@ -255,7 +262,7 @@ impl QuillApp {
                 change(&mut choice);
                 this.set_preview_choice(choice);
                 if let Some(note) = note {
-                    this.connection.status_note = note.into();
+                    this.connection.set_note(StatusNote::info(note));
                 }
                 cx.notify();
             });

@@ -7,6 +7,7 @@ use super::app::QuillApp;
 use super::gift_market_state::MarketBox;
 use super::gift_market_ui::{BoxView, collectible_tile, price_line};
 use super::image_budget::{Fit, sized_media};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
@@ -94,7 +95,9 @@ impl QuillApp {
             }
             self.gift_market.push(MarketBox::Resale);
         } else {
-            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_LOAD_THE_GIFTS_ON).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULDNT_LOAD_THE_GIFTS_ON,
+            )));
         }
         cx.notify();
     }

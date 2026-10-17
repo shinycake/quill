@@ -3,6 +3,7 @@
 
 use super::app::QuillApp;
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::Textarea;
@@ -19,12 +20,12 @@ impl QuillApp {
     pub(super) fn replace_primary_invite_link(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         let note = match self.live.as_mut() {
             Some(live) => match live.driver.replace_primary_chat_invite_link(chat_id) {
-                Ok(_) => tr(keys::Q_PEOPLE_REPLACING_PRIMARY_INVITE_LINK).into(),
-                Err(_) => tr(keys::Q_PEOPLE_COULD_NOT_REPLACE_INVITE_LINK).into(),
+                Ok(_) => StatusNote::info(tr(keys::Q_PEOPLE_REPLACING_PRIMARY_INVITE_LINK)),
+                Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_REPLACE_INVITE_LINK)),
             },
-            None => tr(keys::Q_PEOPLE_INVITE_LINKS_NEED_A_LIVE).into(),
+            None => StatusNote::info(tr(keys::Q_PEOPLE_INVITE_LINKS_NEED_A_LIVE)),
         };
-        self.connection.status_note = note;
+        self.connection.set_note(note);
         cx.notify();
     }
 
@@ -40,17 +41,17 @@ impl QuillApp {
                 {
                     Ok(_) => {
                         if current {
-                            tr(keys::Q_PEOPLE_JOIN_REQUESTS_DISABLED).into()
+                            StatusNote::silent(tr(keys::Q_PEOPLE_JOIN_REQUESTS_DISABLED))
                         } else {
-                            tr(keys::Q_PEOPLE_JOIN_REQUESTS_ENABLED).into()
+                            StatusNote::silent(tr(keys::Q_PEOPLE_JOIN_REQUESTS_ENABLED))
                         }
                     }
-                    Err(_) => tr(keys::Q_PEOPLE_COULD_NOT_TOGGLE_JOIN_REQUESTS).into(),
+                    Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_TOGGLE_JOIN_REQUESTS)),
                 }
             }
-            None => tr(keys::Q_PEOPLE_JOIN_REQUESTS_NEED_A_LIVE).into(),
+            None => StatusNote::info(tr(keys::Q_PEOPLE_JOIN_REQUESTS_NEED_A_LIVE)),
         };
-        self.connection.status_note = note;
+        self.connection.set_note(note);
         cx.notify();
     }
 
@@ -127,16 +128,19 @@ impl QuillApp {
                     (None, _) => None,
                 };
                 self.admin.invite_link_dialog = None;
-                self.connection.status_note = match result {
-                    Some(Ok(_)) => tr(keys::Q_PEOPLE_SAVING_INVITE_LINK).into(),
-                    Some(Err(_)) => tr(keys::Q_PEOPLE_COULD_NOT_SAVE_INVITE_LINK).into(),
-                    None => tr(keys::Q_PEOPLE_INVITE_LINKS_NEED_A_LIVE).into(),
-                };
+                self.connection.set_note(match result {
+                    Some(Ok(_)) => StatusNote::info(tr(keys::Q_PEOPLE_SAVING_INVITE_LINK)),
+                    Some(Err(_)) => {
+                        StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_SAVE_INVITE_LINK))
+                    }
+                    None => StatusNote::info(tr(keys::Q_PEOPLE_INVITE_LINKS_NEED_A_LIVE)),
+                });
                 cx.notify();
                 return;
             }
             if !stars_text.trim().is_empty() && stars_text.trim().parse::<i64>().is_err() {
-                self.connection.status_note = tr(keys::Q_PEOPLE_STARS_PRICE_MUST_BE_A).into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_STARS_PRICE_MUST_BE_A)));
                 cx.notify();
                 return;
             }
@@ -150,8 +154,9 @@ impl QuillApp {
                     let days: i64 = match days.trim().parse() {
                         Ok(days) if days >= 0 => days,
                         _ => {
-                            self.connection.status_note =
-                                tr(keys::Q_PEOPLE_EXPIRATION_MUST_BE_A_NON).into();
+                            self.connection.set_note(StatusNote::silent(tr(
+                                keys::Q_PEOPLE_EXPIRATION_MUST_BE_A_NON,
+                            )));
                             cx.notify();
                             return;
                         }
@@ -159,8 +164,9 @@ impl QuillApp {
                     let member_limit: i32 = match limit.trim().parse() {
                         Ok(limit) if limit >= 0 => limit,
                         _ => {
-                            self.connection.status_note =
-                                tr(keys::Q_PEOPLE_MEMBER_LIMIT_MUST_BE_A).into();
+                            self.connection.set_note(StatusNote::info(tr(
+                                keys::Q_PEOPLE_MEMBER_LIMIT_MUST_BE_A,
+                            )));
                             cx.notify();
                             return;
                         }
@@ -195,17 +201,21 @@ impl QuillApp {
             ) {
                 Ok(_) => {
                     self.admin.invite_link_dialog = None;
-                    self.connection.status_note = tr(keys::Q_PEOPLE_CREATING_INVITE_LINK).into();
+                    self.connection
+                        .set_note(StatusNote::info(tr(keys::Q_PEOPLE_CREATING_INVITE_LINK)));
                 }
                 Err(_) => {
-                    self.connection.status_note =
-                        tr(keys::Q_PEOPLE_COULD_NOT_CREATE_INVITE_LINK).into();
+                    self.connection.set_note(StatusNote::error(tr(
+                        keys::Q_PEOPLE_COULD_NOT_CREATE_INVITE_LINK,
+                    )));
                 }
             }
         } else {
             // Screenshot demos have no live driver; close the dialog honestly.
             self.admin.invite_link_dialog = None;
-            self.connection.status_note = tr(keys::Q_PEOPLE_INVITE_LINKS_NEED_A_LIVE).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_INVITE_LINKS_NEED_A_LIVE,
+            )));
         }
         let _ = window;
         cx.notify();

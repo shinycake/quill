@@ -7,6 +7,7 @@
 use super::app::QuillApp;
 use super::chat_row::chat_avatar;
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
@@ -98,7 +99,9 @@ impl QuillApp {
                 .toggle_business_bot_paused(chat_id, paused)
                 .is_err()
         {
-            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_CHANGE_THE_BOT).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MEDIA_COULD_NOT_CHANGE_THE_BOT,
+            )));
         }
         cx.notify();
     }
@@ -107,7 +110,9 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.remove_business_bot_from_chat(chat_id).is_err()
         {
-            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_REMOVE_THE_BOT).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MEDIA_COULD_NOT_REMOVE_THE_BOT,
+            )));
         }
         cx.notify();
     }

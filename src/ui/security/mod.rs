@@ -5,6 +5,7 @@ use super::app::QuillApp;
 use super::demo::{demo_sessions, demo_storage_stats, demo_websites};
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Textarea;
@@ -920,10 +921,10 @@ impl QuillApp {
                     live.driver.terminate_all_other_sessions().map(|_| ())
                 }
             };
-            self.connection.status_note = match result {
-                Ok(()) => tr(keys::Q_PREFS_TERMINATING_SESSION).into(),
-                Err(_) => tr(keys::Q_PREFS_COULD_NOT_TERMINATE_THE_SESSION).into(),
-            };
+            self.connection.set_note(match result {
+                Ok(()) => StatusNote::silent(tr(keys::Q_PREFS_TERMINATING_SESSION)),
+                Err(_) => StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_TERMINATE_THE_SESSION)),
+            });
         }
         cx.notify();
     }

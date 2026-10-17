@@ -10,6 +10,7 @@
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::*;
@@ -159,13 +160,15 @@ impl QuillApp {
         }
         let (text, reply, now_ms) = self.leaving_draft_parts(cx);
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live
-                .driver
-                .select_search_chat(chat_id, &text, reply, now_ms)
-            {
-                Ok(_) => tr(keys::Q_MISC_OPENED_LINK).into(),
-                Err(_) => tr(keys::Q_MISC_COULDNT_OPEN_THE_CHAT).into(),
-            };
+            self.connection.set_note(
+                match live
+                    .driver
+                    .select_search_chat(chat_id, &text, reply, now_ms)
+                {
+                    Ok(_) => StatusNote::info(tr(keys::Q_MISC_OPENED_LINK)),
+                    Err(_) => StatusNote::error(tr(keys::Q_MISC_COULDNT_OPEN_THE_CHAT)),
+                },
+            );
             // Jump to the linked message / post once the chat is open.
             let jump_to = match action {
                 DeepLinkAction::OpenUsername {
@@ -185,7 +188,9 @@ impl QuillApp {
                     .jump_to_replied_message(MessageId::from_server_id(message_id))
                     .is_err()
             {
-                self.connection.status_note = tr(keys::Q_MISC_OPENED_CHAT_COULDNT_JUMP_TO).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_MISC_OPENED_CHAT_COULDNT_JUMP_TO,
+                )));
             }
         }
         self.dismiss_cross_chat_state(chat_id, cx);

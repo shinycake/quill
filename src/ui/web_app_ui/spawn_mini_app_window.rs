@@ -1,12 +1,16 @@
 //! Methods moved out of `web_app_ui.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     pub(super) fn spawn_mini_app_window(&mut self, launch: WebAppLaunch, cx: &mut Context<Self>) {
         let Some(path) = helper_path() else {
-            self.set_status_note(tr(keys::Q_MEDIA_THE_MINI_APP_WINDOW_QUILL_2), cx);
+            self.set_status_note(
+                StatusNote::silent(tr(keys::Q_MEDIA_THE_MINI_APP_WINDOW_QUILL_2)),
+                cx,
+            );
             return;
         };
         let account = self
@@ -37,7 +41,10 @@ impl QuillApp {
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(_) => {
-                self.set_status_note(tr(keys::Q_MEDIA_THE_MINI_APP_WINDOW_COULDNT), cx);
+                self.set_status_note(
+                    StatusNote::error(tr(keys::Q_MEDIA_THE_MINI_APP_WINDOW_COULDNT)),
+                    cx,
+                );
                 return;
             }
         };
@@ -188,7 +195,7 @@ impl QuillApp {
                         .and_then(|session| session.users.get(&bot_user_id))
                         .map(|user| user.display_name())
                         .unwrap_or_else(|| tr(keys::Q_MEDIA_MINI_APP).into());
-                    self.connection.status_note.clear();
+                    self.connection.clear_note();
                     self.spawn_mini_app_window(
                         WebAppLaunch {
                             bot_user_id,
@@ -201,7 +208,9 @@ impl QuillApp {
                         cx,
                     );
                 }
-                WebAppOpenResult::Failed { message, .. } => self.set_status_note(&message, cx),
+                WebAppOpenResult::Failed { message, .. } => {
+                    self.set_status_note(StatusNote::error(&message), cx)
+                }
             }
         }
         if let Some((bot_id, result)) = write_access {
@@ -232,7 +241,7 @@ impl QuillApp {
                     });
                     cx.notify();
                 }
-                Err(message) => self.set_status_note(&message, cx),
+                Err(message) => self.set_status_note(StatusNote::error(&message), cx),
             }
         }
         if let Some(result) = toggled {
@@ -240,9 +249,9 @@ impl QuillApp {
                 Ok((_, added)) => {
                     self.set_status_note(
                         if added {
-                            tr(keys::BOT_ADD_TO_MENU_DONE)
+                            StatusNote::silent(tr(keys::BOT_ADD_TO_MENU_DONE))
                         } else {
-                            tr(keys::BOT_REMOVE_FROM_MENU_DONE)
+                            StatusNote::silent(tr(keys::BOT_REMOVE_FROM_MENU_DONE))
                         },
                         cx,
                     );
@@ -252,7 +261,7 @@ impl QuillApp {
                 }
                 Err(message) => {
                     self.mini_apps.awaiting_toggle = None;
-                    self.set_status_note(&message, cx);
+                    self.set_status_note(StatusNote::error(&message), cx);
                 }
             }
         }
@@ -280,13 +289,15 @@ impl QuillApp {
                         cx.notify();
                     }
                 }
-                Err(message) => self.set_status_note(&message, cx),
+                Err(message) => self.set_status_note(StatusNote::error(&message), cx),
             }
         }
         if let Some(result) = data_sent {
             match result {
-                Ok(()) => self.set_status_note(tr(keys::Q_MEDIA_SENT_TO_THE_BOT), cx),
-                Err(message) => self.set_status_note(&message, cx),
+                Ok(()) => {
+                    self.set_status_note(StatusNote::silent(tr(keys::Q_MEDIA_SENT_TO_THE_BOT)), cx)
+                }
+                Err(message) => self.set_status_note(StatusNote::error(&message), cx),
             }
         }
     }
@@ -361,20 +372,20 @@ impl QuillApp {
             HelperEvent::Error { message } => {
                 let note = if message.contains("web view") {
                     if cfg!(target_os = "windows") {
-                        tr(keys::Q_MEDIA_MINI_APPS_NEED_THE_MICROSOFT).to_string()
+                        StatusNote::info(tr(keys::Q_MEDIA_MINI_APPS_NEED_THE_MICROSOFT))
                     } else if cfg!(target_os = "linux") {
-                        tr(keys::Q_MEDIA_MINI_APPS_NEED_WEBKITGTK_LIBWEBKIT2GTK).to_string()
+                        StatusNote::info(tr(keys::Q_MEDIA_MINI_APPS_NEED_WEBKITGTK_LIBWEBKIT2GTK))
                     } else {
-                        tr(keys::Q_MEDIA_THE_MINI_APP_WINDOW_COULDNT_2).to_string()
+                        StatusNote::error(tr(keys::Q_MEDIA_THE_MINI_APP_WINDOW_COULDNT_2))
                     }
                 } else {
-                    tr_with(
+                    StatusNote::error(tr_with(
                         keys::Q_MEDIA_THE_MINI_APP_WINDOW_FAILED,
                         &[("message", &message.to_string())],
-                    )
+                    ))
                 };
                 self.close_mini_app_window(cx);
-                self.set_status_note(&note, cx);
+                self.set_status_note(note, cx);
             }
         }
     }
@@ -451,7 +462,10 @@ impl QuillApp {
                     .as_mut()
                     .map(|live| live.driver.send_web_app_data(bot_id, &button_text, &data));
                 if !matches!(sent, Some(Ok(_))) {
-                    self.set_status_note(tr(keys::Q_MEDIA_COULDNT_SEND_THE_APPS_DATA), cx);
+                    self.set_status_note(
+                        StatusNote::error(tr(keys::Q_MEDIA_COULDNT_SEND_THE_APPS_DATA)),
+                        cx,
+                    );
                 }
                 // tdesktop closes the panel once the data is on its way.
                 self.close_mini_app_window(cx);

@@ -8,6 +8,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
@@ -43,11 +44,15 @@ impl QuillApp {
     /// (the admin hold) needs no note: the button already shows it.
     pub(super) fn note_self_mute_failure(&mut self, err: &SelfMuteError) {
         let note = match err {
-            SelfMuteError::Engine(_) => tr(keys::Q_AV_COULDNT_CHANGE_THE_MICROPHONE),
-            SelfMuteError::Send(_) => tr(keys::Q_AV_MICROPHONE_CHANGED_OTHERS_NOT_TOLD),
+            SelfMuteError::Engine(_) => {
+                StatusNote::error(tr(keys::Q_AV_COULDNT_CHANGE_THE_MICROPHONE))
+            }
+            SelfMuteError::Send(_) => {
+                StatusNote::silent(tr(keys::Q_AV_MICROPHONE_CHANGED_OTHERS_NOT_TOLD))
+            }
             SelfMuteError::NotAllowed => return,
         };
-        self.connection.status_note = note.into();
+        self.connection.set_note(note);
     }
 
     /// Mute or unmute the microphone without a toggle round trip.
@@ -310,7 +315,9 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.choose_group_call_join_as(sender).is_err() {
-                self.connection.status_note = tr(keys::Q_AV_COULDNT_CHANGE_WHO_YOU_JOIN).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_AV_COULDNT_CHANGE_WHO_YOU_JOIN,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.set_group_call_join_as(Some(sender));

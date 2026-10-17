@@ -189,15 +189,17 @@ fn a_windows_failure_is_a_toast(cx: &mut TestAppContext) {
     assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::PasskeysAbout));
     app.read_with(vcx, |app, _| {
         assert_eq!(
-            app.connection.status_note,
+            app.connection.status_note(),
             "Couldn't add a passkey with the security key."
         );
     });
     app.update_in(vcx, |app, _, cx| {
-        app.connection.status_note.clear();
+        app.connection.clear_note();
         app.show_passkey_sheet(CeremonySheet::System, cx);
         app.feed_ceremony_event(CeremonyEvent::Failed(CeremonyError::Cancelled), cx);
     });
     assert_eq!(sheet(&app, vcx), None);
-    app.read_with(vcx, |app, _| assert!(app.connection.status_note.is_empty()));
+    app.read_with(vcx, |app, _| {
+        assert!(app.connection.status_note().is_empty())
+    });
 }

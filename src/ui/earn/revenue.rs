@@ -6,6 +6,7 @@ use super::chart::EarnChartKind;
 use super::*;
 use crate::ui::chat_theme::{danger, success};
 use crate::ui::premium_ui::star_tx_row;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::switch::Switch;
@@ -774,8 +775,9 @@ impl QuillApp {
                         .driver
                         .set_channel_sponsored_messages(quill::ids::ChatId(chat_id), off);
                     if sent.is_err() {
-                        this.connection.status_note =
-                            tr(keys::Q_MONEY_COULDNT_CHANGE_THE_ADS_SETTING).into();
+                        this.connection.set_note(StatusNote::error(tr(
+                            keys::Q_MONEY_COULDNT_CHANGE_THE_ADS_SETTING,
+                        )));
                     }
                 }
                 cx.notify();

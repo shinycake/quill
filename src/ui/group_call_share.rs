@@ -12,6 +12,7 @@
 
 use super::app::QuillApp;
 use super::chat_row::chat_avatar;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::{ActiveTheme, Sizable};
@@ -135,7 +136,9 @@ impl QuillApp {
             self.group_call.share_speaker = true;
             self.group_call.share_copied = false;
         } else {
-            self.connection.status_note = tr(keys::Q_AV_COULDNT_GET_THE_INVITE_LINK).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_AV_COULDNT_GET_THE_INVITE_LINK,
+            )));
         }
         cx.notify();
     }

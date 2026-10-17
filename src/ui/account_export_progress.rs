@@ -5,6 +5,7 @@
 
 use super::app::QuillApp;
 use super::shell::DialogKind;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::progress::Progress as ProgressBar;
 use gpui_kit::component::*;
@@ -39,7 +40,8 @@ impl QuillApp {
             live.driver.session.settings.account_export = None;
             self.dialogs.account_export_seen = None;
             self.dialogs.account_export_progress_hidden = false;
-            self.connection.status_note = ended_note(&progress);
+            self.connection
+                .set_note(StatusNote::info(ended_note(&progress)));
             return true;
         }
         let changed = self.dialogs.account_export_seen.as_ref() != Some(&progress);

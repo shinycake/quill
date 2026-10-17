@@ -13,6 +13,7 @@ use super::entity_links::LinkPopup;
 use super::message_media::{MediaCorners, spoiler_surface};
 use super::message_text::MONO_FONT;
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -60,7 +61,9 @@ impl QuillApp {
     /// "Copy Address" (iOS toast: "Address copied").
     pub(super) fn copy_ton_address(&mut self, address: String, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(address));
-        self.connection.status_note = tr(keys::Q_MONEY_ADDRESS_COPIED_TO_CLIPBOARD).into();
+        self.connection.set_note(StatusNote::info(tr(
+            keys::Q_MONEY_ADDRESS_COPIED_TO_CLIPBOARD,
+        )));
         cx.notify();
     }
 }

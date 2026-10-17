@@ -3,6 +3,7 @@
 //! send one. Rules and requests: `quill::quick_replies`.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ui::status_note::StatusNote;
 mod build;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
@@ -388,13 +389,13 @@ impl QuillApp {
     }
 
     fn send_quick_reply_to(&mut self, chat_id: ChatId, shortcut_id: i32, cx: &mut Context<Self>) {
-        self.connection.status_note = match self.live.as_mut() {
+        self.connection.set_note(match self.live.as_mut() {
             Some(live) => match live.driver.send_quick_reply(chat_id, shortcut_id) {
-                Ok(()) => tr(keys::Q_OPS_SENDING_QUICK_REPLY).into(),
-                Err(_) => tr(keys::Q_OPS_COULD_NOT_SEND_THE_QUICK).into(),
+                Ok(()) => StatusNote::silent(tr(keys::Q_OPS_SENDING_QUICK_REPLY)),
+                Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_QUICK)),
             },
-            None => tr(keys::Q_OPS_DEMO_MODE_SENDING_A_QUICK).into(),
-        };
+            None => StatusNote::info(tr(keys::Q_OPS_DEMO_MODE_SENDING_A_QUICK)),
+        });
         cx.notify();
     }
 }

@@ -1,6 +1,7 @@
 //! Methods moved out of `message_menu_ui.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -43,19 +44,24 @@ impl QuillApp {
                     let target = target.clone();
                     move |this, _, cx| {
                         if let Some(live) = this.live.as_mut() {
-                            this.connection.status_note = match live.driver.save_audio_to_profile(
-                                target.file_id,
-                                target.duration,
-                                &target.title,
-                                &target.performer,
-                                &target.file_name,
-                            ) {
-                                Ok(_) => tr(keys::SAVED_MUSIC_ADDED).into(),
-                                Err(_) => tr(keys::Q_CHAT_COULD_NOT_SAVE_TO_YOUR).into(),
-                            };
+                            this.connection.set_note(
+                                match live.driver.save_audio_to_profile(
+                                    target.file_id,
+                                    target.duration,
+                                    &target.title,
+                                    &target.performer,
+                                    &target.file_name,
+                                ) {
+                                    Ok(_) => StatusNote::silent(tr(keys::SAVED_MUSIC_ADDED)),
+                                    Err(_) => {
+                                        StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SAVE_TO_YOUR))
+                                    }
+                                },
+                            );
                         } else {
-                            this.connection.status_note =
-                                tr(keys::Q_CHAT_DEMO_SAVING_TO_THE_PROFILE).into();
+                            this.connection.set_note(StatusNote::info(tr(
+                                keys::Q_CHAT_DEMO_SAVING_TO_THE_PROFILE,
+                            )));
                         }
                         this.message_ui.menu = None;
                         cx.notify();
@@ -76,14 +82,18 @@ impl QuillApp {
                     let draft =
                         quill::composer::ForwardDraft::from_message(chat_id, message_id, false);
                     if let (Some(live), Some(me), Some(draft)) = (this.live.as_mut(), me, draft) {
-                        this.connection.status_note =
+                        this.connection.set_note(
                             match live.driver.forward_messages(ChatId(me), &draft) {
-                                Ok(_) => tr(keys::Q_CHAT_SAVED_TO_SAVED_MESSAGES).into(),
-                                Err(_) => tr(keys::Q_CHAT_COULD_NOT_SAVE_TO_SAVED).into(),
-                            };
+                                Ok(_) => StatusNote::info(tr(keys::Q_CHAT_SAVED_TO_SAVED_MESSAGES)),
+                                Err(_) => {
+                                    StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SAVE_TO_SAVED))
+                                }
+                            },
+                        );
                     } else {
-                        this.connection.status_note =
-                            tr(keys::Q_CHAT_DEMO_SAVED_MESSAGES_NEEDS_LIVE).into();
+                        this.connection.set_note(StatusNote::info(tr(
+                            keys::Q_CHAT_DEMO_SAVED_MESSAGES_NEEDS_LIVE,
+                        )));
                     }
                     this.message_ui.menu = None;
                     cx.notify();
@@ -630,7 +640,9 @@ impl QuillApp {
                 .is_err()
             {
                 self.message_ui.menu_ui.report_open = false;
-                self.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_START_THE_REPORT).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_CHAT_COULD_NOT_START_THE_REPORT,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.begin_message_report(chat_id, message_ids);
@@ -677,7 +689,9 @@ impl QuillApp {
                 )
                 .is_err()
         {
-            self.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_SEND_THE_REPORT).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_CHAT_COULD_NOT_SEND_THE_REPORT,
+            )));
         }
         cx.notify();
     }
@@ -711,7 +725,8 @@ impl QuillApp {
                 .to_string()
         };
         if text.is_empty() && !is_optional {
-            self.connection.status_note = tr(keys::Q_CHAT_ADD_A_COMMENT_TO_SEND).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_CHAT_ADD_A_COMMENT_TO_SEND)));
             cx.notify();
             return;
         }
@@ -721,7 +736,9 @@ impl QuillApp {
                 .report_messages(flow.chat_id, &flow.message_ids, &option_id, &text, None)
                 .is_err()
         {
-            self.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_SEND_THE_REPORT).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_CHAT_COULD_NOT_SEND_THE_REPORT,
+            )));
         }
         self.message_ui
             .menu_ui

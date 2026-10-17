@@ -5,6 +5,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::demo::seed_ready_media_session;
 use crate::ui::demos::video_fixtures::apply_ready_video_viewer;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use std::sync::atomic::Ordering;
@@ -64,7 +65,9 @@ impl QuillApp {
             player.seek(5.0);
             player.seek(0.0);
         }
-        self.connection.status_note = "screenshot demo — in-viewer video playback".into();
+        self.connection.set_note(StatusNote::silent(
+            "screenshot demo — in-viewer video playback",
+        ));
         match demo {
             VideoPlaybackDemo::VideoPip => {
                 let weak = cx.entity().downgrade();

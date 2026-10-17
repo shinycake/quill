@@ -3,6 +3,7 @@
 //! payment follow-ups) or keep timers ticking.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr};
 use quill::state::StoryPostOutcome;
 
@@ -73,7 +74,8 @@ impl QuillApp {
             && open_chat == Some(chat_id)
         {
             self.set_composer_markup(&text, window, cx);
-            self.connection.status_note = tr(keys::Q_REST_AI_UPDATED_THE_DRAFT).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_REST_AI_UPDATED_THE_DRAFT)));
         }
         if let Some((chat_id, rich, note)) = ai_blocks
             && open_chat == Some(chat_id)
@@ -82,7 +84,7 @@ impl QuillApp {
             self.composer.update(cx, |input, cx| {
                 input.set_value(&text, window, cx);
             });
-            self.connection.status_note = note.into();
+            self.connection.set_note(StatusNote::info(note));
         }
         // Phase A1: keep the slow-mode countdown ticking while the open
         // chat is gated (spawns at most one 1s task per open chat).
@@ -213,7 +215,8 @@ impl QuillApp {
             self.stories.viewer.close();
             self.stories.reaction_picker_open = false;
             self.stories.reply_open = false;
-            self.connection.status_note = tr(keys::Q_REST_STORY_DELETED).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_REST_STORY_DELETED)));
         }
         // Phase 4.6: push the playback clock into the seek slider entity so
         // the thumb follows elapsed time (the tick has no `&mut Window`).

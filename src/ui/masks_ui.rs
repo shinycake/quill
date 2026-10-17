@@ -9,6 +9,7 @@
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use super::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
@@ -47,7 +48,8 @@ impl QuillApp {
     pub(super) fn open_mask_sets(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_mask_sets().is_err() {
-                self.connection.status_note = tr(keys::Q_MISC_COULD_NOT_LOAD_MASKS).into();
+                self.connection
+                    .set_note(StatusNote::error(tr(keys::Q_MISC_COULD_NOT_LOAD_MASKS)));
             }
         } else if let Some(masks) = self.masks_panel_mut() {
             masks.open = true;
@@ -66,7 +68,8 @@ impl QuillApp {
     fn select_mask_tab(&mut self, tab: MasksTab, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.select_mask_tab(tab).is_err() {
-                self.connection.status_note = tr(keys::Q_MISC_COULD_NOT_LOAD_MASKS).into();
+                self.connection
+                    .set_note(StatusNote::error(tr(keys::Q_MISC_COULD_NOT_LOAD_MASKS)));
             }
         } else if let Some(masks) = self.masks_panel_mut() {
             masks.tab = tab;
@@ -88,23 +91,25 @@ impl QuillApp {
             masks.confirm_remove = None;
         }
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note =
+            self.connection.set_note(
                 match live.driver.change_mask_set(set_id, installed, archived) {
-                    Ok(Some(_)) => tr(keys::Q_MISC_UPDATING_MASKS).into(),
-                    Ok(None) => tr(keys::Q_MISC_A_MASK_UPDATE_IS_ALREADY).into(),
-                    Err(_) => tr(keys::Q_MISC_COULD_NOT_UPDATE_MASKS).into(),
-                };
+                    Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MISC_UPDATING_MASKS)),
+                    Ok(None) => StatusNote::silent(tr(keys::Q_MISC_A_MASK_UPDATE_IS_ALREADY)),
+                    Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_UPDATE_MASKS)),
+                },
+            );
         }
         cx.notify();
     }
 
     fn reorder_mask_set(&mut self, source: i64, target: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.reorder_mask_set(source, target) {
-                Ok(Some(_)) => tr(keys::Q_MISC_SAVING_MASK_ORDER).into(),
-                Ok(None) => tr(keys::Q_MISC_MASK_ORDER_UNCHANGED_OR_AN).into(),
-                Err(_) => tr(keys::Q_MISC_COULD_NOT_REORDER_MASKS).into(),
-            };
+            self.connection
+                .set_note(match live.driver.reorder_mask_set(source, target) {
+                    Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MISC_SAVING_MASK_ORDER)),
+                    Ok(None) => StatusNote::silent(tr(keys::Q_MISC_MASK_ORDER_UNCHANGED_OR_AN)),
+                    Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_REORDER_MASKS)),
+                });
         }
         cx.notify();
     }
@@ -279,8 +284,9 @@ impl QuillApp {
                         if let Some(live) = this.live.as_mut()
                             && live.driver.more_archived_masks().is_err()
                         {
-                            this.connection.status_note =
-                                tr(keys::Q_MISC_COULD_NOT_LOAD_MORE_MASKS).into();
+                            this.connection.set_note(StatusNote::error(tr(
+                                keys::Q_MISC_COULD_NOT_LOAD_MORE_MASKS,
+                            )));
                         }
                         cx.notify();
                     })),

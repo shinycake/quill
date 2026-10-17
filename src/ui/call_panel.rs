@@ -19,6 +19,7 @@ use super::call_panel_devices::{self as devices, DeviceMenuTarget};
 use super::calls::call_video::{CallPicture, CallWindowRoot};
 use super::chat_row::chat_avatar;
 use super::nested_click::SwallowPress;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{ActiveTheme, Icon, Root, Sizable};
 use gpui_kit::prelude::FluentBuilder;
@@ -310,10 +311,9 @@ impl QuillApp {
                 app.calls.window_opening = false;
                 match result {
                     Ok(handle) => app.calls.window = Some(handle.into()),
-                    Err(_) => {
-                        app.connection.status_note =
-                            tr(keys::Q_OPS_COULDNT_OPEN_THE_CALL_WINDOW).into()
-                    }
+                    Err(_) => app.connection.set_note(StatusNote::error(tr(
+                        keys::Q_OPS_COULDNT_OPEN_THE_CALL_WINDOW,
+                    ))),
                 }
                 cx.notify();
             });

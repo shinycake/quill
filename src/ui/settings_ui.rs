@@ -5,6 +5,7 @@ use super::app::QuillApp;
 use super::privacy::PrivacyEditorTarget;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::{status_note::StatusNote, user_error::user_error_for};
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
@@ -81,7 +82,10 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.chat_list.archive_settings_open = true;
             if let Err(err) = live.driver.fetch_archive_chat_list_settings() {
-                self.connection.status_note = format!("archive settings failed: {err:?}");
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_ARCHIVE_SETTINGS,
+                    &err,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.chat_list.archive_settings_open = true;
@@ -97,14 +101,18 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let Some(mut settings) = live.driver.session.chat_list.archive_chat_list_settings
             else {
-                self.connection.status_note =
-                    tr(keys::Q_PREFS_ARCHIVE_SETTINGS_STILL_LOADING).into();
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_PREFS_ARCHIVE_SETTINGS_STILL_LOADING,
+                )));
                 cx.notify();
                 return;
             };
             archive_setting_set(&mut settings, index, on);
             if let Err(err) = live.driver.set_archive_chat_list_settings(settings) {
-                self.connection.status_note = format!("archive setting failed: {err:?}");
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_ARCHIVE_SETTINGS,
+                    &err,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut()
             && let Some(mut settings) = session.chat_list.archive_chat_list_settings
@@ -493,8 +501,9 @@ impl QuillApp {
                             .on_click(cx.listener(move |this, &on, _, cx| {
                                 if let Some(live) = this.live.as_mut() {
                                     if live.driver.set_less_data_for_calls(on).is_err() {
-                                        this.connection.status_note =
-                                            tr(keys::Q_PREFS_COULDNT_UPDATE_CALL_SETTINGS).into();
+                                        this.connection.set_note(StatusNote::error(tr(
+                                            keys::Q_PREFS_COULDNT_UPDATE_CALL_SETTINGS,
+                                        )));
                                     }
                                 } else if let Some(demo) = this.demo_session.as_mut() {
                                     // Demo: show the chosen value immediately

@@ -13,6 +13,7 @@ use super::app::QuillApp;
 use super::dialogs::{GroupSettingsAction, GroupSettingsDialog, GroupSettingsView};
 use super::pressable::action_row;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -106,7 +107,8 @@ impl QuillApp {
             return;
         };
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A).into();
+            self.connection
+                .set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
             cx.notify();
             return;
         };
@@ -190,11 +192,14 @@ impl QuillApp {
         match result {
             Ok(Some(_)) => {}
             Ok(None) => {
-                self.connection.status_note =
-                    tr(keys::Q_PEOPLE_THAT_SETTING_ISNT_AVAILABLE_FOR).into();
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_PEOPLE_THAT_SETTING_ISNT_AVAILABLE_FOR,
+                )));
             }
             Err(_) => {
-                self.connection.status_note = tr(keys::Q_PEOPLE_COULDNT_SEND_THE_CHANGE_TRY).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_PEOPLE_COULDNT_SEND_THE_CHANGE_TRY,
+                )));
             }
         }
         cx.notify();

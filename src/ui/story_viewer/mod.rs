@@ -9,6 +9,7 @@ use super::nested_click::SwallowPress;
 use super::pressable::PressableDiv;
 use super::search_ui::chat_search_jump_note;
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
@@ -67,7 +68,9 @@ impl QuillApp {
                 let _ = live.driver.get_story(chat_id, id);
             }
         } else if !missing.is_empty() {
-            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_GETSTORY_RUNS_WITH_LIVE).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MEDIA_DEMO_GETSTORY_RUNS_WITH_LIVE,
+            )));
         }
         if !self.rebuild_story_viewer(chat_id, story_id, cx) {
             self.chat_list.pending_story_open = Some((chat_id.0, story_id));
@@ -175,23 +178,25 @@ impl QuillApp {
             Some("❤")
         };
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note =
+            self.connection.set_note(
                 match live
                     .driver
                     .set_story_reaction(item.chat_id, item.story_id, emoji)
                 {
                     Ok(_) => {
                         if emoji.is_some() {
-                            tr(keys::Q_MEDIA_REACTED).into()
+                            StatusNote::silent(tr(keys::Q_MEDIA_REACTED))
                         } else {
-                            tr(keys::Q_MEDIA_REACTION_REMOVED).into()
+                            StatusNote::silent(tr(keys::Q_MEDIA_REACTION_REMOVED))
                         }
                     }
-                    Err(_) => tr(keys::Q_MEDIA_COULD_NOT_SET_STORY_REACTION).into(),
-                };
+                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_SET_STORY_REACTION)),
+                },
+            );
         } else if self.demo_session.is_some() {
-            self.connection.status_note =
-                tr(keys::Q_MEDIA_DEMO_SETSTORYREACTION_RUNS_WITH_LIVE).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MEDIA_DEMO_SETSTORYREACTION_RUNS_WITH_LIVE,
+            )));
         }
         self.stories.reaction_picker_open = false;
         cx.notify();
@@ -208,12 +213,15 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.join_live_story(chat_id, story_id) {
-                Ok(_) => tr(keys::Q_MEDIA_JOINING_LIVE_STORY).into(),
-                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_JOIN_THE_LIVE).into(),
-            };
+            self.connection
+                .set_note(match live.driver.join_live_story(chat_id, story_id) {
+                    Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_JOINING_LIVE_STORY)),
+                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_JOIN_THE_LIVE)),
+                });
         } else if self.demo_session.is_some() {
-            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_LIVE_STORIES_JOIN_WITH).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MEDIA_DEMO_LIVE_STORIES_JOIN_WITH,
+            )));
         }
         cx.notify();
     }
@@ -228,15 +236,15 @@ impl QuillApp {
                 if live.driver.session.stories.available_reactions.is_none() {
                     match live.driver.get_story_available_reactions() {
                         Ok(_) => {}
-                        Err(_) => {
-                            self.connection.status_note =
-                                tr(keys::Q_MEDIA_COULD_NOT_LOAD_STORY_REACTIONS).into()
-                        }
+                        Err(_) => self.connection.set_note(StatusNote::error(tr(
+                            keys::Q_MEDIA_COULD_NOT_LOAD_STORY_REACTIONS,
+                        ))),
                     }
                 }
             } else if self.demo_session.is_some() {
-                self.connection.status_note =
-                    tr(keys::Q_MEDIA_DEMO_STORY_REACTIONS_RUN_WITH).into();
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_MEDIA_DEMO_STORY_REACTIONS_RUN_WITH,
+                )));
             }
         }
         cx.notify();
@@ -248,16 +256,21 @@ impl QuillApp {
             return;
         };
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note =
+            self.connection.set_note(
                 match live
                     .driver
                     .set_story_reaction(item.chat_id, item.story_id, Some(emoji))
                 {
-                    Ok(_) => tr_with(keys::Q_MEDIA_REACTED_2, &[("emoji", emoji)]),
-                    Err(_) => tr(keys::Q_MEDIA_COULD_NOT_SET_STORY_REACTION).into(),
-                };
+                    Ok(_) => {
+                        StatusNote::silent(tr_with(keys::Q_MEDIA_REACTED_2, &[("emoji", emoji)]))
+                    }
+                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_SET_STORY_REACTION)),
+                },
+            );
         } else if self.demo_session.is_some() {
-            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STORY_REACTIONS_RUN_WITH).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MEDIA_DEMO_STORY_REACTIONS_RUN_WITH,
+            )));
         }
         self.stories.reaction_picker_open = false;
         cx.notify();
@@ -316,16 +329,20 @@ impl QuillApp {
             return;
         };
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.set_story_custom_emoji_reaction(
-                item.chat_id,
-                item.story_id,
-                custom_emoji_id,
-            ) {
-                Ok(_) => tr(keys::Q_MEDIA_REACTED_3).into(),
-                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_SET_STORY_REACTION).into(),
-            };
+            self.connection.set_note(
+                match live.driver.set_story_custom_emoji_reaction(
+                    item.chat_id,
+                    item.story_id,
+                    custom_emoji_id,
+                ) {
+                    Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_REACTED_3)),
+                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_SET_STORY_REACTION)),
+                },
+            );
         } else if self.demo_session.is_some() {
-            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STORY_REACTIONS_RUN_WITH).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MEDIA_DEMO_STORY_REACTIONS_RUN_WITH,
+            )));
         }
         self.stories.reaction_picker_open = false;
         cx.notify();
@@ -349,11 +366,12 @@ impl QuillApp {
             } => {
                 let url = location.open_street_map_url();
                 let label = Self::story_area_pin_label(&[address, &location.coords_label()]);
-                self.connection.status_note = if quill::platform::open_external_url(&url) {
-                    label
-                } else {
-                    tr(keys::Q_MEDIA_COULD_NOT_OPEN_MAP).into()
-                };
+                self.connection
+                    .set_note(if quill::platform::open_external_url(&url) {
+                        StatusNote::info(label)
+                    } else {
+                        StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_OPEN_MAP))
+                    });
                 cx.notify();
             }
             StoryAreaKind::Venue {
@@ -368,11 +386,12 @@ impl QuillApp {
                     label.push_str(" — ");
                     label.push_str(address);
                 }
-                self.connection.status_note = if quill::platform::open_external_url(&url) {
-                    label
-                } else {
-                    tr(keys::Q_MEDIA_COULD_NOT_OPEN_MAP).into()
-                };
+                self.connection
+                    .set_note(if quill::platform::open_external_url(&url) {
+                        StatusNote::info(label)
+                    } else {
+                        StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_OPEN_MAP))
+                    });
                 cx.notify();
             }
             StoryAreaKind::SuggestedReaction { emoji, .. } => {
@@ -386,18 +405,20 @@ impl QuillApp {
                 self.story_area_open_message(ChatId(*chat_id), MessageId(*message_id), cx);
             }
             StoryAreaKind::Weather { temperature, emoji } => {
-                self.connection.status_note = format!("{emoji} {temperature:.1}°C");
+                self.connection
+                    .set_note(StatusNote::silent(format!("{emoji} {temperature:.1}°C")));
                 cx.notify();
             }
             StoryAreaKind::Gift { gift_name } => {
-                self.connection.status_note = format!("🎁 {gift_name}");
+                self.connection
+                    .set_note(StatusNote::silent(format!("🎁 {gift_name}")));
                 cx.notify();
             }
             StoryAreaKind::Unsupported { type_name } => {
-                self.connection.status_note = tr_with(
+                self.connection.set_note(StatusNote::silent(tr_with(
                     keys::Q_MEDIA_STORY_AREA_ISNT_SUPPORTED,
                     &[("type_name", &type_name.to_string())],
-                );
+                )));
                 cx.notify();
             }
         }
@@ -415,18 +436,20 @@ impl QuillApp {
         self.close_story_viewer(cx);
         self.flush_leaving_draft(cx);
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live
-                .driver
-                .select_chat(chat_id)
-                .and_then(|_| live.driver.jump_to_replied_message(message_id))
-            {
-                Ok(_) => chat_search_jump_note(&live.driver.session),
-                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_OPEN_MESSAGE).into(),
-            };
+            self.connection.set_note(
+                match live
+                    .driver
+                    .select_chat(chat_id)
+                    .and_then(|_| live.driver.jump_to_replied_message(message_id))
+                {
+                    Ok(_) => chat_search_jump_note(&live.driver.session),
+                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_OPEN_MESSAGE)),
+                },
+            );
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_chat(chat_id);
             let _ = session.begin_chat_search_jump(message_id);
-            self.connection.status_note = chat_search_jump_note(session);
+            self.connection.set_note(chat_search_jump_note(session));
         }
         self.dismiss_cross_chat_state(chat_id, cx);
         // The composer shows the new chat's draft (next frame: no window here).
@@ -456,19 +479,22 @@ impl QuillApp {
             return;
         }
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note =
+            self.connection.set_note(
                 match live
                     .driver
                     .send_story_reply(item.chat_id, item.story_id, &text)
                 {
-                    Ok(_) => tr(keys::Q_MEDIA_STORY_REPLY_SENT).into(),
-                    Err(_) => tr(keys::Q_MEDIA_COULD_NOT_SEND_STORY_REPLY).into(),
-                };
+                    Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_STORY_REPLY_SENT)),
+                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_SEND_STORY_REPLY)),
+                },
+            );
             self.stories
                 .reply_input
                 .update(cx, |input, cx| input.set_value("", window, cx));
         } else if self.demo_session.is_some() {
-            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STORY_REPLIES_RUN_WITH).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MEDIA_DEMO_STORY_REPLIES_RUN_WITH,
+            )));
         }
         self.end_story_reply(cx);
         cx.notify();
@@ -483,13 +509,16 @@ impl QuillApp {
             return;
         };
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note =
+            self.connection.set_note(
                 match live.driver.delete_story(item.chat_id, item.story_id) {
-                    Ok(_) => tr(keys::Q_MEDIA_DELETING_STORY).into(),
-                    Err(_) => tr(keys::Q_MEDIA_COULD_NOT_DELETE_STORY).into(),
-                };
+                    Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_DELETING_STORY)),
+                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_DELETE_STORY)),
+                },
+            );
         } else if self.demo_session.is_some() {
-            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_DELETESTORY_RUNS_WITH_LIVE).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MEDIA_DEMO_DELETESTORY_RUNS_WITH_LIVE,
+            )));
         }
         self.stories.reaction_picker_open = false;
         self.end_story_reply(cx);
@@ -533,12 +562,16 @@ impl QuillApp {
                 .get_story_interactions(item.chat_id, item.story_id, offset)
                 .is_err()
             {
-                self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_LOAD_STORY_VIEWERS).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_MEDIA_COULD_NOT_LOAD_STORY_VIEWERS,
+                )));
             }
         } else if self.demo_session.is_some() {
             // Demo seeds the panel state directly (see the
             // `ReadyStoryViewers` demo); a live fetch says so honestly.
-            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STORY_VIEWERS_RUN_WITH).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MEDIA_DEMO_STORY_VIEWERS_RUN_WITH,
+            )));
         }
         cx.notify();
     }
@@ -647,12 +680,12 @@ impl QuillApp {
                     .session
                     .story_report_sending(item.chat_id.0, item.story_id);
             }
-            self.connection.status_note =
+            self.connection.set_note(
                 match live
                     .driver
                     .report_story(item.chat_id, item.story_id, option_id, text)
                 {
-                    Ok(_) => tr(keys::Q_MEDIA_REPORTING_STORY).into(),
+                    Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_REPORTING_STORY)),
                     Err(_) => {
                         // Phase 9.5 review: the driver took the pending
                         // request back, so no answer will ever arrive —
@@ -660,13 +693,16 @@ impl QuillApp {
                         live.driver.session.fail_story_report_send(
                             item.chat_id.0,
                             item.story_id,
-                            tr(keys::Q_MEDIA_COULD_NOT_REPORT_STORY).into(),
+                            tr(keys::Q_MEDIA_COULD_NOT_REPORT_STORY).to_string(),
                         );
-                        tr(keys::Q_MEDIA_COULD_NOT_REPORT_STORY).into()
+                        StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_REPORT_STORY))
                     }
-                };
+                },
+            );
         } else if self.demo_session.is_some() {
-            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STORY_REPORTS_RUN_WITH).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MEDIA_DEMO_STORY_REPORTS_RUN_WITH,
+            )));
         }
         cx.notify();
     }
@@ -702,7 +738,9 @@ impl QuillApp {
         }
         let text = self.stories.report_text_input.read(cx).value().to_string();
         if text.trim().is_empty() && !is_optional {
-            self.connection.status_note = tr(keys::Q_MEDIA_ADD_DETAILS_OR_CANCEL_THE).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MEDIA_ADD_DETAILS_OR_CANCEL_THE,
+            )));
             cx.notify();
             return;
         }
@@ -724,22 +762,29 @@ impl QuillApp {
             .map(|session| session.stories.stealth)
             .unwrap_or_default();
         if stealth.is_active(now) {
-            self.connection.status_note = tr(keys::Q_MEDIA_STEALTH_MODE_IS_ACTIVE_YOUR).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MEDIA_STEALTH_MODE_IS_ACTIVE_YOUR,
+            )));
             cx.notify();
             return;
         }
         if stealth.is_cooling_down(now) {
-            self.connection.status_note = tr(keys::Q_MEDIA_STEALTH_MODE_IS_COOLING_DOWN).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MEDIA_STEALTH_MODE_IS_COOLING_DOWN,
+            )));
             cx.notify();
             return;
         }
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.activate_story_stealth_mode() {
-                Ok(_) => tr(keys::Q_MEDIA_ENABLING_STEALTH_MODE).into(),
-                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_ENABLE_STEALTH_MODE).into(),
-            };
+            self.connection
+                .set_note(match live.driver.activate_story_stealth_mode() {
+                    Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_ENABLING_STEALTH_MODE)),
+                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_ENABLE_STEALTH_MODE)),
+                });
         } else if self.demo_session.is_some() {
-            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STEALTH_MODE_NEEDS_LIVE).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_MEDIA_DEMO_STEALTH_MODE_NEEDS_LIVE,
+            )));
         }
         cx.notify();
     }

@@ -6,6 +6,7 @@ use super::join::ProgramRow;
 use super::setup::STARREF_TOS_URL;
 use super::*;
 use crate::ui::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::{Dialog, DialogContent};
@@ -576,7 +577,8 @@ impl QuillApp {
 
     fn copy_affiliate_link(&mut self, url: &str, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(url.to_string()));
-        self.connection.status_note = tr(keys::STICKERS_COPIED).into();
+        self.connection
+            .set_note(StatusNote::info(tr(keys::STICKERS_COPIED)));
         cx.notify();
     }
 

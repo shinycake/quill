@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -115,17 +116,17 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note =
+            self.connection.set_note(
                 match live
                     .driver
                     .pin_chat_message_with(chat_id, message_id, silent, only_for_self)
                 {
-                    Ok(_) => tr(keys::Q_MISC_PINNING).into(),
-                    Err(_) => tr(keys::Q_MISC_COULD_NOT_PIN).into(),
-                };
+                    Ok(_) => StatusNote::silent(tr(keys::Q_MISC_PINNING)),
+                    Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_PIN)),
+                },
+            );
         } else if self.demo_session.is_some() {
             self.apply_demo_pin_toggle(chat_id, message_id);
-            self.connection.status_note = "pinned".into();
         }
         cx.notify();
     }

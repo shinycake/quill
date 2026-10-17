@@ -10,6 +10,8 @@ use super::chat_row::{
 };
 use super::notifications::notification_settings_json;
 use super::*;
+use crate::ui::status_note::StatusNote;
+use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::tab::{Tab, TabBar};
@@ -184,10 +186,10 @@ impl QuillApp {
             } else {
                 driver.select_chat_at(chat_id, open_at)
             };
-            self.connection.status_note = match result {
-                Ok(_) => "".into(),
-                Err(_) => tr(keys::Q_CHATLIST_COULD_NOT_OPEN_CHAT).into(),
-            };
+            self.connection.set_note(match result {
+                Ok(_) => StatusNote::default(),
+                Err(_) => StatusNote::error(tr(keys::Q_CHATLIST_COULD_NOT_OPEN_CHAT)),
+            });
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_chat(chat_id);
             if let Some(message_id) = open_at {
@@ -242,7 +244,10 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.get_community_full_info(community_id)
         {
-            self.connection.status_note = format!("community info request failed: {err:?}");
+            self.connection.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_COMMUNITY_INFO,
+                &err,
+            )));
         }
         cx.notify();
     }
@@ -510,7 +515,10 @@ impl QuillApp {
             && let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_contacts()
         {
-            self.connection.status_note = format!("contacts request failed: {err:?}");
+            self.connection.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_CONTACTS,
+                &err,
+            )));
         }
         cx.notify();
     }
@@ -523,11 +531,17 @@ impl QuillApp {
         self.chat_list.calls_tab_open = true;
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.fetch_call_history() {
-                self.connection.status_note = format!("call history request failed: {err:?}");
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_CALL_HISTORY,
+                    &err,
+                )));
             }
             for key in [PrivacySettingKey::AllowCalls, PrivacySettingKey::PeerToPeer] {
                 if let Err(err) = live.driver.fetch_privacy_rules(key) {
-                    self.connection.status_note = format!("call privacy request failed: {err:?}");
+                    self.connection.set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_CALL_PRIVACY,
+                        &err,
+                    )));
                 }
             }
             // Slice S4: the call-settings "Use less data for calls"
@@ -545,7 +559,10 @@ impl QuillApp {
         if let (Some(live), Some(folder_id)) = (self.live.as_mut(), folder)
             && let Err(err) = live.driver.load_folder_chats(folder_id)
         {
-            self.connection.status_note = format!("folder load failed: {err:?}");
+            self.connection.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_FOLDER,
+                &err,
+            )));
         }
         // A shared folder: has its owner added chats?
         self.poll_folder_new_chats();
@@ -617,7 +634,10 @@ impl QuillApp {
         let ids = reorder.release(std::time::Instant::now());
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_pinned_chat_order(archived, ids) {
-                self.connection.status_note = format!("pin reorder failed: {err:?}");
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_PIN_REORDER,
+                    &err,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.reorder_pinned_chats(archived, &ids);
@@ -631,7 +651,10 @@ impl QuillApp {
     pub(super) fn mark_all_chats_as_read(&mut self, archived: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.mark_all_chats_as_read(archived) {
-                self.connection.status_note = format!("mark all read failed: {err:?}");
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_MARK_ALL_READ,
+                    &err,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             // Demo: clear the badges directly so the fixture shows the
@@ -677,14 +700,20 @@ impl QuillApp {
             match live.driver.create_private_chat_with_self() {
                 Ok(Some(_)) => {}
                 Ok(None) if live.driver.session.my_user_id.is_none() => {
-                    self.connection.status_note =
-                        tr(keys::Q_CHATLIST_ACCOUNT_INFO_NOT_LOADED_YET).into();
+                    self.connection.set_note(StatusNote::silent(tr(
+                        keys::Q_CHATLIST_ACCOUNT_INFO_NOT_LOADED_YET,
+                    )));
                 }
                 Ok(None) => {}
-                Err(err) => self.connection.status_note = format!("saved messages failed: {err:?}"),
+                Err(err) => self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_SAVED_MESSAGES,
+                    &err,
+                ))),
             }
         } else {
-            self.connection.status_note = tr(keys::Q_CHATLIST_NO_SAVED_MESSAGES_CHAT_IN).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_CHATLIST_NO_SAVED_MESSAGES_CHAT_IN,
+            )));
         }
         cx.notify();
     }
@@ -700,21 +729,21 @@ impl QuillApp {
             } else {
                 live.driver.archive_chat(chat_id)
             };
-            self.connection.status_note = match result {
-                Ok(_) if archived => tr(keys::Q_CHATLIST_UNARCHIVING).into(),
-                Ok(_) => tr(keys::Q_CHATLIST_ARCHIVING).into(),
-                Err(_) => tr(keys::Q_CHATLIST_COULD_NOT_CHANGE_ARCHIVE).into(),
-            };
+            self.connection.set_note(match result {
+                Ok(_) if archived => StatusNote::silent(tr(keys::Q_CHATLIST_UNARCHIVING)),
+                Ok(_) => StatusNote::silent(tr(keys::Q_CHATLIST_ARCHIVING)),
+                Err(_) => StatusNote::error(tr(keys::Q_CHATLIST_COULD_NOT_CHANGE_ARCHIVE)),
+            });
             cx.notify();
             return;
         }
         if self.demo_session.is_some() {
             self.apply_demo_archive(chat_id, !archived);
-            self.connection.status_note = if archived {
-                "unarchived".into()
+            self.connection.set_note(if archived {
+                StatusNote::info("unarchived")
             } else {
-                "archived".into()
-            };
+                StatusNote::info("archived")
+            });
             cx.notify();
         }
     }

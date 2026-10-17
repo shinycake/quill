@@ -6,6 +6,8 @@ use super::chat_row::chat_avatar;
 use super::pressable::PressableDiv;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
+use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Textarea, TextareaState};
@@ -239,7 +241,10 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_contacts()
         {
-            self.connection.status_note = format!("contacts request failed: {err:?}");
+            self.connection.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_CONTACTS,
+                &err,
+            )));
         }
         cx.notify();
     }
@@ -330,16 +335,19 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.contact_prefs.sync_enabled = next;
             if let Err(err) = live.driver.save_contact_prefs() {
-                self.connection.status_note = tr_with(
+                self.connection.set_note(StatusNote::error(tr_with(
                     keys::Q_PEOPLE_COULDNT_SAVE_CONTACT_PREFS,
                     &[("err", &err.to_string())],
-                );
+                )));
             }
             if next && live.driver.session.users_state.contacts.is_none() {
                 // Re-enable refetches the server list so the tab
                 // converges with TDLib immediately.
                 if let Err(err) = live.driver.fetch_contacts() {
-                    self.connection.status_note = format!("contacts request failed: {err:?}");
+                    self.connection.set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_CONTACTS,
+                        &err,
+                    )));
                 }
             }
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -384,16 +392,17 @@ impl QuillApp {
         let text = dialog.input.read(cx).text().to_string();
         let (contacts, skipped, truncated) = parse_vcard(&text);
         if contacts.is_empty() {
-            self.connection.status_note =
-                tr(keys::Q_PEOPLE_NO_PHONE_NUMBER_CONTACTS_FOUND).to_string();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_PEOPLE_NO_PHONE_NUMBER_CONTACTS_FOUND,
+            )));
             cx.notify();
             return;
         }
         if let Some(live) = self.live.as_mut() {
             match live.driver.import_contacts(&contacts) {
                 Ok(Some(_)) => {
-                    self.connection.status_note = if skipped == 0 && truncated == 0 {
-                        tr(keys::Q_PEOPLE_IMPORTING_CONTACTS).to_string()
+                    self.connection.set_note(if skipped == 0 && truncated == 0 {
+                        StatusNote::silent(tr(keys::Q_PEOPLE_IMPORTING_CONTACTS))
                     } else {
                         let mut details = Vec::new();
                         if skipped > 0 {
@@ -407,20 +416,24 @@ impl QuillApp {
                                 "{truncated} over the {VCARD_IMPORT_LIMIT}-card limit"
                             ));
                         }
-                        tr_with(
+                        StatusNote::silent(tr_with(
                             keys::Q_PEOPLE_IMPORTING_CONTACTS_2,
                             &[("join", &(details.join(", ")).to_string())],
-                        )
-                    };
+                        ))
+                    });
                 }
                 Ok(None) => {
-                    self.connection.status_note =
-                        tr(keys::Q_PEOPLE_REQUEST_ALREADY_IN_FLIGHT).to_string();
+                    self.connection.set_note(StatusNote::silent(tr(
+                        keys::Q_PEOPLE_REQUEST_ALREADY_IN_FLIGHT,
+                    )));
                     cx.notify();
                     return;
                 }
                 Err(err) => {
-                    self.connection.status_note = format!("import failed: {err:?}");
+                    self.connection.set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_IMPORT_CONTACTS,
+                        &err,
+                    )));
                     cx.notify();
                     return;
                 }
@@ -580,7 +593,8 @@ impl QuillApp {
             .as_ref()
             .and_then(|dialog| dialog.draft(cx));
         let Some((user_id, phone, first, last)) = draft else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_ENTER_A_NAME_OR_PHONE).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_ENTER_A_NAME_OR_PHONE)));
             cx.notify();
             return;
         };
@@ -588,16 +602,21 @@ impl QuillApp {
             match live.driver.add_contact(user_id, &phone, &first, &last) {
                 Ok(_) => {
                     self.dialogs.add_contact_dialog = None;
-                    self.connection.status_note = tr(keys::Q_PEOPLE_CONTACT_ADD_REQUESTED).into();
+                    self.connection
+                        .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_CONTACT_ADD_REQUESTED)));
                 }
                 Err(err) => {
-                    self.connection.status_note = format!("add contact failed: {err:?}");
+                    self.connection.set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_ADD_CONTACT,
+                        &err,
+                    )));
                 }
             }
         } else {
             // Demo: no driver — just close.
             self.dialogs.add_contact_dialog = None;
-            self.connection.status_note = tr(keys::Q_PEOPLE_CONTACT_ADD_REQUESTED).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_CONTACT_ADD_REQUESTED)));
         }
         let _ = window;
         cx.notify();

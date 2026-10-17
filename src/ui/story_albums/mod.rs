@@ -3,6 +3,8 @@
 
 use super::app::QuillApp;
 use super::*;
+use crate::ui::status_note::StatusNote;
+use crate::ui::user_error::{user_error_doing, user_error_for};
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::radio::{Radio, RadioGroup};
@@ -11,7 +13,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::connect::LiveConnect;
 use quill::ids::ChatId;
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr, tr_with, trn_with};
 use quill::story_composer::StoryPrivacy;
 use quill::story_page::{StoryPageOpState, parse_story_id_list};
 use quill::telegram::envelope::StoryAreaKind;
@@ -39,19 +41,30 @@ impl QuillApp {
         self.stories.page = Some(StoryPage::new(chat_id, window, cx));
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.get_chat_story_albums(chat_id) {
-                self.connection.status_note = format!("could not load story albums: {err:?}");
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_STORY_ALBUMS,
+                    &err,
+                )));
             }
             if let Err(err) = live
                 .driver
                 .get_chat_posted_to_chat_page_stories(chat_id, 0, 50)
             {
-                self.connection.status_note = format!("could not load chat page stories: {err:?}");
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_CHAT_PAGE_STORIES,
+                    &err,
+                )));
             }
             if let Err(err) = live.driver.get_chat_archived_stories(chat_id, 0, 50) {
-                self.connection.status_note = format!("could not load archived stories: {err:?}");
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_ARCHIVED_STORIES,
+                    &err,
+                )));
             }
         } else {
-            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STORY_ALBUMS_CHAT_PAGE).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MEDIA_DEMO_STORY_ALBUMS_CHAT_PAGE,
+            )));
         }
         cx.notify();
     }
@@ -100,10 +113,15 @@ impl QuillApp {
                 .driver
                 .get_story_album_stories(chat_id, album_id, offset, 50)
             {
-                self.connection.status_note = format!("could not load album stories: {err:?}");
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_ALBUM_STORIES,
+                    &err,
+                )));
             }
         } else {
-            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_ALBUM_STORIES_LOAD_WITH).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MEDIA_DEMO_ALBUM_STORIES_LOAD_WITH,
+            )));
         }
         cx.notify();
     }
@@ -128,13 +146,16 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note =
-                tr_with(keys::Q_MEDIA_DEMO_RUNS_WITH_LIVE_TDLIB, &[("what", what)]);
+            self.connection.set_note(StatusNote::silent(tr_with(
+                keys::Q_MEDIA_DEMO_RUNS_WITH_LIVE_TDLIB,
+                &[("what", what)],
+            )));
             cx.notify();
             return;
         };
         if let Err(err) = f(live) {
-            self.connection.status_note = format!("could not {what}: {err:?}");
+            self.connection
+                .set_note(StatusNote::error(user_error_doing(what, &err)));
         }
         cx.notify();
     }
@@ -155,8 +176,11 @@ impl QuillApp {
         };
         let (story_ids, skipped) = self.partition_addable_stories(chat_id, &story_ids);
         if !skipped.is_empty() {
-            self.connection.status_note =
-                format!("skipped stories that can't be added to albums: {skipped:?}");
+            self.connection.set_note(StatusNote::info(trn_with(
+                keys::Q_NOTES_STORIES_SKIPPED,
+                skipped.len(),
+                &[("count", &skipped.len().to_string())],
+            )));
         }
         self.story_page_mutate(
             tr(keys::Q_MEDIA_CREATE_STORY_ALBUM),
@@ -297,20 +321,25 @@ impl QuillApp {
             None => return,
         };
         if story_ids.is_empty() {
-            self.connection.status_note = tr(keys::Q_MEDIA_ENTER_AT_LEAST_ONE_STORY).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MEDIA_ENTER_AT_LEAST_ONE_STORY,
+            )));
             cx.notify();
             return;
         }
         let (story_ids, skipped) = self.partition_addable_stories(chat_id, &story_ids);
         if story_ids.is_empty() {
-            self.connection.status_note =
-                format!("none of these stories can be added to an album (skipped: {skipped:?})");
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_NOTES_NO_STORY_CAN_BE_ADDED)));
             cx.notify();
             return;
         }
         if !skipped.is_empty() {
-            self.connection.status_note =
-                format!("skipped stories that can't be added to albums: {skipped:?}");
+            self.connection.set_note(StatusNote::info(trn_with(
+                keys::Q_NOTES_STORIES_SKIPPED,
+                skipped.len(),
+                &[("count", &skipped.len().to_string())],
+            )));
         }
         self.story_page_mutate(
             tr(keys::Q_MEDIA_ADD_STORIES_TO_ALBUM),

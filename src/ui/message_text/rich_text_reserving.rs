@@ -1,6 +1,7 @@
 //! Methods moved out of `message_text.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr};
 
 /// `rich_text_line`, optionally ending the last paragraph with `reserve`
@@ -620,14 +621,12 @@ pub(in crate::ui) fn message_rich_block(
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if let Some(live) = this.live.as_mut() {
                         match live.driver.fetch_full_rich_message(chat_id, message_id) {
-                            Ok(_) => {
-                                this.connection.status_note =
-                                    tr(keys::Q_MISC_LOADING_FULL_MESSAGE).into()
-                            }
-                            Err(_) => {
-                                this.connection.status_note =
-                                    tr(keys::Q_MISC_COULD_NOT_LOAD_FULL_MESSAGE).into()
-                            }
+                            Ok(_) => this.connection.set_note(StatusNote::silent(tr(
+                                keys::Q_MISC_LOADING_FULL_MESSAGE,
+                            ))),
+                            Err(_) => this.connection.set_note(StatusNote::error(tr(
+                                keys::Q_MISC_COULD_NOT_LOAD_FULL_MESSAGE,
+                            ))),
                         }
                         cx.notify();
                     }

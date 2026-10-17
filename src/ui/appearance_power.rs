@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectState};
 use gpui_kit::component::theme::{ActiveTheme, Theme};
 use gpui_kit::component::{IndexPath, StyledExt as _};
@@ -186,7 +187,7 @@ impl QuillApp {
                     .cursor_pointer()
                     .occlude()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.set_status_note(FORCED_MESSAGE, cx);
+                        this.set_status_note(StatusNote::silent(FORCED_MESSAGE), cx);
                     })),
             );
         }

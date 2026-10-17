@@ -6,6 +6,7 @@
 
 use super::super::app::QuillApp;
 use super::super::message_text::rich_text_line;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -88,7 +89,7 @@ pub(in crate::ui) fn fact_check_block(
                     .tab_index(0)
                     .child(tr(keys::Q_MEDIA_WHATS_THIS))
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.connection.status_note = about.clone();
+                        this.connection.set_note(StatusNote::info(about.clone()));
                         cx.notify();
                     })),
             )

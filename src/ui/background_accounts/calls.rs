@@ -8,6 +8,7 @@
 
 use super::*;
 use crate::ui::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use quill::lang::{keys, tr, tr_with};
@@ -175,7 +176,8 @@ impl QuillApp {
         if ready {
             self.accept_incoming_call(cx);
         } else {
-            self.connection.status_note = tr(keys::Q_OPS_THE_CALL_ENDED_BEFORE_IT).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_OPS_THE_CALL_ENDED_BEFORE_IT)));
         }
         cx.notify();
     }

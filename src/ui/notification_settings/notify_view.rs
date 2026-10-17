@@ -3,6 +3,7 @@
 //! notifications are on.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 use quill::notify::NotifyView;
 
@@ -19,15 +20,16 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.notify_view = view;
             if let Err(err) = live.driver.save_notify_view() {
-                self.connection.status_note = tr_with(
+                self.connection.set_note(StatusNote::silent(tr_with(
                     keys::Q_PREFS_COULDN_T_SAVE_NOTIFICATION_PREVIEW,
                     &[("err", &err.to_string())],
-                );
+                )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.notify_view = view;
-            self.connection.status_note =
-                tr(keys::Q_PREFS_DEMO_NOTIFICATION_PREVIEW_SETTINGS_ARE).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_PREFS_DEMO_NOTIFICATION_PREVIEW_SETTINGS_ARE,
+            )));
         }
         cx.notify();
     }

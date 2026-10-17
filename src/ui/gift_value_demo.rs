@@ -10,6 +10,7 @@
 use super::app::QuillApp;
 use super::gift_market_demo::{ME, listing, seed_gift_market_session};
 use super::screenshot_demo::{DemoSpec, register_demos};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::diagnostics::MemorySink;
 use quill::premium_hub::gift_value::{GiftValueInfo, GiftValueLookup, parse_gift_value_info};
@@ -127,7 +128,8 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             session.payments.hub.gift_value = lookup;
         }
-        self.connection.status_note = "screenshot demo — gift value".into();
+        self.connection
+            .set_note(StatusNote::silent("screenshot demo — gift value"));
         cx.notify();
     }
 }

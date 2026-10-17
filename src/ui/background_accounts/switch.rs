@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::ui::connect_ui::{ConnectUiStatus, live_status_for};
+use crate::ui::status_note::StatusNote;
 
 impl QuillApp {
     /// Hand the account on screen to the background instead of closing it.
@@ -87,7 +88,8 @@ impl QuillApp {
         self.connection.status = ConnectUiStatus::Live;
         self.connection.presence.reset();
         let auth = live.driver.session.auth.clone();
-        self.connection.status_note = live_status_for(&auth);
+        self.connection
+            .set_note(StatusNote::silent(live_status_for(&auth)));
         self.auth_ui.demo_state = auth;
         live.attach_call_engine(&MemorySink::new());
         // The auto-switch runs on screen; its settings are the app's.

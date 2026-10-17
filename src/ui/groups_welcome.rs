@@ -4,6 +4,7 @@
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Textarea;
@@ -27,7 +28,9 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.load_chat_welcome_messages(chat_id).is_err()
         {
-            self.connection.status_note = tr(keys::Q_PEOPLE_COULD_NOT_LOAD_WELCOME_MESSAGES).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_PEOPLE_COULD_NOT_LOAD_WELCOME_MESSAGES,
+            )));
         }
         cx.notify();
     }
@@ -48,22 +51,25 @@ impl QuillApp {
             None => return,
         };
         if text.is_empty() {
-            self.connection.status_note = tr(keys::Q_PEOPLE_WELCOME_MESSAGE_CANNOT_BE_EMPTY).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_PEOPLE_WELCOME_MESSAGE_CANNOT_BE_EMPTY,
+            )));
             cx.notify();
             return;
         }
         if let Some(live) = self.live.as_mut() {
             match live.driver.add_chat_welcome_message(chat_id, &text) {
-                Ok(_) => {
-                    self.connection.status_note = tr(keys::Q_PEOPLE_WELCOME_MESSAGE_ADDED).into()
-                }
-                Err(_) => {
-                    self.connection.status_note =
-                        tr(keys::Q_PEOPLE_COULD_NOT_ADD_WELCOME_MESSAGE).into()
-                }
+                Ok(_) => self
+                    .connection
+                    .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_WELCOME_MESSAGE_ADDED))),
+                Err(_) => self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_PEOPLE_COULD_NOT_ADD_WELCOME_MESSAGE,
+                ))),
             }
         } else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_WELCOME_MESSAGES_NEED_A_LIVE).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_WELCOME_MESSAGES_NEED_A_LIVE,
+            )));
         }
         if let Some(dialog) = self.admin.welcome_dialog.as_mut() {
             dialog.new_input.update(cx, |input, cx| {
@@ -87,7 +93,9 @@ impl QuillApp {
             None => return,
         };
         if text.is_empty() {
-            self.connection.status_note = tr(keys::Q_PEOPLE_WELCOME_MESSAGE_CANNOT_BE_EMPTY).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_PEOPLE_WELCOME_MESSAGE_CANNOT_BE_EMPTY,
+            )));
             cx.notify();
             return;
         }
@@ -96,16 +104,17 @@ impl QuillApp {
                 .driver
                 .edit_chat_welcome_message(chat_id, welcome_id, &text)
             {
-                Ok(_) => {
-                    self.connection.status_note = tr(keys::Q_PEOPLE_WELCOME_MESSAGE_UPDATED).into()
-                }
-                Err(_) => {
-                    self.connection.status_note =
-                        tr(keys::Q_PEOPLE_COULD_NOT_EDIT_WELCOME_MESSAGE).into()
-                }
+                Ok(_) => self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_PEOPLE_WELCOME_MESSAGE_UPDATED,
+                ))),
+                Err(_) => self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_PEOPLE_COULD_NOT_EDIT_WELCOME_MESSAGE,
+                ))),
             }
         } else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_WELCOME_MESSAGES_NEED_A_LIVE).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_WELCOME_MESSAGES_NEED_A_LIVE,
+            )));
         }
         if let Some(dialog) = self.admin.welcome_dialog.as_mut() {
             dialog.editing = None;
@@ -122,16 +131,17 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             match live.driver.delete_chat_welcome_message(chat_id, welcome_id) {
-                Ok(_) => {
-                    self.connection.status_note = tr(keys::Q_PEOPLE_WELCOME_MESSAGE_DELETED).into()
-                }
-                Err(_) => {
-                    self.connection.status_note =
-                        tr(keys::Q_PEOPLE_COULD_NOT_DELETE_WELCOME_MESSAGE).into()
-                }
+                Ok(_) => self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_PEOPLE_WELCOME_MESSAGE_DELETED,
+                ))),
+                Err(_) => self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_PEOPLE_COULD_NOT_DELETE_WELCOME_MESSAGE,
+                ))),
             }
         } else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_WELCOME_MESSAGES_NEED_A_LIVE).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_WELCOME_MESSAGES_NEED_A_LIVE,
+            )));
         }
         cx.notify();
     }

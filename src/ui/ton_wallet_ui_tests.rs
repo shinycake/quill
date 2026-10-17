@@ -144,6 +144,6 @@ fn a_ton_address_opens_copy_and_explorer(cx: &mut TestAppContext) {
     let copied = vcx.read_from_clipboard().and_then(|item| item.text());
     assert_eq!(copied.as_deref(), Some(ADDRESS));
     app.read_with(vcx, |app, _| {
-        assert_eq!(app.connection.status_note, "address copied to clipboard");
+        assert_eq!(app.connection.status_note(), "address copied to clipboard");
     });
 }

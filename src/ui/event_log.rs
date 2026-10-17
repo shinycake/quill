@@ -2,6 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
@@ -26,8 +27,9 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.set_chat_event_log_query(chat_id, &query);
             if live.driver.refresh_chat_event_log(chat_id).is_err() {
-                self.connection.status_note =
-                    tr(keys::Q_OPS_COULD_NOT_SEARCH_RECENT_ACTIONS).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_OPS_COULD_NOT_SEARCH_RECENT_ACTIONS,
+                )));
             }
         }
         cx.notify();
@@ -43,8 +45,9 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.toggle_chat_event_log_filter(chat_id, toggle);
             if live.driver.refresh_chat_event_log(chat_id).is_err() {
-                self.connection.status_note =
-                    tr(keys::Q_OPS_COULD_NOT_FILTER_RECENT_ACTIONS).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_OPS_COULD_NOT_FILTER_RECENT_ACTIONS,
+                )));
             }
         }
         cx.notify();
@@ -55,12 +58,14 @@ impl QuillApp {
             match live.driver.refresh_chat_event_log(chat_id) {
                 Ok(_) => {}
                 Err(_) => {
-                    self.connection.status_note =
-                        tr(keys::Q_OPS_COULD_NOT_REFRESH_RECENT_ACTIONS).into();
+                    self.connection.set_note(StatusNote::error(tr(
+                        keys::Q_OPS_COULD_NOT_REFRESH_RECENT_ACTIONS,
+                    )));
                 }
             }
         } else {
-            self.connection.status_note = tr(keys::Q_OPS_RECENT_ACTIONS_NEED_A_LIVE).into();
+            self.connection
+                .set_note(StatusNote::info(tr(keys::Q_OPS_RECENT_ACTIONS_NEED_A_LIVE)));
         }
         cx.notify();
     }
@@ -71,12 +76,14 @@ impl QuillApp {
             match live.driver.fetch_chat_event_log_more(chat_id) {
                 Ok(_) => {}
                 Err(_) => {
-                    self.connection.status_note =
-                        tr(keys::Q_OPS_COULD_NOT_LOAD_MORE_ACTIONS).into();
+                    self.connection.set_note(StatusNote::error(tr(
+                        keys::Q_OPS_COULD_NOT_LOAD_MORE_ACTIONS,
+                    )));
                 }
             }
         } else {
-            self.connection.status_note = tr(keys::Q_OPS_RECENT_ACTIONS_NEED_A_LIVE).into();
+            self.connection
+                .set_note(StatusNote::info(tr(keys::Q_OPS_RECENT_ACTIONS_NEED_A_LIVE)));
         }
         cx.notify();
     }
@@ -470,7 +477,8 @@ impl QuillApp {
                 .event_log_filters
                 .remove(&chat_id.0);
             if live.driver.refresh_chat_event_log(chat_id).is_err() {
-                self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_CLEAR_FILTERS).into();
+                self.connection
+                    .set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_CLEAR_FILTERS)));
             }
         }
         cx.notify();

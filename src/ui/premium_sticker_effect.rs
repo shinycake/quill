@@ -18,6 +18,7 @@
 
 use super::app::QuillApp;
 use super::sticker_playback::PlaybackSize;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::emoji_interaction::EmojiEffect;
@@ -282,7 +283,7 @@ impl QuillApp {
                 );
                 cx.notify();
             }
-            Click::Hint => self.set_status_note(HINT, cx),
+            Click::Hint => self.set_status_note(StatusNote::info(HINT), cx),
             Click::Nothing => {}
         }
     }

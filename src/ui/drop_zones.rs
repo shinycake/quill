@@ -9,6 +9,7 @@
 use super::app::{PaneMode, QuillApp};
 use super::chat_theme::accent;
 use super::composer_sends::SendSlot;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -90,21 +91,24 @@ impl QuillApp {
                 }) else {
                     return;
                 };
-                self.connection.status_note = match appended {
-                    Ok(count) => trn(keys::Q_MISC_ATTACHED_FILES_SEND_TO_UPLOAD, count),
-                    Err(note) => note.into(),
-                };
+                self.connection.set_note(match appended {
+                    Ok(count) => {
+                        StatusNote::silent(trn(keys::Q_MISC_ATTACHED_FILES_SEND_TO_UPLOAD, count))
+                    }
+                    Err(note) => StatusNote::error(note),
+                });
                 cx.notify();
             }
             DropPlan::Reject(note) => {
-                self.connection.status_note = note.into();
+                self.connection.set_note(StatusNote::error(note));
                 cx.notify();
             }
             DropPlan::Archive(source) => {
                 let Some(slot) = self.send_slot() else {
                     return;
                 };
-                self.connection.status_note = tr(keys::Q_MISC_PREPARING_THE_ARCHIVE).into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_MISC_PREPARING_THE_ARCHIVE)));
                 cx.notify();
                 let dir = quill::local_path::media_cache_base().join("archives");
                 quill::local_path::ensure_private_dir(&dir);
@@ -142,12 +146,12 @@ impl QuillApp {
                 }) else {
                     return;
                 };
-                self.connection.status_note = match appended {
-                    Ok(_) => tr(keys::Q_MISC_ATTACHED_THE_ARCHIVE_SEND_TO).into(),
-                    Err(note) => note.into(),
-                };
+                self.connection.set_note(match appended {
+                    Ok(_) => StatusNote::silent(tr(keys::Q_MISC_ATTACHED_THE_ARCHIVE_SEND_TO)),
+                    Err(note) => StatusNote::error(note),
+                });
             }
-            Err(err) => self.connection.status_note = err.note(),
+            Err(err) => self.connection.set_note(StatusNote::error(err.note())),
         }
         cx.notify();
     }

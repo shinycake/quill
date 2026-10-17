@@ -57,14 +57,14 @@ fn save_is_disabled_until_a_field_changes(cx: &mut TestAppContext) {
     vcx.update(|window, cx| window.click("edit-profile-save", cx));
     frames(vcx);
     assert!(app.read_with(vcx, |app, _| {
-        !app.connection.status_note.contains("Demo mode")
+        !app.connection.status_note().contains("Demo mode")
     }));
     type_bio(&app, vcx, "A new bio");
     assert!(app.read_with(vcx, |app, cx| app.profile_form_can_save(cx)));
     vcx.update(|window, cx| window.click("edit-profile-save", cx));
     frames(vcx);
     assert!(app.read_with(vcx, |app, _| {
-        app.connection.status_note.contains("Demo mode")
+        app.connection.status_note().contains("Demo mode")
     }));
     // Typing the opening text back disables it again.
     let original = app.read_with(vcx, |app, _| {

@@ -202,7 +202,7 @@ fn a_refused_craft_keeps_the_craft_box(cx: &mut TestAppContext) {
         assert!(app.gift_market.forge_started.is_none());
         assert_eq!(app.gift_market.top(), Some(&MarketBox::Craft));
         assert_eq!(
-            app.connection.status_note,
+            app.connection.status_note(),
             "This gift can't be used for crafting."
         );
         assert_eq!(app.craft_session().and_then(|c| c.result.clone()), None);

@@ -8,6 +8,7 @@ use super::dialogs::TopicEditor;
 use super::pressable::PressableDiv;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -157,7 +158,9 @@ impl QuillApp {
             return;
         };
         if name.is_empty() {
-            self.connection.status_note = tr(keys::Q_PEOPLE_TOPIC_NAME_CANNOT_BE_EMPTY).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_PEOPLE_TOPIC_NAME_CANNOT_BE_EMPTY,
+            )));
             cx.notify();
             return;
         }
@@ -188,14 +191,16 @@ impl QuillApp {
                         .edit_forum_topic_with_icon(chat_id, id, &name, editor.icon_emoji)
                 }
             };
-            self.connection.status_note = match (result, editor.target) {
-                (Ok(_), None) => tr(keys::Q_PEOPLE_TOPIC_CREATED).into(),
-                (Ok(_), Some(_)) => tr(keys::Q_PEOPLE_TOPIC_SAVED).into(),
-                (Err(_), None) => tr(keys::Q_PEOPLE_COULD_NOT_CREATE_TOPIC).into(),
-                (Err(_), Some(_)) => tr(keys::Q_PEOPLE_COULD_NOT_SAVE_TOPIC).into(),
-            };
+            self.connection.set_note(match (result, editor.target) {
+                (Ok(_), None) => StatusNote::silent(tr(keys::Q_PEOPLE_TOPIC_CREATED)),
+                (Ok(_), Some(_)) => StatusNote::silent(tr(keys::Q_PEOPLE_TOPIC_SAVED)),
+                (Err(_), None) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_CREATE_TOPIC)),
+                (Err(_), Some(_)) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_SAVE_TOPIC)),
+            });
         } else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_TOPICS_NEED_A_LIVE_CONNECTION).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_TOPICS_NEED_A_LIVE_CONNECTION,
+            )));
         }
         if let Some(dialog) = self.admin.forum_manage_dialog.as_mut() {
             dialog.editor = None;
@@ -238,14 +243,17 @@ impl QuillApp {
                 // The topic list refetches after the server confirms
                 // (the render path reloads when the cache is dropped).
                 Ok(_) => {
-                    self.connection.status_note = tr(keys::Q_PEOPLE_TOPIC_UPDATED).into();
+                    self.connection
+                        .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_TOPIC_UPDATED)));
                 }
-                Err(_) => {
-                    self.connection.status_note = tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_TOPIC).into()
-                }
+                Err(_) => self
+                    .connection
+                    .set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_TOPIC))),
             }
         } else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_TOPICS_NEED_A_LIVE_CONNECTION).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_TOPICS_NEED_A_LIVE_CONNECTION,
+            )));
         }
         cx.notify();
     }

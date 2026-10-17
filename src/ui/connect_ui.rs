@@ -1,6 +1,7 @@
 //! connection status UI.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ui::status_note::StatusNote;
 use quill::auth::view_for;
 use quill::connect::{ConnectBlocker, ConnectGate, evaluate_gate, start_prepared_live_connect};
 use quill::credentials::TelegramCredentials;
@@ -86,7 +87,8 @@ impl super::app::QuillApp {
         let credentials = self.credentials.clone();
         self.connection.status = ConnectUiStatus::Live;
         self.auth_ui.demo_state = AuthorizationState::WaitTdlibParameters;
-        self.connection.status_note = tr(keys::Q_MISC_CONNECTING_TO_TELEGRAM).into();
+        self.connection
+            .set_note(StatusNote::silent(tr(keys::Q_MISC_CONNECTING_TO_TELEGRAM)));
         // The first connection of the run first deletes folders an earlier
         // run left for deletion (it quit before their clients had closed).
         let sweep = self.startup_sweep();
@@ -128,8 +130,9 @@ impl super::app::QuillApp {
                         if !safe {
                             // Its old client's close can't be confirmed in
                             // this run: never open the database again.
-                            this.connection.status_note =
-                                tr(keys::Q_REST_CONNECTION_TO_TELEGRAM_WAS_CLOSED).into();
+                            this.connection.set_note(StatusNote::silent(tr(
+                                keys::Q_REST_CONNECTION_TO_TELEGRAM_WAS_CLOSED,
+                            )));
                             cx.notify();
                             return false;
                         }
@@ -179,7 +182,8 @@ impl super::app::QuillApp {
                     ConnectBlocker::MissingTdjson => ConnectUiStatus::NeedTdjson,
                     _ => ConnectUiStatus::RestoreBlocked(blocker.user_message()),
                 };
-                self.connection.status_note = blocker.user_message().into();
+                self.connection
+                    .set_note(StatusNote::error(blocker.user_message()));
             }
         }
         self.reload_account_keybindings(cx);

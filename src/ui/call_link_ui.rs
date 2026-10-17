@@ -5,6 +5,7 @@ use super::app::QuillApp;
 use super::group_call_stream_layout::StreamJoinIntent;
 use super::link_info_boxes::finish;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::*;
@@ -23,7 +24,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_OPS_CALLS_NEED_A_SIGNED_IN).into();
+            self.connection
+                .set_note(StatusNote::info(tr(keys::Q_OPS_CALLS_NEED_A_SIGNED_IN)));
             cx.notify();
             return;
         };
@@ -36,19 +38,20 @@ impl QuillApp {
                 if let CallLinkStep::Offer { group_call_id } = step {
                     self.note_stream_join_intent(StreamJoinIntent::Call(group_call_id));
                 }
-                self.connection.status_note = match step_note(step, live_stream) {
-                    Some(note) => note,
-                    None if matches!(step, CallLinkStep::Offer { .. }) => {
-                        if live_stream {
-                            tr(keys::Q_OPS_OPENING_THE_LIVE_STREAM).into()
-                        } else {
-                            tr(keys::Q_OPS_OPENING_THE_VOICE_CHAT).into()
+                self.connection
+                    .set_note(match step_note(step, live_stream) {
+                        Some(note) => StatusNote::info(note),
+                        None if matches!(step, CallLinkStep::Offer { .. }) => {
+                            if live_stream {
+                                StatusNote::silent(tr(keys::Q_OPS_OPENING_THE_LIVE_STREAM))
+                            } else {
+                                StatusNote::silent(tr(keys::Q_OPS_OPENING_THE_VOICE_CHAT))
+                            }
                         }
-                    }
-                    None => self.connection.status_note.clone(),
-                };
+                        None => self.connection.note().clone(),
+                    });
             }
-            Err(_) => self.connection.status_note = BAD_LINK_NOTE.into(),
+            Err(_) => self.connection.set_note(StatusNote::info(BAD_LINK_NOTE)),
         }
         cx.notify();
     }
@@ -64,7 +67,8 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.confirm_call_link_leave().is_err()
         {
-            self.connection.status_note = tr(keys::Q_OPS_COULDNT_LEAVE_THE_CALL).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_OPS_COULDNT_LEAVE_THE_CALL)));
         }
         cx.notify();
     }

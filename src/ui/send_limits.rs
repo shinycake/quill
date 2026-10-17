@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::composer::AttachmentKind;
 use quill::local_time::{civil_local, full_stamp, now_unix};
@@ -38,7 +39,7 @@ impl QuillApp {
         let Some(note) = self.send_denial(kind) else {
             return false;
         };
-        self.connection.status_note = note;
+        self.connection.set_note(StatusNote::error(note));
         cx.notify();
         true
     }
@@ -55,7 +56,7 @@ impl QuillApp {
         else {
             return false;
         };
-        self.connection.status_note = note;
+        self.connection.set_note(StatusNote::error(note));
         cx.notify();
         true
     }

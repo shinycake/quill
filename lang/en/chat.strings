@@ -544,3 +544,4 @@
 "qll_chat_your_account_is_frozen_and" = "Your account is frozen and can't send messages.";
 "qll_chat_your_account_is_frozen_and_2" = "Your account is frozen and read-only. Open the banner at the top for details.";
 "qll_chat_your_number" = "your number";
+"qll_chat_attached_name" = "Attached {name}.";

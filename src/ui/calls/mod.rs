@@ -4,6 +4,7 @@
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
@@ -73,7 +74,9 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|live| !live.driver.has_call_engine())
         {
-            self.connection.status_note = tr(keys::Q_OPS_CALLS_ARE_UNAVAILABLE_THE_AUDIO).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_OPS_CALLS_ARE_UNAVAILABLE_THE_AUDIO,
+            )));
             cx.notify();
             return;
         }
@@ -84,7 +87,9 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|live| live.driver.session.is_offline())
         {
-            self.connection.status_note = tr(keys::Q_OPS_YOURE_OFFLINE_CANT_START_A).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_OPS_YOURE_OFFLINE_CANT_START_A,
+            )));
             cx.notify();
             return;
         }
@@ -105,23 +110,26 @@ impl QuillApp {
     pub(super) fn dial_user(&mut self, user_id: i64, is_video: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.session.is_offline() {
-                self.connection.status_note = tr(keys::Q_OPS_YOURE_OFFLINE_CANT_START_A).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_OPS_YOURE_OFFLINE_CANT_START_A,
+                )));
                 cx.notify();
                 return;
             }
             let result = live.driver.start_call(user_id, is_video);
-            self.connection.status_note = match result {
+            self.connection.set_note(match result {
                 Ok(_) => {
                     if is_video {
-                        tr(keys::Q_OPS_STARTING_VIDEO_CALL).into()
+                        StatusNote::silent(tr(keys::Q_OPS_STARTING_VIDEO_CALL))
                     } else {
-                        tr(keys::Q_OPS_CALLING_2).into()
+                        StatusNote::silent(tr(keys::Q_OPS_CALLING_2))
                     }
                 }
-                Err(_) => tr(keys::Q_OPS_COULD_NOT_START_THE_CALL).into(),
-            };
+                Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_START_THE_CALL)),
+            });
         } else if self.demo_session.is_some() {
-            self.connection.status_note = tr(keys::Q_OPS_DEMO_CALL_START_NO_LIVE).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_OPS_DEMO_CALL_START_NO_LIVE)));
         }
         cx.notify();
     }
@@ -158,14 +166,16 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.calls.prefs = prefs;
             if let Err(err) = live.driver.save_call_prefs() {
-                self.connection.status_note = tr_with(
+                self.connection.set_note(StatusNote::silent(tr_with(
                     keys::Q_OPS_COULDN_T_SAVE_CALL_SETTINGS,
                     &[("err", &err.to_string())],
-                );
+                )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.calls.prefs = prefs;
-            self.connection.status_note = tr(keys::Q_OPS_DEMO_CALL_SETTINGS_ARE_NOT).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_OPS_DEMO_CALL_SETTINGS_ARE_NOT,
+            )));
         }
         self.sync_ptt_with_call(cx);
         cx.notify();
@@ -180,19 +190,20 @@ impl QuillApp {
                 .active_call
                 .as_ref()
                 .is_some_and(|call| !call.muted);
-            self.connection.status_note = match live.driver.set_call_muted(muted) {
-                Ok(()) => {
-                    if muted {
-                        tr(keys::Q_OPS_MICROPHONE_MUTED_2).into()
-                    } else {
-                        tr(keys::Q_OPS_MICROPHONE_UNMUTED).into()
+            self.connection
+                .set_note(match live.driver.set_call_muted(muted) {
+                    Ok(()) => {
+                        if muted {
+                            StatusNote::silent(tr(keys::Q_OPS_MICROPHONE_MUTED_2))
+                        } else {
+                            StatusNote::silent(tr(keys::Q_OPS_MICROPHONE_UNMUTED))
+                        }
                     }
-                }
-                Err(err) => tr_with(
-                    keys::Q_OPS_COULD_NOT_CHANGE_MUTE_STATE,
-                    &[("err", &err.to_string())],
-                ),
-            };
+                    Err(err) => StatusNote::error(tr_with(
+                        keys::Q_OPS_COULD_NOT_CHANGE_MUTE_STATE,
+                        &[("err", &err.to_string())],
+                    )),
+                });
         } else if let Some(call) = self
             .demo_session
             .as_mut()
@@ -222,15 +233,19 @@ impl QuillApp {
                 .active_call
                 .as_ref()
                 .is_some_and(|call| call.camera_on);
-            self.connection.status_note =
-                camera_toggle_note(result.map_err(|e| e.to_string()), camera_on);
+            self.connection.set_note(camera_toggle_note(
+                result.map_err(|e| e.to_string()),
+                camera_on,
+            ));
         } else if let Some(call) = self
             .demo_session
             .as_mut()
             .and_then(|session| session.calls.active_call.as_mut())
         {
             call.camera_on = !call.camera_on;
-            self.connection.status_note = tr(keys::Q_OPS_DEMO_CAMERA_TOGGLE_NO_LIVE).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_OPS_DEMO_CAMERA_TOGGLE_NO_LIVE,
+            )));
         }
         cx.notify();
     }
@@ -266,27 +281,29 @@ impl QuillApp {
                 return;
             };
             let call_id = call.id;
-            self.connection.status_note = match live.driver.set_call_screen_share(call_id, sharing)
-            {
-                Ok(()) => {
-                    if sharing {
-                        tr(keys::Q_OPS_SCREEN_SHARE_ON).into()
-                    } else {
-                        tr(keys::Q_OPS_SCREEN_SHARE_OFF).into()
+            self.connection
+                .set_note(match live.driver.set_call_screen_share(call_id, sharing) {
+                    Ok(()) => {
+                        if sharing {
+                            StatusNote::silent(tr(keys::Q_OPS_SCREEN_SHARE_ON))
+                        } else {
+                            StatusNote::silent(tr(keys::Q_OPS_SCREEN_SHARE_OFF))
+                        }
                     }
-                }
-                Err(err) => tr_with(
-                    keys::Q_OPS_COULD_NOT_CHANGE_SCREEN_SHARE,
-                    &[("err", &err.to_string())],
-                ),
-            };
+                    Err(err) => StatusNote::error(tr_with(
+                        keys::Q_OPS_COULD_NOT_CHANGE_SCREEN_SHARE,
+                        &[("err", &err.to_string())],
+                    )),
+                });
         } else if let Some(call) = self
             .demo_session
             .as_mut()
             .and_then(|session| session.calls.active_call.as_mut())
         {
             call.screen_sharing = sharing;
-            self.connection.status_note = tr(keys::Q_OPS_DEMO_SCREEN_SHARE_TOGGLE_NO).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_OPS_DEMO_SCREEN_SHARE_TOGGLE_NO,
+            )));
         }
         cx.notify();
     }
@@ -301,14 +318,15 @@ impl QuillApp {
             // Phase C2e: camera selection goes to the driver, which
             // stores it and re-applies the camera on the active call.
             if kind == quill::calls::engine::MediaDeviceKind::Camera {
-                self.connection.status_note =
+                self.connection.set_note(
                     match live.driver.select_call_camera(Some(device_id.to_string())) {
-                        Ok(()) => tr(keys::Q_OPS_CAMERA_SELECTED).into(),
-                        Err(err) => tr_with(
+                        Ok(()) => StatusNote::silent(tr(keys::Q_OPS_CAMERA_SELECTED)),
+                        Err(err) => StatusNote::error(tr_with(
                             keys::Q_OPS_COULD_NOT_SELECT_CAMERA,
                             &[("err", &err.to_string())],
-                        ),
-                    };
+                        )),
+                    },
+                );
                 cx.notify();
                 return;
             }
@@ -322,14 +340,14 @@ impl QuillApp {
                 }
                 _ => return,
             };
-            self.connection.status_note = match live.driver.select_call_devices(microphone, speaker)
-            {
-                Ok(()) => tr(keys::Q_OPS_AUDIO_DEVICE_SELECTED).into(),
-                Err(err) => tr_with(
-                    keys::Q_OPS_COULD_NOT_SELECT_AUDIO_DEVICE,
-                    &[("err", &err.to_string())],
-                ),
-            };
+            self.connection
+                .set_note(match live.driver.select_call_devices(microphone, speaker) {
+                    Ok(()) => StatusNote::silent(tr(keys::Q_OPS_AUDIO_DEVICE_SELECTED)),
+                    Err(err) => StatusNote::error(tr_with(
+                        keys::Q_OPS_COULD_NOT_SELECT_AUDIO_DEVICE,
+                        &[("err", &err.to_string())],
+                    )),
+                });
         } else {
             match kind {
                 quill::calls::engine::MediaDeviceKind::Microphone => {
@@ -351,12 +369,13 @@ impl QuillApp {
     pub(super) fn accept_incoming_call(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.accept_call();
-            self.connection.status_note = match result {
-                Ok(_) => tr(keys::Q_OPS_ANSWERING).into(),
-                Err(_) => tr(keys::Q_OPS_COULD_NOT_ANSWER_THE_CALL).into(),
-            };
+            self.connection.set_note(match result {
+                Ok(_) => StatusNote::silent(tr(keys::Q_OPS_ANSWERING)),
+                Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_ANSWER_THE_CALL)),
+            });
         } else if self.demo_session.is_some() {
-            self.connection.status_note = tr(keys::Q_OPS_DEMO_CALL_ACCEPT_NO_LIVE).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_OPS_DEMO_CALL_ACCEPT_NO_LIVE)));
         }
         cx.notify();
     }
@@ -366,12 +385,13 @@ impl QuillApp {
     pub(super) fn hang_up_call(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.discard_call();
-            self.connection.status_note = match result {
-                Ok(_) => tr(keys::Q_OPS_HANGING_UP_2).into(),
-                Err(_) => tr(keys::Q_OPS_COULD_NOT_HANG_UP_THE).into(),
-            };
+            self.connection.set_note(match result {
+                Ok(_) => StatusNote::silent(tr(keys::Q_OPS_HANGING_UP_2)),
+                Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_HANG_UP_THE)),
+            });
         } else if self.demo_session.is_some() {
-            self.connection.status_note = tr(keys::Q_OPS_DEMO_CALL_HANG_UP_NO).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_OPS_DEMO_CALL_HANG_UP_NO)));
         }
         cx.notify();
     }
@@ -430,12 +450,13 @@ impl QuillApp {
         let stars = detail.stars;
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.send_call_rating(stars, &comment, &problems);
-            self.connection.status_note = match result {
-                Ok(_) => tr(keys::Q_OPS_THANKS_FOR_YOUR_FEEDBACK_2).into(),
-                Err(_) => tr(keys::Q_OPS_COULD_NOT_SEND_THE_RATING).into(),
-            };
+            self.connection.set_note(match result {
+                Ok(_) => StatusNote::silent(tr(keys::Q_OPS_THANKS_FOR_YOUR_FEEDBACK_2)),
+                Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_RATING)),
+            });
         } else if self.demo_session.is_some() {
-            self.connection.status_note = tr(keys::Q_OPS_DEMO_CALL_RATING_NO_LIVE).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_OPS_DEMO_CALL_RATING_NO_LIVE)));
             if let Some(session) = self.demo_session.as_mut()
                 && let Some(summary) = session.calls.summary.as_mut()
             {
@@ -447,10 +468,11 @@ impl QuillApp {
 
     pub(super) fn upload_call_diagnostics(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.send_call_debug_information() {
-                Ok(_) => tr(keys::Q_OPS_DIAGNOSTICS_UPLOAD_SENT).into(),
-                Err(_) => tr(keys::Q_OPS_COULD_NOT_UPLOAD_DIAGNOSTICS).into(),
-            };
+            self.connection
+                .set_note(match live.driver.send_call_debug_information() {
+                    Ok(_) => StatusNote::silent(tr(keys::Q_OPS_DIAGNOSTICS_UPLOAD_SENT)),
+                    Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_UPLOAD_DIAGNOSTICS)),
+                });
         } else if let Some(summary) = self
             .demo_session
             .as_mut()
@@ -458,7 +480,9 @@ impl QuillApp {
         {
             summary.debug_information_sent = true;
             summary.debug_information_error = None;
-            self.connection.status_note = tr(keys::Q_OPS_DEMO_DIAGNOSTICS_UPLOAD_NO_LIVE).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_OPS_DEMO_DIAGNOSTICS_UPLOAD_NO_LIVE,
+            )));
         }
         cx.notify();
     }
@@ -467,10 +491,10 @@ impl QuillApp {
     /// ended call's log file (schema 1.8.67 :14240).
     pub(super) fn upload_call_log(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.send_call_log() {
-                Ok(_) => tr(keys::Q_OPS_CALL_LOG_UPLOAD_SENT).into(),
-                Err(_) => tr(keys::Q_OPS_COULD_NOT_UPLOAD_THE_CALL).into(),
-            };
+            self.connection.set_note(match live.driver.send_call_log() {
+                Ok(_) => StatusNote::silent(tr(keys::Q_OPS_CALL_LOG_UPLOAD_SENT)),
+                Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_UPLOAD_THE_CALL)),
+            });
         } else if let Some(summary) = self
             .demo_session
             .as_mut()
@@ -478,7 +502,8 @@ impl QuillApp {
         {
             summary.log_sent = true;
             summary.log_error = None;
-            self.connection.status_note = tr(keys::Q_OPS_DEMO_CALL_LOG_UPLOAD_NO).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_OPS_DEMO_CALL_LOG_UPLOAD_NO)));
         }
         cx.notify();
     }
@@ -657,10 +682,10 @@ impl QuillApp {
     pub(super) fn answer_swap_call(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.accept_swap_call();
-            self.connection.status_note = match result {
-                Ok(_) => tr(keys::Q_OPS_ENDING_CURRENT_CALL_ANSWERING).into(),
-                Err(_) => tr(keys::Q_OPS_COULD_NOT_ANSWER_THE_CALL).into(),
-            };
+            self.connection.set_note(match result {
+                Ok(_) => StatusNote::silent(tr(keys::Q_OPS_ENDING_CURRENT_CALL_ANSWERING)),
+                Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_ANSWER_THE_CALL)),
+            });
         } else if let Some(session) = self.demo_session.as_mut() {
             if let Some((call_id, user_id, is_video)) = session.calls.swap_pending.take() {
                 session.calls.active_call = None;
@@ -689,7 +714,9 @@ impl QuillApp {
                     remote_audio_muted: false,
                 });
             }
-            self.connection.status_note = tr(keys::Q_OPS_DEMO_SWAP_ACCEPTED_NO_LIVE).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_OPS_DEMO_SWAP_ACCEPTED_NO_LIVE,
+            )));
         }
         cx.notify();
     }
@@ -698,13 +725,15 @@ impl QuillApp {
     pub(super) fn decline_swap_call(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.decline_swap_call();
-            self.connection.status_note = match result {
-                Ok(_) => tr(keys::Q_OPS_INCOMING_CALL_DECLINED).into(),
-                Err(_) => tr(keys::Q_OPS_COULD_NOT_DECLINE_THE_CALL).into(),
-            };
+            self.connection.set_note(match result {
+                Ok(_) => StatusNote::silent(tr(keys::Q_OPS_INCOMING_CALL_DECLINED)),
+                Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_DECLINE_THE_CALL)),
+            });
         } else if let Some(session) = self.demo_session.as_mut() {
             session.calls.swap_pending = None;
-            self.connection.status_note = tr(keys::Q_OPS_DEMO_SWAP_DECLINED_NO_LIVE).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_OPS_DEMO_SWAP_DECLINED_NO_LIVE,
+            )));
         }
         cx.notify();
     }
@@ -896,10 +925,13 @@ mod stream_volume_tests;
 /// The status note after a camera toggle, read from the call's resulting
 /// `camera_on` rather than from what the toggle asked for: the driver may
 /// keep the camera off (video not ready), so the request is not the state.
-pub(super) fn camera_toggle_note(result: Result<(), String>, camera_on: bool) -> String {
+pub(super) fn camera_toggle_note(result: Result<(), String>, camera_on: bool) -> StatusNote {
     match result {
-        Ok(()) if camera_on => tr(keys::Q_OPS_CAMERA_ON_2).into(),
-        Ok(()) => tr(keys::Q_OPS_CAMERA_OFF_2).into(),
-        Err(err) => tr_with(keys::Q_OPS_COULD_NOT_CHANGE_CAMERA_STATE, &[("err", &err)]),
+        Ok(()) if camera_on => StatusNote::silent(tr(keys::Q_OPS_CAMERA_ON_2)),
+        Ok(()) => StatusNote::silent(tr(keys::Q_OPS_CAMERA_OFF_2)),
+        Err(err) => StatusNote::error(tr_with(
+            keys::Q_OPS_COULD_NOT_CHANGE_CAMERA_STATE,
+            &[("err", &err)],
+        )),
     }
 }

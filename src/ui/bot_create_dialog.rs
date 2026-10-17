@@ -6,6 +6,7 @@
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -75,10 +76,10 @@ impl QuillApp {
             return true;
         }
         if !user.can_manage_bots {
-            self.connection.status_note = format!(
+            self.connection.set_note(StatusNote::silent(format!(
                 "@{} doesn't have Bot Management Mode enabled.",
                 user.username
-            );
+            )));
             cx.notify();
             return true;
         }
@@ -107,7 +108,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(manager_id) = self.session().and_then(|s| s.bot_user_id_for_chat(chat_id)) else {
-            self.set_status_note(tr(keys::Q_MISC_ONLY_A_BOT_CAN_ASK), cx);
+            self.set_status_note(StatusNote::info(tr(keys::Q_MISC_ONLY_A_BOT_CAN_ASK)), cx);
             return;
         };
         if one_time {
@@ -249,7 +250,8 @@ impl QuillApp {
         }
         let full = owned_bots::full_username(&typed);
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_MODE_CREATING_A_BOT).into();
+            self.connection
+                .set_note(StatusNote::info(tr(keys::Q_MEDIA_DEMO_MODE_CREATING_A_BOT)));
             cx.notify();
             return;
         };
@@ -258,7 +260,9 @@ impl QuillApp {
             .create_managed_bot(manager_id, &name, &full, via_link)
             .is_err()
         {
-            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_REQUEST).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MEDIA_COULD_NOT_SEND_THE_REQUEST,
+            )));
             cx.notify();
             return;
         }
@@ -331,10 +335,10 @@ impl QuillApp {
                     story_id: None,
                 });
             }
-            self.connection.status_note = tr_with(
+            self.connection.set_note(StatusNote::silent(tr_with(
                 keys::Q_MEDIA_CREATED_WILL_MANAGE_THIS_BOT,
                 &[("name", name), ("manager", &manager.to_string())],
-            );
+            )));
             cx.notify();
             return true;
         }

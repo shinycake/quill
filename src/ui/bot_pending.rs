@@ -1,6 +1,7 @@
 //! Streaming bot reply display, using existing text and rich-block renderers.
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -75,14 +76,16 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live
-                .driver
-                .stop_pending_bot_message(chat_id, topic_id, draft_id)
-            {
-                Ok(Some(_)) => tr(keys::Q_MEDIA_STOPPING_BOT_REPLY).into(),
-                Ok(None) => tr(keys::Q_MEDIA_THIS_REPLY_IS_NO_LONGER).into(),
-                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_STOP_THE_BOT).into(),
-            };
+            self.connection.set_note(
+                match live
+                    .driver
+                    .stop_pending_bot_message(chat_id, topic_id, draft_id)
+                {
+                    Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MEDIA_STOPPING_BOT_REPLY)),
+                    Ok(None) => StatusNote::silent(tr(keys::Q_MEDIA_THIS_REPLY_IS_NO_LONGER)),
+                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_STOP_THE_BOT)),
+                },
+            );
         }
         cx.notify();
     }

@@ -8,6 +8,7 @@ use super::gif_clip::{GifClip, GifError};
 use super::inline_players::Demand;
 use super::inline_video::InlineTile;
 use super::message_media::MediaFrameKind;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::{FileId, MessageId};
 use quill::lang::{keys, tr};
@@ -95,7 +96,8 @@ impl QuillApp {
         self.playback.autoplayed_gifs.insert(message_id);
         if self.playback.playing_animation == Some(message_id) {
             self.stop_animation_playback();
-            self.connection.status_note = tr(keys::Q_AV_GIF_PAUSED).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_AV_GIF_PAUSED)));
             cx.notify();
             return;
         }
@@ -143,7 +145,8 @@ impl QuillApp {
         self.playback.pending_gif_play = None;
         let roots = self.media_display_roots();
         let Some(safe) = sandboxed_display_path(&path, &roots) else {
-            self.connection.status_note = tr(keys::Q_AV_GIF_FILE_IS_OUTSIDE_THE).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_AV_GIF_FILE_IS_OUTSIDE_THE)));
             cx.notify();
             return;
         };
@@ -152,7 +155,8 @@ impl QuillApp {
         self.stop_audio_playback();
         self.stop_viewer_video();
         self.playback.playing_animation = Some(message_id);
-        self.connection.status_note = tr(keys::Q_AV_LOADING_GIF_PLAYBACK).into();
+        self.connection
+            .set_note(StatusNote::silent(tr(keys::Q_AV_LOADING_GIF_PLAYBACK)));
         self.spawn_gif_decode(message_id, file_id, safe, cx);
         cx.notify();
     }
@@ -224,7 +228,8 @@ impl QuillApp {
             Ok(clip) => {
                 self.playback.gif = Some(Rc::new(clip));
                 self.playback.gif_started_at = Some(Instant::now());
-                self.connection.status_note = tr(keys::Q_AV_PLAYING_GIF).into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_AV_PLAYING_GIF)));
             }
             // Started again after this decode saw the stop: decode anew.
             Err(GifError::Cancelled) => {
@@ -240,7 +245,8 @@ impl QuillApp {
             }
             Err(_) => {
                 self.stop_animation_playback();
-                self.connection.status_note = tr(keys::Q_AV_COULD_NOT_PLAY_GIF).into();
+                self.connection
+                    .set_note(StatusNote::error(tr(keys::Q_AV_COULD_NOT_PLAY_GIF)));
             }
         }
         self.notify_conversation(cx);

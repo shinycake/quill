@@ -83,7 +83,7 @@ fn a_chat_that_takes_no_files_keeps_the_chooser_open(cx: &mut TestAppContext) {
         app.choose_start_files_chat(chat, window, cx);
         assert_eq!(app.start_files.choosing.len(), 1);
         assert_eq!(
-            app.connection.status_note,
+            app.connection.status_note(),
             "Sorry, no way to send media here :("
         );
         assert!(app.pending_attachments().is_empty());

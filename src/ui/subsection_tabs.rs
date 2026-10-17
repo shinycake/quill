@@ -17,6 +17,7 @@ use super::GroupConfirmAction;
 use super::app::QuillApp;
 use super::chat_theme::{accent, accent_strong, text_on_fill};
 use super::pressable::PressableDiv;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::*;
@@ -552,7 +553,9 @@ impl QuillApp {
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_MISC_TOPICS_NEED_A_LIVE_CONNECTION).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_MISC_TOPICS_NEED_A_LIVE_CONNECTION,
+            )));
             cx.notify();
             return;
         };
@@ -563,7 +566,8 @@ impl QuillApp {
             _ => Ok(None),
         };
         if result.is_err() {
-            self.connection.status_note = tr(keys::Q_MISC_COULD_NOT_UPDATE_TOPIC).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_MISC_COULD_NOT_UPDATE_TOPIC)));
         }
         cx.notify();
     }

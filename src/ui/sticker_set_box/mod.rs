@@ -11,6 +11,7 @@
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -73,7 +74,9 @@ impl QuillApp {
             && live.driver.view_sticker_set(set_id).is_err()
         {
             self.message_ui.menu_ui.sticker_set_open = false;
-            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_OPEN_THE_STICKER).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MEDIA_COULD_NOT_OPEN_THE_STICKER,
+            )));
         }
         cx.notify();
     }
@@ -91,16 +94,20 @@ impl QuillApp {
                 // The dialog stays; the set's state follows TDLib's update.
                 live.driver.session.stickers.sticker_set_view = None;
                 self.message_ui.menu_ui.sticker_set_open = false;
-                self.connection.status_note = if install {
-                    tr(keys::Q_MEDIA_STICKER_SET_ADDED).into()
+                self.connection.set_note(if install {
+                    StatusNote::silent(tr(keys::Q_MEDIA_STICKER_SET_ADDED))
                 } else {
-                    tr(keys::Q_MEDIA_STICKER_SET_REMOVED).into()
-                };
+                    StatusNote::silent(tr(keys::Q_MEDIA_STICKER_SET_REMOVED))
+                });
             } else {
-                self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_CHANGE_THE_STICKER).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_MEDIA_COULD_NOT_CHANGE_THE_STICKER,
+                )));
             }
         } else {
-            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STICKER_SETS_CHANGE_WITH).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MEDIA_DEMO_STICKER_SETS_CHANGE_WITH,
+            )));
         }
         cx.notify();
     }
@@ -117,7 +124,8 @@ impl QuillApp {
         self.close_sticker_set_dialog(cx);
         self.close_kit_dialog_if_done(DialogKind::StickerSet, window, cx);
         self.share.link_text = Some(link);
-        self.connection.status_note = tr(keys::Q_MEDIA_CHOOSE_A_CHAT_TO_SHARE).into();
+        self.connection
+            .set_note(StatusNote::silent(tr(keys::Q_MEDIA_CHOOSE_A_CHAT_TO_SHARE)));
         cx.notify();
     }
 
@@ -129,7 +137,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         cx.write_to_clipboard(ClipboardItem::new_string(link));
-        self.connection.status_note = copied_note(kind).into();
+        self.connection
+            .set_note(StatusNote::info(copied_note(kind)));
         cx.notify();
     }
 
@@ -146,16 +155,17 @@ impl QuillApp {
                 Ok(_) => {
                     live.driver.session.stickers.sticker_set_view = None;
                     self.message_ui.menu_ui.sticker_set_open = false;
-                    self.connection.status_note = ARCHIVED_NOTE.into();
+                    self.connection.set_note(StatusNote::info(ARCHIVED_NOTE));
                     self.close_kit_dialog_if_done(DialogKind::StickerSet, window, cx);
                 }
-                Err(_) => {
-                    self.connection.status_note =
-                        tr(keys::Q_MEDIA_COULD_NOT_ARCHIVE_THE_STICKER).into()
-                }
+                Err(_) => self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_MEDIA_COULD_NOT_ARCHIVE_THE_STICKER,
+                ))),
             }
         } else {
-            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STICKER_SETS_ARCHIVE_WITH).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MEDIA_DEMO_STICKER_SETS_ARCHIVE_WITH,
+            )));
         }
         cx.notify();
     }

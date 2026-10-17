@@ -7,6 +7,7 @@
 
 use super::{QuillApp, run_ffmpeg, work_dir};
 use crate::ui::shell::DialogKind;
+use crate::ui::status_note::StatusNote;
 use crate::ui::video_editor::EditorTarget;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
@@ -90,7 +91,8 @@ impl QuillApp {
                 });
                 match sent {
                     Ok(()) => {
-                        this.connection.status_note = tr(keys::Q_AV_PHOTO_UPDATE_REQUESTED).into();
+                        this.connection
+                            .set_note(StatusNote::silent(tr(keys::Q_AV_PHOTO_UPDATE_REQUESTED)));
                         this.close_video_editor(cx);
                         this.close_kit_dialog_if_done(DialogKind::VideoEditor, window, cx);
                     }

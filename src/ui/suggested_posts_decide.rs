@@ -8,6 +8,7 @@ use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::suggested_posts_state::{AcceptBox, BalanceFor, DeclineBox, SuggestTarget, TimeTarget};
 use super::suggested_posts_ui::{channel_name, sender_short_name};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -145,7 +146,9 @@ impl QuillApp {
                     .approve_suggested_post(accept.chat_id, accept.message_id, accept.send_date)
                     .is_err()
                 {
-                    self.connection.status_note = tr(keys::Q_MONEY_COULDNT_PUBLISH_THE_POST).into();
+                    self.connection.set_note(StatusNote::error(tr(
+                        keys::Q_MONEY_COULDNT_PUBLISH_THE_POST,
+                    )));
                 }
             }
             None => self.set_demo_suggestion_state(
@@ -236,7 +239,9 @@ impl QuillApp {
                     .decline_suggested_post(decline.chat_id, decline.message_id, &reason)
                     .is_err()
                 {
-                    self.connection.status_note = tr(keys::Q_MONEY_COULDNT_DECLINE_THE_POST).into();
+                    self.connection.set_note(StatusNote::error(tr(
+                        keys::Q_MONEY_COULDNT_DECLINE_THE_POST,
+                    )));
                 }
             }
             None => self.set_demo_suggestion_state(

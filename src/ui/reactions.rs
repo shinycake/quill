@@ -5,6 +5,7 @@
 use super::app::QuillApp;
 use super::menu_states::MessageMenuState;
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -307,8 +308,9 @@ impl QuillApp {
                     .is_some_and(|m| m.chosen_reaction(&choice) || has_reaction(m, &choice))
             })
         {
-            self.connection.status_note =
-                tr(keys::Q_MISC_CUSTOM_EMOJI_REACTIONS_NEED_TELEGRAM).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_MISC_CUSTOM_EMOJI_REACTIONS_NEED_TELEGRAM,
+            )));
             cx.notify();
             return;
         }
@@ -327,13 +329,15 @@ impl QuillApp {
             });
         }
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live
-                .driver
-                .toggle_reaction_choice(chat_id, message_id, &choice)
-            {
-                Ok(_) => tr(keys::Q_MISC_UPDATING_REACTION).into(),
-                Err(_) => tr(keys::Q_MISC_COULD_NOT_UPDATE_REACTION).into(),
-            };
+            self.connection.set_note(
+                match live
+                    .driver
+                    .toggle_reaction_choice(chat_id, message_id, &choice)
+                {
+                    Ok(_) => StatusNote::silent(tr(keys::Q_MISC_UPDATING_REACTION)),
+                    Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_UPDATE_REACTION)),
+                },
+            );
             cx.notify();
             return;
         }
@@ -342,7 +346,8 @@ impl QuillApp {
                 self.toggle_emoji_reaction(chat_id, message_id, emoji, cx)
             }
             ReactionChoice::CustomEmoji(_) => {
-                self.connection.status_note = tr(keys::Q_MISC_REACTION_UPDATED).into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_MISC_REACTION_UPDATED)));
                 cx.notify();
             }
         }
@@ -359,16 +364,17 @@ impl QuillApp {
             let result = live
                 .driver
                 .toggle_message_reaction(chat_id, message_id, &emoji);
-            self.connection.status_note = match result {
-                Ok(_) => tr(keys::Q_MISC_UPDATING_REACTION).into(),
-                Err(_) => tr(keys::Q_MISC_COULD_NOT_UPDATE_REACTION).into(),
-            };
+            self.connection.set_note(match result {
+                Ok(_) => StatusNote::silent(tr(keys::Q_MISC_UPDATING_REACTION)),
+                Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_UPDATE_REACTION)),
+            });
             cx.notify();
             return;
         }
         if self.demo_session.is_some() {
             self.apply_demo_reaction_toggle(chat_id, message_id, &emoji);
-            self.connection.status_note = tr(keys::Q_MISC_REACTION_UPDATED).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_MISC_REACTION_UPDATED)));
             cx.notify();
         }
     }

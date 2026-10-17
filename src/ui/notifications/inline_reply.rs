@@ -5,6 +5,7 @@
 //! still goes through `flush_notifications` on the next render.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::composer::{ComposerReplyTo, ComposerSnapshot};
 use quill::lang::{keys, tr};
 use quill::locks::LockExt;
@@ -178,8 +179,9 @@ impl QuillApp {
             Err(_) => {
                 // Not sendable here (no rights, a closed topic, a channel):
                 // open the chat instead so the user sees why.
-                self.connection.status_note =
-                    tr(keys::Q_PREFS_REPLY_FROM_THE_NOTIFICATION_WAS).into();
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_PREFS_REPLY_FROM_THE_NOTIFICATION_WAS,
+                )));
                 false
             }
         }

@@ -8,6 +8,8 @@
 
 use super::app::QuillApp;
 
+use crate::ui::status_note::StatusNote;
+use crate::ui::user_error::user_error_for;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 use std::path::Path;
@@ -97,7 +99,9 @@ impl QuillApp {
         };
         let edits = dialog.initial.edits_to(&dialog.current_fields(cx));
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED,
+            )));
             cx.notify();
             return;
         };
@@ -108,12 +112,16 @@ impl QuillApp {
                 ProfileEdit::SetBio(bio) => live.driver.set_bio(bio),
             };
             if let Err(err) = sent {
-                self.connection.status_note = format!("save profile failed: {err:?}");
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_SAVE_PROFILE,
+                    &err,
+                )));
                 cx.notify();
                 return;
             }
         }
-        self.connection.status_note = tr(keys::Q_PEOPLE_NAME_UPDATE_REQUESTED).into();
+        self.connection
+            .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_NAME_UPDATE_REQUESTED)));
         self.close_edit_profile_dialog(cx);
     }
 
@@ -143,14 +151,21 @@ impl QuillApp {
             return;
         };
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED,
+            )));
             cx.notify();
             return;
         };
         live.driver.session.users_state.profile_edit_error = None;
         match live.driver.set_profile_photo(path) {
-            Ok(_) => self.connection.status_note = tr(keys::Q_PEOPLE_PHOTO_UPDATE_REQUESTED).into(),
-            Err(err) => self.connection.status_note = format!("set photo failed: {err:?}"),
+            Ok(_) => self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_PEOPLE_PHOTO_UPDATE_REQUESTED,
+            ))),
+            Err(err) => self.connection.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_SET_PHOTO,
+                &err,
+            ))),
         }
         cx.notify();
     }

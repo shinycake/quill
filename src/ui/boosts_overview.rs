@@ -5,6 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -42,7 +43,9 @@ impl QuillApp {
                 .set_unrestrict_boost_count(chat_id, unrestrict_clamped(count))
                 .is_err()
         {
-            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_SAVE_THE_SETTING).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULD_NOT_SAVE_THE_SETTING,
+            )));
         }
         cx.notify();
     }

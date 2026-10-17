@@ -112,6 +112,27 @@ fn a_sticker_drops_a_reply_to_a_deleted_message_and_is_still_sent(cx: &mut TestA
 }
 
 #[gpui_kit::test]
+fn a_sticker_sent_under_a_toast_still_consumes_the_reply(cx: &mut TestAppContext) {
+    // A silent "sent" note never replaces a toast, so success must not be
+    // read back from the note.
+    let (app, mut vcx) = app_with_a_deleted_reply(cx);
+    let before = rows(&app, &vcx);
+    app.update(&mut vcx, |app, cx| {
+        app.connection
+            .set_note(crate::ui::status_note::StatusNote::info("Link copied"));
+        app.send_sticker_pick(FileId(8), "x".into(), 100, 100, None, cx)
+    });
+    assert!(reply_is_gone(&app, &vcx), "the reply was consumed");
+    assert!(
+        rows(&app, &vcx).len() > before.len(),
+        "the sticker was sent"
+    );
+    app.read_with(&vcx, |app, _| {
+        assert_eq!(app.connection.status_note(), "Link copied");
+    });
+}
+
+#[gpui_kit::test]
 fn shared_content_drops_a_reply_to_a_deleted_message(cx: &mut TestAppContext) {
     // Contact, location, dice and venue all take the reply through
     // `send_reply_for`; the dice roll stands for them. The demo has no live

@@ -2,6 +2,7 @@
 //! cell and the creator's footer.
 use super::*;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
+use crate::ui::status_note::StatusNote;
 use quill::state::{StickerSetView, StickerSetViewStage};
 
 register_demos![
@@ -169,6 +170,7 @@ impl QuillApp {
             }
             _ => {}
         }
-        self.connection.status_note = "screenshot demo — your own sticker set".into();
+        self.connection
+            .set_note(StatusNote::silent("screenshot demo — your own sticker set"));
     }
 }

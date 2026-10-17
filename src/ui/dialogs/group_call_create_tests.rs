@@ -477,7 +477,7 @@ fn a_call_only_looked_at_is_dropped_without_leaving_it(cx: &mut TestAppContext) 
     // Dropped locally: no `leaveGroupCall` for a call that was never
     // joined (TDLib would refuse it and its error would land on the new
     // call).
-    let note = app.read_with(&main, |app, _| app.connection.status_note.clone());
+    let note = app.read_with(&main, |app, _| app.connection.status_note().to_string());
     assert!(!note.contains("left the voice chat"), "{note}");
 }
 

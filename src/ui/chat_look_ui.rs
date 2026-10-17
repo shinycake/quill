@@ -16,6 +16,7 @@ use super::pressable::action_row;
 use super::shell::{DialogKind, QuillShell};
 use super::wallpaper::{paint_wallpaper, session_wallpaper};
 use super::wallpaper_cache::Slot;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
@@ -225,7 +226,8 @@ impl QuillApp {
             {
                 let _ = this.update(cx, |this, cx| {
                     if !is_wallpaper_image(&path) {
-                        this.connection.status_note = tr(keys::Q_MISC_CHOOSE_A_JPEG_PNG_OR).into();
+                        this.connection
+                            .set_note(StatusNote::silent(tr(keys::Q_MISC_CHOOSE_A_JPEG_PNG_OR)));
                     } else if let Some(d) = this.dialogs.chat_look_dialog.as_mut() {
                         d.file = Some(path);
                         d.background = None;

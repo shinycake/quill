@@ -13,6 +13,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::chat_theme::success;
 use crate::ui::message_text::format_unix_date_time;
 use crate::ui::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::skeleton::Skeleton;
@@ -144,7 +145,8 @@ impl QuillApp {
             if live.driver.open_grams(is_dark).is_err()
                 && !live.driver.session.payments.hub.grams.open
             {
-                self.connection.status_note = tr(keys::Q_GRAMS_COULD_NOT_LOAD).into();
+                self.connection
+                    .set_note(StatusNote::error(tr(keys::Q_GRAMS_COULD_NOT_LOAD)));
             }
         } else if let Some(grams) = self.grams_mut() {
             grams.open = true;
@@ -664,7 +666,9 @@ fn receipt(
             .small()
             .on_click(cx.listener(move |this, _, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(id.clone()));
-                this.connection.status_note = tr(keys::CREDITS_BOX_HISTORY_ENTRY_ID_COPIED).into();
+                this.connection.set_note(StatusNote::info(tr(
+                    keys::CREDITS_BOX_HISTORY_ENTRY_ID_COPIED,
+                )));
                 cx.notify();
             })),
     )

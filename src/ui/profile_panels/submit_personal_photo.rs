@@ -1,6 +1,7 @@
 //! Methods moved out of `profile_panels.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -12,7 +13,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_PHOTO_CHANGES_NEED).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_DEMO_MODE_PHOTO_CHANGES_NEED,
+            )));
             cx.notify();
             return;
         };
@@ -26,10 +29,10 @@ impl QuillApp {
             }
             _ => return,
         };
-        self.connection.status_note = match sent {
-            Ok(_) => mode.done_note().into(),
-            Err(_) => tr(keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN).into(),
-        };
+        self.connection.set_note(match sent {
+            Ok(_) => StatusNote::info(mode.done_note()),
+            Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
+        });
         cx.notify();
     }
 
@@ -87,7 +90,8 @@ impl QuillApp {
             dialog.share_phone,
         );
         if first.is_empty() && last.is_empty() {
-            self.connection.status_note = tr(keys::Q_PEOPLE_ENTER_A_NAME_FOR_THE).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_ENTER_A_NAME_FOR_THE)));
             cx.notify();
             return false;
         }
@@ -103,7 +107,9 @@ impl QuillApp {
             return false;
         };
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_CONTACT_EDITS_NEED).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_DEMO_MODE_CONTACT_EDITS_NEED,
+            )));
             cx.notify();
             return true;
         };
@@ -117,12 +123,14 @@ impl QuillApp {
         };
         match sent {
             Ok(()) => {
-                self.connection.status_note = tr(keys::Q_PEOPLE_CONTACT_SAVED).into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_CONTACT_SAVED)));
                 true
             }
             Err(_) => {
-                self.connection.status_note =
-                    tr(keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
+                )));
                 cx.notify();
                 false
             }
@@ -210,22 +218,25 @@ impl QuillApp {
             }
         };
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_BIRTHDAY_CHANGES_NEED).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_DEMO_MODE_BIRTHDAY_CHANGES_NEED,
+            )));
             cx.notify();
             return true;
         };
         match live.driver.set_birthdate(parts) {
             Ok(_) => {
-                self.connection.status_note = if remove {
-                    tr(keys::Q_PEOPLE_BIRTHDAY_REMOVED).into()
+                self.connection.set_note(if remove {
+                    StatusNote::silent(tr(keys::Q_PEOPLE_BIRTHDAY_REMOVED))
                 } else {
-                    tr(keys::Q_PEOPLE_BIRTHDAY_SAVED).into()
-                };
+                    StatusNote::silent(tr(keys::Q_PEOPLE_BIRTHDAY_SAVED))
+                });
                 true
             }
             Err(_) => {
-                self.connection.status_note =
-                    tr(keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
+                )));
                 cx.notify();
                 false
             }
@@ -242,22 +253,24 @@ impl QuillApp {
 
     pub(super) fn choose_personal_channel(&mut self, chat_id: i64, cx: &mut Context<Self>) -> bool {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A).into();
+            self.connection
+                .set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
             cx.notify();
             return true;
         };
         match live.driver.set_personal_chat(chat_id) {
             Ok(_) => {
-                self.connection.status_note = if chat_id == 0 {
-                    tr(keys::Q_PEOPLE_PERSONAL_CHANNEL_REMOVED).into()
+                self.connection.set_note(if chat_id == 0 {
+                    StatusNote::silent(tr(keys::Q_PEOPLE_PERSONAL_CHANNEL_REMOVED))
                 } else {
-                    tr(keys::Q_PEOPLE_PERSONAL_CHANNEL_SAVED).into()
-                };
+                    StatusNote::silent(tr(keys::Q_PEOPLE_PERSONAL_CHANNEL_SAVED))
+                });
                 true
             }
             Err(_) => {
-                self.connection.status_note =
-                    tr(keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
+                )));
                 cx.notify();
                 false
             }
@@ -283,7 +296,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> bool {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_SHARING_NEEDS_A).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_DEMO_MODE_SHARING_NEEDS_A,
+            )));
             cx.notify();
             return true;
         };
@@ -296,15 +311,16 @@ impl QuillApp {
             .unwrap_or_default();
         match live.driver.send_contact_message(ChatId(chat_id), user_id) {
             Ok(_) => {
-                self.connection.status_note = tr_with(
+                self.connection.set_note(StatusNote::silent(tr_with(
                     keys::Q_PEOPLE_CONTACT_SHARED_WITH,
                     &[("title", &title.to_string())],
-                );
+                )));
                 true
             }
             Err(_) => {
-                self.connection.status_note =
-                    tr(keys::Q_PEOPLE_COULDNT_SHARE_THE_CONTACT_HERE).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_PEOPLE_COULDNT_SHARE_THE_CONTACT_HERE,
+                )));
                 cx.notify();
                 false
             }

@@ -1,6 +1,8 @@
 //! Methods moved out of `privacy.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
+use crate::ui::user_error::user_error_for;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -60,7 +62,9 @@ impl QuillApp {
                 .session()
                 .is_some_and(|s| s.payments.premium_option == Some(true))
         {
-            self.connection.status_note = tr(keys::Q_PREFS_RESTRICTING_WHO_CAN_SEND_YOU).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PREFS_RESTRICTING_WHO_CAN_SEND_YOU,
+            )));
             cx.notify();
             return;
         }
@@ -82,7 +86,10 @@ impl QuillApp {
                 }
             };
             if let Err(err) = result {
-                self.connection.status_note = format!("privacy update failed: {err:?}");
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_PRIVACY_UPDATE,
+                    &err,
+                )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             match target {
@@ -203,7 +210,10 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = { live.driver.set_read_date_privacy(next) };
             if let Err(err) = result {
-                self.connection.status_note = format!("read-date update failed: {err:?}");
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_READ_DATE,
+                    &err,
+                )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.read_date_show = Some(next);
@@ -572,7 +582,10 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = { live.driver.set_privacy_rules(key, detail) };
             if let Err(err) = result {
-                self.connection.status_note = format!("privacy update failed: {err:?}");
+                self.connection.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_PRIVACY_UPDATE,
+                    &err,
+                )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings

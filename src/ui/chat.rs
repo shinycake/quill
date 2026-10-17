@@ -2,6 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
@@ -33,10 +34,10 @@ impl QuillApp {
         let Some(wait) = self.slow_mode_wait_secs_for(chat_id) else {
             return false;
         };
-        self.connection.status_note = tr_with(
+        self.connection.set_note(StatusNote::info(tr_with(
             keys::Q_REST_SLOW_MODE_WAIT_S_BEFORE,
             &[("wait", &wait.to_string())],
-        );
+        )));
         if self.live.is_some() {
             let supergroup_id = self.live.as_ref().and_then(|live| {
                 let session = &live.driver.session;
@@ -134,7 +135,9 @@ impl QuillApp {
                 _ => None,
             });
         if supergroup_id.is_none_or(|id| !self.can_change_slow_mode(id)) {
-            self.connection.status_note = tr(keys::Q_REST_SLOW_MODE_NEEDS_THE_RESTRICT).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_REST_SLOW_MODE_NEEDS_THE_RESTRICT,
+            )));
             cx.notify();
             return;
         }
@@ -143,13 +146,16 @@ impl QuillApp {
                 .driver
                 .set_chat_slow_mode_delay(chat_id, slow_mode_delay)
             {
-                Ok(_) => self.connection.status_note = tr(keys::Q_REST_SLOW_MODE_UPDATED).into(),
-                Err(_) => {
-                    self.connection.status_note = tr(keys::Q_REST_COULD_NOT_CHANGE_SLOW_MODE).into()
-                }
+                Ok(_) => self
+                    .connection
+                    .set_note(StatusNote::info(tr(keys::Q_REST_SLOW_MODE_UPDATED))),
+                Err(_) => self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_REST_COULD_NOT_CHANGE_SLOW_MODE,
+                ))),
             }
         } else {
-            self.connection.status_note = tr(keys::Q_REST_SLOW_MODE_NEEDS_A_LIVE).into();
+            self.connection
+                .set_note(StatusNote::info(tr(keys::Q_REST_SLOW_MODE_NEEDS_A_LIVE)));
         }
         cx.notify();
     }

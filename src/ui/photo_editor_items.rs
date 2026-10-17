@@ -5,6 +5,7 @@
 use super::app::QuillApp;
 use super::photo_edit::Placed;
 use super::photo_editor::{EditorMode, HANDLE_GRAB, PhotoEditor, preview_of};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -226,8 +227,9 @@ impl QuillApp {
                                     this.photo_editor_mut(|editor| editor.place(image), cx)
                                 }
                                 None => {
-                                    this.connection.status_note =
-                                        tr(keys::Q_MISC_COULDNT_DRAW_THAT_EMOJI).into();
+                                    this.connection.set_note(StatusNote::error(tr(
+                                        keys::Q_MISC_COULDNT_DRAW_THAT_EMOJI,
+                                    )));
                                     cx.notify();
                                 }
                             }
@@ -288,14 +290,16 @@ impl QuillApp {
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.download_file(file_id, 16);
             }
-            self.connection.status_note = tr(keys::Q_MISC_DOWNLOADING_THE_STICKER).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_MISC_DOWNLOADING_THE_STICKER)));
             cx.notify();
             return;
         };
         match super::editor_art::sticker_pixels(std::path::Path::new(&path), format) {
             Some(image) => self.photo_editor_mut(|editor| editor.place(image), cx),
             None => {
-                self.connection.status_note = tr(keys::Q_MISC_COULDNT_USE_THAT_STICKER).into();
+                self.connection
+                    .set_note(StatusNote::error(tr(keys::Q_MISC_COULDNT_USE_THAT_STICKER)));
                 cx.notify();
             }
         }

@@ -7,6 +7,7 @@
 use super::app::QuillApp;
 use super::chat_row::{chat_avatar, compact_count};
 use super::chat_theme::{accent, text_muted};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
@@ -215,13 +216,13 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if locked {
-            self.connection.status_note = tr_with(
+            self.connection.set_note(StatusNote::info(tr_with(
                 keys::Q_MISC_SUBSCRIBE_TO_TELEGRAM_PREMIUM_TO,
                 &[(
                     "similar_channels_premium_limit",
                     &SIMILAR_CHANNELS_PREMIUM_LIMIT.to_string(),
                 )],
-            );
+            )));
             cx.notify();
             return;
         }

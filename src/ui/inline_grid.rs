@@ -7,6 +7,7 @@
 use super::QuillApp;
 use super::inline_mode::{InlineView, inline_view};
 use super::pressable::PressableDiv;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::theme::ActiveTheme;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -441,7 +442,10 @@ impl QuillApp {
                         story_id: None,
                     });
                     if sent.is_err() {
-                        self.set_status_note(tr(keys::Q_MEDIA_COULDNT_OPEN_THE_BOTS_CHAT), cx);
+                        self.set_status_note(
+                            StatusNote::error(tr(keys::Q_MEDIA_COULDNT_OPEN_THE_BOTS_CHAT)),
+                            cx,
+                        );
                     }
                 }
             }

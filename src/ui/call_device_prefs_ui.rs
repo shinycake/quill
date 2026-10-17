@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_base::Disableable;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::switch::Switch;
@@ -72,8 +73,9 @@ impl QuillApp {
                         .small()
                         .on_click(cx.listener(|this, _, _, cx| {
                             if !open_system_sound_prefs() {
-                                this.connection.status_note =
-                                    tr(keys::Q_OPS_COULDNT_OPEN_THE_SYSTEM_SOUND).into();
+                                this.connection.set_note(StatusNote::error(tr(
+                                    keys::Q_OPS_COULDNT_OPEN_THE_SYSTEM_SOUND,
+                                )));
                                 cx.notify();
                             }
                         })),

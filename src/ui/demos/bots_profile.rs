@@ -5,6 +5,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::bots::{apply_ready_bot_chat, apply_ready_bot_keyboard};
 use crate::ui::profile::apply_ready_profile_edit;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use std::sync::atomic::Ordering;
 
@@ -43,7 +44,9 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_bot_chat(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.connection.status_note = "screenshot demo — bot chat with info panel".into();
+        self.connection.set_note(StatusNote::silent(
+            "screenshot demo — bot chat with info panel",
+        ));
     }
 
     fn demo_ready_bot_keyboard(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -51,8 +54,9 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_bot_keyboard(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.connection.status_note =
-            "screenshot demo — bot keyboards: inline buttons, custom keyboard, force reply".into();
+        self.connection.set_note(StatusNote::silent(
+            "screenshot demo — bot keyboards: inline buttons, custom keyboard, force reply",
+        ));
     }
 
     fn demo_profile_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -61,6 +65,7 @@ impl QuillApp {
             apply_ready_profile_edit(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_edit_profile_dialog(window, cx);
-        self.connection.status_note = "screenshot demo — edit profile dialog".into();
+        self.connection
+            .set_note(StatusNote::silent("screenshot demo — edit profile dialog"));
     }
 }

@@ -411,7 +411,7 @@ fn stars_past_the_balance_open_the_stars_top_up(cx: &mut TestAppContext) {
                 .is_some_and(|live| live.pending_reaction.is_none()),
             "nothing waits to be sent"
         );
-        assert!(app.connection.status_note.contains("Needed"));
+        assert!(app.connection.status_note().contains("Needed"));
     });
     // Back from the top-up, the box opens on the same amount.
     let chosen = app.read_with(vcx, |app, _| {

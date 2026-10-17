@@ -4,6 +4,7 @@
 use crate::ui::app::QuillApp;
 use crate::ui::groups::apply_ready_group_manage;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::state::InfoPanelTarget;
 use std::sync::atomic::Ordering;
@@ -29,7 +30,8 @@ impl QuillApp {
             apply_ready_group_manage(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_info_panel_target(InfoPanelTarget::Supergroup(61), window, cx);
-        self.connection.status_note = "screenshot demo — group info edit".into();
+        self.connection
+            .set_note(StatusNote::silent("screenshot demo — group info edit"));
         cx.notify();
     }
 }

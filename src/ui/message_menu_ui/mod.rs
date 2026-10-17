@@ -9,6 +9,7 @@
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -350,8 +351,8 @@ impl QuillApp {
                         MediaAction::CopyFilename => {
                             if let Some(name) = target.copy_name.clone() {
                                 cx.write_to_clipboard(ClipboardItem::new_string(name));
-                                this.connection.status_note =
-                                    tr(keys::Q_CHAT_FILENAME_COPIED).into();
+                                this.connection
+                                    .set_note(StatusNote::info(tr(keys::Q_CHAT_FILENAME_COPIED)));
                             }
                         }
                     }
@@ -417,7 +418,9 @@ impl QuillApp {
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.ensure_media_files(&[target.file_id]);
             }
-            self.connection.status_note = tr(keys::Q_CHAT_DOWNLOADING_CHOOSE_SAVE_AS_AGAIN).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_CHAT_DOWNLOADING_CHOOSE_SAVE_AS_AGAIN,
+            )));
             cx.notify();
             return;
         };
@@ -438,13 +441,16 @@ impl QuillApp {
                 .spawn(async move { std::fs::copy(&path, &dest).map(|_| dest) })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.connection.status_note = match copied {
-                    Ok(dest) => format!(
+                this.connection.set_note(match copied {
+                    Ok(dest) => StatusNote::info(format!(
                         "saved to {}",
                         dest.file_name().and_then(|n| n.to_str()).unwrap_or("file")
-                    ),
-                    Err(err) => tr_with(keys::Q_CHAT_COULDNT_SAVE, &[("err", &err.to_string())]),
-                };
+                    )),
+                    Err(err) => StatusNote::error(tr_with(
+                        keys::Q_CHAT_COULDNT_SAVE,
+                        &[("err", &err.to_string())],
+                    )),
+                });
                 cx.notify();
             });
         })
@@ -462,7 +468,9 @@ impl QuillApp {
             return;
         }
         let Some((_, path)) = self.menu_media_local(chat_id, message_id) else {
-            self.connection.status_note = tr(keys::Q_CHAT_DOWNLOAD_THE_PHOTO_FIRST_TO).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_CHAT_DOWNLOAD_THE_PHOTO_FIRST_TO,
+            )));
             cx.notify();
             return;
         };
@@ -475,9 +483,10 @@ impl QuillApp {
                         cx.write_to_clipboard(ClipboardItem::new_image(
                             &gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Png, bytes),
                         ));
-                        this.connection.status_note = tr(keys::Q_CHAT_PHOTO_COPIED).into();
+                        this.connection
+                            .set_note(StatusNote::info(tr(keys::Q_CHAT_PHOTO_COPIED)));
                     }
-                    Err(note) => this.connection.status_note = note.into(),
+                    Err(note) => this.connection.set_note(StatusNote::error(note)),
                 }
                 cx.notify();
             },
@@ -489,16 +498,18 @@ impl QuillApp {
     fn save_message_gif(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let sent = live.driver.set_gif_saved(file_id, true);
-            self.connection.status_note = match sent {
-                Ok(_) => tr(keys::Q_CHAT_SAVING_GIF).into(),
-                Err(_) => tr(keys::Q_CHAT_COULD_NOT_SAVE_GIF).into(),
-            };
+            self.connection.set_note(match sent {
+                Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_SAVING_GIF)),
+                Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SAVE_GIF)),
+            });
             if sent.is_ok() {
                 // A full list drops its oldest GIF; the limit box says so.
                 self.note_gif_replaced(cx);
             }
         } else {
-            self.connection.status_note = tr(keys::Q_CHAT_DEMO_GIFS_SAVE_WITH_LIVE).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_CHAT_DEMO_GIFS_SAVE_WITH_LIVE,
+            )));
         }
         cx.notify();
     }
@@ -506,12 +517,14 @@ impl QuillApp {
     /// "Save for Notifications" (`addSavedNotificationSound`).
     fn save_message_tone(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.save_notification_tone(file_id) {
-                Ok(_) => tr(keys::Q_CHAT_SAVING_SOUND).into(),
-                Err(_) => tr(keys::Q_CHAT_COULD_NOT_SAVE_THE_SOUND).into(),
-            };
+            self.connection
+                .set_note(match live.driver.save_notification_tone(file_id) {
+                    Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_SAVING_SOUND)),
+                    Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SAVE_THE_SOUND)),
+                });
         } else {
-            self.connection.status_note = tr(keys::Q_CHAT_SOUND_ADDED).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_CHAT_SOUND_ADDED)));
         }
         cx.notify();
     }
@@ -524,14 +537,16 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.set_favorite_sticker(file_id, favorite)
-            {
-                Ok(_) if favorite => tr(keys::Q_CHAT_ADDED_TO_FAVORITES).into(),
-                Ok(_) => tr(keys::Q_CHAT_REMOVED_FROM_FAVORITES).into(),
-                Err(_) => tr(keys::Q_CHAT_COULD_NOT_CHANGE_FAVORITES).into(),
-            };
+            self.connection
+                .set_note(match live.driver.set_favorite_sticker(file_id, favorite) {
+                    Ok(_) if favorite => StatusNote::silent(tr(keys::Q_CHAT_ADDED_TO_FAVORITES)),
+                    Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_REMOVED_FROM_FAVORITES)),
+                    Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_CHANGE_FAVORITES)),
+                });
         } else {
-            self.connection.status_note = tr(keys::Q_CHAT_DEMO_FAVORITES_CHANGE_WITH_LIVE).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_CHAT_DEMO_FAVORITES_CHANGE_WITH_LIVE,
+            )));
         }
         cx.notify();
     }
@@ -544,15 +559,18 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.cancel_upload(chat_id, message_id) {
-                Ok(_) => {
-                    self.begin_vanish(chat_id, &[message_id]);
-                    tr(keys::Q_CHAT_UPLOAD_CANCELED).into()
-                }
-                Err(_) => tr(keys::Q_CHAT_COULD_NOT_CANCEL_THE_UPLOAD).into(),
-            };
+            self.connection
+                .set_note(match live.driver.cancel_upload(chat_id, message_id) {
+                    Ok(_) => {
+                        self.begin_vanish(chat_id, &[message_id]);
+                        StatusNote::silent(tr(keys::Q_CHAT_UPLOAD_CANCELED))
+                    }
+                    Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_CANCEL_THE_UPLOAD)),
+                });
         } else {
-            self.connection.status_note = tr(keys::Q_CHAT_DEMO_UPLOADS_CANCEL_WITH_LIVE).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_CHAT_DEMO_UPLOADS_CANCEL_WITH_LIVE,
+            )));
         }
         cx.notify();
     }

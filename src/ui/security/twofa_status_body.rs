@@ -1,6 +1,7 @@
 //! Methods moved out of `security.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -400,13 +401,12 @@ impl QuillApp {
                 .driver
                 .toggle_session_can_accept_secret_chats(session_id)
             {
-                Ok(_) => {
-                    self.connection.status_note = tr(keys::Q_PREFS_UPDATING_SESSION_SETTING).into()
-                }
-                Err(_) => {
-                    self.connection.status_note =
-                        tr(keys::Q_PREFS_COULD_NOT_UPDATE_THE_SESSION).into()
-                }
+                Ok(_) => self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_PREFS_UPDATING_SESSION_SETTING,
+                ))),
+                Err(_) => self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_PREFS_COULD_NOT_UPDATE_THE_SESSION,
+                ))),
             }
         }
         cx.notify();
@@ -417,13 +417,12 @@ impl QuillApp {
     pub(in crate::ui) fn toggle_session_calls(&mut self, session_id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             match live.driver.toggle_session_can_accept_calls(session_id) {
-                Ok(_) => {
-                    self.connection.status_note = tr(keys::Q_PREFS_UPDATING_SESSION_SETTING).into()
-                }
-                Err(_) => {
-                    self.connection.status_note =
-                        tr(keys::Q_PREFS_COULD_NOT_UPDATE_THE_SESSION).into()
-                }
+                Ok(_) => self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_PREFS_UPDATING_SESSION_SETTING,
+                ))),
+                Err(_) => self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_PREFS_COULD_NOT_UPDATE_THE_SESSION,
+                ))),
             }
         }
         cx.notify();
@@ -737,10 +736,10 @@ impl QuillApp {
                 }
                 WebsitesConfirm::DisconnectAll => live.driver.disconnect_all_websites().map(|_| ()),
             };
-            self.connection.status_note = match result {
-                Ok(()) => tr(keys::Q_PREFS_DISCONNECTING_WEBSITE).into(),
-                Err(_) => tr(keys::Q_PREFS_COULD_NOT_DISCONNECT_THE_WEBSITE).into(),
-            };
+            self.connection.set_note(match result {
+                Ok(()) => StatusNote::silent(tr(keys::Q_PREFS_DISCONNECTING_WEBSITE)),
+                Err(_) => StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_DISCONNECT_THE_WEBSITE)),
+            });
         }
         cx.notify();
     }

@@ -13,6 +13,7 @@ use crate::ui::composer_field::{emoji_token, field_doc};
 use crate::ui::media_panel::PanelTab;
 use crate::ui::recording::RecordMode;
 use crate::ui::recording_state::{CaptureFor, CaptureMedia};
+use crate::ui::status_note::StatusNote;
 use gpui_base::input::InputContent;
 use gpui_kit::assets::IconName;
 use quill::lang::{keys, tr, tr_with};
@@ -342,18 +343,22 @@ impl QuillApp {
     fn finish_story_reply_media(&mut self, sent: Option<bool>, what: &str, cx: &mut Context<Self>) {
         match sent {
             Some(true) => {
-                self.connection.status_note =
-                    tr_with(keys::Q_MEDIA_STORY_REPLY_SENT_2, &[("what", what)]);
+                self.connection.set_note(StatusNote::silent(tr_with(
+                    keys::Q_MEDIA_STORY_REPLY_SENT_2,
+                    &[("what", what)],
+                )));
                 self.end_story_reply(cx);
             }
             Some(false) => {
-                self.connection.status_note = tr_with(
+                self.connection.set_note(StatusNote::error(tr_with(
                     keys::Q_MEDIA_COULD_NOT_SEND_STORY_REPLY_2,
                     &[("what", what)],
-                );
+                )));
             }
             None => {
-                self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STORY_REPLIES_RUN_WITH).into();
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_MEDIA_DEMO_STORY_REPLIES_RUN_WITH,
+                )));
             }
         }
         cx.notify();
@@ -391,10 +396,11 @@ impl QuillApp {
             Ok(capture) => {
                 self.hold_capture(CaptureMedia::Video(capture), CaptureFor::StoryReply);
                 self.spawn_voice_tick(cx);
-                self.connection.status_note = tr(keys::Q_MEDIA_RECORDING_VIDEO_REPLY).into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_MEDIA_RECORDING_VIDEO_REPLY)));
             }
             Err(err) => {
-                self.connection.status_note = err;
+                self.connection.set_note(StatusNote::error(err));
             }
         }
         cx.notify();
@@ -434,7 +440,7 @@ impl QuillApp {
                             .is_ok()
                     }),
                     Err(err) => {
-                        this.connection.status_note = err;
+                        this.connection.set_note(StatusNote::error(err));
                         cx.notify();
                         return;
                     }
@@ -454,10 +460,11 @@ impl QuillApp {
             Ok(capture) => {
                 self.hold_capture(CaptureMedia::Voice(capture), CaptureFor::StoryReply);
                 self.spawn_voice_tick(cx);
-                self.connection.status_note = tr(keys::Q_MEDIA_RECORDING_VOICE_REPLY).into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_MEDIA_RECORDING_VOICE_REPLY)));
             }
             Err(err) => {
-                self.connection.status_note = err;
+                self.connection.set_note(StatusNote::error(err));
             }
         }
         cx.notify();
@@ -487,7 +494,7 @@ impl QuillApp {
         let draft = match capture.finish() {
             Ok(draft) => draft,
             Err(err) => {
-                self.connection.status_note = err;
+                self.connection.set_note(StatusNote::error(err));
                 cx.notify();
                 return true;
             }

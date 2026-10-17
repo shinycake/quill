@@ -5,6 +5,7 @@
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Textarea, TextareaState};
@@ -78,15 +79,18 @@ impl QuillApp {
         }
         match self.live.as_mut() {
             Some(live) => {
-                self.connection.status_note =
+                self.connection.set_note(
                     match live
                         .driver
                         .set_fact_check(dialog.chat_id, dialog.message_id, &text)
                     {
-                        Ok(_) if text.is_empty() => tr(keys::Q_MISC_REMOVING_THE_FACT_CHECK).into(),
-                        Ok(_) => tr(keys::Q_MISC_SAVING_THE_FACT_CHECK).into(),
-                        Err(_) => tr(keys::Q_MISC_COULD_NOT_SAVE_THE_FACT).into(),
-                    };
+                        Ok(_) if text.is_empty() => {
+                            StatusNote::silent(tr(keys::Q_MISC_REMOVING_THE_FACT_CHECK))
+                        }
+                        Ok(_) => StatusNote::silent(tr(keys::Q_MISC_SAVING_THE_FACT_CHECK)),
+                        Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_SAVE_THE_FACT)),
+                    },
+                );
             }
             None => {
                 if let Some(message) = self
@@ -105,7 +109,8 @@ impl QuillApp {
                         quill::telegram::envelope::FactCheck::plain(text.clone(), country)
                     });
                 }
-                self.connection.status_note = tr(keys::Q_MISC_FACT_CHECK_SAVED_DEMO).into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_MISC_FACT_CHECK_SAVED_DEMO)));
             }
         }
         cx.notify();

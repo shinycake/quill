@@ -8,6 +8,7 @@ use super::app::QuillApp;
 use super::link_info_boxes::finish;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_base::StyledExt;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -138,13 +139,15 @@ impl QuillApp {
                     .request_giveaway_info(chat, message, summary)
                     .is_err()
                 {
-                    self.connection.status_note =
-                        tr(keys::Q_MONEY_COULD_NOT_LOAD_THE_GIVEAWAY).into();
+                    self.connection.set_note(StatusNote::error(tr(
+                        keys::Q_MONEY_COULD_NOT_LOAD_THE_GIVEAWAY,
+                    )));
                 }
             }
             None => {
-                self.connection.status_note =
-                    tr(keys::Q_MONEY_GIVEAWAY_DETAILS_NEED_A_SIGNED).into();
+                self.connection.set_note(StatusNote::info(tr(
+                    keys::Q_MONEY_GIVEAWAY_DETAILS_NEED_A_SIGNED,
+                )));
             }
         }
         cx.notify();

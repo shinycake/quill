@@ -7,6 +7,7 @@
 use super::app::QuillApp;
 use super::gift_manage_ui::hint;
 use super::gift_market_ui::{BoxView, collectible_tile};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::Textarea;
@@ -91,11 +92,14 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if live.driver.buy_gift_resale(price, &text, hide).is_err() {
-                    self.connection.status_note = tr(keys::Q_MONEY_COULDNT_BUY_THE_GIFT).into();
+                    self.connection
+                        .set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_BUY_THE_GIFT)));
                 }
             }
             None => {
-                self.connection.status_note = tr(keys::Q_MONEY_BUYING_GIFTS_NEEDS_A_SIGNED).into();
+                self.connection.set_note(StatusNote::info(tr(
+                    keys::Q_MONEY_BUYING_GIFTS_NEEDS_A_SIGNED,
+                )));
             }
         }
         cx.notify();

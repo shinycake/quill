@@ -2,6 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::connect_ui::ConnectUiStatus;
+use super::status_note::{NoteKind, StatusNote};
 
 pub(crate) struct ConnectionUi {
     pub(super) status: ConnectUiStatus,
@@ -10,10 +11,12 @@ pub(crate) struct ConnectionUi {
     /// "connection closed" note. A new connection bumps `generation`, which
     /// re-arms it; other notes cannot, so they are never overwritten again.
     closed_noted_generation: Option<u64>,
-    pub(super) status_note: String,
-    /// The `status_note` text the toast last showed, and when it appeared:
-    /// a changed note restarts the toast's timer.
-    pub(super) status_seen: String,
+    /// The current note. Private: every write names its kind through
+    /// `set_note`, so a toast never depends on the words.
+    note: StatusNote,
+    /// The note the toast last showed, and when it appeared: a changed note
+    /// restarts the toast's timer.
+    pub(super) status_seen: StatusNote,
     pub(super) status_shown_at: Option<std::time::Instant>,
     /// The last status note printed by `QUILL_TRACE_STATUS`.
     pub(super) status_traced: String,
@@ -27,8 +30,8 @@ impl ConnectionUi {
             status: connect_status,
             generation: 0,
             closed_noted_generation: None,
-            status_note,
-            status_seen: String::new(),
+            note: StatusNote::new(NoteKind::Silent, status_note),
+            status_seen: StatusNote::default(),
             status_shown_at: None,
             status_traced: String::new(),
             presence: Default::default(),
@@ -37,6 +40,31 @@ impl ConnectionUi {
 }
 
 impl ConnectionUi {
+    /// Replaces the current note. Progress chatter ([`NoteKind::Silent`])
+    /// never replaces a note the toast still shows, so "pinned" or "sending"
+    /// cannot wipe an unread failure; the toast's own timer clears that one.
+    pub(super) fn set_note(&mut self, note: StatusNote) {
+        if note.kind() == NoteKind::Silent && self.note.is_toast() {
+            return;
+        }
+        self.note = note;
+    }
+
+    /// The current note.
+    pub(super) fn note(&self) -> &StatusNote {
+        &self.note
+    }
+
+    /// The current note's text.
+    pub(super) fn status_note(&self) -> &str {
+        self.note.text()
+    }
+
+    /// Drops the current note.
+    pub(super) fn clear_note(&mut self) {
+        self.note = StatusNote::default();
+    }
+
     /// Whether the poll should post the "connection closed" note now: the
     /// bridge stopped on its own, its queue is fully drained, and this
     /// connection has not posted it yet. True at most once per connection.
@@ -67,7 +95,7 @@ pub(super) fn auth_for_bridge(
 
 #[cfg(test)]
 mod tests {
-    use super::{ConnectionUi, auth_for_bridge};
+    use super::{ConnectionUi, StatusNote, auth_for_bridge};
     use quill::telegram::envelope::AuthorizationState;
 
     #[test]
@@ -99,11 +127,25 @@ mod tests {
     fn replacing_the_note_does_not_refire_while_the_bridge_stays_stopped() {
         let mut c = connection();
         assert!(c.claim_closed_note(true, false));
-        c.status_note = "Copied".into();
+        c.set_note(StatusNote::info("Copied"));
         assert!(!c.claim_closed_note(true, false));
-        assert_eq!(c.status_note, "Copied", "the user's note is kept");
+        assert_eq!(c.status_note(), "Copied", "the user's note is kept");
         // A new connection re-arms the latch.
         c.generation += 1;
         assert!(c.claim_closed_note(true, false));
+    }
+
+    #[test]
+    fn progress_chatter_cannot_wipe_a_shown_failure() {
+        let mut c = connection();
+        c.set_note(StatusNote::error("Senden fehlgeschlagen"));
+        c.set_note(StatusNote::silent("sending…"));
+        assert_eq!(c.status_note(), "Senden fehlgeschlagen");
+        assert!(c.note().is_toast(), "a German failure still toasts");
+        c.set_note(StatusNote::info("Link kopiert"));
+        assert_eq!(c.status_note(), "Link kopiert");
+        c.clear_note();
+        c.set_note(StatusNote::silent("sending…"));
+        assert_eq!(c.status_note(), "sending…");
     }
 }

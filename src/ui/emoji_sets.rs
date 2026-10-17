@@ -3,6 +3,7 @@
 use super::app::QuillApp;
 use super::dialogs::GroupConfirmAction;
 use super::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Textarea;
@@ -21,7 +22,9 @@ impl QuillApp {
     pub(super) fn open_emoji_sets(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_emoji_sets().is_err() {
-                self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_LOAD_EMOJI_PACKS).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_MEDIA_COULD_NOT_LOAD_EMOJI_PACKS,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.stickers.emoji.open = true;
@@ -39,7 +42,9 @@ impl QuillApp {
     fn select_emoji_sets_tab(&mut self, tab: EmojiSetTab, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.select_emoji_set_tab(tab).is_err() {
-                self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_LOAD_EMOJI_PACKS).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_MEDIA_COULD_NOT_LOAD_EMOJI_PACKS,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.stickers.emoji.tab = tab;
@@ -50,17 +55,20 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.preview_emoji_pack(id).is_err()
         {
-            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_LOAD_EMOJI_PACK).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MEDIA_COULD_NOT_LOAD_EMOJI_PACK,
+            )));
         }
         cx.notify();
     }
     fn install_emoji_set(&mut self, id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.set_emoji_pack_installed(id, true) {
-                Ok(Some(_)) => tr(keys::Q_MEDIA_INSTALLING_EMOJI_PACK).into(),
-                Ok(None) => tr(keys::Q_MEDIA_AN_EMOJI_PACK_IS_ALREADY).into(),
-                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_INSTALL_EMOJI_PACK).into(),
-            };
+            self.connection
+                .set_note(match live.driver.set_emoji_pack_installed(id, true) {
+                    Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MEDIA_INSTALLING_EMOJI_PACK)),
+                    Ok(None) => StatusNote::silent(tr(keys::Q_MEDIA_AN_EMOJI_PACK_IS_ALREADY)),
+                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_INSTALL_EMOJI_PACK)),
+                });
         }
         cx.notify();
     }
@@ -74,18 +82,21 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.search_emoji_packs(&query).is_err()
         {
-            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_SEARCH_EMOJI_PACKS).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MEDIA_COULD_NOT_SEARCH_EMOJI_PACKS,
+            )));
         }
         cx.notify();
     }
     fn change_emoji_status(&mut self, id: Option<i64>, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let duration = live.driver.session.stickers.emoji.status_duration_secs;
-            self.connection.status_note = match live.driver.change_emoji_status(id, duration) {
-                Ok(Some(_)) => tr(keys::Q_MEDIA_UPDATING_EMOJI_STATUS).into(),
-                Ok(None) => tr(keys::Q_MEDIA_AN_EMOJI_STATUS_IS_ALREADY).into(),
-                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_STATUS).into(),
-            };
+            self.connection
+                .set_note(match live.driver.change_emoji_status(id, duration) {
+                    Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MEDIA_UPDATING_EMOJI_STATUS)),
+                    Ok(None) => StatusNote::silent(tr(keys::Q_MEDIA_AN_EMOJI_STATUS_IS_ALREADY)),
+                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_STATUS)),
+                });
         }
         cx.notify();
     }
@@ -121,8 +132,9 @@ impl QuillApp {
                         if let Some(live) = this.live.as_mut()
                             && live.driver.load_emoji_status_choices().is_err()
                         {
-                            this.connection.status_note =
-                                tr(keys::Q_MEDIA_COULD_NOT_LOAD_EMOJI_STATUSES).into();
+                            this.connection.set_note(StatusNote::error(tr(
+                                keys::Q_MEDIA_COULD_NOT_LOAD_EMOJI_STATUSES,
+                            )));
                         }
                         cx.notify();
                     })),
@@ -190,8 +202,9 @@ impl QuillApp {
                                 live.driver.session.stickers.emoji.status_duration_secs = secs;
                             }
                         } else {
-                            this.connection.status_note =
-                                tr(keys::Q_MEDIA_ENTER_POSITIVE_WHOLE_HOURS_WITHIN).into();
+                            this.connection.set_note(StatusNote::silent(tr(
+                                keys::Q_MEDIA_ENTER_POSITIVE_WHOLE_HOURS_WITHIN,
+                            )));
                         }
                         cx.notify();
                     })),
@@ -293,14 +306,19 @@ impl QuillApp {
                     .disabled(busy)
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(live) = this.live.as_mut() {
-                            this.connection.status_note = match live
-                                .driver
-                                .clear_recent_emoji_statuses()
-                            {
-                                Ok(Some(_)) => tr(keys::Q_MEDIA_CLEARING_RECENT_STATUSES).into(),
-                                Ok(None) => tr(keys::Q_MEDIA_AN_EMOJI_STATUS_IS_ALREADY).into(),
-                                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_CLEAR_RECENT_STATUSES).into(),
-                            };
+                            this.connection.set_note(
+                                match live.driver.clear_recent_emoji_statuses() {
+                                    Ok(Some(_)) => StatusNote::silent(tr(
+                                        keys::Q_MEDIA_CLEARING_RECENT_STATUSES,
+                                    )),
+                                    Ok(None) => StatusNote::silent(tr(
+                                        keys::Q_MEDIA_AN_EMOJI_STATUS_IS_ALREADY,
+                                    )),
+                                    Err(_) => StatusNote::error(tr(
+                                        keys::Q_MEDIA_COULD_NOT_CLEAR_RECENT_STATUSES,
+                                    )),
+                                },
+                            );
                         }
                         cx.notify();
                     })),
@@ -423,8 +441,9 @@ impl QuillApp {
                         if let Some(live) = this.live.as_mut()
                             && live.driver.more_trending_emoji_packs().is_err()
                         {
-                            this.connection.status_note =
-                                tr(keys::Q_MEDIA_COULD_NOT_LOAD_MORE_EMOJI).into();
+                            this.connection.set_note(StatusNote::error(tr(
+                                keys::Q_MEDIA_COULD_NOT_LOAD_MORE_EMOJI,
+                            )));
                         }
                         cx.notify();
                     })),
@@ -472,11 +491,15 @@ impl QuillApp {
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(live) = this.live.as_mut() {
-                            this.connection.status_note = match live.driver.download_emoji_pack(id)
-                            {
-                                Ok(()) => tr(keys::Q_MEDIA_EMOJI_PACK_DOWNLOAD_REQUESTED).into(),
-                                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_DOWNLOAD_EMOJI_PACK).into(),
-                            };
+                            this.connection
+                                .set_note(match live.driver.download_emoji_pack(id) {
+                                    Ok(()) => StatusNote::silent(tr(
+                                        keys::Q_MEDIA_EMOJI_PACK_DOWNLOAD_REQUESTED,
+                                    )),
+                                    Err(_) => StatusNote::error(tr(
+                                        keys::Q_MEDIA_COULD_NOT_DOWNLOAD_EMOJI_PACK,
+                                    )),
+                                });
                         }
                         cx.notify();
                     })),

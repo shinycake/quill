@@ -1,6 +1,7 @@
 //! Methods moved out of `history.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 
 impl QuillApp {
     pub(in crate::ui) fn load_older_action(&mut self, cx: &mut Context<Self>) {
@@ -21,11 +22,11 @@ impl QuillApp {
                     } else {
                         live.driver.fetch_history()
                     };
-                    self.connection.status_note = match result {
-                        Ok(Some(_)) => "loading older messages".into(),
-                        Ok(None) => "no older messages to load".into(),
-                        Err(_) => "could not load history".into(),
-                    };
+                    self.connection.set_note(match result {
+                        Ok(Some(_)) => StatusNote::silent("loading older messages"),
+                        Ok(None) => StatusNote::silent("no older messages to load"),
+                        Err(_) => StatusNote::error("could not load history"),
+                    });
                 }
                 cx.notify();
             }

@@ -5,6 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -117,16 +118,16 @@ impl QuillApp {
     }
 
     fn delete_revoked_link(&mut self, chat_id: ChatId, invite_link: &str, cx: &mut Context<Self>) {
-        self.connection.status_note = match self.live.as_mut() {
+        self.connection.set_note(match self.live.as_mut() {
             Some(live) => match live
                 .driver
                 .delete_revoked_chat_invite_link(chat_id, invite_link)
             {
-                Ok(_) => tr(keys::Q_OPS_DELETING_INVITE_LINK).into(),
-                Err(_) => tr(keys::Q_OPS_COULD_NOT_DELETE_INVITE_LINK).into(),
+                Ok(_) => StatusNote::info(tr(keys::Q_OPS_DELETING_INVITE_LINK)),
+                Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_DELETE_INVITE_LINK)),
             },
-            None => tr(keys::Q_OPS_INVITE_LINKS_NEED_A_LIVE).into(),
-        };
+            None => StatusNote::info(tr(keys::Q_OPS_INVITE_LINKS_NEED_A_LIVE)),
+        });
         cx.notify();
     }
 
@@ -147,15 +148,19 @@ impl QuillApp {
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
                     let _ = app.update(cx, |this, cx| {
-                        this.connection.status_note = match this.live.as_mut() {
+                        this.connection.set_note(match this.live.as_mut() {
                             Some(live) => {
                                 match live.driver.delete_all_revoked_chat_invite_links(chat_id) {
-                                    Ok(_) => tr(keys::Q_OPS_DELETING_REVOKED_LINKS).into(),
-                                    Err(_) => tr(keys::Q_OPS_COULD_NOT_DELETE_REVOKED_LINKS).into(),
+                                    Ok(_) => {
+                                        StatusNote::info(tr(keys::Q_OPS_DELETING_REVOKED_LINKS))
+                                    }
+                                    Err(_) => StatusNote::error(tr(
+                                        keys::Q_OPS_COULD_NOT_DELETE_REVOKED_LINKS,
+                                    )),
                                 }
                             }
-                            None => tr(keys::Q_OPS_INVITE_LINKS_NEED_A_LIVE).into(),
-                        };
+                            None => StatusNote::info(tr(keys::Q_OPS_INVITE_LINKS_NEED_A_LIVE)),
+                        });
                         cx.notify();
                     });
                     true
