@@ -382,7 +382,11 @@ impl QuillApp {
         // Verified check, emoji status or SCAM / FAKE chip after the title
         // (`Info::Profile::Badge`).
         let badges = session
-            .and_then(|s| s.chats.get(&chat_id.0).map(|chat| s.chat_header_badges(chat)))
+            .and_then(|s| {
+                s.chats
+                    .get(&chat_id.0)
+                    .map(|chat| s.chat_header_badges(chat))
+            })
             .unwrap_or_default();
         let badges = self.info_header_badges(badges, chat_id.0, cx);
         let mut body = div()

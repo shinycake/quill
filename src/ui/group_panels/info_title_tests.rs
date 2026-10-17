@@ -5,6 +5,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
+use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::diagnostics::DiagnosticSink;
 use quill::lang::{keys, tr};
@@ -81,7 +82,7 @@ fn title_follows_the_peer_and_a_verified_channel_shows_its_badge(cx: &mut TestAp
             r#"{"@type":"updateUser","user":{"id":777,"first_name":"Me","type":{"@type":"userTypeRegular"}}}"#,
         ],
     );
-    let titled = |target| title_of(&app, vcx, target);
+    let mut titled = |target| title_of(&app, vcx, target);
     assert_eq!(
         titled(InfoPanelTarget::Supergroup(71)),
         Some(tr(keys::INFO_CHANNEL_TITLE))

@@ -20,8 +20,8 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
-use quill::state::{ProfileChatsKind, Session};
 use quill::state::{ContactRow, InfoPanelTarget, SupergroupMembersFetch};
+use quill::state::{ProfileChatsKind, Session};
 use quill::telegram::envelope::ChatKind;
 use std::path::PathBuf;
 /// Parity slice: data for the channel/supergroup conversation header —
@@ -677,19 +677,19 @@ pub(super) fn format_birthday(date: quill::telegram::envelope::Birthdate) -> Str
 
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
+mod info_title_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 mod invite_disclosure_tests;
 mod slow_mode;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod slow_mode_tests;
 mod user_info_panel;
-#[cfg(test)]
-#[cfg(feature = "demo-capture")]
-mod info_title_tests;
 
 /// The info panel title of a person (`Info::Profile::Widget::title`):
 /// Saved Messages for the viewer, Bot Info for a bot, else User Info.
-pub(super) fn person_info_title(session: &Session, user_id: i64) -> &'static str {
+pub(super) fn person_info_title(session: &Session, user_id: i64) -> quill::lang::Key {
     if session.my_user_id == Some(user_id) {
         keys::SAVED_MESSAGES
     } else if session.user(user_id).is_some_and(|u| u.is_bot) {
@@ -700,7 +700,7 @@ pub(super) fn person_info_title(session: &Session, user_id: i64) -> &'static str
 }
 
 /// Group Info for a supergroup, Channel Info for a broadcast channel.
-pub(super) fn supergroup_info_title(session: &Session, supergroup_id: i64) -> &'static str {
+pub(super) fn supergroup_info_title(session: &Session, supergroup_id: i64) -> quill::lang::Key {
     if session.supergroup_is_channel(supergroup_id) {
         keys::INFO_CHANNEL_TITLE
     } else {
