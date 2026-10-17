@@ -194,6 +194,7 @@ fn typing_focus_moves_to_the_new_field_when_the_tab_changes(cx: &mut TestAppCont
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     seed(&app, vcx);
+    set_links_count(&app, vcx, 24);
     let old = app.read_with(vcx, |app, _| app.media_search.input.clone());
     vcx.update(|window, cx| old.update(cx, |input, cx| input.focus(window, cx)));
     change_tab_in_state(&app, vcx, SharedMediaTab::Links);
@@ -206,4 +207,44 @@ fn typing_focus_moves_to_the_new_field_when_the_tab_changes(cx: &mut TestAppCont
             .is_focused(window)
     });
     assert!(focused, "the cursor follows the user to the new field");
+}
+
+fn set_links_count(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, count: i32) {
+    app.update_in(vcx, |app, _, cx| {
+        if let Some(session) = app.demo_session.as_mut()
+            && let Some(chat) = session.open_chat
+        {
+            session
+                .media
+                .chat_media_counts
+                .entry(chat.0)
+                .or_default()
+                .insert(4, count);
+        }
+        cx.notify();
+    });
+}
+
+#[gpui_kit::test]
+fn a_tab_without_a_drawn_field_takes_no_focus(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx);
+    set_links_count(&app, vcx, 3);
+    let old = app.read_with(vcx, |app, _| app.media_search.input.clone());
+    vcx.update(|window, cx| old.update(cx, |input, cx| input.focus(window, cx)));
+    change_tab_in_state(&app, vcx, SharedMediaTab::Links);
+    assert!(vcx.debug_bounds("shared-media-search").is_none());
+    let focused = vcx.update(|window, cx| {
+        app.read(cx)
+            .media_search
+            .input
+            .read(cx)
+            .focus_handle(cx)
+            .is_focused(window)
+    });
+    assert!(
+        !focused,
+        "a field that is not drawn must not hold the cursor"
+    );
 }
