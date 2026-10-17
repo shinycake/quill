@@ -57,8 +57,8 @@ pub enum UpdateState {
     InstallFailed(ReleaseInfo, &'static str),
     Installed(ReleaseInfo),
     /// Downloaded and verified in the background ("Install updates
-    /// automatically"); the path is the install plan the helper applies when
-    /// Quill next quits.
+    /// automatically"); the path is the install plan, applied the next time
+    /// Quill starts or when the user presses "Restart to update".
     Staged(ReleaseInfo, std::path::PathBuf),
     UpToDate,
     NoRelease,

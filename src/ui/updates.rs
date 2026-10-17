@@ -1,6 +1,7 @@
 //! Release checks run off the UI thread. Nothing installs without the user's
-//! click, unless they turned on "Install updates automatically" (then it only
-//! stages, and applies on the next quit).
+//! click, unless they turned on "Install updates automatically": then a new
+//! release is downloaded and staged, and installs the next time Quill starts
+//! (`update_install::apply_on_start`). Quill never restarts itself.
 #![deny(clippy::indexing_slicing)]
 use super::QuillApp;
 use crate::ui::status_note::StatusNote;
@@ -38,12 +39,18 @@ impl QuillApp {
                     this.check_for_updates(cx);
                     return;
                 }
-                this.settings.update_state = state;
-                this.stage_if_opted_in(cx);
-                cx.notify();
+                this.apply_check_result(state, cx);
             });
         })
         .detach();
+        cx.notify();
+    }
+
+    /// The answer of a release check: shown, and staged when the user opted
+    /// in.
+    pub(super) fn apply_check_result(&mut self, state: UpdateState, cx: &mut Context<Self>) {
+        self.settings.update_state = state;
+        self.stage_if_opted_in(cx);
         cx.notify();
     }
 
@@ -91,7 +98,7 @@ impl QuillApp {
             return;
         };
         let release = release.clone();
-        match quill::update_install::launch_helper(plan) {
+        match quill::update_install::hand_off(plan) {
             Ok(()) => {
                 self.settings.update_state = UpdateState::Installing(release);
                 cx.quit();
@@ -120,7 +127,7 @@ impl QuillApp {
             let result = download.await;
             let _ = this.update(cx, |this, cx| {
                 match result {
-                    Ok(plan) => match quill::update_install::launch_helper(&plan) {
+                    Ok(plan) => match quill::update_install::hand_off(&plan) {
                         Ok(()) => {
                             this.settings.update_state = UpdateState::Installing(release);
                             cx.quit();

@@ -203,7 +203,7 @@ fn restore_dir(
     Ok(())
 }
 
-fn remove_any(path: &Path) -> io::Result<()> {
+pub(super) fn remove_any(path: &Path) -> io::Result<()> {
     match fs::symlink_metadata(path) {
         // remove_dir_all never follows links; a link or file goes as itself.
         Ok(meta) if meta.is_dir() => fs::remove_dir_all(path),
@@ -254,7 +254,7 @@ pub fn clear_temp_entries(dir: &Path) -> usize {
 // Windows: file by file inside the install directory.
 
 /// Every regular file under `root`, relative to it. Links are refused.
-fn list_files(root: &Path) -> io::Result<Vec<PathBuf>> {
+pub(super) fn list_files(root: &Path) -> io::Result<Vec<PathBuf>> {
     fn walk(root: &Path, dir: &Path, depth: usize, out: &mut Vec<PathBuf>) -> io::Result<()> {
         if depth > MAX_DEPTH {
             return Err(io::Error::other("Update package is nested too deeply"));

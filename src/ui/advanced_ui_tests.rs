@@ -345,10 +345,11 @@ fn update_section(
     let (app, _shell, mut vcx) = new_app_on(cx, "ready-update-install");
     quill::update_install::force_self_update_available(Some(supported));
     app.update(&mut vcx, |_, cx| cx.notify());
+    let mut shown = false;
     for _ in 0..40 {
         vcx.run_until_parked();
         vcx.update(|window, cx| window.render_frame(cx));
-        let shown = vcx.update(|window, _| {
+        shown = vcx.update(|window, _| {
             window
                 .try_find("install-updates-automatically")
                 .is_some_and(|row| row.visible())
@@ -363,6 +364,7 @@ fn update_section(
             touch_phase: gpui_kit::TouchPhase::Moved,
         });
     }
+    assert!(shown, "the auto-update switch rendered on screen");
     (app, vcx)
 }
 
@@ -398,6 +400,61 @@ fn the_auto_update_switch_is_off_and_disabled_where_the_install_cannot_update_it
         auto_update::install_automatically(),
         "a disabled switch ignores the click (the stored choice is untouched)"
     );
+    auto_update::set_install_automatically(false);
+    quill::update_install::force_self_update_available(None);
+}
+
+/// The call in `check_for_updates`: a release the check found is staged at
+/// once when the user opted in, and only shown otherwise.
+#[gpui_kit::test]
+fn a_release_the_check_finds_is_staged_only_when_opted_in(cx: &mut TestAppContext) {
+    use quill::advanced::auto_update;
+    use quill::updater::{RELEASES_URL, ReleaseAsset, ReleaseInfo, UpdateState};
+    let _guard = AUTO_UPDATE_STATE.lock().unwrap_or_else(|e| e.into_inner());
+    // Forced: the download in the background refuses at once, offline.
+    quill::update_install::force_self_update_available(Some(true));
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let release = ReleaseInfo {
+        version: "999.0.0".into(),
+        notes: String::new(),
+        url: format!("{RELEASES_URL}/tag/v999.0.0"),
+        asset: Some(ReleaseAsset {
+            url: format!(
+                "{RELEASES_URL}/download/v999.0.0/{}",
+                quill::updater::update_asset_name()
+            ),
+            size: 100,
+            sha256: "a".repeat(64),
+        }),
+    };
+    for opted_in in [false, true] {
+        auto_update::set_install_automatically(opted_in);
+        app.update_in(vcx, |app, _, cx| {
+            app.appearance.check_updates_on_launch = true;
+            app.settings.update_state = UpdateState::Idle;
+            app.apply_check_result(UpdateState::Available(release.clone()), cx);
+            let state = &app.settings.update_state;
+            if opted_in {
+                assert!(
+                    matches!(state, UpdateState::Downloading(r) if r.version == "999.0.0"),
+                    "opted in: the release is downloaded and staged"
+                );
+            } else {
+                assert!(
+                    matches!(state, UpdateState::Available(_)),
+                    "opted out: only the card"
+                );
+            }
+        });
+        vcx.run_until_parked();
+    }
+    app.update_in(vcx, |app, _, _| {
+        assert!(
+            matches!(app.settings.update_state, UpdateState::DownloadFailed(..)),
+            "the download finished (offline here) and its result is shown"
+        );
+    });
     auto_update::set_install_automatically(false);
     quill::update_install::force_self_update_available(None);
 }
