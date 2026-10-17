@@ -12,14 +12,16 @@ use super::live_comments::{MESSAGE_SKIP, live_pinned_strip};
 use super::live_state::{effect_progress, level_color, pinned_comments};
 use super::*;
 use crate::ui::calls::stream_view::frame_expands;
+use crate::ui::calls::stream_volume::VolumeHost;
 use crate::ui::message_text::kit_avatar_element;
 use crate::ui::screen_chooser::split_bold;
 use crate::ui::video_player::controls::{
     LiveActions, LiveFacts, LiveInput, LiveOverlayParts, PictureOverlay, PictureState,
-    VideoController,
+    VideoController, VolumeHoverHandler,
 };
 use crate::ui::video_player::{VideoPlayer, follow_live_slot, video_frame};
 use gpui_kit::assets::IconName;
+use gpui_kit::component::slider::SliderState;
 use quill::calls::engine::StreamState;
 use quill::calls::live_video::LiveSink;
 use quill::lang::{trn, trn_with};
@@ -47,19 +49,61 @@ pub(super) fn sender_avatar(session: &Session, sender: MessageSender, size: f32)
 }
 
 impl QuillApp {
-    /// The header's LIVE badge with " {count} viewers", and the sound
-    /// toggle (tdesktop's volume button; Quill mutes only: ntgcalls has
-    /// no gain for the stream's sound): the live controller's header.
-    pub(super) fn live_story_header(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn live_story_volume(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<SliderState>> {
+        self.stories.live.watching?;
+        let call_id = self
+            .session()?
+            .calls
+            .story_stream
+            .as_ref()
+            .map(|call| call.id);
+        self.stream_volume_slider(VolumeHost::LiveStory, call_id, cx)
+    }
+
+    /// The header's LIVE badge with " {count} viewers" and the sound
+    /// toggle (tdesktop's volume button): the live controller's header.
+    pub(super) fn live_story_header(
+        &self,
+        volume: Option<Entity<SliderState>>,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         self.stories.live.watching?;
         let call = self.session()?.calls.story_stream.as_ref()?;
         let muted = self.live_story_muted();
         let view = cx.entity().downgrade();
         let pip_view = view.clone();
+        let pill_view = view.clone();
+        let volume_hover = volume.is_some().then(|| -> VolumeHoverHandler {
+            Rc::new(move |part, inside, _, cx| {
+                let _ = pill_view.update(cx, |this, cx| {
+                    let now = cx.background_executor().now();
+                    let pill = &mut this.stories.live.volume_pill;
+                    let was = pill.open(now);
+                    if let Some(delay) = pill.hover(part, inside, now) {
+                        cx.spawn(async move |this, cx| {
+                            cx.background_executor().timer(delay).await;
+                            let _ = this.update(cx, |_, cx| cx.notify());
+                        })
+                        .detach();
+                    }
+                    if pill.open(now) != was {
+                        cx.notify();
+                    }
+                });
+            })
+        });
+        let now = cx.background_executor().now();
         let facts = LiveFacts {
             viewers: call.viewer_count,
             muted,
-            volume: None,
+            volume_focus: volume
+                .is_some()
+                .then(|| self.stories.live.volume_focus.clone()),
+            volume,
+            volume_open: self.stories.live.volume_pill.open(now),
             fullscreen: false,
         };
         let actions = LiveActions {
@@ -71,6 +115,7 @@ impl QuillApp {
                 let _ = pip_view.update(cx, |this, cx| this.open_story_pip(window, cx));
             })),
             hover: None,
+            volume_hover,
         };
         Some(
             div()

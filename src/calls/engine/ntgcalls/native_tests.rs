@@ -193,3 +193,135 @@ fn group_playback_video_is_external() {
     assert_eq!(screen.media_source, NTG_MEDIA_SOURCE_EXTERNAL);
     assert!(camera.input.is_null() && screen.input.is_null());
 }
+
+mod stream_sound {
+    use crate::calls::engine::{CallbackShared, frames_trampoline};
+    use crate::calls::stream_audio::{PcmFormat, StreamAudio};
+    use ntgcalls_sys::{
+        NTG_STREAM_DEVICE_CAMERA, NTG_STREAM_DEVICE_MICROPHONE, NTG_STREAM_MODE_CAPTURE,
+        NTG_STREAM_MODE_PLAYBACK, NTG_VIDEO_ROTATION_VIDEO_ROTATION_0, ntg_frame, ntg_frame_data,
+        ntg_stream_device, ntg_stream_mode,
+    };
+    use std::ffi::c_void;
+    use std::sync::Arc;
+
+    const CHAT: i64 = -100_777;
+
+    fn frame(ssrc: i64, bytes: &mut [u8]) -> ntg_frame {
+        ntg_frame {
+            ssrc,
+            data: bytes.as_mut_ptr(),
+            data_len: bytes.len(),
+            frame_data: ntg_frame_data {
+                absolute_capture_timestamp_ms: 0,
+                rotation: NTG_VIDEO_ROTATION_VIDEO_ROTATION_0,
+                width: 0,
+                height: 0,
+            },
+        }
+    }
+
+    fn pcm(samples: &[i16]) -> Vec<u8> {
+        samples.iter().flat_map(|s| s.to_ne_bytes()).collect()
+    }
+
+    /// What ntgcalls' frames callback does: one batch for `chat_id`.
+    fn deliver(
+        shared: &CallbackShared,
+        chat_id: i64,
+        mode: ntg_stream_mode,
+        device: ntg_stream_device,
+        frames: &[ntg_frame],
+    ) {
+        let user_data = std::ptr::from_ref(shared).cast_mut().cast::<c_void>();
+        // SAFETY: `frames` and `user_data` outlive this synchronous call, as
+        // ntgcalls guarantees for its own callback.
+        unsafe {
+            frames_trampoline(
+                std::ptr::null_mut(),
+                chat_id,
+                mode,
+                device,
+                frames.as_ptr(),
+                frames.len(),
+                user_data,
+            );
+        }
+    }
+
+    fn routed() -> (CallbackShared, Arc<StreamAudio>) {
+        let shared = CallbackShared::new();
+        let audio = Arc::new(StreamAudio::new(
+            PcmFormat::for_output(48_000, 2),
+            1.0,
+            false,
+        ));
+        shared.route_stream_audio(CHAT, Some(audio.clone()));
+        (shared, audio)
+    }
+
+    #[test]
+    fn a_streams_playback_frames_reach_its_ring_mixed() {
+        let (shared, audio) = routed();
+        let mut a = pcm(&[100, 200, -300, 400]);
+        let mut b = pcm(&[1, 2, 3, 4]);
+        let batch = [frame(1, &mut a), frame(2, &mut b)];
+        deliver(
+            &shared,
+            CHAT,
+            NTG_STREAM_MODE_PLAYBACK,
+            NTG_STREAM_DEVICE_MICROPHONE,
+            &batch,
+        );
+        let mut out = [0i16; 4];
+        assert_eq!(audio.ring().pop(&mut out), 4);
+        assert_eq!(out, [101, 202, -297, 404]);
+        assert_eq!(audio.health().frames, 1);
+    }
+
+    #[test]
+    fn other_chats_and_other_kinds_never_reach_the_ring() {
+        let (shared, audio) = routed();
+        let mut bytes = pcm(&[9, 9]);
+        let batch = [frame(1, &mut bytes)];
+        deliver(
+            &shared,
+            CHAT + 1,
+            NTG_STREAM_MODE_PLAYBACK,
+            NTG_STREAM_DEVICE_MICROPHONE,
+            &batch,
+        );
+        deliver(
+            &shared,
+            CHAT,
+            NTG_STREAM_MODE_CAPTURE,
+            NTG_STREAM_DEVICE_MICROPHONE,
+            &batch,
+        );
+        deliver(
+            &shared,
+            CHAT,
+            NTG_STREAM_MODE_PLAYBACK,
+            NTG_STREAM_DEVICE_CAMERA,
+            &batch,
+        );
+        assert!(audio.ring().is_empty());
+        assert_eq!(audio.health().frames, 0);
+    }
+
+    #[test]
+    fn leaving_the_call_stops_the_routing() {
+        let (shared, audio) = routed();
+        shared.forget_group(CHAT);
+        let mut bytes = pcm(&[5, 5]);
+        let batch = [frame(1, &mut bytes)];
+        deliver(
+            &shared,
+            CHAT,
+            NTG_STREAM_MODE_PLAYBACK,
+            NTG_STREAM_DEVICE_MICROPHONE,
+            &batch,
+        );
+        assert!(audio.ring().is_empty());
+    }
+}

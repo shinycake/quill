@@ -161,6 +161,30 @@ pub trait CallEngine {
         Ok(())
     }
 
+    /// app -> engine; the volume (0.0 to 1.0, the media viewer's) of
+    /// every stream the engine plays itself, now and for later joins.
+    fn set_stream_volume(&mut self, volume: f32) {
+        let _ = volume;
+    }
+
+    /// How the stream in group call `group_call_id` plays through the
+    /// engine's own output; `None` when the engine does not play it
+    /// (not a stream, device playback, no output), so it has no volume.
+    fn stream_sound_health(
+        &self,
+        group_call_id: i32,
+    ) -> Option<crate::calls::stream_audio::watch::PlaybackHealth> {
+        let _ = group_call_id;
+        None
+    }
+
+    /// app -> engine; the self-healing fallback: play the stream in
+    /// `group_call_id` on the device from now on.
+    fn use_device_playback(&mut self, group_call_id: i32) -> Result<(), EngineError> {
+        let _ = group_call_id;
+        Ok(())
+    }
+
     /// Stream mode: engine -> app; register the hook receiving ntgcalls'
     /// broadcast timestamp and part requests. The hook runs on an ntgcalls
     /// thread and must only queue the event.

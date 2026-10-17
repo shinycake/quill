@@ -17,6 +17,7 @@ mod link;
 mod rtmp_start;
 mod share_links;
 mod stream;
+mod stream_sound;
 mod transport;
 
 /// Phase C2f: participant-management request shapes and gates

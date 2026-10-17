@@ -95,6 +95,10 @@ pub(in crate::ui) struct LiveStoryUi {
     pub(in crate::ui) demo_feed: Option<DemoFeed>,
     /// The live controller's states over the picture: when each began.
     pub(super) overlay: crate::ui::video_player::controls::LiveOverlayClock,
+    pub(in crate::ui) volume: Option<Entity<gpui_kit::component::slider::SliderState>>,
+    pub(in crate::ui) volume_pill: crate::ui::calls::stream_volume::VolumePill,
+    pub(in crate::ui) volume_focus: FocusHandle,
+    _volume_focus: [Subscription; 2],
 }
 
 impl LiveStoryUi {
@@ -121,6 +125,7 @@ impl LiveStoryUi {
             },
         )
         .detach();
+        let volume_focus = cx.focus_handle();
         Self {
             input,
             player: None,
@@ -135,6 +140,20 @@ impl LiveStoryUi {
             last_comment: None,
             demo_feed: None,
             overlay: Default::default(),
+            volume: None,
+            volume_pill: Default::default(),
+            _volume_focus: [
+                cx.on_focus_in(&volume_focus, window, |this, window, cx| {
+                    let keyboard = window.last_input_was_keyboard();
+                    this.stories.live.volume_pill.focus(keyboard);
+                    cx.notify();
+                }),
+                cx.on_focus_out(&volume_focus, window, |this, _, _, cx| {
+                    this.stories.live.volume_pill.focus(false);
+                    cx.notify();
+                }),
+            ],
+            volume_focus,
         }
     }
 

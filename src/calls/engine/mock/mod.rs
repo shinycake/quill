@@ -64,6 +64,9 @@ struct MockInner {
     live_frame_hook: Option<LiveFrameCallback>,
     stream_qualities: Vec<(i64, StreamQuality)>,
     group_playbacks: Vec<(i32, Option<String>, bool)>,
+    stream_sound: HashMap<i32, crate::calls::stream_audio::watch::PlaybackHealth>,
+    stream_volumes: Vec<f32>,
+    device_playbacks: Vec<i32>,
     broadcast_timestamps: Vec<(i64, i64)>,
     broadcast_parts: Vec<(i64, BroadcastPartAnswer)>,
     /// External frames pushed through `external_frame_sender`.
@@ -213,6 +216,25 @@ impl MockEngine {
 
     pub fn group_playbacks(&self) -> Vec<(i32, Option<String>, bool)> {
         self.inner.lock_or_recover().group_playbacks.clone()
+    }
+
+    pub fn set_stream_sound(
+        &self,
+        group_call_id: i32,
+        health: crate::calls::stream_audio::watch::PlaybackHealth,
+    ) {
+        self.inner
+            .lock_or_recover()
+            .stream_sound
+            .insert(group_call_id, health);
+    }
+
+    pub fn stream_volumes(&self) -> Vec<f32> {
+        self.inner.lock_or_recover().stream_volumes.clone()
+    }
+
+    pub fn device_playbacks(&self) -> Vec<i32> {
+        self.inner.lock_or_recover().device_playbacks.clone()
     }
 
     pub fn stream_qualities(&self) -> Vec<(i64, StreamQuality)> {
@@ -674,6 +696,28 @@ impl CallEngine for MockEngine {
             speaker.map(str::to_owned),
             muted,
         ));
+        Ok(())
+    }
+
+    fn set_stream_volume(&mut self, volume: f32) {
+        self.inner.lock_or_recover().stream_volumes.push(volume);
+    }
+
+    fn stream_sound_health(
+        &self,
+        group_call_id: i32,
+    ) -> Option<crate::calls::stream_audio::watch::PlaybackHealth> {
+        self.inner
+            .lock_or_recover()
+            .stream_sound
+            .get(&group_call_id)
+            .copied()
+    }
+
+    fn use_device_playback(&mut self, group_call_id: i32) -> Result<(), EngineError> {
+        let mut inner = self.inner.lock_or_recover();
+        inner.stream_sound.remove(&group_call_id);
+        inner.device_playbacks.push(group_call_id);
         Ok(())
     }
 

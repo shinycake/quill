@@ -140,6 +140,18 @@ pub(crate) unsafe extern "C" fn frames_trampoline(
         // Drop unregisters the callback before releasing the Arc; ntgcalls
         // guarantees the frames array for the duration of this call.
         let shared = unsafe { &*user_data.cast::<CallbackShared>() };
+        // Sound reaches this callback only from a stream Quill plays
+        // (external playback writes PLAYBACK+MICROPHONE); every other
+        // call's sound stays on ntgcalls' device output.
+        if mode == NTG_STREAM_MODE_PLAYBACK && device == NTG_STREAM_DEVICE_MICROPHONE {
+            if let Some(audio) = shared.stream_audio.load().get(&user_id) {
+                // SAFETY: frames is non-null with frames_len entries
+                // (checked above); ntgcalls keeps them for this call.
+                let batch = unsafe { std::slice::from_raw_parts(frames, frames_len) };
+                audio.push_frames(batch.iter().filter_map(frame_bytes));
+            }
+            return;
+        }
         // Phase C2g: group-chat routing is checked first; the native callback
         // key is the chat id for group calls and the user id for P2P.
         let group_call = shared
@@ -229,6 +241,15 @@ pub(crate) unsafe extern "C" fn frames_trampoline(
             hook(key, frame);
         }
     })
+}
+
+fn frame_bytes(frame: &ntg_frame) -> Option<&[u8]> {
+    if frame.data.is_null() || frame.data_len == 0 {
+        return None;
+    }
+    // SAFETY: ntgcalls guarantees the frame's byte span for the duration
+    // of the frames callback, which outlives this borrow.
+    Some(unsafe { std::slice::from_raw_parts(frame.data, frame.data_len) })
 }
 
 /// ntgcalls' rotation flag as a live feed carries it.

@@ -37,6 +37,7 @@
 use super::app::QuillApp;
 use super::calls::stream_title::{SEPARATOR_GAP, title_layout, title_rect};
 use super::calls::stream_view::blurred_photo;
+use super::calls::stream_volume::{KEY_STEP, VolumeHost};
 use super::group_call_panel::LEAVE_BG;
 use super::group_call_stream_boxes::StreamOverlay;
 use super::video_player::VideoPlayer;
@@ -47,6 +48,7 @@ use super::video_player::controls::{
 };
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants};
+use gpui_kit::component::slider::SliderState;
 use gpui_kit::component::{Icon, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -130,6 +132,7 @@ pub(crate) struct StreamWindow {
     pub(super) demo_feed: Option<super::calls::demo_feed::DemoFeed>,
     /// Screenshot fixtures and tests: "mute" without a call engine.
     pub(super) demo_muted: bool,
+    pub(super) volume: Option<Entity<SliderState>>,
 }
 
 impl StreamWindow {
@@ -148,6 +151,7 @@ impl StreamWindow {
         self.key_shown = false;
         self.joining = None;
         self.join_timeout = None;
+        self.volume = None;
     }
 }
 
@@ -441,8 +445,9 @@ impl QuillApp {
             &[("count", &quill::premium_hub::group_digits(viewers))],
         );
         let title = title_row(&facts.title, &viewers, full, shown, window);
+        let volume = self.stream_volume_slider(VolumeHost::StreamWindow, Some(facts.id), cx);
         let bar = self
-            .group_call_stream_bar(facts, full, shown, cx)
+            .group_call_stream_bar(facts, volume, full, shown, cx)
             .into_any_element();
         let band = (!full).then(|| self.stream_title_band(cx));
         let share = if self.group_call.share_open {
@@ -537,6 +542,7 @@ impl QuillApp {
     fn group_call_stream_bar(
         &self,
         facts: &StreamFacts,
+        volume: Option<Entity<SliderState>>,
         full: bool,
         shown: f32,
         cx: &mut Context<Self>,
@@ -584,6 +590,7 @@ impl QuillApp {
             pip: Some(Rc::new(move |window, cx| {
                 let _ = pip_view.update(cx, |this, cx| this.open_stream_pip(window, cx));
             })),
+            volume_hover: None,
             hover: Some(Rc::new(move |inside, window, cx| {
                 let active = window.is_window_active();
                 let _ = view.update(cx, |this, cx| {
@@ -610,8 +617,9 @@ impl QuillApp {
         let live = LiveFacts {
             viewers: facts.viewers.max(1),
             muted: self.stream_muted(),
-            // ntgcalls has no gain for a stream's sound: mute only.
-            volume: None,
+            volume,
+            volume_open: false,
+            volume_focus: None,
             fullscreen: full,
         };
         div()
@@ -644,7 +652,7 @@ impl QuillApp {
     }
 
     /// The bar's mute button and the M key: the stream's sound off or on
-    /// for you only, through the call's playback (no gain exists).
+    /// for you only, through the call's playback.
     pub(super) fn toggle_stream_mute(&mut self, cx: &mut Context<Self>) {
         let muted = self.stream_muted();
         match self.live.as_mut() {
@@ -690,6 +698,18 @@ impl QuillApp {
         match action {
             LiveKeyAction::Nothing => {}
             LiveKeyAction::ToggleMute => self.toggle_stream_mute(cx),
+            LiveKeyAction::VolumeUp | LiveKeyAction::VolumeDown => {
+                let step = if action == LiveKeyAction::VolumeUp {
+                    KEY_STEP
+                } else {
+                    -KEY_STEP
+                };
+                let call_id = self
+                    .session()
+                    .and_then(|s| s.calls.active_group_call.as_ref())
+                    .map(|c| c.id);
+                self.step_stream_volume(step, call_id, cx);
+            }
             LiveKeyAction::ToggleFullscreen => toggle_stream_full(window),
             LiveKeyAction::LeaveFullscreen => leave_stream_full(window),
         }

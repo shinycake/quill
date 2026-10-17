@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 mod call_engine;
 mod external;
+mod stream_audio;
 
 /// Phase C2b: safe driver-thread adapter over the runtime-loaded C ABI.
 ///
@@ -32,6 +33,8 @@ pub struct NtgcallsEngine {
     callback: Arc<CallbackShared>,
     /// Feeder threads' access to the native instance (`external.rs`).
     external_gate: Arc<external::ExternalGate>,
+    stream_outputs: HashMap<i32, stream_audio::StreamOutput>,
+    stream_volume: f32,
     _driver_thread_only: PhantomData<Rc<()>>,
 }
 
@@ -73,6 +76,8 @@ impl NtgcallsEngine {
             group_calls: HashMap::new(),
             callback: Arc::new(CallbackShared::new()),
             external_gate: Arc::default(),
+            stream_outputs: HashMap::new(),
+            stream_volume: 1.0,
             _driver_thread_only: PhantomData,
         })
     }
@@ -350,10 +355,15 @@ impl NtgcallsEngine {
             .cloned()
             .ok_or(EngineError::NoSuchCall(group_call_id))?;
         let instance = self.ensure_instance()?;
-        let speaker = self.device_input(speaker, MediaDeviceKind::Speaker)?;
+        let external = self.open_stream_sound(group_call_id, speaker);
+        let speaker_input = match external {
+            Some(_) => None,
+            None => self.device_input(speaker, MediaDeviceKind::Speaker)?,
+        };
         // Everyone else's voices: the call mixes them into its playback
         // "microphone" receiver, which names the output device.
-        let mut speaker_audio = audio_description(speaker.as_ref());
+        let mut speaker_audio =
+            external.unwrap_or_else(|| audio_description(speaker_input.as_ref()));
         // Every picture (a stream's, and participants' camera and screen
         // share in a normal video chat) reaches the frames callback only
         // through external playback writers: ntgcalls v3.0.3
@@ -362,8 +372,9 @@ impl NtgcallsEngine {
         // drops frames without one. NULL descriptions would silently drop
         // all incoming video, so RTC calls pass them too.
         let (mut playback_camera, mut playback_screen) = Self::external_playback_video();
+        let writer_off = media.playback_muted && external.is_none();
         let playback = ntg_media_description {
-            microphone: if media.playback_muted {
+            microphone: if writer_off {
                 null_mut()
             } else {
                 &mut speaker_audio
@@ -382,6 +393,13 @@ impl NtgcallsEngine {
                 playback,
             )
         };
+        if rc != NTG_OK && external.is_some() {
+            eprintln!(
+                "quill: warning: ntgcalls refused external stream sound ({rc}); playing group call {group_call_id} on the device"
+            );
+            self.force_device_playback(group_call_id);
+            return self.issue_group_playback_on(group_call_id, speaker);
+        }
         if rc != NTG_OK {
             return Err(EngineError::Engine {
                 op: "ntg_set_stream_sources",

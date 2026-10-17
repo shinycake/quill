@@ -168,7 +168,10 @@ impl super::app::QuillApp {
             start_prepared_live_connect(credentials, prepared, Arc::new(MemorySink::new()))
         });
         match result {
-            Ok(live) => self.live = Some(live),
+            Ok(mut live) => {
+                live.driver.set_stream_volume(self.playback.volume);
+                self.live = Some(live);
+            }
             Err(blocker) => {
                 self.auth_ui.demo_state = AuthorizationState::WaitPhoneNumber;
                 self.connection.status = match blocker {

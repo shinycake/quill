@@ -529,8 +529,8 @@ impl QuillApp {
         })
     }
 
-    /// The header's sound toggle (tdesktop's volume toggle; Quill has
-    /// mute only): the story's sound only, not the call you are in.
+    /// The header's sound toggle (tdesktop's volume toggle): the story's
+    /// sound only, not the call you are in.
     pub(in crate::ui) fn toggle_live_story_sound(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut()
             && let Some(call_id) = live

@@ -307,6 +307,7 @@ impl CallEngine for NtgcallsEngine {
             .into_owned();
         // SAFETY: `out` came from ntgcalls and is freed once, after the copy.
         unsafe { (self.api.ntg_string_free)(out) };
+        self.close_stream_output(group_call_id);
         self.group_calls.insert(
             group_call_id,
             GroupCallMedia {
@@ -339,14 +340,34 @@ impl CallEngine for NtgcallsEngine {
             .group_calls
             .get_mut(&group_call_id)
             .ok_or(EngineError::NoSuchCall(group_call_id))?;
-        let changed = media.speaker.as_deref() != speaker || media.playback_muted != muted;
+        let speaker_changed = media.speaker.as_deref() != speaker;
+        let changed = speaker_changed || media.playback_muted != muted;
         media.speaker = speaker.map(str::to_owned);
         media.playback_muted = muted;
-        if changed && media.connected {
+        let connected = media.connected;
+        if !speaker_changed && self.try_mute_quill_stream(group_call_id, muted) {
+            return Ok(());
+        }
+        if changed && connected {
             self.issue_group_playback(group_call_id)
         } else {
             Ok(())
         }
+    }
+
+    fn set_stream_volume(&mut self, volume: f32) {
+        self.apply_stream_volume(volume);
+    }
+
+    fn stream_sound_health(
+        &self,
+        group_call_id: i32,
+    ) -> Option<crate::calls::stream_audio::watch::PlaybackHealth> {
+        self.stream_health(group_call_id)
+    }
+
+    fn use_device_playback(&mut self, group_call_id: i32) -> Result<(), EngineError> {
+        self.fall_back_to_device(group_call_id)
     }
 
     fn set_group_muted(&mut self, group_call_id: i32, muted: bool) -> Result<(), EngineError> {
@@ -743,6 +764,7 @@ impl CallEngine for NtgcallsEngine {
 
     fn leave_group_call(&mut self, group_call_id: i32) -> Result<(), EngineError> {
         // Unknown group call ids succeed: leave is cleanup, never an error.
+        self.close_stream_output(group_call_id);
         let Some(media) = self.group_calls.remove(&group_call_id) else {
             return Ok(());
         };
