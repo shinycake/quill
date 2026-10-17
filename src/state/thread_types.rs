@@ -58,6 +58,10 @@ pub struct ThreadView {
     pub stale_pages: HashSet<u64>,
     /// The unread divider goes above the first incoming reply after this id.
     pub unread_anchor: Option<MessageId>,
+    /// The thread opens at its saved scroll position: the first page loads
+    /// around this reply (instead of the read position) and the UI holds
+    /// its first anchoring until that page lands. Taken by the page.
+    pub saved_anchor: Option<MessageId>,
     /// Bumped by "jump to root" so the view scrolls to the top again.
     pub root_jump_serial: u64,
     /// `chat_id` differs from `open_chat`: the driver still has to open it.
@@ -94,6 +98,7 @@ impl ThreadView {
             reload_needed: false,
             stale_pages: HashSet::new(),
             unread_anchor: None,
+            saved_anchor: None,
             root_jump_serial: 0,
             needs_chat_switch: false,
             reading_started: false,

@@ -507,6 +507,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let send_outcome = Self::send_outcome(&owned.envelope.payload);
         self.session.apply(owned);
         self.run_deferred_caption(send_outcome);
+        // A saved open that missed its message loads the default window
+        // on this tick, whatever the `?` returns below do.
+        self.load_default_after_saved_open();
         if paid_prices_change {
             self.sync_paid_guard();
         }

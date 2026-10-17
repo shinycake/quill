@@ -380,6 +380,15 @@ pub struct HistoryState {
     /// Bumped whenever the window is replaced, so the UI re-anchors its
     /// scroll position (unread divider, jump target, or bottom).
     pub window_epoch: u64,
+    /// The chat was opened at its saved scroll position and the window
+    /// around that message is still loading: the UI holds the first
+    /// anchoring until it lands, so the position is restored with the
+    /// first rows. Cleared by the answer, its failure, or a window reset.
+    pub saved_open: Option<MessageId>,
+    /// The saved message was not in the window loaded around it (deleted)
+    /// or that load failed: the window was emptied and the driver loads
+    /// the default one (`Session::take_saved_open_fallback`).
+    pub saved_open_missed: bool,
     /// Newest server message id ever seen for this chat (survives window
     /// resets): a lower bound for the chat's latest message when the chat
     /// summary doesn't carry one.
@@ -413,6 +422,7 @@ impl HistoryState {
         self.has_newer = false;
         self.newer_failed = false;
         self.load_failed = false;
+        self.saved_open = None;
         self.window_epoch = self.window_epoch.wrapping_add(1);
     }
 

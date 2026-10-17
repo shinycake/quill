@@ -247,6 +247,11 @@ impl QuillApp {
     /// window whatever state is in place.
     pub(super) fn note_history_scroll(&mut self, cx: &mut Context<Self>) {
         self.in_window_scope(None, cx, |this, cx| {
+            // Record where the reader is now: the saved position follows
+            // every scroll, not only the next full render.
+            if let Some(key) = this.history.key {
+                this.remember_scroll(key, cx);
+            }
             // Pinned to the live edge, rows only move because messages arrive.
             if this.history.scroller.read(cx).is_following_tail() {
                 return;

@@ -74,6 +74,11 @@ impl Session {
                 if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
                     && !self.take_stale_history_request(pending)
+                    // A failed load around a saved position falls back to
+                    // the default window instead.
+                    && !pending
+                        .around_message_id
+                        .is_some_and(|anchor| self.settle_saved_open(chat_id, anchor))
                 {
                     // R5: the empty window shows "Couldn't load messages ·
                     // Retry" instead of a skeleton that never settles.

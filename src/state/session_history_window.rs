@@ -206,6 +206,77 @@ impl Session {
         }
     }
 
+    /// Prepare the window for a chat opened at `open` (after `open_chat`).
+    /// A saved position keeps a window that holds its message; otherwise
+    /// the window is replaced and the load around the message becomes the
+    /// open (`HistoryState::saved_open`). Anything else is
+    /// [`Self::prepare_history_window`]. Returns the message the first page
+    /// must load around.
+    pub fn prepare_history_window_at(
+        &mut self,
+        chat_id: ChatId,
+        open: HistoryOpen,
+    ) -> Option<MessageId> {
+        let HistoryOpen::Saved(anchor) = open else {
+            self.prepare_history_window(chat_id);
+            return None;
+        };
+        if self
+            .histories
+            .get(&chat_id.0)
+            .is_some_and(|history| history.contains(anchor))
+        {
+            return None;
+        }
+        self.reset_history_window(chat_id);
+        self.histories.entry(chat_id.0).or_default().saved_open = Some(anchor);
+        Some(anchor)
+    }
+
+    /// The load around a saved position answered or failed, so the first
+    /// rows can anchor. Without its message (deleted, or the load failed)
+    /// the window is emptied and the default one loads instead. Returns
+    /// whether `anchor` was that load.
+    pub(crate) fn settle_saved_open(&mut self, chat_id: ChatId, anchor: MessageId) -> bool {
+        let Some(history) = self
+            .histories
+            .get_mut(&chat_id.0)
+            .filter(|history| history.saved_open == Some(anchor))
+        else {
+            return false;
+        };
+        history.saved_open = None;
+        if !history.contains(anchor) {
+            history.reset_window();
+            history.saved_open_missed = true;
+        }
+        true
+    }
+
+    /// A saved-position load was dropped unanswered (stale view, chat no
+    /// longer shown): nothing is left waiting for it.
+    pub(crate) fn drop_saved_open(&mut self, chat_id: Option<ChatId>) {
+        if let Some(history) = chat_id.and_then(|id| self.histories.get_mut(&id.0)) {
+            history.saved_open = None;
+        }
+    }
+
+    /// The open chat missed its saved position and needs its default
+    /// window loaded (taken once).
+    pub fn take_saved_open_fallback(&mut self) -> Option<ChatId> {
+        let chat_id = self.open_chat?;
+        let history = self.histories.get_mut(&chat_id.0)?;
+        std::mem::take(&mut history.saved_open_missed).then_some(chat_id)
+    }
+
+    /// The window of `chat_id` is still loading around its saved position:
+    /// the first anchoring waits for it.
+    pub fn saved_open_pending(&self, chat_id: ChatId) -> bool {
+        self.histories
+            .get(&chat_id.0)
+            .is_some_and(|history| history.saved_open.is_some())
+    }
+
     /// Recompute whether the window stops short of the chat's latest
     /// message after a page landed.
     pub(crate) fn refresh_history_has_newer(&mut self, chat_id: ChatId) {

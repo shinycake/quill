@@ -145,6 +145,7 @@ impl Session {
         {
             return;
         }
+        let first_page = !newer && thread.saved_anchor.is_some();
         let empty = messages.is_empty();
         let mut added = 0usize;
         let mut oldest_reply: Option<i64> = None;
@@ -181,6 +182,15 @@ impl Session {
             thread.refresh_has_newer();
         }
         thread.history.total_count = thread.history.messages.len() as i32;
+        // The page around the saved position landed without its reply
+        // (deleted): load the default first page instead.
+        if first_page
+            && let Some(anchor) = thread.saved_anchor.take()
+            && !thread.history.messages.contains_key(&anchor.0)
+        {
+            thread.reset_window();
+            return;
+        }
         if thread.status == ThreadStatus::LoadingHistory {
             thread.status = ThreadStatus::Ready;
         }
@@ -211,9 +221,33 @@ impl Session {
         }
         if newer {
             thread.newer_failed = true;
+        } else if thread.saved_anchor.take().is_some() {
+            // The page around the saved position failed: load the default
+            // first page instead.
+            thread.reset_window();
         } else if thread.status != ThreadStatus::Ready {
             thread.status = ThreadStatus::Failed(line);
         }
+    }
+
+    /// Open the resolved thread at `anchor`, its saved scroll position,
+    /// before the first page is requested.
+    pub fn open_thread_at_saved(&mut self, anchor: Option<MessageId>) {
+        if let Some(thread) = self
+            .threads
+            .thread
+            .as_mut()
+            .filter(|thread| !thread.reading_started)
+        {
+            thread.saved_anchor = anchor;
+        }
+    }
+
+    /// The open thread's window is still loading around its saved
+    /// position: the first anchoring waits for it.
+    pub fn thread_saved_open_pending(&self, chat_id: ChatId) -> bool {
+        self.thread_for_chat(chat_id)
+            .is_some_and(|thread| thread.saved_anchor.is_some())
     }
 
     /// Replace the open thread's window (jump to the latest replies): the
