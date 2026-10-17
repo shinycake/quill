@@ -111,6 +111,9 @@ pub struct SupergroupFullInfoData {
     /// B7: the flags behind the group admin toggles (history for new
     /// members, hidden members, paid reactions).
     pub admin: crate::telegram::envelope::SupergroupFullAdmin,
+    /// Links, mentions and hashtags in `description`, parsed by TDLib when
+    /// the info arrives (`crate::text::about`).
+    pub description_entities: Vec<crate::text::TextEntity>,
 }
 
 impl Default for SupergroupFullInfoData {
@@ -130,6 +133,7 @@ impl Default for SupergroupFullInfoData {
             sticker_set_id: 0,
             custom_emoji_sticker_set_id: 0,
             admin: Default::default(),
+            description_entities: Vec::new(),
         }
     }
 }
