@@ -502,6 +502,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 ### Groups, supergroups & channels
 
 - [x] Group/channel info panel with description and member/subscriber count (src/ui/mod.rs:8280) <!-- parity:groups-info-panel -->
+- [ ] Full member and subscriber count with digit grouping ("12,345 subscribers") in the chat header and profile cover, as in tdesktop (the info members block has it since #985) <!-- parity:groups-count-decimal -->
 - [x] Create new group via `createNewBasicGroupChat` (title + member picker, sidebar "New group") (src/ui/mod.rs) <!-- parity:groups-create-group -->
 - [x] Create new supergroup/channel via `createNewSupergroupChat` (title + description only — no forum toggle, no member picker; `is_forum` is sent false and the schema takes no member IDs, so members are added after creation from the member dialog; sidebar "New supergroup" / "New channel") (src/ui/mod.rs) <!-- parity:groups-create-channel -->
 - [x] Convert supergroup to broadcast group — one-way (`toggleSupergroupIsBroadcastGroup`, no reverse in schema :15221 or Telegram X; owner-only, destructive confirm) (src/ui/mod.rs) <!-- parity:groups-convert-broadcast -->
@@ -1070,6 +1071,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Remove shown notifications when the chat is read on another device <!-- parity:notify-clear-read-elsewhere -->
 - [x] Reaction notifications ("X reacted to your message") <!-- parity:notify-reactions-dispatch -->
 - [x] Desktop notification options: position, count, display, volume (partial: volume shipped; position, count and display only apply to custom notification windows, and Quill uses system notifications) <!-- parity:notify-desktop-options -->
+- [x] Notification sound volume for private chats, groups and channels, and per chat from the mute menu, kept per account (#984) <!-- parity:notify-volume-scopes -->
 - [x] Flash the taskbar or bounce the Dock for new messages <!-- parity:notify-alert-attention -->
 - [x] Show notifications from all accounts <!-- parity:notify-all-accounts -->
 - [x] Respect system Focus and Do Not Disturb <!-- parity:notify-focus-dnd -->
