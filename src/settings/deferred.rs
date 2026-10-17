@@ -1,0 +1,224 @@
+//! Settings writes that keep the disk off the UI thread.
+//!
+//! The atomic write syncs the file, which can stall for tens of
+//! milliseconds on a slow or scanned disk. [`write_json_deferred`]
+//! serializes on the caller's thread (the value is small) and hands the
+//! bytes to a short-lived writer thread. Pending writes are coalesced by
+//! path, so the newest bytes for a path win and earlier ones are dropped.
+//! Each write is still the atomic temp-file-and-rename, and
+//! [`flush_deferred_writes`] waits for everything queued, for quitting.
+
+use super::{json_bytes, write_bytes_atomic};
+use serde::Serialize;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
+use std::time::{Duration, Instant};
+
+type Sink = dyn Fn(&Path, &[u8]) + Send + Sync;
+
+#[derive(Default)]
+struct State {
+    pending: HashMap<PathBuf, Vec<u8>>,
+    writer_running: bool,
+}
+
+struct Shared {
+    state: Mutex<State>,
+    idle: Condvar,
+    sink: Box<Sink>,
+}
+
+impl Shared {
+    fn lock(&self) -> MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+/// Coalescing, latest-wins background writer.
+#[derive(Clone)]
+pub(crate) struct DeferredWriter {
+    shared: Arc<Shared>,
+}
+
+impl DeferredWriter {
+    pub(crate) fn new(sink: Box<Sink>) -> Self {
+        Self {
+            shared: Arc::new(Shared {
+                state: Mutex::new(State::default()),
+                idle: Condvar::new(),
+                sink,
+            }),
+        }
+    }
+
+    /// Queue `bytes` for `path`, replacing anything still queued for it.
+    pub(crate) fn submit(&self, path: PathBuf, bytes: Vec<u8>) {
+        let start = {
+            let mut state = self.shared.lock();
+            state.pending.insert(path, bytes);
+            !std::mem::replace(&mut state.writer_running, true)
+        };
+        if start && !self.spawn_writer() {
+            self.drain();
+        }
+    }
+
+    /// The bytes still queued for `path`, so a read sees a write that has
+    /// not reached the disk yet.
+    pub(crate) fn pending(&self, path: &Path) -> Option<Vec<u8>> {
+        self.shared.lock().pending.get(path).cloned()
+    }
+
+    fn spawn_writer(&self) -> bool {
+        let this = self.clone();
+        std::thread::Builder::new()
+            .name("quill-settings-writer".into())
+            .spawn(move || this.drain())
+            .is_ok()
+    }
+
+    /// Write what is queued until nothing is left, then mark the writer
+    /// stopped. Runs on the writer thread, or inline if none could start.
+    fn drain(&self) {
+        loop {
+            let batch = {
+                let mut state = self.shared.lock();
+                if state.pending.is_empty() {
+                    state.writer_running = false;
+                    self.shared.idle.notify_all();
+                    return;
+                }
+                std::mem::take(&mut state.pending)
+            };
+            for (path, bytes) in &batch {
+                (self.shared.sink)(path, bytes);
+            }
+        }
+    }
+
+    /// Wait until everything queued is written, or `timeout` passes.
+    pub(crate) fn flush(&self, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        let mut state = self.shared.lock();
+        while state.writer_running || !state.pending.is_empty() {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return;
+            }
+            state = match self.shared.idle.wait_timeout(state, left) {
+                Ok((guard, _)) => guard,
+                Err(poisoned) => poisoned.into_inner().0,
+            };
+        }
+    }
+}
+
+fn global() -> &'static DeferredWriter {
+    static WRITER: OnceLock<DeferredWriter> = OnceLock::new();
+    WRITER.get_or_init(|| {
+        DeferredWriter::new(Box::new(|path, bytes| {
+            let _ = write_bytes_atomic(path, bytes);
+        }))
+    })
+}
+
+/// Save `value` as JSON at `path` without waiting for the disk. A newer
+/// call for the same path replaces one still waiting.
+pub(crate) fn write_json_deferred<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
+    global().submit(path.to_path_buf(), json_bytes(value)?);
+    Ok(())
+}
+
+/// The bytes of `path`, from the queue when a write is still waiting.
+pub(crate) fn read_with_pending(path: &Path) -> std::io::Result<Vec<u8>> {
+    match global().pending(path) {
+        Some(bytes) => Ok(bytes),
+        None => std::fs::read(path),
+    }
+}
+
+/// Wait for every deferred write; call when the app quits.
+pub fn flush_deferred_writes() {
+    global().flush(Duration::from_secs(5));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DeferredWriter;
+    use std::path::{Path, PathBuf};
+    use std::sync::mpsc;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    type Log = Arc<Mutex<Vec<(PathBuf, Vec<u8>)>>>;
+
+    /// A writer whose sink tells `entered` it started, then waits on `gate`.
+    fn recording(gate: Option<(mpsc::Receiver<()>, mpsc::Sender<()>)>) -> (DeferredWriter, Log) {
+        let log: Log = Arc::default();
+        let seen = log.clone();
+        let gate = Mutex::new(gate);
+        let writer = DeferredWriter::new(Box::new(move |path, bytes| {
+            if let Ok(gate) = gate.lock()
+                && let Some((gate, entered)) = gate.as_ref()
+            {
+                let _ = entered.send(());
+                let _ = gate.recv_timeout(Duration::from_secs(5));
+            }
+            if let Ok(mut log) = seen.lock() {
+                log.push((path.to_path_buf(), bytes.to_vec()));
+            }
+        }));
+        (writer, log)
+    }
+
+    #[test]
+    fn last_write_wins_while_a_write_is_in_flight() {
+        let (open, gate) = mpsc::channel();
+        let (entered_tx, entered) = mpsc::channel();
+        let (writer, log) = recording(Some((gate, entered_tx)));
+        let path = PathBuf::from("/x/prefs.json");
+        writer.submit(path.clone(), b"a".to_vec());
+        assert!(entered.recv_timeout(Duration::from_secs(5)).is_ok());
+        // The first write is stuck in the sink; these queue behind it.
+        writer.submit(path.clone(), b"b".to_vec());
+        writer.submit(path.clone(), b"c".to_vec());
+        assert_eq!(writer.pending(&path), Some(b"c".to_vec()));
+        for _ in 0..3 {
+            let _ = open.send(());
+        }
+        writer.flush(Duration::from_secs(5));
+        let written: Vec<Vec<u8>> = log
+            .lock()
+            .map(|l| l.iter().map(|(_, b)| b.clone()).collect())
+            .unwrap_or_default();
+        assert_eq!(written, vec![b"a".to_vec(), b"c".to_vec()]);
+        assert_eq!(writer.pending(&path), None);
+    }
+
+    #[test]
+    fn different_paths_are_each_written_and_flush_waits() {
+        let (writer, log) = recording(None);
+        for name in ["a.json", "b.json", "c.json"] {
+            writer.submit(Path::new("/x").join(name), name.as_bytes().to_vec());
+        }
+        writer.flush(Duration::from_secs(5));
+        let count = log.lock().map(|l| l.len()).unwrap_or(0);
+        assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn writes_reach_disk_atomically_and_flush_on_quit() {
+        let dir = std::env::temp_dir().join(format!("quill-deferred-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("prefs.json");
+        let writer = DeferredWriter::new(Box::new(|path, bytes| {
+            let _ = super::write_bytes_atomic(path, bytes);
+        }));
+        writer.submit(path.clone(), b"{\"a\":1}".to_vec());
+        writer.submit(path.clone(), b"{\"a\":2}".to_vec());
+        writer.flush(Duration::from_secs(5));
+        assert_eq!(std::fs::read(&path).ok(), Some(b"{\"a\":2}".to_vec()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

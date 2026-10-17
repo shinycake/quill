@@ -148,9 +148,8 @@ impl Drop for CameraStream {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
         let child = self.child.lock_or_recover().take();
-        if let Some(mut child) = child {
-            let _ = child.kill();
-            let _ = child.wait();
+        if let Some(child) = child {
+            crate::child_reap::kill_and_reap(child);
         }
     }
 }

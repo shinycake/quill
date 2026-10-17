@@ -104,7 +104,7 @@ pub fn store(prefs: NotifyPrefs) {
     if PERSIST.load(Ordering::SeqCst)
         && let Some(path) = prefs_path()
     {
-        let _ = crate::settings::write_json_atomic(&path, &prefs);
+        let _ = crate::settings::write_json_deferred(&path, &prefs);
     }
     if let Ok(mut guard) = PREFS.write() {
         *guard = Some(prefs);
@@ -125,22 +125,15 @@ pub fn set_volume_memory(percent: u8) {
     }
 }
 
-/// Save the in-memory preferences on a worker thread (the write syncs the
-/// disk).
+/// Save the in-memory preferences through the background settings writer
+/// (the write syncs the disk).
 pub fn persist() {
     if !PERSIST.load(Ordering::SeqCst) {
         return;
     }
-    let spawned = std::thread::Builder::new()
-        .name("quill-notify-prefs".into())
-        .spawn(|| {
-            static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-            let _guard = WRITE_LOCK.lock();
-            if let Some(path) = prefs_path() {
-                let _ = crate::settings::write_json_atomic(&path, &current());
-            }
-        });
-    drop(spawned);
+    if let Some(path) = prefs_path() {
+        let _ = crate::settings::write_json_deferred(&path, &current());
+    }
 }
 
 /// Change some preferences and save them.

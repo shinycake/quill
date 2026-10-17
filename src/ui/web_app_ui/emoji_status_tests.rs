@@ -4,6 +4,7 @@
 
 use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::ScreenshotDemo;
+use crate::ui::web_app_ui::helper_pipe::HelperWriter;
 use crate::ui::web_app_ui::{MiniAppWindow, PopupPurpose, theme_params};
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
@@ -65,8 +66,9 @@ fn open_window(
         }),
     );
     app.mini_apps.window = Some(MiniAppWindow {
-        child,
-        stdin,
+        child: Some(child),
+        writer: HelperWriter::spawn(stdin),
+        wedged: false,
         events: mpsc::channel().1,
         launch: WebAppLaunch {
             bot_user_id: BOT,

@@ -39,8 +39,7 @@ use quill_webview_protocol::{
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::io::{BufRead, Write};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::rc::Rc;
 use std::sync::mpsc;
 use std::time::Duration;
@@ -141,8 +140,10 @@ enum RenderAction {
 
 /// The helper process and the app it shows.
 pub(super) struct MiniAppWindow {
-    child: Child,
-    stdin: ChildStdin,
+    child: Option<Child>,
+    writer: helper_pipe::HelperWriter,
+    /// Set once the helper stopped reading and was killed.
+    wedged: bool,
     events: mpsc::Receiver<HelperEvent>,
     launch: WebAppLaunch,
     theme: ThemeParams,
@@ -160,24 +161,27 @@ pub(super) struct MiniAppWindow {
 
 impl Drop for MiniAppWindow {
     fn drop(&mut self) {
-        let _ = self.stdin.write_all(encode(&HostCommand::Close).as_bytes());
-        let _ = self.stdin.flush();
-        // Give it a moment to exit on its own, then make sure.
-        for _ in 0..20 {
-            if matches!(self.child.try_wait(), Ok(Some(_))) {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(10));
+        // Ask it to close, then reap on a detached thread: neither the
+        // queue nor the wait can hold up the UI thread.
+        let _ = self.writer.send(encode(&HostCommand::Close).into_bytes());
+        if let Some(child) = self.child.take() {
+            quill::child_reap::reap_after(child, Duration::from_millis(200));
         }
-        let _ = self.child.kill();
-        let _ = self.child.wait();
     }
 }
 
 impl MiniAppWindow {
     fn send(&mut self, command: &HostCommand) {
-        let _ = self.stdin.write_all(encode(command).as_bytes());
-        let _ = self.stdin.flush();
+        if self.writer.send(encode(command).into_bytes()) == helper_pipe::Sent::Queued
+            || self.wedged
+        {
+            return;
+        }
+        self.wedged = true;
+        eprintln!("quill: the mini app helper stopped reading its input; closing it");
+        if let Some(child) = self.child.as_mut() {
+            let _ = child.kill();
+        }
     }
 
     fn emit(&mut self, reply: BridgeReply) {
@@ -914,6 +918,7 @@ fn bottom_button(setup: quill::web_app::bridge::ButtonSetup) -> BottomButton {
 }
 
 mod emoji_status;
+mod helper_pipe;
 mod inline_results_button;
 mod spawn_mini_app_window;
 

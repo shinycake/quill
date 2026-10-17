@@ -704,6 +704,7 @@ impl QuillApp {
         QUIT_FLUSH.call_once(|| {
             cx.on_app_quit(|_, _| {
                 quill::settings::flush_window_state();
+                quill::settings::flush_deferred_writes();
                 async {}
             })
             .detach();

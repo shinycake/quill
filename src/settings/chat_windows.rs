@@ -84,17 +84,19 @@ pub fn load_chat_windows() -> ChatWindowsState {
 }
 
 pub fn load_chat_windows_from(path: &Path) -> ChatWindowsState {
-    std::fs::read(path)
+    super::read_with_pending(path)
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default()
 }
 
+/// Queue the state for a background write (the caller is on the UI thread);
+/// a load sees it at once and quitting flushes it.
 pub fn save_chat_windows(state: &ChatWindowsState) -> std::io::Result<()> {
     let path = path().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::NotFound, "no app data directory")
     })?;
-    save_chat_windows_to(&path, state)
+    super::write_json_deferred(&path, state)
 }
 
 pub fn save_chat_windows_to(path: &Path, state: &ChatWindowsState) -> std::io::Result<()> {
