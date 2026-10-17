@@ -582,10 +582,18 @@ impl QuillApp {
         // tdesktop's channel actions: Join Channel, Leave channel (in the
         // management section), then Report for a channel the viewer does
         // not own.
-        if is_channel {
-            body = body.children(self.channel_join_row(chat_id, cx));
+        let join_row = if is_channel {
+            self.channel_join_row(chat_id, cx)
+        } else {
+            None
+        };
+        // A channel the viewer has not joined has nothing to manage, so the
+        // section (an empty header) is left out.
+        let not_joined = join_row.is_some();
+        body = body.children(join_row);
+        if !not_joined {
+            body = body.child(self.group_management_section(chat_id, is_channel, false, cx));
         }
-        body = body.child(self.group_management_section(chat_id, is_channel, false, cx));
         if is_channel {
             body = body.children(self.channel_report_row(chat_id, cx));
         }
