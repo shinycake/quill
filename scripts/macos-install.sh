@@ -17,6 +17,8 @@
 #   QUILL_NO_OPEN=1    don't open Quill when done
 set -euo pipefail
 
+# Braces: piped into bash, nothing runs until the whole script has arrived.
+{
 REPO=shinycake/quill
 ASSET=quill-macos-aarch64.zip
 
@@ -84,7 +86,7 @@ exe="$app/Contents/MacOS/quill"
 running() { pgrep -f "^$exe( |$)" >/dev/null; }
 if running; then
   say "Quitting Quill to update it"
-  "$exe" --quit >/dev/null 2>&1 || true
+  "$exe" --quit </dev/null >/dev/null 2>&1 || true
   for _ in $(seq 1 20); do running || break; sleep 0.5; done
   ! running || die "Quill is still running; quit it and run this again"
 fi
@@ -102,3 +104,5 @@ say "Installed Quill $version to $app"
 if [ "${QUILL_NO_OPEN:-}" != 1 ]; then
   open "$app"
 fi
+exit 0
+}
