@@ -3,7 +3,8 @@
 //! hours ago, edited, and shown to contacts only, so the header carries the
 //! age, "edited", the position and the privacy badge. The second story
 //! reposts the first, so it shows the "Reposted from" link; the third
-//! reposts a story the demo never caches.
+//! reposts a story the demo never caches (`ready-story-repost-gone` marks
+//! it gone).
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
@@ -30,9 +31,23 @@ register_demos![
         "screenshot demo — photo story with its age, edited mark and privacy badge"
     )
     .setup(QuillApp::demo_story_photo),
+    DemoSpec::chats(
+        "ready-story-repost-gone",
+        "screenshot demo — the photo stories, the third reposting a story known to be gone"
+    )
+    .setup(QuillApp::demo_story_repost_gone),
 ];
 
 impl QuillApp {
+    /// As `ready-story-photo`, with `getStory` having said the third
+    /// story's origin is gone, so its press opens the poster's profile.
+    fn demo_story_repost_gone(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.demo_story_photo(window, cx);
+        if let Some(session) = self.demo_session.as_mut() {
+            session.stories.missing.insert((CHANNEL, GONE_ORIGIN));
+        }
+    }
+
     fn demo_story_photo(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = self.demo_session.as_mut() else {
             return;
