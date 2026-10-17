@@ -73,7 +73,8 @@ is shown, as it is today for a jump or an unread open, and the anchoring still w
   default and is forgotten.
 
 ## Verified
-Demo `ready-chats` with `QUILL_DEMO_STRESS=3,300`: wheel up 300 in Demo chat A, Demo chat B, Demo
-chat A, twice. See the PR for the light and dark captures.
+Demo `ready-chats` with `QUILL_DEMO_STRESS=3,300`: a 300 px wheel scroll in Demo chat A, then Demo
+chat B, Demo chat A, twice. After both round trips the view equals the one left (stress messages 3
+to 9 at the same offsets), light and dark.
 Not shown: real TDLib round trips (the demo history is all in memory, so the restore there is the
 in-window case; the around-load is covered by the driver tests).
