@@ -47,15 +47,18 @@ fn a_search_without_matches_says_no_groups_found(cx: &mut TestAppContext) {
     };
     assert!(vcx.update(|window, _| window.try_find("info-common-groups-empty").is_none()));
     app.update_in(&mut vcx, |app, window, cx| {
-        if let Some(search) = app.common_groups.search.as_ref() {
-            search
-                .input
-                .update(cx, |input, cx| input.set_value("zzzz", window, cx));
+        if let Some(input) = app.common_groups.search_input() {
+            input.update(cx, |input, cx| input.set_value("zzzz", window, cx));
         }
         cx.notify();
     });
     for _ in 0..3 {
         vcx.update(|window, cx| window.render_frame(cx));
     }
-    assert!(vcx.update(|window, _| window.try_find("info-common-groups-empty").is_some()));
+    let label = vcx.update(|window, _| {
+        window
+            .try_find("info-common-groups-empty")
+            .and_then(|row| row.label().map(str::to_string))
+    });
+    assert_eq!(label.as_deref(), Some("No groups found"));
 }

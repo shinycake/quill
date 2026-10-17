@@ -12,13 +12,22 @@ use quill::state::GROUPS_IN_COMMON_SEARCH_MIN;
 /// The search field above the list, made when the profile opens.
 #[derive(Default)]
 pub(in crate::ui) struct CommonGroupsUi {
-    pub(super) search: Option<CommonGroupsSearch>,
+    search: Option<CommonGroupsSearch>,
 }
 
-pub(super) struct CommonGroupsSearch {
+struct CommonGroupsSearch {
     user_id: i64,
-    pub(super) input: Entity<TextareaState>,
+    input: Entity<TextareaState>,
     _subscription: Subscription,
+}
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+impl CommonGroupsUi {
+    /// The search field, for tests that type into it.
+    pub(super) fn search_input(&self) -> Option<&Entity<TextareaState>> {
+        self.search.as_ref().map(|search| &search.input)
+    }
 }
 
 impl QuillApp {
@@ -152,6 +161,7 @@ impl QuillApp {
                     column.child(
                         div()
                             .id("info-common-groups-empty")
+                            .aria_label(tr(keys::BOT_GROUPS_NOT_FOUND))
                             .test_support()
                             .px_2()
                             .py_1p5()
