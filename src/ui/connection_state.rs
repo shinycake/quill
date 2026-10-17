@@ -3,6 +3,8 @@
 
 use super::connect_ui::ConnectUiStatus;
 use super::status_note::{NoteKind, StatusNote};
+use super::toast_queue::ToastQueue;
+use std::time::Instant;
 
 pub(crate) struct ConnectionUi {
     pub(super) status: ConnectUiStatus,
@@ -14,10 +16,10 @@ pub(crate) struct ConnectionUi {
     /// The current note. Private: every write names its kind through
     /// `set_note`, so a toast never depends on the words.
     note: StatusNote,
-    /// The note the toast last showed, and when it appeared: a changed note
-    /// restarts the toast's timer.
-    pub(super) status_seen: StatusNote,
-    pub(super) status_shown_at: Option<std::time::Instant>,
+    /// The toasts on screen and waiting, with the visible one's timer.
+    pub(super) toasts: ToastQueue,
+    /// The deadline a wake-up is already scheduled for.
+    pub(super) toast_wake: Option<Instant>,
     /// The last status note printed by `QUILL_TRACE_STATUS`.
     pub(super) status_traced: String,
     /// Batch 4: the last `online` value sent to TDLib.
@@ -31,8 +33,8 @@ impl ConnectionUi {
             generation: 0,
             closed_noted_generation: None,
             note: StatusNote::new(NoteKind::Silent, status_note),
-            status_seen: StatusNote::default(),
-            status_shown_at: None,
+            toasts: ToastQueue::default(),
+            toast_wake: None,
             status_traced: String::new(),
             presence: Default::default(),
         }
@@ -47,6 +49,7 @@ impl ConnectionUi {
         if note.kind() == NoteKind::Silent && self.note.is_toast() {
             return;
         }
+        self.toasts.push(note.clone(), Instant::now());
         self.note = note;
     }
 
@@ -63,6 +66,16 @@ impl ConnectionUi {
     /// Drops the current note.
     pub(super) fn clear_note(&mut self) {
         self.note = StatusNote::default();
+        self.toasts = ToastQueue::default();
+    }
+
+    /// Advances the toast timers to `now`, and drops the current note once
+    /// its toast is over so the same message set again shows again.
+    pub(super) fn advance_toasts(&mut self, now: Instant) {
+        self.toasts.tick(now);
+        if self.note.is_toast() && !self.toasts.holds(&self.note) {
+            self.note = StatusNote::default();
+        }
     }
 
     /// Whether the poll should post the "connection closed" note now: the
@@ -145,6 +158,16 @@ mod tests {
         c.set_note(StatusNote::info("Link kopiert"));
         assert_eq!(c.status_note(), "Link kopiert");
         c.clear_note();
+        c.set_note(StatusNote::silent("sending…"));
+        assert_eq!(c.status_note(), "sending…");
+    }
+
+    #[test]
+    fn a_finished_toast_frees_the_note() {
+        let mut c = connection();
+        c.set_note(StatusNote::error("Couldn't send"));
+        c.advance_toasts(Instant::now() + std::time::Duration::from_secs(7));
+        assert!(c.note().is_empty());
         c.set_note(StatusNote::silent("sending…"));
         assert_eq!(c.status_note(), "sending…");
     }

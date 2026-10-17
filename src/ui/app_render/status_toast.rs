@@ -1,14 +1,23 @@
 //! The status toast: shows the current status note for a few seconds. Which
 //! notes toast, and for how long, comes from the note's kind
-//! (`ui/status_note.rs`), not from its words.
+//! (`ui/status_note.rs`), not from its words. The queue and the timers are
+//! state (`ui/toast_queue.rs`); this file only wires them to the frame.
 
 use super::*;
+use crate::ui::status_note::{NoteKind, StatusNote};
+
+/// The pill's widest line, so a long failure wraps instead of stretching.
+const TOAST_MAX_WIDTH: f32 = 440.;
+/// Longest toast text, in lines (tdesktop's multiline toast wraps too).
+const TOAST_MAX_LINES: usize = 3;
 
 impl QuillApp {
-    /// Whether the live status toast shows this frame. A new note restarts
-    /// its timer and schedules the re-render that hides it; failures stay
-    /// up longer than confirmations.
-    pub(super) fn status_toast_visible(&mut self, cx: &mut Context<Self>) -> bool {
+    /// The toast on screen this frame, if any. Advances the queue's timers
+    /// and schedules the re-render for the next deadline; a paused (hovered)
+    /// toast has none, so it stays until the pointer leaves or it is
+    /// clicked away. Notes toast with or without a live session, so
+    /// sign-in failures show too.
+    pub(super) fn status_toast_visible(&mut self, cx: &mut Context<Self>) -> Option<StatusNote> {
         self.drain_suggested_post_notes(cx);
         // `QUILL_TRACE_STATUS=1`: print every status note (toasted or not)
         // to stderr, for diagnosing a live session.
@@ -20,43 +29,107 @@ impl QuillApp {
                 eprintln!("status: {}", self.connection.status_traced);
             }
         }
-        if !self.connection.note().is_toast() {
-            return false;
+        let now = std::time::Instant::now();
+        if !self.demo_pins_toast() {
+            self.connection.advance_toasts(now);
         }
-        if self.live.is_none() {
-            return self.demo_pins_toast();
+        let deadline = self.connection.toasts.deadline(now);
+        if deadline != self.connection.toast_wake {
+            self.connection.toast_wake = deadline;
+            if let Some(deadline) = deadline {
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor()
+                        .timer(deadline.saturating_duration_since(std::time::Instant::now()))
+                        .await;
+                    let _ = this.update(cx, |this, cx| {
+                        if this.connection.toast_wake == Some(deadline) {
+                            this.connection.toast_wake = None;
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
+            }
         }
-        if *self.connection.note() != self.connection.status_seen {
-            self.connection.status_seen = self.connection.note().clone();
-            self.connection.status_shown_at = Some(std::time::Instant::now());
-            let duration = self.connection.note().toast_duration();
-            let shown = self.connection.note().clone();
-            cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(duration).await;
-                let _ = this.update(cx, |this, cx| {
-                    // Expired and unchanged: clear it, so the same message
-                    // set again later (a repeated failure) shows again.
-                    if *this.connection.note() == shown {
-                        this.connection.clear_note();
-                        this.connection.status_seen = Default::default();
-                    }
-                    cx.notify();
-                });
-            })
-            .detach();
-        }
-        let duration = self.connection.note().toast_duration();
+        self.connection.toasts.visible().cloned()
+    }
+
+    /// The toast, centred over the conversation pane (`left` and `right`
+    /// are the space the other columns take). Hovering pauses its timer, a
+    /// click dismisses it; failures are announced as alerts.
+    pub(super) fn status_toast_layer(
+        &self,
+        note: &StatusNote,
+        left: Pixels,
+        right: Pixels,
+        bottom: Pixels,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let error = note.kind() == NoteKind::Error;
+        let role = if error { Role::Alert } else { Role::Status };
+        div()
+            .absolute()
+            .left(left)
+            .right(right)
+            .bottom(bottom)
+            .px_4()
+            .flex()
+            .justify_center()
+            .child(
+                div()
+                    .id("status-toast")
+                    .role(role)
+                    .aria_label(note.text().to_string())
+                    .cursor_pointer()
+                    .max_w(px(TOAST_MAX_WIDTH))
+                    .px_3()
+                    .py_1p5()
+                    .rounded_xl()
+                    .border_1()
+                    .border_color(if error {
+                        cx.theme().danger
+                    } else {
+                        cx.theme().border
+                    })
+                    .bg(cx.theme().popover)
+                    .text_color(cx.theme().popover_foreground)
+                    .shadow_md()
+                    .text_sm()
+                    .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                        this.hover_status_toast(*hovered, cx);
+                    }))
+                    .on_click(cx.listener(|this, _, _, cx| this.dismiss_status_toast(cx)))
+                    .child(
+                        div()
+                            .line_clamp(TOAST_MAX_LINES)
+                            .child(note.text().to_string()),
+                    ),
+            )
+    }
+
+    /// Pointer over the toast pauses its timer; leaving resumes it.
+    fn hover_status_toast(&mut self, hovered: bool, cx: &mut Context<Self>) {
         self.connection
-            .status_shown_at
-            .is_some_and(|at| at.elapsed() < duration)
+            .toasts
+            .set_hovered(hovered, std::time::Instant::now());
+        cx.notify();
+    }
+
+    /// A click on the toast sends it away and brings the next one.
+    fn dismiss_status_toast(&mut self, cx: &mut Context<Self>) {
+        self.connection.toasts.dismiss(std::time::Instant::now());
+        self.connection.toast_wake = None;
+        cx.notify();
     }
 
     /// Screenshot demos have no live connection, so no toast; with
-    /// `QUILL_DEMO_SHOW_TOAST=1` the demo's note stays up as the toast, for
-    /// the captures that prove how a toast looks.
+    /// `QUILL_DEMO_SHOW_TOAST=1` the demo's toasts stay up (their timers do
+    /// not run), for the captures that prove how a toast looks.
     #[cfg(feature = "demo-capture")]
     fn demo_pins_toast(&self) -> bool {
-        self.demo_session.is_some() && std::env::var_os("QUILL_DEMO_SHOW_TOAST").is_some()
+        self.live.is_none()
+            && self.demo_session.is_some()
+            && std::env::var_os("QUILL_DEMO_SHOW_TOAST").is_some()
     }
 
     #[cfg(not(feature = "demo-capture"))]

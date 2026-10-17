@@ -261,4 +261,21 @@ fn the_chat_pane_is_what_the_other_columns_leave() {
     );
     // One column: the whole window.
     assert_eq!(pane(input(400.)), 400.);
+=======
+fn a_toast_centres_over_the_conversation_pane() {
+    let wide = shell_layout(ShellInput {
+        panels: Some(INFO_PANEL_WIDTH),
+        rail: 60.,
+        ..input(1400.)
+    });
+    assert_eq!(wide.chat_insets(60.), (360., INFO_PANEL_WIDTH));
+    let narrow = shell_layout(input(500.));
+    assert!(narrow.one_column);
+    assert_eq!(narrow.chat_insets(0.), (0., 0.));
+    let list_only = shell_layout(ShellInput {
+        chat_open: false,
+        ..input(500.)
+    });
+    assert_eq!(list_only.chat_insets(0.), (0., 0.));
+>>>>>>> ee38d3fd (feat(toast): queue notes, pause on hover, centre over the conversation)
 }
