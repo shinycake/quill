@@ -5,6 +5,7 @@ use gpui_kit::*;
 use quill::ids::FileId;
 use quill::ids::MessageId;
 use quill::media_viewer::MediaViewer;
+use quill::media_viewer::SwipeNav;
 use quill::media_viewer::ViewerZoom;
 use quill::media_viewer::WheelNav;
 use std::path::PathBuf;
@@ -28,6 +29,8 @@ pub(crate) struct ViewerUi {
     pub(super) drag: Option<(f32, f32)>,
     /// Wheel and trackpad scrolling toward the next item.
     pub(super) wheel: WheelNav,
+    /// A horizontal trackpad swipe pulling the next or previous arrow in.
+    pub(super) swipe: SwipeNav,
     /// Parity slice 5: message whose video clip is playing in the viewer
     /// (sound playing) or paused (clock frozen, sound paused).
     pub(super) video: Option<MessageId>,
@@ -104,6 +107,7 @@ impl ViewerUi {
             frame: (720.0, 480.0),
             drag: None,
             wheel: WheelNav::default(),
+            swipe: SwipeNav::default(),
             video: None,
             pip: None,
             video_path: None,
