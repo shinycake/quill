@@ -264,10 +264,15 @@ impl QuillApp {
         drop(due);
         if first {
             let app = cx.weak_entity();
+            // The flag lives in this window's history: reset it in the
+            // window that set it, not whichever one is in place later.
+            let scope = self.windows.scope;
             cx.defer(move |cx| {
                 let _ = app.update(cx, |this, cx| {
-                    this.history.chrome_notify_pending.set(false);
-                    cx.notify();
+                    this.in_window_scope(scope, cx, |this, cx| {
+                        this.history.chrome_notify_pending.set(false);
+                        cx.notify();
+                    });
                 });
             });
         }
