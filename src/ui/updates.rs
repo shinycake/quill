@@ -269,7 +269,7 @@ impl QuillApp {
                             .label(tr(keys::Q_OPS_RELEASE_NOTES))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.settings.appearance_open = true;
+                                this.open_appearance();
                                 cx.notify();
                             })),
                     )

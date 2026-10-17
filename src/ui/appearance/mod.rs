@@ -71,6 +71,14 @@ impl QuillApp {
     pub(crate) fn minimize_to_tray(&self) -> bool {
         self.appearance.minimize_to_tray
     }
+    /// Opens the Appearance dialog. The default-app row is drawn from the
+    /// link handler's cache, so this is where it is read (on macOS, on this
+    /// thread, once).
+    pub(super) fn open_appearance(&mut self) {
+        quill::link_handler::read_now();
+        self.settings.appearance_open = true;
+    }
+
     pub(super) fn close_appearance(&mut self) {
         super::keybindings::close_appearance_capture(
             &mut self.settings.appearance_open,

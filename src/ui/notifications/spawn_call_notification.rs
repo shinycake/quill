@@ -351,14 +351,27 @@ impl QuillApp {
         if clears.is_empty() {
             return;
         }
-        let idle = self.composer_ui.pending_edit.is_none()
+        let open_chat = self.open_chat_id();
+        let composer_idle = self.composer_ui.pending_edit.is_none()
             && self.composer_ui.reply().is_none()
             && self.composer.read(cx).value().trim().is_empty();
         for (chat_id, topic) in clears {
-            if self.composer_ui.clear_draft_on_success != Some(chat_id) {
+            let Some(flag) = self.composer_ui.clear_draft_on_success.clone() else {
+                continue;
+            };
+            let stored = self
+                .session()
+                .and_then(|session| session.draft_for(chat_id, topic))
+                .map(|draft| draft.text.clone());
+            if !flag.matches(chat_id, stored.as_deref()) {
                 continue;
             }
             self.composer_ui.clear_draft_on_success = None;
+            let idle = if open_chat == Some(chat_id) {
+                composer_idle
+            } else {
+                true
+            };
             if !idle {
                 continue;
             }

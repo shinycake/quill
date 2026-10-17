@@ -386,9 +386,10 @@ fn wait_for_cancelable_child(
     if cancelled.load(Ordering::SeqCst) {
         return Err("ffmpeg extraction was cancelled".to_string());
     }
-    let child = command
-        .spawn()
-        .map_err(|err| format!("video playback needs ffmpeg ({err})"))?;
+    let child = command.spawn().map_err(|err| {
+        eprintln!("quill: could not start ffmpeg: {err}");
+        crate::lang::tr(crate::lang::keys::Q_OPS_VIDEO_PLAYBACK_NEEDS_FFMPEG).to_string()
+    })?;
     // Publish the running child so the UI can kill an abandoned
     // extraction (viewer closed/stepped). The worker polls
     // `try_wait` instead of blocking in `wait` so it never holds
@@ -471,15 +472,19 @@ pub(crate) fn extract_frames(
             if crate::child_timeout::is_timeout(&err) {
                 crate::lang::tr(crate::lang::keys::Q_OPS_VIDEO_TOOL_TOOK_TOO_LONG).to_string()
             } else {
-                format!("video playback needs ffmpeg ({err})")
+                eprintln!("quill: could not run ffmpeg: {err}");
+                crate::lang::tr(crate::lang::keys::Q_OPS_VIDEO_PLAYBACK_NEEDS_FFMPEG).to_string()
             }
         })?,
     };
     if !status.success() {
-        return Err("ffmpeg could not read the video".into());
+        return Err(crate::lang::tr(crate::lang::keys::Q_OPS_VIDEO_COULD_NOT_READ).to_string());
     }
     let mut frames: Vec<PathBuf> = std::fs::read_dir(cache_dir)
-        .map_err(|err| err.to_string())?
+        .map_err(|err| {
+            eprintln!("quill: could not list extracted frames: {err}");
+            crate::lang::tr(crate::lang::keys::Q_OPS_VIDEO_COULD_NOT_READ).to_string()
+        })?
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.path())
         .filter(|path| {
