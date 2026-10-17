@@ -404,5 +404,8 @@ fn a_failed_follow_up_page_keeps_the_listed_groups() {
             .len(),
         40
     );
-    assert!(!session.common_groups_paging(31).loading_more);
+    let paging = session.common_groups_paging(31);
+    assert!(!paging.loading_more);
+    // The list ends here, as in tdesktop, so Load more cannot repeat.
+    assert!(paging.exhausted);
 }

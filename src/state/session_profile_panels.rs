@@ -97,11 +97,15 @@ impl Session {
     /// show a Retry row instead of spinning forever.
     pub(crate) fn fail_profile_fetch(&mut self, pending: &PendingRequest, reason: String) {
         if let Some(key) = Self::profile_chats_key(pending) {
-            // A failed follow-up page keeps the groups already listed.
+            // A failed follow-up page keeps the groups already listed and
+            // ends the list: tdesktop's `loadMoreRows` has no failure
+            // handler, so its request id stays set and it never asks
+            // again. (TDLib's "Wrong offset_chat_id" would only repeat.)
             if key.0 == ProfileChatsKind::GroupsInCommon
                 && let Some(paging) = self.users_state.common_groups_paging.get_mut(&key.1)
                 && std::mem::take(&mut paging.loading_more)
             {
+                paging.exhausted = true;
                 return;
             }
             self.users_state

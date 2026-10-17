@@ -6,8 +6,9 @@ use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
+use gpui_kit::component::input::InputEvent;
 use gpui_kit::test::TestWindowExt;
-use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
+use gpui_kit::{AppContext, Entity, Focusable, TestAppContext, VisualTestContext, px, size};
 use quill::state::{SharedMediaTab, SharedMediaTabStatus};
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
@@ -155,4 +156,54 @@ fn a_tab_without_search_has_no_field_and_the_text_is_dropped(cx: &mut TestAppCon
     frame(vcx);
     assert!(vcx.debug_bounds("shared-media-search").is_none());
     assert_eq!(field_text(&app, vcx), "");
+}
+
+fn change_tab_in_state(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, tab: SharedMediaTab) {
+    app.update_in(vcx, |app, _, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.media.shared_media.select_tab_dropping_search(tab);
+        }
+        cx.notify();
+    });
+    frame(vcx);
+}
+
+#[gpui_kit::test]
+fn an_edit_from_a_replaced_field_is_ignored(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx);
+    type_into_field(&app, vcx, "budget");
+    let old = app.read_with(vcx, |app, _| app.media_search.input.clone());
+    change_tab_in_state(&app, vcx, SharedMediaTab::Links);
+    assert_ne!(
+        old.entity_id(),
+        app.read_with(vcx, |app, _| app.media_search.input.entity_id())
+    );
+    // The old field still holds "budget"; a late edit from it must not
+    // search the tab that is open now.
+    vcx.update(|_, cx| {
+        old.update(cx, |_, cx| cx.emit(InputEvent::Change));
+    });
+    frame(vcx);
+    assert_eq!(query(&app, vcx), "");
+}
+
+#[gpui_kit::test]
+fn typing_focus_moves_to_the_new_field_when_the_tab_changes(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx);
+    let old = app.read_with(vcx, |app, _| app.media_search.input.clone());
+    vcx.update(|window, cx| old.update(cx, |input, cx| input.focus(window, cx)));
+    change_tab_in_state(&app, vcx, SharedMediaTab::Links);
+    let focused = vcx.update(|window, cx| {
+        app.read(cx)
+            .media_search
+            .input
+            .read(cx)
+            .focus_handle(cx)
+            .is_focused(window)
+    });
+    assert!(focused, "the cursor follows the user to the new field");
 }

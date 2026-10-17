@@ -75,7 +75,7 @@ impl QuillApp {
                 .child(if admins_only {
                     tr(keys::Q_MEDIA_ADMINISTRATORS).to_string()
                 } else {
-                    members_title(group_total)
+                    members_title(group_total, shape.is_channel)
                 }),
         );
         let mut buttons = div().flex().items_center().gap_1();
