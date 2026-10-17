@@ -44,6 +44,25 @@ impl QuillApp {
                 self.request_media_download(video_id, None, cx);
             }
         }
+        self.preload_adjacent_stories();
+    }
+
+    /// tdesktop `preloadNext`: warm the next stories and the previous one
+    /// below the current story's priority. Each file is requested once;
+    /// `download_file` skips local, running and already-ended downloads.
+    fn preload_adjacent_stories(&mut self) {
+        let requests = match self.session() {
+            Some(session) => quill::story_preload::plan(session, &self.stories.viewer),
+            None => return,
+        };
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        for request in requests {
+            let _ =
+                live.driver
+                    .download_file_prefix(request.file_id, request.priority, request.limit);
+        }
     }
 
     /// Phase 9.2+: warm `downloadFile` for custom-emoji reaction sticker

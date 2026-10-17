@@ -135,6 +135,9 @@ pub enum StoryContentView {
         /// `storyVideo.video:file` — downloaded when there is no thumbnail
         /// so the file lands local.
         file_id: FileId,
+        /// `storyVideo.preload_prefix_size`: bytes of the clip the server
+        /// expects clients to preload (0 = unknown).
+        preload_prefix_size: i32,
     },
     Live {
         /// `storyContentLive.group_call_id` (`schema/td_api.tl:6662`).
@@ -688,6 +691,9 @@ pub(crate) fn parse_story_content(
                 thumb_height,
                 duration_secs,
                 file_id,
+                preload_prefix_size: video
+                    .and_then(|video| video.get("preload_prefix_size"))
+                    .map_or(0, |size| int53_or_zero(Some(size)).sat_i32()),
             }
         }
         Some("storyContentLive") => StoryContentView::Live {

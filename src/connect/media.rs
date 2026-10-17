@@ -5,6 +5,7 @@ use crate::state::RequestPurpose;
 use crate::telegram::requests::{
     add_file_to_downloads as add_file_to_downloads_request,
     cancel_download_file as cancel_download_file_request, download_file as download_file_request,
+    download_file_range as download_file_range_request,
     remove_file_from_downloads as remove_file_from_downloads_request,
     toggle_download_is_paused as toggle_download_is_paused_request,
 };
@@ -138,6 +139,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         file_id: FileId,
         priority: i32,
     ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.download_file_prefix(file_id, priority, 0)
+    }
+
+    /// `download_file` limited to the first `limit` bytes (0 = whole file).
+    pub fn download_file_prefix(
+        &mut self,
+        file_id: FileId,
+        priority: i32,
+        limit: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -148,10 +159,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let extra = self.session.request_download(file_id);
         self.session.begin_download(file_id);
-        match self
-            .sender
-            .send_json(&download_file_request(extra, file_id, priority))
-        {
+        match self.sender.send_json(&download_file_range_request(
+            extra, file_id, priority, limit,
+        )) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);

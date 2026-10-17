@@ -229,6 +229,14 @@ impl StoryViewer {
         self.items.get(self.index)
     }
 
+    /// The stories worth preloading around the current one, in preload order.
+    pub fn preload_neighbors(&self) -> Vec<&StoryViewerItem> {
+        crate::story_preload::preload_indices(self.index, self.items.len())
+            .into_iter()
+            .filter_map(|i| self.items.get(i))
+            .collect()
+    }
+
     /// 1-based `(position, total)` for the "Story 2 of 5" header.
     pub fn position(&self) -> Option<(usize, usize)> {
         self.is_open().then(|| (self.index + 1, self.items.len()))
@@ -474,6 +482,7 @@ mod tests {
                 thumb_height: 240,
                 duration_secs: duration,
                 file_id: FileId(file),
+                preload_prefix_size: 0,
             },
             caption: String::new(),
             caption_entities: Vec::new(),
