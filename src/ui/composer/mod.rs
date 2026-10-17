@@ -45,7 +45,11 @@ pub(super) fn apply_ready_reply(session: &mut Session, sink: &Arc<MemorySink>, s
 impl QuillApp {
     /// Slice parity:platform-offline-errors — use the submitted schedule,
     /// before the composer resets its one-shot scheduling choice.
-    fn send_started_note(&self, scheduling: ComposerScheduling, online_note: &str) -> StatusNote {
+    pub(in crate::ui) fn send_started_note(
+        &self,
+        scheduling: ComposerScheduling,
+        online_note: &str,
+    ) -> StatusNote {
         let offline = self
             .live
             .as_ref()
@@ -137,6 +141,15 @@ impl QuillApp {
                         self.connection.set_note(StatusNote::silent(tr(
                             keys::Q_CHAT_CHECKING_THE_VIDEO_SEND_AGAIN,
                         )));
+                        cx.notify();
+                        return;
+                    }
+                    // Photos and videos of an earlier Send are still being
+                    // read: this Send is refused for now (it does not
+                    // queue), so the messages keep their order.
+                    if self.tray_preparing() {
+                        self.connection
+                            .set_note(StatusNote::silent(tr(keys::Q_OPS_PREPARING_THE_FILES)));
                         cx.notify();
                         return;
                     }
@@ -318,79 +331,24 @@ impl QuillApp {
                         return;
                     }
                     // MED1: ungrouped sends go out one message at a time.
-                    // `plan` came from the live session and `snaps` is non-empty
-                    // (checked above), so neither early return fires.
-                    let (Some(live), Some((first, rest))) =
-                        (self.live.as_mut(), snaps.split_first())
-                    else {
+                    // Photos and videos are read first, off the UI thread
+                    // (`send_prep.rs`); the send goes out when they are
+                    // ready, to this chat, and the composer is cleared
+                    // then. Everything else goes now.
+                    let Some(slot) = self.send_slot() else {
                         return;
                     };
-                    let mut result = live.driver.send_snapshot(first);
-                    for snap in rest {
-                        if result.is_err() {
-                            break;
-                        }
-                        result = live.driver.send_snapshot(snap);
+                    let origin = super::send_prep::SendOrigin::new(
+                        slot,
+                        chat_id,
+                        self.composer_markup(cx),
+                        &snaps,
+                    );
+                    if snaps.iter().any(ComposerSnapshot::needs_media_prep) {
+                        self.begin_media_prep(origin, snaps, window, cx);
+                    } else {
+                        self.deliver_live_send(origin, snaps, window, cx);
                     }
-                    let scheduling = first.send_options.scheduling;
-                    match result {
-                        Ok(_) => {
-                            // The tray, its options, the schedule and the
-                            // preview choice went with the snapshot.
-                            self.finish_pending_send();
-                            // MED1: the grouping override was consumed —
-                            // the next composer follows the pref again.
-                            self.composer_ui.group_media = None;
-                            self.composer_ui.schedule_popup_open = false;
-                            self.composer_ui.set_reply(None);
-                            self.clear_suggest_bar_after_send(chat_id);
-                            self.composer_ui.clear_draft_on_success = Some(chat_id);
-                            self.composer
-                                .update(cx, |input, cx| input.set_value("", window, cx));
-                            self.forget_local_draft(chat_id);
-                            self.connection.set_note(
-                                self.send_started_note(scheduling, tr(keys::Q_CHAT_SENDING)),
-                            );
-                        }
-                        Err(quill::connect::ConnectSendError::CaptionTooLong { limit }) => {
-                            // MED4: runtime `message_caption_length_max`
-                            // refusal — the counter already warned; this
-                            // names the limit.
-                            // tdesktop `CaptionLimitBox`: the limit box says by how
-                            // much, with Premium's 4096 as the way out.
-                            let over = self.composer.read(cx).value().chars().count() as i64
-                                - i64::from(limit);
-                            self.show_premium_limit(
-                                quill::premium_limits::PremiumLimitKind::Caption,
-                                over.max(0),
-                                cx,
-                            );
-                        }
-                        Err(_) => {
-                            let video_unreadable = snaps
-                                .iter()
-                                .flat_map(|snap| snap.attachment.iter().chain(snap.album.iter()))
-                                .any(|att| {
-                                    att.kind == AttachmentKind::Video
-                                        && quill::video::probe_local_video(&att.path).is_err()
-                                });
-                            let note_unreadable = snaps
-                                .iter()
-                                .filter_map(|snap| snap.attachment.as_ref())
-                                .any(|att| {
-                                    att.kind == AttachmentKind::VideoNote
-                                        && quill::video::probe_local_video_note(&att.path).is_err()
-                                });
-                            self.connection.set_note(if note_unreadable {
-                                StatusNote::silent(tr(keys::Q_CHAT_VIDEO_NOTE_MUST_BE_A))
-                            } else if video_unreadable {
-                                StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_READ_VIDEO_DURATION))
-                            } else {
-                                StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_MESSAGE))
-                            });
-                        }
-                    }
-                    cx.notify();
                     return;
                 }
                 if self.demo_session.is_some() {

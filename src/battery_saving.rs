@@ -128,16 +128,11 @@ fn probe_native() -> Option<bool> {
 #[cfg(target_os = "linux")]
 fn probe_native() -> Option<bool> {
     let run = |args: &[&str]| -> Option<String> {
-        let output = std::process::Command::new("gdbus")
-            .args(args)
-            .stdin(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .output()
-            .ok()?;
-        output
-            .status
-            .success()
-            .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+        crate::child_timeout::stdout_within(
+            "gdbus",
+            args,
+            crate::child_timeout::DESKTOP_QUERY_LIMIT,
+        )
     };
     // `org.freedesktop.portal.PowerProfileMonitor`, the property GIO's
     // `GPowerProfileMonitor` is backed by.

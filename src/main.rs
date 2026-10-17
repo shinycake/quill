@@ -209,8 +209,7 @@ fn ui_main(args: &[String]) {
         // high-contrast palette with `QUILL_DEMO_THEME=high-contrast`.
         ui::set_high_contrast(std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("high-contrast"));
         // kit Phase 9: honor the OS reduce-motion preference.
-        quill::power_saving::set_os_reduce_motion(os_prefers_reduced_motion());
-        cx.set_reduce_motion(quill::power_saving::reduce_motion_now());
+        ui::reduce_motion_probe::apply_at_startup(cx);
         ui::bind_keys(cx);
         // kit Phase 7: File / Edit / View / Window / Help — native on
         // macOS, kit `AppMenuBar` data on Linux/Windows.
@@ -497,55 +496,6 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
     None
 }
 
-/// kit Phase 9: respect the OS "reduce motion" accessibility preference.
-/// GPUI's animation/spring machinery settles instantly when
-/// `App::set_reduce_motion(true)` is called, so kit `Skeleton` shimmer,
-/// switch springs and spinners all go static with this one call.
-/// `QUILL_REDUCED_MOTION=1` overrides for testing.
-#[cfg(feature = "ui")]
-fn os_prefers_reduced_motion() -> bool {
-    if let Ok(v) = std::env::var("QUILL_REDUCED_MOTION") {
-        return v == "1" || v.eq_ignore_ascii_case("true");
-    }
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("defaults")
-            .args(["read", "com.apple.universalaccess", "reduceMotion"])
-            .output()
-            .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "1")
-    }
-    #[cfg(target_os = "linux")]
-    {
-        // GNOME exposes the preference as interface animations off.
-        std::process::Command::new("gsettings")
-            .args(["get", "org.gnome.desktop.interface", "enable-animations"])
-            .output()
-            .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "false")
-    }
-    #[cfg(windows)]
-    {
-        // Settings > Accessibility > Visual effects > Animation effects.
-        use windows_sys::Win32::UI::WindowsAndMessaging::{
-            SPI_GETCLIENTAREAANIMATION, SystemParametersInfoW,
-        };
-        let mut animations: i32 = 1;
-        // SAFETY: SPI_GETCLIENTAREAANIMATION writes one BOOL to the pointer.
-        let ok = unsafe {
-            SystemParametersInfoW(
-                SPI_GETCLIENTAREAANIMATION,
-                0,
-                (&mut animations as *mut i32).cast(),
-                0,
-            )
-        };
-        ok != 0 && animations == 0
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
-    {
-        false
-    }
-}
-
 /// Open a real GPUI window in the requested demo state, linger so an external
 /// capture (ffmpeg x11grab) can snap docs/screenshots/*.png, then quit.
 #[cfg(feature = "ui")]
@@ -615,8 +565,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                 std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("high-contrast"),
             );
             // kit Phase 9: honor the OS reduce-motion preference.
-            quill::power_saving::set_os_reduce_motion(os_prefers_reduced_motion());
-            cx.set_reduce_motion(quill::power_saving::reduce_motion_now());
+            ui::reduce_motion_probe::apply_at_startup(cx);
             ui::bind_keys(cx);
             ui::setup_app_menus(cx);
             cx.spawn(async move |cx| {

@@ -314,6 +314,25 @@ impl QuillApp {
         )
     }
 
+    /// The handler is read on a thread (Linux): draw again when it lands.
+    fn repaint_when_link_handler_read(&self, cx: &mut Context<Self>) {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static WATCHING: AtomicBool = AtomicBool::new(false);
+        if !quill::link_handler::refreshing() || WATCHING.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            while quill::link_handler::refreshing() {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(100))
+                    .await;
+            }
+            WATCHING.store(false, Ordering::Release);
+            let _ = this.update(cx, |_, cx| cx.notify());
+        })
+        .detach();
+    }
+
     /// "Open Telegram links with Quill": opt-in default handler for `tg:`
     /// links (`quill::link_handler`). Quill never claims it on its own.
     /// Windows/Linux get a switch; macOS cannot hand the scheme back to
@@ -321,8 +340,14 @@ impl QuillApp {
     pub(super) fn general_link_handler_section(&self, cx: &mut Context<Self>) -> AnyElement {
         use quill::link_handler::{self, ControlKind, LinkHandlerState};
         let state = link_handler::state();
+        self.repaint_when_link_handler_read(cx);
         let ours = state == LinkHandlerState::Ours;
-        let unavailable = matches!(state, LinkHandlerState::Unavailable(_));
+        // Nothing to turn on or off while the handler is unknown: it cannot be
+        // managed, or the first read has not landed yet (drawn as checking).
+        let unavailable = matches!(
+            state,
+            LinkHandlerState::Unavailable(_) | LinkHandlerState::Checking
+        );
         let hint = if unavailable {
             link_handler::status_text(&state)
         } else {

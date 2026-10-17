@@ -414,6 +414,7 @@ impl QuillApp {
 
     /// `account` logged out or was removed: drop its choices.
     pub(in crate::ui) fn forget_account_sends(&mut self, account: &AccountKey) {
+        self.composer_ui.send_box.prep.cancel_account(account);
         let dropped = self.composer_sends.forget_account(account);
         self.forget_tray_checks(&dropped);
     }

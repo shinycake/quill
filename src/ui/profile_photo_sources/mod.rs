@@ -63,14 +63,20 @@ fn run_ffmpeg(args: &[String], log: &Path) -> Result<(), String> {
         side.saturating_mul(side),
     )?;
     let log_file = std::fs::File::create(log).map_err(|e| e.to_string())?;
-    let status = quill::video_encoder::quiet_command_for(&job.program)
+    let mut command = quill::video_encoder::quiet_command_for(&job.program);
+    command
         .args(["-hide_banner", "-loglevel", "error"])
         .args(&job.args)
-        .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(log_file)
-        .status()
-        .map_err(|e| e.to_string())?;
+        .stderr(log_file);
+    let limit = quill::child_timeout::transcode_limit(10.0);
+    let status = quill::child_timeout::status_within(&mut command, limit).map_err(|e| {
+        if quill::child_timeout::is_timeout(&e) {
+            quill::lang::tr(quill::lang::keys::Q_OPS_VIDEO_TOOL_TOOK_TOO_LONG).to_string()
+        } else {
+            e.to_string()
+        }
+    })?;
     if status.success() {
         Ok(())
     } else {

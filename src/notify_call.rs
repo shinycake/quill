@@ -173,13 +173,18 @@ pub fn parse_call_output(stdout: &str) -> Option<CallNotificationAction> {
     })
 }
 
-/// Run the command to completion and report the picked action. A missing
-/// notification daemon yields `None`; never panics.
+/// Run the command and report the picked action. It waits for a click, so it
+/// has the generous `NOTIFICATION_WAIT_LIMIT`; the caller runs it on a
+/// thread of its own (`spawn_call_notification`), never the UI thread. A
+/// missing notification daemon or a timeout yields `None`; never panics.
 pub fn run_call_command(command: &NotificationCommand) -> Option<CallNotificationAction> {
-    let output = std::process::Command::new(&command.program)
-        .args(&command.args)
-        .output()
-        .ok()?;
+    let mut process = std::process::Command::new(&command.program);
+    process.args(&command.args);
+    let output = crate::child_timeout::output_within(
+        &mut process,
+        crate::child_timeout::NOTIFICATION_WAIT_LIMIT,
+    )
+    .ok()?;
     parse_call_output(&String::from_utf8_lossy(&output.stdout))
 }
 

@@ -4,14 +4,12 @@ use crate::proxy::ProxyDraft;
 
 #[cfg(target_os = "macos")]
 pub(super) fn detect() -> Option<ProxyDraft> {
-    let output = std::process::Command::new("/usr/sbin/scutil")
-        .arg("--proxy")
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    super::parse_scutil_proxy(&String::from_utf8_lossy(&output.stdout))
+    let text = crate::child_timeout::stdout_within(
+        "/usr/sbin/scutil",
+        &["--proxy"],
+        crate::child_timeout::DESKTOP_QUERY_LIMIT,
+    )?;
+    super::parse_scutil_proxy(&text)
 }
 
 #[cfg(windows)]
@@ -30,14 +28,11 @@ pub(super) fn detect() -> Option<ProxyDraft> {
 pub(super) fn detect() -> Option<ProxyDraft> {
     super::proxy_from_env(|name| std::env::var(name).ok()).or_else(|| {
         super::proxy_from_gsettings(|schema, key| {
-            let output = std::process::Command::new("gsettings")
-                .args(["get", schema, key])
-                .output()
-                .ok()?;
-            output
-                .status
-                .success()
-                .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+            crate::child_timeout::stdout_within(
+                "gsettings",
+                &["get", schema, key],
+                crate::child_timeout::PROBE_LIMIT,
+            )
         })
     })
 }

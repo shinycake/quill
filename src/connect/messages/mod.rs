@@ -289,34 +289,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Validate the picked path before allocating `@extra`.
         let media_path = match snapshot.attachment.as_ref() {
             Some(att) => Some(
-                media_options::media_send_path(att, snapshot.media)
+                media_options::media_send_path(att, snapshot)
                     .ok_or(ConnectSendError::InvalidRequest)?,
             ),
             None => None,
         };
         let video_probe = match snapshot.attachment.as_ref() {
-            Some(att) if att.kind == AttachmentKind::Video && !att.extras.gif => Some(
-                crate::video::probe_local_video(&att.path)
-                    .map_err(|_| ConnectSendError::InvalidRequest)?,
-            ),
+            Some(att) if att.kind == AttachmentKind::Video && !att.extras.gif => {
+                Some(media_options::video_probe(att, snapshot)?)
+            }
             _ => None,
         };
         let video_note = match snapshot.attachment.as_ref() {
             Some(att) if att.kind == AttachmentKind::VideoNote => {
-                let probe = crate::video::probe_local_video_note(&att.path)
-                    .map_err(|_| ConnectSendError::InvalidRequest)?;
-                let thumbnail = crate::video::write_video_note_thumbnail(&att.path).map(|thumb| {
-                    VideoNoteThumbnailSend {
-                        path: thumb.path.to_string_lossy().into_owned(),
-                        width: thumb.width,
-                        height: thumb.height,
-                    }
-                });
-                Some(VideoNoteSend {
-                    duration: probe.duration,
-                    length: probe.length,
-                    thumbnail,
-                })
+                Some(media_options::video_note(att, snapshot)?)
             }
             _ => None,
         };
@@ -389,7 +375,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         chat_id,
                         topic_id,
                         path,
-                        &media_options::local_animation(&att.path),
+                        &media_options::local_animation(att, snapshot),
                         caption,
                         snapshot.caption_above_media,
                         reply_to,

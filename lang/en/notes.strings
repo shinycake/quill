@@ -95,3 +95,5 @@
 "qll_notes_failed_save_folder" = "Couldn't save the folder.";
 "qll_notes_failed_save_folder_link" = "Couldn't save the link.";
 "qll_notes_failed_delete_folder_link" = "Couldn't delete the link.";
+"qll_notes_could_not_prepare_files" = "Couldn't prepare the files for sending.";
+"qll_notes_preparing_files_timed_out" = "Preparing the files took too long.";

@@ -40,6 +40,12 @@ register_demos![
         "screenshot demo — status toast: two queued notes"
     )
     .setup(QuillApp::demo_status_toast_queued),
+    // The toast after a send of several messages that stopped part way.
+    DemoSpec::chats(
+        "ready-status-toast-partly-sent",
+        "screenshot demo — status toast: partly sent"
+    )
+    .setup(QuillApp::demo_status_toast_partly_sent),
     // A confirmation toast over the open media viewer: centred on the
     // window, clear of the caption and the video controls.
     DemoSpec::ready(
@@ -59,6 +65,11 @@ impl QuillApp {
     fn demo_status_toast_error(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         self.connection
             .set_note(StatusNote::error(user_error(&ConnectSendError::Native)));
+    }
+
+    fn demo_status_toast_partly_sent(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+        self.connection
+            .set_note(crate::ui::send_prep::partly_sent_note(2, 5));
     }
 
     fn demo_status_toast_long_error(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {

@@ -335,7 +335,8 @@ pub fn parse_source(value: &Value) -> Option<VideoSource> {
 
 /// Run ffprobe on a local file. Blocks; call it off the UI thread.
 pub fn probe_source(path: &Path) -> Option<VideoSource> {
-    let output = crate::media_tools::command("ffprobe")
+    let mut command = crate::media_tools::command("ffprobe");
+    command
         .args([
             "-v",
             "error",
@@ -344,9 +345,10 @@ pub fn probe_source(path: &Path) -> Option<VideoSource> {
             "-of",
             "json",
         ])
-        .arg(path)
-        .output()
-        .ok()?;
+        .arg(path);
+    let output =
+        crate::child_timeout::output_within(&mut command, crate::child_timeout::PROBE_LIMIT)
+            .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -447,29 +449,43 @@ fn stamp() -> u128 {
         .map_or(0, |elapsed| elapsed.as_nanos())
 }
 
+/// A single frame: reading far into a big file is the slow part.
+const FRAME_LIMIT: std::time::Duration = std::time::Duration::from_secs(30);
+
 fn run_ffmpeg(args: &[String]) -> Result<(), String> {
-    run_program(crate::media_tools::quiet_command("ffmpeg"), args)
+    run_program(
+        crate::media_tools::quiet_command("ffmpeg"),
+        args,
+        FRAME_LIMIT,
+    )
 }
 
 /// Run an encode that names `libx264` on the first ffmpeg with an H.264
 /// encoder (`pixels` is the output's area, for the bitrate).
-fn run_h264(args: &[String], pixels: u32) -> Result<(), String> {
+/// The encode may take as long as [`crate::child_timeout::transcode_limit`]
+/// allows for `media_ms` of output.
+fn run_h264(args: &[String], pixels: u32, media_ms: i64) -> Result<(), String> {
     let job = crate::video_encoder::h264_job("Video edits", args, pixels)?;
     run_program(
         crate::video_encoder::quiet_command_for(&job.program),
         &job.args,
+        crate::child_timeout::transcode_limit(media_ms as f64 / 1000.0),
     )
 }
 
-fn run_program(mut command: std::process::Command, args: &[String]) -> Result<(), String> {
-    let output = command
-        .args(args)
-        .output()
-        .map_err(|_| "ffmpeg isn't available".to_string())?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err("ffmpeg could not process this video".into())
+fn run_program(
+    mut command: std::process::Command,
+    args: &[String],
+    limit: std::time::Duration,
+) -> Result<(), String> {
+    command.args(args);
+    match crate::child_timeout::output_within(&mut command, limit) {
+        Ok(output) if output.status.success() => Ok(()),
+        Ok(_) => Err("ffmpeg could not process this video".into()),
+        Err(err) if crate::child_timeout::is_timeout(&err) => {
+            Err(crate::lang::tr(crate::lang::keys::Q_OPS_VIDEO_TOOL_TOOK_TOO_LONG).to_string())
+        }
+        Err(_) => Err("ffmpeg isn't available".to_string()),
     }
 }
 
@@ -490,7 +506,7 @@ pub fn render_edited(
         source,
     );
     let (width, height) = edits.edited_size(source);
-    run_h264(&args, width.saturating_mul(height))?;
+    run_h264(&args, width.saturating_mul(height), edits.length_ms())?;
     crate::local_path::pick_send_path(&output).ok_or_else(|| "couldn't prepare the video".into())
 }
 

@@ -812,3 +812,5 @@
 "qll_prefs_zoom" = "Zoom";
 "qll_prefs_zoom_in" = "Zoom in";
 "qll_prefs_zoom_out" = "Zoom out";
+"qll_prefs_checking_the_default_app" = "Checking the default app…";
+"qll_prefs_default_app_no_answer" = "xdg-mime did not answer.";
