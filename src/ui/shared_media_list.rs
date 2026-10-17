@@ -101,8 +101,8 @@ impl QuillApp {
                                 .child(item.label.clone()),
                         ),
                 })
-                .on_click(cx.listener(
-                    move |this, _, _, cx| match (link_url.as_ref(), chat_id) {
+                .on_click(
+                    cx.listener(move |this, _, _, cx| match (link_url.as_ref(), chat_id) {
                         (Some(url), Some(chat_id)) => this.queue_link(
                             LinkTarget::Url {
                                 url: url.clone(),
@@ -112,8 +112,8 @@ impl QuillApp {
                             cx,
                         ),
                         _ => this.activate_shared_media_item(action, message_id, cx),
-                    },
-                ));
+                    }),
+                );
             // Telegram Desktop's "Go To Message" on a shared media item.
             list = list.child(if is_message {
                 row.context_menu({

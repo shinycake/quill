@@ -156,7 +156,7 @@ impl QuillApp {
         ix: usize,
         link: &LinkLine,
         cx: &mut Context<Self>,
-    ) -> Div {
+    ) -> AnyElement {
         let line = div()
             .text_xs()
             .text_color(accent())
@@ -167,7 +167,7 @@ impl QuillApp {
             self.session()
                 .and_then(|session| session.media.shared_media.chat_id),
         ) else {
-            return line;
+            return line.into_any_element();
         };
         let message_id = item.message_id;
         let shown = link.display.clone();
@@ -188,5 +188,6 @@ impl QuillApp {
                     cx,
                 );
             }))
+            .into_any_element()
     }
 }

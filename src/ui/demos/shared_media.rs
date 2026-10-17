@@ -257,6 +257,7 @@ impl QuillApp {
 
     /// Open `tab` of the gallery filled with `messages` (UI tests).
     #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
     pub(crate) fn demo_fill_shared_media(
         &mut self,
         tab: SharedMediaTab,
