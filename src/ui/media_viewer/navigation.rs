@@ -2,6 +2,7 @@
 //! files it shows.
 
 use super::*;
+use std::time::Instant;
 
 impl QuillApp {
     /// Phase 4.5: open the fullscreen media viewer on the clicked message.
@@ -196,6 +197,7 @@ impl QuillApp {
         self.viewer.zoom.reset();
         self.viewer.drag = None;
         self.viewer.wheel.new_item();
+        self.viewer.swipe.new_item();
         self.viewer_leave_video_fullscreen();
         // MED1: orientation and playback error are per-item state.
         self.viewer.orientation = Default::default();
@@ -289,13 +291,17 @@ impl QuillApp {
             ),
         };
         self.viewer_note_activity(false, cx);
+        let at = cx.background_executor().now();
+        if self.viewer_swipe(dx, dy, source, event.touch_phase, at, cx) {
+            return;
+        }
         let action = self.viewer.wheel.feed(WheelInput {
             dx,
             dy,
             primary: event.modifiers.secondary(),
             source,
             zoomed: self.viewer.zoom.is_zoomed(),
-            at: cx.background_executor().now(),
+            at,
         });
         match action {
             WheelAction::None => {}
@@ -308,6 +314,95 @@ impl QuillApp {
             }
             WheelAction::Next | WheelAction::Previous => {}
         }
+    }
+
+    /// A horizontal trackpad swipe pulls the next or previous arrow in from
+    /// the edge, and letting go once it is fully in moves one item
+    /// (`SwipeNav`). `true` when the event belongs to the swipe, so
+    /// `WheelNav` must not see it (tdesktop `_swipeNavigating`).
+    fn viewer_swipe(
+        &mut self,
+        dx: f32,
+        dy: f32,
+        source: WheelSource,
+        phase: TouchPhase,
+        at: Instant,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let had_timeout = self.viewer.swipe.timeout_at().is_some();
+        let action = self.viewer.swipe.feed(SwipeInput {
+            dx,
+            dy,
+            source,
+            at,
+            can_next: self.viewer.state.has_next(),
+            can_prev: self.viewer.state.has_prev(),
+        });
+        let mut step = match action {
+            SwipeAction::None => None,
+            SwipeAction::Capture => {
+                cx.notify();
+                None
+            }
+            SwipeAction::Step(dir) => Some(dir),
+        };
+        match phase {
+            TouchPhase::Ended => {
+                let released = self.viewer.swipe.end(at);
+                step = step.or(released);
+            }
+            // The system took the touch: it never committed.
+            TouchPhase::Cancelled => {
+                self.viewer.swipe.end(at);
+            }
+            TouchPhase::Started | TouchPhase::Moved => {}
+        }
+        if let Some(dir) = step {
+            self.step_viewer_swipe(dir, cx);
+        }
+        if !had_timeout && self.viewer.swipe.timeout_at().is_some() {
+            self.arm_viewer_swipe_timeout(cx);
+        }
+        action != SwipeAction::None
+    }
+
+    fn step_viewer_swipe(&mut self, dir: SwipeDir, cx: &mut Context<Self>) {
+        match dir {
+            SwipeDir::Next if self.viewer.state.has_next() => self.step_media_viewer(1, cx),
+            SwipeDir::Previous if self.viewer.state.has_prev() => self.step_media_viewer(-1, cx),
+            SwipeDir::Next | SwipeDir::Previous => cx.notify(),
+        }
+    }
+
+    /// A swipe without phases (Wayland, X11, some Windows drivers) ends
+    /// after the trackpad pause, since no end phase will come.
+    fn arm_viewer_swipe_timeout(&mut self, cx: &mut Context<Self>) {
+        self.spawn_scoped(cx, async move |this, cx| {
+            let mut wait = VIEWER_TRACKPAD_GESTURE_GAP;
+            loop {
+                cx.background_executor().timer(wait).await;
+                let again = this
+                    .update(cx, |this, cx| {
+                        let deadline = this.viewer.swipe.timeout_at()?;
+                        let now = cx.background_executor().now();
+                        if now < deadline {
+                            return Some(deadline.saturating_duration_since(now));
+                        }
+                        match this.viewer.swipe.end(now) {
+                            Some(dir) => this.step_viewer_swipe(dir, cx),
+                            None => cx.notify(),
+                        }
+                        None
+                    })
+                    .ok()
+                    .flatten();
+                match again {
+                    Some(left) => wait = left,
+                    None => break,
+                }
+            }
+        })
+        .detach();
     }
 
     /// A trackpad pinch zooms at the event position (tdesktop

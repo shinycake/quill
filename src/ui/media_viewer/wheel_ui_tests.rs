@@ -1,7 +1,8 @@
 //! A wheel notch over the viewer moves to the next item, over the
 //! picture and over the black around it; with Cmd (Ctrl) it zooms
 //! instead, and the last item stays put. A trackpad flick moves one
-//! item, and the bottom controls keep the wheel (needs the
+//! item, and the bottom controls keep the wheel. A horizontal swipe
+//! pulls an arrow in and moves one item once it is fully in (needs the
 //! `demo-capture` feature for gpui-kit's test support).
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
@@ -14,6 +15,7 @@ use gpui_kit::{
 use gpui_kit::{TestAppContext, VisualTestContext, point, px, size};
 use quill::ids::{ChatId, FileId, MessageId};
 use quill::telegram::envelope::{MessageContent, PhotoContent, PhotoSizeView};
+use std::time::Duration;
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
@@ -205,4 +207,107 @@ fn a_wheel_over_the_caption_or_the_bottom_band_keeps_the_item(cx: &mut TestAppCo
     assert_eq!(current(&app, vcx), 8901, "over the band around the rows");
     notch(vcx, backdrop, -1., Modifiers::default());
     assert_eq!(current(&app, vcx), 8902, "over the backdrop it still moves");
+}
+
+fn trackpad(vcx: &mut VisualTestContext, at: Point<Pixels>, dx: f32, dy: f32, phase: TouchPhase) {
+    vcx.simulate_event(ScrollWheelEvent {
+        position: at,
+        delta: ScrollDelta::Pixels(point(px(dx), px(dy))),
+        modifiers: Modifiers::default(),
+        touch_phase: phase,
+    });
+    settle(vcx);
+}
+
+/// Photo 1 of 3 open, the pointer over the picture.
+fn three_photos(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Point<Pixels> {
+    for id in [8901, 8902, 8903] {
+        add_photo(app, vcx, id);
+    }
+    open(app, vcx, 8901);
+    let (picture, _) = targets(app, vcx);
+    vcx.simulate_mouse_move(picture, None, Modifiers::default());
+    settle(vcx);
+    picture
+}
+
+#[gpui_kit::test]
+fn a_full_swipe_moves_to_the_next_item(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let picture = three_photos(&app, vcx);
+
+    trackpad(vcx, picture, 0., 0., TouchPhase::Started);
+    trackpad(vcx, picture, -60., 0., TouchPhase::Moved);
+    assert!(vcx.debug_bounds("media-viewer-swipe-next").is_some());
+    assert_eq!(current(&app, vcx), 8901, "nothing moves before the release");
+    trackpad(vcx, picture, 0., 0., TouchPhase::Ended);
+    assert_eq!(current(&app, vcx), 8902);
+    assert!(vcx.debug_bounds("media-viewer-swipe-next").is_none());
+    for _ in 0..5 {
+        trackpad(vcx, picture, -40., 0., TouchPhase::Moved);
+    }
+    assert_eq!(current(&app, vcx), 8902, "momentum does not move again");
+    assert!(vcx.debug_bounds("media-viewer-swipe-next").is_none());
+}
+
+#[gpui_kit::test]
+fn a_short_swipe_cancels(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let picture = three_photos(&app, vcx);
+
+    trackpad(vcx, picture, 0., 0., TouchPhase::Started);
+    trackpad(vcx, picture, -40., 0., TouchPhase::Moved);
+    let shown = vcx
+        .debug_bounds("media-viewer-swipe-next")
+        .expect("the next arrow pulled in");
+    assert!(shown.left() > px(1000.), "at the right edge");
+    trackpad(vcx, picture, 10., 0., TouchPhase::Moved);
+    trackpad(vcx, picture, 0., 0., TouchPhase::Ended);
+    assert_eq!(current(&app, vcx), 8901, "a 30 px swipe cancels");
+    assert!(vcx.debug_bounds("media-viewer-swipe-next").is_none());
+}
+
+#[gpui_kit::test]
+fn a_swipe_right_on_the_first_item_does_nothing(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let picture = three_photos(&app, vcx);
+
+    trackpad(vcx, picture, 0., 0., TouchPhase::Started);
+    trackpad(vcx, picture, 80., 0., TouchPhase::Moved);
+    assert!(vcx.debug_bounds("media-viewer-swipe-prev").is_none());
+    trackpad(vcx, picture, 0., 0., TouchPhase::Ended);
+    assert_eq!(current(&app, vcx), 8901);
+}
+
+#[gpui_kit::test]
+fn a_vertical_first_gesture_stays_with_the_wheel(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let picture = three_photos(&app, vcx);
+
+    trackpad(vcx, picture, 0., -130., TouchPhase::Started);
+    assert_eq!(current(&app, vcx), 8902, "the wheel rule moved it");
+    trackpad(vcx, picture, -80., 0., TouchPhase::Moved);
+    assert!(vcx.debug_bounds("media-viewer-swipe-next").is_none());
+    trackpad(vcx, picture, 0., 0., TouchPhase::Ended);
+    assert_eq!(current(&app, vcx), 8902, "the sideways part did not swipe");
+}
+
+#[gpui_kit::test]
+fn a_swipe_without_phases_ends_after_a_pause(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let picture = three_photos(&app, vcx);
+
+    trackpad(vcx, picture, -30., 0., TouchPhase::Moved);
+    trackpad(vcx, picture, -30., 0., TouchPhase::Moved);
+    assert!(vcx.debug_bounds("media-viewer-swipe-next").is_some());
+    assert_eq!(current(&app, vcx), 8901);
+    vcx.executor().advance_clock(Duration::from_millis(350));
+    settle(vcx);
+    assert_eq!(current(&app, vcx), 8902);
+    assert!(vcx.debug_bounds("media-viewer-swipe-next").is_none());
 }

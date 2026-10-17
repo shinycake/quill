@@ -20,11 +20,12 @@ use gpui_kit::*;
 use quill::ids::{ChatId, FileId, MessageId};
 use quill::local_path::sandboxed_display_path;
 use quill::media_viewer::{
-    MediaViewer, MediaViewerItem, MediaViewerKind, VIEWER_SHOW_MS, VIEWER_WAIT_HIDE_MS,
-    VIEWER_WHEEL_NOTCH_PX, ViewerKeyAction, ViewerKeyMods, ViewerOrientation, ViewerSource,
-    ViewerVideoStart, ViewerZoom, WheelAction, WheelInput, WheelSource, collect_media_items,
-    controls_fade_ms, controls_hide_wait_ms, controls_should_hide, decide_viewer_video_start,
-    orient_rgba, pinch_zoom_factor, save_media_to_downloads, seek_target_secs, viewer_delete_gate,
+    MediaViewer, MediaViewerItem, MediaViewerKind, SwipeAction, SwipeDir, SwipeInput,
+    VIEWER_SHOW_MS, VIEWER_TRACKPAD_GESTURE_GAP, VIEWER_WAIT_HIDE_MS, VIEWER_WHEEL_NOTCH_PX,
+    ViewerKeyAction, ViewerKeyMods, ViewerOrientation, ViewerSource, ViewerVideoStart, ViewerZoom,
+    WheelAction, WheelInput, WheelSource, collect_media_items, controls_fade_ms,
+    controls_hide_wait_ms, controls_should_hide, decide_viewer_video_start, orient_rgba,
+    pinch_zoom_factor, save_media_to_downloads, seek_target_secs, viewer_delete_gate,
     viewer_key_action, wheel_zoom_factor,
 };
 use quill::settings::MediaPrefs;
@@ -54,6 +55,7 @@ mod overlay;
 mod overlay_controls;
 mod pip;
 mod playback;
+mod swipe_indicator;
 mod ttl_ui;
 mod video;
 mod video_extras;

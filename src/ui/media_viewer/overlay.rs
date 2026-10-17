@@ -3,6 +3,7 @@
 //! picture.
 
 use super::chrome::ChromeFacts;
+use super::swipe_indicator::swipe_indicator;
 use super::*;
 use quill::lang::{keys, tr, tr_with};
 
@@ -507,6 +508,12 @@ impl QuillApp {
         });
         let open_gen = self.viewer.open_gen as usize;
         let viewport = window.viewport_size();
+        let swipe = self
+            .viewer
+            .swipe
+            .indicator()
+            .filter(|_| part.draws_chrome())
+            .map(|shown| swipe_indicator(shown, geometry.fit, f32::from(viewport.width)));
         // Layered, the panel takes no clicks itself: the backdrop under it
         // closes the viewer.
         let root = if part == ViewerPart::Inline {
@@ -547,6 +554,7 @@ impl QuillApp {
                 visual.map(|visual| div().absolute().left(px(left)).top(px(top)).child(visual)),
             )
             .children(chrome.into_iter().flatten())
+            .children(swipe)
             // Fade in over 200 ms when it opens (tdesktop
             // `mediaviewShowDuration`). Closing is instant: a fade-out
             // would have to keep the closed viewer's state alive.

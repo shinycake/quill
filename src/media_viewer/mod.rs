@@ -27,6 +27,7 @@ mod items;
 pub mod pip;
 mod quality;
 mod save;
+mod swipe;
 mod transform;
 mod ttl;
 mod wheel;
@@ -52,6 +53,9 @@ pub use quality::{VideoQualityOption, build_quality_options, current_quality, pi
 pub use save::{
     downloads_dir, os_downloads_dir, save_media_to_downloads, save_media_to_downloads_in_dir,
     saved_note,
+};
+pub use swipe::{
+    SwipeAction, SwipeDir, SwipeIndicator, SwipeInput, SwipeNav, VIEWER_SWIPE_THRESHOLD_PX,
 };
 pub use transform::{
     VIEWER_WHEEL_MAX_NOTCHES, VIEWER_WHEEL_NOTCH_PX, VIEWER_ZOOM_MAX, VIEWER_ZOOM_MIN,
