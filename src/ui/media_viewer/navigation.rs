@@ -2,6 +2,7 @@
 //! files it shows.
 
 use super::*;
+use std::time::Instant;
 
 impl QuillApp {
     /// Phase 4.5: open the fullscreen media viewer on the clicked message.
@@ -295,7 +296,7 @@ impl QuillApp {
             primary: event.modifiers.secondary(),
             source,
             zoomed: self.viewer.zoom.is_zoomed(),
-            at: std::time::Instant::now(),
+            at: Instant::now(),
         });
         match action {
             WheelAction::None => {}
@@ -310,7 +311,7 @@ impl QuillApp {
         }
     }
 
-    /// A trackpad pinch zooms at its center (tdesktop
+    /// A trackpad pinch zooms at the event position (tdesktop
     /// `handleNativeGesture`).
     pub(in crate::ui) fn viewer_pinch(
         &mut self,
