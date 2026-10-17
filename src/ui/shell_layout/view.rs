@@ -4,7 +4,7 @@
 
 use super::{
     DOWNLOADS_PANEL_WIDTH, ForumPane, INFO_PANEL_WIDTH, PanelPane, SHARED_MEDIA_PANEL_WIDTH,
-    ShellInput, ShellLayout, max_list_width, shell_layout,
+    ShellInput, ShellLayout, chat_pane_width, max_list_width, shell_layout,
 };
 use crate::ui::app::{PaneMode, QuillApp};
 use crate::ui::navigation::SidebarResize;
@@ -89,7 +89,9 @@ impl QuillApp {
         self.frame.main_width = window.viewport_size().width;
         // Also records the peek and whether the topics are on screen.
         self.forum_column_layout(window);
-        let layout = self.shell_layout();
+        let input = self.shell_input();
+        let layout = shell_layout(input);
+        self.seed_history_width(chat_pane_width(input, &layout));
         let open = self.session().and_then(|s| s.open_chat);
         let list = layout.list.map(|list| {
             let column = if self.pane_mode() == PaneMode::Ready {

@@ -28,8 +28,9 @@ pub(super) fn poll_body(
     content: &PollContent,
     // The options' pictures and custom emoji, as far as downloaded.
     media: &PollMediaView,
-    // The bubble look: a plain bubble has no padding to take off the width.
-    plain: bool,
+    // The bubble's room: a plain bubble has no padding to take off the
+    // width, a narrow history lowers the floor.
+    room: crate::ui::history::bubble_width::BubbleRoom,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let poll = &content.poll;
@@ -45,7 +46,7 @@ pub(super) fn poll_body(
         .mt_1()
         // Telegram Desktop `Poll::countOptimalSize`: never narrower than
         // `msgFileMinWidth`; the question and answers widen it.
-        .min_w(super::history::bubble_width::poll_min_width(plain))
+        .min_w(super::history::bubble_width::poll_min_width(room))
         .child(
             super::bidi_line::aligned_block(poll.question.clone())
                 .text_sm()
@@ -167,12 +168,12 @@ pub(super) fn session_poll_body(
         &[std::path::PathBuf],
         Option<&quill::state::Session>,
     ),
-    look: super::synthetic::BubbleLook,
+    room: crate::ui::history::bubble_width::BubbleRoom,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let media =
         super::polls::option_thumb::poll_media_view(&content.poll, files, media_roots, session);
-    poll_body(message.chat_id, message.id, content, &media, look.plain, cx)
+    poll_body(message.chat_id, message.id, content, &media, room, cx)
 }
 
 /// One poll option: text + percentage, a bar split by `flex_grow`

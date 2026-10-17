@@ -22,7 +22,9 @@ fn map_tile(
         .id(id)
         .relative()
         .w(width)
-        .h(height)
+        // A narrow bubble shrinks the tile, keeping its shape.
+        .max_w_full()
+        .aspect_ratio(MAP_TILE_WIDTH / MAP_TILE_HEIGHT)
         .overflow_hidden()
         .rounded_md()
         .bg(fill_muted())

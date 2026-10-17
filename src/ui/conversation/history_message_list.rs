@@ -724,7 +724,7 @@ impl QuillApp {
             .children(pull_indicator)
             .child(pull_listener)
             .children(date_pill)
-            .child(self.chat_layout_probe(cx))
+            .child(self.history_width_probe(cx))
             // tdesktop's corner "@" / heart buttons.
             .children(corner_buttons.map(super::anim_layer::occluder))
             // Where the scroller's jump-to-latest button floats while

@@ -31,14 +31,17 @@ fn picture_path(
 }
 
 /// Card frame of a forwarded story: the box a photo or video of the
-/// story's size gets in a bubble.
-pub(in crate::ui) fn story_frame(preview: Option<&StoryPreview>) -> (Pixels, Pixels) {
+/// story's size gets in a bubble that leaves it `width_max`.
+pub(in crate::ui) fn story_frame(
+    preview: Option<&StoryPreview>,
+    width_max: i32,
+) -> (Pixels, Pixels) {
     let (kind, w, h) = match preview {
         Some(p) if p.duration_secs.is_some() => (MediaFrameKind::Video, p.width, p.height),
         Some(p) => (MediaFrameKind::Photo, p.width, p.height),
         None => (MediaFrameKind::Photo, 720, 1280),
     };
-    media_frame_for(kind, w, h, 0)
+    media_frame_for(kind, w, h, 0, width_max)
 }
 
 /// The "no longer available" wording of an expired mention
@@ -102,6 +105,7 @@ pub(in crate::ui) fn story_card(
     session: Option<&Session>,
     files: &HashMap<i32, ParsedFile>,
     media_roots: &[PathBuf],
+    width_max: i32,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let state = session.map_or(StoryCardState::Loading, |s| {
@@ -125,7 +129,7 @@ pub(in crate::ui) fn story_card(
             .into_any_element();
     }
     let preview = session.and_then(|s| s.story_preview(poster.0, story_id));
-    let (width, height) = story_frame(preview.as_ref());
+    let (width, height) = story_frame(preview.as_ref(), width_max);
     let mut tile = div()
         .id(("story-card", row_id))
         .relative()

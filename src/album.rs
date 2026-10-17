@@ -468,6 +468,37 @@ pub fn layout_bounds(parts: &[AlbumRect]) -> (i32, i32) {
     (width, height)
 }
 
+/// `GroupedMedia::countCurrentSize`: a mosaic laid out at its full width,
+/// scaled down to `width` with its gaps (never up), so a narrow bubble
+/// keeps the same arrangement. Each tile's right and bottom edges are
+/// scaled together with the gap after them, as Telegram Desktop does, so
+/// the gaps stay even.
+pub fn scale_layout(parts: &[AlbumRect], width: i32, spacing: i32) -> Vec<AlbumRect> {
+    let (full_w, full_h) = layout_bounds(parts);
+    if width >= full_w || width <= 0 {
+        return parts.to_vec();
+    }
+    let factor = f64::from(width) / f64::from(full_w);
+    let scale = |value: i32| (f64::from(value) * factor).round() as i32;
+    let gap = scale(spacing);
+    parts
+        .iter()
+        .map(|part| {
+            let right_skip = part.x + part.width < full_w;
+            let bottom_skip = part.y + part.height < full_h;
+            let right = part.x + part.width + if right_skip { spacing } else { 0 };
+            let bottom = part.y + part.height + if bottom_skip { spacing } else { 0 };
+            let (left, top) = (scale(part.x), scale(part.y));
+            AlbumRect {
+                x: left,
+                y: top,
+                width: (scale(right) - left - if right_skip { gap } else { 0 }).max(1),
+                height: (scale(bottom) - top - if bottom_skip { gap } else { 0 }).max(1),
+            }
+        })
+        .collect()
+}
+
 /// MED1: the message ids of one album, oldest first, from an unordered
 /// history slice. Drives album pin/unpin (`pinChatMessage` per message —
 /// TGX `MessagePinAlbum` pins each member; TDLib has no album-level pin).
@@ -576,5 +607,36 @@ mod tests {
         assert_eq!(album_message_ids(&history, 8), vec![MessageId(20)]);
         assert!(album_message_ids(&history, 0).is_empty());
         assert!(album_message_ids(&history, 99).is_empty());
+    }
+
+    #[test]
+    fn a_narrow_bubble_scales_the_mosaic_and_its_gaps() {
+        let full = layout_media_group(
+            &[(200, 200), (200, 200), (300, 200)],
+            ALBUM_MAX_WIDTH,
+            ALBUM_MIN_WIDTH,
+            ALBUM_SPACING,
+        );
+        let (full_w, full_h) = layout_bounds(&full);
+        // Wide enough: unchanged.
+        assert_eq!(scale_layout(&full, full_w, ALBUM_SPACING), full);
+        assert_eq!(scale_layout(&full, 1000, ALBUM_SPACING), full);
+        // Half as wide: same arrangement, edges and gaps halved.
+        let half = scale_layout(&full, full_w / 2, ALBUM_SPACING);
+        assert_eq!(half.len(), full.len());
+        let (w, h) = layout_bounds(&half);
+        assert!((w - full_w / 2).abs() <= 1, "{w}");
+        assert!((h - full_h / 2).abs() <= 1, "{h}");
+        for (small, big) in half.iter().zip(&full) {
+            assert_eq!(small.x == 0, big.x == 0);
+            assert_eq!(small.y == 0, big.y == 0);
+        }
+        // Neighbours keep a gap of half the spacing (2 px of 4).
+        let pairs = half.iter().flat_map(|a| half.iter().map(move |b| (a, b)));
+        for (a, b) in pairs {
+            if b.x > a.x + a.width - 1 && b.y < a.y + a.height && a.y < b.y + b.height {
+                assert!(b.x - (a.x + a.width) >= 1, "{a:?} {b:?}");
+            }
+        }
     }
 }

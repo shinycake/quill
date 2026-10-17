@@ -18,11 +18,16 @@
 //!   widening the row in between;
 //! - poll: `msgFileMinWidth` floor, the question and answers widen it;
 //! - contact: as wide as its lines and buttons, no floor.
+//!
+//! A narrow history narrows all of them (`Message::resizeContentGetHeight`
+//! and each media's `countCurrentSize` fit the history's width): every
+//! width here is capped by the row's [`BubbleRoom`].
 
 use super::*;
 use quill::bubble_layout::{
-    FILE_MIN_WIDTH, FileContext, MSG_MAX_WIDTH, MediaContext, WAVEFORM_BAR, WAVEFORM_MAX,
-    WAVEFORM_MIN, WAVEFORM_SAMPLES, WAVEFORM_SKIP, file_max_width, skip_block_width,
+    FILE_MIN_WIDTH, FileContext, HistoryWidth, MAX_MEDIA_SIZE, MSG_MAX_WIDTH, MediaContext,
+    WAVEFORM_BAR, WAVEFORM_MAX, WAVEFORM_MIN, WAVEFORM_SAMPLES, WAVEFORM_SKIP, file_max_width,
+    skip_block_width,
 };
 
 /// Horizontal chrome of a padded bubble around its content: the kit
@@ -37,13 +42,69 @@ pub(in crate::ui) fn content_for_outer(outer: i32, plain: bool) -> Pixels {
     px(inner.max(0) as f32)
 }
 
+/// How wide one row's bubble may get in the history it is drawn in
+/// ([`HistoryWidth::bubble_room`]), and whether the row has the plain
+/// look. In a wide history it changes nothing; in a narrow one it caps
+/// the bubble, its rows and its pictures so they shrink instead of being
+/// clipped at the history's edge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::ui) struct BubbleRoom {
+    room: i32,
+    plain: bool,
+}
+
+impl BubbleRoom {
+    /// A row in a history `history` wide; `photo` when the row keeps the
+    /// sender photo column.
+    pub(in crate::ui) const fn new(history: HistoryWidth, photo: bool, plain: bool) -> Self {
+        Self {
+            room: history.bubble_room(photo, plain),
+            plain,
+        }
+    }
+
+    /// A row in a wide history: nothing is narrowed.
+    pub(in crate::ui) const fn wide(plain: bool) -> Self {
+        Self::new(HistoryWidth::WIDE, true, plain)
+    }
+
+    /// The bubble's outer width limit: `msgMaxWidth`, less in a narrow
+    /// history.
+    pub(in crate::ui) fn outer(self) -> i32 {
+        MSG_MAX_WIDTH.min(self.room)
+    }
+
+    /// The widest a picture is drawn: `maxMediaSize`, or what the room
+    /// leaves inside the bubble's border (`led`: the picture leads the
+    /// bubble) or inside its padding.
+    pub(in crate::ui) fn media(self, led: bool) -> i32 {
+        let chrome = if self.plain {
+            0
+        } else if led {
+            2
+        } else {
+            PADDED_CHROME
+        };
+        MAX_MEDIA_SIZE.min(self.room - chrome).max(1)
+    }
+
+    /// A width Telegram Desktop gives a bubble, narrowed to the room.
+    fn cap(self, outer: i32) -> i32 {
+        outer.min(self.outer())
+    }
+}
+
 /// A voice note row (`Document::countOptimalSize` with a
 /// `HistoryDocumentVoice`): the widest of `msgFileMinWidth`, the status
 /// line with the unread dot and the time's skip block, and a full
 /// 100-bar waveform with the row's disc and padding. The waveform then
 /// fills whatever is left of it. `status_width` is the duration label's
 /// width, `info_width` the time footer's (0 when hidden).
-pub(in crate::ui) fn voice_row_width(status_width: i32, info_width: i32, plain: bool) -> Pixels {
+pub(in crate::ui) fn voice_row_width(
+    status_width: i32,
+    info_width: i32,
+    room: BubbleRoom,
+) -> Pixels {
     let outer = file_max_width(FileContext {
         thumbed: false,
         voice: true,
@@ -52,23 +113,25 @@ pub(in crate::ui) fn voice_row_width(status_width: i32, info_width: i32, plain: 
         skip_block_width: skip_block_width(info_width),
         transcribe_width: 0,
     });
-    content_for_outer(outer, plain)
+    content_for_outer(room.cap(outer), room.plain)
 }
 
 /// A music or document row: `msgFileMinWidth` at the narrowest and
 /// `msgMaxWidth` at the widest (`Document::countOptimalSize` caps the name
 /// there); between the two the name widens the row, which flex does.
-pub(in crate::ui) fn file_row_bounds(plain: bool) -> (Pixels, Pixels) {
+/// A narrow history lowers both to its room.
+pub(in crate::ui) fn file_row_bounds(room: BubbleRoom) -> (Pixels, Pixels) {
     (
-        content_for_outer(FILE_MIN_WIDTH, plain),
-        content_for_outer(MSG_MAX_WIDTH, plain),
+        content_for_outer(room.cap(FILE_MIN_WIDTH), room.plain),
+        content_for_outer(room.outer(), room.plain),
     )
 }
 
 /// A poll never gets narrower than `msgFileMinWidth`
-/// (`Poll::countOptimalSize`); its question and answers widen it.
-pub(in crate::ui) fn poll_min_width(plain: bool) -> Pixels {
-    content_for_outer(FILE_MIN_WIDTH, plain)
+/// (`Poll::countOptimalSize`) unless the history is narrower; its question
+/// and answers widen it.
+pub(in crate::ui) fn poll_min_width(room: BubbleRoom) -> Pixels {
+    content_for_outer(room.cap(FILE_MIN_WIDTH), room.plain)
 }
 
 pub(in crate::ui) use super::text_measure::longest_line_width;
@@ -200,10 +263,11 @@ pub(in crate::ui) const PREVIEW_CARD_CHROME: i32 = 8 + 8 + 2;
 /// thumbnail (`gap_2`).
 pub(in crate::ui) const PREVIEW_PHOTO_DELTA: i32 = 8;
 
-/// The widest a link preview card's inside gets: the padded bubble at
-/// `msgMaxWidth`, less the card's own chrome.
-pub(in crate::ui) fn preview_inner_max() -> i32 {
-    MSG_MAX_WIDTH - PADDED_CHROME - PREVIEW_CARD_CHROME
+/// The widest a link preview card's inside gets: the padded bubble at its
+/// outer limit (`msgMaxWidth` in a wide history), less the card's own
+/// chrome.
+pub(in crate::ui) fn preview_inner_max(room: BubbleRoom) -> i32 {
+    (room.outer() - PADDED_CHROME - PREVIEW_CARD_CHROME).max(1)
 }
 
 /// `ArticleThumbWidth`: a thumbnail of `dims` in a box `height` tall
@@ -279,14 +343,14 @@ pub(in crate::ui) fn article_thumb(dims: (i32, i32), copy: &ArticleCopy, inner: 
 
 /// A link preview's large photo (`WebPage` with a `Photo` attach): the
 /// photo's own optimal width, capped at the card's inside at
-/// `msgMaxWidth`, and its frame there (`Photo::countCurrentSize`). The
-/// card draws it at least that wide and fills a wider card's inside at
-/// the same proportions.
-pub(in crate::ui) fn preview_photo_frame(dims: (i32, i32)) -> (i32, i32) {
+/// `msgMaxWidth` (or what a narrow history leaves), and its frame there
+/// (`Photo::countCurrentSize`). The card draws it at least that wide and
+/// fills a wider card's inside at the same proportions.
+pub(in crate::ui) fn preview_photo_frame(dims: (i32, i32), room: BubbleRoom) -> (i32, i32) {
     use quill::bubble_layout::{Size, photo_current, photo_optimal};
     let dims = Size::new(dims.0, dims.1);
     let context = media_context(0, 0);
-    let width = photo_optimal(dims, context).w.min(preview_inner_max());
+    let width = photo_optimal(dims, context).w.min(preview_inner_max(room));
     let frame = photo_current(dims, context, width);
     (frame.w.min(width), frame.h)
 }
@@ -379,11 +443,16 @@ pub(in crate::ui) fn waveform_bars(values: &[u8], available: i32) -> Vec<WaveBar
 #[cfg(test)]
 mod tests {
     use super::{
-        ArticleCopy, CaptionTail, WAVEFORM_MAX, WAVEFORM_MIN, article_thumb, article_thumb_width,
-        bubble_width_limit, caption_ends_bubble, content_for_outer, file_row_bounds, media_context,
-        poll_min_width, preview_inner_max, preview_photo_frame, voice_row_width, waveform_bars,
+        ArticleCopy, BubbleRoom, CaptionTail, WAVEFORM_MAX, WAVEFORM_MIN, article_thumb,
+        article_thumb_width, bubble_width_limit, caption_ends_bubble, content_for_outer,
+        file_row_bounds, media_context, poll_min_width, preview_inner_max, preview_photo_frame,
+        voice_row_width, waveform_bars,
     };
     use gpui_kit::px;
+    use quill::bubble_layout::HistoryWidth;
+
+    const PADDED: BubbleRoom = BubbleRoom::wide(false);
+    const PLAIN: BubbleRoom = BubbleRoom::wide(true);
 
     #[test]
     fn rows_take_telegram_desktop_widths_less_the_bubble_chrome() {
@@ -391,19 +460,19 @@ mod tests {
         // adds 12 + 12 + 2 around its content.
         assert_eq!(content_for_outer(268, false), px(242.));
         assert_eq!(content_for_outer(268, true), px(268.));
-        assert_eq!(file_row_bounds(false), (px(242.), px(404.)));
-        assert_eq!(poll_min_width(true), px(268.));
+        assert_eq!(file_row_bounds(PADDED), (px(242.), px(404.)));
+        assert_eq!(poll_min_width(PLAIN), px(268.));
     }
 
     #[test]
     fn a_voice_row_is_as_wide_as_a_full_waveform() {
         // 100 bars of 3 px, the row's 12 + 10 padding, the 44 px disc and
         // its 11 px skip: 377, as Telegram Desktop; 351 inside the bubble.
-        assert_eq!(voice_row_width(40, 30, true), px(377.));
-        assert_eq!(voice_row_width(40, 30, false), px(351.));
+        assert_eq!(voice_row_width(40, 30, PLAIN), px(377.));
+        assert_eq!(voice_row_width(40, 30, PADDED), px(351.));
         // A very wide status line (a long "played / total") still wins.
         // 67 text left + 300 status + 12 unread dot + 40 skip block + 11.
-        assert_eq!(voice_row_width(300, 30, true), px(430.));
+        assert_eq!(voice_row_width(300, 30, PLAIN), px(430.));
     }
 
     #[test]
@@ -445,8 +514,8 @@ mod tests {
     #[test]
     fn file_rows_in_the_plain_look_take_the_whole_bubble_widths() {
         // No bubble padding to leave out: 268..430, not 242..404.
-        assert_eq!(file_row_bounds(true), (px(268.), px(430.)));
-        assert_eq!(file_row_bounds(false), (px(242.), px(404.)));
+        assert_eq!(file_row_bounds(PLAIN), (px(268.), px(430.)));
+        assert_eq!(file_row_bounds(PADDED), (px(242.), px(404.)));
     }
 
     #[test]
@@ -512,7 +581,7 @@ mod tests {
             title_line: 19.6,
             small_line: 16.8,
         };
-        let inner = preview_inner_max();
+        let inner = preview_inner_max(PADDED);
         assert_eq!(inner, 386);
         // Site, title and one description line: 16.8 + 19.6 + 16.8.
         assert_eq!(article_thumb((90, 90), &copy, inner), (53, 53));
@@ -537,10 +606,56 @@ mod tests {
     fn a_large_preview_photo_fills_the_cards_inside() {
         // A landscape photo's optimal width is msgMaxWidth: the whole
         // inside of the card at the widest bubble.
-        let (w, h) = preview_photo_frame((1100, 740));
-        assert_eq!(w, preview_inner_max());
+        let (w, h) = preview_photo_frame((1100, 740), PADDED);
+        assert_eq!(w, preview_inner_max(PADDED));
         assert_eq!(h, 259);
         // A small one keeps `historyPhotoBubbleMinWidth`.
-        assert_eq!(preview_photo_frame((90, 90)).0, 200);
+        assert_eq!(preview_photo_frame((90, 90), PADDED).0, 200);
+    }
+
+    #[test]
+    fn a_wide_history_keeps_telegram_desktops_widths() {
+        for plain in [false, true] {
+            let room = BubbleRoom::wide(plain);
+            assert_eq!(room.outer(), 430);
+            // maxMediaSize, whatever chrome the bubble has.
+            assert_eq!(room.media(true), 430);
+            assert_eq!(room.media(false), 430);
+        }
+        // Any history from 640 px on reads the same, so nothing changes.
+        let at = |width: f32| BubbleRoom::new(HistoryWidth::new(width), true, false);
+        assert_eq!(at(640.), PADDED);
+        assert_eq!(at(1180.), PADDED);
+    }
+
+    #[test]
+    fn a_narrow_history_narrows_every_row_kind() {
+        // A 380 px history: a group row (sender photo column) has 252 px
+        // for its bubble, an outgoing row 284.
+        let group = BubbleRoom::new(HistoryWidth::new(380.), true, false);
+        let own = BubbleRoom::new(HistoryWidth::new(380.), false, false);
+        assert_eq!(group.outer(), 252);
+        assert_eq!(own.outer(), 284);
+        // Pictures: inside the 1 px border, or the padding under a header.
+        assert_eq!(group.media(true), 250);
+        assert_eq!(group.media(false), 226);
+        // Files and polls drop their msgFileMinWidth floor to the room.
+        assert_eq!(file_row_bounds(group), (px(226.), px(226.)));
+        assert_eq!(file_row_bounds(own), (px(242.), px(258.)));
+        assert_eq!(poll_min_width(group), px(226.));
+        // A voice row narrows (its waveform takes fewer bars).
+        assert_eq!(voice_row_width(40, 30, group), px(226.));
+        // A link preview card and its large photo.
+        assert_eq!(preview_inner_max(group), 252 - 26 - 18);
+        let (w, h) = preview_photo_frame((1100, 740), group);
+        assert_eq!(w, 208);
+        assert!(h < 259 && h > 100, "{h}");
+        // A 500 px history only narrows the photo rows a little.
+        let mid = BubbleRoom::new(HistoryWidth::new(500.), true, false);
+        assert_eq!(mid.outer(), 348);
+        assert_eq!(
+            BubbleRoom::new(HistoryWidth::new(600.), false, false).outer(),
+            430
+        );
     }
 }

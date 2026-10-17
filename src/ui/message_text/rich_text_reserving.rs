@@ -242,6 +242,8 @@ pub(in crate::ui) fn message_text_block(
     // Trailing space for the bubble's inline time footer (see
     // `rich_text_reserving`); only when the text is the bubble's last part.
     reserve: Option<Pixels>,
+    // How wide the bubble may get: the link preview card fits it.
+    room: crate::ui::history::bubble_width::BubbleRoom,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = msg_key.1;
@@ -289,9 +291,18 @@ pub(in crate::ui) fn message_text_block(
         cx,
     );
     let card = text.link_preview.as_ref().and_then(|preview| {
-        preview
-            .has_card()
-            .then(|| link_preview_card(row_id, preview, files, downloading, media_roots, font, cx))
+        preview.has_card().then(|| {
+            link_preview_card(
+                row_id,
+                preview,
+                files,
+                downloading,
+                media_roots,
+                font,
+                room,
+                cx,
+            )
+        })
     });
     let has_text = !text.text.is_empty();
     let mut block = div().id(("msg-text-block", row_id)).flex().flex_col();
@@ -325,6 +336,7 @@ pub(in crate::ui) fn link_preview_card(
     media_roots: &[PathBuf],
     // Settings → Appearance: message font size.
     font: Pixels,
+    room: crate::ui::history::bubble_width::BubbleRoom,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let site_empty = preview.site_name.is_empty();
@@ -340,7 +352,7 @@ pub(in crate::ui) fn link_preview_card(
     };
     let small = font * (12.0 / 14.0);
     let thumb = preview.photo.as_ref().map(|photo| {
-        let frame = preview_frame(preview, photo, font, small, cx);
+        let frame = preview_frame(preview, photo, font, small, room, cx);
         preview_thumb(row_id, photo, frame, files, downloading, media_roots)
     });
     // MED4: embedded players get a play/duration badge over the
@@ -394,11 +406,16 @@ pub(in crate::ui) fn link_preview_card(
                 .flex()
                 .gap_1()
                 .mt_1();
+            // Up to four 72 px tiles 4 px apart; a narrow card shrinks them.
+            let tiles = thumbnails.len().min(4) as i32;
+            let fit = (crate::ui::history::bubble_width::preview_inner_max(room) - 4 * (tiles - 1))
+                / tiles.max(1);
+            let side = px(fit.clamp(1, 72) as f32);
             for (index, thumb_photo) in thumbnails.iter().enumerate() {
                 strip = strip.child(preview_thumb(
                     row_id * 100 + index as u64,
                     thumb_photo,
-                    ThumbFrame::Fixed(px(72.), px(72.)),
+                    ThumbFrame::Fixed(side, side),
                     files,
                     downloading,
                     media_roots,
@@ -546,6 +563,7 @@ fn preview_frame(
     photo: &quill::telegram::envelope::PhotoContent,
     font: Pixels,
     small: Pixels,
+    room: crate::ui::history::bubble_width::BubbleRoom,
     cx: &App,
 ) -> ThumbFrame {
     use crate::ui::history::bubble_width::{
@@ -557,7 +575,7 @@ fn preview_frame(
         .or_else(|| photo.thumb_size())
         .map_or((0, 0), |size| (size.width, size.height));
     if preview.show_large_media {
-        let (w, h) = preview_photo_frame(dims);
+        let (w, h) = preview_photo_frame(dims, room);
         return ThumbFrame::Fill {
             min_width: px(w as f32),
             ratio: w as f32 / h.max(1) as f32,
@@ -578,7 +596,7 @@ fn preview_frame(
         title_line: f32::from(font) * 1.4,
         small_line: f32::from(small) * 1.4,
     };
-    let (w, h) = article_thumb(dims, &copy, preview_inner_max());
+    let (w, h) = article_thumb(dims, &copy, preview_inner_max(room));
     ThumbFrame::Fixed(px(w as f32), px(h as f32))
 }
 

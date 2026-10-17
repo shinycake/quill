@@ -237,3 +237,28 @@ fn back_steps_to_topics_only_in_a_one_column_forum() {
         .back_to_topics()
     );
 }
+
+#[test]
+fn the_chat_pane_is_what_the_other_columns_leave() {
+    let pane = |input: ShellInput| chat_pane_width(input, &shell_layout(input));
+    // List beside the chat.
+    assert_eq!(pane(input(1000.)), 700.);
+    // Side panel beside it too: 300 list + 290 panel.
+    assert_eq!(
+        pane(ShellInput {
+            panels: Some(INFO_PANEL_WIDTH),
+            ..input(970.)
+        }),
+        CHAT_MIN_WIDTH
+    );
+    // The folder rail comes off as well.
+    assert_eq!(
+        pane(ShellInput {
+            rail: 70.,
+            ..input(1000.)
+        }),
+        630.
+    );
+    // One column: the whole window.
+    assert_eq!(pane(input(400.)), 400.);
+}

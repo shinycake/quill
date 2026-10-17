@@ -87,14 +87,21 @@ pub(super) struct InlineTile {
 impl InlineTile {
     /// A video or GIF tile: the media fitted by `media_frame_for`, widened
     /// by a caption of `caption_width` as the bubble draws it, so the
-    /// pictures are decoded for the frame they fill.
+    /// pictures are decoded for the frame they fill. Sized for a wide
+    /// history: a narrower one draws the same pictures smaller.
     pub(super) fn media(
         kind: crate::ui::message_media::MediaFrameKind,
         width: i32,
         height: i32,
         caption_width: i32,
     ) -> Self {
-        let (w, h) = super::message_media::media_frame_for(kind, width, height, caption_width);
+        let (w, h) = super::message_media::media_frame_for(
+            kind,
+            width,
+            height,
+            caption_width,
+            quill::bubble_layout::MAX_MEDIA_SIZE,
+        );
         Self {
             media: (width, height),
             tile: (f32::from(w), f32::from(h)),

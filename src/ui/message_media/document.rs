@@ -130,9 +130,10 @@ pub(in crate::ui) fn document_chip(
     // (user-initiated, listed) download; `Some(paused)` otherwise.
     paused: Option<bool>,
     origin: DocOrigin,
-    // The plain (bubble-less) look: the row takes Telegram Desktop's
-    // bubble widths whole, with no padding to leave out.
-    plain: bool,
+    // The bubble's room (`BubbleRoom`): in the plain (bubble-less) look
+    // the row takes Telegram Desktop's bubble widths whole, with no
+    // padding to leave out; a narrow history narrows them.
+    room: crate::ui::history::bubble_width::BubbleRoom,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     if doc.thumbnail.is_some() {
@@ -144,7 +145,7 @@ pub(in crate::ui) fn document_chip(
             downloading,
             media_roots,
             origin,
-            plain,
+            room,
             cx,
         );
     }
@@ -270,7 +271,7 @@ pub(in crate::ui) fn document_chip(
         None
     };
     // `msgFileMinWidth` to `msgMaxWidth`; the name widens the row between.
-    let (min_width, max_width) = crate::ui::history::bubble_width::file_row_bounds(plain);
+    let (min_width, max_width) = crate::ui::history::bubble_width::file_row_bounds(room);
     div()
         .id(("doc-chip", row_id))
         .mt_1()

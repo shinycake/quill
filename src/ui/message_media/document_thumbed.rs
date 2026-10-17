@@ -26,7 +26,7 @@ pub(in crate::ui) fn thumbed_document_chip(
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     origin: DocOrigin,
-    plain: bool,
+    room: crate::ui::history::bubble_width::BubbleRoom,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let file_id = doc.file_id;
@@ -174,7 +174,7 @@ pub(in crate::ui) fn thumbed_document_chip(
     } else {
         cx.theme().primary
     };
-    let (min_width, max_width) = crate::ui::history::bubble_width::file_row_bounds(plain);
+    let (min_width, max_width) = crate::ui::history::bubble_width::file_row_bounds(room);
     div()
         .id(("doc-chip", row_id))
         .mt_1()

@@ -146,6 +146,8 @@ pub(super) fn sponsored_message_row(
                     )
                 }),
         );
+    // The sponsored row has no sender photo column.
+    let room = crate::ui::history::bubble_width::BubbleRoom::new(look.history, false, look.plain);
     let content: Option<AnyElement> = match &message.content {
         MessageContent::Text(text) => Some(message_text_block(
             (chat_id.0, row_id),
@@ -161,6 +163,7 @@ pub(super) fn sponsored_message_row(
             look.font,
             false,
             None,
+            room,
             cx,
         )),
         MessageContent::Photo(photo) => Some(
@@ -176,6 +179,7 @@ pub(super) fn sponsored_message_row(
                     None,
                     MediaCorners::small(),
                     0,
+                    room.media(false),
                     cx,
                 ))
                 .into_any_element(),
@@ -196,6 +200,7 @@ pub(super) fn sponsored_message_row(
                     None,
                     MediaCorners::small(),
                     0,
+                    room.media(false),
                     cx,
                 ))
                 .into_any_element(),
@@ -214,6 +219,7 @@ pub(super) fn sponsored_message_row(
                     None,
                     MediaCorners::small(),
                     0,
+                    room.media(false),
                     cx,
                 ))
                 .into_any_element(),
@@ -229,7 +235,7 @@ pub(super) fn sponsored_message_row(
             // manager panel does); `None` hides it.
             None,
             DocOrigin::Sponsored(chat_id, message.message_id),
-            false,
+            room,
             cx,
         )),
         _ => None,

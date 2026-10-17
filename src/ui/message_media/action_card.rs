@@ -61,6 +61,8 @@ pub(in crate::ui) fn action_card(
     files: &HashMap<i32, ParsedFile>,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
+    // The widest the card's picture may be (`BubbleRoom::media`).
+    width_max: i32,
     cx: &mut Context<QuillApp>,
 ) -> Option<AnyElement> {
     if let Some((stars, locked, caption)) = locked_paid_media(&message.content) {
@@ -70,6 +72,7 @@ pub(in crate::ui) fn action_card(
             stars,
             locked,
             caption,
+            width_max,
             cx,
         ));
     }
@@ -81,6 +84,7 @@ pub(in crate::ui) fn action_card(
             files,
             downloading,
             media_roots,
+            width_max,
             cx,
         ));
     }
@@ -92,6 +96,7 @@ pub(in crate::ui) fn action_card(
         session,
         files,
         media_roots,
+        width_max,
         cx,
     ))
 }

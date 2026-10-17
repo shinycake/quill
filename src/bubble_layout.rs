@@ -640,6 +640,64 @@ pub fn album_max_width(available: i32) -> i32 {
     GROUP_WIDTH_MAX.min(available).max(GROUP_WIDTH_MIN)
 }
 
+/// The history scroller's inset on each side of a row (`MessageScroller`
+/// wraps every row in `px_3`).
+pub const HISTORY_ROW_INSET: i32 = 12;
+
+/// The history's width as bubble layout reads it. Telegram Desktop
+/// narrows every bubble to the history it is laid out in
+/// (`Message::resizeContentGetHeight` takes the history width less the
+/// margins and the photo column, and each media's `countCurrentSize` fits
+/// that). Whole pixels, and every width at which no bubble is narrowed
+/// reads as [`HistoryWidth::WIDE`], so resizing a wide history changes no
+/// layout input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct HistoryWidth(i32);
+
+impl HistoryWidth {
+    /// From this width on every bubble gets its whole `msgMaxWidth` and a
+    /// picture its whole `maxMediaSize` inside the bubble's border: the
+    /// narrowest row, one with a sender photo, leaves
+    /// `(640 - 24 - 40) * 4 / 5 = 460`.
+    pub const WIDE: Self = Self(640);
+
+    /// `width` in logical pixels, as the history measured it at paint.
+    pub fn new(width: f32) -> Self {
+        if width.is_nan() {
+            return Self::WIDE;
+        }
+        // `as` saturates, so a huge or infinite width is just wide.
+        Self((width.floor() as i32).clamp(0, Self::WIDE.0))
+    }
+
+    pub const fn get(self) -> i32 {
+        self.0
+    }
+
+    /// The widest a bubble may be, its padding included, in a row of this
+    /// history. The row leaves the history less the scroller's insets and,
+    /// with a sender photo, `msgPhotoSkip`; a bubble takes four fifths of
+    /// that (the kit `Bubble`'s `max_w(relative(0.8))`, which stands in for
+    /// `msgMargin.right`), and a plain-look row all of it. Never under
+    /// `msgMinWidth`, below which Telegram Desktop stops narrowing.
+    pub const fn bubble_room(self, photo: bool, plain: bool) -> i32 {
+        let skip = if photo { MSG_PHOTO_SKIP } else { 0 };
+        let column = self.0 - 2 * HISTORY_ROW_INSET - skip;
+        let room = if plain { column } else { column * 4 / 5 };
+        if room < MSG_MIN_WIDTH {
+            MSG_MIN_WIDTH
+        } else {
+            room
+        }
+    }
+}
+
+impl Default for HistoryWidth {
+    fn default() -> Self {
+        Self::WIDE
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -871,5 +929,47 @@ mod tests {
         assert_eq!(album_max_width(1000), 430);
         assert_eq!(album_max_width(300), 300);
         assert_eq!(album_max_width(50), 100);
+    }
+
+    #[test]
+    fn a_wide_history_reads_as_one_width() {
+        assert_eq!(HistoryWidth::new(640.), HistoryWidth::WIDE);
+        assert_eq!(HistoryWidth::new(1180.5), HistoryWidth::WIDE);
+        assert_eq!(HistoryWidth::new(f32::INFINITY), HistoryWidth::WIDE);
+        assert_eq!(HistoryWidth::new(f32::NAN), HistoryWidth::WIDE);
+        assert_eq!(HistoryWidth::new(399.9).get(), 399);
+        assert_eq!(HistoryWidth::new(-5.).get(), 0);
+        assert_eq!(HistoryWidth::default(), HistoryWidth::WIDE);
+    }
+
+    #[test]
+    fn a_wide_history_leaves_every_bubble_its_full_width() {
+        let wide = HistoryWidth::WIDE;
+        for (photo, plain) in [(false, false), (true, false), (false, true), (true, true)] {
+            // msgMaxWidth, plus the 1 px border on each side of a picture.
+            assert!(wide.bubble_room(photo, plain) >= MSG_MAX_WIDTH + 2);
+        }
+        assert_eq!(wide.bubble_room(true, false), 460);
+        assert_eq!(wide.bubble_room(false, false), 492);
+        assert_eq!(wide.bubble_room(true, true), 576);
+    }
+
+    #[test]
+    fn a_narrow_history_narrows_its_bubbles() {
+        // A 380 px history (Telegram Desktop's narrowest): 356 px of row,
+        // 316 beside a sender photo; a bubble takes four fifths.
+        let narrow = HistoryWidth::new(380.);
+        assert_eq!(narrow.bubble_room(false, false), 284);
+        assert_eq!(narrow.bubble_room(true, false), 252);
+        assert_eq!(narrow.bubble_room(true, true), 316);
+        // Never under msgMinWidth.
+        assert_eq!(
+            HistoryWidth::new(100.).bubble_room(true, false),
+            MSG_MIN_WIDTH
+        );
+        assert_eq!(
+            HistoryWidth::new(0.).bubble_room(false, true),
+            MSG_MIN_WIDTH
+        );
     }
 }

@@ -203,6 +203,11 @@ pub(super) fn album_history_row(
         quill::album::ALBUM_MIN_WIDTH,
         quill::album::ALBUM_SPACING,
     );
+    // A narrow history scales the mosaic down (`GroupedMedia::countCurrentSize`).
+    let media_max =
+        bubble_width::BubbleRoom::new(look.history, sender_avatar.is_some(), look.plain)
+            .media(true);
+    let layout = quill::album::scale_layout(&layout, media_max, quill::album::ALBUM_SPACING);
     let (box_w, box_h) = quill::album::layout_bounds(&layout);
     let mut mosaic = div()
         .id(("album", album_id as u64))
@@ -264,7 +269,7 @@ pub(super) fn album_history_row(
     }
     chrome.sender_status = sender_status;
     chrome.media_led = true;
-    chrome.media_width = Some(media_content_width(px(box_w as f32), px(0.)));
+    chrome.media_width = Some(media_content_width(px(box_w as f32), px(0.), media_max));
     chrome.footer_overlay = !has_caption;
     chrome.actions = Some(message_actions_button(first.chat_id, first.id, cx).into_any_element());
     let revealed = std::collections::HashSet::new();
