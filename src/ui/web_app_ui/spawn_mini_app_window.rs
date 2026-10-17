@@ -1,5 +1,6 @@
 //! Methods moved out of `web_app_ui.rs` to keep files under 1000 lines.
 
+use super::helper_pipe::{HelperWriter, Line, read_bounded_line};
 use super::*;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
@@ -54,12 +55,17 @@ impl QuillApp {
         };
         let (sender, events) = mpsc::channel();
         quill::thread_guard::spawn_guarded("quill-webview-reader", move || {
-            let reader = std::io::BufReader::new(stdout);
-            for line in reader.lines() {
-                let Ok(line) = line else { break };
-                if line.len() > quill_webview_protocol::MAX_IPC_MESSAGE_BYTES * 2 {
+            let mut reader = std::io::BufReader::new(stdout);
+            let cap = quill_webview_protocol::MAX_IPC_MESSAGE_BYTES * 2;
+            loop {
+                let line = match read_bounded_line(&mut reader, cap) {
+                    Ok(Line::Text(line)) => line,
+                    Ok(Line::TooLong) => continue,
+                    Ok(Line::End) | Err(_) => break,
+                };
+                let Ok(line) = String::from_utf8(line) else {
                     continue;
-                }
+                };
                 if let Ok(event) = decode::<HelperEvent>(&line)
                     && sender.send(event).is_err()
                 {
@@ -84,8 +90,9 @@ impl QuillApp {
             .map(|info| info.privacy_policy_url.clone())
             .filter(|url| quill::text::openable_http_url(url));
         self.mini_apps.window = Some(MiniAppWindow {
-            child,
-            stdin,
+            child: Some(child),
+            writer: HelperWriter::spawn(stdin),
+            wedged: false,
             events,
             launch,
             theme: theme_params(cx),

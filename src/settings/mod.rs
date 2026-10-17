@@ -11,6 +11,7 @@ mod appearance;
 mod badge;
 mod chat_prefs;
 mod chat_windows;
+mod deferred;
 mod first_run;
 mod media;
 mod video_pip;
@@ -20,6 +21,8 @@ pub use appearance::*;
 pub use badge::*;
 pub use chat_prefs::*;
 pub use chat_windows::*;
+pub use deferred::flush_deferred_writes;
+pub(crate) use deferred::{read_with_pending, write_json_deferred};
 pub use first_run::*;
 pub use media::*;
 pub use video_pip::*;
@@ -162,13 +165,22 @@ where
 /// leaves the previous file intact instead of a truncated one that would
 /// silently reset the settings to defaults.
 pub(crate) fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
+    write_bytes_atomic(path, &json_bytes(value)?)
+}
+
+/// The pretty JSON the settings files hold.
+pub(crate) fn json_bytes<T: Serialize>(value: &T) -> std::io::Result<Vec<u8>> {
+    serde_json::to_vec_pretty(value)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
+
+/// The atomic temp-file-and-rename write behind [`write_json_atomic`].
+pub(crate) fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     let parent = path
         .parent()
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "no parent dir"))?;
     std::fs::create_dir_all(parent)?;
-    let bytes = serde_json::to_vec_pretty(value)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
@@ -178,7 +190,7 @@ pub(crate) fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> std::io
     let tmp = parent.join(format!(".{file_name}.tmp-{}-{seq}", std::process::id()));
     let result = (|| {
         let mut file = std::fs::File::create(&tmp)?;
-        file.write_all(&bytes)?;
+        file.write_all(bytes)?;
         file.sync_all()?;
         drop(file);
         // `std::fs::rename` replaces an existing target on every platform

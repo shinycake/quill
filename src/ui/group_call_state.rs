@@ -43,6 +43,9 @@ pub(crate) struct GroupCallUi {
     /// System-wide push-to-talk hook, live only while joined with PTT on.
     pub(super) global_ptt: quill::calls::ptt_global::PlatformController,
     pub(super) global_ptt_polling: bool,
+    /// Ends the task listening to the hook's key edges (set when the hook
+    /// is torn down or replaced, so no thread waits on a dead channel).
+    pub(super) global_ptt_listener_stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// Locally pinned video tile of the group call (tdesktop viewport pin).
     pub(super) pin: quill::calls::tile_pin::TilePin,
     /// Your own microphone level on the mute button: the halo follows
@@ -91,6 +94,7 @@ impl GroupCallUi {
             ptt_delay_slider: None,
             global_ptt: Default::default(),
             global_ptt_polling: false,
+            global_ptt_listener_stop: None,
             pin: quill::calls::tile_pin::TilePin::default(),
             tile_overlays: HashMap::new(),
             stage_volume: None,

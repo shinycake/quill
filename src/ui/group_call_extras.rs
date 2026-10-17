@@ -23,6 +23,9 @@ use quill::lang::{keys, tr, tr_with};
 use quill::telegram::envelope::MessageSender;
 use std::time::Duration;
 
+/// How long the key-edge listener waits before it re-checks its stop flag.
+const PTT_LISTEN_SLICE: Duration = Duration::from_millis(250);
+
 impl QuillApp {
     fn ptt_config(&self) -> PttConfig {
         self.session()
@@ -182,8 +185,15 @@ impl QuillApp {
             events = Some(rx);
             Ok(handle)
         });
+        if (events.is_some() || !self.group_call.global_ptt.is_active())
+            && let Some(stop) = self.group_call.global_ptt_listener_stop.take()
+        {
+            stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
         if let Some(rx) = events {
-            self.listen_global_ptt(rx, cx);
+            let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            self.group_call.global_ptt_listener_stop = Some(stop.clone());
+            self.listen_global_ptt(rx, stop, cx);
         }
         if want.is_none() && changed {
             let _ = self.group_call.ptt.reset();
@@ -199,25 +209,37 @@ impl QuillApp {
         }
     }
 
-    /// Forward hook-thread events to the app. Blocks one background thread
-    /// per event instead of polling; ends when the hook stops.
+    /// Forward hook-thread events to the app. Each wait on the background
+    /// executor lasts at most `PTT_LISTEN_SLICE`, so a hook that went away
+    /// without dropping its sender cannot pin an executor thread; the loop
+    /// ends when `stop` is set or the sender is gone.
     fn listen_global_ptt(
         &mut self,
         rx: std::sync::mpsc::Receiver<KeyEdge>,
+        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
         cx: &mut Context<Self>,
     ) {
+        use std::sync::atomic::Ordering;
+        use std::sync::mpsc::RecvTimeoutError;
         cx.spawn(async move |this, cx| {
             let mut rx = rx;
-            loop {
+            while !stop.load(Ordering::Relaxed) {
                 let (back, edge) = cx
                     .background_executor()
                     .spawn(async move {
-                        let edge = rx.recv().ok();
+                        let edge = rx.recv_timeout(PTT_LISTEN_SLICE);
                         (rx, edge)
                     })
                     .await;
                 rx = back;
-                let Some(edge) = edge else { break };
+                let edge = match edge {
+                    Ok(edge) => edge,
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => break,
+                };
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
                 if this
                     .update(cx, |this, cx| this.global_ptt_edge(edge, cx))
                     .is_err()
