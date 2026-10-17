@@ -22,13 +22,19 @@ falling back to "Chat 123" for a chat that is not loaded.
 ## What changed
 
 - `quill::story_repost::press` picks the action from the origin and the
-  story's cache state (`story_card_state`). Open story, open the poster's
-  profile (the viewer closes first, like the "Stories" button), or the
-  viewer note "This story has expired." (also used when the poster has no
-  profile target).
-- The label is a button (`story-viewer-repost`); "edited" stays beside it as
-  plain text, now from the tdesktop key `lng_edited`.
-- On show, an uncached origin story is requested with `getStory`, like
-  tdesktop's resolve.
+  story's cache state (`story_card_state`):
+  - cached or still loading: open the story. `open_story_viewer` sends
+    `getStory` for an uncached story and opens the viewer on it when the
+    answer arrives (`pending_story_open`), which stands in for tdesktop's
+    resolve on show;
+  - gone (`getStory` said so): the poster's profile, after the viewer
+    closes, like the "Stories" button. A poster with no profile target
+    gets nothing;
+  - no poster or no story id: the viewer note "This story has expired."
+    (`lng_forwarded_story_expired`), the only case tdesktop toasts.
+- Opening another story from the viewer sends `closeStory` for the story it
+  replaces before `openStory`, as stepping does, so TDLib's calls stay paired.
+- The label is a button (`story-viewer-repost`). "edited" is in the header
+  (PR #947), not here.
 - Unloaded chat: the "Chat 123" fallback is gone. tdesktop has no
   placeholder to copy, so the label reads "Reposted story" without a name.

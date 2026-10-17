@@ -188,16 +188,36 @@ impl QuillApp {
         self.start_story_viewer(StoryViewer::open(items, index), cx);
     }
 
+    /// TDLib's `openStory` for the story the viewer now shows, after
+    /// `closeStory` for the one it replaces, so the two stay paired.
+    pub(super) fn switch_open_story(
+        &mut self,
+        previous: Option<(ChatId, i32)>,
+        current: Option<(ChatId, i32)>,
+    ) {
+        if previous == current {
+            return;
+        }
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        if let Some((chat_id, story_id)) = previous {
+            let _ = live.driver.close_story(chat_id, story_id);
+        }
+        if let Some((chat_id, story_id)) = current {
+            let _ = live.driver.open_story(chat_id, story_id);
+        }
+    }
+
     fn start_story_viewer(&mut self, viewer: StoryViewer, cx: &mut Context<Self>) {
+        let previous = self.stories.viewer.current().map(StoryViewerItem::key);
         let current = viewer.current().map(StoryViewerItem::key);
         self.stories.viewer = viewer;
         // Phase 9.5: viewers list and report flow are per-story.
         self.stories.viewers_open = false;
         self.stories.report_open = false;
         self.stories.stats_open = false;
-        if let (Some(live), Some((chat_id, story_id))) = (self.live.as_mut(), current) {
-            let _ = live.driver.open_story(chat_id, story_id);
-        }
+        self.switch_open_story(previous, current);
         // Phase 9.6: (re)start the playback clock + tick whenever the
         // viewer (re)opens — also covers the deferred `pending_story_open`
         // path, which funnels through here.

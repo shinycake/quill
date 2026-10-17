@@ -156,13 +156,15 @@ impl QuillApp {
     }
 
     /// A press on the repost label, like tdesktop's `RepostView`: the
-    /// original story if it is loaded, else its poster's profile, else a
-    /// note that the story expired.
+    /// original story (fetched first when it is not cached, the viewer
+    /// opening on it once it arrives), else its poster's profile when the
+    /// story is gone, else a note that the story expired.
     pub(in crate::ui) fn press_story_repost(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        use quill::story_repost::RepostPress;
         let Some(origin) = self
             .current_story()
             .and_then(|story| story.repost_info)
@@ -177,10 +179,16 @@ impl QuillApp {
             None => return,
         };
         match action {
-            quill::story_repost::RepostPress::OpenStory { chat_id, story_id } => {
-                self.open_story_viewer(ChatId(chat_id), story_id, cx);
+            RepostPress::OpenStory { chat_id, story_id } => {
+                // tdesktop jumps to the origin in `StoriesContextSingle`.
+                self.open_story_viewer(
+                    ChatId(chat_id),
+                    story_id,
+                    quill::story_viewer::StoryOpenScope::Single,
+                    cx,
+                );
             }
-            quill::story_repost::RepostPress::OpenPeer { chat_id } => {
+            RepostPress::OpenPeer { chat_id } => {
                 let sender = MessageSender::Chat { chat_id };
                 if self
                     .session()
@@ -189,12 +197,9 @@ impl QuillApp {
                 {
                     self.close_story_viewer(cx);
                     self.open_avatar_profile(sender, window, cx);
-                } else {
-                    self.stories.notice = Some(tr(keys::FORWARDED_STORY_EXPIRED).into());
-                    cx.notify();
                 }
             }
-            quill::story_repost::RepostPress::Expired => {
+            RepostPress::Expired => {
                 self.stories.notice = Some(tr(keys::FORWARDED_STORY_EXPIRED).into());
                 cx.notify();
             }

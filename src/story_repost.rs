@@ -7,30 +7,30 @@ use crate::telegram::envelope::StoryOriginView;
 /// The result of pressing "Reposted from ...".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RepostPress {
-    /// The original story is loaded: open it.
+    /// Open the original story. Quill fetches it first when it is not
+    /// cached yet (tdesktop resolves it while showing the repost).
     OpenStory { chat_id: i64, story_id: i32 },
-    /// The story is not available (deleted, or not loaded): show its
-    /// poster's profile.
+    /// The story is gone: show its poster's profile (tdesktop's short info
+    /// box).
     OpenPeer { chat_id: i64 },
-    /// The original poster is hidden, so there is nothing to open: say the
-    /// story has expired.
+    /// No poster or no story id (a hidden poster): say the story expired.
     Expired,
 }
 
 /// `state` is the cache state of the origin story, if it has a chat.
 pub fn press(origin: &StoryOriginView, state: impl Fn(i64, i32) -> StoryCardState) -> RepostPress {
-    match origin {
-        StoryOriginView::PublicStory { chat_id, story_id } => {
-            if state(*chat_id, *story_id) == StoryCardState::Ready {
-                RepostPress::OpenStory {
-                    chat_id: *chat_id,
-                    story_id: *story_id,
+    match *origin {
+        StoryOriginView::PublicStory { chat_id, story_id } if story_id != 0 => {
+            match state(chat_id, story_id) {
+                StoryCardState::Ready | StoryCardState::Loading => {
+                    RepostPress::OpenStory { chat_id, story_id }
                 }
-            } else {
-                RepostPress::OpenPeer { chat_id: *chat_id }
+                StoryCardState::Expired => RepostPress::OpenPeer { chat_id },
             }
         }
-        StoryOriginView::HiddenUser { .. } => RepostPress::Expired,
+        StoryOriginView::PublicStory { .. } | StoryOriginView::HiddenUser { .. } => {
+            RepostPress::Expired
+        }
     }
 }
 
@@ -38,41 +38,45 @@ pub fn press(origin: &StoryOriginView, state: impl Fn(i64, i32) -> StoryCardStat
 mod tests {
     use super::*;
 
-    fn public() -> StoryOriginView {
+    fn public(story_id: i32) -> StoryOriginView {
         StoryOriginView::PublicStory {
             chat_id: 5,
-            story_id: 9,
+            story_id,
         }
     }
 
     #[test]
-    fn a_loaded_origin_opens_the_story() {
-        assert_eq!(
-            press(&public(), |_, _| StoryCardState::Ready),
-            RepostPress::OpenStory {
-                chat_id: 5,
-                story_id: 9
-            }
-        );
-    }
-
-    #[test]
-    fn a_missing_origin_opens_the_poster() {
-        for state in [StoryCardState::Expired, StoryCardState::Loading] {
+    fn a_loaded_or_loading_origin_opens_the_story() {
+        for state in [StoryCardState::Ready, StoryCardState::Loading] {
             assert_eq!(
-                press(&public(), |_, _| state),
-                RepostPress::OpenPeer { chat_id: 5 }
+                press(&public(9), |_, _| state),
+                RepostPress::OpenStory {
+                    chat_id: 5,
+                    story_id: 9
+                }
             );
         }
     }
 
     #[test]
-    fn a_hidden_poster_says_the_story_expired() {
-        let origin = StoryOriginView::HiddenUser {
+    fn a_deleted_origin_opens_the_poster() {
+        assert_eq!(
+            press(&public(9), |_, _| StoryCardState::Expired),
+            RepostPress::OpenPeer { chat_id: 5 }
+        );
+    }
+
+    #[test]
+    fn no_poster_or_no_id_says_the_story_expired() {
+        let hidden = StoryOriginView::HiddenUser {
             poster_name: "Someone".into(),
         };
         assert_eq!(
-            press(&origin, |_, _| StoryCardState::Ready),
+            press(&hidden, |_, _| StoryCardState::Ready),
+            RepostPress::Expired
+        );
+        assert_eq!(
+            press(&public(0), |_, _| StoryCardState::Ready),
             RepostPress::Expired
         );
     }

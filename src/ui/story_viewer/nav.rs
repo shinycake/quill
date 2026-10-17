@@ -112,12 +112,8 @@ impl QuillApp {
     /// story is open, drop the per-story panels and restart playback.
     fn story_changed(&mut self, prev: Option<(ChatId, i32)>, cx: &mut Context<Self>) {
         let next = self.stories.viewer.current().map(StoryViewerItem::key);
-        if let (Some(prev), Some(next)) = (prev, next)
-            && prev != next
-            && let Some(live) = self.live.as_mut()
-        {
-            let _ = live.driver.close_story(prev.0, prev.1);
-            let _ = live.driver.open_story(next.0, next.1);
+        if prev.is_some() && next.is_some() {
+            self.switch_open_story(prev, next);
         }
         self.stories.reaction_picker_open = false;
         self.end_story_reply(cx);
