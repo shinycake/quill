@@ -1,23 +1,30 @@
 //! The Media, Photos, Videos and GIFs tabs as a thumbnail grid under month
 //! headers (tdesktop `Info::Media` with `Overview::Layout::{Photo, Video,
 //! Gif}`): the minithumbnail blur shows at once, the downloaded thumbnail
-//! replaces it, videos carry their length and GIFs a "GIF" mark.
+//! replaces it, and videos carry their length. The grid is a virtual list of
+//! rows (month header, row of tiles, Load more), so only the tiles on screen
+//! are built and ask for their pictures.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::mini_image::mini_image;
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::*;
+use gpui_kit::gpui::Size as ItemSize;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::message_a11y::format_duration_text;
-use quill::state::{SharedMediaItem, SharedMediaTab, SharedMediaTile, TileBadge, month_sections};
+use quill::state::{
+    GRID_GAP, GRID_PAD, GridLayout, GridRow, SharedMediaItem, SharedMediaTab, SharedMediaTile,
+    TileBadge, grid_rows, month_sections,
+};
 use std::path::PathBuf;
+use std::rc::Rc;
 
-/// Tile side (three per row in the panel).
-const TILE: f32 = 96.;
+/// The shared-media panel's width (`shell_layout`).
+const PANEL_WIDTH: f32 = super::shell_layout::SHARED_MEDIA_PANEL_WIDTH;
 
 impl QuillApp {
     /// The `Ready` body of a photo, video or GIF tab.
@@ -32,47 +39,102 @@ impl QuillApp {
         let Some(state) = session.media.shared_media.tab_at(tab) else {
             return div().into_any_element();
         };
-        let roots = self.media_display_roots();
-        let sections = month_sections(&state.items);
-        let mut body = div()
-            .id(("shared-media-items", tab.index() as u64))
+        let layout = GridLayout::for_width(PANEL_WIDTH);
+        let rows = Rc::new(grid_rows(
+            &month_sections(&state.items),
+            layout.per_row,
+            state.can_load_more(),
+        ));
+        let sizes: Rc<Vec<ItemSize<Pixels>>> = Rc::new(
+            rows.iter()
+                .map(|row| ItemSize::new(px(0.), px(row.height(&layout))))
+                .collect(),
+        );
+        let mut list = v_virtual_list(
+            cx.entity(),
+            ("shared-media-items", tab.index() as u64),
+            sizes,
+            move |this: &mut QuillApp, range, _window, cx| {
+                let roots = this.media_display_roots();
+                range
+                    .filter_map(|ix| rows.get(ix).copied().map(|row| (ix, row)))
+                    .map(|(ix, row)| this.shared_media_grid_row(tab, ix, row, &layout, &roots, cx))
+                    .collect::<Vec<_>>()
+            },
+        )
+        .flex_1()
+        .min_h_0()
+        .w_full();
+        if let Some(handle) = self.shared_media_grid.scroll(tab) {
+            list = list.track_scroll(handle);
+        }
+        div()
             .flex_1()
-            .overflow_y_scroll()
-            .pb_2();
-        if let Some(bar) = self.shared_media_date_bar(tab, cx) {
-            body = body.child(bar);
-        }
-        for section in &sections {
-            let items = state.items.get(section.start..section.end).unwrap_or(&[]);
-            let mut grid = div().flex().flex_wrap().gap_1().px_2();
-            for item in items {
-                grid = grid.child(self.shared_media_tile_view(item, &roots, cx));
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .children(self.shared_media_date_bar(tab, cx))
+            .child(list)
+            .into_any_element()
+    }
+
+    fn shared_media_grid_row(
+        &self,
+        tab: SharedMediaTab,
+        ix: usize,
+        row: GridRow,
+        layout: &GridLayout,
+        roots: &[PathBuf],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        match row {
+            GridRow::Header(month) => div()
+                .id(("shared-media-month", ix as u64))
+                .role(gpui_kit::Role::Heading)
+                .aria_label(month.title())
+                .h(px(row.height(layout)))
+                .flex()
+                .items_end()
+                .px_3()
+                .pb_1()
+                .text_xs()
+                .font_semibold()
+                .text_color(cx.theme().muted_foreground)
+                .child(month.title())
+                .into_any_element(),
+            GridRow::Tiles { start, end } => {
+                let items = self
+                    .session()
+                    .and_then(|session| session.media.shared_media.tab_at(tab))
+                    .and_then(|state| state.items.get(start..end))
+                    .unwrap_or(&[]);
+                div()
+                    .id(("shared-media-tiles", ix as u64))
+                    .flex()
+                    .gap(px(GRID_GAP))
+                    .px(px(GRID_PAD))
+                    .h(px(row.height(layout)))
+                    .children(
+                        items
+                            .iter()
+                            .map(|item| self.shared_media_tile_view(item, layout.tile, roots, cx)),
+                    )
+                    .into_any_element()
             }
-            body = body
-                .child(
-                    div()
-                        .id(("shared-media-month", section.start as u64))
-                        .role(gpui_kit::Role::Heading)
-                        .aria_label(section.month.title())
-                        .px_3()
-                        .pt_2()
-                        .pb_1()
-                        .text_xs()
-                        .font_semibold()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(section.month.title()),
-                )
-                .child(grid);
+            GridRow::LoadMore => div()
+                .h(px(row.height(layout)))
+                .flex()
+                .items_center()
+                .child(self.shared_media_load_more(tab, cx))
+                .w_full()
+                .into_any_element(),
         }
-        if state.can_load_more() {
-            body = body.child(self.shared_media_load_more(tab, cx));
-        }
-        body.into_any_element()
     }
 
     fn shared_media_tile_view(
         &self,
         item: &SharedMediaItem,
+        side: f32,
         roots: &[PathBuf],
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -88,10 +150,10 @@ impl QuillApp {
         });
         let base = div()
             .id(("shared-media-tile", message_id.0 as u64))
+            .debug_selector(move || format!("shared-media-tile-{}", message_id.0))
             .relative()
-            .size(px(TILE))
+            .size(px(side))
             .flex_none()
-            .rounded_lg()
             .overflow_hidden()
             .bg(cx.theme().secondary)
             .role(gpui_kit::Role::Button)
@@ -102,7 +164,7 @@ impl QuillApp {
             (Some(path), tile) => Some(
                 img(super::image_budget::sized_media(
                     &path,
-                    (px(TILE), px(TILE)),
+                    (px(side), px(side)),
                     tile.map(|t| (t.width, t.height))
                         .filter(|(w, h)| *w > 0 && *h > 0),
                     super::image_budget::Fit::Cover,
@@ -168,7 +230,6 @@ fn badge_text(badge: TileBadge) -> Option<String> {
     match badge {
         TileBadge::None => None,
         TileBadge::Duration(secs) => Some(format_duration_text(i64::from(secs))),
-        TileBadge::Gif => Some(tr(keys::Q_OPS_GIF).to_string()),
     }
 }
 
@@ -179,3 +240,8 @@ fn tile_label(item: &SharedMediaItem, tile: Option<&SharedMediaTile>) -> String 
         None => item.label.clone(),
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "shared_media_grid_tests.rs"]
+mod tests;

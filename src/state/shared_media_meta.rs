@@ -53,7 +53,7 @@ pub enum SharedMediaMeta {
 /// (tdesktop `Overview::Layout::{Photo, Video, Gif}`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SharedMediaTile {
-    /// Downloaded sizes to try, best first.
+    /// Sizes to try, preferred first.
     pub thumbs: Vec<FileId>,
     pub width: i32,
     pub height: i32,
@@ -68,7 +68,6 @@ pub enum TileBadge {
     None,
     /// A video's length in seconds.
     Duration(i32),
-    Gif,
 }
 
 /// One address listed in a Links row: the text the message shows for it and
@@ -118,28 +117,34 @@ impl SharedMediaMeta {
                     badge: TileBadge::None,
                 })
             }
-            MessageContent::Video(video) => SharedMediaMeta::Tile(SharedMediaTile {
-                thumbs: video
-                    .thumb_file_id()
-                    .filter(|_| !(video.is_secret || video.has_spoiler))
-                    .into_iter()
-                    .collect(),
-                width: video.thumb_width,
-                height: video.thumb_height,
-                mini: None,
-                badge: TileBadge::Duration(video.duration),
-            }),
-            MessageContent::Animation(gif) => SharedMediaMeta::Tile(SharedMediaTile {
-                thumbs: gif
-                    .thumb_file_id()
-                    .filter(|_| !(gif.is_secret || gif.has_spoiler))
-                    .into_iter()
-                    .collect(),
-                width: gif.thumb_width,
-                height: gif.thumb_height,
-                mini: None,
-                badge: TileBadge::Gif,
-            }),
+            MessageContent::Video(video) => {
+                let hidden = video.is_secret || video.has_spoiler;
+                SharedMediaMeta::Tile(SharedMediaTile {
+                    thumbs: video
+                        .thumb_file_id()
+                        .filter(|_| !hidden)
+                        .into_iter()
+                        .collect(),
+                    width: video.thumb_width,
+                    height: video.thumb_height,
+                    mini: video.minithumbnail.clone().filter(|_| !hidden),
+                    badge: TileBadge::Duration(video.duration),
+                })
+            }
+            MessageContent::Animation(gif) => {
+                let hidden = gif.is_secret || gif.has_spoiler;
+                SharedMediaMeta::Tile(SharedMediaTile {
+                    thumbs: gif
+                        .thumb_file_id()
+                        .filter(|_| !hidden)
+                        .into_iter()
+                        .collect(),
+                    width: gif.thumb_width,
+                    height: gif.thumb_height,
+                    mini: gif.minithumbnail.clone().filter(|_| !hidden),
+                    badge: TileBadge::None,
+                })
+            }
             MessageContent::Audio(audio) => SharedMediaMeta::Music {
                 performer: audio.performer.clone(),
                 title: audio.title.clone(),

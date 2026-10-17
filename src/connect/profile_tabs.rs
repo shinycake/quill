@@ -282,10 +282,16 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Download the thumbnails the Stories and Gifts grids asked for.
     pub fn maybe_download_profile_thumbs(&mut self) -> Result<(), ConnectSendError> {
-        if !self.chats_path_active() || self.session.settings.media_prefs.data_saver {
+        if !self.chats_path_active() {
             return Ok(());
         }
-        for file_id in self.session.take_profile_thumbs() {
+        // Data saver asks for none; the queue is dropped so it does not pile
+        // up (a reopened tab asks again).
+        let due = self.session.take_profile_thumbs();
+        if self.session.settings.media_prefs.data_saver {
+            return Ok(());
+        }
+        for file_id in due {
             self.download_file(file_id, THUMB_DOWNLOAD_PRIORITY)?;
         }
         Ok(())

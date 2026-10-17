@@ -148,6 +148,7 @@ fn viewer_caption_custom_emoji_covers_media_captions() {
         thumb_file_id: None,
         thumb_width: 0,
         thumb_height: 0,
+        minithumbnail: None,
     });
     assert_eq!(viewer_caption_custom_emoji(&gif), vec![777]);
     assert!(

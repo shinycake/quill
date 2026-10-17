@@ -99,6 +99,19 @@ pub(crate) fn text_link_message(id: i64, body: &str, label: &str, url: &str) -> 
     )
 }
 
+/// A photo message whose "m" size is the demo thumbnail.
+pub(crate) fn photo_message(id: i64, age_days: i64, caption: &str) -> Value {
+    message(
+        id,
+        age_days,
+        false,
+        json!({ "@type": "messagePhoto", "caption": text(caption, json!([])),
+            "photo": { "@type": "photo", "has_stickers": false, "sizes": [
+                { "@type": "photoSize", "type": "m", "width": 320, "height": 320,
+                  "photo": file_json(id + 1000, 24, &demo_thumb_png_path()) } ] } }),
+    )
+}
+
 fn tab_messages(tab: SharedMediaTab) -> Vec<Value> {
     let thumb = demo_thumb_png_path();
     let document = |id: i64, age: i64, name: &str, size: i64| {
@@ -136,17 +149,7 @@ fn tab_messages(tab: SharedMediaTab) -> Vec<Value> {
     let link = |id: i64, age: i64, body: &str, url: &str, title: &str, description: &str| {
         link_message(id, age, body, url, title, description)
     };
-    let photo = |id: i64, age: i64, caption: &str| {
-        message(
-            id,
-            age,
-            false,
-            json!({ "@type": "messagePhoto", "caption": text(caption, json!([])),
-                "photo": { "@type": "photo", "has_stickers": false, "sizes": [
-                    { "@type": "photoSize", "type": "m", "width": 320, "height": 320,
-                      "photo": file_json(id + 1000, 24, &thumb) } ] } }),
-        )
-    };
+    let photo = photo_message;
     let video = |id: i64, age: i64, secs: i64| {
         message(
             id,

@@ -395,9 +395,10 @@ impl Session {
 
     /// Thumbnails the Stories and Gifts grids still need.
     pub fn take_profile_thumbs(&mut self) -> Vec<FileId> {
+        let mut seen = std::collections::HashSet::new();
         std::mem::take(&mut self.media.profile_thumbs_due)
             .into_iter()
-            .filter(|id| self.should_download(*id))
+            .filter(|id| seen.insert(*id) && self.should_download(*id))
             .collect()
     }
 
