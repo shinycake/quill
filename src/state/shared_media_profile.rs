@@ -302,6 +302,7 @@ pub fn story_item(
             height,
         },
         meta: SharedMediaMeta::None,
+        file: FileId(0),
     }
 }
 
@@ -322,6 +323,7 @@ pub fn gift_item(gift: &crate::premium_hub::ReceivedGift) -> SharedMediaItem {
         action: SharedMediaAction::Gift,
         visual: SharedMediaVisual::Gift(Box::new(gift.clone())),
         meta: SharedMediaMeta::None,
+        file: FileId(0),
     }
 }
 
@@ -664,6 +666,7 @@ mod tests {
             action: SharedMediaAction::Gift,
             visual: SharedMediaVisual::None,
             meta: SharedMediaMeta::None,
+            file: FileId(0),
         };
         let tab = SharedMediaTab::Gifts;
         gallery.begin_profile_fetch(tab);

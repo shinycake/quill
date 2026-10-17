@@ -8,8 +8,9 @@ use super::app::QuillApp;
 use super::pressable::PressableDiv;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
+use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{SharedMediaAction, SharedMediaTab, calendar_media, month_sections};
@@ -30,6 +31,7 @@ impl QuillApp {
         };
         let sections = month_sections(&state.items);
         let state_chat = session.media.shared_media.chat_id;
+        let selecting = !session.media.shared_media.selection.is_empty();
         let mut list = div()
             .id(("shared-media-items", tab.index() as u64))
             .flex_1()
@@ -101,8 +103,12 @@ impl QuillApp {
                                 .child(item.label.clone()),
                         ),
                 })
-                .on_click(
-                    cx.listener(move |this, _, _, cx| match (link_url.as_ref(), chat_id) {
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if this.shared_media_selecting() && is_message {
+                        this.toggle_shared_media_selection(message_id, cx);
+                        return;
+                    }
+                    match (link_url.as_ref(), chat_id) {
                         (Some(url), Some(chat_id)) => this.queue_link(
                             LinkTarget::Url {
                                 url: url.clone(),
@@ -112,24 +118,18 @@ impl QuillApp {
                             cx,
                         ),
                         _ => this.activate_shared_media_item(action, message_id, cx),
-                    }),
-                );
-            // Telegram Desktop's "Go To Message" on a shared media item.
-            list = list.child(if is_message {
-                row.context_menu({
-                    let owner = cx.entity().downgrade();
-                    move |menu, _, _| {
-                        let owner = owner.clone();
-                        menu.item(PopupMenuItem::new(tr(keys::Q_OPS_GO_TO_MESSAGE)).on_click(
-                            move |_, _, cx| {
-                                let _ = owner.update(cx, |this, cx| {
-                                    this.jump_to_shared_media_item_ui(message_id, cx);
-                                });
-                            },
-                        ))
                     }
-                })
-                .into_any_element()
+                }));
+            // Telegram Desktop's row menu: Go to message, Forward, Delete, Select.
+            list = list.child(if is_message {
+                let selected = self.shared_media_is_selected(message_id);
+                row.on_hover(self.shared_media_hover_listener(message_id, cx))
+                    .when(selected, |this| this.bg(cx.theme().accent))
+                    .when(selecting, |this| {
+                        this.child(self.shared_media_check(selected, cx))
+                    })
+                    .context_menu(self.shared_media_context_menu(item, cx))
+                    .into_any_element()
             } else {
                 row.into_any_element()
             });

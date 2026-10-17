@@ -234,6 +234,9 @@ impl QuillApp {
             }
             SharedMediaTabStatus::Ready => self.shared_media_ready_list(active_tab, cx),
         };
+        if let Some(bar) = self.shared_media_selection_bar(active_tab, cx) {
+            panel = panel.child(bar);
+        }
         panel = panel.child(content);
         Some(panel.into_any_element())
     }
