@@ -179,28 +179,7 @@ impl Render for QuillApp {
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
                 this.navigate(super::navigation::NavigationAction::Settings, window, cx);
             }))
-            .on_action(cx.listener(|this, _: &QuitApp, window, cx| {
-                #[cfg(target_os = "macos")]
-                {
-                    use quill::quit_guard::QuitDecision;
-                    let now =
-                        u64::try_from(this.frame.quit_clock.elapsed().as_millis()).unwrap_or(0);
-                    match this
-                        .frame
-                        .quit_guard
-                        .press(now, this.appearance.mac_warn_before_quit)
-                    {
-                        QuitDecision::Warn => {
-                            this.connection
-                                .set_note(StatusNote::info(quill::quit_guard::WARNING.to_string()));
-                            cx.notify();
-                            return;
-                        }
-                        QuitDecision::Holding => return,
-                        QuitDecision::Quit => {}
-                    }
-                }
-                let _ = this;
+            .on_action(cx.listener(|_, _: &QuitApp, window, cx| {
                 window.remove_window();
                 cx.quit();
             }))
@@ -959,7 +938,5 @@ impl Render for QuillApp {
 
 mod frame_upkeep;
 mod status_toast;
-#[cfg(target_os = "macos")]
-use crate::ui::status_note::StatusNote;
 #[allow(unused_imports)]
 use status_toast::*;

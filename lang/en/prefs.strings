@@ -448,7 +448,6 @@
 "qll_prefs_hide" = "Hide";
 "qll_prefs_hint" = "Hint: {password_hint}";
 "qll_prefs_hint_optional" = "Hint (optional)";
-"qll_prefs_hold_q_to_quit_instead" = "Hold ⌘Q to quit instead of quitting on the first press.";
 "qll_prefs_hostname" = "Hostname";
 "qll_prefs_hour" = "− hour";
 "qll_prefs_hour_2" = "+ hour";
@@ -787,8 +786,6 @@
 "qll_prefs_videos" = "Videos";
 "qll_prefs_view" = "View";
 "qll_prefs_voice_messages" = "Voice messages";
-"qll_prefs_warn_before_quitting" = "Warn before quitting";
-"qll_prefs_warn_before_quitting_with_command" = "Warn before quitting with Command Q";
 "qll_prefs_well_send_a_code_to" = "We'll send a code to your recovery email. It is the only way to recover a forgotten password.";
 "qll_prefs_whats_new" = "What's new";
 "qll_prefs_when_a_local_passcode_is" = "When a local passcode is set, a lock icon appears at the top of your chat list. Click it to lock Quill.";
