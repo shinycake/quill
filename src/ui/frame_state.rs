@@ -1,10 +1,9 @@
-//! Window and per-frame bookkeeping: animation demand, focus restore, quit guard.
+//! Window and per-frame bookkeeping: animation demand, focus restore.
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
 use gpui_kit::*;
 use std::path::PathBuf;
-use std::time::Instant;
 
 pub(crate) struct FrameUi {
     /// Highest frame rate animated content asked for since the last
@@ -36,11 +35,6 @@ pub(crate) struct FrameUi {
     pub(super) sidebar_width: Pixels,
     /// A debounced `window_state.json` save is scheduled.
     pub(super) window_state_save_pending: bool,
-    /// Cmd+Q hold detection (`macWarnBeforeQuit`) and its clock origin.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    pub(super) quit_guard: quill::quit_guard::QuitGuard,
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    pub(super) quit_clock: Instant,
     /// Whether the main window is currently excluded from screen capture.
     pub(super) capture_blocked: bool,
     /// The "screenshots can't be blocked here" note was dismissed (Linux).
@@ -70,8 +64,6 @@ impl FrameUi {
                     state.sidebar_width
                 })),
             window_state_save_pending: false,
-            quit_guard: Default::default(),
-            quit_clock: std::time::Instant::now(),
             capture_blocked: false,
             capture_notice_dismissed: false,
             context_menu_focus: cx.focus_handle(),

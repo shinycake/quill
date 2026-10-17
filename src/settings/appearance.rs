@@ -189,9 +189,6 @@ pub struct AppearancePrefs {
     /// the Windows tray shows a one-color glyph that matches the taskbar.
     #[serde(default = "default_true")]
     pub tray_icon_monochrome: bool,
-    /// tdesktop `macWarnBeforeQuit`: hold Cmd+Q to quit (macOS only).
-    #[serde(default = "default_true")]
-    pub mac_warn_before_quit: bool,
     #[serde(default = "default_true")]
     pub check_updates_on_launch: bool,
     /// tdesktop `nativeWindowFrame` ("Use system window frame", Linux and
@@ -256,7 +253,6 @@ impl Default for AppearancePrefs {
             show_tray_icon: true,
             show_taskbar_icon: true,
             tray_icon_monochrome: true,
-            mac_warn_before_quit: true,
             check_updates_on_launch: true,
             native_window_frame: false,
         }
@@ -414,7 +410,6 @@ mod tests {
             show_tray_icon: false,
             show_taskbar_icon: false,
             tray_icon_monochrome: false,
-            mac_warn_before_quit: false,
             check_updates_on_launch: false,
             native_window_frame: true,
         };
