@@ -582,6 +582,9 @@ const DEMO_MINITHUMB: &str = "/9j/4AAQSkZJRgABAQAASABIAAD/4QBMRXhpZgAATU0AKgAAAA
 pub(super) fn seed_demo_session(sink: Arc<MemorySink>, kind: DemoSeed) -> Session {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let mut session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    // No server answers history requests here: the seeded rows are the
+    // only copy, so closed chats are never trimmed.
+    session.keep_all_histories();
     // Slice parity:platform-offline-indicator — the fixtures model a
     // connected client, so the offline indicator stays hidden in every
     // existing demo.

@@ -414,3 +414,26 @@ fn a_late_page_for_a_closed_topic_stays_inside_the_topic_bound() {
     session.topic_history_entry(ChatId(7), 900);
     assert_eq!(session.threads.topic_histories.len(), CLOSED_TOPICS_MAX + 1);
 }
+
+#[test]
+fn a_session_without_a_server_keeps_every_history() {
+    // The screenshot demos: nothing could load trimmed rows back.
+    let (mut session, _sink) = session();
+    session.keep_all_histories();
+    switch(&mut session, 7);
+    feed(&mut session, 7, 200);
+    switch(&mut session, 8);
+    assert_eq!(len(&session, 7), 200, "closing trims nothing");
+    assert!(!is_closed_tail(&session, 7));
+    feed(&mut session, 9, CLOSED_TAIL_CAP as i64 + 20);
+    assert_eq!(
+        len(&session, 9),
+        CLOSED_TAIL_CAP + 20,
+        "live rows keep the page cap, not the closed tail"
+    );
+    for chat in 100..=(100 + CLOSED_CHATS_MAX as i64 + 10) {
+        session.history_entry(ChatId(chat));
+    }
+    assert!(session.histories.contains_key(&100), "no LRU eviction");
+    assert!(session.histories.contains_key(&7));
+}

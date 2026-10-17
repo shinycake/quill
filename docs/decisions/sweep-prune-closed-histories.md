@@ -107,13 +107,28 @@ chat, except these:
   list preview and notifications read their own state (`ChatSummary`, the
   notification payload), not `histories`.
 - Scroll restore (#949): a left chat keeps only the newest 60 rows, so a
-  saved reading position older than that is not in memory on reopen. #949 is
-  being reworked to load history around the saved anchor on open; this
-  change does not touch scroll restore and depends on that rework for
-  positions outside the kept tail (until it lands, such a chat opens at the
-  unread divider or the bottom).
+  saved reading position older than that is not in memory on reopen.
+  `Session::prepare_history_window_at` checks the window as it is after the
+  trim: when the tail no longer holds the saved row the window is replaced
+  and the first page loads around it (`saved_open`); when the tail still
+  holds it the window is kept and the row is restored in place. The trim
+  runs at the frame's holds sync, before any later open, so the check never
+  sees rows that are about to go.
 - Chat-list "Mark as read": falls back to `ChatSummary.last_message`, see
   above.
+
+## Sessions with no server
+
+The screenshot demos seed every message in memory and answer no
+`getChatHistory`, so a trimmed or dropped history could never come back:
+the demo's chats lost their older rows for good on the first switch, and a
+saved scroll position older than the tail opened at the unread divider
+instead (`ui::scroll_restore_tests::returning_to_a_chat_lands_on_the_row_it_was_left_at`
+failed with the top row on the oldest kept message, 2060). The demo open
+path has no around-load to fall back on. `Session::keep_all_histories`,
+called by `seed_demo_session`, turns pruning off for such a session: closing
+queues no release, new entries join no LRU, and live messages in a closed
+chat keep the page cap as before this change. Live sessions are unchanged.
 
 ## Notes
 
@@ -146,3 +161,9 @@ open chat releases its topic. Driver tests (`connect/tests/chat_state/list_ops.r
 the reply bar sends `getMessage` once for a target that left memory and shows
 the answer without putting it in the window, and "Mark as read" works after
 the history was dropped. The existing history-window tests still pass.
+With #949: `connect::tests::history_window` leaves a chat, settles its
+release (80 rows trimmed to 21..80) and reopens it at a saved row below the
+tail (one `getChatHistory` around it, the row restored, no fallback) and at
+a saved row inside the tail (window kept, no request).
+`state::tests::history_prune` checks that a session without a server keeps
+every history, and `ui::scroll_restore_tests` passes again on the demo.

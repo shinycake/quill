@@ -253,7 +253,7 @@ impl QuillApp {
         if self.chat_list.swipe.poll.is_some() {
             return;
         }
-        self.chat_list.swipe.poll = Some(cx.spawn(async move |this, cx| {
+        self.chat_list.swipe.poll = Some(Self::spawn_main(cx, async move |this, cx| {
             loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(POLL_MS))

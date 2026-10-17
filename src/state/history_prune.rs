@@ -67,6 +67,8 @@ pub struct HistoryPruning {
     release_topics: VecDeque<(i64, i32)>,
     dropped: BTreeMap<i64, DroppedHistory>,
     dropped_order: VecDeque<i64>,
+    /// The histories are the only copy of the rows ([`Session::keep_all_histories`]).
+    keep_all: bool,
 }
 
 impl HistoryPruning {
@@ -201,6 +203,20 @@ impl TopicHistory {
 }
 
 impl Session {
+    /// This session has no server to load rows back from: the screenshot
+    /// demos seed every message in memory and answer no `getChatHistory`.
+    /// A trimmed tail or a dropped entry would be lost for good, and a
+    /// saved scroll position could never load around its row again, so
+    /// nothing is trimmed on close or dropped by the LRU. Live messages in
+    /// a chat nobody shows keep the page cap, as before pruning.
+    pub fn keep_all_histories(&mut self) {
+        self.history_pruning.keep_all = true;
+        self.history_pruning.release_chats.clear();
+        self.history_pruning.release_topics.clear();
+        self.history_pruning.closed_chats.clear();
+        self.history_pruning.closed_topics.clear();
+    }
+
     /// The UI's claim on histories that are read while their chat is not
     /// shown: the source chat of a pending forward, the chat a reply bar
     /// points at, the chat of the playing track. Replaces the previous
@@ -280,7 +296,7 @@ impl Session {
     /// it, its history and its topics shrink to a tail, or go whole for a
     /// chat that is gone.
     pub(crate) fn release_chat_history(&mut self, chat_id: ChatId) {
-        if self.chat_shown_by_view(chat_id) {
+        if self.history_pruning.keep_all || self.chat_shown_by_view(chat_id) {
             return;
         }
         self.history_pruning.queue_chat(chat_id.0);
@@ -289,7 +305,7 @@ impl Session {
     /// `topic` of `chat_id` stopped being shown; settled like
     /// [`Self::release_chat_history`].
     pub(crate) fn release_topic_history(&mut self, chat_id: ChatId, topic: i32) {
-        if self.topic_shown_by_view(chat_id, topic) {
+        if self.history_pruning.keep_all || self.topic_shown_by_view(chat_id, topic) {
             return;
         }
         self.history_pruning.queue_topic((chat_id.0, topic));
@@ -375,7 +391,9 @@ impl Session {
                 fresh.latest_seen = memo.latest_seen;
             }
             self.histories.insert(chat_id.0, fresh);
-            if !self.chat_history_in_use(chat_id) && !self.history_pruning.release_pending(chat_id)
+            if !self.history_pruning.keep_all
+                && !self.chat_history_in_use(chat_id)
+                && !self.history_pruning.release_pending(chat_id)
             {
                 self.history_pruning.touch_chat(chat_id.0);
                 self.enforce_closed_bounds(Some(chat_id.0));
@@ -392,7 +410,8 @@ impl Session {
         let missing = !self.threads.topic_histories.contains_key(&key);
         if missing {
             self.threads.topic_histories.entry(key).or_default();
-            if !self.topic_history_in_use(chat_id, topic)
+            if !self.history_pruning.keep_all
+                && !self.topic_history_in_use(chat_id, topic)
                 && !self.history_pruning.release_topics.contains(&key)
             {
                 self.history_pruning.touch_topic(key);
@@ -437,6 +456,10 @@ impl Session {
     /// A live message landed in a chat no view shows: keep its tail
     /// bounded and mark the chat as recently used.
     pub(crate) fn note_closed_chat_update(&mut self, chat_id: ChatId) {
+        if self.history_pruning.keep_all {
+            self.trim_history_window(chat_id, WindowEnd::Oldest);
+            return;
+        }
         if let Some(history) = self.histories.get_mut(&chat_id.0) {
             history.trim_window_end(WindowEnd::Oldest, CLOSED_TAIL_CAP, CLOSED_TAIL_KEEP);
             self.history_pruning.touch_chat(chat_id.0);
