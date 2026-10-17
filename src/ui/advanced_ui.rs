@@ -43,6 +43,12 @@ impl QuillApp {
                     cx.notify();
                 },
             ))
+            .child(super::nav_row::nav_row(
+                "settings-replay-intro",
+                tr(keys::Q_FIRST_RUN_REPLAY),
+                cx,
+                |this, window, cx| this.replay_first_run(window, cx),
+            ))
             .into_any_element()
     }
 

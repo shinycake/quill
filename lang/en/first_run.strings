@@ -11,3 +11,4 @@
 "qll_first_run_native_body" = "Written in Rust and drawn on the GPU, for macOS, Windows and Linux.";
 "qll_first_run_telegram_title" = "Chats, calls and stories";
 "qll_first_run_telegram_body" = "Groups, channels, voice and video calls, stories, and several accounts side by side.";
+"qll_first_run_replay" = "Show the welcome intro";
