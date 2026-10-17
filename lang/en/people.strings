@@ -145,6 +145,7 @@
 "qll_people_abort" = "Abort";
 "qll_people_abort_recovery_email_setup" = "Abort recovery email setup";
 "qll_people_aborting_email_setup" = "aborting email setup…";
+"qll_people_about_copied" = "Description copied to clipboard";
 "qll_people_action_failed" = "action failed";
 "qll_people_activate" = "Activate";
 "qll_people_add_a_personal_channel" = "Add a personal channel";

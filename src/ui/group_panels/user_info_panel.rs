@@ -494,21 +494,7 @@ impl QuillApp {
                     }),
             );
         if !description.is_empty() {
-            body = body.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .w_full()
-                    .gap_1()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_semibold()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(tr(keys::INFO_ABOUT_LABEL)),
-                    )
-                    .child(div().text_sm().child(description)),
-            );
+            body = body.child(self.about_text_block(chat_id, &description, cx));
         }
         if let Some(verification) =
             session.and_then(|s| s.supergroup_bot_verification(supergroup_id))
