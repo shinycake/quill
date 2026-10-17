@@ -171,7 +171,7 @@ fn an_option_that_cannot_be_deleted_has_no_delete_row(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     facts(&app, vcx, "poll");
     // The facts are for option b; option a was never asked about.
-    vcx.update(|window, cx| window.right_click(("poll-option", (POLL * 64 + 0) as u64), cx));
+    vcx.update(|window, cx| window.right_click(("poll-option", (POLL * 64) as u64), cx));
     frames(vcx);
     assert_eq!(menu_item(&app, vcx), ReplyItem::PollOption("a".into()));
     assert!(has(vcx, "menu-copy-option"));
