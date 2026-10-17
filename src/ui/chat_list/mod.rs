@@ -179,20 +179,23 @@ impl QuillApp {
             }
         }
         let open_at = self.chat_list.open_at.take();
+        let open = self.chat_open_at(chat_id, open_at);
         if let Some(live) = self.live.as_mut() {
             let driver = &mut live.driver;
             let result = if thread_switch {
                 driver.switch_to_thread_chat()
             } else {
-                driver.select_chat_at(chat_id, open_at)
+                driver.select_chat_open(chat_id, open)
             };
             self.connection.set_note(match result {
                 Ok(_) => StatusNote::default(),
                 Err(_) => StatusNote::error(tr(keys::Q_CHATLIST_COULD_NOT_OPEN_CHAT)),
             });
         } else if let Some(session) = self.demo_session.as_mut() {
+            // The demo history is all in memory: a saved position is in the
+            // window already.
             session.open_chat(chat_id);
-            if let Some(message_id) = open_at {
+            if let quill::state::HistoryOpen::Message(message_id) = open {
                 let _ = session.begin_chat_search_jump(message_id);
             }
         }

@@ -12,6 +12,8 @@ struct ThreadWindow {
     unread_count: i32,
     has_newer: bool,
     window_epoch: u64,
+    /// The first page still loads around the saved scroll position.
+    saved_open: bool,
 }
 
 impl QuillApp {
@@ -54,6 +56,7 @@ impl QuillApp {
                 unread_count: thread.unread_count,
                 has_newer: thread.has_newer,
                 window_epoch: thread.window_epoch,
+                saved_open: thread.saved_anchor.is_some(),
             });
         let history_key = (
             viewed_chat.map(|chat| chat.0).unwrap_or(-1),
@@ -71,6 +74,16 @@ impl QuillApp {
                 .and_then(|s| viewed_chat.and_then(|chat| s.histories.get(&chat.0)))
                 .map(|h| (h.unread_anchor, h.has_newer, h.window_epoch))
                 .unwrap_or((None, false, 0)),
+        };
+        // A history opened at its saved position anchors once the window
+        // around that message is in, so the position comes with the first rows.
+        let saved_open_pending = match &thread_window {
+            Some(thread) => thread.saved_open,
+            None => {
+                viewed_topic.is_none()
+                    && viewed_chat
+                        .is_some_and(|chat| session.is_some_and(|s| s.saved_open_pending(chat)))
+            }
         };
         let unread_count = match &thread_window {
             Some(thread) => thread.unread_count,
@@ -269,6 +282,12 @@ impl QuillApp {
                 // A new or replaced window anchors once its rows are in.
                 self.history.window_epoch = window_epoch;
                 self.history.anchor_pending = true;
+                // The window of a chat already open was replaced (jump to
+                // the latest, a date jump): the position left behind is not
+                // where the reader goes back to.
+                if self.history.key == Some(history_key) {
+                    self.history.scroll_memory.forget(history_key);
+                }
             }
             if self.history.key != Some(history_key) {
                 // New chat/topic (or first render): reset; the anchor below
@@ -421,33 +440,11 @@ impl QuillApp {
             self.history.row_stats.note_built(rows_started);
             self.history.had_newer = has_newer;
             self.history_a11y_rows_changed(cx);
-            // A new or replaced window: start at the jump target, else at the
-            // "Unread messages" divider, else at the bottom.
-            if self.history.anchor_pending && !self.history.rows.is_empty() {
+            // A new or replaced window: start at the saved position, else the
+            // jump target, else the "Unread messages" divider, else the bottom.
+            if self.history.anchor_pending && !self.history.rows.is_empty() && !saved_open_pending {
                 self.history.anchor_pending = false;
-                let highlighted = highlight_id.and_then(|target| {
-                    self.history
-                        .rows
-                        .iter()
-                        .position(|row| row.contains(target))
-                });
-                if highlighted.is_some() {
-                    self.history.last_highlight = highlight_id;
-                }
-                let target = highlighted.or_else(|| {
-                    self.history
-                        .rows
-                        .iter()
-                        .position(HistoryRow::unread_divider)
-                        // A little context above the divider.
-                        .map(|ix| ix.saturating_sub(1))
-                });
-                self.history.scroller.update(cx, |state, cx| match target {
-                    Some(ix) => {
-                        state.scroll_to_item(ix, cx);
-                    }
-                    None => state.scroll_to_end(cx),
-                });
+                self.anchor_opened_history(history_key, highlight_id, cx);
             }
             // Chat-search jump: scroll the highlight into view once per new
             // `highlight_id` (current code only outlined the message).
@@ -471,6 +468,7 @@ impl QuillApp {
             let fresh = chrome_inputs.stale_rows(&self.history.rows);
             self.patch_row_chrome(fresh, session_revision, rows_started, cx);
         }
+        self.remember_scroll(history_key, cx);
         self.history.shared = HistoryShared { media_roots };
         // A new jump (search hit, reply, pinned message) restarts the
         // highlight fade, even onto the message highlighted before.

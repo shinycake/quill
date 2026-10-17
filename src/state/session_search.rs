@@ -64,6 +64,7 @@ impl Session {
         seq: u64,
     ) {
         if self.take_stale_history_request(pending) || self.history_view_stale(pending) {
+            self.drop_saved_open(pending.chat_id);
             self.diagnostics.record(Diagnostic {
                 category: "reducer",
                 type_name: Some("messages".into()),
@@ -77,6 +78,7 @@ impl Session {
             return;
         };
         if !self.chat_is_shown(chat_id) {
+            self.drop_saved_open(Some(chat_id));
             self.diagnostics.record(Diagnostic {
                 category: "reducer",
                 type_name: Some("messages".into()),
@@ -96,6 +98,9 @@ impl Session {
         }
         self.refresh_history_has_newer(chat_id);
         if let Some(message_id) = pending.around_message_id {
+            if self.settle_saved_open(chat_id, message_id) {
+                return;
+            }
             self.finish_history_around(Some(pending), message_id, false, seq);
         }
     }

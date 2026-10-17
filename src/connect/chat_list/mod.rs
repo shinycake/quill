@@ -3,7 +3,7 @@ use super::*;
 use crate::composer::DraftSaveClock;
 use crate::folders::spec_without_chat;
 use crate::ids::{ChatId, MessageId, RequestId};
-use crate::state::{InfoPanelTarget, RequestPurpose, RequestRollback, SearchStatus};
+use crate::state::{HistoryOpen, InfoPanelTarget, RequestPurpose, RequestRollback, SearchStatus};
 use crate::telegram::envelope::{ChatFolderSpec, ChatKind};
 use crate::telegram::requests::{
     ArchiveChatListSettings, add_chat_to_list, add_chat_to_list_value, clear_recently_found_chats,
@@ -33,6 +33,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         target: Option<MessageId>,
     ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.select_chat_open(
+            chat_id,
+            target.map_or(HistoryOpen::Default, HistoryOpen::Message),
+        )
+    }
+
+    /// Select a chat and load its first window where `open` says: the
+    /// default (read boundary or latest), around an explicit target that
+    /// highlights, or around the saved scroll position without a highlight
+    /// (tdesktop `showHistory` at `scrollTopItem`), so the position is
+    /// restored with the first rows. Re-selecting the open chat ignores a
+    /// saved position: its view is live.
+    pub fn select_chat_open(
+        &mut self,
+        chat_id: ChatId,
+        open: HistoryOpen,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -43,7 +60,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             self.fetch_open_chat_extras(chat_id)?;
             self.maybe_download_open_chat_media()?;
-            if let Some(target) = target {
+            if let HistoryOpen::Message(target) = open {
                 return self.jump_to_chat_search_message(target);
             }
             return self.fetch_history();
@@ -53,7 +70,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.draft_clock = DraftSaveClock::idle();
         self.pending_draft = None;
         self.session.open_chat(chat_id);
-        self.session.prepare_history_window(chat_id);
+        let around_saved = self.session.prepare_history_window_at(chat_id, open);
         // Channels are ungated since Phase 2.2: they follow the normal
         // openChat / history path; sponsored rows fetch for every channel.
         // A chat shown in its own window is open in TDLib already.
@@ -62,9 +79,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.fetch_open_chat_extras(chat_id)?;
         self.fetch_pinned_messages(chat_id)?;
-        match target {
-            Some(target) => self.jump_to_chat_search_message(target),
-            None => self.fetch_history(),
+        match (open, around_saved) {
+            (HistoryOpen::Message(target), _) => self.jump_to_chat_search_message(target),
+            (_, Some(anchor)) => self.fetch_history_around_saved(chat_id, anchor),
+            _ => self.fetch_history(),
         }
     }
 

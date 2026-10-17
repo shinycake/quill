@@ -202,6 +202,9 @@ impl Session {
         history.viewing.clear();
         history.visible.clear();
         history.visible_reported = false;
+        // A saved-position open belongs to one view; the opener sets it again.
+        history.saved_open = None;
+        history.saved_open_missed = false;
         history.unread_anchor = unread_anchor;
         history.unread_at_open = match history.unread_anchor {
             Some(_) => unread_count,

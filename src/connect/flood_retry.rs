@@ -106,6 +106,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .session
                 .sweep_stale_requests(now, PENDING_REQUEST_TTL, |id| waiting.contains(&id));
         }
+        // A swept load around a saved position falls back here.
+        changed |= self.load_default_after_saved_open();
         changed
     }
 
