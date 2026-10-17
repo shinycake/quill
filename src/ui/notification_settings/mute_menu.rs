@@ -15,6 +15,9 @@ impl QuillApp {
     pub(in crate::ui) fn open_mute_menu(&mut self, cx: &mut Context<Self>) {
         self.notify.mute_menu_open = true;
         self.notify.mute_custom_open = false;
+        if let Some(chat_id) = self.session().and_then(|session| session.open_chat) {
+            self.ensure_chat_volume_slider(chat_id, cx);
+        }
         self.connection
             .set_note(StatusNote::silent(tr(keys::Q_PREFS_MUTE_FOR)));
         cx.notify();
@@ -356,6 +359,9 @@ impl QuillApp {
                 current,
                 &saved_sounds,
             ));
+        }
+        if let Some(chat_id) = open_chat {
+            panel = panel.children(self.chat_volume_row(chat_id, sound_disabled, cx));
         }
         // Parity slice (`parity:stories-notify-settings`): per-chat story
         // controls — mute toggle, poster toggle, and a story-sound picker

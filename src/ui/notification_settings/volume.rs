@@ -30,11 +30,12 @@ impl QuillApp {
     fn on_notification_volume_event(&mut self, event: &SliderEvent, cx: &mut Context<Self>) {
         match event {
             SliderEvent::Change(value) => {
-                quill::notify_prefs::set_volume(volume_from_slider(value.end()));
+                quill::notify_prefs::set_volume_memory(volume_from_slider(value.end()));
                 cx.notify();
             }
             SliderEvent::Release(value) => {
-                quill::notify_prefs::set_volume(volume_from_slider(value.end()));
+                quill::notify_prefs::set_volume_memory(volume_from_slider(value.end()));
+                quill::notify_prefs::persist();
                 // tdesktop plays the sound at the new volume on release.
                 self.notify
                     .notification_sounds

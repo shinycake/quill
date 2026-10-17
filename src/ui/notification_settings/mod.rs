@@ -34,6 +34,7 @@ mod notify_view;
 mod notify_view_tests;
 mod reactions;
 mod scope;
+mod scoped_volume;
 mod sounds;
 mod ttl_picker;
 mod volume;

@@ -414,6 +414,12 @@ impl NotificationSounds {
     /// can't be decoded falls back to the default tone, so the alert is
     /// never lost.
     pub(super) fn play(&mut self, sound: NotificationSound) {
+        self.play_at(sound, None);
+    }
+
+    /// Like [`Self::play`], with a per-chat or per-scope volume percent
+    /// that replaces the app-wide one (`quill::notify_volume`).
+    pub(super) fn play_at(&mut self, sound: NotificationSound, volume_percent: Option<u8>) {
         let Some(mixer) = self.output.mixer() else {
             return;
         };
@@ -422,7 +428,10 @@ impl NotificationSounds {
         }
         let player = Player::connect_new(&mixer);
         // Settings > Notifications volume (tdesktop `notificationsVolume`).
-        player.set_volume(quill::notify_prefs::current().gain());
+        player.set_volume(quill::notify_volume::resolve_gain(
+            volume_percent,
+            quill::notify_prefs::current().gain(),
+        ));
         let source: Option<Box<dyn Source + Send>> = match &sound {
             NotificationSound::File(path) => open_source(path, &SharedSpeed::new(1.0)).ok(),
             NotificationSound::DefaultTone => None,

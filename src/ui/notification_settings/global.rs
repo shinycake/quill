@@ -110,6 +110,7 @@ impl QuillApp {
             },
         );
         app.update(cx, |this, cx| {
+            this.ensure_scope_volume_sliders(cx);
             let session = this.session();
             let saved_sounds: Vec<NotificationSound> = session
                 .as_ref()

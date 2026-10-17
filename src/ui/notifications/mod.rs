@@ -876,7 +876,7 @@ impl QuillApp {
                 dnd,
             });
             if let (true, Some(kind)) = (plan.sound, queued.sound) {
-                self.play_notification_sound(kind);
+                self.play_notification_sound(kind, queued.chat_id);
             }
             self.spawn_os_notification(queued, cx);
         }

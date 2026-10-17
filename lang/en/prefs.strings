@@ -64,6 +64,9 @@
 "lng_notification_exceptions_unmuted" = "Unmuted";
 "lng_notification_reactions" = "Reactions";
 "lng_notification_reactions_poll_votes" = "Poll votes";
+"lng_notification_volume_channel" = "Notifications volume for channels";
+"lng_notification_volume_groups" = "Notifications volume for groups";
+"lng_notification_volume_private_chats" = "Notifications volume for private chats";
 "lng_passcode_change" = "Change passcode";
 "lng_passcode_change_button" = "Save Passcode";
 "lng_passcode_confirm_new" = "Re-enter new passcode";
@@ -109,6 +112,7 @@
 "lng_proxy_use_system_settings" = "Use system proxy settings";
 "lng_recent_channels" = "Channels";
 "lng_rights_transfer_set_password" = "Set password";
+"lng_ringtones_box_volume" = "Volume";
 "lng_self_destruct_sessions_description" = "If you don't come online from a specific session at least once within this period, it will be terminated.";
 "lng_sessions_application" = "Application";
 "lng_sessions_info" = "Info";
