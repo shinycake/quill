@@ -345,6 +345,8 @@ fn message_corner_actions(
     cx: &mut Context<QuillApp>,
 ) -> (AnyElement, Pixels) {
     let more = message_actions_button(chat_id, message_id, cx);
+    let fast_share =
+        fast_share::facts(message, session).and_then(quill::corner_buttons::fast_share);
     let (reply, react) = quill::corner_buttons::visible(
         session.map(|s| {
             (
@@ -355,13 +357,22 @@ fn message_corner_actions(
         !message.pending && message.id.0 > 0,
         message.can_react(),
     );
-    if !reply && !react {
+    if !reply && !react && fast_share.is_none() {
         return (
             more.into_any_element(),
-            px(quill::corner_buttons::span(false, false)),
+            px(quill::corner_buttons::span(false, false, false)),
         );
     }
     let mut row = div().flex().items_center().gap_1();
+    if let Some(what) = fast_share {
+        row = row.child(fast_share::button(
+            chat_id,
+            message_id,
+            message.pending,
+            what,
+            cx,
+        ));
+    }
     if reply {
         row = row.child(
             corner_button(
@@ -397,7 +408,7 @@ fn message_corner_actions(
             })),
         );
     }
-    let span = quill::corner_buttons::span(reply, react);
+    let span = quill::corner_buttons::span(fast_share.is_some(), reply, react);
     (row.child(more).into_any_element(), px(span))
 }
 
@@ -653,6 +664,7 @@ mod reaction_chip_row;
 pub(in crate::ui) mod text_measure;
 use reaction_chip_row::reaction_chip_row;
 mod community_rows;
+mod fast_share;
 mod session_history_row;
 mod wrap;
 #[allow(unused_imports)]

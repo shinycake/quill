@@ -4,6 +4,8 @@
 //! tested.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ids::{ChatId, MessageId};
+
 /// One button's width plus the gap after it.
 const SLOT: f32 = 28.;
 /// Margin between the bubble and the first button.
@@ -19,14 +21,164 @@ pub fn visible(prefs: Option<(bool, bool)>, replyable: bool, reactable: bool) ->
 
 /// Room the buttons take beside the bubble: the "..." button always, plus
 /// one slot for each extra.
-pub fn span(reply: bool, react: bool) -> f32 {
-    let buttons = 1 + usize::from(reply) + usize::from(react);
+pub fn span(fast_share: bool, reply: bool, react: bool) -> f32 {
+    let buttons = 1 + usize::from(fast_share) + usize::from(reply) + usize::from(react);
     MARGIN + SLOT * buttons as f32
+}
+
+/// The kind of chat a message sits in, as far as the fast share button
+/// cares (tdesktop `Message::displayFastShare`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FastShareChat {
+    /// A broadcast channel (a supergroup that is not a megagroup).
+    Channel,
+    /// A one-to-one chat; `bot` when the other side is a bot.
+    Private { bot: bool },
+    /// Groups, megagroups, secret chats and anything unknown.
+    Other,
+}
+
+/// What the fast share decision reads from a message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FastShareFacts {
+    pub chat: FastShareChat,
+    /// The server has the message (not still sending).
+    pub sent: bool,
+    pub outgoing: bool,
+    /// Forwarding is allowed: not protected content, not a secret chat, not
+    /// an anchored ephemeral message, and `messageProperties.can_be_forwarded`
+    /// when TDLib's answer for the message is cached.
+    pub forwardable: bool,
+    /// The message is a forward whose original sender is a broadcast channel
+    /// and which does not show the forwarder (tdesktop
+    /// `showForwardsFromSender`: Saved Messages, Replies, verification codes).
+    pub forwarded_from_channel: bool,
+    /// The row sits in a reply thread (comments); tdesktop `Context::Replies`
+    /// never shows the go-to-original button there.
+    pub reply_thread: bool,
+    /// Where a forward was made from (tdesktop `savedFromPeer` and
+    /// `savedFromMsgId`), set for forwards in Saved Messages.
+    pub forward_source: Option<(ChatId, MessageId)>,
+    /// The content is one a bot sent that `allowsFastShare`: files, photos,
+    /// GIFs and videos, games, albums and link previews.
+    pub media: bool,
+}
+
+/// The round button beside the bubble.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FastShare {
+    /// Open the forward picker for the message.
+    Share,
+    /// Jump to the message this one was forwarded from.
+    GoToOriginal(ChatId, MessageId),
+}
+
+/// Whether the message gets the fast share button, and which one. Mirrors
+/// `displayGoToOriginal` (a forward that remembers its source, wins on
+/// click) and `displayFastShare` (channel posts; forwards from channels and
+/// bot media in private chats), the latter only when forwarding is allowed.
+pub fn fast_share(facts: FastShareFacts) -> Option<FastShare> {
+    if !facts.sent {
+        return None;
+    }
+    if let Some((chat_id, message_id)) = facts.forward_source
+        && !facts.reply_thread
+    {
+        return Some(FastShare::GoToOriginal(chat_id, message_id));
+    }
+    if !facts.forwardable {
+        return None;
+    }
+    let shown = match facts.chat {
+        FastShareChat::Channel => true,
+        FastShareChat::Private { bot } => {
+            !facts.outgoing && (facts.forwarded_from_channel || (bot && facts.media))
+        }
+        FastShareChat::Other => false,
+    };
+    shown.then_some(FastShare::Share)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{span, visible};
+    use super::{FastShare, FastShareChat, FastShareFacts, fast_share, span, visible};
+    use crate::ids::{ChatId, MessageId};
+
+    fn facts(chat: FastShareChat) -> FastShareFacts {
+        FastShareFacts {
+            chat,
+            sent: true,
+            outgoing: false,
+            forwardable: true,
+            forwarded_from_channel: false,
+            reply_thread: false,
+            forward_source: None,
+            media: false,
+        }
+    }
+
+    #[test]
+    fn channel_posts_get_the_share_button() {
+        assert_eq!(
+            fast_share(facts(FastShareChat::Channel)),
+            Some(FastShare::Share)
+        );
+    }
+
+    #[test]
+    fn protected_or_unsent_channel_posts_do_not() {
+        let mut f = facts(FastShareChat::Channel);
+        f.forwardable = false;
+        assert_eq!(fast_share(f), None);
+        f.forwardable = true;
+        f.sent = false;
+        assert_eq!(fast_share(f), None);
+    }
+
+    #[test]
+    fn groups_never_get_it() {
+        assert_eq!(fast_share(facts(FastShareChat::Other)), None);
+    }
+
+    #[test]
+    fn private_chats_share_channel_forwards_and_bot_media() {
+        let private = |bot| facts(FastShareChat::Private { bot });
+        assert_eq!(fast_share(private(false)), None);
+        let mut forwarded = private(false);
+        forwarded.forwarded_from_channel = true;
+        assert_eq!(fast_share(forwarded), Some(FastShare::Share));
+        forwarded.outgoing = true;
+        assert_eq!(fast_share(forwarded), None);
+        let mut bot = private(true);
+        assert_eq!(fast_share(bot), None);
+        bot.media = true;
+        assert_eq!(fast_share(bot), Some(FastShare::Share));
+        bot.forwardable = false;
+        assert_eq!(fast_share(bot), None);
+    }
+
+    #[test]
+    fn forwards_with_a_source_go_to_the_original_even_when_protected() {
+        let mut f = facts(FastShareChat::Private { bot: false });
+        f.forward_source = Some((ChatId(7), MessageId(9)));
+        f.forwardable = false;
+        assert_eq!(
+            fast_share(f),
+            Some(FastShare::GoToOriginal(ChatId(7), MessageId(9)))
+        );
+        f.sent = false;
+        assert_eq!(fast_share(f), None);
+    }
+
+    #[test]
+    fn reply_threads_never_go_to_the_original() {
+        let mut f = facts(FastShareChat::Channel);
+        f.forward_source = Some((ChatId(7), MessageId(9)));
+        f.reply_thread = true;
+        assert_eq!(fast_share(f), Some(FastShare::Share));
+        f.chat = FastShareChat::Other;
+        assert_eq!(fast_share(f), None);
+    }
 
     #[test]
     fn both_buttons_show_by_default() {
@@ -48,8 +200,9 @@ mod tests {
 
     #[test]
     fn span_grows_with_the_buttons() {
-        assert_eq!(span(false, false), 34.);
-        assert!(span(true, false) > span(false, false));
-        assert!(span(true, true) > span(true, false));
+        assert_eq!(span(false, false, false), 34.);
+        assert!(span(false, true, false) > span(false, false, false));
+        assert!(span(true, true, true) > span(false, true, true));
+        assert!(span(false, true, true) > span(false, true, false));
     }
 }

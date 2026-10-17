@@ -105,11 +105,15 @@ impl FactCheck {
     }
 }
 
-/// Typed `messageForwardInfo`. `source` (Saved Messages / Replies) stays out.
+/// Typed `messageForwardInfo`. `source` keeps only where the forward was
+/// made from (Saved Messages / Replies), as tdesktop's `savedFromPeer`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageForwardInfo {
     pub origin: MessageOrigin,
     pub date: i32,
+    /// `messageForwardInfo.source`: the chat and message the forward was
+    /// made from, when TDLib knows both.
+    pub source: Option<(ChatId, MessageId)>,
 }
 
 /// Same-chat / known-chat reply metadata from `message.reply_to`.
@@ -656,10 +660,18 @@ pub(crate) fn parse_forward_info(value: Option<&Value>) -> Option<MessageForward
                     .and_then(Value::as_i64)
                     .unwrap_or(0)
                     .sat_i32(),
+                source: parse_forward_source(value.get("source")),
             })
         }
         _ => None,
     }
+}
+
+fn parse_forward_source(value: Option<&Value>) -> Option<(ChatId, MessageId)> {
+    let value = value.filter(|value| !value.is_null())?;
+    let chat_id = int53_or_zero(value.get("chat_id"));
+    let message_id = int53_or_zero(value.get("message_id"));
+    (chat_id != 0 && message_id > 0).then_some((ChatId(chat_id), MessageId(message_id)))
 }
 
 pub(crate) fn parse_message_origin(value: Option<&Value>) -> Option<MessageOrigin> {
