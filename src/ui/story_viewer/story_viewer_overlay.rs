@@ -13,6 +13,7 @@ impl QuillApp {
     /// backdrop click and Escape (see `cancel_search`) close it.
     pub(in crate::ui) fn story_viewer_overlay(
         &mut self,
+        window_width: f32,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         // The shared emoji / sticker / GIF panel while the reply row has it.
@@ -253,6 +254,18 @@ impl QuillApp {
             .children(area_chips)
             .children(paused_chip)
             .into_any_element();
+        // The neighbour posters hang off the frame, outside its clip, so
+        // they centre on it whatever the panel holds above and below. The
+        // frame still gives way, clipped, when the window is too short.
+        let visual: AnyElement = div()
+            .debug_selector(|| "story-viewer-frame".into())
+            .relative()
+            .flex()
+            .flex_col()
+            .min_h_0()
+            .child(visual)
+            .children(self.story_sibling_layer(window_width, cx))
+            .into_any_element();
         // A live stream has no caption, progress or reactions row
         // (tdesktop hides them for a video stream).
         let caption: Option<AnyElement> = (!item.caption.is_empty() && !live_watch).then(|| {
@@ -302,12 +315,14 @@ impl QuillApp {
             .child(
                 div()
                     .id("story-viewer-panel")
+                    .debug_selector(|| "story-viewer-panel".into())
                     .flex()
                     .flex_col()
                     .items_center()
                     .gap_2()
                     .p_4()
-                    .max_w(px(480.))
+                    .flex_none()
+                    .w(px(quill::story_sibling_layout::STORY_COLUMN_WIDTH))
                     .max_h_full()
                     .when(!live_watch, |this| {
                         this.child(self.story_progress_bar(position, total, now))
@@ -370,7 +385,7 @@ impl QuillApp {
                                 Button::new("story-viewer-prev")
                                     .label(tr(keys::Q_MEDIA_PREV))
                                     .custom(chrome::ghost(cx))
-                                    .disabled(position <= 1)
+                                    .disabled(!self.story_step_available(-1))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.step_story_viewer(-1, cx);
                                     })),
@@ -379,7 +394,7 @@ impl QuillApp {
                                 Button::new("story-viewer-next")
                                     .label(tr(keys::Q_MEDIA_NEXT))
                                     .custom(chrome::ghost(cx))
-                                    .disabled(position >= total)
+                                    .disabled(!self.story_step_available(1))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.step_story_viewer(1, cx);
                                     })),

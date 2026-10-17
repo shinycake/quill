@@ -57,9 +57,20 @@ impl Session {
                     );
                 }
             }
+            Some(RequestPurpose::LoadActiveStories) => {
+                self.stories
+                    .active_stories_failed(err.code, std::time::Instant::now());
+            }
+            // Only a not-found or invalid answer means the story is gone; a
+            // timeout, FLOOD_WAIT or 500 is asked for again after a wait.
             Some(RequestPurpose::GetStory) => {
-                if let Some((chat, story)) = pending.and_then(|p| Some((p.chat_id?, p.story_id?))) {
-                    self.stories.missing.insert((chat.0, story));
+                if let Some(story) = pending.and_then(|p| Some((p.chat_id?.0, p.story_id?))) {
+                    if matches!(err.code, 400 | 404) {
+                        self.stories.missing.insert(story);
+                    } else {
+                        self.stories
+                            .story_fetch_failed(story, std::time::Instant::now());
+                    }
                 }
             }
             Some(RequestPurpose::SearchPublicStories) => {

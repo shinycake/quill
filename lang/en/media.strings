@@ -726,6 +726,7 @@
 "qll_media_story_ids_to_add_comma" = "Story ids to add, comma-separated";
 "qll_media_story_link" = "Story link";
 "qll_media_story_link_copied" = "Story link copied";
+"qll_media_story_load_failed" = "Couldn't load the story.";
 "qll_media_story_media_file_path" = "Story media file path";
 "qll_media_story_reaction_emoji" = "Story reaction emoji";
 "qll_media_story_reply_sent" = "Story reply sent";

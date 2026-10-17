@@ -96,7 +96,12 @@ pub(super) fn reply_header_strip(
                 .pressable(cx.theme())
                 .on_click(cx.listener(move |this, _, window, cx| {
                     if let Some(story) = story {
-                        this.open_story_viewer(target_chat, story, cx);
+                        this.open_story_viewer(
+                            target_chat,
+                            story,
+                            quill::story_viewer::StoryOpenScope::Single,
+                            cx,
+                        );
                     } else if external {
                         this.select_search_message(target_chat, target_id, window, cx);
                     } else {

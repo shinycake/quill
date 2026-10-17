@@ -728,40 +728,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    pub(super) fn step_story_viewer(&mut self, delta: i32, cx: &mut Context<Self>) {
-        let prev = self.stories.viewer.current().cloned();
-        if delta < 0 {
-            self.stories.viewer.prev();
-        } else {
-            self.stories.viewer.next();
-        }
-        let next = self.stories.viewer.current().cloned();
-        if let (Some(prev), Some(next)) = (prev, next)
-            && (prev.chat_id, prev.story_id) != (next.chat_id, next.story_id)
-            && let Some(live) = self.live.as_mut()
-        {
-            let _ = live.driver.close_story(prev.chat_id, prev.story_id);
-            let _ = live.driver.open_story(next.chat_id, next.story_id);
-        }
-        self.stories.reaction_picker_open = false;
-        self.end_story_reply(cx);
-        self.stories.stats_open = false;
-        // B14: a new story starts playing (a Space pause is per story).
-        self.stories.pause.reset();
-        self.stories.share_open = false;
-        self.stories.notice = None;
-        self.stories.native_failed = None;
-        // Phase 9.6: manual nav restarts the playback clock for the new
-        // current story (same as the official clients).
-        self.stories.playback.start(Instant::now());
-        self.sync_story_video(cx);
-        self.ensure_story_tick(cx);
-        self.ensure_story_download(cx);
-        self.ensure_story_custom_emoji_downloads();
-        self.sync_live_story(cx);
-        cx.notify();
-    }
-
     /// Phase 9.6: pause predicate for story playback — the timer must never
     /// auto-advance under an open panel. Mirrors Telegram Android pausing on
     /// any open popup/sheet/keyboard/reaction UI (`StoryViewer.isPaused`,
@@ -814,7 +780,7 @@ impl QuillApp {
                         this.tick_close_friends(cx);
                         this.live_story_tick(cx);
                         if this.story_segment_finished(now) {
-                            this.advance_story_playback(cx);
+                            this.step_story_viewer(1, cx);
                         }
                         // Phase 9.2+: keep custom-emoji reaction stickers
                         // warm while the viewer is open (picker options +
@@ -838,21 +804,6 @@ impl QuillApp {
         })
         .detach();
     }
-
-    /// Phase 9.6: auto-advance from the playback tick — next story, or close
-    /// the viewer at the end of the sequence (official behavior: no loop).
-    pub(super) fn advance_story_playback(&mut self, cx: &mut Context<Self>) {
-        if self
-            .stories
-            .viewer
-            .position()
-            .is_some_and(|(position, total)| position < total)
-        {
-            self.step_story_viewer(1, cx);
-        } else {
-            self.close_story_viewer(cx);
-        }
-    }
 }
 
 pub(in crate::ui) mod chrome;
@@ -872,11 +823,16 @@ mod live_story;
 #[cfg(feature = "demo-capture")]
 mod live_tests;
 mod live_view;
+mod nav;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod nav_tests;
 mod open;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod open_tests;
 mod reply_media;
+mod siblings;
 #[cfg(feature = "demo-capture")]
 mod story_demo;
 #[cfg(test)]
@@ -885,3 +841,4 @@ mod story_header_tests;
 mod story_viewer_overlay;
 
 pub(in crate::ui) use live_state::LiveStoryUi;
+pub(in crate::ui) use open::PendingStoryOpen;

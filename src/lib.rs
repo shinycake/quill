@@ -198,6 +198,8 @@ pub mod story_page;
 pub mod story_preload;
 pub mod story_restriction;
 pub mod story_ring;
+pub mod story_sibling_layout;
+pub mod story_tray_walk;
 pub mod story_viewer;
 pub mod subsection_tabs;
 pub mod suggest;

@@ -153,8 +153,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Phase 9.1: fetch one story's full content (`getStory`). Deduped by
-    /// the story cache + in-flight per-story requests; the `story` response
-    /// is authoritative on `(poster_chat_id, id)`.
+    /// the story cache + in-flight per-story requests, and held back while
+    /// a failed ask waits out its retry clock; the `story` response is
+    /// authoritative on `(poster_chat_id, id)`.
     pub fn get_story(
         &mut self,
         chat_id: ChatId,
@@ -163,11 +164,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self
-            .session
-            .stories
-            .stories
-            .contains_key(&(chat_id.0, story_id))
+        let stories = &self.session.stories;
+        if stories.stories.contains_key(&(chat_id.0, story_id))
+            || stories.story_fetch_waiting((chat_id.0, story_id), std::time::Instant::now())
             || self.session.requests.has_purpose_for_story(
                 RequestPurpose::GetStory,
                 chat_id,
@@ -186,6 +185,20 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Err(err)
             }
         }
+    }
+
+    /// The user opened this story: a wait left by a failed `getStory` no
+    /// longer holds it back.
+    pub fn get_story_now(
+        &mut self,
+        chat_id: ChatId,
+        story_id: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.session
+            .stories
+            .story_retry
+            .remove(&(chat_id.0, story_id));
+        self.get_story(chat_id, story_id)
     }
 
     /// Phase 9.1: `openStory` — the user opened a story for viewing.

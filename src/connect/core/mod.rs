@@ -644,6 +644,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if became_ready {
             // Phase 9.1: the story tray needs `updateChatActiveStories`
             // updates; one `loadActiveStories(storyListMain)` per Ready.
+            self.session.stories.reset_active_stories_paging();
             self.maybe_load_active_stories()?;
             // Parity slice: saved notification sounds (picker + custom-sound
             // playback) and per-scope default settings (`use_default_*`

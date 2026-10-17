@@ -1,6 +1,7 @@
-//! Opening stories: one the server no longer has drops the open and toasts
-//! that the link is broken (tdesktop `lng_stories_link_invalid`), and a
-//! poster's stories that arrive after the viewer opened join its list.
+//! Opening stories: a linked one the server no longer has drops the open and
+//! toasts that the link is broken (tdesktop `lng_stories_link_invalid`),
+//! while a card or tray open of one drops it silently, and a poster's
+//! stories that arrive after the viewer opened join its list.
 //! Nothing reaches Telegram: the demo app has no connection.
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
@@ -11,18 +12,23 @@ use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
-use quill::story_viewer::StoryViewerItem;
+use quill::story_viewer::{StoryOpenScope, StoryViewerItem};
+
+use super::PendingStoryOpen;
 
 const POSTER: i64 = 13;
 
-fn frames(vcx: &mut VisualTestContext) {
+pub(super) fn frames(vcx: &mut VisualTestContext) {
     vcx.run_until_parked();
     for _ in 0..2 {
         vcx.update(|window, cx| window.render_frame(cx));
     }
 }
 
-fn open_app(cx: &mut TestAppContext, kind: &'static str) -> (Entity<QuillApp>, VisualTestContext) {
+pub(super) fn open_app(
+    cx: &mut TestAppContext,
+    kind: &'static str,
+) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -41,13 +47,23 @@ fn open_app(cx: &mut TestAppContext, kind: &'static str) -> (Entity<QuillApp>, V
 }
 
 #[gpui_kit::test]
-fn a_story_the_server_no_longer_has_shows_the_broken_link_toast(cx: &mut TestAppContext) {
+fn a_linked_story_the_server_no_longer_has_shows_the_broken_link_toast(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_app(cx, "ready-channels");
     let vcx = &mut vcx;
-    app.update(vcx, |app, cx| app.open_story_viewer(ChatId(POSTER), 99, cx));
+    app.update(vcx, |app, cx| {
+        app.open_story_viewer(ChatId(POSTER), 99, StoryOpenScope::Link, cx)
+    });
     frames(vcx);
     let waiting = app.read_with(vcx, |app, _| app.chat_list.pending_story_open);
-    assert_eq!(waiting, Some((POSTER, 99)), "the open waits for getStory");
+    assert_eq!(
+        waiting,
+        Some(PendingStoryOpen {
+            chat_id: POSTER,
+            story_id: 99,
+            scope: StoryOpenScope::Link,
+        }),
+        "the open waits for getStory"
+    );
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             session.stories.missing.insert((POSTER, 99));
@@ -68,20 +84,47 @@ fn a_story_the_server_no_longer_has_shows_the_broken_link_toast(cx: &mut TestApp
 }
 
 #[gpui_kit::test]
-fn a_story_known_to_be_gone_toasts_on_the_next_frame(cx: &mut TestAppContext) {
+fn a_linked_story_known_to_be_gone_toasts_on_the_next_frame(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_app(cx, "ready-channels");
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             session.stories.missing.insert((POSTER, 98));
         }
-        app.open_story_viewer(ChatId(POSTER), 98, cx);
+        app.open_story_viewer(ChatId(POSTER), 98, StoryOpenScope::Link, cx);
     });
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert_eq!(app.chat_list.pending_story_open, None);
         assert_eq!(app.connection.note().text(), tr(keys::STORIES_LINK_INVALID));
     });
+}
+
+#[gpui_kit::test]
+fn a_gone_story_opened_from_a_card_or_the_tray_drops_the_open_quietly(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx, "ready-channels");
+    let vcx = &mut vcx;
+    for scope in [StoryOpenScope::Single, StoryOpenScope::Tray] {
+        app.update(vcx, |app, cx| {
+            app.connection
+                .set_note(crate::ui::status_note::StatusNote::silent(""));
+            app.open_story_viewer(ChatId(POSTER), 97, scope, cx);
+            if let Some(session) = app.demo_session.as_mut() {
+                session.stories.missing.insert((POSTER, 97));
+            }
+            cx.notify();
+        });
+        frames(vcx);
+        app.read_with(vcx, |app, _| {
+            assert_eq!(app.chat_list.pending_story_open, None, "{scope:?}");
+            assert!(!app.stories.viewer.is_open());
+            assert_ne!(
+                app.connection.note().text(),
+                tr(keys::STORIES_LINK_INVALID),
+                "{scope:?}: only a link says it is broken"
+            );
+        });
+    }
 }
 
 /// Maya's stories in the `ready-story-viewer` demo.
@@ -97,7 +140,7 @@ fn a_story_that_arrives_after_the_viewer_opened_joins_the_list(cx: &mut TestAppC
             .demo_session
             .as_mut()
             .and_then(|session| session.stories.stories.remove(&(MAYA, 6)));
-        app.open_story_viewer(ChatId(MAYA), 5, cx);
+        app.open_story_viewer(ChatId(MAYA), 5, StoryOpenScope::Tray, cx);
         late
     });
     frames(vcx);
@@ -126,4 +169,74 @@ fn a_story_that_arrives_after_the_viewer_opened_joins_the_list(cx: &mut TestAppC
     app.update(vcx, |app, cx| app.step_story_viewer(1, cx));
     frames(vcx);
     assert_eq!(shown(&app, vcx), (Some((ChatId(MAYA), 6)), Some((2, 2))));
+}
+
+/// What a pending open of `story` from `scope` leaves once its `getStory`
+/// failed with an error that may pass: the pending open and the note.
+fn open_then_fail(
+    app: &Entity<QuillApp>,
+    vcx: &mut VisualTestContext,
+    story: i32,
+    scope: StoryOpenScope,
+) -> (Option<PendingStoryOpen>, String) {
+    app.update(vcx, |app, cx| {
+        app.connection
+            .set_note(crate::ui::status_note::StatusNote::silent(""));
+        app.open_story_viewer(ChatId(POSTER), story, scope, cx);
+        if let Some(session) = app.demo_session.as_mut() {
+            session
+                .stories
+                .story_fetch_failed((POSTER, story), std::time::Instant::now());
+        }
+        cx.notify();
+    });
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        (
+            app.chat_list.pending_story_open,
+            app.connection.note().text().to_string(),
+        )
+    })
+}
+
+#[gpui_kit::test]
+fn an_open_whose_story_failed_to_load_says_so(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx, "ready-channels");
+    let vcx = &mut vcx;
+    for (story, scope, note) in [
+        (95, StoryOpenScope::Single, keys::Q_MEDIA_STORY_LOAD_FAILED),
+        (94, StoryOpenScope::Tray, keys::Q_MEDIA_STORY_LOAD_FAILED),
+        (93, StoryOpenScope::Link, keys::STORIES_LINK_INVALID),
+    ] {
+        let (pending, shown) = open_then_fail(&app, vcx, story, scope);
+        assert_eq!(pending, None, "{scope:?}: the open is dropped");
+        assert_eq!(shown, tr(note).to_string(), "{scope:?}");
+        assert!(app.read_with(vcx, |app, _| !app.stories.viewer.is_open()));
+    }
+}
+
+#[gpui_kit::test]
+fn opening_a_story_again_after_a_failure_waits_for_the_new_answer(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx, "ready-channels");
+    let vcx = &mut vcx;
+    open_then_fail(&app, vcx, 92, StoryOpenScope::Single);
+    app.update(vcx, |app, cx| {
+        app.open_story_viewer(ChatId(POSTER), 92, StoryOpenScope::Single, cx)
+    });
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        assert_eq!(
+            app.chat_list.pending_story_open,
+            Some(PendingStoryOpen {
+                chat_id: POSTER,
+                story_id: 92,
+                scope: StoryOpenScope::Single,
+            }),
+            "the earlier failure does not drop the new open"
+        );
+        let waiting = app
+            .session()
+            .is_some_and(|s| s.stories.story_retry.contains_key(&(POSTER, 92)));
+        assert!(!waiting, "the open cleared the retry clock");
+    });
 }

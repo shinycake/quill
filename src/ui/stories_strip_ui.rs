@@ -21,7 +21,8 @@ use quill::local_path::sandboxed_display_path;
 use quill::stories_strip as metrics;
 use quill::stories_strip::{Axis, AxisLock};
 use quill::story_ring::StoryRing;
-use quill::story_viewer::story_to_open;
+use quill::story_tray_walk::story_to_open;
+use quill::story_viewer::StoryOpenScope;
 
 /// One entry of the strip: a poster with active stories.
 #[derive(Clone)]
@@ -30,7 +31,8 @@ pub(super) struct StoryTile {
     pub title: String,
     pub photo: Option<std::path::PathBuf>,
     pub ring: Option<StoryRing>,
-    pub open_story: i32,
+    /// tdesktop `toOpen`; `None` for a poster with no active story.
+    pub open_story: Option<i32>,
 }
 
 /// Cache key for the tile list: rebuilt only when the session changed.
@@ -217,7 +219,14 @@ impl QuillApp {
                         }),
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.open_story_viewer(ChatId(chat_id), open_story, cx);
+                        if let Some(story) = open_story {
+                            this.open_story_viewer(
+                                ChatId(chat_id),
+                                story,
+                                StoryOpenScope::Tray,
+                                cx,
+                            );
+                        }
                     })),
             );
         }

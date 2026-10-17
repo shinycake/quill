@@ -100,6 +100,7 @@ mod sticker_categories;
 mod sticker_creator;
 mod sticker_tabs;
 mod stories;
+mod story_fetch_retry;
 mod story_insights;
 mod story_preload;
 mod story_reply_media;
