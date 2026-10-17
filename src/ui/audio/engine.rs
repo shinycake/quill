@@ -924,7 +924,7 @@ pub(in crate::ui) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::test_support::{RATE, device, pull, track};
-    use super::{AudioEngine, AudioError, EngineState, Simulation};
+    use super::{AudioEngine, AudioError, EngineState, SeekBoard, Simulation};
     use crate::ui::audio::SharedOutput;
     use rodio::mixer::MixerSource;
     use std::path::PathBuf;
@@ -1084,7 +1084,30 @@ mod tests {
             }
             std::thread::yield_now();
         }
-        panic!("the seek never settled");
+        let (handed, answered) = engine.track_parts().map_or((0, 0), |(board, probe)| {
+            let answered = probe
+                .seeks_handled
+                .load(std::sync::atomic::Ordering::Relaxed);
+            (board.lock().handed, answered)
+        });
+        panic!(
+            "the seek never settled: handed {handed}, answered {answered}, restart building {}",
+            engine.restart.is_some()
+        );
+    }
+
+    /// Pull one frame at a time, with no tick, until the device has answered
+    /// the seek on `board`.
+    fn pull_until_answered(board: &SeekBoard, device: &mut MixerSource) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while board.lock().done.is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the device never answered the seek"
+            );
+            pull(device, 1);
+            std::thread::yield_now();
+        }
     }
 
     #[test]
@@ -1262,19 +1285,48 @@ mod tests {
         let path = track("restart-retarget.wav", 8);
         engine.start(&path, 0.0, 1.0, 1.0, 8.0).unwrap();
         pull(&mut device, usize::try_from(RATE).unwrap());
-        let (_, probe) = engine.track_parts().unwrap();
+        let (board, probe) = engine.track_parts().unwrap();
         probe
             .refuse_seek
             .store(true, std::sync::atomic::Ordering::Relaxed);
         engine.seek(6.0, true).unwrap();
-        pull_until(&mut engine, &mut device, "restart building", |engine| {
-            engine.restart.is_some() || !engine.seek_pending()
-        });
+        pull_until_answered(&board, &mut device);
+        // No tick has run, so this seek's own settle starts the restart and
+        // the seek lands on it while it builds.
         engine.seek(2.0, true).unwrap();
+        assert!(engine.restart.is_some(), "the restart is building");
         assert!(
             (engine.position_secs() - 2.0).abs() < 1e-9,
             "the newest target at once"
         );
+        pull_until_settled(&mut engine, &mut device);
+        let secs = engine.position_secs();
+        assert!((1.95..=2.3).contains(&secs), "got {secs}");
+        assert_eq!(engine.error(), None);
+    }
+
+    #[test]
+    fn a_seek_after_a_restart_built_moves_the_new_track() {
+        let (mut engine, mut device) = rig();
+        let path = track("restart-built-then-seek.wav", 8);
+        engine.start(&path, 0.0, 1.0, 1.0, 8.0).unwrap();
+        pull(&mut device, usize::try_from(RATE).unwrap());
+        let (board, probe) = engine.track_parts().unwrap();
+        probe
+            .refuse_seek
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        engine.seek(6.0, true).unwrap();
+        pull_until_answered(&board, &mut device);
+        engine.settle();
+        let slot = engine.restart.as_ref().map(|r| r.slot.clone()).unwrap();
+        wait_until("the restart finished building", || {
+            slot.lock().unwrap().is_some()
+        });
+        // This seek's settle lands the rebuilt track, and the seek goes to
+        // the new track in place.
+        engine.seek(2.0, true).unwrap();
+        assert!(engine.restart.is_none(), "the restart landed");
+        assert!((engine.position_secs() - 2.0).abs() < 1e-9);
         pull_until_settled(&mut engine, &mut device);
         let secs = engine.position_secs();
         assert!((1.95..=2.3).contains(&secs), "got {secs}");
