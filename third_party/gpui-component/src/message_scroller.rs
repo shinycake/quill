@@ -162,6 +162,17 @@ impl MessageScrollerState {
         self.user_scrolls
     }
 
+    /// Count a reader-initiated scroll the list's own handler never sees:
+    /// keyboard paging, sending a message, jump to latest.
+    pub fn note_user_scroll(&mut self) {
+        self.user_scrolls = self.user_scrolls.wrapping_add(1);
+    }
+
+    /// Whether the reader is dragging the scrollbar right now.
+    pub fn is_scrollbar_dragging(&self) -> bool {
+        self.list_state.is_scrollbar_dragging()
+    }
+
     /// The row at the top of the viewport and how many pixels of it are
     /// scrolled above the viewport. `None` while the list follows its
     /// tail, so callers keep a position only for a reader who moved away.
@@ -541,6 +552,36 @@ mod tests {
                 state.scroll_to_end(cx);
                 assert_eq!(state.top_anchor(), None);
                 assert_eq!(state.user_scrolls(), 0);
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn keyboard_send_and_jump_scrolls_count_as_reader_scrolls(cx: &mut gpui::TestAppContext) {
+        let state = cx.new(|cx| MessageScrollerState::new(6, cx));
+        cx.update(|cx| {
+            state.update(cx, |state, cx| {
+                assert_eq!(state.user_scrolls(), 0);
+                // Programmatic jumps (the open anchor) do not count.
+                state.scroll_to_item(2, cx);
+                state.scroll_to_end(cx);
+                assert_eq!(state.user_scrolls(), 0);
+                state.note_user_scroll();
+                assert_eq!(state.user_scrolls(), 1);
+                assert!(!state.is_scrollbar_dragging());
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn a_scrollbar_drag_is_visible_to_the_scroller(cx: &mut gpui::TestAppContext) {
+        let state = cx.new(|cx| MessageScrollerState::new(6, cx));
+        cx.update(|cx| {
+            state.update(cx, |state, _| {
+                state.list_state.scrollbar_drag_started();
+                assert!(state.is_scrollbar_dragging());
+                state.list_state.scrollbar_drag_ended();
+                assert!(!state.is_scrollbar_dragging());
             });
         });
     }

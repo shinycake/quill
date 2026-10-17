@@ -78,6 +78,39 @@ impl ScrollMemory {
     }
 }
 
+/// A remembered position waiting for its message to load. Any move the
+/// reader makes ends the wait, so the position never pulls them back later.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RestoreWait {
+    pending: bool,
+    seen: u64,
+}
+
+impl RestoreWait {
+    /// Start waiting; `interactions` is the scroller's reader-scroll count now.
+    pub fn arm(&mut self, interactions: u64) {
+        self.pending = true;
+        self.seen = interactions;
+    }
+
+    pub fn is_pending(&self) -> bool {
+        self.pending
+    }
+
+    /// The wait is over: restored, replaced by a jump, or abandoned.
+    pub fn finish(&mut self) {
+        self.pending = false;
+    }
+
+    /// End the wait when the reader scrolled (wheel, trackpad, keyboard, a
+    /// send or jump to latest counted by the scroller) or holds the scrollbar.
+    pub fn observe(&mut self, interactions: u64, scrollbar_dragging: bool) {
+        if self.pending && (interactions != self.seen || scrollbar_dragging) {
+            self.pending = false;
+        }
+    }
+}
+
 /// What opening a history does with its remembered position.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ScrollOpen {
@@ -107,7 +140,9 @@ pub fn scroll_open(
 
 #[cfg(test)]
 mod tests {
-    use super::{SCROLL_MEMORY_CAP, SavedScroll, ScrollMemory, ScrollOpen, scroll_open};
+    use super::{
+        RestoreWait, SCROLL_MEMORY_CAP, SavedScroll, ScrollMemory, ScrollOpen, scroll_open,
+    };
     use crate::ids::MessageId;
 
     fn at(id: i64, offset: f32) -> Option<SavedScroll> {
@@ -190,5 +225,46 @@ mod tests {
         assert_eq!((open, row), (ScrollOpen::Default, None));
         let (open, _) = scroll_open(None, false, |_| Some(1));
         assert_eq!(open, ScrollOpen::Default);
+    }
+
+    #[test]
+    fn a_reader_move_ends_the_wait_for_a_late_page() {
+        let mut wait = RestoreWait::default();
+        wait.arm(4);
+        wait.observe(4, false);
+        assert!(wait.is_pending());
+        wait.observe(5, false);
+        assert!(!wait.is_pending());
+    }
+
+    #[test]
+    fn holding_the_scrollbar_ends_the_wait() {
+        let mut wait = RestoreWait::default();
+        wait.arm(0);
+        wait.observe(0, true);
+        assert!(!wait.is_pending());
+        // Once ended it stays ended, and recording resumes.
+        wait.observe(0, false);
+        assert!(!wait.is_pending());
+    }
+
+    #[test]
+    fn leaving_the_late_restore_unarmed_never_pends() {
+        let mut wait = RestoreWait::default();
+        wait.observe(9, true);
+        assert!(!wait.is_pending());
+    }
+
+    #[test]
+    fn sending_or_jumping_to_latest_forgets_the_position() {
+        let mut memory = ScrollMemory::default();
+        let mut wait = RestoreWait::default();
+        memory.record((1, None, 0), at(40, 12.));
+        wait.arm(0);
+        // The reader sends: the scroller counts it, the entry goes.
+        memory.forget((1, None, 0));
+        wait.observe(1, false);
+        assert_eq!(memory.get((1, None, 0)), None);
+        assert!(!wait.is_pending());
     }
 }

@@ -348,6 +348,7 @@ impl QuillApp {
     /// message is replaced by the newest page (the scroller re-anchors at
     /// the bottom when it lands); otherwise just scroll down.
     pub(in crate::ui) fn jump_to_latest_messages(&mut self, cx: &mut Context<Self>) {
+        self.forget_scroll_on_return_to_latest(cx);
         let in_thread = self.thread_active();
         // Inside a thread the button addresses the thread's window: its
         // divider goes, and a window short of the newest replies is

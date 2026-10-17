@@ -97,6 +97,9 @@ impl QuillApp {
                     self.submit_forward_bar(text, window, cx);
                     return;
                 }
+                // Sending hands the view back to the reader: a position
+                // still waiting to be restored is dropped.
+                self.forget_scroll_on_return_to_latest(cx);
                 self.remember_sent_hashtags(&text);
                 // M2: the rich editor sends blocks, not text.
                 if self.composer_ui.rich_editor_open {

@@ -38,3 +38,22 @@ Not shown: real TDLib windows that reload on open (anchor outside the window fal
   does not depend on a full app render.
 - Verified: scroll up in Demo chat A, Demo chat B, Demo chat A, and again B, A. The view after
   one and two round trips shows messages 7 to 13 at the same offsets, light and dark.
+
+## Review follow-ups, round 3
+- Any reader move now ends the pending restore, in one place (`RestoreWait::observe`, fed by
+  `MessageScrollerState::user_scrolls` and `is_scrollbar_dragging`): wheel and trackpad (already
+  counted), keyboard paging / Home / End / selection focus scroll and a send or jump to latest
+  (`note_user_scroll`), and a scrollbar drag (read from the list state). Once it ends, recording
+  resumes normally, so moves made in that window are saved.
+- Sending a message and jump to latest forget the memory entry
+  (`forget_scroll_on_return_to_latest`).
+- Not done as asked: a "never restore while following the tail" guard. The default position of a
+  chat whose anchor has not loaded is the tail, so that guard would disable the late restore
+  entirely. Instead the wait ends on every reader move (including scrolling back to the tail),
+  which covers the yank cases.
+- Tests: `scroll_memory` (`RestoreWait` ends on a counted scroll or a held scrollbar; send or
+  jump forgets the entry) and `message_scroller` (keyboard counts, programmatic jumps do not,
+  scrollbar drag is visible; the vendored crate's tests do not run in the workspace).
+- Verified again: scroll up in Demo chat A, B, A, B, A. The view equals the one left (messages 0
+  to 6, same offsets), light.
+
