@@ -494,21 +494,17 @@ impl QuillApp {
                     }),
             );
         if !description.is_empty() {
-            body = body.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .w_full()
-                    .gap_1()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_semibold()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(tr(keys::INFO_ABOUT_LABEL)),
-                    )
-                    .child(div().text_sm().child(description)),
-            );
+            // tdesktop strips external links from a group's description.
+            let entities = info
+                .as_ref()
+                .map(|i| i.description_entities.clone())
+                .unwrap_or_default();
+            let entities = if is_channel {
+                entities
+            } else {
+                quill::text::about::strip_external_links(&description, &entities)
+            };
+            body = body.child(self.about_text_block(chat_id, &description, &entities, cx));
         }
         if let Some(verification) =
             session.and_then(|s| s.supergroup_bot_verification(supergroup_id))

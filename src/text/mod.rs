@@ -538,5 +538,7 @@ pub fn last_line_is_rtl(text: &str) -> bool {
     text.trim_end().lines().next_back().is_some_and(is_rtl_text)
 }
 
+pub mod about;
+
 #[cfg(test)]
 mod tests;

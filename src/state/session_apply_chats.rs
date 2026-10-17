@@ -495,6 +495,7 @@ impl Session {
             self.groups.supergroup_full_infos.insert(
                 supergroup_id,
                 SupergroupFullInfoData {
+                    description_entities: crate::text::about::about_entities(&description),
                     description,
                     member_count,
                     linked_chat_id,
@@ -549,6 +550,7 @@ impl Session {
         self.groups.supergroup_full_infos.insert(
             supergroup_id,
             SupergroupFullInfoData {
+                description_entities: crate::text::about::about_entities(&description),
                 description,
                 member_count,
                 linked_chat_id,
