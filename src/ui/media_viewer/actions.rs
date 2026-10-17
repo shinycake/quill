@@ -53,7 +53,7 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        let no_files = HashMap::new();
+        let no_files = quill::state::FileMap::default();
         let files = self.session().map_or(&no_files, |s| &s.media.files);
         let roots = self.media_display_roots();
         let path = viewer_display_path(&item, files, &roots);
@@ -152,7 +152,7 @@ impl QuillApp {
         if self.viewer_is_timed() || self.refuse_protected_copy(item.chat_id, cx) {
             return;
         }
-        let no_files = HashMap::new();
+        let no_files = quill::state::FileMap::default();
         let files = self.session().map_or(&no_files, |s| &s.media.files);
         let path = match item.kind {
             MediaViewerKind::Photo => {
@@ -351,7 +351,7 @@ impl QuillApp {
         if self.viewer_is_timed() || self.refuse_protected_copy(item.chat_id, cx) {
             return;
         }
-        let no_files = HashMap::new();
+        let no_files = quill::state::FileMap::default();
         let files = self.session().map_or(&no_files, |s| &s.media.files);
         let roots = self.media_display_roots();
         let orientation = self.viewer.orientation;

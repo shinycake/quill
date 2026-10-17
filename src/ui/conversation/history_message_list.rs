@@ -27,9 +27,9 @@ impl QuillApp {
     pub(in crate::ui) fn history_message_list(
         &mut self,
         id: &'static str,
-        // `None`: nothing feeding the rows changed since the last build
-        // (`HistoryRowsKey`) — keep `history_rows` and the scroller as is.
-        messages: Option<Vec<HistoryMessage>>,
+        // Build the rows, patch messages changed in place or keep them
+        // (`HistoryRowsKey`).
+        messages: RowsInput,
         chat: Option<&ChatSummary>,
         sender_name: &str,
         highlight_id: Option<MessageId>,
@@ -90,7 +90,18 @@ impl QuillApp {
             None => chat.map_or(0, |chat| chat.unread_count),
         };
         let rows_started = std::time::Instant::now();
-        let session_revision = session.map(|s| s.revision);
+        let mark = self.chrome_mark();
+        let (build, patch) = match messages {
+            RowsInput::Build(messages) => (Some(messages), Vec::new()),
+            RowsInput::Patch(patch) => (None, patch),
+            RowsInput::Keep => (None, Vec::new()),
+        };
+        let cloned = build.as_ref().map_or(0, |list| list.len() as u64);
+        let chrome_due = if build.is_none() {
+            self.chrome_due_rows()
+        } else {
+            Vec::new()
+        };
         let chrome_inputs = super::row_chrome::ChromeInputs {
             session,
             chat,
@@ -98,7 +109,7 @@ impl QuillApp {
             media_roots: &media_roots,
             wide: self.chat_wide(),
         };
-        if let Some(mut messages) = messages {
+        if let Some(mut messages) = build {
             // Deleted messages dissolve in place before they go.
             self.merge_vanishing(&mut messages, cx);
             let mut divider_placed = false;
@@ -187,6 +198,7 @@ impl QuillApp {
                             album_id,
                             messages: album_messages,
                             chrome,
+                            chrome_stamp: mark.epoch,
                             spot,
                             day_label,
                             unread_divider,
@@ -202,6 +214,7 @@ impl QuillApp {
                         let row_unread_divider = first_unread(&message);
                         rows.push(HistoryRow::Single(Box::new(HistoryRowInputs {
                             chrome,
+                            chrome_stamp: mark.epoch,
                             spot,
                             highlighted: highlight_id == Some(message.id),
                             run_start: spot.sender_changed && index > 0,
@@ -228,6 +241,7 @@ impl QuillApp {
                 let chrome = chrome_inputs.chrome(&message, spot);
                 rows.push(HistoryRow::Single(Box::new(HistoryRowInputs {
                     chrome,
+                    chrome_stamp: mark.epoch,
                     spot,
                     highlighted: false,
                     run_start: spot.sender_changed,
@@ -436,8 +450,13 @@ impl QuillApp {
                 _ => None,
             };
             self.history.rows = rows;
-            self.history.chrome_session_revision = session_revision;
+            self.history.chrome_epoch = mark.epoch;
+            self.history.chrome_seen = mark.revision;
+            if let Ok(mut due) = self.history.chrome_due.try_borrow_mut() {
+                due.clear();
+            }
             self.history.row_stats.note_built(rows_started);
+            self.history.row_stats.messages_cloned += cloned;
             self.history.had_newer = has_newer;
             self.history_a11y_rows_changed(cx);
             // A new or replaced window: start at the saved position, else the
@@ -462,11 +481,13 @@ impl QuillApp {
                     });
                 }
             }
-        } else if !self.chrome_follows_revision()
-            || self.history.chrome_session_revision != session_revision
-        {
-            let fresh = chrome_inputs.stale_rows(&self.history.rows);
-            self.patch_row_chrome(fresh, session_revision, rows_started, cx);
+        } else {
+            // Kept rows: patch the messages changed in place and bring the
+            // chrome around the viewport up to date.
+            let patches = chrome_inputs.row_patches(&self.history.rows, patch);
+            let fresh =
+                chrome_inputs.stale_rows(&self.history.rows, &chrome_due, &patches, mark.epoch);
+            self.apply_row_patches(patches, fresh, mark, rows_started, cx);
         }
         self.remember_scroll(history_key, cx);
         self.history.shared = HistoryShared { media_roots };
@@ -754,6 +775,7 @@ impl QuillApp {
         // A row scrolled into view that hasn't been reported yet: render
         // the app once more so `report_visible_history` sees it promptly
         // (list scrolling alone doesn't re-render the app view).
+        self.note_stale_chrome(ix, row, cx);
         let unreported = self.live.is_some()
             && self.history.window_active
             && row.message_ids().iter().any(|id| {

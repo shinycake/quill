@@ -6,7 +6,7 @@ use quill::lang::{keys, tr};
 pub(in crate::ui) fn photo_attachment(
     row_id: u64,
     photo: &quill::telegram::envelope::PhotoContent,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     sponsored: Option<(ChatId, i64)>,
@@ -182,7 +182,7 @@ pub(in crate::ui) fn photo_attachment(
 pub(in crate::ui) fn animation_attachment(
     message_id: MessageId,
     animation: &quill::telegram::envelope::AnimationContent,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     playing: bool,
@@ -411,7 +411,7 @@ pub(in crate::ui) fn animation_attachment(
 pub(in crate::ui) fn video_attachment(
     message_id: MessageId,
     video: &quill::telegram::envelope::VideoContent,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     inline: Option<crate::ui::inline_video::InlineFrame>,

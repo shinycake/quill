@@ -302,7 +302,7 @@ impl QuillApp {
     pub(super) fn reply_pattern_path(
         header: &ReplyHeader,
         session: Option<&quill::state::Session>,
-        files: &std::collections::HashMap<i32, quill::telegram::ParsedFile>,
+        files: &quill::state::FileMap,
         media_roots: &[PathBuf],
     ) -> Option<PathBuf> {
         let id = header.background_emoji?;
@@ -321,7 +321,7 @@ impl QuillApp {
 
     pub(super) fn reply_thumb_path(
         header: &ReplyHeader,
-        files: &std::collections::HashMap<i32, quill::telegram::ParsedFile>,
+        files: &quill::state::FileMap,
         media_roots: &[PathBuf],
     ) -> Option<PathBuf> {
         header.thumb.iter().find_map(|id| {

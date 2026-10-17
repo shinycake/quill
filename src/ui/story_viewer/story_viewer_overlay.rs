@@ -47,9 +47,9 @@ impl QuillApp {
             .unwrap_or_else(|| {
                 tr_with(keys::Q_MEDIA_CHAT_3, &[("0", &item.chat_id.0.to_string())])
             });
-        let no_files = HashMap::new();
+        let no_files = quill::state::FileMap::default();
         let no_downloads = quill::state::DownloadIntents::default();
-        let (files, downloading): (&HashMap<i32, ParsedFile>, &quill::state::DownloadIntents) =
+        let (files, downloading): (&quill::state::FileMap, &quill::state::DownloadIntents) =
             self.session().map_or((&no_files, &no_downloads), |s| {
                 (&s.media.files, &s.media.downloads)
             });

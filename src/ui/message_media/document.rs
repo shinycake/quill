@@ -123,7 +123,7 @@ pub(in crate::ui) fn document_chip(
     // The disc is accent-filled; on an accent outgoing bubble it switches
     // to a translucent white one.
     outgoing: bool,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     // Slice media-downloads-pause: `None` when the file isn't a pausable

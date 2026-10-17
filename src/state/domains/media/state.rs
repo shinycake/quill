@@ -7,7 +7,7 @@ pub struct MediaState {
     /// The emoji/sticker panel's set contents (`getStickerSet`, lazily).
     pub media_library: MediaLibrary,
     /// TDLib `file.id` → latest `file` / `localFile` snapshot.
-    pub files: HashMap<i32, ParsedFile>,
+    pub files: FileMap,
     /// What was asked to download and how each request ended; the status
     /// rows show is `downloads.status(id, &files)`.
     pub downloads: DownloadIntents,
@@ -50,7 +50,7 @@ impl MediaState {
     pub(crate) fn new() -> Self {
         Self {
             media_library: MediaLibrary::default(),
-            files: HashMap::new(),
+            files: FileMap::default(),
             downloads: DownloadIntents::default(),
             open_chat_media_downloads: HashSet::new(),
             avatar_file_refs: HashMap::new(),

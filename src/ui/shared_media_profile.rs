@@ -233,7 +233,7 @@ impl QuillApp {
                 } else {
                     cx.theme().foreground
                 };
-                let empty = std::collections::HashMap::new();
+                let empty = quill::state::FileMap::default();
                 backdrop
                     .flex()
                     .flex_col()

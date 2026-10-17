@@ -273,60 +273,119 @@ pub fn next_revision() -> u64 {
 }
 
 /// A chat's loaded messages keyed by id. Reads go through `Deref`; every
-/// mutation goes through these methods and bumps `revision`, so views can
-/// cache what they derived from the messages and know exactly when to
-/// rebuild.
+/// mutation goes through these methods, so views can cache what they
+/// derived from the messages and know exactly what to derive again:
+/// `revision` moves on any change, `ids_revision` when a message comes or
+/// goes, and `changed_since` names the messages changed in place.
 #[derive(Debug, Default)]
 pub struct HistoryMessages {
     map: BTreeMap<i64, HistoryMessage>,
+    /// The `revision` at which each message was last stored or changed.
+    changed_at: HashMap<i64, u64>,
     revision: u64,
+    ids_revision: u64,
 }
 
 impl HistoryMessages {
-    /// Bumped on every mutation (conservatively: also on `get_mut`).
+    /// Moves on every change (a `next_revision` value).
     pub fn revision(&self) -> u64 {
         self.revision
     }
 
-    fn touch(&mut self) {
+    /// Moves when a message is added or removed, not when one changes in
+    /// place.
+    pub fn ids_revision(&self) -> u64 {
+        self.ids_revision
+    }
+
+    /// Messages stored or changed after `revision` (an earlier value of
+    /// [`Self::revision`]), oldest id first.
+    pub fn changed_since(&self, revision: u64) -> Vec<i64> {
+        let mut ids: Vec<i64> = self
+            .changed_at
+            .iter()
+            .filter(|(_, at)| **at > revision)
+            .map(|(id, _)| *id)
+            .collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    fn touch(&mut self, id: i64) {
         self.revision = next_revision();
+        self.changed_at.insert(id, self.revision);
+    }
+
+    fn ids_changed(&mut self) {
+        self.revision = next_revision();
+        self.ids_revision = self.revision;
     }
 
     pub fn insert(&mut self, id: i64, message: HistoryMessage) -> Option<HistoryMessage> {
-        self.touch();
-        self.map.insert(id, message)
+        let before = self.map.insert(id, message);
+        if before.is_none() {
+            self.ids_changed();
+        }
+        self.touch(id);
+        before
     }
 
     pub fn remove(&mut self, id: &i64) -> Option<HistoryMessage> {
-        self.touch();
-        self.map.remove(id)
+        let removed = self.map.remove(id)?;
+        self.changed_at.remove(id);
+        self.ids_changed();
+        Some(removed)
     }
 
+    /// The message to change in place; marks it changed when it exists.
     pub fn get_mut(&mut self, id: &i64) -> Option<&mut HistoryMessage> {
-        self.touch();
+        if self.map.contains_key(id) {
+            self.touch(*id);
+        }
         self.map.get_mut(id)
     }
 
+    /// Every message, each marked changed.
     pub fn values_mut(
         &mut self,
     ) -> std::collections::btree_map::ValuesMut<'_, i64, HistoryMessage> {
-        self.touch();
+        self.touch_all();
         self.map.values_mut()
     }
 
+    /// Every message with its id, each marked changed.
     pub fn iter_mut(&mut self) -> std::collections::btree_map::IterMut<'_, i64, HistoryMessage> {
-        self.touch();
+        self.touch_all();
         self.map.iter_mut()
     }
 
-    pub fn retain(&mut self, keep: impl FnMut(&i64, &mut HistoryMessage) -> bool) {
-        self.touch();
-        self.map.retain(keep);
+    fn touch_all(&mut self) {
+        self.revision = next_revision();
+        let revision = self.revision;
+        for id in self.map.keys() {
+            self.changed_at.insert(*id, revision);
+        }
+    }
+
+    /// Keep the messages `keep` accepts.
+    pub fn retain(&mut self, mut keep: impl FnMut(&i64, &HistoryMessage) -> bool) {
+        let doomed: Vec<i64> = self
+            .map
+            .iter()
+            .filter(|(id, message)| !keep(id, message))
+            .map(|(id, _)| *id)
+            .collect();
+        for id in &doomed {
+            self.remove(id);
+        }
     }
 
     pub fn clear(&mut self) {
-        self.touch();
-        self.map.clear();
+        if !self.map.is_empty() {
+            self.map.clear();
+            self.changed_at.clear();
+            self.ids_changed();
+        }
     }
 }
 

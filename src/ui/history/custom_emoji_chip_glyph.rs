@@ -7,7 +7,7 @@ use super::*;
 pub(super) fn custom_emoji_chip_glyph(
     id: i64,
     session: Option<&Session>,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     media_roots: &[PathBuf],
 ) -> AnyElement {
     let size = super::super::reactions::CHIP_GLYPH;

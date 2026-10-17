@@ -34,7 +34,7 @@ pub(in crate::ui) fn gift_card_element(
     inner: &ServiceAction,
     card: &GiftCard,
     session: Option<&Session>,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     roots: &[PathBuf],
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {

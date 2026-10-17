@@ -293,12 +293,12 @@ impl QuillApp {
             waiting.local.path.clear();
             waiting.local.is_downloading_completed = false;
             if let Some(session) = self.demo_session.as_mut() {
-                session.media.files.insert(82, waiting);
+                session.media.files.insert(waiting);
             }
             self.toggle_voice_playback(ChatId(11), MessageId(91), FileId(82), true, 3., cx);
             assert!(self.playback.pending_voice_play.is_some());
             if let Some(session) = self.demo_session.as_mut() {
-                session.media.files.insert(82, local);
+                session.media.files.insert(local);
             }
             self.resume_pending_voice(cx);
             assert!(

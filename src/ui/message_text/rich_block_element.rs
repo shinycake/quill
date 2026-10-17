@@ -280,7 +280,7 @@ pub(in crate::ui) fn preview_thumb(
     row_id: u64,
     photo: &quill::telegram::envelope::PhotoContent,
     frame: ThumbFrame,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
 ) -> AnyElement {

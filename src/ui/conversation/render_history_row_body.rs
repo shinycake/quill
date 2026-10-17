@@ -25,7 +25,7 @@ impl QuillApp {
         let shared = &self.history.shared;
         // File state is read from the session at row-render time rather
         // than copied into a per-render snapshot.
-        let no_files = HashMap::new();
+        let no_files = quill::state::FileMap::default();
         let no_ids = quill::state::DownloadIntents::default();
         let session = self.session();
         let files = session.map_or(&no_files, |s| &s.media.files);

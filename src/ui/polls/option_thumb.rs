@@ -10,7 +10,7 @@ use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr};
 use quill::state::Session;
-use quill::telegram::envelope::{ParsedFile, PollOptionMedia};
+use quill::telegram::envelope::PollOptionMedia;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -102,7 +102,7 @@ impl PollMediaView {
 /// The first of `candidates` that is downloaded and inside the media folders.
 fn first_local(
     candidates: &[quill::ids::FileId],
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     media_roots: &[PathBuf],
 ) -> Option<PathBuf> {
     candidates.iter().find_map(|id| {
@@ -118,7 +118,7 @@ fn first_local(
 /// session has.
 pub(in crate::ui) fn poll_media_view(
     poll: &quill::telegram::Poll,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     media_roots: &[PathBuf],
     session: Option<&Session>,
 ) -> PollMediaView {

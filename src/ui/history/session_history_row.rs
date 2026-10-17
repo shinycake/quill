@@ -5,7 +5,7 @@ use quill::lang::{keys, tr, tr_with};
 
 pub(in crate::ui) fn session_history_row(
     message: &HistoryMessage,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     // kit Phase 4: per-row chrome (sender header / outbox receipt /

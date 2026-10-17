@@ -164,7 +164,7 @@ pub(super) fn session_poll_body(
     message: &quill::state::HistoryMessage,
     content: &PollContent,
     (files, media_roots, session): (
-        &std::collections::HashMap<i32, quill::telegram::envelope::ParsedFile>,
+        &quill::state::FileMap,
         &[std::path::PathBuf],
         Option<&quill::state::Session>,
     ),
