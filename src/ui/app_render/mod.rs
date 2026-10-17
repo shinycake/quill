@@ -664,6 +664,7 @@ impl Render for QuillApp {
             .when(
                 self.live.is_none()
                     && !self.connection.status_note().is_empty()
+                    && !self.demo_pins_toast()
                     && std::env::var_os("QUILL_DEMO_HIDE_STATUS").is_none(),
                 |this| {
                     this.child(
@@ -688,34 +689,14 @@ impl Render for QuillApp {
             // above the composer — no layout shift, no click capture, gone
             // after a few seconds. It paints above the media viewer too
             // ("Saved to Downloads", "Frame copied"), clear of its controls.
-            .when(status_toast, |this| {
-                this.child(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .right_0()
-                        .bottom(px(if viewer_open { 132. } else { 84. }))
-                        .flex()
-                        .justify_center()
-                        .child(
-                            div()
-                                .id("status-toast")
-                                .role(Role::Label)
-                                .aria_label(self.connection.status_note().to_string())
-                                .max_w(px(520.))
-                                .px_3()
-                                .py_1p5()
-                                .rounded_full()
-                                .border_1()
-                                .border_color(cx.theme().border)
-                                .bg(cx.theme().popover)
-                                .text_color(cx.theme().popover_foreground)
-                                .shadow_md()
-                                .text_sm()
-                                .truncate()
-                                .child(self.connection.status_note().to_string()),
-                        ),
-                )
+            .when_some(status_toast, |this, note| {
+                let (left, right) = self.chat_insets();
+                let bottom = if viewer_open {
+                    px(132.)
+                } else {
+                    self.toast_bottom()
+                };
+                this.child(self.status_toast_layer(&note, left, right, bottom, cx))
             })
             .children(self.custom_emoji_card(cx))
             .children(self.photo_editor_overlay(cx))

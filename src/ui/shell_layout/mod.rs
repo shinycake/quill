@@ -102,6 +102,26 @@ impl ShellLayout {
     pub(crate) fn chat_back(&self) -> bool {
         self.one_column && self.chat
     }
+
+    /// The space the conversation pane leaves at the window's left and
+    /// right edges (the list, rail and topics before it; the side panels
+    /// after it), where a toast centres over the conversation. Zero both
+    /// sides when the pane fills the window.
+    pub(crate) fn chat_insets(&self, rail: f32) -> (f32, f32) {
+        if !self.chat {
+            return (0., 0.);
+        }
+        let list = self.list.map_or(0., |list| list + rail);
+        let forum = match self.forum {
+            ForumPane::Column { .. } => FORUM_COLUMN_WIDTH,
+            ForumPane::Hidden | ForumPane::Fill => 0.,
+        };
+        let panels = match self.panels {
+            PanelPane::Column(width) => width,
+            PanelPane::Hidden | PanelPane::Fill => 0.,
+        };
+        (list + forum, panels)
+    }
 }
 
 /// Below this content width the window shows one column.

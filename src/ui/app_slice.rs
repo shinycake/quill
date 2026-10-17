@@ -99,6 +99,11 @@ pub(super) struct Slices {
 }
 
 impl Slices {
+    /// The composer's height as last laid out.
+    pub(super) fn composer_height(&self) -> Pixels {
+        self.composer_height.get()
+    }
+
     /// The slice whose content is being drawn now, if any.
     pub(super) fn current(&self) -> Option<EntityId> {
         self.scope.get()

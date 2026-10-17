@@ -461,6 +461,7 @@ mod suggestions_block;
 mod system_unlock;
 mod threads;
 mod threads_demo;
+mod toast_queue;
 mod ton_wallet_details;
 mod ton_wallet_money;
 mod ton_wallet_ui;

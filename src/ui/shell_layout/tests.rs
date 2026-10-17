@@ -262,3 +262,46 @@ fn the_chat_pane_is_what_the_other_columns_leave() {
     // One column: the whole window.
     assert_eq!(pane(input(400.)), 400.);
 }
+
+#[test]
+fn a_toast_centres_over_the_conversation_pane() {
+    let wide = shell_layout(ShellInput {
+        panels: Some(INFO_PANEL_WIDTH),
+        rail: 60.,
+        ..input(1400.)
+    });
+    assert_eq!(wide.chat_insets(60.), (360., INFO_PANEL_WIDTH));
+    let narrow = shell_layout(input(500.));
+    assert!(narrow.one_column);
+    assert_eq!(narrow.chat_insets(0.), (0., 0.));
+    let list_only = shell_layout(ShellInput {
+        chat_open: false,
+        ..input(500.)
+    });
+    assert_eq!(list_only.chat_insets(0.), (0., 0.));
+}
+
+#[test]
+fn a_toast_centres_in_forum_and_fill_layouts() {
+    let beside = shell_layout(ShellInput {
+        forum: ForumColumn::Beside,
+        rail: 60.,
+        ..input(1400.)
+    });
+    assert!(matches!(beside.forum, ForumPane::Column { .. }));
+    let (left, right) = beside.chat_insets(60.);
+    assert_eq!(left, beside.list.unwrap_or(0.) + 60. + FORUM_COLUMN_WIDTH);
+    assert_eq!(right, 0.);
+    let replacing = shell_layout(ShellInput {
+        forum: ForumColumn::Replacing,
+        ..input(1400.)
+    });
+    assert_eq!(replacing.list, None);
+    assert_eq!(replacing.chat_insets(0.), (FORUM_COLUMN_WIDTH, 0.));
+    let fill = shell_layout(ShellInput {
+        panels: Some(INFO_PANEL_WIDTH),
+        ..input(900.)
+    });
+    assert_eq!(fill.panels, PanelPane::Fill);
+    assert_eq!(fill.chat_insets(0.), (0., 0.));
+}
