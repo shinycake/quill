@@ -1,13 +1,16 @@
 //! A wheel notch over the viewer moves to the next item, over the
 //! picture and over the black around it; with Cmd (Ctrl) it zooms
-//! instead, and the last item stays put (needs the `demo-capture`
-//! feature for gpui-kit's test support).
+//! instead, and the last item stays put. A trackpad flick moves one
+//! item, and the bottom controls keep the wheel (needs the
+//! `demo-capture` feature for gpui-kit's test support).
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
-use gpui_kit::{AppContext, Entity, Modifiers, Pixels, Point, ScrollDelta, ScrollWheelEvent};
+use gpui_kit::{
+    AppContext, Entity, Modifiers, Pixels, Point, ScrollDelta, ScrollWheelEvent, TouchPhase,
+};
 use gpui_kit::{TestAppContext, VisualTestContext, point, px, size};
 use quill::ids::{ChatId, FileId, MessageId};
 use quill::telegram::envelope::{MessageContent, PhotoContent, PhotoSizeView};
@@ -36,13 +39,22 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
 }
 
 fn add_photo(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, id: i64) {
+    add_captioned_photo(app, vcx, id, "");
+}
+
+fn add_captioned_photo(
+    app: &Entity<QuillApp>,
+    vcx: &mut VisualTestContext,
+    id: i64,
+    caption: &str,
+) {
     app.update_in(vcx, |app, _, cx| {
         let session = app.demo_session.as_mut().expect("demo session");
         let history = session.histories.get_mut(&11).expect("history");
         let mut message = history.messages.get(&101).expect("a message").clone();
         message.id = MessageId(id);
         message.content = MessageContent::Photo(PhotoContent {
-            caption: String::new(),
+            caption: caption.into(),
             caption_entities: Vec::new(),
             show_caption_above_media: false,
             sizes: vec![PhotoSizeView {
@@ -140,4 +152,57 @@ fn a_wheel_notch_moves_to_the_next_item_and_cmd_wheel_zooms(cx: &mut TestAppCont
         );
         assert!(!app.viewer.zoom.is_zoomed(), "back at fit");
     });
+}
+
+#[gpui_kit::test]
+fn a_trackpad_flick_moves_exactly_one_item(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    for id in [8901, 8902, 8903] {
+        add_photo(&app, vcx, id);
+    }
+    open(&app, vcx, 8901);
+    let (picture, _) = targets(&app, vcx);
+    vcx.simulate_mouse_move(picture, None, Modifiers::default());
+    settle(vcx);
+
+    for frame in 0..5 {
+        vcx.simulate_event(ScrollWheelEvent {
+            position: picture,
+            delta: ScrollDelta::Pixels(point(px(0.), px(-70.))),
+            modifiers: Modifiers::default(),
+            touch_phase: if frame == 0 {
+                TouchPhase::Started
+            } else {
+                TouchPhase::Moved
+            },
+        });
+    }
+    settle(vcx);
+    assert_eq!(current(&app, vcx), 8902, "350 px in one gesture moves once");
+}
+
+#[gpui_kit::test]
+fn a_wheel_over_the_caption_or_the_bottom_band_keeps_the_item(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    for id in [8901, 8902] {
+        add_captioned_photo(&app, vcx, id, "A caption under the photo");
+    }
+    open(&app, vcx, 8901);
+    let caption = vcx
+        .debug_bounds("media-viewer-caption-row")
+        .expect("the caption row");
+    let band = vcx
+        .debug_bounds("media-viewer-bottom-band")
+        .expect("the bottom band");
+    let (_, backdrop) = targets(&app, vcx);
+
+    notch(vcx, caption.center(), -1., Modifiers::default());
+    assert_eq!(current(&app, vcx), 8901, "over the caption");
+    let padding = point(band.left() + px(8.), band.bottom() - px(4.));
+    notch(vcx, padding, -1., Modifiers::default());
+    assert_eq!(current(&app, vcx), 8901, "over the band around the rows");
+    notch(vcx, backdrop, -1., Modifiers::default());
+    assert_eq!(current(&app, vcx), 8902, "over the backdrop it still moves");
 }

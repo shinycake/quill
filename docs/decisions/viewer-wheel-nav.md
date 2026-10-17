@@ -25,9 +25,11 @@ pinch. The handler covers the whole overlay, not only the picture.
   While the picture is zoomed in, a plain scroll also zooms, so the wheel can zoom back out to
   fit. tdesktop moves to the next item there; Quill keeps the zoom gesture instead.
 - Pinch is GPUI's own `PinchEvent` (macOS magnify, Wayland and X11 gestures, Windows Direct
-  Manipulation), zooming at its center by `pinch_zoom_factor`. A Windows touchpad that sends
+  Manipulation), zooming at the event position by `pinch_zoom_factor`. A Windows touchpad that sends
   pinch as Ctrl+wheel zooms through the Ctrl rule.
 - The picture and the black backdrop take the wheel. The top bar, the arrows and the bottom
-  controls occlude the backdrop and keep their own scrolling, so the expanded caption scrolls
-  without changing the item.
+  rows (caption, error, controls) occlude the backdrop and keep their own scrolling, so the
+  expanded caption scrolls without changing the item. The padding band around the bottom rows
+  lets clicks through to the picture under it but swallows the wheel, so a scroll there does
+  not change the item either.
 - At the first or last item the step is dropped, so the clip and the zoom are not reset.
