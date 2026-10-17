@@ -5,6 +5,27 @@ use super::*;
 use crate::telegram::envelope::ParsedProfilePhoto;
 
 impl Session {
+    /// The chat of a supergroup or channel, for the info panel's title and
+    /// header badges.
+    pub fn supergroup_chat(&self, supergroup_id: i64) -> Option<&ChatSummary> {
+        self.chats.values().find(|chat| {
+            matches!(chat.kind, ChatKind::Supergroup { supergroup_id: id, .. } if id == supergroup_id)
+        })
+    }
+
+    /// Whether supergroup `supergroup_id` is a broadcast channel.
+    pub fn supergroup_is_channel(&self, supergroup_id: i64) -> bool {
+        self.supergroup_chat(supergroup_id).is_some_and(|chat| {
+            matches!(
+                chat.kind,
+                ChatKind::Supergroup {
+                    is_channel: true,
+                    ..
+                }
+            )
+        })
+    }
+
     /// The `profile_chat_lists` key a pending `GetProfileChats` request
     /// answers: the user id for groups in common, the channel chat id for
     /// similar channels, 0 for the personal channel candidates.

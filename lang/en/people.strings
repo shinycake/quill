@@ -51,6 +51,8 @@
 "lng_info_bio_label" = "Bio";
 "lng_info_delete_contact" = "Delete contact";
 "lng_info_edit_contact" = "Edit contact";
+"lng_info_bot_title" = "Bot Info";
+"lng_info_channel_title" = "Channel Info";
 "lng_info_group_title" = "Group Info";
 "lng_info_hours_label" = "Business hours";
 "lng_info_hours_local_time" = "local time";
@@ -60,6 +62,7 @@
 "lng_info_mobile_context_menu_fragment_about_link" = "Fragment";
 "lng_info_mobile_label" = "Mobile";
 "lng_info_share_contact" = "Share this contact";
+"lng_info_user_title" = "User Info";
 "lng_info_username_label" = "Username";
 "lng_info_work_closed" = "Closed";
 "lng_manage_discussion_group" = "Discussion";
@@ -231,7 +234,6 @@
 "qll_people_community_name_updated" = "community name updated";
 "qll_people_community_permissions_need_a_live" = "community permissions need a live connection (demo)";
 "qll_people_contact_add_requested" = "Contact add requested.";
-"qll_people_contact_info" = "Contact info";
 "qll_people_contact_saved" = "Contact saved";
 "qll_people_contact_shared_with" = "Contact shared with {title}";
 "qll_people_contacts_to_import" = "Contacts to import";
