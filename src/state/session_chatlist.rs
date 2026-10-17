@@ -152,7 +152,7 @@ impl Session {
         if self.open_chat != Some(chat_id) {
             self.media.shared_media.close();
         }
-        self.open_chat = Some(chat_id);
+        let previous = self.open_chat.replace(chat_id);
         // Phase 5.1: switching chats leaves the topic view.
         self.open_topic = None;
         // ... and the Saved Messages sublist / tag filter.
@@ -167,6 +167,9 @@ impl Session {
             self.threads.thread = None;
         }
         self.view_generation.bump();
+        if let Some(previous) = previous.filter(|previous| *previous != chat_id) {
+            self.release_chat_history(previous);
+        }
         self.prepare_history_view(chat_id);
     }
 
@@ -182,6 +185,7 @@ impl Session {
             .chats
             .get(&chat_id.0)
             .map_or(0, |chat| chat.unread_count);
+        self.reclaim_chat_history(chat_id);
         let view_generation = self.view_generation;
         let history = self.histories.entry(chat_id.0).or_default();
         history.view_generation = view_generation;

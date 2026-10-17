@@ -25,6 +25,7 @@ impl Session {
             chat_list: ChatListState::new(),
             chats_state: ChatsState::new(),
             histories: HashMap::new(),
+            history_pruning: HistoryPruning::default(),
             stale_history_requests: HashSet::new(),
             revision: 0,
             messages: MessagesState::new(),

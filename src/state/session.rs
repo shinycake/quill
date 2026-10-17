@@ -49,6 +49,8 @@ pub struct Session {
     /// Declared in `src/state/domains/chats/state.rs`.
     pub chats_state: ChatsState,
     pub histories: HashMap<i64, HistoryState>,
+    /// Which closed chats and topics keep a history tail (`history_prune.rs`).
+    pub history_pruning: HistoryPruning,
     /// History page requests issued for a window that has since been
     /// replaced (`reset_history_window`): their answers are dropped so an
     /// old page can't land in the new window and fake contiguity.
