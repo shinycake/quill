@@ -19,6 +19,16 @@ register_demos![
     )
     .setup(QuillApp::demo_ready_send_media)
     .attachments(|| attachments(&[("demo-notes.txt", AttachmentKind::Document)])),
+    // A photo and a video in the tray, their send waiting on the background
+    // read of the files (`send_prep.rs`): the tray says it is preparing.
+    DemoSpec::chat_list("ready-send-preparing")
+        .setup(QuillApp::demo_ready_send_preparing)
+        .attachments(|| {
+            attachments(&[
+                ("demo-thumb.png", AttachmentKind::Photo),
+                ("demo-clip.mp4", AttachmentKind::Video),
+            ])
+        }),
     // Ready chat draft with typos underlined (red wavy).
     DemoSpec::chat_list("ready-spellcheck").setup(|app, window, cx| app.demo_spellcheck(
         SpellcheckDemo::Spellcheck,
@@ -95,6 +105,15 @@ impl QuillApp {
         self.composer.update(cx, |input, cx| {
             input.set_value("sending a photo too", window, cx);
         });
+    }
+
+    fn demo_ready_send_preparing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.composer.update(cx, |input, cx| {
+            input.set_value("two files for you", window, cx);
+        });
+        if let Some(slot) = self.send_slot() {
+            self.composer_ui.send_box.prep.begin(slot);
+        }
     }
 
     fn demo_spellcheck(

@@ -29,6 +29,9 @@ pub(crate) struct SendBoxUi {
     pub(super) price: Option<PriceDialog>,
     /// The video editor opened from the tray or the edit box.
     pub(super) video_editor: Option<VideoEditorDialog>,
+    /// Sends whose photos and videos are being read in the background
+    /// (`send_prep.rs`).
+    pub(super) prep: super::send_prep::SendPrepState,
 }
 
 impl SendBoxUi {
@@ -42,6 +45,7 @@ impl SendBoxUi {
             thumbnail_jobs: 0,
             price: None,
             video_editor: None,
+            prep: super::send_prep::SendPrepState::default(),
         }
     }
 

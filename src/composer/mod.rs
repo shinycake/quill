@@ -17,6 +17,7 @@ mod edit;
 mod edit_media_tools;
 mod markup;
 mod media_options;
+mod media_prep;
 mod reply;
 mod send;
 mod shortcuts;
@@ -54,6 +55,10 @@ pub use media_options::{
     file_thumbnail_upload_required, fitted_photo_size, is_gif_path, paid_media_fits,
     parse_paid_price, photo_for_send, photo_scale_args, photo_side_limit, photo_size_of,
     session_allows_paid_media,
+};
+pub use media_prep::{
+    AnimationSize, PREP_BUDGET, PrepareError, PreparedFile, PreparedMedia, PreparedNote,
+    send_path_for,
 };
 pub use reply::{ComposerReplyTo, QuoteSelection, cancel_reply_draft, quote_position};
 pub use send::{
@@ -147,6 +152,9 @@ pub struct ComposerSnapshot {
     /// Send-box choices for the whole message: "High Quality" photos and
     /// the price of paid media.
     pub media: MediaSendOptions,
+    /// The files read ahead of the send, off the UI thread
+    /// ([`PreparedMedia::prepare`]); `None` makes the driver read them.
+    pub prepared: Option<std::sync::Arc<PreparedMedia>>,
 }
 
 impl ComposerSnapshot {
@@ -176,6 +184,7 @@ impl ComposerSnapshot {
             send_options: SendOptions::default(),
             caption_above_media: false,
             media: MediaSendOptions::default(),
+            prepared: None,
         }
     }
 
@@ -197,6 +206,7 @@ impl ComposerSnapshot {
             send_options: SendOptions::default(),
             caption_above_media: false,
             media: MediaSendOptions::default(),
+            prepared: None,
         }
     }
 

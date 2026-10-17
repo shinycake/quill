@@ -19,6 +19,9 @@ pub const PHOTO_SIDE_LARGE: u32 = 2560;
 /// paid media message can have, in Stars.
 pub const PAID_MEDIA_MAX_STARS: i64 = 10_000;
 
+/// Scaling one photo with ffmpeg may take this long.
+const PHOTO_SCALE_LIMIT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// The longer side a photo is sent with.
 pub fn photo_side_limit(high_quality: bool) -> u32 {
     if high_quality {
@@ -191,7 +194,8 @@ pub fn photo_scale_args(input: &str, output: &str, size: (u32, u32), png: bool) 
 }
 
 pub fn photo_size_of(path: &Path) -> Option<(u32, u32)> {
-    let output = crate::media_tools::command("ffprobe")
+    let mut command = crate::media_tools::command("ffprobe");
+    command
         .args([
             "-v",
             "error",
@@ -202,9 +206,10 @@ pub fn photo_size_of(path: &Path) -> Option<(u32, u32)> {
             "-of",
             "json",
         ])
-        .arg(path)
-        .output()
-        .ok()?;
+        .arg(path);
+    let output =
+        crate::child_timeout::output_within(&mut command, crate::child_timeout::PROBE_LIMIT)
+            .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -237,15 +242,15 @@ pub fn photo_for_send(path: &Path, high_quality: bool) -> PathBuf {
         .map_or(0, |elapsed| elapsed.as_nanos());
     let dir = crate::scratch::temp_work_dir("quill-send-photos");
     let output = dir.join(format!("photo-{stamp}.{}", if png { "png" } else { "jpg" }));
+    let mut command = crate::media_tools::command("ffmpeg");
+    command.args(photo_scale_args(
+        &path.to_string_lossy(),
+        &output.to_string_lossy(),
+        size,
+        png,
+    ));
     let made = std::fs::create_dir_all(&dir).is_ok()
-        && crate::media_tools::command("ffmpeg")
-            .args(photo_scale_args(
-                &path.to_string_lossy(),
-                &output.to_string_lossy(),
-                size,
-                png,
-            ))
-            .output()
+        && crate::child_timeout::output_within(&mut command, PHOTO_SCALE_LIMIT)
             .is_ok_and(|result| result.status.success());
     if made {
         pick_send_path(&output).unwrap_or_else(|| path.to_path_buf())

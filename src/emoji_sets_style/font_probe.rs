@@ -19,19 +19,13 @@ pub fn fc_list_has_color_font(output: &str) -> bool {
 /// Blocking; call off the UI thread.
 #[cfg(target_os = "linux")]
 pub fn color_emoji_font_installed() -> Option<bool> {
-    use std::process::{Command, Stdio};
-    let output = Command::new("fc-list")
-        .args([":charset=1f600", "color=true", "family"])
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    Some(fc_list_has_color_font(&String::from_utf8_lossy(
-        &output.stdout,
-    )))
+    // A fontconfig cache rebuild on a first run can take a while.
+    let listing = crate::child_timeout::stdout_within(
+        "fc-list",
+        &[":charset=1f600", "color=true", "family"],
+        std::time::Duration::from_secs(30),
+    )?;
+    Some(fc_list_has_color_font(&listing))
 }
 
 #[cfg(not(target_os = "linux"))]

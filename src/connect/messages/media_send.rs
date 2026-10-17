@@ -119,7 +119,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
         let mut contents = Vec::with_capacity(snapshot.album.len());
         for (index, att) in snapshot.album.iter().enumerate() {
-            let path = media_options::media_send_path(att, snapshot.media)
+            let path = media_options::media_send_path(att, snapshot)
                 .ok_or(ConnectSendError::InvalidRequest)?;
             let item_caption = if index == last { caption } else { "" };
             let content = match att.kind {
@@ -131,8 +131,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     is_secret,
                 ),
                 AttachmentKind::Video => {
-                    let probe = crate::video::probe_local_video(&att.path)
-                        .map_err(|_| ConnectSendError::InvalidRequest)?;
+                    let probe = media_options::video_probe(att, snapshot)?;
                     input_message_video(
                         &path,
                         &VideoSend {

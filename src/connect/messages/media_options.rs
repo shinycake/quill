@@ -3,31 +3,66 @@
 //! GIF sent with its caption, and paid media.
 use super::*;
 use crate::composer::{
-    ComposerAttachment, MediaSendOptions, cover_send_path, paid_media_fits, photo_for_send,
+    ComposerAttachment, ComposerSnapshot, cover_send_path, paid_media_fits, send_path_for,
     session_allows_cover, session_allows_paid_media,
 };
 use crate::telegram::requests::{
     LocalAnimation, PaidMediaItem, input_message_paid_media, send_paid_media, with_video_options,
 };
-use std::path::Path;
+use crate::video::VideoProbe;
 
-/// The path a file goes out with. A photo is scaled to the limit of the
-/// "High Quality" choice first (`photo_for_send`), anything else goes as
-/// picked.
+/// The path a file goes out with: the one prepared in the background, else
+/// (a snapshot nobody prepared) worked out here, which can wait on ffmpeg.
 pub(super) fn media_send_path(
     attachment: &ComposerAttachment,
-    media: MediaSendOptions,
+    snapshot: &ComposerSnapshot,
 ) -> Option<String> {
-    let path = attachment.send_path_str()?;
-    if attachment.kind != AttachmentKind::Photo {
-        return Some(path);
+    snapshot
+        .prepared_file(&attachment.path)
+        .and_then(|file| file.send_path.clone())
+        .or_else(|| send_path_for(attachment, snapshot.media))
+}
+
+/// The probe of a video sent as a video: prepared, else read now.
+pub(super) fn video_probe(
+    attachment: &ComposerAttachment,
+    snapshot: &ComposerSnapshot,
+) -> Result<VideoProbe, ConnectSendError> {
+    match snapshot
+        .prepared_file(&attachment.path)
+        .and_then(|file| file.video)
+    {
+        Some(probe) => Ok(probe),
+        None => crate::video::probe_local_video(&attachment.path)
+            .map_err(|_| ConnectSendError::InvalidRequest),
     }
-    let prepared = photo_for_send(&attachment.path, media.hd_photos);
-    if prepared == attachment.path {
-        Some(path)
-    } else {
-        Some(prepared.to_string_lossy().into_owned())
-    }
+}
+
+/// What `inputVideoNote` needs for a round video: prepared, else read now.
+pub(super) fn video_note(
+    attachment: &ComposerAttachment,
+    snapshot: &ComposerSnapshot,
+) -> Result<VideoNoteSend, ConnectSendError> {
+    let (probe, thumbnail) = match snapshot
+        .prepared_file(&attachment.path)
+        .and_then(|file| file.note.clone())
+    {
+        Some(note) => (note.probe, note.thumbnail),
+        None => (
+            crate::video::probe_local_video_note(&attachment.path)
+                .map_err(|_| ConnectSendError::InvalidRequest)?,
+            crate::video::write_video_note_thumbnail(&attachment.path),
+        ),
+    };
+    Ok(VideoNoteSend {
+        duration: probe.duration,
+        length: probe.length,
+        thumbnail: thumbnail.map(|thumb| VideoNoteThumbnailSend {
+            path: thumb.path.to_string_lossy().into_owned(),
+            width: thumb.width,
+            height: thumb.height,
+        }),
+    })
 }
 
 /// The cover picked for a video, when the chat takes covers.
@@ -44,21 +79,31 @@ fn cover_path(
     Some(path.to_string_lossy().into_owned())
 }
 
-/// Size and length of a GIF file (or an edited video sent as one). TDLib
-/// takes the real values from the file, so an unreadable probe sends zeros.
-pub(super) fn local_animation(path: &Path) -> LocalAnimation {
-    crate::video::probe_with_ffprobe(path, false).map_or(
-        LocalAnimation {
-            duration: 0,
-            width: 0,
-            height: 0,
-        },
-        |probe| LocalAnimation {
-            duration: probe.duration,
-            width: probe.width,
-            height: probe.height,
-        },
-    )
+/// Size and length of a GIF file (or an edited video sent as one): prepared,
+/// else read now. TDLib takes the real values from the file, so an
+/// unreadable probe sends zeros.
+pub(super) fn local_animation(
+    attachment: &ComposerAttachment,
+    snapshot: &ComposerSnapshot,
+) -> LocalAnimation {
+    let size = snapshot
+        .prepared_file(&attachment.path)
+        .and_then(|file| file.animation)
+        .unwrap_or_else(|| {
+            crate::video::probe_with_ffprobe(&attachment.path, false).map_or_else(
+                Default::default,
+                |probe| crate::composer::AnimationSize {
+                    duration: probe.duration,
+                    width: probe.width,
+                    height: probe.height,
+                },
+            )
+        });
+    LocalAnimation {
+        duration: size.duration,
+        width: size.width,
+        height: size.height,
+    }
 }
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -123,14 +168,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let mut videos = Vec::with_capacity(attachments.len());
         for attachment in attachments {
             paths.push(
-                media_send_path(attachment, snapshot.media)
-                    .ok_or(ConnectSendError::InvalidRequest)?,
+                media_send_path(attachment, snapshot).ok_or(ConnectSendError::InvalidRequest)?,
             );
             videos.push(match attachment.kind {
-                AttachmentKind::Video => Some(
-                    crate::video::probe_local_video(&attachment.path)
-                        .map_err(|_| ConnectSendError::InvalidRequest)?,
-                ),
+                AttachmentKind::Video => Some(video_probe(attachment, snapshot)?),
                 _ => None,
             });
         }

@@ -116,15 +116,32 @@ static LINUX: std::sync::Mutex<LinuxState> = std::sync::Mutex::new(LinuxState {
     failed: false,
 });
 
+/// Ends a read: `running` clears and the next call may start another (a
+/// panicked read counts as failed, so it is not retried every frame).
+#[cfg(target_os = "linux")]
+struct ReadDone;
+
+#[cfg(target_os = "linux")]
+impl Drop for ReadDone {
+    fn drop(&mut self) {
+        let mut state = crate::locks::lock_or_recover(&LINUX);
+        state.running = false;
+        if state.value.is_none() {
+            state.failed = true;
+        }
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn linux_cached() -> Option<u32> {
     let mut state = crate::locks::lock_or_recover(&LINUX);
     if !state.running && !state.failed {
         state.running = true;
         let spawned = crate::thread_guard::spawn_guarded("system-accent", || {
+            // Clears `running` even when the read panics.
+            let _done = ReadDone;
             let value = read_native().map(|rgb| rgb.max(1));
             let mut state = crate::locks::lock_or_recover(&LINUX);
-            state.running = false;
             state.failed = value.is_none();
             if value.is_some() {
                 state.value = value;
@@ -164,16 +181,11 @@ fn read_native() -> Option<u32> {
 #[cfg(target_os = "linux")]
 fn read_native() -> Option<u32> {
     let run = |program: &str, args: &[&str]| -> Option<String> {
-        let output = std::process::Command::new(program)
-            .args(args)
-            .stdin(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .output()
-            .ok()?;
-        output
-            .status
-            .success()
-            .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+        crate::child_timeout::stdout_within(
+            program,
+            args,
+            crate::child_timeout::DESKTOP_QUERY_LIMIT,
+        )
     };
     run(
         "gdbus",

@@ -178,6 +178,15 @@ impl QuillApp {
                     .into_any_element(),
             );
         }
+        if self.tray_preparing() {
+            controls.push(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr(keys::Q_OPS_PREPARING_THE_FILES))
+                    .into_any_element(),
+            );
+        }
         if self.tray_has_large_photo() {
             controls.push(
                 gpui_kit::component::checkbox::Checkbox::new("composer-high-quality")

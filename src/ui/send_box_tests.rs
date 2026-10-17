@@ -183,3 +183,41 @@ fn a_soundless_mp4_becomes_a_gif_after_the_background_check(cx: &mut TestAppCont
     });
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[gpui_kit::test]
+fn a_slot_whose_files_are_being_read_says_so_and_other_chats_are_free(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| {
+        tray(app, &[("demo-thumb.png", AttachmentKind::Photo)]);
+        let open = app.open_chat_id().expect("a chat is open");
+        assert!(!app.tray_preparing());
+        assert!(app.send_box_option_controls(cx).is_empty());
+
+        let slot = app.send_slot().expect("an open slot");
+        let job = app.composer_ui.send_box.prep.begin(slot);
+        assert!(job.is_some());
+        assert!(app.tray_preparing());
+        assert_eq!(
+            app.send_box_option_controls(cx).len(),
+            1,
+            "the tray says the files are being prepared"
+        );
+
+        // Another chat's composer is not held by it.
+        let other = if open == ChatId(12) {
+            ChatId(11)
+        } else {
+            ChatId(12)
+        };
+        app.demo_session.as_mut().unwrap().open_chat(other);
+        assert!(!app.tray_preparing());
+        app.demo_session.as_mut().unwrap().open_chat(open);
+        assert!(app.tray_preparing(), "back in the chat it is still held");
+
+        // The job ends: the label goes with it, nothing else stored.
+        app.composer_ui.send_box.prep.finish(job.unwrap());
+        assert!(!app.tray_preparing());
+        assert!(app.send_box_option_controls(cx).is_empty());
+    });
+}

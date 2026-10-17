@@ -39,6 +39,23 @@ impl UserError for ConnectSendError {
     }
 }
 
+impl UserError for quill::composer::PrepareError {
+    fn user_text(&self) -> String {
+        use quill::composer::PrepareError;
+        match self {
+            PrepareError::Video => tr(keys::Q_CHAT_COULD_NOT_READ_VIDEO_DURATION),
+            PrepareError::VideoNote => tr(keys::Q_CHAT_VIDEO_NOTE_MUST_BE_A),
+            PrepareError::TimedOut => tr(keys::Q_NOTES_PREPARING_FILES_TIMED_OUT),
+            PrepareError::Unreadable => tr(keys::Q_NOTES_COULD_NOT_PREPARE_FILES),
+        }
+        .to_string()
+    }
+
+    fn is_generic(&self) -> bool {
+        true
+    }
+}
+
 impl UserError for TdError {
     fn is_generic(&self) -> bool {
         !self.is_flood()

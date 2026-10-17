@@ -34,6 +34,15 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// Ends a refresh: the next stale read may start another.
+struct RefreshDone;
+
+impl Drop for RefreshDone {
+    fn drop(&mut self) {
+        REFRESHING.store(false, Ordering::Release);
+    }
+}
+
 /// Whether the OS is in Do Not Disturb / Focus right now (last known
 /// answer; `false` until the first refresh lands). Never waits on another
 /// thread; on macOS a stale answer is re-read in place (cheap, in-process).
@@ -51,9 +60,10 @@ pub fn dnd_active() -> bool {
     }
     if now_ms().saturating_sub(checked) > FRESH_MS && !REFRESHING.swap(true, Ordering::AcqRel) {
         let spawned = crate::thread_guard::spawn_guarded("quill-dnd", || {
+            // Clears the flag even when the query panics.
+            let _refresh = RefreshDone;
             DND.store(query_os_dnd(), Ordering::Relaxed);
             CHECKED_AT_MS.store(now_ms(), Ordering::Relaxed);
-            REFRESHING.store(false, Ordering::Release);
         });
         if spawned.is_err() {
             REFRESHING.store(false, Ordering::Release);
@@ -182,12 +192,11 @@ fn query_os_dnd() -> bool {
 #[cfg(target_os = "linux")]
 fn query_os_dnd() -> bool {
     let run = |program: &str, args: &[&str]| {
-        std::process::Command::new(program)
-            .args(args)
-            .output()
-            .ok()
-            .filter(|out| out.status.success())
-            .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+        crate::child_timeout::stdout_within(
+            program,
+            args,
+            crate::child_timeout::DESKTOP_QUERY_LIMIT,
+        )
     };
     let inhibited = run(
         "gdbus",

@@ -83,13 +83,17 @@ pub fn write_video_note_thumbnail(src: &Path) -> Option<VideoNoteThumbnail> {
         .ok()?
         .as_nanos();
     let dest = dir.join(format!("{}-{nanos}.jpg", std::process::id()));
-    let status = crate::media_tools::command("ffmpeg")
+    let mut command = crate::media_tools::command("ffmpeg");
+    command
         .args(["-y", "-hide_banner", "-loglevel", "error", "-i"])
         .arg(src)
         .args(["-frames:v", "1", "-vf", "scale=240:240", "-q:v", "5"])
         .arg(&dest)
-        .status()
-        .ok()?;
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    let status =
+        crate::child_timeout::status_within(&mut command, crate::child_timeout::PROBE_LIMIT * 3)
+            .ok()?;
     if !status.success() || !dest.is_file() {
         let _ = std::fs::remove_file(&dest);
         return None;
@@ -122,7 +126,8 @@ pub fn probe_local_video(path: &Path) -> Result<VideoProbe, String> {
 }
 
 pub(crate) fn probe_with_ffprobe(path: &Path, supports_streaming: bool) -> Option<VideoProbe> {
-    let output = crate::media_tools::command("ffprobe")
+    let mut command = crate::media_tools::command("ffprobe");
+    command
         .args([
             "-v",
             "error",
@@ -133,9 +138,10 @@ pub(crate) fn probe_with_ffprobe(path: &Path, supports_streaming: bool) -> Optio
             "-of",
             "json",
         ])
-        .arg(path)
-        .output()
-        .ok()?;
+        .arg(path);
+    let output =
+        crate::child_timeout::output_within(&mut command, crate::child_timeout::PROBE_LIMIT)
+            .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -457,9 +463,11 @@ pub(crate) fn extract_frames(
         .stderr(std::process::Stdio::null());
     let status = match child_slot {
         Some((slot, cancelled)) => wait_for_cancelable_child(&mut command, slot, cancelled)?,
-        None => command
-            .status()
-            .map_err(|err| format!("video playback needs ffmpeg ({err})"))?,
+        None => crate::child_timeout::status_within(
+            &mut command,
+            crate::child_timeout::transcode_limit(f64::from(max_frames) / fps.max(0.01)),
+        )
+        .map_err(|err| format!("video playback needs ffmpeg ({err})"))?,
     };
     if !status.success() {
         return Err("ffmpeg could not read the video".into());

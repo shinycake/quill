@@ -358,10 +358,19 @@ mod windows_impl {
 
 #[cfg(target_os = "linux")]
 fn run_xdg_mime(args: &[&str]) -> Result<String, String> {
-    let out = std::process::Command::new("xdg-mime")
-        .args(args)
-        .output()
-        .map_err(|e| format!("xdg-mime is not available: {e}"))?;
+    let mut command = std::process::Command::new("xdg-mime");
+    command.args(args);
+    let out = crate::child_timeout::output_within(
+        &mut command,
+        crate::child_timeout::DESKTOP_QUERY_LIMIT,
+    )
+    .map_err(|e| {
+        if crate::child_timeout::is_timeout(&e) {
+            "xdg-mime did not answer.".to_string()
+        } else {
+            format!("xdg-mime is not available: {e}")
+        }
+    })?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     } else {
@@ -397,6 +406,61 @@ static CACHE: Mutex<Option<(Instant, LinkHandlerState)>> = Mutex::new(None);
 
 /// The current handler, cached briefly so rendering never spawns a process
 /// per frame. Reflects external changes within a couple of seconds.
+///
+/// Linux asks `xdg-mime`, which can hang on a wedged desktop, and this is
+/// called while the settings page draws: the last answer comes back at once
+/// and a stale one is refreshed on a thread of its own ([`refreshing`] says
+/// when the new answer is in). The first call has no answer yet.
+#[cfg(target_os = "linux")]
+pub fn state() -> LinkHandlerState {
+    let (cached, stale) = {
+        let cache = CACHE.lock_or_recover();
+        match cache.as_ref() {
+            Some((at, state)) => (Some(state.clone()), at.elapsed() >= CACHE_TTL),
+            None => (None, true),
+        }
+    };
+    if stale {
+        start_refresh();
+    }
+    cached.unwrap_or_else(|| LinkHandlerState::Unavailable("Checking the default app…".into()))
+}
+
+/// A background read of the handler is running (Linux only).
+pub fn refreshing() -> bool {
+    REFRESHING.load(std::sync::atomic::Ordering::Acquire)
+}
+
+static REFRESHING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Ends a refresh, also when the read panics.
+#[cfg(target_os = "linux")]
+struct RefreshDone;
+
+#[cfg(target_os = "linux")]
+impl Drop for RefreshDone {
+    fn drop(&mut self) {
+        REFRESHING.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn start_refresh() {
+    use std::sync::atomic::Ordering;
+    if REFRESHING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let spawned = crate::thread_guard::spawn_guarded("link-handler", || {
+        let _done = RefreshDone;
+        let fresh = query_state();
+        *CACHE.lock_or_recover() = Some((Instant::now(), fresh));
+    });
+    if spawned.is_err() {
+        REFRESHING.store(false, Ordering::Release);
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
 pub fn state() -> LinkHandlerState {
     let mut cache = CACHE.lock_or_recover();
     if let Some((at, state)) = cache.as_ref()
@@ -411,7 +475,12 @@ pub fn state() -> LinkHandlerState {
 
 /// Drops the cache so the next [`state`] asks the OS again.
 pub fn invalidate() {
-    *CACHE.lock_or_recover() = None;
+    let mut cache = CACHE.lock_or_recover();
+    // The old answer stays to show while the next one is read (Linux reads
+    // it on a thread); it is just no longer fresh.
+    if let Some((at, _)) = cache.as_mut() {
+        *at = at.checked_sub(CACHE_TTL).unwrap_or(*at);
+    }
 }
 
 #[cfg(all(target_os = "macos", feature = "ui"))]

@@ -1,0 +1,519 @@
+//! Sending photos, videos and round videos without waiting for ffmpeg.
+//!
+//! A media send reads its files first: `ffprobe` for a video's length and
+//! size, `ffmpeg` to scale a large photo down. That used to run on the UI
+//! thread inside the send, one process per file. Now Send hands the
+//! snapshots to the background executor and returns: the tray and the text
+//! stay where they are, marked as preparing (derived from
+//! [`SendPrepState`], never from a flag the screen keeps), and the send goes
+//! out when the files are ready, to the chat and account Send was tapped in,
+//! whichever chat is open by then. A slot has at most one send in flight, so
+//! a later Send in the same chat waits and the messages keep their order.
+//!
+//! A failed or timed out preparation changes nothing but the toast: the
+//! draft, the tray and the reply are still there for another try. After a
+//! successful send only what Send took is cleared: text typed or files
+//! added meanwhile stay.
+#![deny(clippy::indexing_slicing)]
+
+use super::app::QuillApp;
+use super::composer_sends::SendSlot;
+use super::status_note::StatusNote;
+use super::user_error::user_error;
+use gpui_kit::*;
+use quill::composer::{ComposerSnapshot, PrepareError, PreparedMedia};
+use quill::ids::{AccountKey, ChatId};
+use quill::lang::{keys, tr};
+use std::path::PathBuf;
+
+/// The slots with a send being prepared.
+#[derive(Default)]
+pub(crate) struct SendPrepState {
+    next_id: u64,
+    jobs: Vec<PrepJob>,
+}
+
+struct PrepJob {
+    id: u64,
+    slot: SendSlot,
+}
+
+impl SendPrepState {
+    /// Start a job for `slot`: its number, or `None` when the slot already
+    /// has one (the sends of one chat go out in the order they were made).
+    pub(super) fn begin(&mut self, slot: SendSlot) -> Option<u64> {
+        if self.is_preparing(&slot) {
+            return None;
+        }
+        self.next_id = self.next_id.wrapping_add(1);
+        let id = self.next_id;
+        self.jobs.push(PrepJob { id, slot });
+        Some(id)
+    }
+
+    /// End job `id`: the slot it was for, or `None` when it was cancelled
+    /// meanwhile (its account left) and must not send.
+    pub(super) fn finish(&mut self, id: u64) -> Option<SendSlot> {
+        let at = self.jobs.iter().position(|job| job.id == id)?;
+        Some(self.jobs.remove(at).slot)
+    }
+
+    pub(super) fn is_preparing(&self, slot: &SendSlot) -> bool {
+        self.jobs.iter().any(|job| &job.slot == slot)
+    }
+
+    /// The account logged out or was removed: its jobs end unsent.
+    pub(super) fn cancel_account(&mut self, account: &AccountKey) {
+        self.jobs.retain(|job| &job.slot.account != account);
+    }
+}
+
+/// Where a send goes and what Send took, fixed when Send is tapped.
+#[derive(Debug, Clone)]
+pub(super) struct SendOrigin {
+    pub(super) slot: SendSlot,
+    pub(super) chat_id: ChatId,
+    /// The composer's markup when Send was tapped.
+    pub(super) markup: String,
+    /// The files of the snapshots.
+    pub(super) files: Vec<PathBuf>,
+}
+
+impl SendOrigin {
+    pub(super) fn new(
+        slot: SendSlot,
+        chat_id: ChatId,
+        markup: String,
+        snaps: &[ComposerSnapshot],
+    ) -> Self {
+        let files = snaps
+            .iter()
+            .flat_map(|snap| snap.attachment.iter().chain(snap.album.iter()))
+            .map(|attachment| attachment.path.clone())
+            .collect();
+        Self {
+            slot,
+            chat_id,
+            markup,
+            files,
+        }
+    }
+}
+
+/// What a successful send clears from its slot.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct SentCleanup {
+    /// The text is still what Send took: clear it (and its stored draft).
+    pub(super) clear_text: bool,
+    /// The tray holds nothing but what was sent: the slot starts over.
+    /// Otherwise only the sent files leave it.
+    pub(super) reset_slot: bool,
+}
+
+/// `text_now` is the composer's markup (or the slot's stored draft when it
+/// is not on screen); `tray_now` the slot's files.
+pub(super) fn plan_cleanup(
+    origin: &SendOrigin,
+    text_now: Option<&str>,
+    tray_now: &[PathBuf],
+) -> SentCleanup {
+    SentCleanup {
+        clear_text: text_now.is_some_and(|now| now == origin.markup),
+        reset_slot: tray_now.iter().all(|file| origin.files.contains(file)),
+    }
+}
+
+/// Read the files of every snapshot that needs it with `prepare` (off the UI
+/// thread). The first failure ends it.
+pub(super) fn prepare_snapshots(
+    snaps: Vec<ComposerSnapshot>,
+    prepare: impl Fn(&ComposerSnapshot) -> Result<PreparedMedia, PrepareError>,
+) -> Result<Vec<ComposerSnapshot>, PrepareError> {
+    snaps
+        .into_iter()
+        .map(|snap| {
+            if snap.needs_media_prep() {
+                let prepared = prepare(&snap)?;
+                Ok(snap.with_prepared(prepared))
+            } else {
+                Ok(snap)
+            }
+        })
+        .collect()
+}
+
+impl QuillApp {
+    /// Files of the open slot's send are being prepared.
+    pub(super) fn tray_preparing(&self) -> bool {
+        self.send_slot()
+            .is_some_and(|slot| self.composer_ui.send_box.prep.is_preparing(&slot))
+    }
+
+    /// Read the files in the background, then send. Returns at once.
+    pub(super) fn begin_media_prep(
+        &mut self,
+        origin: SendOrigin,
+        snaps: Vec<ComposerSnapshot>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(job) = self.composer_ui.send_box.prep.begin(origin.slot.clone()) else {
+            return;
+        };
+        self.connection
+            .set_note(StatusNote::silent(tr(keys::Q_OPS_PREPARING_THE_FILES)));
+        cx.notify();
+        let worker =
+            cx.background_spawn(async move { prepare_snapshots(snaps, PreparedMedia::prepare) });
+        self.spawn_scoped_in(window, cx, async move |this, cx| {
+            let prepared = worker.await;
+            let ran = this.update_in(cx, |this, window, cx| {
+                this.finish_media_prep(job, origin, prepared, window, cx);
+            });
+            if ran.is_err() {
+                // The window closed: the job must not hold the slot.
+                let _ = this.main().update(cx, |this, cx| {
+                    this.composer_ui.send_box.prep.finish(job);
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
+    fn finish_media_prep(
+        &mut self,
+        job: u64,
+        origin: SendOrigin,
+        prepared: Result<Vec<ComposerSnapshot>, PrepareError>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.composer_ui.send_box.prep.finish(job).is_none() {
+            return;
+        }
+        match prepared {
+            Ok(snaps) => self.deliver_live_send(origin, snaps, window, cx),
+            Err(err) => {
+                // Nothing was taken from the composer: the draft stays.
+                self.connection
+                    .set_note(StatusNote::error(user_error(&err)));
+                cx.notify();
+            }
+        }
+    }
+
+    /// Hand the snapshots to the driver, one message at a time, and clear
+    /// what Send took when they all went out.
+    pub(super) fn deliver_live_send(
+        &mut self,
+        origin: SendOrigin,
+        snaps: Vec<ComposerSnapshot>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let same_account = self
+            .session()
+            .is_some_and(|session| session.account == origin.slot.account);
+        let (true, Some(live), Some((first, rest))) =
+            (same_account, self.live.as_mut(), snaps.split_first())
+        else {
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_MESSAGE)));
+            cx.notify();
+            return;
+        };
+        let mut result = live.driver.send_snapshot(first);
+        for snap in rest {
+            if result.is_err() {
+                break;
+            }
+            result = live.driver.send_snapshot(snap);
+        }
+        let scheduling = first.send_options.scheduling;
+        let is_open = self.send_slot().as_ref() == Some(&origin.slot);
+        match result {
+            Ok(_) => {
+                self.clear_after_send(&origin, is_open, window, cx);
+                self.connection
+                    .set_note(self.send_started_note(scheduling, tr(keys::Q_CHAT_SENDING)));
+            }
+            Err(quill::connect::ConnectSendError::CaptionTooLong { limit }) if is_open => {
+                // MED4: runtime `message_caption_length_max` refusal — the
+                // counter already warned; this names the limit.
+                // tdesktop `CaptionLimitBox`: the limit box says by how
+                // much, with Premium's 4096 as the way out.
+                let over = self.composer.read(cx).value().chars().count() as i64 - i64::from(limit);
+                self.show_premium_limit(
+                    quill::premium_limits::PremiumLimitKind::Caption,
+                    over.max(0),
+                    cx,
+                );
+            }
+            Err(_) => {
+                self.connection
+                    .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_MESSAGE)));
+            }
+        }
+        cx.notify();
+    }
+
+    /// The send went: clear what Send took. In the chat on screen that is
+    /// the text, the reply and the options; in a chat left meanwhile its
+    /// stored draft and tray (tdesktop clears the field and resets the
+    /// preview draft after sending).
+    fn clear_after_send(
+        &mut self,
+        origin: &SendOrigin,
+        is_open: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let chat_id = origin.chat_id;
+        let topic = origin.slot.draft.topic;
+        let text_now = if is_open {
+            Some(self.composer_markup(cx))
+        } else {
+            self.session()
+                .and_then(|session| session.draft_for(chat_id, topic))
+                .map(|draft| draft.text.clone())
+        };
+        let tray_now: Vec<PathBuf> = self
+            .composer_sends
+            .get(&origin.slot)
+            .attachments
+            .iter()
+            .map(|attachment| attachment.path.clone())
+            .collect();
+        let plan = plan_cleanup(origin, text_now.as_deref(), &tray_now);
+        if plan.reset_slot {
+            if let Some(sent) = self.composer_sends.finish(&origin.slot) {
+                self.forget_tray_checks(&sent.attachments);
+            }
+        } else {
+            let dropped = self.composer_sends.update(&origin.slot, |send| {
+                let (gone, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut send.attachments)
+                    .into_iter()
+                    .partition(|attachment| origin.files.contains(&attachment.path));
+                send.attachments = kept;
+                gone
+            });
+            self.forget_tray_checks(&dropped);
+        }
+        if is_open {
+            // MED1: the grouping override was consumed: the next composer
+            // follows the pref again.
+            self.composer_ui.group_media = None;
+            self.composer_ui.schedule_popup_open = false;
+            self.composer_ui.set_reply(None);
+            self.clear_suggest_bar_after_send(chat_id);
+        }
+        self.composer_ui.clear_draft_on_success = Some(chat_id);
+        if plan.clear_text {
+            if is_open {
+                self.composer
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                self.forget_local_draft(chat_id);
+            } else {
+                self.forget_stored_draft(chat_id, topic);
+            }
+        }
+    }
+
+    /// Drop the stored draft of a chat that is not on screen.
+    fn forget_stored_draft(&mut self, chat_id: ChatId, topic: quill::composer::DraftTopic) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.cancel_pending_draft();
+            live.driver
+                .session
+                .store_composer_draft(chat_id, topic, None);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        PrepareError, PreparedMedia, SendOrigin, SendPrepState, SentCleanup, plan_cleanup,
+        prepare_snapshots,
+    };
+    use crate::ui::composer_sends::SendSlot;
+    use quill::composer::{AttachmentKind, ComposerAttachment, ComposerSnapshot, DraftTopic};
+    use quill::ids::{AccountKey, ChatId, ViewGeneration};
+    use std::path::PathBuf;
+
+    fn slot(account: &str, chat: i64) -> SendSlot {
+        SendSlot {
+            account: AccountKey(account.to_string()),
+            draft: DraftTopic::Chat.key(chat),
+        }
+    }
+
+    fn photo(path: &str) -> ComposerAttachment {
+        ComposerAttachment {
+            path: PathBuf::from(path),
+            kind: AttachmentKind::Photo,
+            file_name: path.into(),
+            spoiler: false,
+            extras: Default::default(),
+        }
+    }
+
+    fn photo_snapshot(chat: i64, path: &str) -> ComposerSnapshot {
+        ComposerSnapshot::capture_with_attachment(
+            ChatId(chat),
+            ViewGeneration(0),
+            "caption",
+            Some(photo(path)),
+        )
+    }
+
+    #[test]
+    fn a_slot_has_one_send_in_flight_and_other_slots_are_free() {
+        let mut prep = SendPrepState::default();
+        let first = prep.begin(slot("a", 11)).expect("starts");
+        assert!(prep.is_preparing(&slot("a", 11)));
+        assert!(
+            prep.begin(slot("a", 11)).is_none(),
+            "a second send in the chat waits, keeping the order"
+        );
+        let other = prep.begin(slot("a", 12)).expect("another chat is free");
+        assert_eq!(prep.finish(first), Some(slot("a", 11)));
+        assert!(!prep.is_preparing(&slot("a", 11)));
+        assert!(prep.is_preparing(&slot("a", 12)));
+        assert_eq!(prep.finish(other), Some(slot("a", 12)));
+        assert_eq!(prep.finish(other), None, "a job ends once");
+    }
+
+    #[test]
+    fn the_job_keeps_the_chat_it_started_in() {
+        let mut prep = SendPrepState::default();
+        let job = prep.begin(slot("a", 11)).unwrap();
+        // The user opens chat 12 while the files are read: the job still
+        // reports chat 11.
+        let open_chat = 12;
+        let sent_from = prep.finish(job).unwrap();
+        assert_eq!(sent_from.draft.chat_id, 11);
+        assert_ne!(sent_from.draft.chat_id, open_chat);
+    }
+
+    #[test]
+    fn a_logged_out_account_cancels_its_jobs() {
+        let mut prep = SendPrepState::default();
+        let gone = prep.begin(slot("a", 11)).unwrap();
+        let kept = prep.begin(slot("b", 11)).unwrap();
+        prep.cancel_account(&AccountKey("a".to_string()));
+        assert_eq!(prep.finish(gone), None, "nothing is sent for it");
+        assert_eq!(prep.finish(kept), Some(slot("b", 11)));
+    }
+
+    #[test]
+    fn a_slow_preparation_does_not_hold_the_caller() {
+        let (release, wait) = std::sync::mpsc::channel::<()>();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let snaps = vec![photo_snapshot(11, "/x/a.jpg")];
+        let worker = std::thread::spawn(move || {
+            let result = prepare_snapshots(snaps, |_| {
+                wait.recv().ok();
+                Ok(PreparedMedia::default())
+            });
+            done_tx.send(result).ok();
+        });
+        // The caller is free while the worker is stuck in its slow step.
+        assert!(done_rx.try_recv().is_err());
+        release.send(()).unwrap();
+        let sent = done_rx.recv().unwrap().unwrap();
+        worker.join().unwrap();
+        let snap = sent.first().expect("one snapshot");
+        assert_eq!(snap.chat_id, 11, "the chat does not change");
+        assert!(snap.prepared.is_some());
+    }
+
+    #[test]
+    fn snapshots_keep_their_order_and_text_only_ones_skip_the_step() {
+        let text = ComposerSnapshot::capture(ChatId(11), ViewGeneration(0), "hi");
+        let snaps = vec![
+            photo_snapshot(11, "/x/a.jpg"),
+            text,
+            photo_snapshot(11, "/x/b.jpg"),
+        ];
+        let calls = std::cell::RefCell::new(Vec::new());
+        let out = prepare_snapshots(snaps, |snap| {
+            calls
+                .borrow_mut()
+                .push(snap.attachment.as_ref().map(|att| att.path.clone()));
+            Ok(PreparedMedia::default())
+        })
+        .unwrap();
+        assert_eq!(out.len(), 3);
+        assert_eq!(calls.borrow().len(), 2, "text needs no files read");
+        assert_eq!(out.get(1).map(|snap| snap.text.as_str()), Some("hi"));
+        assert!(out.get(1).is_some_and(|snap| snap.prepared.is_none()));
+        assert_eq!(
+            out.iter()
+                .map(|snap| snap.text.as_str())
+                .collect::<Vec<_>>(),
+            ["caption", "hi", "caption"]
+        );
+    }
+
+    #[test]
+    fn a_failed_preparation_fails_the_whole_send() {
+        let snaps = vec![
+            photo_snapshot(11, "/x/a.jpg"),
+            photo_snapshot(11, "/x/b.jpg"),
+        ];
+        let out = prepare_snapshots(snaps, |snap| {
+            if snap
+                .attachment
+                .as_ref()
+                .is_some_and(|att| att.path.ends_with("b.jpg"))
+            {
+                Err(PrepareError::TimedOut)
+            } else {
+                Ok(PreparedMedia::default())
+            }
+        });
+        assert!(matches!(out, Err(PrepareError::TimedOut)));
+    }
+
+    fn origin(files: &[&str]) -> SendOrigin {
+        SendOrigin {
+            slot: slot("a", 11),
+            chat_id: ChatId(11),
+            markup: "caption".into(),
+            files: files.iter().map(PathBuf::from).collect(),
+        }
+    }
+
+    #[test]
+    fn a_sent_slot_starts_over_when_nothing_new_was_added() {
+        let origin = origin(&["/x/a.jpg", "/x/b.jpg"]);
+        let tray = [PathBuf::from("/x/a.jpg"), PathBuf::from("/x/b.jpg")];
+        assert_eq!(
+            plan_cleanup(&origin, Some("caption"), &tray),
+            SentCleanup {
+                clear_text: true,
+                reset_slot: true
+            }
+        );
+    }
+
+    #[test]
+    fn text_and_files_added_meanwhile_are_not_wiped() {
+        let origin = origin(&["/x/a.jpg"]);
+        let tray = [PathBuf::from("/x/a.jpg"), PathBuf::from("/x/new.jpg")];
+        assert_eq!(
+            plan_cleanup(&origin, Some("caption and more"), &tray),
+            SentCleanup {
+                clear_text: false,
+                reset_slot: false
+            }
+        );
+    }
+
+    #[test]
+    fn nothing_to_compare_clears_no_text() {
+        assert!(!plan_cleanup(&origin(&[]), None, &[]).clear_text);
+    }
+}

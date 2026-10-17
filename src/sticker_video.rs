@@ -274,9 +274,10 @@ pub fn encode_sticker(
             break;
         }
         let args = webm_args(&input, &out, edits, source, kind.image_side(), crf);
-        let ran = crate::video_encoder::quiet_command_for(&program)
-            .args(&args)
-            .output()
+        let mut command = crate::video_encoder::quiet_command_for(&program);
+        command.args(&args);
+        let limit = crate::child_timeout::transcode_limit(edits.length_ms() as f64 / 1000.0);
+        let ran = crate::child_timeout::output_within(&mut command, limit)
             .is_ok_and(|result| result.status.success());
         let bytes = ran
             .then(|| std::fs::metadata(&output).ok().map(|meta| meta.len()))
