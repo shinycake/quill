@@ -208,6 +208,10 @@ struct SeekBoard {
     cancelled: AtomicBool,
     /// Live seek workers across the engine's tracks.
     workers: Arc<AtomicUsize>,
+    /// Tests: how long (ms) the worker takes to notice the audio thread's
+    /// answer, as on a loaded machine.
+    #[cfg(test)]
+    answer_delay_ms: AtomicU64,
 }
 
 #[derive(Debug, Default)]
@@ -260,6 +264,8 @@ impl SeekBoard {
             inner: Mutex::default(),
             cancelled: AtomicBool::new(false),
             workers,
+            #[cfg(test)]
+            answer_delay_ms: AtomicU64::new(0),
         }
     }
 
@@ -356,6 +362,10 @@ impl SeekBoard {
                 seek.target
             };
             let moved = player.try_seek(Duration::from_secs_f64(target)).is_ok();
+            #[cfg(test)]
+            std::thread::sleep(Duration::from_millis(
+                self.answer_delay_ms.load(Ordering::Relaxed),
+            ));
             if self.is_cancelled() {
                 return;
             }
@@ -1206,6 +1216,49 @@ mod tests {
         panic!("never happened: {what}");
     }
 
+    /// The current track's seek worker takes 600 ms to notice an answer, as
+    /// a thread does on a machine under load. The position must not depend
+    /// on how soon that happens.
+    fn slow_workers(engine: &AudioEngine) {
+        if let Some((board, _)) = engine.track_parts() {
+            board
+                .answer_delay_ms
+                .store(600, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// Like `pull_until`, but the device is pulled only while a seek the
+    /// audio side owes an answer for is outstanding, on the current track or
+    /// on `replaced`, a track the engine let go of. Pulling on every turn
+    /// would let the sound run on while a worker thread waits to be
+    /// scheduled, and the position would drift past the seek's target by as
+    /// much as the machine is loaded.
+    fn pull_while_awaited(
+        engine: &mut AudioEngine,
+        device: &mut MixerSource,
+        replaced: (&SeekBoard, &super::Probe),
+        what: &str,
+        done: impl Fn(&AudioEngine) -> bool,
+    ) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while std::time::Instant::now() < deadline {
+            let replaced_awaits = replaced.0.lock().handed
+                > replaced
+                    .1
+                    .seeks_handled
+                    .load(std::sync::atomic::Ordering::Relaxed);
+            if engine.seek_awaits_device() || replaced_awaits {
+                pull(device, 1);
+            }
+            engine.settle();
+            if done(engine) {
+                return;
+            }
+            std::thread::yield_now();
+        }
+        panic!("never happened: {what}");
+    }
+
     #[test]
     fn a_replaced_stalled_track_lets_its_worker_go_without_touching_state() {
         let (engine, mut device) = rig();
@@ -1214,6 +1267,7 @@ mod tests {
         let second = track("stall-second.wav", 6);
         engine.start(&first, 0.0, 1.0, 1.0, 6.0).unwrap();
         pull(&mut device, usize::try_from(RATE).unwrap());
+        slow_workers(&engine);
         engine.seek(5.0, true).unwrap();
         wait_until("the seek reaches the device", || {
             engine.seek_awaits_device()
@@ -1221,20 +1275,25 @@ mod tests {
         clock.store(2500, std::sync::atomic::Ordering::Relaxed);
         assert_eq!(engine.error(), Some(AudioError::DeviceStalled));
         assert_eq!(engine.live_workers(), 1);
-        let (old_board, _) = engine.track_parts().unwrap();
+        let (old_board, old_probe) = engine.track_parts().unwrap();
 
         // A new track starts while the device is still silent, and is
         // scrubbed too: both workers are parked.
         engine.start(&second, 0.0, 1.0, 1.0, 6.0).unwrap();
         assert_eq!(engine.error(), None, "the new track starts clean");
+        slow_workers(&engine);
         engine.seek(3.0, true).unwrap();
         wait_until("both workers parked", || engine.live_workers() >= 2);
 
         // The device wakes: the old worker leaves without writing anything,
         // the new one delivers its seek, and no thread stays behind.
-        pull_until(&mut engine, &mut device, "workers gone", |engine| {
-            engine.live_workers() == 0 && !engine.seek_pending()
-        });
+        pull_while_awaited(
+            &mut engine,
+            &mut device,
+            (&old_board, &old_probe),
+            "workers gone",
+            |engine| engine.live_workers() == 0 && !engine.seek_pending(),
+        );
         assert!(
             old_board.lock().done.is_none(),
             "the stopped track reports nothing"
