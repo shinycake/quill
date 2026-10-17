@@ -31,9 +31,9 @@ Cluster `platform-shortcuts-data`. Reference: tdesktop `core/shortcuts.cpp`,
   (default on). Turning it off drops the macOS/Windows handle or shuts down the
   Linux StatusNotifierItem; the tray dependent switches hide with it, and the
   switch itself stays visible so it can be turned back on.
-- **Quit warning (`data-mac-quit-warning`).** macOS only. `quit_guard` turns
-  the key repeat chain of Cmd+Q into "warn on the first press, quit after a
-  1.5 s hold", with the toast "Hold ⌘Q to quit". Default on, as in tdesktop.
+- **Quit warning (`data-mac-quit-warning`).** Removed on 2026-10-16 at the
+  owner's request: Cmd+Q and the Quit menu item quit at once, like other Mac
+  apps. The hold-to-quit guard and its setting are gone.
 - **IPv6 (`data-ipv6`).** Already implemented (`setOption("prefer_ipv6")`,
   switch in the proxy box). Only the checklist was stale.
 - **Chat export (not claimed).** The export menu item opens a box with HTML or

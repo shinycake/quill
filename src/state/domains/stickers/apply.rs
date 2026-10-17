@@ -154,6 +154,12 @@ impl Session {
                     // Phase 9.2+: story reaction picker visuals — keyed by
                     // sticker id (= custom emoji id).
                     self.accept_story_custom_emoji_stickers(stickers);
+                } else if purpose
+                    == Some(RequestPurpose::Stories(StoriesPurpose::Live(
+                        LiveStoryPurpose::GetBursts,
+                    )))
+                {
+                    self.set_live_bursts(stickers);
                 }
             }
             // Slice S10: emoji payloads — purpose-gated dispatch lives in emoji.rs.

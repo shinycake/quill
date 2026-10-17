@@ -665,7 +665,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Story statistics and public forwards <!-- parity:stories-statistics -->
 - [x] Live story stream playback: stream in the story frame, LIVE badge and viewers, comments with entities, paid comments, send-as, Stars reactions with Undo, pinned paid comments, top donors, moderation (#852; not tried on a live account) <!-- parity:stories-live-stream-playback -->
 - [x] Watch a live story while in another call (its own receive-only stream slot, like tdesktop's registerVideoStream; a real call on the same chat takes the key and the story shows Failed with Retry, #912) <!-- parity:stories-live-beside-call -->
-- [ ] Live story Stars reaction effect animation (tdesktop plays bundled Lottie effects; Quill draws its own burst) <!-- parity:stories-live-stars-effect -->
+- [x] Live story Stars reaction effect animation (tdesktop plays bundled Lottie effects; Quill draws its own burst) <!-- parity:stories-live-stars-effect -->
 
 ### Calls
 
@@ -1087,7 +1087,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Experimental settings page (deferred: low impact) <!-- parity:data-experimental -->
 - [x] Tray icon and taskbar icon toggles, monochrome tray icon <!-- parity:data-tray-toggles -->
 - [x] Explicit "when window is closed: run in background or quit" choice <!-- parity:data-window-close -->
-- [x] Warn before quitting with Cmd+Q <!-- parity:data-mac-quit-warning -->
+- [x] Warn before quitting with Cmd+Q (dropped: Cmd+Q quits at once, like other Mac apps) <!-- parity:data-mac-quit-warning -->
 - [x] Use system window frame toggle on Linux and Windows <!-- parity:data-native-frame -->
 - [x] Hardware decoding toggle (Settings > Advanced > Performance; FFmpeg hardware decoding on Windows via D3D11VA/DXVA2 and on the macOS FFmpeg path via VideoToolbox, default on only on macOS like tdesktop; AVPlayer always decodes in hardware; Linux decodes in software until libva loads at run time. tdesktop's renderer options don't apply to GPUI) <!-- parity:data-hw-decode -->
 

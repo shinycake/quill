@@ -155,7 +155,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.live_story_reaction_tick(unix_ms_now());
         }
-        let now = Instant::now();
+        let now = self.stories.live.now();
         let effects = self
             .live_session_mut()
             .and_then(|s| s.stories.live.as_mut())
