@@ -75,15 +75,24 @@ CONFIG=(
   --enable-swscale --enable-swresample --enable-zlib
   --extra-cflags=-DCONFIG_SAFE_BITSTREAM_READER=1
 )
+# Hardware decoding (Settings > Advanced > Hardware accelerated video
+# decoding; docs/decisions/hw-decode-toggle.md). The system frameworks and
+# DLLs are part of the OS: VideoToolbox on macOS, and D3D11 / DXVA2, which
+# FFmpeg loads at run time, on Windows. Linux stays software-only: FFmpeg
+# links libva/libvdpau directly, so the package would stop loading on
+# systems without them.
 case "$OS" in
   # Capture: V4L2 cameras, ALSA and PulseAudio (PipeWire serves it) microphones.
   linux) CONFIG+=(--enable-pic --enable-pthreads --enable-alsa --enable-libpulse --enable-indev=v4l2,alsa,pulse) ;;
-  macos) CONFIG+=(--enable-pthreads) ;;
+  macos) CONFIG+=(--enable-pthreads
+    --enable-videotoolbox --enable-hwaccel=h264_videotoolbox,hevc_videotoolbox,vp9_videotoolbox) ;;
   # Native Windows threads, and the MinGW runtime (libgcc, and winpthread,
   # which still backs clock_gettime/nanosleep) linked statically: the DLLs
   # import only the system (UCRT/KERNEL32/bcrypt) — check-bundle-pe.ps1.
   # DirectShow cameras and microphones; the H.264 encoder is Media Foundation's.
-  windows) CONFIG+=(--target-os=mingw32 --disable-pthreads --enable-w32threads --enable-mediafoundation --enable-d3d11va --enable-encoder=h264_mf --enable-indev=dshow "--extra-ldflags=-static-libgcc -static") ;;
+  windows) CONFIG+=(--target-os=mingw32 --disable-pthreads --enable-w32threads --enable-mediafoundation --enable-d3d11va --enable-encoder=h264_mf --enable-indev=dshow "--extra-ldflags=-static-libgcc -static"
+    --enable-dxva2
+    --enable-hwaccel=h264_d3d11va2,hevc_d3d11va2,vp9_d3d11va2,h264_dxva2,hevc_dxva2,vp9_dxva2) ;;
 esac
 if [[ "$OS" == linux ]] && ! command -v pkg-config >/dev/null; then
   echo "error: pkg-config is required to find libpulse/libasound (apt install pkg-config libpulse-dev libasound2-dev)" >&2

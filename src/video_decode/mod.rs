@@ -86,7 +86,10 @@ pub fn probe_cli(path: Option<&str>) -> i32 {
         eprintln!("usage: quill --video-probe <file>");
         return 2;
     };
-    let options = OpenOptions::viewer();
+    let options = OpenOptions {
+        hardware: true,
+        ..OpenOptions::viewer()
+    };
     let mut demuxer = match ffi::FfiDemuxer::open(Path::new(path), &options) {
         Ok(demuxer) => demuxer,
         Err(err) => {
@@ -112,8 +115,12 @@ pub fn probe_cli(path: Option<&str>) -> i32 {
         }
     }
     println!(
-        "video={} {}x{} frames={frames} audio={} samples={samples}",
-        info.video_codec, size.0, size.1, info.audio_codec
+        "video={} {}x{} frames={frames} audio={} samples={samples} hardware={}",
+        info.video_codec,
+        size.0,
+        size.1,
+        info.audio_codec,
+        demuxer.info().hardware
     );
     i32::from(info.has_video && frames == 0)
 }
@@ -132,6 +139,9 @@ pub struct OpenOptions {
     pub video_frames: usize,
     /// The picture layout to start with ([`Player::set_output`] changes it).
     pub output: PixelOutput,
+    /// Decode the video on the GPU where the platform and codec allow it
+    /// (software otherwise, and after a hardware failure).
+    pub hardware: bool,
 }
 
 impl OpenOptions {
@@ -145,6 +155,7 @@ impl OpenOptions {
             want_audio: false,
             video_frames: 3,
             output: PixelOutput::Bgra,
+            hardware: false,
         }
     }
 
@@ -157,6 +168,7 @@ impl OpenOptions {
             want_audio: true,
             video_frames: 4,
             output: PixelOutput::Bgra,
+            hardware: false,
         }
     }
 
@@ -183,6 +195,8 @@ pub struct MediaInfo {
     pub channels: u16,
     pub video_codec: String,
     pub audio_codec: String,
+    /// The video decodes in hardware ([`OpenOptions::hardware`]).
+    pub hardware: bool,
 }
 
 /// One decoded picture, upright, tightly packed.
