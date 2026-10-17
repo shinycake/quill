@@ -115,6 +115,7 @@ pub mod notify_accounts;
 pub mod notify_call;
 pub mod notify_focus;
 pub mod notify_prefs;
+pub mod notify_volume;
 pub mod owned_bots;
 pub mod paid_messages;
 pub mod paid_messages_guard;

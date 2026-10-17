@@ -573,6 +573,9 @@ impl QuillApp {
                 saved_sounds,
             ));
         }
+        if loaded {
+            section = section.children(self.scope_volume_row(scope, settings.sound_id, cx));
+        }
         section = section
             .child(
                 // Parity slice: story fields of `scopeNotificationSettings`

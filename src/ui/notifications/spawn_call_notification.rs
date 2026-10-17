@@ -155,7 +155,14 @@ impl QuillApp {
     /// downloaded (a pending download plays on completion via
     /// `pending_sound_plays`). Silent when the chat's sound is disabled —
     /// the reducer never queues a sound for those.
-    pub(in crate::ui) fn play_notification_sound(&mut self, kind: NotificationSoundKind) {
+    pub(in crate::ui) fn play_notification_sound(
+        &mut self,
+        kind: NotificationSoundKind,
+        chat_id: ChatId,
+    ) {
+        let volume = self
+            .session()
+            .and_then(|session| session.notification_volume_override(chat_id));
         let sound = match self.live.as_mut() {
             Some(live) => notification_sound(live.driver.resolve_notification_sound(kind)),
             // No live driver (screenshot demo): the tone is the honest
@@ -163,7 +170,7 @@ impl QuillApp {
             None => Some(NotificationSound::DefaultTone),
         };
         if let Some(sound) = sound {
-            self.notify.notification_sounds.play(sound);
+            self.notify.notification_sounds.play_at(sound, volume);
         }
     }
 

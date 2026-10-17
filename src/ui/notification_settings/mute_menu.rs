@@ -357,6 +357,9 @@ impl QuillApp {
                 &saved_sounds,
             ));
         }
+        if let Some(chat_id) = open_chat {
+            panel = panel.children(self.chat_volume_row(chat_id, sound_disabled, cx));
+        }
         // Parity slice (`parity:stories-notify-settings`): per-chat story
         // controls — mute toggle, poster toggle, and a story-sound picker
         // reusing the saved-sound picker with a story target.

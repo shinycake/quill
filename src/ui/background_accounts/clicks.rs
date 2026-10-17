@@ -34,7 +34,7 @@ impl QuillApp {
                 dnd,
             });
             if let (true, Some(kind)) = (plan.sound, queued.sound) {
-                self.play_background_sound(account, kind);
+                self.play_background_sound(account, kind, queued.chat_id);
             }
             self.show_background_notification(account, queued, cx);
         }

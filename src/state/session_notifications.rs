@@ -149,6 +149,17 @@ impl Session {
         })
     }
 
+    /// The saved per-chat or per-scope sound volume for a chat's
+    /// notification (`notify_volume`), `None` to use the app-wide volume.
+    pub fn notification_volume_override(&self, chat_id: ChatId) -> Option<u8> {
+        let chat = self.chats.get(&chat_id.0)?;
+        crate::notify_volume::override_percent(
+            &self.account.0,
+            chat_id,
+            scope_for_chat_kind(&chat.kind),
+        )
+    }
+
     /// Phase 8.1: append with same-chat burst coalescing; the first
     /// message's sound wins so a burst plays exactly once.
     pub(crate) fn queue_notification_with_sound(

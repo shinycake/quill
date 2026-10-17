@@ -43,7 +43,13 @@ impl QuillApp {
         &mut self,
         account: &AccountKey,
         kind: NotificationSoundKind,
+        chat_id: ChatId,
     ) {
+        let volume = self
+            .background
+            .client(account)
+            .and_then(|client| client.live.as_ref())
+            .and_then(|live| live.driver.session.notification_volume_override(chat_id));
         let sound = self
             .background
             .client_mut(account)
@@ -52,7 +58,7 @@ impl QuillApp {
                 notification_sound(live.driver.resolve_notification_sound(kind))
             });
         if let Some(sound) = sound {
-            self.notify.notification_sounds.play(sound);
+            self.notify.notification_sounds.play_at(sound, volume);
         }
     }
 

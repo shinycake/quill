@@ -468,6 +468,9 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn session_history(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.notify.mute_menu_open {
+            self.ensure_chat_volume_slider(cx);
+        }
         let session = self.session();
         let open = session.and_then(|s| s.open_chat);
         let title = open

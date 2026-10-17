@@ -58,6 +58,17 @@ pub(crate) struct NotifyUi {
     /// Notification sound volume slider (`notification_settings/volume.rs`),
     /// created when the defaults dialog first renders.
     pub(super) volume_slider: Option<gpui_kit::Entity<gpui_kit::component::slider::SliderState>>,
+    /// Per-scope sound volume sliders, created when the defaults dialog
+    /// first renders (`notification_settings/scoped_volume.rs`).
+    pub(super) scope_volume_sliders: Vec<(
+        NotificationSettingsScope,
+        gpui_kit::Entity<gpui_kit::component::slider::SliderState>,
+    )>,
+    /// The open chat's sound volume slider in the notification panel.
+    pub(super) chat_volume_slider: Option<(
+        ChatId,
+        gpui_kit::Entity<gpui_kit::component::slider::SliderState>,
+    )>,
     /// Quill's own notification windows (`notify_windows`).
     pub(super) windows: super::notify_windows::NotifyWindows,
 }
@@ -83,6 +94,8 @@ impl NotifyUi {
             defaults_exceptions_scope: None,
             notifications_confirm: None,
             volume_slider: None,
+            scope_volume_sliders: Vec::new(),
+            chat_volume_slider: None,
             windows: super::notify_windows::NotifyWindows::new(),
         }
     }
