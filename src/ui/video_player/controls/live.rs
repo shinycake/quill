@@ -66,12 +66,23 @@ const LIVE_RED: u32 = 0xdc2626;
 pub(crate) const BADGE_GAP: f32 = 4.;
 /// `mediaviewSaveMsgBg`: the header's volume pill.
 const VOLUME_PILL_BG: u32 = 0x000000b2;
+/// A hairline that keeps the capsule's shape where the header band behind
+/// it is already black (the dark theme).
+const VOLUME_PILL_EDGE: u32 = 0xffffff1f;
+/// `storiesVolumeButton`: the pill is as wide as tdesktop's 40 px button
+/// and its top slot is that square, so the capsule's end is a half circle
+/// around the icon.
+const VOLUME_PILL_WIDTH: f32 = 40.;
 /// `storiesVolumeSize` / `storiesVolumeBottom`: the pill's slider and the
 /// space under it.
 const VOLUME_PILL_SLIDER: f32 = 75.;
 const VOLUME_PILL_BOTTOM: f32 = 20.;
-/// Room for half the kit thumb, which overhangs the slider at 100 %.
+/// Half the kit thumb, which overhangs the slider's end at 100 %, so it
+/// clears the button above.
 const VOLUME_PILL_THUMB_SKIP: f32 = 8.;
+/// The kit's small icon button (`size_6`), which the toggle in the header
+/// is; the open pill sits so its button slot is centred on it.
+const VOLUME_TOGGLE_SIZE: f32 = 24.;
 
 /// What one draw of the live controller needs.
 pub(crate) struct LiveFacts {
@@ -370,12 +381,19 @@ fn render_header(this: LiveController, cx: &mut App) -> AnyElement {
     let row_id = this.row_id;
     let (icon, label) = mute_look(this.facts.muted);
     let variant = this.variant.unwrap_or_else(|| overlay_button(cx));
+    // Inside the open pill the capsule is the hover state (tdesktop's
+    // `storiesVolumeButton` has no ripple), so its button draws no square.
+    let in_pill = ButtonCustomVariant::new(cx)
+        .color(gpui_kit::transparent_black())
+        .foreground(gpui_kit::white())
+        .hover(gpui_kit::transparent_black())
+        .active(gpui_kit::white().opacity(0.22));
     let toggle_mute = this.actions.toggle_mute.clone();
     let mute = move |id: &'static str, tab_stop: bool| {
         let toggle_mute = toggle_mute.clone();
         Button::new((id, row_id))
             .icon(icon)
-            .custom(variant)
+            .custom(if tab_stop { variant } else { in_pill })
             .small()
             .when(tab_stop, |button| button.tab_index(0))
             .tooltip(label)
@@ -396,29 +414,40 @@ fn render_header(this: LiveController, cx: &mut App) -> AnyElement {
     let open = this.facts.volume_open;
     let pill = this.facts.volume.filter(|_| open).map(|slider| {
         let hover = hover.clone();
+        let inset = (VOLUME_PILL_WIDTH - VOLUME_TOGGLE_SIZE) / 2.;
         deferred(
             div()
                 .id(("live-volume", row_id))
                 .debug_selector(|| "live-story-volume".into())
                 .absolute()
-                .top_0()
-                .left_0()
+                .top(px(-inset))
+                .left(px(-inset))
+                .w(px(VOLUME_PILL_WIDTH))
                 .flex()
                 .flex_col()
                 .items_center()
-                .gap(px(VOLUME_PILL_THUMB_SKIP))
                 .pb(px(VOLUME_PILL_BOTTOM))
                 .rounded_full()
                 .bg(rgba(VOLUME_PILL_BG))
+                .border_1()
+                .border_color(rgba(VOLUME_PILL_EDGE))
                 .when_some(hover, |pill, hover| {
                     pill.on_hover(move |inside: &bool, window, cx| {
                         hover(VolumePart::Pill, *inside, window, cx)
                     })
                 })
-                .child(mute("live-volume-mute", false))
+                .child(
+                    div()
+                        .size(px(VOLUME_PILL_WIDTH))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(mute("live-volume-mute", false)),
+                )
                 .child(
                     Slider::new(&slider)
                         .vertical()
+                        .mt(px(VOLUME_PILL_THUMB_SKIP))
                         .h(px(VOLUME_PILL_SLIDER))
                         .bg(crate::ui::chat_theme::accent())
                         .text_color(crate::ui::chat_theme::text_on_fill()),
@@ -437,7 +466,15 @@ fn render_header(this: LiveController, cx: &mut App) -> AnyElement {
                 hover(VolumePart::Toggle, *inside, window, cx)
             })
         })
-        .child(mute("live-mute", true))
+        // The open pill is translucent and its own button sits here, so the
+        // header's toggle leaves only its slot while the pill is up.
+        .map(|toggle| {
+            if open {
+                toggle.child(div().size(px(VOLUME_TOGGLE_SIZE)))
+            } else {
+                toggle.child(mute("live-mute", true))
+            }
+        })
         .children(pill);
     div()
         .id(("live-controller", row_id))
