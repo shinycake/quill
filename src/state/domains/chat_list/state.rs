@@ -28,6 +28,9 @@ pub struct ChatListState {
     /// with the chat dropped from the spec — there is no
     /// `removeChatFromList` in 1.8.67.
     pub folder_remove_queue: Vec<(ChatId, i32)>,
+    /// Basic groups whose `leaveChat` was answered: the driver now sends
+    /// `deleteChatHistory` with `remove_from_chat_list` for each.
+    pub delete_after_leave: Vec<ChatId>,
     /// Parity slice: `getChatFolderChatsToLeave` results per folder id —
     /// chats the delete-confirm dialog offers to leave with the folder.
     pub folder_chats_to_leave: HashMap<i32, Vec<i64>>,
@@ -114,6 +117,7 @@ impl ChatListState {
             chat_lists_for_add: HashMap::new(),
             folder_chats_exhausted: HashSet::new(),
             folder_remove_queue: Vec::new(),
+            delete_after_leave: Vec::new(),
             folder_chats_to_leave: HashMap::new(),
             folder_invite_links: HashMap::new(),
             folder_link_chats: HashMap::new(),

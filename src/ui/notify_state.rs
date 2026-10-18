@@ -26,6 +26,9 @@ pub(crate) struct NotifyUi {
     pub(super) polled_redraw: super::notifications::PolledRedraw,
     /// tdesktop Mute submenu (1 hour / 8 hours / 2 days / Forever).
     pub(super) mute_menu_open: bool,
+    /// The chat the Mute panel is for when it was opened from a chat row's
+    /// menu; `None` means the open chat.
+    pub(super) mute_chat: Option<ChatId>,
     /// The Mute submenu's "Custom..." duration row is expanded.
     pub(super) mute_custom_open: bool,
     /// The custom mute duration being edited (tdesktop `ChooseTimeWidget`).
@@ -83,6 +86,7 @@ impl NotifyUi {
             notification_sounds: super::audio::NotificationSounds::new(audio_output.clone()),
             polled_redraw: super::notifications::PolledRedraw::new(std::time::Instant::now()),
             mute_menu_open: false,
+            mute_chat: None,
             mute_custom_open: false,
             mute_custom: quill::mute_menu::CustomMute::default(),
             ttl_picker_open: false,

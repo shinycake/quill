@@ -645,10 +645,10 @@ impl QuillApp {
         };
         let size = window.viewport_size();
         self.chat_list.preview = None;
-        self.chat_list.menu = Some(ChatMenuState {
+        self.chat_list.menu = Some(ChatMenuState::at(
             chat_id,
-            position: point(size.width - px(220.), px(64.)),
-        });
+            point(size.width - px(220.), px(64.)),
+        ));
         cx.notify();
         true
     }

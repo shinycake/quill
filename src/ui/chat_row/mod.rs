@@ -497,10 +497,7 @@ pub(super) fn session_chat_row(
         .on_mouse_down(
             MouseButton::Right,
             cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                this.chat_list.menu = Some(ChatMenuState {
-                    chat_id: id,
-                    position: event.position,
-                });
+                this.chat_list.menu = Some(ChatMenuState::at(id, event.position));
                 cx.notify();
             }),
         )
