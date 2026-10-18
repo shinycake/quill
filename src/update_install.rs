@@ -34,7 +34,8 @@ use layout::{
     Layout, ensure_private_dir, owned_by_me, package_exe, plans_dir, receipt_for, result_path,
     staged_for, trusted_dir, trusted_file, update_dirs,
 };
-#[cfg(all(test, unix))]
+#[cfg(test)]
+#[cfg(unix)]
 use layout::{trusted_dir_as, trusted_file_as};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
