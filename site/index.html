@@ -170,14 +170,85 @@
         </div>
       </div>
       <div class="platforms" id="platforms" hidden></div>
+      <section class="mac" id="mac-install" aria-labelledby="mac-title">
+        <h3 class="mac-title" id="mac-title">Installing on a Mac</h3>
+
+        <div class="mac-card recommended">
+          <span class="badge">Recommended</span>
+          <h4>Install with one Terminal command</h4>
+          <p class="mac-lede">Quill installs in Applications and opens straight away, without the “Apple could not verify” warning. Run the same command later to update.</p>
+          <ol class="mac-steps">
+            <li>Open <strong>Terminal</strong>: press <kbd>⌘</kbd> <kbd>Space</kbd>, type <em>Terminal</em> and press <kbd>Return</kbd>.</li>
+            <li>Paste this command and press <kbd>Return</kbd>:
+              <div class="cmd">
+                <code id="mac-cmd">curl -fsSL https://raw.githubusercontent.com/shinycake/quill/main/scripts/macos-install.sh | bash</code>
+                <button type="button" class="copy" id="mac-copy" aria-describedby="mac-cmd">Copy</button>
+              </div>
+            </li>
+            <li>Quill opens when it's done.</li>
+          </ol>
+
+          <h5>Why it's safe</h5>
+          <ul class="safe">
+            <li><strong>You can read it.</strong> The installer is a short, open-source script. <a href="https://github.com/shinycake/quill/blob/main/scripts/macos-install.sh">Read it on GitHub</a> before you run it, like the rest of Quill.</li>
+            <li><strong>It only downloads Quill.</strong> It fetches the same file as the download button below, from Quill's official GitHub releases.</li>
+            <li><strong>It checks the download.</strong> It compares the file's fingerprint (a SHA-256 checksum) with the one published with the release, and checks that the app's code signature is intact. If anything doesn't match, it stops and installs nothing.</li>
+            <li><strong>It changes nothing else.</strong> No administrator password, no background services, and no Mac security settings are touched. It puts Quill.app in Applications and nothing more.</li>
+          </ul>
+          <p class="why-note">Why there's no warning: macOS checks apps you download in a browser. Quill isn't checked by Apple yet, because that needs a paid Apple developer account, so the browser download below asks you to confirm it once. Files that Terminal downloads aren't marked for that check.</p>
+        </div>
+
+        <div class="mac-card">
+          <h4>Or download it yourself</h4>
+          <p class="mac-lede">Get the app as a zip file. The first time you open it, macOS asks you to confirm it.</p>
+          <a class="btn ghost" id="mac-zip" href="https://github.com/shinycake/quill/releases/latest/download/quill-macos-aarch64.zip">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>
+            Download for macOS (zip)
+          </a>
+
+          <h5>How to open it the first time</h5>
+          <ol class="open-steps">
+            <li>
+              <p><strong>Unzip it and move Quill to Applications.</strong> Double-click the zip, then drag Quill into your Applications folder and open it.</p>
+            </li>
+            <li>
+              <p><strong>macOS says Quill wasn't opened.</strong> Click <strong>Done</strong>. Don't click Move to Trash.</p>
+              <div class="mock mock-alert" role="img" aria-label="A macOS alert titled “Quill.app” Not Opened, saying Apple could not verify it is free of malware, with the buttons Done and Move to Trash. Done is highlighted.">
+                <img src="img/icon-256.webp" alt="" width="52" height="52">
+                <b>“Quill.app” Not Opened</b>
+                <span>Apple could not verify “Quill.app” is free of malware that may harm your Mac or compromise your privacy.</span>
+                <i class="mbtn primary ring">Done</i>
+                <i class="mbtn">Move to Trash</i>
+              </div>
+            </li>
+            <li>
+              <p><strong>Open System Settings, then Privacy &amp; Security.</strong> Scroll down to Security and click <strong>Open Anyway</strong> next to the Quill message.</p>
+              <div class="mock mock-settings" role="img" aria-label="System Settings, Privacy and Security pane. Under Security, the line “Quill.app” was blocked to protect your Mac, with an Open Anyway button, which is highlighted.">
+                <div class="side"><span></span><span></span><span class="sel">Privacy &amp; Security</span><span></span><span></span></div>
+                <div class="pane">
+                  <b>Privacy &amp; Security</b>
+                  <em>Security</em>
+                  <div class="row"><span>“Quill.app” was blocked to protect your Mac.</span><i class="mbtn ring">Open Anyway</i></div>
+                </div>
+              </div>
+            </li>
+            <li>
+              <p><strong>Confirm.</strong> macOS asks once more. Click <strong>Open Anyway</strong>, and enter your password or use Touch ID if asked. Quill opens, and from then on it opens like any other app.</p>
+              <div class="mock mock-alert" role="img" aria-label="A macOS alert asking whether to open Quill.app, with an Open Anyway button, which is highlighted.">
+                <img src="img/icon-256.webp" alt="" width="52" height="52">
+                <b>Open “Quill.app”?</b>
+                <span>Apple could not verify “Quill.app” is free of malware. Open it only if you trust where it came from.</span>
+                <i class="mbtn ring">Open Anyway</i>
+              </div>
+            </li>
+          </ol>
+          <p class="why-note">Comfortable with Terminal? Instead of steps 2 to 4 you can run <code>xattr -dr com.apple.quarantine /Applications/Quill.app</code> once.</p>
+        </div>
+      </section>
       <div class="whatsnew" id="whatsnew" hidden>
         <h3 id="whatsnew-title">What's new</h3>
         <div class="notes" id="whatsnew-body"></div>
         <a class="more" id="whatsnew-link" href="https://github.com/shinycake/quill/releases">All releases</a>
-      </div>
-      <div class="mac-install">
-        <p>On a Mac, the easiest way is to paste this into Terminal. It installs Quill in Applications, and Quill opens without a security warning:</p>
-        <pre><code>curl -fsSL https://raw.githubusercontent.com/shinycake/quill/main/scripts/macos-install.sh | bash</code></pre>
       </div>
       <p class="reqs">macOS 14 or later on Apple Silicon · Windows 10 or later (x64) · Linux x86_64 with glibc. Builds aren't signed with a paid developer certificate yet, so a download from the browser asks you to confirm the first launch.</p>
     </section>
@@ -198,7 +269,7 @@
       </details>
       <details>
         <summary>Why do I need to confirm the first launch?</summary>
-        <p>Releases aren't signed with a paid Apple or Microsoft certificate yet. On macOS, install with the Terminal command above and there's nothing to confirm: macOS only checks apps downloaded in a browser. If you used the browser, run <code>xattr -dr com.apple.quarantine /Applications/Quill.app</code> in Terminal, or open System Settings → Privacy &amp; Security and choose Open Anyway. On Windows, choose More info → Run anyway. Each release lists SHA-256 checksums so you can verify the download.</p>
+        <p>Releases aren't signed with a paid Apple or Microsoft certificate yet. On macOS, <a href="#mac-install">install with the Terminal command</a> and there's nothing to confirm, because macOS only checks apps downloaded in a browser. If you downloaded the zip, <a href="#mac-install">follow the steps to open it</a> once. On Windows, choose More info → Run anyway. Each release lists SHA-256 checksums so you can verify the download.</p>
       </details>
       <details>
         <summary>How can I help?</summary>
