@@ -100,11 +100,8 @@ impl Render for QuillApp {
             self.request_animation_tick(30, cx);
         }
         let status_toast = self.status_toast_visible(cx);
-        let menu_open = self.message_ui.menu.is_some()
-            || self.chat_list.menu.is_some()
-            || self.chat_list.archive_menu.is_some()
-            || self.chat_list.global.story_menu.is_some()
-            || self.folders.tab_menu.is_some();
+        self.frame.context_menu_items.begin();
+        let menu_open = self.context_menu_open();
         if menu_open && !self.frame.context_menu_was_open {
             self.frame.context_menu_previous_focus = window.focused(cx);
             window.focus(&self.frame.context_menu_focus, cx);

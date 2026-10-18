@@ -3,6 +3,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::context_menu_keys::context_menu_item;
 use super::*;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
@@ -10,7 +11,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
-use quill::stories_menu::{StoryMenuAction, StoryMenuFacts, story_menu};
+use quill::stories_menu::{StoryMenuAction, StoryMenuFacts, StoryMenuItem, story_menu};
 use quill::telegram::envelope::{ChatKind, StoryListView};
 
 impl QuillApp {
@@ -81,12 +82,8 @@ impl QuillApp {
         })
     }
 
-    pub(super) fn story_menu_overlay(
-        &self,
-        chat_id: i64,
-        position: Point<Pixels>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    /// The entries the story tile menu shows for this chat.
+    pub(super) fn story_menu_entries(&self, chat_id: i64) -> Vec<StoryMenuItem> {
         let kind = self
             .session()
             .and_then(|s| s.chats.get(&chat_id))
@@ -94,13 +91,21 @@ impl QuillApp {
             .unwrap_or(ChatKind::Unknown);
         let is_self = matches!(kind, ChatKind::Private { user_id }
             if self.session().and_then(|s| s.my_user_id) == Some(user_id.0));
-        let items = story_menu(&StoryMenuFacts {
+        story_menu(&StoryMenuFacts {
             kind: &kind,
             is_self,
             hidden: self.story_tile_hidden(chat_id),
             muted: self.story_tile_muted(chat_id),
-        });
-        let hover = cx.theme().accent;
+        })
+    }
+
+    pub(super) fn story_menu_overlay(
+        &self,
+        chat_id: i64,
+        position: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let items = self.story_menu_entries(chat_id);
         let rows: Vec<AnyElement> = items
             .into_iter()
             .enumerate()
@@ -111,27 +116,20 @@ impl QuillApp {
                     StoryMenuAction::ToggleHidden => IconName::EyeOff,
                     StoryMenuAction::ToggleMute => IconName::BellOff,
                 };
-                div()
-                    .id(("story-menu-item", i))
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .px_3()
-                    .py_1p5()
-                    .rounded_md()
-                    .cursor_pointer()
-                    .text_sm()
-                    .text_color(text_menu())
-                    .hover(|style| style.bg(hover))
-                    .role(Role::MenuItem)
-                    .aria_label(entry.label)
-                    .child(Icon::new(icon).size(px(16.)))
-                    .child(entry.label)
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.chat_list.global.story_menu = None;
-                        this.run_story_menu_action(chat_id, entry.action, window, cx);
-                    }))
-                    .into_any_element()
+                context_menu_item(
+                    ("story-menu-item", i),
+                    icon,
+                    entry.label,
+                    text_menu().into(),
+                    true,
+                    &self.frame.context_menu_items,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.chat_list.global.story_menu = None;
+                    this.run_story_menu_action(chat_id, entry.action, window, cx);
+                }))
+                .into_any_element()
             })
             .collect();
         let panel = div()

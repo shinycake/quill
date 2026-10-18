@@ -369,22 +369,7 @@ impl QuillApp {
             if !capturing {
                 let menu_handled = menu_app
                     .update(cx, |this, cx| {
-                        if this.message_ui.menu.is_none()
-                            && this.chat_list.menu.is_none()
-                            && this.chat_list.archive_menu.is_none()
-                            && this.folders.tab_menu.is_none()
-                        {
-                            return false;
-                        }
-                        if event.keystroke.key == "escape" {
-                            this.message_ui.menu = None;
-                            this.chat_list.menu = None;
-                            this.chat_list.archive_menu = None;
-                            this.folders.tab_menu = None;
-                            cx.notify();
-                            return true;
-                        }
-                        super::keybindings::context_menu_captures_key(&event.keystroke)
+                        this.context_menu_key(&event.keystroke, window, cx)
                     })
                     .unwrap_or(false);
                 if menu_handled {

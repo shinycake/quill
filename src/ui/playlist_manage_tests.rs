@@ -122,3 +122,67 @@ fn the_track_menu_opens_and_delete_asks_before_removing(cx: &mut TestAppContext)
         );
     });
 }
+
+#[gpui_kit::test]
+fn tab_reaches_the_track_menu_items(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_playlist(&app, vcx);
+    app.update_in(vcx, |app, _, cx| {
+        app.open_playlist_menu(FileId(2), point(px(300.), px(200.)), cx);
+    });
+    vcx.run_until_parked();
+    vcx.simulate_keystrokes("tab");
+    let (inside, on_frame) = vcx.update(|window, cx| {
+        let menu = app.read(cx).frame.context_menu_focus.clone();
+        (menu.contains_focused(window, cx), menu.is_focused(window))
+    });
+    assert!(inside && !on_frame, "Tab lands on an item inside the menu");
+}
+
+#[gpui_kit::test]
+fn escape_closes_the_track_menu(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_playlist(&app, vcx);
+    app.update_in(vcx, |app, _, cx| {
+        app.open_playlist_menu(FileId(2), point(px(300.), px(200.)), cx);
+    });
+    vcx.run_until_parked();
+    vcx.simulate_keystrokes("down");
+    vcx.simulate_keystrokes("escape");
+    vcx.run_until_parked();
+    app.read_with(vcx, |app, _| {
+        assert!(
+            app.playback.playlist_menu.is_none(),
+            "Escape closed the menu"
+        );
+        assert!(!app.context_menu_open());
+    });
+}
+
+#[gpui_kit::test]
+fn down_and_up_wrap_through_the_track_menu_items(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_playlist(&app, vcx);
+    app.update_in(vcx, |app, _, cx| {
+        app.open_playlist_menu(FileId(2), point(px(300.), px(200.)), cx);
+    });
+    vcx.run_until_parked();
+    let items = app.read_with(vcx, |app, _| app.frame.context_menu_items.enabled_count());
+    assert!(items >= 2, "the track menu has items, saw {items}");
+    let focus = |vcx: &mut VisualTestContext| vcx.update(|window, cx| window.focused(cx));
+    vcx.simulate_keystrokes("down");
+    let first = focus(vcx).expect("Down focuses an item");
+    for _ in 1..items {
+        vcx.simulate_keystrokes("down");
+        assert_ne!(focus(vcx), Some(first.clone()), "still walking the items");
+    }
+    vcx.simulate_keystrokes("down");
+    assert_eq!(focus(vcx), Some(first.clone()), "Down wrapped to the first");
+    vcx.simulate_keystrokes("up");
+    assert_ne!(focus(vcx), Some(first.clone()), "Up wrapped to the last");
+    vcx.simulate_keystrokes("down");
+    assert_eq!(focus(vcx), Some(first), "and Down came back");
+}

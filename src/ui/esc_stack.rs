@@ -60,20 +60,9 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "context-menus",
-        |app| app.message_ui.menu.is_some()
-            || app.chat_list.menu.is_some()
-            || app.chat_list.archive_menu.is_some()
-            || app.chat_list.global.story_menu.is_some()
-            || app.folders.tab_menu.is_some()
-            || app.playback.playlist_menu.is_some(),
+        |app| app.context_menu_open(),
         |app, _, cx| {
-            app.playback.playlist_menu = None;
-            app.message_ui.menu = None;
-            app.chat_list.menu = None;
-            app.chat_list.archive_menu = None;
-            app.chat_list.global.story_menu = None;
-            app.folders.tab_menu = None;
-            cx.notify();
+            app.dismiss_context_menus(cx);
         }
     ),
     layer!(

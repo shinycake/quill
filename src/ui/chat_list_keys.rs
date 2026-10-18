@@ -144,6 +144,13 @@ impl ChatListKeys {
         self.list == Some(row)
     }
 
+    /// Whether the keys have selected a chat row.
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
+    pub(super) fn has_list_selection(&self) -> bool {
+        self.list.is_some()
+    }
+
     pub(super) fn search_highlighted(&self, row: SearchRow) -> bool {
         self.search == Some(row)
     }

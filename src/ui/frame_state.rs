@@ -42,6 +42,8 @@ pub(crate) struct FrameUi {
     /// The "screenshots can't be blocked here" note was dismissed (Linux).
     pub(super) capture_notice_dismissed: bool,
     pub(super) context_menu_focus: FocusHandle,
+    /// Focus handles of the open context menu's items.
+    pub(super) context_menu_items: super::context_menu_keys::ContextMenuItems,
     pub(super) context_menu_was_open: bool,
     pub(super) context_menu_previous_focus: Option<FocusHandle>,
     /// Focus return for hand-drawn layers (see `esc_stack::track_layer_focus`).
@@ -70,6 +72,7 @@ impl FrameUi {
             capture_blocked: false,
             capture_notice_dismissed: false,
             context_menu_focus: cx.focus_handle(),
+            context_menu_items: Default::default(),
             context_menu_was_open: false,
             context_menu_previous_focus: None,
             layer_focus: Default::default(),

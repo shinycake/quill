@@ -7,6 +7,7 @@
 
 use super::app::QuillApp;
 use super::chat_theme::{accent, bg_canvas, peer_name_color, text_menu};
+use super::context_menu_keys::context_menu_item;
 use super::folder_share::{chat_title, finish_dialog};
 use super::shell::{DialogKind, QuillShell};
 use super::*;
@@ -128,7 +129,6 @@ impl QuillApp {
         menu: FolderTabMenu,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let hover = cx.theme().accent;
         let item = |id: &'static str,
                     icon: IconName,
                     label: &'static str,
@@ -140,29 +140,21 @@ impl QuillApp {
             } else {
                 Hsla::from(text_menu())
             };
-            div()
-                .id(id)
-                .flex()
-                .items_center()
-                .gap_3()
-                .px_3()
-                .py_1p5()
-                .rounded_md()
-                .cursor_pointer()
-                .text_sm()
-                .text_color(color)
-                .hover(|style| style.bg(hover))
-                .role(Role::MenuItem)
-                .aria_label(label)
-                .tab_index(0)
-                .child(Icon::new(icon).size(px(16.)).text_color(color))
-                .child(label)
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.folders.tab_menu = None;
-                    on_click(this, window, cx);
-                    cx.notify();
-                }))
-                .into_any_element()
+            context_menu_item(
+                id,
+                icon,
+                label,
+                color,
+                true,
+                &self.frame.context_menu_items,
+                cx,
+            )
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.folders.tab_menu = None;
+                on_click(this, window, cx);
+                cx.notify();
+            }))
+            .into_any_element()
         };
         let unread = self.folder_has_unread(menu.folder_id);
         let mut rows: Vec<AnyElement> = Vec::new();
