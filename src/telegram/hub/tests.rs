@@ -275,3 +275,36 @@ fn live_clients_get_only_their_own_envelopes() {
         assert!(closed, "client {id} closed");
     }
 }
+
+#[test]
+fn a_stop_ends_the_receive_thread_at_once_with_or_without_clients() {
+    let (idle, _tx, _sink) = channel_hub();
+    std::thread::sleep(Duration::from_millis(20));
+    let start = Instant::now();
+    assert!(idle.stop_within(Duration::from_millis(500)));
+    assert!(
+        start.elapsed() < Duration::from_millis(300),
+        "{:?}",
+        start.elapsed()
+    );
+
+    let (busy, _tx, _sink) = channel_hub();
+    let bridge = busy.bridge(1);
+    std::thread::sleep(Duration::from_millis(20));
+    assert!(busy.stop_within(Duration::from_millis(500)));
+    assert!(!bridge.stopped_unexpectedly());
+}
+
+#[test]
+fn a_stop_gives_up_on_a_receive_that_does_not_return() {
+    let source: ReceiveSource = Box::new(|_| {
+        std::thread::sleep(Duration::from_secs(2));
+        None
+    });
+    let hub = Arc::new(TdHub::with_source(source, Arc::new(MemorySink::new())).unwrap());
+    let _client = hub.bridge(1);
+    std::thread::sleep(Duration::from_millis(20));
+    let start = Instant::now();
+    assert!(!hub.stop_within(Duration::from_millis(100)));
+    assert!(start.elapsed() < Duration::from_millis(500));
+}
