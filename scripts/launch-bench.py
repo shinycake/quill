@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Time Quill's macOS launch to a painted chat list.
 
-    scripts/launch-bench.py [--runs N] [--template dist/Quill.app] LABEL=BINARY ...
+    scripts/launch-bench.py [--runs N] [--cold] [--template dist/Quill.app] LABEL=BINARY ...
 
 Each BINARY (a `--features ui --release` quill) is copied into its own
 signed Quill.app under ~/Library/Caches/quill-launch-bench/LABEL, built from
@@ -11,6 +11,11 @@ clean environment (as a Finder double click is), against the real account in
 the default data folder, with QUILL_STARTUP_TRACE set (src/startup_trace.rs).
 Every milestone is printed as the median, min and max ms after `open` was
 called; `chat_list` is the first frame that draws the chat list.
+
+`--cold` empties the file cache (`sudo -n /usr/sbin/purge`, so sudo must
+allow it without a password) before every launch, as after a reboot. The
+shared system libraries stay mapped, so this is close to, not exactly, a
+first launch after boot.
 
 Environment: QUILL_CODESIGN_IDENTITY signs the bundles (use the identity the
 keychain already trusts for Quill's database key, or the keychain asks on
@@ -77,8 +82,11 @@ def quit_quill():
     time.sleep(2)
 
 
-def launch(app, trace, creds, timeout=40.0):
+def launch(app, trace, creds, cold=False, timeout=40.0):
     trace.unlink(missing_ok=True)
+    if cold:
+        subprocess.run(["sudo", "-n", "/usr/sbin/purge"], check=True)
+        time.sleep(1)
     args = ["/usr/bin/open", "-n", "-a", app, "--env", f"QUILL_STARTUP_TRACE={trace}"]
     for key, value in creds.items():
         args += ["--env", f"{key}={value}"]
@@ -102,6 +110,7 @@ def launch(app, trace, creds, timeout=40.0):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--runs", type=int, default=7)
+    parser.add_argument("--cold", action="store_true", help="empty the file cache before every launch")
     parser.add_argument("--template", default=str(REPO / "dist/Quill.app"))
     parser.add_argument("sides", nargs="+", metavar="LABEL=BINARY")
     opts = parser.parse_args()
@@ -119,7 +128,7 @@ def main():
         launch(app, WORK / f"trace-{label}.txt", creds)
     for run in range(opts.runs):
         for label, app in sides:
-            marks = launch(app, WORK / f"trace-{label}.txt", creds)
+            marks = launch(app, WORK / f"trace-{label}.txt", creds, opts.cold)
             results[label].append(marks)
             shown = f"{marks['chat_list']:.0f} ms" if "chat_list" in marks else "NOT REACHED"
             print(f"{label} run {run}: chat_list {shown}, load {os.getloadavg()[0]:.1f}",

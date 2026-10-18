@@ -1,10 +1,10 @@
 //! The run's first connection, begun in `main` before AppKit and the window
 //! start. A worker does what `start_connection` does before a client opens
 //! (the startup sweep, the database key from the keychain, the account
-//! folders) and loads TDLib; [`open_if_ready`] then opens the client on the
-//! main thread, so TDLib reads its database and the chat list while the
-//! window is built. Begun from `QuillApp::new`, all of it waited for the
-//! window instead.
+//! folders) and loads TDLib and the call engine's library; [`open_if_ready`]
+//! then opens the client on the main thread, so TDLib reads its database and
+//! the chat list while the window is built. Begun from `QuillApp::new`, all
+//! of it waited for the window instead.
 #![deny(clippy::indexing_slicing)]
 
 use super::background_accounts::deleting::{Sweep, live_secrets};
@@ -62,6 +62,7 @@ fn prepare(credentials: Option<TelegramCredentials>) -> Option<Prepared> {
     if prepared.is_ok() {
         // The client opens on the main thread, over the library loaded here.
         let _ = quill::telegram::hub::TdHub::shared(Arc::new(DiscardSink));
+        quill::calls::engine::preload_ntgcalls();
     }
     Some((Some(swept), prepared))
 }

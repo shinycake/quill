@@ -38,6 +38,15 @@ pub struct NtgcallsEngine {
     _driver_thread_only: PhantomData<Rc<()>>,
 }
 
+/// The library, mapped by [`preload_ntgcalls`] on a worker and kept loaded,
+/// so the engine's own load on the UI thread only resolves its symbols.
+static PRELOADED: std::sync::OnceLock<Option<Loader>> = std::sync::OnceLock::new();
+
+/// Load the ntgcalls library off the UI thread, ahead of the first engine.
+pub fn preload_ntgcalls() {
+    PRELOADED.get_or_init(|| Loader::load_default().ok());
+}
+
 impl NtgcallsEngine {
     /// Phase C2b: load the sidecar and cache its reported call protocol.
     pub fn load() -> Result<Self, EngineError> {
