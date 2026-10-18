@@ -170,7 +170,13 @@ impl TdHub {
             Reuse::Stopped(None) | Reuse::None => Self::load_secured_api()?,
         };
         let receive = api.clone();
-        let source: ReceiveSource = Box::new(move |timeout| receive.receive(timeout));
+        let source: ReceiveSource = Box::new(move |timeout| {
+            let json = receive.receive(timeout);
+            // An idle loop still calls `td_receive`, which makes TDLib's
+            // client manager before any client id exists.
+            stop_shared_before_tdlib_teardown();
+            json
+        });
         let mut hub = TdHub::with_source(source, sink).map_err(|_| TdJsonError::Load)?;
         hub.api = Some(api);
         let hub = Arc::new(hub);
@@ -300,9 +306,10 @@ static EXIT_HOOK: std::sync::Once = std::sync::Once::new();
 
 /// Stop the shared hub's receive thread when the process exits, before
 /// TDLib destroys its static client manager under it. Call right after a
-/// client id is made: `atexit` hooks and static destructors run in reverse
-/// order of registration, and TDLib registers the manager's destructor when
-/// it first makes a client id, so a hook registered after that runs first.
+/// client id is made or a `td_receive` returns: `atexit` hooks and static
+/// destructors run in reverse order of registration, and TDLib registers the
+/// manager's destructor when either first runs, so a hook registered after
+/// that runs first.
 pub fn stop_shared_before_tdlib_teardown() {
     EXIT_HOOK.call_once(|| {
         // SAFETY: `stop_shared_at_exit` is a plain `extern "C" fn()` that
@@ -314,13 +321,10 @@ pub fn stop_shared_before_tdlib_teardown() {
 /// Runs inside `exit`, so it never calls `std::thread::current()`: on macOS
 /// that ends the process silently once `exit` has torn down thread locals.
 extern "C" fn stop_shared_at_exit() {
-    let _ = std::panic::catch_unwind(|| {
-        // Never wait on the slot at exit: whoever holds it is only reading.
-        let hub = match SHARED.try_lock() {
-            Ok(slot) => slot.clone(),
-            Err(std::sync::TryLockError::Poisoned(slot)) => slot.into_inner().clone(),
-            Err(std::sync::TryLockError::WouldBlock) => None,
-        };
+    crate::thread_guard::ffi_boundary((), || {
+        // Never block exit on the slot. It is held only while a hub is
+        // being made; that rare quit keeps the old behaviour.
+        let hub = crate::locks::try_lock_or_recover(&SHARED).and_then(|slot| slot.clone());
         if let Some(hub) = hub {
             hub.stop_within(EXIT_STOP_WAIT);
         }
