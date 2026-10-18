@@ -111,11 +111,11 @@ try {
 
         # Replace a running copy only after it has quit: Windows keeps a
         # running program's files locked.
-        if ((Get-Running $exe).Count) {
+        if (@(Get-Running $exe).Count) {
             Say 'Quitting Quill to update it'
             try { Start-Process -FilePath $exe -ArgumentList '--quit' -WindowStyle Hidden } catch { }
-            for ($i = 0; $i -lt 20 -and (Get-Running $exe).Count; $i++) { Start-Sleep -Milliseconds 500 }
-            if ((Get-Running $exe).Count) { Fail 'Quill is still running; quit it and run this again' }
+            for ($i = 0; $i -lt 20 -and @(Get-Running $exe).Count; $i++) { Start-Sleep -Milliseconds 500 }
+            if (@(Get-Running $exe).Count) { Fail 'Quill is still running; quit it and run this again' }
         }
 
         # Stage beside the destination, then swap with renames on one volume,
