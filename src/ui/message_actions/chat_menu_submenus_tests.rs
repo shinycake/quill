@@ -258,3 +258,35 @@ fn exit_entry_follows_the_chat_kind(cx: &mut TestAppContext) {
     });
     assert_eq!(action, Some(true));
 }
+
+#[gpui_kit::test]
+fn only_a_typed_announcement_offers_hide(cx: &mut TestAppContext) {
+    use quill::promotion::Promotion;
+    let (app, mut vcx, chat_id) = open(cx);
+    let vcx = &mut vcx;
+    let promote = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, p: Option<Promotion>| {
+        app.update(vcx, |app, _| {
+            if let Some(session) = app.demo_session.as_mut() {
+                match p {
+                    Some(p) => session.chat_list.promoted_chats.insert(chat_id.0, p),
+                    None => session.chat_list.promoted_chats.remove(&chat_id.0),
+                };
+            }
+        });
+        show_menu(app, vcx, chat_id);
+    };
+    promote(&app, vcx, None);
+    assert!(!present(vcx, "chat-menu-hide-promotion"));
+    promote(&app, vcx, Some(Promotion::MtprotoProxy));
+    assert!(!present(vcx, "chat-menu-hide-promotion"));
+    promote(
+        &app,
+        vcx,
+        Some(Promotion::Psa {
+            kind: "covid".into(),
+        }),
+    );
+    assert!(present(vcx, "chat-menu-hide-promotion"));
+    click(vcx, "chat-menu-hide-promotion");
+    assert!(app.update(vcx, |app, _| app.chat_list.menu.is_none()));
+}

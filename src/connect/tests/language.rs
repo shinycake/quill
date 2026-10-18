@@ -3,6 +3,7 @@
 use super::super::*;
 use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
+use crate::ids::ChatId;
 use crate::lang::PackValue;
 use crate::lang::prefs::{LanguageChoice, save_choice};
 use crate::platform::MemorySecretStore;
@@ -308,4 +309,52 @@ fn the_pack_list_comes_from_the_localization_target() {
     let state = &f.driver.session.settings.language;
     assert!(!state.packs_loading);
     assert_eq!(state.packs.len(), 1);
+}
+
+fn position(chat: i64, source: Value) -> Value {
+    json!({"@type":"updateChatPosition","chat_id":chat,"position":{
+        "@type":"chatPosition","list":{"@type":"chatListMain"},"order":"9",
+        "is_pinned":false,"source":source}})
+}
+
+#[test]
+fn announcement_labels_are_fetched_once_and_hide_deletes_the_history() {
+    let mut f = Fixture::new();
+    f.feed(position(
+        7,
+        json!({"@type":"chatSourcePublicServiceAnnouncement","type":"covid","text":"Hi"}),
+    ));
+    f.feed(position(8, json!({"@type":"chatSourceMtprotoProxy"})));
+    f.driver.pump_psa_labels();
+    let sent = f.sent();
+    let ask = sent
+        .iter()
+        .find(|v| v["@type"] == "getLanguagePackStrings")
+        .unwrap();
+    assert_eq!(ask["language_pack_id"], "en");
+    assert_eq!(ask["keys"], json!(["cloud_lng_badge_psa_covid"]));
+    f.feed(strings(
+        &ask["@extra"],
+        "cloud_lng_badge_psa_covid",
+        "COVID-19 Info",
+    ));
+    let label = |f: &Fixture, chat: i64| {
+        let list = &f.driver.session.chat_list;
+        list.psa_labels.label(&list.promoted_chats[&chat])
+    };
+    assert_eq!(label(&f, 7), "COVID-19 Info");
+    assert_eq!(label(&f, 8), "Proxy sponsor");
+    let before = f.sent().len();
+    f.driver.pump_psa_labels();
+    assert_eq!(f.sent().len(), before);
+
+    assert!(f.driver.hide_promotion(ChatId(8)).unwrap().is_none());
+    assert!(f.driver.hide_promotion(ChatId(7)).unwrap().is_some());
+    let sent = f.sent();
+    let hide = sent
+        .iter()
+        .find(|v| v["@type"] == "deleteChatHistory")
+        .unwrap();
+    assert_eq!(hide["chat_id"], 7);
+    assert_eq!(hide["remove_from_chat_list"], true);
 }

@@ -259,6 +259,7 @@ impl QuillApp {
                     $order,
                     div()
                         .id($id)
+                        .test_support()
                         .flex()
                         .items_center()
                         .gap_3()
@@ -324,6 +325,30 @@ impl QuillApp {
                 {
                     this.chat_list.menu = None;
                     this.open_chat_in_new_window(chat_id, window, cx);
+                    cx.notify();
+                }
+            );
+        }
+        // tdesktop `Filler::addHidePromotion`: announcements only.
+        if self.session().is_some_and(|session| {
+            session
+                .chat_list
+                .promoted_chats
+                .get(&chat_id.0)
+                .is_some_and(quill::promotion::Promotion::can_hide)
+        }) {
+            item!(
+                6,
+                Lucide::Trash,
+                "chat-menu-hide-promotion",
+                tr(keys::CONTEXT_HIDE_PSA),
+                this,
+                cx,
+                {
+                    this.chat_list.menu = None;
+                    if let Some(live) = this.live.as_mut() {
+                        let _ = live.driver.hide_promotion(chat_id);
+                    }
                     cx.notify();
                 }
             );

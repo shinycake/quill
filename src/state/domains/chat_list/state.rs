@@ -102,7 +102,9 @@ pub struct ChatListState {
     /// Chats TDLib placed in the main list as a promotion
     /// (`chatPosition.source`: a proxy sponsor or a public service
     /// announcement), tdesktop's `useTopPromotion`.
-    pub promoted_chats: HashSet<i64>,
+    pub promoted_chats: HashMap<i64, crate::promotion::Promotion>,
+    /// The server's badge text per announcement type.
+    pub psa_labels: crate::promotion::PsaLabels,
     /// Chats whose history page was preloaded for the pull to the next
     /// channel (`pull_next`): the answer arrived.
     pub preloaded_histories: HashSet<i64>,
@@ -145,7 +147,8 @@ impl ChatListState {
             archive_settings_loading: false,
             archive_settings_open: false,
             chat_preview_fetch: None,
-            promoted_chats: HashSet::new(),
+            promoted_chats: HashMap::new(),
+            psa_labels: crate::promotion::PsaLabels::default(),
             preloaded_histories: HashSet::new(),
         }
     }

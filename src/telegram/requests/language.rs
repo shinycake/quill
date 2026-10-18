@@ -39,6 +39,18 @@ pub fn get_language_pack_strings(extra: RequestId, language_pack_id: &str) -> St
     .to_string()
 }
 
+/// `getLanguagePackStrings` for the given keys only.
+/// Response is `languagePackStrings`.
+pub fn get_language_pack_keys(extra: RequestId, language_pack_id: &str, keys: &[String]) -> String {
+    json!({
+        "@type": "getLanguagePackStrings",
+        "@extra": extra.as_extra(),
+        "language_pack_id": language_pack_id,
+        "keys": keys,
+    })
+    .to_string()
+}
+
 /// `synchronizeLanguagePack`: fetch the latest strings of a pack (changes
 /// then arrive as `updateLanguagePackStrings`). Response is `ok`.
 pub fn synchronize_language_pack(extra: RequestId, language_pack_id: &str) -> String {
@@ -82,6 +94,8 @@ mod tests {
         let v = parse(&get_language_pack_strings(extra, "pt-br"));
         assert_eq!(v["@type"], "getLanguagePackStrings");
         assert_eq!(v["keys"], serde_json::json!([]));
+        let v = parse(&get_language_pack_keys(extra, "en", &["a".to_string()]));
+        assert_eq!(v["keys"], serde_json::json!(["a"]));
         let v = parse(&synchronize_language_pack(extra, "pt-br"));
         assert_eq!(v["language_pack_id"], "pt-br");
         let v = parse(&add_custom_server_language_pack(extra, "x-custom"));
