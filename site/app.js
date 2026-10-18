@@ -65,13 +65,15 @@ async function renderRelease() {
     const asset = release.assets.find((a) => p.match.test(a.name));
     if (!asset) continue;
     if (p.id === current) currentAsset = { p, asset };
+    // On a Mac the recommended path is the Terminal installer, explained below.
+    const mac = p.id === "mac";
     const card = el(
       "a",
-      { class: `plat${p.id === current ? " current" : ""}`, href: asset.url },
+      { class: `plat${p.id === current ? " current" : ""}`, href: mac ? "#mac-install" : asset.url },
       el("span", { class: "name" }, p.label),
       el("span", { class: "meta" }, `${p.detail} · ${formatSize(asset.size)}`),
       asset.sha256 ? el("span", { class: "sha", title: "SHA-256" }, `SHA-256 ${asset.sha256}`) : null,
-      el("span", { class: "go" }, `Download ${release.tag}`),
+      el("span", { class: "go" }, mac ? `Install ${release.tag}` : `Download ${release.tag}`),
     );
     grid.append(card);
   }
@@ -84,8 +86,9 @@ async function renderRelease() {
   const hero = document.getElementById("hero-download");
   const meta = document.getElementById("hero-meta");
   if (currentAsset) {
-    label.textContent = `Download for ${currentAsset.p.label}`;
-    hero.href = currentAsset.asset.url;
+    const mac = currentAsset.p.id === "mac";
+    label.textContent = `${mac ? "Install" : "Download"} for ${currentAsset.p.label}`;
+    hero.href = mac ? "#mac-install" : currentAsset.asset.url;
   } else {
     label.textContent = "Download";
   }
@@ -191,6 +194,25 @@ function setupHeroVideo() {
   reduce.addEventListener("change", () => (reduce.matches ? video.pause() : play()));
 }
 
+function setupCopy() {
+  const button = document.getElementById("mac-copy");
+  const code = document.getElementById("mac-cmd");
+  if (!button || !code || !navigator.clipboard) {
+    if (button) button.hidden = true;
+    return;
+  }
+  button.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(code.textContent);
+      button.textContent = "Copied";
+    } catch {
+      button.textContent = "Select and copy";
+    }
+    setTimeout(() => { button.textContent = "Copy"; }, 2000);
+  });
+}
+
+setupCopy();
 setupHeroVideo();
 setupGallery();
 renderMissing();
