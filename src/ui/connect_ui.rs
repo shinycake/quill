@@ -5,7 +5,7 @@ use crate::ui::status_note::StatusNote;
 use quill::auth::view_for;
 use quill::connect::{ConnectBlocker, ConnectGate, evaluate_gate, start_prepared_live_connect};
 use quill::credentials::TelegramCredentials;
-use quill::diagnostics::MemorySink;
+use quill::diagnostics::DiscardSink;
 use quill::ids::AccountKey;
 use quill::lang::{keys, tr};
 use quill::platform::SecretStore;
@@ -168,7 +168,7 @@ impl super::app::QuillApp {
         cx: &mut gpui_kit::Context<Self>,
     ) {
         let result = prepared.and_then(|(credentials, prepared)| {
-            start_prepared_live_connect(credentials, prepared, Arc::new(MemorySink::new()))
+            start_prepared_live_connect(credentials, prepared, Arc::new(DiscardSink))
         });
         match result {
             Ok(mut live) => {
