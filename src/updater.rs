@@ -30,18 +30,75 @@ pub fn binary_asset_name() -> String {
     format!("quill-{}-{}", std::env::consts::OS, std::env::consts::ARCH)
 }
 
-/// The release asset the in-app updater downloads. macOS (and other Unix) swap
-/// the bare executable; Linux and Windows install the whole package (the same
-/// tarball/zip users download), so the bundled TDLib, ntgcalls, FFmpeg and
-/// OpenSSL libraries always match the new executable.
+/// The release asset the in-app updater downloads: the whole package users
+/// download too (the Linux tarball, the Windows zip, the macOS `Quill.app`
+/// zip), so the bundled TDLib, ntgcalls, FFmpeg and OpenSSL libraries always
+/// match the new executable. Other platforms have no package.
 pub fn update_asset_name() -> String {
     let name = binary_asset_name();
     if cfg!(target_os = "linux") {
         format!("{name}-bundle.tar.gz")
-    } else if cfg!(windows) {
+    } else if cfg!(any(windows, target_os = "macos")) {
         format!("{name}.zip")
     } else {
         name
+    }
+}
+
+/// Test installs of the self-updater read a local release fixture instead
+/// of GitHub: `QUILL_UPDATE_FIXTURE_URL=http://127.0.0.1:<port>` serves
+/// `latest.json`, `releases.json` and `download/<tag>/<asset>`. Only test
+/// and screenshot builds read the variable; release builds have no such
+/// switch and only ever speak HTTPS to GitHub.
+#[cfg(feature = "demo-capture")]
+pub(crate) fn fixture_base() -> Option<String> {
+    std::env::var("QUILL_UPDATE_FIXTURE_URL")
+        .ok()
+        .filter(|url| local_fixture_url(url))
+        .map(|url| url.trim_end_matches('/').to_string())
+}
+
+/// Exactly `http://127.0.0.1:<port>`, optionally with a trailing slash: no
+/// userinfo (`127.0.0.1:80@evil` would make `evil` the host), no path.
+#[cfg(any(test, feature = "demo-capture"))]
+pub(crate) fn local_fixture_url(url: &str) -> bool {
+    url.strip_prefix("http://127.0.0.1:")
+        .map(|port| port.trim_end_matches('/'))
+        .is_some_and(|port| {
+            (1..=5).contains(&port.len()) && port.bytes().all(|b| b.is_ascii_digit())
+        })
+}
+
+/// Where a release asset is downloaded from.
+// Downloading is part of the UI build only.
+#[cfg_attr(not(feature = "ui"), allow(dead_code))]
+pub(crate) struct DownloadSource {
+    pub url: String,
+    /// Only HTTPS is allowed (GitHub); the local fixture speaks HTTP.
+    pub https_only: bool,
+    /// GitHub serves assets through a redirect; the fixture must not
+    /// redirect anywhere.
+    pub redirects: u32,
+}
+
+/// The asset's GitHub URL, or its path under the test fixture.
+// Downloading is part of the UI build only.
+#[cfg_attr(not(feature = "ui"), allow(dead_code))]
+pub(crate) fn download_source(asset_url: &str) -> DownloadSource {
+    #[cfg(feature = "demo-capture")]
+    if let Some(base) = fixture_base()
+        && let Some(rest) = asset_url.strip_prefix(&format!("{RELEASES_URL}/download/"))
+    {
+        return DownloadSource {
+            url: format!("{base}/download/{rest}"),
+            https_only: false,
+            redirects: 0,
+        };
+    }
+    DownloadSource {
+        url: asset_url.to_string(),
+        https_only: true,
+        redirects: 3,
     }
 }
 
@@ -201,6 +258,24 @@ fn release_state(release: GithubRelease, version: Version, current: &Version) ->
     })
 }
 
+/// The release list or latest-release endpoint, and whether only HTTPS is
+/// allowed: GitHub's API, or the test fixture's `releases.json` /
+/// `latest.json`.
+#[cfg(feature = "ui")]
+fn check_endpoint(beta: bool) -> (String, bool) {
+    #[cfg(feature = "demo-capture")]
+    if let Some(base) = fixture_base() {
+        let file = if beta { "releases.json" } else { "latest.json" };
+        return (format!("{base}/{file}"), false);
+    }
+    let url = if beta {
+        RELEASES_API_URL
+    } else {
+        LATEST_API_URL
+    };
+    (url.to_string(), true)
+}
+
 /// Blocking, bounded check; callers run it on the background executor.
 /// "Install beta versions" (`advanced::update_channel`) picks the channel.
 #[cfg(feature = "ui")]
@@ -219,19 +294,16 @@ pub fn check_release(beta: bool) -> UpdateState {
             interpret_release(status, body, crate::version::APP)
         }
     };
+    let (url, https_only) = check_endpoint(beta);
     let agent = ureq::Agent::config_builder()
-        .https_only(true)
+        .https_only(https_only)
         .max_redirects(0)
         .timeout_global(Some(std::time::Duration::from_secs(15)))
         .http_status_as_error(false)
         .build()
         .new_agent();
     let response = agent
-        .get(if beta {
-            RELEASES_API_URL
-        } else {
-            LATEST_API_URL
-        })
+        .get(&url)
         .header("User-Agent", format!("Quill/{}", crate::version::APP))
         .header("Accept", "application/vnd.github+json")
         .call();
@@ -276,16 +348,33 @@ mod tests {
     }
 
     #[test]
-    fn update_asset_is_the_package_on_linux_and_windows() {
+    fn update_asset_is_the_release_package() {
         let name = binary_asset_name();
         let asset = update_asset_name();
         if cfg!(target_os = "linux") {
             assert_eq!(asset, format!("{name}-bundle.tar.gz"));
-        } else if cfg!(windows) {
+        } else if cfg!(any(windows, target_os = "macos")) {
             assert_eq!(asset, format!("{name}.zip"));
         } else {
             assert_eq!(asset, name);
         }
+        let github = format!("{RELEASES_URL}/download/v1.0.0/{asset}");
+        let source = download_source(&github);
+        assert_eq!(source.url, github);
+        assert!(source.https_only);
+        assert_eq!(source.redirects, 3);
+    }
+
+    #[test]
+    fn only_a_bare_loopback_origin_is_a_fixture_url() {
+        assert!(local_fixture_url("http://127.0.0.1:18765"));
+        assert!(local_fixture_url("http://127.0.0.1:8/"));
+        assert!(!local_fixture_url("http://127.0.0.1:80@evil.com/"));
+        assert!(!local_fixture_url("http://127.0.0.1:80/path"));
+        assert!(!local_fixture_url("http://127.0.0.1"));
+        assert!(!local_fixture_url("https://127.0.0.1:443"));
+        assert!(!local_fixture_url("http://localhost:80"));
+        assert!(!local_fixture_url("http://127.0.0.1:123456"));
     }
 
     #[test]
