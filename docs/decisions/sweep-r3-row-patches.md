@@ -111,9 +111,10 @@ chrome follows the same rules as #986.
   returns `None` for another instance, and the rows key carries the instance, so the
   patch path rebuilds too. No replacement site needed a change.
 - **Vanish.** The splice declines while any message is crumbling.
-- **Cost.** `RowSeed::before` and `changed_since` (and `changes_since`) are O(rows) per
-  splice: they walk the kept rows above the region and every message's revision. That is
-  a pointer walk, with no copying and no chrome derived; the measured cost is the copy
+- **Cost.** `RowSeed::before` is O(rows) per splice (it walks the kept rows above the
+  region), and `changed_since` (so `changes_since`) is O(messages): it walks every
+  message's revision in `changed_at`. Both are
+  plain walks, with no copying and no chrome derived; the measured cost is the copy
   and chrome counts in the tables. A per-row index would remove it if profiles ask for it.
 - **Revision wraparound.** `next_revision` is a `u64` counter; it would take centuries at
   a billion changes a second to wrap, so it is documented, not handled.

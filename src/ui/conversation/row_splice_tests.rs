@@ -485,14 +485,15 @@ fn a_crumbling_message_makes_the_rows_build_whole(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");
     let vcx = &mut vcx;
     mixed_group(&app, vcx);
+    // The dissolve must really start: chat effects on, motion not reduced.
+    quill::power_saving::set(0);
+    quill::power_saving::set_force_all(false);
+    quill::power_saving::set_os_reduce_motion(false);
     app.update(vcx, |app, _| {
         app.begin_vanish(ChatId(GROUP), &[MessageId(id(5))]);
     });
     let crumbling = app.read_with(vcx, |app, _| !app.history.vanishing.borrow().is_empty());
-    if !crumbling {
-        // Chat effects are off here (power saving): nothing to dissolve.
-        return;
-    }
+    assert!(crumbling, "begin_vanish skipped the dissolve");
     check(
         &app,
         vcx,
@@ -500,7 +501,13 @@ fn a_crumbling_message_makes_the_rows_build_whole(cx: &mut TestAppContext) {
         &[&delete(&[5])],
         Expect::Build,
     );
-    // A later message while the dust is in the air: never a splice.
+    // A single new message while the dust is in the air: never a splice.
+    let revision = app.read_with(vcx, |app, _| {
+        app.session()
+            .and_then(|s| s.histories.get(&GROUP))
+            .map(|h| h.messages.revision())
+    });
+    let revision = revision.expect("the open chat's history");
     let landed = text_message(id(MESSAGES + 1), Some(21), BASE_DATE + 20 * 86400, "");
     check(
         &app,
@@ -509,12 +516,34 @@ fn a_crumbling_message_makes_the_rows_build_whole(cx: &mut TestAppContext) {
         &[&landed],
         Expect::Build,
     );
-    // And the splice itself declines, whatever the key says.
-    let declined = app.read_with(vcx, |app, _| {
+    // Revision taken just before that one message: only the vanish guard
+    // can decline. With the dissolve gone the same call splices.
+    let splice_since = |app: &QuillApp| {
         let history = app.session()?.histories.get(&GROUP)?;
-        Some(app.row_splice(&history.messages, history.messages.instance(), 0, None, 0))
+        Some(
+            app.row_splice(
+                &history.messages,
+                history.messages.instance(),
+                revision,
+                None,
+                0,
+            )
+            .is_some(),
+        )
+    };
+    let (while_crumbling, still_crumbling) = app.read_with(vcx, |app, _| {
+        (
+            splice_since(app),
+            !app.history.vanishing.borrow().is_empty(),
+        )
     });
-    assert!(matches!(declined, Some(None)), "splice while dissolving");
+    assert!(still_crumbling, "the dissolve ended before the check");
+    assert_eq!(while_crumbling, Some(false), "splice while dissolving");
+    let after = app.read_with(vcx, |app, _| {
+        app.history.vanishing.borrow_mut().clear();
+        splice_since(app)
+    });
+    assert_eq!(after, Some(true), "one new message splices without dust");
 }
 
 #[gpui_kit::test]
@@ -607,16 +636,19 @@ fn a_splice_keeps_following_the_tail(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn more_removals_than_the_log_holds_build_the_rows_whole(cx: &mut TestAppContext) {
+fn more_changes_than_a_patch_holds_build_the_rows_whole(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");
     let vcx = &mut vcx;
     mixed_group(&app, vcx);
-    let deletes: Vec<String> = (1..=66).map(|n| delete(&[n])).collect();
+    // Over `PATCH_MAX` (32) but inside the removal log (64), so only the
+    // cap declines the splice; the log running out is covered by
+    // `removals_too_far_back_are_not_listed`.
+    let deletes: Vec<String> = (1..=40).map(|n| delete(&[n])).collect();
     let updates: Vec<&str> = deletes.iter().map(String::as_str).collect();
     check(
         &app,
         vcx,
-        "66 removals in one render",
+        "40 removals in one render",
         &updates,
         Expect::Build,
     );
