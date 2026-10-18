@@ -35,5 +35,7 @@ download, not a compromised release. That's the same trust as downloading the
 zip directly. `package-macos.yml` runs the installer on each build's zip and
 checks that the installed app has no quarantine attribute and a valid signature.
 
-Quill's in-app updater downloads with its own client, so its downloads aren't
-quarantined either.
+Quill's own HTTP downloads (ureq) aren't quarantined either, so an in-place
+macOS updater won't trip Gatekeeper as long as it keeps the bundle's signature
+valid and the Info.plist never sets `LSFileQuarantineEnabled`. Until that
+updater ships, Mac users update by running the installer again.

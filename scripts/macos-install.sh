@@ -83,7 +83,8 @@ xattr -dr com.apple.quarantine "$new" 2>/dev/null || true
 # out from under it. Only the copy being replaced: Quill runs one instance, so
 # when this one runs, `--quit` reaches it; any other copy is left alone.
 exe="$app/Contents/MacOS/quill"
-running() { pgrep -f "^$exe( |$)" >/dev/null; }
+# Fixed-string match on the command line: the path may hold regex characters.
+running() { ps -axo command= | awk -v e="$exe" '$0 == e || index($0, e " ") == 1 { found = 1 } END { exit !found }'; }
 if running; then
   say "Quitting Quill to update it"
   "$exe" --quit </dev/null >/dev/null 2>&1 || true
@@ -91,12 +92,15 @@ if running; then
   ! running || die "Quill is still running; quit it and run this again"
 fi
 
-# Stage next to the destination so the final move is a rename on one volume.
+# Stage next to the destination, then swap with renames on one volume so an
+# interrupted install never leaves a half-deleted Quill.app.
 staged="$dest_dir/.Quill.app.installing"
-rm -rf "$staged"
+old="$dest_dir/.Quill.app.old"
+rm -rf "$staged" "$old"
 ditto "$new" "$staged"
-rm -rf "$app"
+if [ -e "$app" ]; then mv "$app" "$old"; fi
 mv "$staged" "$app"
+rm -rf "$old"
 xattr -dr com.apple.quarantine "$app" 2>/dev/null || true
 
 version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist" 2>/dev/null || echo unknown)"
