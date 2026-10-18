@@ -31,8 +31,6 @@ const ICON_TINTS: [(u32, u32); 5] = [
     (0x4cb8a0, 0x4c9fe0),
 ];
 
-/// The stickers the stickers preview shows: the one that was clicked
-/// first, then the examples.
 /// Text and icons on the promo's gradients. The gradients are fixed brand
 /// colours, so the foreground is a fixed white too and never follows a
 /// custom theme.
@@ -40,6 +38,8 @@ fn on_brand() -> Rgba {
     rgb(0xffffff)
 }
 
+/// The stickers the stickers preview shows: the one that was clicked
+/// first, then the examples.
 fn preview_stickers(
     hub: &quill::premium_hub::PremiumHub,
 ) -> impl Iterator<Item = &quill::telegram::envelope::StickerItem> {

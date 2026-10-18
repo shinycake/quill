@@ -268,13 +268,28 @@ impl QuillApp {
             // window that set it, not whichever one is in place later.
             let scope = self.windows.scope;
             cx.defer(move |cx| {
-                let _ = app.update(cx, |this, cx| {
-                    this.in_window_scope(scope, cx, |this, cx| {
-                        this.history.chrome_notify_pending.set(false);
-                        cx.notify();
-                    });
-                });
+                let _ = app.update(cx, |this, cx| this.finish_chrome_notify(scope, cx));
             });
+        }
+    }
+
+    /// Clear `scope`'s pending-notify flag and notify. When the window
+    /// cannot be scoped in (it is live but its session view is gone), the
+    /// flag is cleared on its slot directly so chrome notifies cannot stop.
+    pub(in crate::ui) fn finish_chrome_notify(
+        &mut self,
+        scope: Option<ChatId>,
+        cx: &mut Context<Self>,
+    ) {
+        let scoped = self.in_window_scope(scope, cx, |this, cx| {
+            this.history.chrome_notify_pending.set(false);
+            cx.notify();
+        });
+        if scoped.is_some() {
+            return;
+        }
+        if let Some(chat_id) = scope {
+            self.clear_slot_chrome_notify(chat_id);
         }
     }
 
