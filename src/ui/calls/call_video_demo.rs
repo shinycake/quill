@@ -64,17 +64,6 @@ impl QuillApp {
     }
 }
 
-impl QuillApp {
-    /// `QUILL_DEMO_THEME=high-contrast`: the call demos switch the app to
-    /// the high-contrast theme (the generic demo prefs only know dark).
-    pub(in crate::ui) fn demo_high_contrast(&mut self, cx: &mut Context<Self>) {
-        if std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("high-contrast") {
-            self.appearance.theme = quill::settings::ThemeChoice::HighContrast;
-            self.apply_appearance(cx);
-        }
-    }
-}
-
 /// The devices the menu lists under `QUILL_DEMO_DEVICES=1`.
 fn demo_devices() -> Vec<MediaDevice> {
     let device = |id: &str, name: &str, kind| MediaDevice {
@@ -83,7 +72,11 @@ fn demo_devices() -> Vec<MediaDevice> {
         kind,
     };
     vec![
-        device("mic-1", "MacBook Pro Microphone", MediaDeviceKind::Microphone),
+        device(
+            "mic-1",
+            "MacBook Pro Microphone",
+            MediaDeviceKind::Microphone,
+        ),
         device("mic-2", "AirPods Pro", MediaDeviceKind::Microphone),
         device("spk-1", "MacBook Pro Speakers", MediaDeviceKind::Speaker),
         device("spk-2", "AirPods Pro", MediaDeviceKind::Speaker),

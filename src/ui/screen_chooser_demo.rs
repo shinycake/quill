@@ -30,6 +30,17 @@ register_demos![
     .timing(2500, 4000),
 ];
 
+impl QuillApp {
+    /// `QUILL_DEMO_THEME=high-contrast`: the call demos switch the app to
+    /// the high-contrast theme (the generic demo prefs only know dark).
+    pub(in crate::ui) fn demo_high_contrast(&mut self, cx: &mut Context<Self>) {
+        if std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("high-contrast") {
+            self.appearance.theme = quill::settings::ThemeChoice::HighContrast;
+            self.apply_appearance(cx);
+        }
+    }
+}
+
 /// The shared window (hidden, so the share is paused).
 const SHARED: &str = "window:42";
 

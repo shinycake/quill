@@ -25,9 +25,9 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::state::ActiveGroupCall;
 
+use crate::ui::app_theme::call_chrome;
 use quill::lang::{keys, tr, tr_with};
 use std::time::Duration;
-use crate::ui::app_theme::call_chrome;
 
 /// lib_ui `colors.palette`.
 pub(super) const BG: u32 = call_chrome::GROUP_SURFACE;
@@ -133,7 +133,10 @@ impl QuillApp {
             .session()
             .and_then(|s| s.calls.active_group_call.clone())
         else {
-            return div().size_full().bg(call_chrome::group_surface()).into_any_element();
+            return div()
+                .size_full()
+                .bg(call_chrome::group_surface())
+                .into_any_element();
         };
         let state = mute_state(&call);
         // Your own microphone: the halo follows the level while live.

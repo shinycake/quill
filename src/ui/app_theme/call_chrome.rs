@@ -21,8 +21,11 @@ pub(crate) const GROUP_SURFACE: u32 = 0x1a2026;
 /// Member rows and cards on the group panel, and their hover.
 pub(crate) const GROUP_RAISED: u32 = 0x2c333d;
 pub(crate) const GROUP_RAISED_OVER: u32 = 0x323a45;
-/// Secondary text on the group panel.
+/// Secondary text on the group panel as other screens still draw it.
 pub(crate) const GROUP_MUTED: u32 = 0x91979e;
+/// Secondary text on the group panel's own rows: `GROUP_MUTED` lifted to
+/// WCAG AA (4.5:1) on the raised rows and their hover.
+const GROUP_MUTED_AA: u32 = 0xa3a9b0;
 /// Secondary text on the call window.
 pub(crate) const MUTED: u32 = 0xaaabac;
 
@@ -85,7 +88,7 @@ pub(crate) fn muted() -> Hsla {
 
 /// Secondary text on the group panel.
 pub(crate) fn group_muted() -> Hsla {
-    hc_or(rgb(GROUP_MUTED).into(), text())
+    hc_or(rgb(GROUP_MUTED_AA).into(), text())
 }
 
 /// A round button over video, and its hover.
@@ -177,7 +180,8 @@ pub(crate) fn answer_ring() -> Hsla {
 #[cfg(test)]
 mod tests {
     use super::{
-        border, group_muted, group_raised, high_contrast, menu_surface, muted, surface, text,
+        border, group_muted, group_raised, group_raised_over, high_contrast, menu_surface, muted,
+        surface, text,
     };
     use crate::ui::chat_theme::set_high_contrast;
     use gpui_kit::{Hsla, Rgba};
@@ -208,6 +212,10 @@ mod tests {
             assert!(
                 ratio(group_muted(), group_raised()) >= 4.5,
                 "group panel, hc {high}"
+            );
+            assert!(
+                ratio(group_muted(), group_raised_over()) >= 4.5,
+                "group panel hover, hc {high}"
             );
             assert!(ratio(muted(), menu_surface()) >= 4.5, "menu, hc {high}");
         }

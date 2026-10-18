@@ -41,3 +41,9 @@ call window with tiles (`ready-call-screen-share`), in light, dark and
 high contrast: light and dark are pixel-equivalent apart from the live
 video; high contrast now shows a black menu with a white outline, white
 status text and heavier chips.
+
+## Contrast change
+
+The group panel's secondary text (`0x91979e` on the `0x2c333d` rows) was
+4.3:1, under AA. The panel now draws it at `0xa3a9b0` (4.8:1 on the hover
+row). Other screens that import the old constant are unchanged.

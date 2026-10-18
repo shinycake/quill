@@ -21,6 +21,7 @@ use super::chat_row::initials_avatar;
 use super::nested_click::SwallowPress;
 use super::video_player::controls::{LiveInput, LiveOverlayParts, PictureOverlay, PictureState};
 use super::video_player::{Purpose, VideoPlayer, video_frame};
+use crate::ui::app_theme::call_chrome;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Icon, Sizable};
@@ -31,7 +32,6 @@ use quill::calls::tile_pin::{TileKey, stage_tile};
 use quill::lang::{keys, tr, tr_with};
 use quill::state::ActiveGroupCall;
 use quill::telegram::envelope::{MessageSender, ParsedGroupCallParticipant};
-use crate::ui::app_theme::call_chrome;
 
 struct Tile {
     key: TileKey,

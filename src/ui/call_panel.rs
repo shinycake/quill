@@ -19,6 +19,7 @@ use super::call_panel_devices::{self as devices, DeviceMenuTarget};
 use super::calls::call_video::{CallPicture, CallWindowRoot};
 use super::chat_row::chat_avatar;
 use super::nested_click::SwallowPress;
+use crate::ui::app_theme::call_chrome;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{ActiveTheme, Icon, Root, Sizable};
@@ -29,12 +30,7 @@ use quill::lang::{keys, tr, tr_with};
 use quill::telegram::envelope::CallState;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use crate::ui::app_theme::call_chrome;
 
-/// lib_ui `colors.palette`.
-const BG: u32 = call_chrome::SURFACE;
-/// The window's dark ground, under the pictures.
-pub(crate) const CALL_BG: u32 = BG;
 const ANSWER_BG: u32 = 0x66c95b;
 const HANGUP_BG: u32 = 0xd75a5a;
 

@@ -9,6 +9,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::app_theme::call_chrome;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{Icon, Sizable};
 use gpui_kit::prelude::FluentBuilder;
@@ -16,7 +17,6 @@ use gpui_kit::*;
 use quill::calls::engine::{MediaDevice, MediaDeviceKind};
 use quill::lang::{keys, tr, tr_with};
 use std::rc::Rc;
-use crate::ui::app_theme::call_chrome;
 
 /// Which button's menu is open.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
