@@ -473,6 +473,10 @@ impl QuillApp {
 
     /// List indices (into the built rows, not the message history) of the
     /// rows whose gap is closing: only those are measured again each frame.
+    ///
+    /// This reads the real elapsed time, not the pinned instant: the
+    /// collapse window has margins wide enough that a frame's difference
+    /// cannot skip or repeat a row.
     pub(super) fn closing_rows(&self) -> Vec<usize> {
         let Ok(vanishing) = self.history.vanishing.try_borrow() else {
             return Vec::new();
@@ -512,31 +516,6 @@ impl QuillApp {
         // The rows are kept while it runs: the frame clock drives it.
         if !vanishing.is_empty() {
             self.request_animation_tick(60, cx);
-        }
-        // The list keeps each row's measured height, so a gap that is
-        // closing is measured again every frame to pull the rows below up.
-        let closing: Vec<usize> = vanishing
-            .iter()
-            .filter(|ghost| ghost.row.is_some())
-            .filter(|ghost| {
-                ghost
-                    .elapsed()
-                    .is_some_and(|t| t >= WIPE && t < WIPE + ghost.collapse())
-            })
-            .filter_map(|ghost| {
-                let id = ghost.message.id;
-                self.history
-                    .rows
-                    .iter()
-                    .position(|row| row.first_id() == Some(id))
-            })
-            .collect();
-        if !closing.is_empty() {
-            self.history.scroller.update(cx, |state, cx| {
-                for row in closing {
-                    let _ = state.remeasure_items(row..row + 1, cx);
-                }
-            });
         }
         let clouds: Vec<(f32, Rc<Vec<Grain>>)> = vanishing
             .iter()
@@ -585,6 +564,12 @@ impl QuillApp {
             ghost.row = Some(area);
             ghost.bubble = Some(area);
         }
+    }
+
+    /// Let the dissolve clock run again after `set_vanishing_clock`.
+    pub(super) fn release_vanishing_clock(&self) {
+        self.history.vanish_held.set(false);
+        self.history.vanish_now.set(None);
     }
 
     /// Put every started dissolve `secs` into its animation.

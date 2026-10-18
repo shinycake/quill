@@ -673,14 +673,19 @@ fn two_reads_in_one_round_see_the_same_phase(cx: &mut TestAppContext) {
         &[&delete(&[5])],
         Expect::Build,
     );
+    // Just before the end of the row phase (1.05s: wipe plus a 0.6s
+    // collapse), with the clock running free so only the pin holds it.
     let (first, second, later) = app.update(vcx, |app, _| {
-        app.set_vanishing_clock(0.05);
+        app.set_vanishing_clock(1.03);
+        app.release_vanishing_clock();
+        app.pin_vanish_now();
         let first = app.vanish_rows_hash();
-        // Time passes inside the round: the pinned instant holds.
-        std::thread::sleep(std::time::Duration::from_millis(30));
+        // Time passes inside the round and crosses the boundary: the
+        // pinned instant holds.
+        std::thread::sleep(std::time::Duration::from_millis(60));
         let second = app.vanish_rows_hash();
         // The next round pins again and sees the later phase.
-        app.set_vanishing_clock(1.2);
+        app.pin_vanish_now();
         (first, second, app.vanish_rows_hash())
     });
     assert_eq!(first, second, "both reads see the phase of the pin");
