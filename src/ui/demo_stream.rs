@@ -15,7 +15,7 @@ use super::app::QuillApp;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::telegram::client::OwnedEnvelope;
-use quill::telegram::envelope::{ChatKind, parse_envelope};
+use quill::telegram::envelope::{ChatKind, MessageSender, parse_envelope};
 use std::time::Duration;
 
 /// File id the stream reports automatic download progress for.
@@ -55,6 +55,13 @@ impl QuillApp {
             return;
         };
         let open = session.open_chat;
+        if step.is_multiple_of(2)
+            && stream_into_open_chat()
+            && let Some(json) = open.and_then(|chat| open_chat_update(session, chat, step / 2))
+        {
+            apply_json(self, &json, cx);
+            return;
+        }
         // A private chat and another chat, neither of them open.
         let mut others: Vec<(ChatId, Option<i64>)> = session
             .chats
@@ -102,18 +109,88 @@ impl QuillApp {
                 other.0
             ),
         };
-        let Ok(envelope) = parse_envelope(&json) else {
-            return;
-        };
-        let need = quill::state::redraw_need(session, &envelope);
-        let seq = session.last_seq + 1;
-        session.apply(OwnedEnvelope {
-            seq,
-            client_id: None,
-            envelope,
-        });
-        self.redraw_polled(need, false, cx);
+        apply_json(self, &json, cx);
     }
+}
+
+fn apply_json(app: &mut QuillApp, json: &str, cx: &mut Context<QuillApp>) {
+    let Some(session) = app.demo_session.as_mut() else {
+        return;
+    };
+    let Ok(envelope) = parse_envelope(json) else {
+        return;
+    };
+    let need = quill::state::redraw_need(session, &envelope);
+    let seq = session.last_seq + 1;
+    session.apply(OwnedEnvelope {
+        seq,
+        client_id: None,
+        envelope,
+    });
+    app.redraw_polled(need, false, cx);
+}
+
+/// `QUILL_DEMO_STREAM_OPEN=1`: every other update of the stream goes to
+/// the open chat, a busy chat: a new message, a reaction on the newest,
+/// and now and then the message above the newest deleted.
+fn stream_into_open_chat() -> bool {
+    std::env::var_os("QUILL_DEMO_STREAM_OPEN").is_some_and(|value| value == "1")
+}
+
+/// Text of the messages the stream posts.
+const STREAM_TEXT: &str = "Stream message";
+
+fn open_chat_update(session: &quill::state::Session, chat: ChatId, step: u64) -> Option<String> {
+    let history = session.histories.get(&chat.0)?;
+    let mut newest = history.messages.values().rev();
+    let last = newest.next()?;
+    let chat_id = chat.0;
+    Some(match step % 6 {
+        0 | 2 | 4 => {
+            // Two from whoever wrote last that is not the user, then one
+            // of the user's own, so runs form and break.
+            let incoming = history
+                .messages
+                .values()
+                .rev()
+                .find(|message| !message.is_outgoing)
+                .filter(|_| step % 6 != 4);
+            let outgoing = incoming.is_none();
+            let sender =
+                incoming
+                    .and_then(|message| message.sender)
+                    .map_or(String::new(), |sender| match sender {
+                        MessageSender::User { user_id } => format!(
+                            r#""sender_id":{{"@type":"messageSenderUser","user_id":{user_id}}},"#
+                        ),
+                        MessageSender::Chat { chat_id } => format!(
+                            r#""sender_id":{{"@type":"messageSenderChat","chat_id":{chat_id}}},"#
+                        ),
+                    });
+            let date = quill::local_time::now_unix();
+            format!(
+                r#"{{"@type":"updateNewMessage","message":{{"id":{},"chat_id":{chat_id},{sender}"is_outgoing":{outgoing},"date":{date},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{STREAM_TEXT} {step}","entities":[]}}}}}}}}"#,
+                last.id.0 + 1
+            )
+        }
+        1 | 3 => format!(
+            r#"{{"@type":"updateMessageInteractionInfo","chat_id":{chat_id},"message_id":{},"interaction_info":{{"@type":"messageInteractionInfo","view_count":{step},"forward_count":0,"reactions":{{"@type":"messageReactions","reactions":[{{"@type":"messageReaction","type":{{"@type":"reactionTypeEmoji","emoji":"👍"}},"total_count":{},"is_chosen":false,"recent_sender_ids":[]}}],"are_tags":false}}}}}}"#,
+            last.id.0,
+            step / 2 + 1
+        ),
+        _ => {
+            // Only a message the stream posted, never the demo's own.
+            let above = newest.next()?;
+            let posted = quill::state::effective_preview(above).starts_with(STREAM_TEXT);
+            if !posted {
+                return None;
+            }
+            format!(
+                r#"{{"@type":"updateDeleteMessages","chat_id":{chat_id},"message_ids":[{}],"is_permanent":true,"from_cache":false}}"#,
+                above.id.0
+            )
+        }
+    })
 }
 
 fn typing(chat_id: i64, user_id: i64, action: &str) -> String {

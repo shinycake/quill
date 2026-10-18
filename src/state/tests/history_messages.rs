@@ -88,3 +88,55 @@ fn a_message_coming_or_going_moves_the_ids_revision() {
             .all(|id| *id == 3 || *id == 4)
     );
 }
+
+#[test]
+fn changes_name_the_messages_added_and_removed() {
+    let mut messages = three();
+    let revision = messages.revision();
+    messages.insert(4, message(4, "new"));
+    messages.remove(&2);
+    assert_eq!(
+        messages.changes_since(revision),
+        Some(super::HistoryChanges {
+            changed: vec![4],
+            removed: vec![2],
+        })
+    );
+    // A send that succeeded: the pending id goes, the server id comes.
+    let revision = messages.revision();
+    messages.remove(&4);
+    messages.insert(5, message(5, "new"));
+    assert_eq!(
+        messages.changes_since(revision),
+        Some(super::HistoryChanges {
+            changed: vec![5],
+            removed: vec![4],
+        })
+    );
+}
+
+#[test]
+fn removals_too_far_back_are_not_listed() {
+    let mut messages = HistoryMessages::default();
+    for id in 1..=200 {
+        messages.insert(id, message(id, "m"));
+    }
+    let revision = messages.revision();
+    for id in 1..=100 {
+        messages.remove(&id);
+    }
+    assert_eq!(messages.changes_since(revision), None, "100 removals");
+    let recent = messages.revision();
+    messages.remove(&150);
+    assert_eq!(
+        messages.changes_since(recent).map(|c| c.removed),
+        Some(vec![150])
+    );
+    let before_clear = messages.revision();
+    messages.clear();
+    assert_eq!(
+        messages.changes_since(before_clear),
+        None,
+        "a cleared window"
+    );
+}

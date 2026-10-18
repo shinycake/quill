@@ -14,6 +14,10 @@ pub(in crate::ui) struct RowsSource<'a> {
     pub(in crate::ui) unread_anchor: Option<MessageId>,
     /// The chat whose translations the rows show in place.
     pub(in crate::ui) translated: Option<ChatId>,
+    /// Rows built after the messages (the joined notice). `None` when the
+    /// rows are not the messages in id order, so a message coming or going
+    /// builds them all again.
+    pub(in crate::ui) tail: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -33,12 +37,14 @@ pub(in crate::ui) struct HistoryRowsKey {
 }
 
 impl HistoryRowsKey {
-    /// Same rows as `other` except for messages changed in place.
-    fn differs_only_in_place(&self, other: &Self) -> bool {
+    /// Same rows as `other` except for the messages: changed in place,
+    /// added or removed.
+    fn differs_only_in_messages(&self, other: &Self) -> bool {
         self.messages_revision != other.messages_revision
             && *self
                 == Self {
                     messages_revision: self.messages_revision,
+                    ids_revision: self.ids_revision,
                     ..other.clone()
                 }
     }
@@ -51,12 +57,14 @@ pub(in crate::ui) enum RowsInput {
     /// These messages changed in place: `(row, new message)`, each row's
     /// place among its neighbours the same.
     Patch(Vec<(usize, HistoryMessage)>),
+    /// Messages came or went: build again only the rows around them.
+    Splice(super::row_splice::RowSplice),
     /// Build every row from these messages (oldest first).
     Build(Vec<HistoryMessage>),
 }
 
 /// Changed messages past which the rows are built again instead.
-const PATCH_MAX: usize = 32;
+pub(super) const PATCH_MAX: usize = 32;
 
 fn hash_of(value: impl Hash) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -101,15 +109,32 @@ impl QuillApp {
         };
         let input = match self.history.rows_key.as_ref() {
             Some(old) if *old == key => RowsInput::Keep,
-            Some(old) if key.differs_only_in_place(old) => source
-                .messages
-                .and_then(|list| {
-                    self.in_place_changes(list, old.messages_revision, source.translated)
-                })
-                .map_or_else(|| RowsInput::Build(messages()), RowsInput::Patch),
+            Some(old) if key.differs_only_in_messages(old) => self
+                .changed_rows(&source, old, &key)
+                .unwrap_or_else(|| RowsInput::Build(messages())),
             _ => RowsInput::Build(messages()),
         };
         (key, input)
+    }
+
+    /// Patch the rows when messages only changed in place and kept their
+    /// place, else build again the rows around the changes; `None` when
+    /// every row must be built.
+    fn changed_rows(
+        &self,
+        source: &RowsSource,
+        old: &HistoryRowsKey,
+        new: &HistoryRowsKey,
+    ) -> Option<RowsInput> {
+        let list = source.messages?;
+        if old.ids_revision == new.ids_revision
+            && let Some(patch) =
+                self.in_place_changes(list, old.messages_revision, source.translated)
+        {
+            return Some(RowsInput::Patch(patch));
+        }
+        self.row_splice(list, old.messages_revision, source.translated, source.tail?)
+            .map(RowsInput::Splice)
     }
 
     /// The messages of `list` changed after `since`, each with the row that
@@ -164,6 +189,7 @@ impl QuillApp {
             window_epoch: history.map_or(0, |h| h.window_epoch),
             unread_anchor: history.and_then(|h| h.unread_anchor),
             translated: chat,
+            tail: Some(usize::from(chat.is_some() && joined.is_some())),
         };
         self.history_rows_input(source, highlight, || {
             let mut messages: Vec<HistoryMessage> = history
@@ -195,6 +221,7 @@ impl QuillApp {
             window_epoch: 0,
             unread_anchor: None,
             translated: None,
+            tail: Some(0),
         };
         self.history_rows_input(source, highlight, || {
             history
@@ -219,6 +246,9 @@ impl QuillApp {
             window_epoch: thread.window_epoch,
             unread_anchor: thread.unread_anchor,
             translated: None,
+            // The root post and the "Discussion started" divider head the
+            // replies.
+            tail: None,
         };
         self.history_rows_input(source, highlight, || thread.rows())
     }
@@ -237,6 +267,7 @@ impl QuillApp {
             window_epoch: 0,
             unread_anchor: None,
             translated: None,
+            tail: Some(0),
         };
         Some(self.history_rows_input(source, highlight, || {
             history.ordered().into_iter().cloned().collect()

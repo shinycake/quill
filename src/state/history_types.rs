@@ -282,8 +282,27 @@ pub struct HistoryMessages {
     map: BTreeMap<i64, HistoryMessage>,
     /// The `revision` at which each message was last stored or changed.
     changed_at: HashMap<i64, u64>,
+    /// The latest removals, oldest first, with the `revision` each went at
+    /// (at most `REMOVED_LOG`).
+    removed: std::collections::VecDeque<(i64, u64)>,
+    /// `removed` holds every removal after this revision.
+    removed_floor: u64,
     revision: u64,
     ids_revision: u64,
+}
+
+/// Removals `HistoryMessages::changes_since` can still name; a view asking
+/// from before the oldest of them builds its rows again.
+const REMOVED_LOG: usize = 64;
+
+/// What changed in a [`HistoryMessages`] after a revision.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct HistoryChanges {
+    /// Messages stored or changed, oldest id first.
+    pub changed: Vec<i64>,
+    /// Messages removed, oldest id first. One removed and stored again is
+    /// in both lists.
+    pub removed: Vec<i64>,
 }
 
 impl HistoryMessages {
@@ -311,6 +330,26 @@ impl HistoryMessages {
         ids
     }
 
+    /// Messages stored, changed or removed after `revision`; `None` when
+    /// removals that far back are no longer listed.
+    pub fn changes_since(&self, revision: u64) -> Option<HistoryChanges> {
+        if revision < self.removed_floor {
+            return None;
+        }
+        let mut removed: Vec<i64> = self
+            .removed
+            .iter()
+            .filter(|(_, at)| *at > revision)
+            .map(|(id, _)| *id)
+            .collect();
+        removed.sort_unstable();
+        removed.dedup();
+        Some(HistoryChanges {
+            changed: self.changed_since(revision),
+            removed,
+        })
+    }
+
     fn touch(&mut self, id: i64) {
         self.revision = next_revision();
         self.changed_at.insert(id, self.revision);
@@ -334,6 +373,12 @@ impl HistoryMessages {
         let removed = self.map.remove(id)?;
         self.changed_at.remove(id);
         self.ids_changed();
+        self.removed.push_back((*id, self.revision));
+        while self.removed.len() > REMOVED_LOG {
+            if let Some((_, at)) = self.removed.pop_front() {
+                self.removed_floor = at;
+            }
+        }
         Some(removed)
     }
 
@@ -385,6 +430,8 @@ impl HistoryMessages {
             self.map.clear();
             self.changed_at.clear();
             self.ids_changed();
+            self.removed.clear();
+            self.removed_floor = self.revision;
         }
     }
 }
