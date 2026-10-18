@@ -429,6 +429,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Top-people strip in the empty search state (`getTopChats`) <!-- parity:chatlist-top-people -->
 - [ ] Forum rows show the latest topic titles <!-- parity:chatlist-forum-topic-titles -->
 - [x] PSA and promoted-chat rows: badge and hide action <!-- parity:chatlist-psa-promoted -->
+- [ ] One-time "about this announcement" box inside a promoted chat <!-- parity:chat-psa-about-box -->
 
 ### Profiles & shared media
 
