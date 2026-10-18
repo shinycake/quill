@@ -312,8 +312,15 @@ impl QuillApp {
             };
         }
         use gpui_kit::assets::IconName as Lucide;
+        // `History::useTopPromotion`: a promoted chat has no Archive or Pin
+        // row, and no new window for a typed announcement.
+        let promotion = self
+            .session()
+            .and_then(|session| quill::promotion::top_promotion(session, &chat))
+            .cloned();
+        let hideable = promotion.as_ref().is_some_and(|p| p.can_hide());
         // tdesktop `Filler::addNewWindow` heads the chat-list menu.
-        if self.can_open_chat_window(&chat) {
+        if self.can_open_chat_window(&chat) && !hideable {
             item_window!(
                 5,
                 Lucide::ExternalLink,
@@ -330,13 +337,7 @@ impl QuillApp {
             );
         }
         // tdesktop `Filler::addHidePromotion`: announcements only.
-        if self.session().is_some_and(|session| {
-            session
-                .chat_list
-                .promoted_chats
-                .get(&chat_id.0)
-                .is_some_and(quill::promotion::Promotion::can_hide)
-        }) {
+        if hideable {
             item!(
                 6,
                 Lucide::Trash,
@@ -353,44 +354,46 @@ impl QuillApp {
                 }
             );
         }
-        item!(
-            10,
-            if archived {
-                Lucide::ArchiveRestore
-            } else {
-                Lucide::Archive
-            },
-            "chat-menu-archive",
-            if archived {
-                tr(keys::Q_CHAT_UNARCHIVE)
-            } else {
-                tr(keys::Q_CHAT_ARCHIVE)
-            },
-            this,
-            cx,
-            {
-                this.toggle_archive(chat_id, cx);
-                this.chat_list.menu = None;
-                cx.notify();
-            }
-        );
-        item!(
-            20,
-            if pinned { Lucide::PinOff } else { Lucide::Pin },
-            "chat-menu-pin",
-            if pinned {
-                tr(keys::Q_CHAT_UNPIN)
-            } else {
-                tr(keys::CONTEXT_PIN_MSG)
-            },
-            this,
-            cx,
-            {
-                this.toggle_chat_pin(chat_id, cx);
-                this.chat_list.menu = None;
-                cx.notify();
-            }
-        );
+        if promotion.is_none() {
+            item!(
+                10,
+                if archived {
+                    Lucide::ArchiveRestore
+                } else {
+                    Lucide::Archive
+                },
+                "chat-menu-archive",
+                if archived {
+                    tr(keys::Q_CHAT_UNARCHIVE)
+                } else {
+                    tr(keys::Q_CHAT_ARCHIVE)
+                },
+                this,
+                cx,
+                {
+                    this.toggle_archive(chat_id, cx);
+                    this.chat_list.menu = None;
+                    cx.notify();
+                }
+            );
+            item!(
+                20,
+                if pinned { Lucide::PinOff } else { Lucide::Pin },
+                "chat-menu-pin",
+                if pinned {
+                    tr(keys::Q_CHAT_UNPIN)
+                } else {
+                    tr(keys::CONTEXT_PIN_MSG)
+                },
+                this,
+                cx,
+                {
+                    this.toggle_chat_pin(chat_id, cx);
+                    this.chat_list.menu = None;
+                    cx.notify();
+                }
+            );
+        }
         if let Some(row) = self.chat_menu_mute_row(menu, &chat, row_hover, cx) {
             rows.push((30, row));
         }

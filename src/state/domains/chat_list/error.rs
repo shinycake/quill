@@ -80,6 +80,13 @@ impl Session {
                 self.chats_state.chat_action_error =
                     Some(format!("could not delete the chat (error {})", err.code));
             }
+            Some(RequestPurpose::HidePromotion) => {
+                self.chats_state.chat_action_error = Some(format!(
+                    "{} (error {})",
+                    crate::lang::tr(crate::lang::keys::Q_CHAT_COULD_NOT_HIDE_THE_ANNOUNCEMENT),
+                    err.code
+                ));
+            }
             // Slice CL2: refused chat-list actions surface in the
             // status note like the CL1 ones — a refusal is never
             // shown as success.

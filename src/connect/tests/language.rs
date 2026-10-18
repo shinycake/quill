@@ -325,6 +325,15 @@ fn announcement_labels_are_fetched_once_and_hide_deletes_the_history() {
         json!({"@type":"chatSourcePublicServiceAnnouncement","type":"covid","text":"Hi"}),
     ));
     f.feed(position(8, json!({"@type":"chatSourceMtprotoProxy"})));
+    // Both are channels the account is not in (`useTopPromotion`).
+    for id in [7, 8] {
+        if let Some(chat) = f.driver.session.chats.get_mut(&id) {
+            chat.kind = crate::telegram::envelope::ChatKind::Supergroup {
+                supergroup_id: id,
+                is_channel: true,
+            };
+        }
+    }
     f.driver.pump_psa_labels();
     let sent = f.sent();
     let ask = sent
@@ -340,7 +349,7 @@ fn announcement_labels_are_fetched_once_and_hide_deletes_the_history() {
     ));
     let label = |f: &Fixture, chat: i64| {
         let list = &f.driver.session.chat_list;
-        list.psa_labels.label(&list.promoted_chats[&chat])
+        list.psa_labels.row(&list.promoted_chats[&chat]).label
     };
     assert_eq!(label(&f, 7), "COVID-19 Info");
     assert_eq!(label(&f, 8), "Proxy sponsor");
@@ -357,4 +366,37 @@ fn announcement_labels_are_fetched_once_and_hide_deletes_the_history() {
         .unwrap();
     assert_eq!(hide["chat_id"], 7);
     assert_eq!(hide["remove_from_chat_list"], true);
+
+    // A joined channel is not hidden, and a language switch asks again.
+    if let Some(chat) = f.driver.session.chats.get_mut(&7) {
+        chat.my_member_status = Some(crate::telegram::envelope::ChannelMemberStatus::Member);
+    }
+    let sent_before = f.sent().len();
+    assert!(f.driver.hide_promotion(ChatId(7)).unwrap().is_none());
+    assert_eq!(f.sent().len(), sent_before);
+    if let Some(chat) = f.driver.session.chats.get_mut(&7) {
+        chat.my_member_status = Some(crate::telegram::envelope::ChannelMemberStatus::Left);
+    }
+    f.driver.switch_language(pack("pt-br", "pt")).unwrap();
+    f.driver.pump_psa_labels();
+    let sent = f.sent();
+    let again = sent
+        .iter()
+        .rev()
+        .find(|v| {
+            v["@type"] == "getLanguagePackStrings"
+                && v["keys"] == json!(["cloud_lng_badge_psa_covid"])
+        })
+        .unwrap();
+    assert_eq!(again["language_pack_id"], "pt-br");
+    assert_eq!(
+        f.driver
+            .session
+            .chat_list
+            .psa_labels
+            .row(&f.driver.session.chat_list.promoted_chats[&7])
+            .label,
+        "PSA",
+        "the English text is dropped until the new pack answers"
+    );
 }

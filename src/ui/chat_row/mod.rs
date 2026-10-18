@@ -363,8 +363,9 @@ pub(super) fn session_chat_row(
     // Active stories: the ring around the avatar (unread: accent gradient,
     // read: grey).
     story_ring: Option<StoryRing>,
-    // A promoted chat's badge ("Proxy sponsor", "PSA") in place of the date.
-    promotion_label: Option<String>,
+    // A promoted chat's badge ("Proxy sponsor", "PSA") in place of the date,
+    // and the announcement text in place of the preview.
+    promotion: Option<quill::promotion::RowBadge>,
     muted_fg: Hsla,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement + Styled + StatefulInteractiveElement + use<> {
@@ -376,8 +377,8 @@ pub(super) fn session_chat_row(
     } else {
         muted_fg
     };
-    let stamp = match promotion_label {
-        Some(label) => Some((RowStatus::None, label)),
+    let stamp = match promotion.as_ref() {
+        Some(badge) => Some((RowStatus::None, badge.label.clone())),
         None => row_stamp(chat),
     };
     let topic_line = topic_names.clone().filter(|_| row_style.preview_lines < 3);
@@ -388,10 +389,16 @@ pub(super) fn session_chat_row(
     };
     // A draft leads with a red "Draft:" (and a reply mark); anything else
     // is the plain preview line.
-    let (preview, draft): (String, Option<bool>) = match chat.sidebar_line() {
-        SidebarLine::Text(text) => (text, None),
-        SidebarLine::Draft(draft) => (draft.text, Some(draft.reply)),
-    };
+    // The announcement of a promoted chat comes first (tdesktop
+    // `topPromotionMessage`).
+    let (preview, draft): (String, Option<bool>) =
+        match promotion.as_ref().and_then(|badge| badge.preview.clone()) {
+            Some(text) => (text, None),
+            None => match chat.sidebar_line() {
+                SidebarLine::Text(text) => (text, None),
+                SidebarLine::Draft(draft) => (draft.text, Some(draft.reply)),
+            },
+        };
     let activity = chat.peer_activity();
     // Slice chatlist-list-style: the icon/entities describe
     // `last_preview` only — draft/typing/activity lines render unstyled.

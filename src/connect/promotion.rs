@@ -4,41 +4,62 @@
 //! `help.hidePromoData` for an announcement.
 use super::*;
 use crate::ids::{ChatId, RequestId};
-use crate::promotion::Promotion;
+use crate::promotion::top_promotion;
 use crate::state::{LanguagePurpose, RequestPurpose, SettingsPurpose};
 use crate::telegram::requests::{delete_chat_history, get_language_pack_keys};
 
 impl<S: JsonSender> ConnectDriver<S> {
-    /// Ask for the badge text of announcement types that are on the list
-    /// and not asked for yet. Called from the app's poll loop; a no-op
-    /// otherwise.
+    /// The language pack the interface uses, or is switching to.
+    fn badge_language(&self) -> String {
+        let language = &self.session.settings.language;
+        let info = language
+            .switching
+            .as_ref()
+            .map(|switch| &switch.info)
+            .or(language.current.as_ref());
+        match info {
+            Some(info) if !info.id.is_empty() => info.id.clone(),
+            _ => "en".to_string(),
+        }
+    }
+
+    /// Ask for the badge text of the announcement types on the list in the
+    /// current language, once per type and language. Called from the app's
+    /// poll loop; a no-op otherwise.
     pub fn pump_psa_labels(&mut self) {
         if !self.chats_path_active() {
             return;
         }
-        let list = &mut self.session.chat_list;
-        let keys = list
+        let pack = self.badge_language();
+        let session = &self.session;
+        let kinds: Vec<String> = session
+            .chat_list
+            .promoted_chats
+            .keys()
+            .filter_map(|id| session.chats.get(id))
+            .filter_map(|chat| top_promotion(session, chat))
+            .filter_map(|promotion| promotion.psa_kind().map(str::to_string))
+            .collect();
+        let (epoch, keys) = self
+            .session
+            .chat_list
             .psa_labels
-            .take_wanted(list.promoted_chats.values().filter_map(Promotion::psa_kind));
+            .take_wanted(&pack, kinds.iter().map(String::as_str));
         if keys.is_empty() {
             return;
         }
-        let pack = self
-            .session
-            .settings
-            .language
-            .current
-            .as_ref()
-            .map_or_else(|| "en".to_string(), |info| info.id.clone());
         let purpose =
-            RequestPurpose::Settings(SettingsPurpose::Language(LanguagePurpose::PsaLabels));
+            RequestPurpose::Settings(SettingsPurpose::Language(LanguagePurpose::PsaLabels {
+                epoch,
+            }));
         let extra = self.session.request(purpose, None);
         // A failed send leaves the generic "PSA" badge, which is fine.
         let _ = self.send_json_request(extra, &get_language_pack_keys(extra, &pack, &keys));
     }
 
-    /// "Hide this announcement": only for a promoted announcement with a
-    /// type (tdesktop `addHidePromotion`).
+    /// "Hide this announcement": only where tdesktop offers it, a promoted
+    /// announcement with a type in a channel the account is not in
+    /// (`addHidePromotion`).
     pub fn hide_promotion(
         &mut self,
         chat_id: ChatId,
@@ -46,15 +67,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let purpose = RequestPurpose::RemoveChatFromList;
-        if self.session.requests.has_purpose_for_chat(purpose, chat_id)
-            || !self
-                .session
-                .chat_list
-                .promoted_chats
-                .get(&chat_id.0)
-                .is_some_and(Promotion::can_hide)
-        {
+        let purpose = RequestPurpose::HidePromotion;
+        let session = &self.session;
+        let hideable = session
+            .chats
+            .get(&chat_id.0)
+            .and_then(|chat| top_promotion(session, chat))
+            .is_some_and(|promotion| promotion.can_hide());
+        if !hideable || session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
         let extra = self.session.request(purpose, Some(chat_id));

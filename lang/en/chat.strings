@@ -576,3 +576,4 @@
 "lng_proxy_sponsor" = "Proxy sponsor";
 "lng_badge_psa_default" = "PSA";
 "lng_context_hide_psa" = "Hide this announcement";
+"qll_chat_could_not_hide_the_announcement" = "Could not hide the announcement";

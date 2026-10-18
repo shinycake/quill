@@ -184,8 +184,8 @@ impl QuillApp {
                     self.session().and_then(|s| s.chat_row_topic_names(chat.id)),
                     story_ring,
                     self.session().and_then(|s| {
-                        let promotion = s.chat_list.promoted_chats.get(&chat.id.0)?;
-                        Some(s.chat_list.psa_labels.label(promotion))
+                        let promotion = quill::promotion::top_promotion(s, chat)?;
+                        Some(s.chat_list.psa_labels.row(promotion))
                     }),
                     muted_fg,
                     cx,
