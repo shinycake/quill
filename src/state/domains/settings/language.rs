@@ -19,6 +19,10 @@ pub enum LanguagePurpose {
     /// `getLanguagePackStrings` of the switch `generation`, for the pack
     /// itself or its base pack. Response is `languagePackStrings`.
     Strings { generation: u32, base: bool },
+    /// `getLanguagePackStrings` of the announcement badge texts
+    /// (`cloud_lng_badge_psa_<type>`) of one pack; `epoch` tells whether the
+    /// pack is still the one asked about. Response is `languagePackStrings`.
+    PsaLabels { epoch: u32 },
     /// `synchronizeLanguagePack` / `addCustomServerLanguagePack`.
     /// Response is `ok`.
     Synchronize,
@@ -77,6 +81,13 @@ impl Session {
                 state.packs_loading = false;
             }
             LanguagePayload::Strings(strings) => {
+                if let Some(RequestPurpose::Settings(SettingsPurpose::Language(
+                    LanguagePurpose::PsaLabels { epoch },
+                ))) = pending.map(|p| p.purpose)
+                {
+                    self.chat_list.psa_labels.store(epoch, strings);
+                    return;
+                }
                 let Some(RequestPurpose::Settings(SettingsPurpose::Language(
                     LanguagePurpose::Strings { generation, base },
                 ))) = pending.map(|p| p.purpose)
@@ -146,7 +157,9 @@ impl Session {
                     state.error = Some(error_reason(err));
                 }
             }
-            LanguagePurpose::SetOption | LanguagePurpose::Synchronize => {}
+            LanguagePurpose::SetOption
+            | LanguagePurpose::PsaLabels { .. }
+            | LanguagePurpose::Synchronize => {}
         }
     }
 }

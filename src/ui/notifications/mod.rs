@@ -507,6 +507,7 @@ impl QuillApp {
         // requests, keep its progress box fresh, and report how it ended.
         if let Some(live) = self.live.as_mut() {
             live.driver.pump_chat_export();
+            live.driver.pump_psa_labels();
             live.driver.pump_account_export();
             if live
                 .driver

@@ -8,7 +8,7 @@ fn position(chat: i64, list: ChatList, order: i64) -> ChatPositionUpdate {
         list,
         order,
         is_pinned: false,
-        is_promoted: false,
+        promotion: None,
     }
 }
 

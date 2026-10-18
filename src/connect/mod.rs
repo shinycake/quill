@@ -75,6 +75,7 @@ mod profile;
 mod profile_panels;
 mod profile_photo_sources;
 mod profile_tabs;
+mod promotion;
 mod proxy;
 mod pull_next;
 mod search;
