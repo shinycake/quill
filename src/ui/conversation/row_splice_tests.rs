@@ -117,6 +117,14 @@ fn facts(app: &QuillApp) -> Vec<String> {
 enum Expect {
     Patch,
     Splice,
+    /// Every row built again from the messages, at least once.
+    Build,
+}
+
+type Stats = crate::ui::history_row::RowCacheStats;
+
+fn stats(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Stats {
+    app.read_with(cx, |app, _| app.history.row_stats)
 }
 
 /// Apply `updates`, check the rows were patched or spliced (not built
@@ -129,16 +137,52 @@ fn check(
     updates: &[&str],
     expect: Expect,
 ) {
-    let stats = |app: &Entity<QuillApp>, cx: &mut VisualTestContext| {
-        app.read_with(cx, |app, _| app.history.row_stats)
-    };
     let before = stats(app, cx);
     apply(app, cx, updates);
+    compare_with_full_build(app, cx, name, before, expect);
+}
+
+/// Like `check`, for a change made straight on the session.
+fn check_after(
+    app: &Entity<QuillApp>,
+    cx: &mut VisualTestContext,
+    name: &str,
+    change: impl FnOnce(&mut quill::state::Session),
+    expect: Expect,
+) {
+    let before = stats(app, cx);
+    app.update(cx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            change(session);
+        }
+        cx.notify();
+    });
+    frames(cx);
+    compare_with_full_build(app, cx, name, before, expect);
+}
+
+fn compare_with_full_build(
+    app: &Entity<QuillApp>,
+    cx: &mut VisualTestContext,
+    name: &str,
+    before: Stats,
+    expect: Expect,
+) {
     let after = stats(app, cx);
-    assert_eq!(after.rebuilds, before.rebuilds, "{name}: rows built whole");
     match expect {
-        Expect::Patch => assert!(after.rows_patched > before.rows_patched, "{name}"),
-        Expect::Splice => assert_eq!(after.splices, before.splices + 1, "{name}"),
+        Expect::Patch => {
+            assert_eq!(after.rebuilds, before.rebuilds, "{name}: rows built whole");
+            assert!(after.rows_patched > before.rows_patched, "{name}");
+        }
+        Expect::Splice => {
+            assert_eq!(after.rebuilds, before.rebuilds, "{name}: rows built whole");
+            assert_eq!(after.splices, before.splices + 1, "{name}");
+        }
+        Expect::Build => {
+            // More than once while something animates: its key moves each frame.
+            assert!(after.rebuilds > before.rebuilds, "{name}: built whole");
+            assert_eq!(after.splices, before.splices, "{name}: not spliced");
+        }
     }
     let (kept, listed, rows) = app.read_with(cx, |app, cx| {
         (
@@ -380,5 +424,344 @@ fn changes_far_apart_build_the_rows_whole(cx: &mut TestAppContext) {
     assert_eq!(
         (after.rebuilds, after.splices),
         (before.rebuilds + 1, before.splices)
+    );
+}
+
+/// The main history's messages, oldest first.
+fn main_messages(session: &quill::state::Session) -> Vec<quill::state::HistoryMessage> {
+    session
+        .histories
+        .get(&GROUP)
+        .map(|history| history.messages.values().cloned().collect())
+        .unwrap_or_default()
+}
+
+fn top_message(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Option<(MessageId, f32)> {
+    app.read_with(cx, |app, cx| {
+        let (ix, offset) = app.history.scroller.read(cx).top_anchor()?;
+        Some((app.history.rows.get(ix)?.first_id()?, offset))
+    })
+}
+
+fn following_tail(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> bool {
+    app.read_with(cx, |app, cx| {
+        app.history.scroller.read(cx).is_following_tail()
+    })
+}
+
+#[gpui_kit::test]
+fn a_replaced_history_builds_the_rows_whole(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    mixed_group(&app, vcx);
+    // The window is replaced by a small one without the window epoch
+    // moving (as `history_entry` default or a reopened sublist do): few
+    // messages are newer than the cached revision, and none are gone.
+    check_after(
+        &app,
+        vcx,
+        "a replaced history",
+        |session| {
+            let kept: Vec<_> = main_messages(session)
+                .into_iter()
+                .skip(50)
+                .take(5)
+                .collect();
+            if let Some(history) = session.histories.get_mut(&GROUP) {
+                history.messages = quill::state::HistoryMessages::default();
+                for message in kept {
+                    history.messages.insert(message.id.0, message);
+                }
+            }
+        },
+        Expect::Build,
+    );
+    let rows = app.read_with(vcx, |app, _| app.history.rows.len());
+    assert!(rows <= 8, "only the new window's rows are left: {rows}");
+}
+
+#[gpui_kit::test]
+fn a_crumbling_message_makes_the_rows_build_whole(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    mixed_group(&app, vcx);
+    app.update(vcx, |app, _| {
+        app.begin_vanish(ChatId(GROUP), &[MessageId(id(5))]);
+    });
+    let crumbling = app.read_with(vcx, |app, _| !app.history.vanishing.borrow().is_empty());
+    if !crumbling {
+        // Chat effects are off here (power saving): nothing to dissolve.
+        return;
+    }
+    check(
+        &app,
+        vcx,
+        "delete while dissolving",
+        &[&delete(&[5])],
+        Expect::Build,
+    );
+    // A later message while the dust is in the air: never a splice.
+    let landed = text_message(id(MESSAGES + 1), Some(21), BASE_DATE + 20 * 86400, "");
+    check(
+        &app,
+        vcx,
+        "new message while dissolving",
+        &[&landed],
+        Expect::Build,
+    );
+    // And the splice itself declines, whatever the key says.
+    let declined = app.read_with(vcx, |app, _| {
+        let history = app.session()?.histories.get(&GROUP)?;
+        Some(app.row_splice(&history.messages, history.messages.instance(), 0, None, 0))
+    });
+    assert!(matches!(declined, Some(None)), "splice while dissolving");
+}
+
+#[gpui_kit::test]
+fn a_splice_keeps_the_reader_where_they_were(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    mixed_group(&app, vcx);
+    app.update(vcx, |app, cx| {
+        app.history
+            .scroller
+            .update(cx, |state, cx| state.scroll_to_item_offset(40, 12., cx));
+    });
+    frames(vcx);
+    let left = top_message(&app, vcx).expect("scrolled away from the tail");
+    assert_eq!(left.1, 12.);
+    assert!(!following_tail(&app, vcx));
+    // Below the viewport: a message lands among the later rows, then one
+    // goes.
+    let below = text_message(
+        id(100) + 1,
+        Some(21),
+        BASE_DATE + 10 * 86400 + 100 * 60 + 30,
+        "",
+    );
+    check(&app, vcx, "landing below", &[&below], Expect::Splice);
+    assert_eq!(top_message(&app, vcx), Some(left), "landing below");
+    check(
+        &app,
+        vcx,
+        "deleting below",
+        &[&delete(&[110])],
+        Expect::Splice,
+    );
+    assert_eq!(top_message(&app, vcx), Some(left), "deleting below");
+    // Above the viewport: rows before the top one come and go.
+    let above = text_message(id(3) + 1, Some(21), BASE_DATE + 3 * 60 + 30, "");
+    check(&app, vcx, "landing above", &[&above], Expect::Splice);
+    assert_eq!(top_message(&app, vcx), Some(left), "landing above");
+    check(
+        &app,
+        vcx,
+        "deleting above",
+        &[&delete(&[5])],
+        Expect::Splice,
+    );
+    assert_eq!(top_message(&app, vcx), Some(left), "deleting above");
+    assert!(!following_tail(&app, vcx), "still away from the tail");
+}
+
+#[gpui_kit::test]
+fn a_splice_keeps_following_the_tail(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    mixed_group(&app, vcx);
+    app.update(vcx, |app, cx| {
+        app.history
+            .scroller
+            .update(cx, |state, cx| state.scroll_to_end(cx));
+    });
+    frames(vcx);
+    assert!(following_tail(&app, vcx), "at the tail");
+    // A row comes inside the list, then one goes, then one at the end.
+    let middle = text_message(
+        id(40) + 1,
+        Some(21),
+        BASE_DATE + 4 * 86400 + 40 * 60 + 30,
+        "",
+    );
+    check(
+        &app,
+        vcx,
+        "landing in the middle",
+        &[&middle],
+        Expect::Splice,
+    );
+    assert!(following_tail(&app, vcx), "after landing in the middle");
+    check(
+        &app,
+        vcx,
+        "deleting in the middle",
+        &[&delete(&[30])],
+        Expect::Splice,
+    );
+    assert!(following_tail(&app, vcx), "after deleting in the middle");
+    let last_date = BASE_DATE + (MESSAGES / 10) * 86400 + MESSAGES * 60;
+    let end = text_message(id(MESSAGES + 1), Some(22), last_date, "");
+    check(&app, vcx, "landing at the end", &[&end], Expect::Splice);
+    assert!(following_tail(&app, vcx), "after landing at the end");
+    assert_eq!(top_message(&app, vcx), None, "no scroll anchor at the tail");
+}
+
+#[gpui_kit::test]
+fn more_removals_than_the_log_holds_build_the_rows_whole(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    mixed_group(&app, vcx);
+    let deletes: Vec<String> = (1..=66).map(|n| delete(&[n])).collect();
+    let updates: Vec<&str> = deletes.iter().map(String::as_str).collect();
+    check(
+        &app,
+        vcx,
+        "66 removals in one render",
+        &updates,
+        Expect::Build,
+    );
+}
+
+/// The open chat's first messages as a `TopicHistory`, for the topic and
+/// saved paths, which take the same splice route with their own source.
+fn topic_copy(session: &quill::state::Session) -> quill::state::TopicHistory {
+    let mut history = quill::state::TopicHistory::default();
+    for message in main_messages(session).into_iter().take(60) {
+        history.messages.insert(message.id.0, message);
+    }
+    history
+}
+
+/// A message like `like`, at `id`, half a minute after it.
+fn sibling(like: &quill::state::HistoryMessage, id: i64) -> quill::state::HistoryMessage {
+    let mut message = like.clone();
+    message.id = MessageId(id);
+    message.date += 30;
+    message
+}
+
+fn land_next_to_20(messages: Option<&mut quill::state::HistoryMessages>) {
+    if let Some(messages) = messages
+        && let Some(like) = messages.get(&id(20)).cloned()
+    {
+        messages.insert(id(20) + 1, sibling(&like, id(20) + 1));
+    }
+}
+
+fn sublist_messages(
+    session: &mut quill::state::Session,
+) -> Option<&mut quill::state::HistoryMessages> {
+    let sublist = session.threads.saved.sublist.as_mut()?;
+    Some(&mut sublist.history.messages)
+}
+
+const TOPIC: i32 = 7;
+
+fn topic_messages(
+    session: &mut quill::state::Session,
+) -> Option<&mut quill::state::HistoryMessages> {
+    let history = session.threads.topic_histories.get_mut(&(GROUP, TOPIC))?;
+    Some(&mut history.messages)
+}
+
+#[gpui_kit::test]
+fn the_saved_sublist_splices_like_the_open_chat(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    mixed_group(&app, vcx);
+    let open_sublist = |session: &mut quill::state::Session, topic_id: i64| {
+        let history = topic_copy(session);
+        session.threads.saved.sublist = Some(quill::state::SavedSublistView { topic_id, history });
+    };
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.my_user_id = Some(GROUP);
+            open_sublist(session, 5);
+        }
+        cx.notify();
+    });
+    frames(vcx);
+    let rows = app.read_with(vcx, |app, _| app.history.rows.len());
+    assert!(rows > 20, "the sublist's rows are shown: {rows}");
+    check_after(
+        &app,
+        vcx,
+        "a message lands in the sublist",
+        |session| land_next_to_20(sublist_messages(session)),
+        Expect::Splice,
+    );
+    check_after(
+        &app,
+        vcx,
+        "a message leaves the sublist",
+        |session| {
+            if let Some(messages) = sublist_messages(session) {
+                messages.remove(&id(30));
+            }
+        },
+        Expect::Splice,
+    );
+    // The sublist replaced by another one: built whole.
+    check_after(
+        &app,
+        vcx,
+        "another sublist",
+        |session| open_sublist(session, 6),
+        Expect::Build,
+    );
+}
+
+#[gpui_kit::test]
+fn a_topic_history_splices_like_the_open_chat(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    mixed_group(&app, vcx);
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            if let Some(chat) = session.chats.get_mut(&GROUP) {
+                chat.is_forum = Some(true);
+            }
+            session.open_topic = Some(TOPIC);
+            let history = topic_copy(session);
+            session
+                .threads
+                .topic_histories
+                .insert((GROUP, TOPIC), history);
+        }
+        cx.notify();
+    });
+    frames(vcx);
+    let rows = app.read_with(vcx, |app, _| app.history.rows.len());
+    assert!(rows > 20, "the topic's rows are shown: {rows}");
+    check_after(
+        &app,
+        vcx,
+        "a message lands in the topic",
+        |session| land_next_to_20(topic_messages(session)),
+        Expect::Splice,
+    );
+    check_after(
+        &app,
+        vcx,
+        "a message leaves the topic",
+        |session| {
+            if let Some(messages) = topic_messages(session) {
+                messages.remove(&id(30));
+            }
+        },
+        Expect::Splice,
+    );
+    check_after(
+        &app,
+        vcx,
+        "the topic's history replaced",
+        |session| {
+            let history = topic_copy(session);
+            session
+                .threads
+                .topic_histories
+                .insert((GROUP, TOPIC), history);
+        },
+        Expect::Build,
     );
 }

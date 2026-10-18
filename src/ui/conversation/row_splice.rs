@@ -41,14 +41,16 @@ impl QuillApp {
     pub(super) fn row_splice(
         &self,
         list: &quill::state::HistoryMessages,
+        instance: u64,
         since: u64,
         translated: Option<ChatId>,
         tail: usize,
     ) -> Option<RowSplice> {
-        if self.stream_rows_hash().is_some() {
+        // A crumbling message is merged into the rows on a full build only.
+        if self.stream_rows_hash().is_some() || self.vanish_rows_hash().is_some() {
             return None;
         }
-        let changes = list.changes_since(since)?;
+        let changes = list.changes_since(instance, since)?;
         if changes.changed.len() + changes.removed.len() > super::rows_cache::PATCH_MAX {
             return None;
         }

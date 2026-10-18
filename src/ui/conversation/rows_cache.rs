@@ -25,6 +25,8 @@ pub(in crate::ui) struct HistoryRowsKey {
     list: &'static str,
     chat: Option<i64>,
     scope: i64,
+    /// Which `HistoryMessages` the revisions belong to.
+    messages_instance: u64,
     messages_revision: u64,
     ids_revision: u64,
     extra: u64,
@@ -97,6 +99,7 @@ impl QuillApp {
             list: source.list,
             chat: source.chat.map(|chat| chat.0),
             scope: source.scope,
+            messages_instance: source.messages.map_or(0, |m| m.instance()),
             messages_revision: source.messages.map_or(0, |m| m.revision()),
             ids_revision: source.messages.map_or(0, |m| m.ids_revision()),
             extra: source.extra,
@@ -133,8 +136,14 @@ impl QuillApp {
         {
             return Some(RowsInput::Patch(patch));
         }
-        self.row_splice(list, old.messages_revision, source.translated, source.tail?)
-            .map(RowsInput::Splice)
+        self.row_splice(
+            list,
+            old.messages_instance,
+            old.messages_revision,
+            source.translated,
+            source.tail?,
+        )
+        .map(RowsInput::Splice)
     }
 
     /// The messages of `list` changed after `since`, each with the row that

@@ -94,9 +94,29 @@ chrome follows the same rules as #986.
 
 - thread lists (`tail: None`): the root post and the divider head the replies
 - a streaming bot reply below the rows
-- a delete animation in progress (its key changes every frame)
+- a delete animation in progress. The key already changes every frame, and
+  `row_splice` also declines while `vanish_rows_hash` is set, because only a full
+  build merges the crumbling messages back into the rows
 - more than 32 changes, or changes more than 64 rows apart
 - a window replaced, a new chat, a highlight or translation change
+
+## Review hardening (#1011 review)
+
+- **Instance token.** Revisions and the removal log mean something only inside one
+  `HistoryMessages`. Some code replaces the whole value (`history_entry` default, a
+  reopened saved sublist or tag search, `TopicHistory::default`) without moving the window
+  epoch, and a small replacement looked like "a few messages changed" against the old
+  revision, so rows outside it survived. Each `HistoryMessages` now takes a unique
+  `instance` from `next_revision()` at creation, `changes_since(instance, revision)`
+  returns `None` for another instance, and the rows key carries the instance, so the
+  patch path rebuilds too. No replacement site needed a change.
+- **Vanish.** The splice declines while any message is crumbling.
+- **Cost.** `RowSeed::before` and `changed_since` (and `changes_since`) are O(rows) per
+  splice: they walk the kept rows above the region and every message's revision. That is
+  a pointer walk, with no copying and no chrome derived; the measured cost is the copy
+  and chrome counts in the tables. A per-row index would remove it if profiles ask for it.
+- **Revision wraparound.** `next_revision` is a `u64` counter; it would take centuries at
+  a billion changes a second to wrap, so it is documented, not handled.
 
 ## Measured after
 
@@ -144,7 +164,22 @@ These are counts only. This change makes no claim about frame time or memory.
   on the 1003-row history, a new message, a deletion and a pending send that then
   succeeds cost no whole build, one splice each and at most 3 messages copied.
 - `state/tests/history_messages.rs`: `changes_since` names the ids added and removed, and
-  forgets removals past the log or before a `clear`.
+  forgets removals past the log or before a `clear`; it knows only its own instance;
+  the log holds exactly 64 removals.
+- `a_replaced_history_builds_the_rows_whole`: the main history replaced by a 5-message
+  window with the epoch unchanged builds whole and equals a full build. Fails with the
+  instance check removed.
+- `a_crumbling_message_makes_the_rows_build_whole`: a delete and a new message while a
+  message dissolves build whole and equal a full build, and `row_splice` returns `None`.
+- `a_splice_keeps_the_reader_where_they_were`: scrolled away from the tail, a message
+  landing or going above and below the viewport leaves the top message and its offset
+  unchanged and the list not following the tail.
+- `a_splice_keeps_following_the_tail`: at the tail, a splice in the middle, a deletion and
+  a message at the end keep following with no scroll anchor.
+- `more_removals_than_the_log_holds_build_the_rows_whole`: 66 removals in one render.
+- `the_saved_sublist_splices_like_the_open_chat` and
+  `a_topic_history_splices_like_the_open_chat`: a message landing and leaving splice and
+  equal a full build; replacing the sublist or topic history builds whole.
 
 ## Verification
 
@@ -167,8 +202,8 @@ above the newest. Two of the three new messages come from the chat's last incomi
 sender, and one is the user's own.
 
 Not shown by the captures: real TDLib ordering of temporary send ids (the tests use ids
-above every server id, as TDLib does), and topic and saved-messages lists. Those take the
-same splice path but have no test of their own.
+above every server id, as TDLib does). Topic and saved sublist lists take the same splice
+path and have tests of their own, not captures.
 
 ## Not covered
 

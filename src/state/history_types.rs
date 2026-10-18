@@ -266,7 +266,9 @@ impl HistoryMessage {
 
 /// The next value for a revision counter. Values are unique across the
 /// process, so a history that replaced another never repeats
-/// a revision a view cached for the old one.
+/// a revision a view cached for the old one. The counter is a `u64`: at a
+/// billion changes a second it would take centuries to wrap, so wraparound
+/// is not handled.
 pub fn next_revision() -> u64 {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
@@ -277,8 +279,13 @@ pub fn next_revision() -> u64 {
 /// derived from the messages and know exactly what to derive again:
 /// `revision` moves on any change, `ids_revision` when a message comes or
 /// goes, and `changed_since` names the messages changed in place.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct HistoryMessages {
+    /// Unique per instance (a `next_revision` value). Revisions and the
+    /// removal log mean something only within one instance, so a view that
+    /// cached them for another one (the history was replaced wholesale)
+    /// must build again.
+    instance: u64,
     map: BTreeMap<i64, HistoryMessage>,
     /// The `revision` at which each message was last stored or changed.
     changed_at: HashMap<i64, u64>,
@@ -289,6 +296,20 @@ pub struct HistoryMessages {
     removed_floor: u64,
     revision: u64,
     ids_revision: u64,
+}
+
+impl Default for HistoryMessages {
+    fn default() -> Self {
+        Self {
+            instance: next_revision(),
+            map: BTreeMap::new(),
+            changed_at: HashMap::new(),
+            removed: std::collections::VecDeque::new(),
+            removed_floor: 0,
+            revision: 0,
+            ids_revision: 0,
+        }
+    }
 }
 
 /// Removals `HistoryMessages::changes_since` can still name; a view asking
@@ -306,6 +327,11 @@ pub struct HistoryChanges {
 }
 
 impl HistoryMessages {
+    /// Which instance the revisions belong to.
+    pub fn instance(&self) -> u64 {
+        self.instance
+    }
+
     /// Moves on every change (a `next_revision` value).
     pub fn revision(&self) -> u64 {
         self.revision
@@ -330,10 +356,12 @@ impl HistoryMessages {
         ids
     }
 
-    /// Messages stored, changed or removed after `revision`; `None` when
-    /// removals that far back are no longer listed.
-    pub fn changes_since(&self, revision: u64) -> Option<HistoryChanges> {
-        if revision < self.removed_floor {
+    /// Messages stored, changed or removed after `revision`, a value of
+    /// [`Self::revision`] read from the instance `instance`; `None` when
+    /// that was another instance, or removals that far back are no longer
+    /// listed.
+    pub fn changes_since(&self, instance: u64, revision: u64) -> Option<HistoryChanges> {
+        if instance != self.instance || revision < self.removed_floor {
             return None;
         }
         let mut removed: Vec<i64> = self
