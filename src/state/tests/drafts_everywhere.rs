@@ -14,6 +14,7 @@ fn draft_json(text: &str) -> String {
 fn text_draft(text: &str) -> ChatDraft {
     ChatDraft {
         text: text.into(),
+        item: Default::default(),
         reply_to_message_id: None,
         quote: None,
         suggested_post: None,

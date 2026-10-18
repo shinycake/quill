@@ -12,6 +12,8 @@ pub struct ChatDraft {
     /// (`inputTextQuote`, schema 1.8.67 line 3056) — `(text, position)`
     /// with `position` in UTF-16 code units.
     pub quote: Option<(String, i32)>,
+    /// The checklist task or poll option the draft replies to.
+    pub item: crate::composer::ReplyItem,
     /// `draftMessage.suggested_post_info`: the suggest bar's terms in a
     /// channel's direct messages.
     pub suggested_post: Option<crate::suggested_posts::SuggestTerms>,
@@ -75,7 +77,7 @@ pub(crate) fn parse_chat_draft(value: Option<&Value>) -> Option<ChatDraft> {
         plain,
         &super::message_content::parse_text_entities(plain, formatted),
     );
-    let (reply_to_message_id, quote) = match value.get("reply_to") {
+    let (reply_to_message_id, quote, item) = match value.get("reply_to") {
         Some(reply)
             if reply.get("@type").and_then(Value::as_str) == Some("inputMessageReplyToMessage") =>
         {
@@ -91,9 +93,25 @@ pub(crate) fn parse_chat_draft(value: Option<&Value>) -> Option<ChatDraft> {
                 let position = quote.get("position").and_then(Value::as_i64)?.sat_i32();
                 Some((text.to_string(), position))
             });
-            (id, quote)
+            let task = reply
+                .get("checklist_task_id")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .sat_i32();
+            let option = reply
+                .get("poll_option_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let item = if task > 0 {
+                crate::composer::ReplyItem::Task(task)
+            } else if !option.is_empty() {
+                crate::composer::ReplyItem::PollOption(option.to_string())
+            } else {
+                crate::composer::ReplyItem::Message
+            };
+            (id, quote, item)
         }
-        _ => (None, None),
+        _ => (None, None, crate::composer::ReplyItem::Message),
     };
     let suggested_post =
         crate::suggested_posts::SuggestTerms::parse_input(value.get("suggested_post_info"));
@@ -104,6 +122,7 @@ pub(crate) fn parse_chat_draft(value: Option<&Value>) -> Option<ChatDraft> {
         text,
         reply_to_message_id,
         quote,
+        item,
         suggested_post,
     })
 }
@@ -125,5 +144,42 @@ pub(crate) fn parse_chat_action(value: Option<&Value>) -> ChatAction {
         Some("chatActionUploadingVideoNote") => ChatAction::UploadingRound,
         None | Some("chatActionCancel") => ChatAction::Cancel,
         Some(_) => ChatAction::Other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_chat_draft;
+    use crate::composer::ReplyItem;
+
+    fn draft(reply: serde_json::Value) -> Option<super::ChatDraft> {
+        let value = serde_json::json!({
+            "@type": "draftMessage",
+            "reply_to": reply,
+            "date": 1,
+            "content": {
+                "@type": "draftMessageContentText",
+                "text": {"@type": "formattedText", "text": "hi", "entities": []}
+            }
+        });
+        parse_chat_draft(Some(&value))
+    }
+
+    #[test]
+    fn a_draft_reply_keeps_its_task_or_option() {
+        let base = |task: i64, option: &str| {
+            serde_json::json!({
+                "@type": "inputMessageReplyToMessage",
+                "message_id": 5,
+                "checklist_task_id": task,
+                "poll_option_id": option
+            })
+        };
+        assert_eq!(draft(base(3, "")).map(|d| d.item), Some(ReplyItem::Task(3)));
+        assert_eq!(
+            draft(base(0, "AQ==")).map(|d| d.item),
+            Some(ReplyItem::PollOption("AQ==".into()))
+        );
+        assert_eq!(draft(base(0, "")).map(|d| d.item), Some(ReplyItem::Message));
     }
 }

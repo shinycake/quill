@@ -215,6 +215,8 @@ pub struct MessageActions {
     pub can_add_offer: bool,
     /// The suggestion's price and time may be changed with `addOffer`.
     pub can_edit_suggested_post_info: bool,
+    /// `getMessageAuthor` works: who wrote a post sent on behalf of a chat.
+    pub can_get_author: bool,
 }
 
 impl MessageActions {

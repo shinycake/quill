@@ -21,6 +21,7 @@ mod media_options;
 mod media_prep;
 mod placeholder;
 mod reply;
+pub mod reply_item;
 mod send;
 mod shortcuts;
 
@@ -64,6 +65,7 @@ pub use media_prep::{
     send_path_for,
 };
 pub use placeholder::{ComposerPlaceholder, PlaceholderFacts, edit_text_changed};
+pub use reply::ReplyItem;
 pub use reply::{ComposerReplyTo, QuoteSelection, cancel_reply_draft, quote_position};
 pub use send::{
     ComposerScheduling, EnterEvent, PreviewMediaSize, SendKeyMode, SendOptions,

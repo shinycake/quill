@@ -43,6 +43,9 @@ pub(super) enum MessageMenuPage {
     AddToSet { emoji: bool },
     /// Who saw / reacted to the message.
     Audience,
+    /// The page of the poll option the menu was opened over (tdesktop
+    /// `FillPollOptionPage`).
+    PollOption,
 }
 
 /// UI state of the message menu's extras.
@@ -139,6 +142,7 @@ pub(super) fn info_row(
         order,
         div()
             .id(id)
+            .test_support()
             .flex()
             .items_center()
             .gap_3()
@@ -624,6 +628,7 @@ crate::ui::shell::register_dialogs! {
 }
 
 mod delete_member_reaction;
+pub(in crate::ui) mod item_rows;
 mod menu_add_to_set_rows;
 mod menu_save_to_rows;
 

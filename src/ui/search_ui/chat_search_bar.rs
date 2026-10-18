@@ -379,6 +379,10 @@ impl QuillApp {
                 let draft = stored.map(|body| ChatDraft {
                     text: body,
                     reply_to_message_id: reply_to.as_ref().map(|reply| reply.message_id),
+                    item: reply_to
+                        .as_ref()
+                        .map(|reply| reply.item.clone())
+                        .unwrap_or_default(),
                     quote: reply_to.and_then(|reply| reply.quote),
                     suggested_post: None,
                 });
@@ -427,6 +431,10 @@ impl QuillApp {
                 let draft = stored.map(|body| ChatDraft {
                     text: body,
                     reply_to_message_id: reply_to.as_ref().map(|reply| reply.message_id),
+                    item: reply_to
+                        .as_ref()
+                        .map(|reply| reply.item.clone())
+                        .unwrap_or_default(),
                     quote: reply_to.and_then(|reply| reply.quote),
                     suggested_post: None,
                 });

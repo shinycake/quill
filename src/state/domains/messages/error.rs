@@ -45,6 +45,7 @@ impl Session {
             Some(
                 purpose @ (RequestPurpose::Messages(MessagesPurpose::GetMessageViewers { .. })
                 | RequestPurpose::Messages(MessagesPurpose::GetMessageReadDate { .. })
+                | RequestPurpose::Messages(MessagesPurpose::GetMessageAuthor { .. })
                 | RequestPurpose::Messages(MessagesPurpose::GetMessageAddedReactions {
                     ..
                 })),
@@ -115,6 +116,10 @@ impl Session {
                 } else {
                     call_request_error_line(err, "Could not add the option")
                 });
+            }
+            Some(RequestPurpose::DeletePollOption) => {
+                self.messages.message_action_note =
+                    Some(call_request_error_line(err, "Could not delete the item"));
             }
             Some(RequestPurpose::MarkChecklistTasks) => {
                 self.messages.message_action_note = Some(call_request_error_line(

@@ -180,6 +180,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 draft.text == text
                     && draft.reply_to_message_id == reply_to.map(|reply| reply.message_id)
                     && draft.quote == reply_to.and_then(|reply| reply.quote.clone())
+                    && draft.item == reply_to.map(|reply| reply.item.clone()).unwrap_or_default()
                     && draft.suggested_post == terms
             }
             _ => false,
@@ -208,6 +209,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         text: text.to_string(),
                         reply_to_message_id: reply_to.map(|reply| reply.message_id),
                         quote: reply_to.and_then(|reply| reply.quote.clone()),
+                        item: reply_to.map(|reply| reply.item.clone()).unwrap_or_default(),
                         suggested_post: terms,
                     });
                 self.session.store_composer_draft(chat_id, topic, draft);

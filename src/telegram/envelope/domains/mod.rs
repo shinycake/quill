@@ -29,7 +29,7 @@ pub use chats::ChatsPayload;
 pub use common::CommonPayload;
 pub use groups::GroupsPayload;
 pub use media::MediaPayload;
-pub use messages::MessagesPayload;
+pub use messages::{MessagesPayload, PollOptionProperties};
 pub use payments::PaymentsPayload;
 pub use search::SearchPayload;
 pub use settings::SettingsPayload;

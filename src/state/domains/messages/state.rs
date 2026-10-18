@@ -10,6 +10,8 @@ pub struct MessagesState {
     /// What the open message context menu may offer (`messageProperties`).
     pub message_menu_actions:
         Option<(ChatId, MessageId, crate::telegram::envelope::MessageActions)>,
+    /// What the open poll-option menu may offer (`pollOptionProperties`).
+    pub poll_option_menu: Option<PollOptionMenu>,
     /// The message menu's Report flow (`reportChat` with message ids).
     pub message_report: Option<MessageReportFlow>,
     /// Viewers, read date and reactors of the message the menu is open on.
@@ -165,6 +167,7 @@ impl MessagesState {
         Self {
             mention_search: None,
             message_menu_actions: None,
+            poll_option_menu: None,
             message_report: None,
             message_audience: None,
             wanted_reactor_tab: None,

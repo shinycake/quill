@@ -38,6 +38,7 @@ fn message_thread_requests_match_1_8_67() {
             message_id: MessageId(520),
             quote: None,
             source_chat: None,
+            item: Default::default(),
         }),
         &SendOptions::default(),
     );

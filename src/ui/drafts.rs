@@ -51,10 +51,7 @@ impl QuillApp {
         };
         let topic = self.open_draft_topic(chat_id);
         let text = self.composer_markup(cx);
-        let reply = self
-            .composer_ui
-            .reply()
-            .and_then(|reply| reply.send_reply(chat_id));
+        let reply = self.draft_reply(self.composer_ui.reply(), chat_id);
         self.save_chat_draft(chat_id, topic, &text, reply, delayed, cx);
     }
 
@@ -70,18 +67,12 @@ impl QuillApp {
             return (String::new(), None, now_ms);
         };
         if self.composer_ui.pending_edit.is_some() {
-            let reply = self
-                .composer_ui
-                .saved_edit_reply
-                .as_ref()
-                .and_then(|saved| saved.send_reply(chat_id));
+            let reply = self.draft_reply(self.composer_ui.saved_edit_reply.as_ref(), chat_id);
             return (self.composer_ui.saved_edit_draft.clone(), reply, now_ms);
         }
         (
             self.composer_markup(cx),
-            self.composer_ui
-                .reply()
-                .and_then(|reply| reply.send_reply(chat_id)),
+            self.draft_reply(self.composer_ui.reply(), chat_id),
             now_ms,
         )
     }
@@ -147,18 +138,12 @@ impl QuillApp {
         };
         let topic = self.open_draft_topic(chat_id);
         let (text, reply) = if self.composer_ui.pending_edit.is_some() {
-            let reply = self
-                .composer_ui
-                .saved_edit_reply
-                .as_ref()
-                .and_then(|saved| saved.send_reply(chat_id));
+            let reply = self.draft_reply(self.composer_ui.saved_edit_reply.as_ref(), chat_id);
             (self.composer_ui.saved_edit_draft.clone(), reply)
         } else {
             (
                 self.composer_markup(cx),
-                self.composer_ui
-                    .reply()
-                    .and_then(|reply| reply.send_reply(chat_id)),
+                self.draft_reply(self.composer_ui.reply(), chat_id),
             )
         };
         self.save_chat_draft(chat_id, topic, &text, reply, false, cx);
@@ -213,6 +198,10 @@ impl QuillApp {
         let draft = stored.map(|text| ChatDraft {
             text,
             reply_to_message_id: reply_to.as_ref().map(|reply| reply.message_id),
+            item: reply_to
+                .as_ref()
+                .map(|reply| reply.item.clone())
+                .unwrap_or_default(),
             quote: reply_to.and_then(|reply| reply.quote),
             suggested_post: None,
         });
@@ -277,6 +266,10 @@ impl QuillApp {
             .as_ref()
             .map(|draft| draft.text.clone())
             .unwrap_or_default();
+        let item = draft
+            .as_ref()
+            .map(|draft| draft.item.clone())
+            .unwrap_or_default();
         let restored_reply = preview.map(|id| {
             // Slice G1: a draft saved with a partial quote restores the
             // quote picker state, not just the replied-to message.
@@ -286,6 +279,7 @@ impl QuillApp {
                 }
                 None => ComposerReplyTo::new(chat_id, id),
             }
+            .to_item(item)
         });
         self.composer_ui.set_reply(restored_reply);
         self.set_composer_markup(&text, window, cx);

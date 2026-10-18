@@ -127,6 +127,21 @@ pub enum MessagesPurpose {
     /// `reportChat` with message ids from the message menu; each answer
     /// drives `Session::message_report` (reason list, details, done).
     ReportMessages,
+    /// `getMessageAuthor` for the menu's "Sent by" row.
+    GetMessageAuthor {
+        chat_id: ChatId,
+        message_id: MessageId,
+    },
+    /// `getPollOptionProperties` for the open poll-option menu.
+    GetPollOptionProperties {
+        chat_id: ChatId,
+        message_id: MessageId,
+        /// `poll_option_key` of the option asked about, so an answer for
+        /// another option of the same poll is never applied to this one.
+        option_key: u64,
+    },
+    /// `deletePollOption`; the poll updates through `updateMessageContent`.
+    DeletePollOption,
     /// `getMessageViewers` for the menu's "N Seen" row.
     GetMessageViewers {
         chat_id: ChatId,
@@ -281,6 +296,7 @@ flat_purposes!(Messages(MessagesPurpose) {
     MarkChecklistTasks,
     AddChecklistTasks,
     StopPoll,
+    DeletePollOption,
     StopLiveLocation,
     UnpinChatMessage,
     UnpinAllChatMessages,

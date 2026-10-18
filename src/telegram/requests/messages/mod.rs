@@ -1,5 +1,5 @@
 use crate::composer::{
-    ComposerEntity, ComposerScheduling, FormatKind, LinkPreviewChoice, PreviewMediaSize,
+    ComposerEntity, ComposerScheduling, FormatKind, LinkPreviewChoice, PreviewMediaSize, ReplyItem,
     SendOptions, parse_format_markup,
 };
 use crate::ids::{ChatId, MessageId, RequestId};
@@ -33,9 +33,16 @@ pub struct SendReply {
     /// being sent to (`inputMessageReplyToExternalMessage`); `None` for a
     /// same-chat reply (`inputMessageReplyToMessage`).
     pub source_chat: Option<ChatId>,
+    /// The checklist task or poll option replied to.
+    pub item: ReplyItem,
 }
 
-impl SendReply {}
+impl SendReply {
+    pub fn with_item(mut self, item: ReplyItem) -> Self {
+        self.item = item;
+        self
+    }
+}
 
 /// Slice G1: `reply_to` JSON for a send builder — delegates to
 /// `input_message_reply_to_with_quote` so whole-message replies keep
@@ -47,9 +54,14 @@ pub(crate) fn send_reply_value(reply_to: Option<&SendReply>) -> Value {
             .as_ref()
             .map(|(text, position)| (text.as_str(), *position))
     });
+    let item = reply_to
+        .map(|reply| &reply.item)
+        .unwrap_or(&ReplyItem::Message);
     match reply_to.and_then(|reply| reply.source_chat.map(|chat| (chat, reply.message_id))) {
-        Some((chat_id, message_id)) => input_message_reply_to_external(chat_id, message_id, quote),
-        None => input_message_reply_to_with_quote(reply_to.map(|reply| reply.message_id), quote),
+        Some((chat_id, message_id)) => {
+            input_message_reply_to_external_item(chat_id, message_id, quote, item)
+        }
+        None => input_message_reply_to_item(reply_to.map(|reply| reply.message_id), quote, item),
     }
 }
 
@@ -63,6 +75,16 @@ pub fn input_message_reply_to_external(
     message_id: MessageId,
     quote: Option<(&str, i32)>,
 ) -> Value {
+    input_message_reply_to_external_item(chat_id, message_id, quote, &ReplyItem::Message)
+}
+
+/// [`input_message_reply_to_external`] pointing at a task or poll option.
+pub fn input_message_reply_to_external_item(
+    chat_id: ChatId,
+    message_id: MessageId,
+    quote: Option<(&str, i32)>,
+    item: &ReplyItem,
+) -> Value {
     json!({
         "@type": "inputMessageReplyToExternalMessage",
         "chat_id": chat_id.0,
@@ -70,8 +92,8 @@ pub fn input_message_reply_to_external(
         "quote": quote
             .map(|(text, position)| input_text_quote_json(text, position))
             .unwrap_or(Value::Null),
-        "checklist_task_id": 0,
-        "poll_option_id": ""
+        "checklist_task_id": item.task_id(),
+        "poll_option_id": item.option_id()
     })
 }
 
@@ -84,14 +106,23 @@ pub fn input_message_reply_to_with_quote(
     message_id: Option<MessageId>,
     quote: Option<(&str, i32)>,
 ) -> Value {
+    input_message_reply_to_item(message_id, quote, &ReplyItem::Message)
+}
+
+/// [`input_message_reply_to_with_quote`] pointing at a task or poll option.
+pub fn input_message_reply_to_item(
+    message_id: Option<MessageId>,
+    quote: Option<(&str, i32)>,
+    item: &ReplyItem,
+) -> Value {
     match message_id {
         None => Value::Null,
         Some(id) => json!({
             "@type": "inputMessageReplyToMessage",
             "message_id": id.0,
             "quote": quote.map(|(text, position)| input_text_quote_json(text, position)).unwrap_or(Value::Null),
-            "checklist_task_id": 0,
-            "poll_option_id": ""
+            "checklist_task_id": item.task_id(),
+            "poll_option_id": item.option_id()
         }),
     }
 }

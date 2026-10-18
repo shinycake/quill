@@ -56,6 +56,14 @@ impl QuillApp {
         self.message_ui.menu = Some(menu);
         self.message_ui.menu_ui.page = super::message_menu_ui::MessageMenuPage::Main;
         self.message_ui.menu_link = self.take_right_clicked_link(menu.position);
+        self.message_ui.menu_item = self.take_right_clicked_item(menu.position);
+        // Over a poll option the menu shows the option's page.
+        if matches!(
+            self.message_ui.menu_item,
+            quill::composer::ReplyItem::PollOption(_)
+        ) {
+            self.message_ui.menu_ui.page = super::message_menu_ui::MessageMenuPage::PollOption;
+        }
         self.message_ui.link_tooltip = None;
         // A right-click keeps the text selection; the menu then acts on it
         // (Telegram Desktop's Quote & Reply, Copy Selected Text).
@@ -70,6 +78,14 @@ impl QuillApp {
             let _ = live
                 .driver
                 .fetch_message_menu_actions(menu.chat_id, menu.message_id);
+            // A poll option has its own menu facts.
+            if let quill::composer::ReplyItem::PollOption(option_id) = &self.message_ui.menu_item {
+                let _ = live.driver.fetch_poll_option_properties(
+                    menu.chat_id,
+                    menu.message_id,
+                    option_id,
+                );
+            }
             // Stickers and GIFs word their menu items by what the user has
             // installed, favorited and saved.
             let content = live

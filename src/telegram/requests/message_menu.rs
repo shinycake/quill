@@ -53,6 +53,57 @@ pub fn get_message_read_date(extra: RequestId, chat_id: ChatId, message_id: Mess
     .to_string()
 }
 
+/// `getMessageAuthor chat_id:int53 message_id:int53 = User` (schema 1.8.68,
+/// line 11960): who really wrote a message posted on behalf of a chat. Works
+/// when `messageProperties.can_get_author` is true.
+pub fn get_message_author(extra: RequestId, chat_id: ChatId, message_id: MessageId) -> String {
+    json!({
+        "@type": "getMessageAuthor",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+    })
+    .to_string()
+}
+
+/// `getPollOptionProperties chat_id:int53 message_id:int53
+/// poll_option_id:string = PollOptionProperties` (schema 1.8.68, line
+/// 11942): what the right-click menu of one poll option may offer.
+pub fn get_poll_option_properties(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    poll_option_id: &str,
+) -> String {
+    json!({
+        "@type": "getPollOptionProperties",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "poll_option_id": poll_option_id,
+    })
+    .to_string()
+}
+
+/// `deletePollOption chat_id:int53 message_id:int53 option_id:string = Ok`
+/// (schema 1.8.68, line 13320). Allowed when
+/// `pollOptionProperties.can_be_deleted` is true.
+pub fn delete_poll_option(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    option_id: &str,
+) -> String {
+    json!({
+        "@type": "deletePollOption",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "option_id": option_id,
+    })
+    .to_string()
+}
+
 /// `getMessageAddedReactions chat_id:int53 message_id:int53
 /// reaction_type:ReactionType offset:string limit:int32 = AddedReactions`
 /// (schema 1.8.67, line 12849). `reaction_type` `None` lists every

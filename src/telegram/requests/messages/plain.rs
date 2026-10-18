@@ -8,6 +8,7 @@ impl SendReply {
             message_id,
             quote: None,
             source_chat: None,
+            item: ReplyItem::Message,
         }
     }
 
@@ -21,6 +22,7 @@ impl SendReply {
             message_id,
             quote,
             source_chat: Some(source_chat),
+            item: ReplyItem::Message,
         }
     }
 }

@@ -96,6 +96,23 @@ impl Session {
                         };
                         self.apply_users_payload(update, None, extra, seq);
                     }
+                } else if let Some(RequestPurpose::Messages(MessagesPurpose::GetMessageAuthor {
+                    chat_id,
+                    message_id,
+                })) = pending.map(|p| p.purpose)
+                {
+                    // The post's real author: keep the user, then tell the
+                    // open menu's "Sent by" row.
+                    if let Some(user) = user
+                        && !self.users.contains_key(&user_id)
+                    {
+                        let update = UsersPayload::UpdateUser {
+                            user_id: crate::ids::UserId(user_id),
+                            user: *user,
+                        };
+                        self.apply_users_payload(update, None, extra, seq);
+                    }
+                    self.accept_message_author(chat_id, message_id, user_id);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetMe) {
                     self.my_user_id = Some(user_id);
                 } else if matches!(

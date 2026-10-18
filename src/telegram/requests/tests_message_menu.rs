@@ -164,3 +164,60 @@ fn read_all_markers_name_the_right_request() {
     assert_eq!(votes["@type"], "readAllChatPollVotes");
     assert_eq!(votes["chat_id"], 4);
 }
+
+#[test]
+fn poll_option_and_author_requests_match_the_schema() {
+    use crate::telegram::requests::{
+        delete_poll_option, get_message_author, get_poll_option_properties,
+    };
+    let author = parse(&get_message_author(RequestId(1), ChatId(-5), MessageId(9)));
+    assert_eq!(author["@type"], "getMessageAuthor");
+    assert_eq!(author["chat_id"], -5);
+    assert_eq!(author["message_id"], 9);
+    let props = parse(&get_poll_option_properties(
+        RequestId(2),
+        ChatId(-5),
+        MessageId(9),
+        "AQ==",
+    ));
+    assert_eq!(props["@type"], "getPollOptionProperties");
+    assert_eq!(props["poll_option_id"], "AQ==");
+    let delete = parse(&delete_poll_option(
+        RequestId(3),
+        ChatId(-5),
+        MessageId(9),
+        "AQ==",
+    ));
+    assert_eq!(delete["@type"], "deletePollOption");
+    assert_eq!(delete["option_id"], "AQ==");
+}
+
+#[test]
+fn a_reply_to_a_task_or_option_names_it_on_the_wire() {
+    use crate::composer::SendOptions;
+    use crate::composer::{ComposerReplyTo, ReplyItem};
+    use crate::telegram::requests::send_text;
+    let send = |item: ReplyItem| {
+        let reply = ComposerReplyTo::new(ChatId(7), MessageId(9))
+            .to_item(item)
+            .send_target(ChatId(7));
+        parse(&send_text(
+            RequestId(1),
+            ChatId(7),
+            None,
+            "hi",
+            reply,
+            &SendOptions::default(),
+        ))
+    };
+    let task = send(ReplyItem::Task(4));
+    assert_eq!(task["reply_to"]["checklist_task_id"], 4);
+    assert_eq!(task["reply_to"]["poll_option_id"], "");
+    assert_eq!(task["reply_to"]["message_id"], 9);
+    let option = send(ReplyItem::PollOption("AQ==".into()));
+    assert_eq!(option["reply_to"]["poll_option_id"], "AQ==");
+    assert_eq!(option["reply_to"]["checklist_task_id"], 0);
+    let plain = send(ReplyItem::Message);
+    assert_eq!(plain["reply_to"]["checklist_task_id"], 0);
+    assert_eq!(plain["reply_to"]["poll_option_id"], "");
+}
