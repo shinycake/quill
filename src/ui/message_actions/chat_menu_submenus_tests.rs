@@ -8,7 +8,9 @@ use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, point, px, size};
 use quill::ids::ChatId;
-use quill::telegram::envelope::{ChatFolderInfo, ChatKind};
+use quill::telegram::envelope::{
+    ChatFolderInfo, ChatKind, NotificationSettingsScope, ScopeNotificationSettings,
+};
 
 fn frames(vcx: &mut VisualTestContext) {
     vcx.run_until_parked();
@@ -93,7 +95,69 @@ fn mute_submenu_applies_the_chosen_duration(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn muted_chat_offers_a_direct_unmute(cx: &mut TestAppContext) {
+fn a_chat_muted_by_the_scope_default_offers_a_direct_unmute(cx: &mut TestAppContext) {
+    let (app, mut vcx, chat_id) = open(cx);
+    let vcx = &mut vcx;
+    // The chat keeps the default; only the private-chat scope is muted.
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            let scope = ScopeNotificationSettings {
+                mute_for: 3600,
+                ..Default::default()
+            };
+            session
+                .settings
+                .scope_notification_settings
+                .insert(NotificationSettingsScope::PrivateChats, scope);
+        }
+    });
+    let muted_before = app.update(vcx, |app, _| {
+        app.session().is_some_and(|s| {
+            s.chats
+                .get(&chat_id.0)
+                .is_some_and(|chat| s.effective_muted(chat))
+        })
+    });
+    assert!(muted_before);
+    show_menu(&app, vcx, chat_id);
+    click(vcx, "chat-menu-mute");
+    // Unmute acts at once: no submenu, the menu closes, and the chat
+    // becomes an unmuted exception to the scope default.
+    assert!(app.update(vcx, |app, _| app.chat_list.menu.is_none()));
+    let muted_after = app.update(vcx, |app, _| {
+        app.session().is_some_and(|s| {
+            s.chats
+                .get(&chat_id.0)
+                .is_some_and(|chat| s.effective_muted(chat))
+        })
+    });
+    assert!(!muted_after);
+}
+
+#[gpui_kit::test]
+fn select_tone_opens_the_panel_for_the_row_chat_without_navigating(cx: &mut TestAppContext) {
+    let (app, mut vcx, chat_id) = open(cx);
+    let vcx = &mut vcx;
+    let open_before = app.update(vcx, |app, _| app.session().and_then(|s| s.open_chat));
+    assert_ne!(open_before, Some(chat_id));
+    show_menu(&app, vcx, chat_id);
+    click(vcx, "chat-menu-mute");
+    click(vcx, "chat-mute-tone");
+    let (open_after, target, panel, picker) = app.update(vcx, |app, _| {
+        (
+            app.session().and_then(|s| s.open_chat),
+            app.notify.mute_chat,
+            app.notify.mute_menu_open,
+            app.notify.notif_sound_picker_open,
+        )
+    });
+    assert_eq!(open_after, open_before);
+    assert_eq!(target, Some(chat_id));
+    assert!(panel && picker);
+}
+
+#[gpui_kit::test]
+fn a_basic_group_offers_delete_and_leave(cx: &mut TestAppContext) {
     let (app, mut vcx, chat_id) = open(cx);
     let vcx = &mut vcx;
     app.update(vcx, |app, _| {
@@ -102,19 +166,20 @@ fn muted_chat_offers_a_direct_unmute(cx: &mut TestAppContext) {
             .as_mut()
             .and_then(|s| s.chats.get_mut(&chat_id.0))
         {
-            chat.notification_settings = chat.notification_settings.clone().with_mute_for(3600);
+            chat.kind = ChatKind::BasicGroup { basic_group_id: 9 };
+            chat.can_be_deleted_only_for_self = true;
         }
     });
     show_menu(&app, vcx, chat_id);
-    assert!(!present(vcx, "chat-mute-1h"));
-    click(vcx, "chat-menu-mute");
-    assert!(app.update(vcx, |app, _| app.chat_list.menu.is_none()));
-    let muted = app.update(vcx, |app, _| {
-        app.session()
-            .and_then(|s| s.chats.get(&chat_id.0))
-            .is_some_and(|chat| chat.is_muted())
+    assert!(!present(vcx, "chat-menu-leave"));
+    click(vcx, "chat-menu-delete");
+    let action = app.update(vcx, |app, _| {
+        app.admin
+            .group_confirm_dialog
+            .as_ref()
+            .map(|dialog| matches!(dialog.action, GroupConfirmAction::RemoveFromList))
     });
-    assert!(!muted);
+    assert_eq!(action, Some(true));
 }
 
 #[gpui_kit::test]

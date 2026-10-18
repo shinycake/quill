@@ -7,13 +7,31 @@ use quill::lang::{keys, tr, tr_with, trn};
 impl QuillApp {
     pub(in crate::ui) fn close_mute_menu(&mut self, cx: &mut Context<Self>) {
         self.notify.mute_menu_open = false;
+        self.notify.mute_chat = None;
         self.notify.mute_custom_open = false;
         self.notify.notif_sound_picker_open = false;
         cx.notify();
     }
 
+    /// The Mute panel for a chat row's menu: keyed to that chat, whatever
+    /// chat is open (tdesktop opens a box for the row's peer).
+    pub(in crate::ui) fn open_mute_menu_for(
+        &mut self,
+        chat_id: ChatId,
+        custom: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_mute_menu(cx);
+        self.notify.mute_chat = Some(chat_id);
+        self.ensure_chat_volume_slider(chat_id, cx);
+        self.notify.mute_custom_open = custom;
+        self.notify.notif_sound_picker_open = !custom;
+        cx.notify();
+    }
+
     pub(in crate::ui) fn open_mute_menu(&mut self, cx: &mut Context<Self>) {
         self.notify.mute_menu_open = true;
+        self.notify.mute_chat = None;
         self.notify.mute_custom_open = false;
         if let Some(chat_id) = self.session().and_then(|session| session.open_chat) {
             self.ensure_chat_volume_slider(chat_id, cx);
@@ -30,6 +48,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.notify.mute_menu_open = false;
+        self.notify.mute_chat = None;
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.set_chat_mute_for(chat_id, mute_for);
             self.connection.set_note(match result {
@@ -66,7 +85,10 @@ impl QuillApp {
     /// `NotificationChannelSecretChat` label with the peer's name.
     pub(in crate::ui) fn mute_menu_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let session = self.session();
-        let open_chat = session.as_ref().and_then(|s| s.open_chat);
+        let open_chat = self
+            .notify
+            .mute_chat
+            .or_else(|| session.as_ref().and_then(|s| s.open_chat));
         let open_chat_summary: Option<&ChatSummary> =
             open_chat.and_then(|id| session.as_ref()?.chats.get(&id.0));
         let chat_settings: ChatNotificationSettings = open_chat_summary
@@ -254,7 +276,14 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(div().font_semibold().child(tr(keys::CHART_TITLE_MUTE)))
+                    .child(div().font_semibold().child(
+                        match (self.notify.mute_chat, open_chat_summary) {
+                            (Some(_), Some(chat)) => {
+                                format!("{} · {}", tr(keys::CHART_TITLE_MUTE), chat.title)
+                            }
+                            _ => tr(keys::CHART_TITLE_MUTE).to_string(),
+                        },
+                    ))
                     .child(
                         Button::new("close-mute-menu")
                             .icon(gpui_kit::assets::IconName::X)

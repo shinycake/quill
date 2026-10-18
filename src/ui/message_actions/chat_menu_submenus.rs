@@ -115,15 +115,10 @@ impl QuillApp {
         &mut self,
         chat_id: ChatId,
         custom: bool,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.chat_list.menu = None;
-        self.select_listed_chat(chat_id, window, cx);
-        self.open_mute_menu(cx);
-        self.notify.mute_custom_open = custom;
-        self.notify.notif_sound_picker_open = !custom;
-        cx.notify();
+        self.open_mute_menu_for(chat_id, custom, cx);
     }
 
     /// The Mute row (order 30): a direct "Unmute" while muted, otherwise a
@@ -143,7 +138,11 @@ impl QuillApp {
             return None;
         }
         let chat_id = menu.chat_id;
-        if chat.is_muted() {
+        // tdesktop's `isMuted` counts the scope default too.
+        let muted = self
+            .session()
+            .is_some_and(|session| session.effective_muted(chat));
+        if muted {
             return Some(
                 menu_row(
                     "chat-menu-mute",
@@ -174,8 +173,8 @@ impl QuillApp {
                 IconName::Music,
                 tr(keys::MUTE_MENU_SOUND_SELECT).to_string(),
             )
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.open_chat_notification_panel(chat_id, false, window, cx);
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.open_chat_notification_panel(chat_id, false, cx);
             }))
             .into_any_element(),
             sub_item(
@@ -226,8 +225,8 @@ impl QuillApp {
                 IconName::Timer,
                 tr(keys::MUTE_MENU_DURATION).to_string(),
             )
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.open_chat_notification_panel(chat_id, true, window, cx);
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.open_chat_notification_panel(chat_id, true, cx);
             }))
             .into_any_element(),
         );
@@ -276,7 +275,7 @@ impl QuillApp {
     ) -> Option<AnyElement> {
         let session = self.session()?;
         let folders = &session.chat_list.chat_folders;
-        if folders.is_empty() {
+        if folders.is_empty() || !chat.supported() {
             return None;
         }
         let chat_id = menu.chat_id;

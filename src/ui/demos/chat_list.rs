@@ -51,8 +51,34 @@ impl QuillApp {
         }
         self.chat_list.selected.insert(11);
         self.chat_list.selected.insert(12);
-        // `QUILL_DEMO_CHAT_MENU_SUBMENU=mute|folders` opens that submenu
-        // of the row menu; the demo account has two folders for it.
+        let menu = self
+            .demo_chat_menu_variant()
+            .unwrap_or_else(|| ChatMenuState::at(ChatId(11), Point::new(px(120.), px(770.))));
+        self.chat_list.menu = Some(menu);
+        self.connection.set_note(StatusNote::silent(
+            "screenshot demo — mentions · reactions · multi-select · report · block",
+        ));
+    }
+
+    /// The row menu for a capture of one chat kind or submenu, chosen by
+    /// `QUILL_DEMO_CHAT_MENU_SUBMENU` (`mute`, `folders`),
+    /// `QUILL_DEMO_CHAT_MENU_KIND` (`group`, `channel`) and
+    /// `QUILL_DEMO_CHAT_MENU_CHAT` (`12`, the muted chat). The account gets
+    /// two folders and the menu sits right of the list so no row is hidden.
+    /// `None` when none is set: the demo keeps its default menu.
+    fn demo_chat_menu_variant(&mut self) -> Option<ChatMenuState> {
+        use crate::ui::menu_states::ChatMenuSubmenu;
+        let submenu = std::env::var("QUILL_DEMO_CHAT_MENU_SUBMENU").ok();
+        let kind = std::env::var("QUILL_DEMO_CHAT_MENU_KIND").ok();
+        let target = std::env::var("QUILL_DEMO_CHAT_MENU_CHAT").ok();
+        if submenu.is_none() && kind.is_none() && target.is_none() {
+            return None;
+        }
+        let chat_id = if target.as_deref() == Some("12") {
+            12
+        } else {
+            11
+        };
         if let Some(session) = self.demo_session.as_mut() {
             for (id, name) in [(7, "Work"), (8, "Family")] {
                 session
@@ -67,15 +93,13 @@ impl QuillApp {
                         has_my_invite_links: false,
                     });
             }
-            if let Some(chat) = session.chats.get_mut(&11) {
-                // `QUILL_DEMO_CHAT_MENU_KIND=group|channel` shows the
-                // delete or leave entry of that chat kind.
-                match std::env::var("QUILL_DEMO_CHAT_MENU_KIND").as_deref() {
-                    Ok("group") => {
+            if let Some(chat) = session.chats.get_mut(&chat_id) {
+                match kind.as_deref() {
+                    Some("group") => {
                         chat.kind =
                             quill::telegram::envelope::ChatKind::BasicGroup { basic_group_id: 11 };
                     }
-                    Ok("channel") => {
+                    Some("channel") => {
                         chat.kind = quill::telegram::envelope::ChatKind::Supergroup {
                             supergroup_id: 11,
                             is_channel: true,
@@ -87,16 +111,13 @@ impl QuillApp {
                 chat.folder_positions.insert(7, 1);
             }
         }
-        let mut menu = ChatMenuState::at(ChatId(11), Point::new(px(120.), px(300.)));
-        menu.submenu = match std::env::var("QUILL_DEMO_CHAT_MENU_SUBMENU").as_deref() {
-            Ok("mute") => Some(crate::ui::menu_states::ChatMenuSubmenu::Mute),
-            Ok("folders") => Some(crate::ui::menu_states::ChatMenuSubmenu::Folders),
+        let mut menu = ChatMenuState::at(ChatId(chat_id), Point::new(px(320.), px(120.)));
+        menu.submenu = match submenu.as_deref() {
+            Some("mute") => Some(ChatMenuSubmenu::Mute),
+            Some("folders") => Some(ChatMenuSubmenu::Folders),
             _ => None,
         };
-        self.chat_list.menu = Some(menu);
-        self.connection.set_note(StatusNote::silent(
-            "screenshot demo — mentions · reactions · multi-select · report · block",
-        ));
+        Some(menu)
     }
 
     fn demo_ready_chat_list_search(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {

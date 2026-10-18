@@ -611,3 +611,31 @@ fn driver_quiz_draft_sends_quiz_type() {
     assert!(!sink.rendered().contains("CANARY"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn driver_set_chat_mute_for_sends_each_row_menu_duration() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+    for seconds in [3600, 8 * 3600, 2 * 86_400, i32::MAX, 0] {
+        driver.set_chat_mute_for(ChatId(7), seconds).unwrap();
+        let json = recorder
+            .snapshot()
+            .last()
+            .cloned()
+            .expect("setChatNotificationSettings");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "setChatNotificationSettings");
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["notification_settings"]["use_default_mute_for"], false);
+        assert_eq!(v["notification_settings"]["mute_for"], seconds);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -44,11 +44,17 @@ durations and the folder add and remove calls already existed
 
 ## Deviations
 
-- "Select tone" and "Mute for..." open the chat's existing notification panel
-  (which owns the tone list and the custom duration) instead of a standalone box.
-  That also opens the chat.
-- tdesktop adds the remaining mute time to "Unmute". TDLib gives the seconds
-  left at update time only, so Quill omits it.
+- "Select tone" and "Mute for…" open the existing notification panel (which owns
+  the tone list and the custom duration) keyed to the right-clicked chat
+  (`notify.mute_chat`), without opening that chat. The panel is shown in the
+  main window's conversation area, not in a standalone box, and needs a chat
+  open there.
+- tdesktop adds the remaining mute time to "Unmute" (`FormatMuteForTiny`).
+  TDLib gives the seconds left at update time only, with no end timestamp, so a
+  hint would go stale; Quill omits it.
+- The Mute and Unmute choice uses `Session::effective_muted`, so a scope default
+  counts as tdesktop's `isMuted` does.
+- The folder row is hidden for chats Quill cannot add to a list (unsupported kinds).
 - A full folder is not pre-checked against the limit; TDLib's error shows as the
   existing folder failure note.
 
