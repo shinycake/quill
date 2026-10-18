@@ -68,6 +68,22 @@ impl QuillApp {
                     });
             }
             if let Some(chat) = session.chats.get_mut(&11) {
+                // `QUILL_DEMO_CHAT_MENU_KIND=group|channel` shows the
+                // delete or leave entry of that chat kind.
+                match std::env::var("QUILL_DEMO_CHAT_MENU_KIND").as_deref() {
+                    Ok("group") => {
+                        chat.kind =
+                            quill::telegram::envelope::ChatKind::BasicGroup { basic_group_id: 11 };
+                    }
+                    Ok("channel") => {
+                        chat.kind = quill::telegram::envelope::ChatKind::Supergroup {
+                            supergroup_id: 11,
+                            is_channel: true,
+                        };
+                    }
+                    _ => {}
+                }
+                chat.can_be_deleted_only_for_self = true;
                 chat.folder_positions.insert(7, 1);
             }
         }
