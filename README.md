@@ -412,7 +412,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] "This is your Archive" explainer <!-- parity:chatlist-archive-hint -->
 - [x] Chat row menu: Mute submenu with durations, direct Unmute, "Add to folder" submenu, Delete chat / Delete and leave / Leave group / Leave channel by chat kind (#1013) <!-- parity:chatlist-row-menu-submenus -->
 - [ ] Drop files, or dragged messages, on a chat row to send them there <!-- parity:chatlist-drop-on-row -->
-- [ ] Top-people strip in the empty search state (`getTopChats`) <!-- parity:chatlist-top-people -->
+- [x] Top-people strip in the empty search state (`getTopChats`) <!-- parity:chatlist-top-people -->
 - [ ] Forum rows show the latest topic titles <!-- parity:chatlist-forum-topic-titles -->
 - [ ] PSA and promoted-chat rows: badge and hide action <!-- parity:chatlist-psa-promoted -->
 
