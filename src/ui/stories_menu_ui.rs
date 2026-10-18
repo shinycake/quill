@@ -3,6 +3,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::context_menu_keys::context_menu_item;
 use super::*;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
@@ -100,7 +101,6 @@ impl QuillApp {
             hidden: self.story_tile_hidden(chat_id),
             muted: self.story_tile_muted(chat_id),
         });
-        let hover = cx.theme().accent;
         let rows: Vec<AnyElement> = items
             .into_iter()
             .enumerate()
@@ -111,29 +111,19 @@ impl QuillApp {
                     StoryMenuAction::ToggleHidden => IconName::EyeOff,
                     StoryMenuAction::ToggleMute => IconName::BellOff,
                 };
-                div()
-                    .id(("story-menu-item", i))
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .px_3()
-                    .py_1p5()
-                    .rounded_md()
-                    .cursor_pointer()
-                    .text_sm()
-                    .text_color(text_menu())
-                    .hover(|style| style.bg(hover))
-                    .role(Role::MenuItem)
-                    .aria_label(entry.label)
-                    .tab_index(0)
-                    .focus_visible(|style| style.bg(hover))
-                    .child(Icon::new(icon).size(px(16.)))
-                    .child(entry.label)
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.chat_list.global.story_menu = None;
-                        this.run_story_menu_action(chat_id, entry.action, window, cx);
-                    }))
-                    .into_any_element()
+                context_menu_item(
+                    ("story-menu-item", i),
+                    icon,
+                    entry.label,
+                    text_menu().into(),
+                    true,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.chat_list.global.story_menu = None;
+                    this.run_story_menu_action(chat_id, entry.action, window, cx);
+                }))
+                .into_any_element()
             })
             .collect();
         let panel = div()
@@ -149,8 +139,7 @@ impl QuillApp {
             .border_color(accent())
             .bg(bg_canvas())
             .children(rows);
-        div()
-            .id("story-menu-overlay")
+        self.context_menu_keys(div().id("story-menu-overlay"), cx)
             .track_focus(&self.frame.context_menu_focus)
             .occlude()
             .absolute()

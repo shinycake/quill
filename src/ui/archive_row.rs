@@ -8,6 +8,7 @@
 use super::app::{ChatListFilter, QuillApp};
 use super::chat_list_keys::ListRow;
 use super::chat_row::chat_row_height;
+use super::context_menu_keys::context_menu_item;
 use super::pressable::PressableDiv;
 use super::*;
 use crate::ui::status_note::StatusNote;
@@ -243,30 +244,12 @@ impl QuillApp {
             .session()
             .and_then(|s| s.archive_row_summary())
             .is_some_and(|summary| summary.unread_chats > 0);
-        let hover = cx.theme().accent;
         let item = |id: &'static str,
                     icon: IconName,
                     label: &'static str,
                     on_click: Box<dyn Fn(&mut QuillApp, &mut Context<QuillApp>)>,
                     cx: &mut Context<QuillApp>| {
-            div()
-                .id(id)
-                .flex()
-                .items_center()
-                .gap_3()
-                .px_3()
-                .py_1p5()
-                .rounded_md()
-                .cursor_pointer()
-                .text_sm()
-                .text_color(text_menu())
-                .hover(|style| style.bg(hover))
-                .role(Role::MenuItem)
-                .aria_label(label)
-                .tab_index(0)
-                .focus_visible(|style| style.bg(hover))
-                .child(Icon::new(icon).size(px(16.)))
-                .child(label)
+            context_menu_item(id, icon, label, text_menu().into(), true, cx)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.chat_list.archive_menu = None;
                     on_click(this, cx);
@@ -335,8 +318,7 @@ impl QuillApp {
             .border_color(accent())
             .bg(bg_canvas())
             .children(rows);
-        div()
-            .id("archive-menu-overlay")
+        self.context_menu_keys(div().id("archive-menu-overlay"), cx)
             .track_focus(&self.frame.context_menu_focus)
             .occlude()
             .absolute()

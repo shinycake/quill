@@ -12,6 +12,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::context_menu_keys::context_menu_item;
 use super::folder_share::finish_dialog;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
@@ -261,26 +262,9 @@ impl QuillApp {
             .is_some();
         let in_profile = session.and_then(|s| s.profile_audio_known(file_id)) == Some(true);
         let finder = cfg!(target_os = "macos");
-        let hover = cx.theme().accent;
         let row = |id: &'static str, icon: IconName, label: &'static str, danger: bool| {
-            div()
-                .id(id)
-                .flex()
-                .items_center()
-                .gap_3()
-                .px_3()
-                .py_1p5()
-                .rounded_md()
-                .cursor_pointer()
-                .text_sm()
-                .text_color(if danger { danger_bright() } else { text_menu() })
-                .hover(|style| style.bg(hover))
-                .role(Role::MenuItem)
-                .aria_label(label)
-                .tab_index(0)
-                .focus_visible(|style| style.bg(hover))
-                .child(Icon::new(icon).size(px(16.)))
-                .child(label)
+            let color = if danger { danger_bright() } else { text_menu() };
+            context_menu_item(id, icon, label, color.into(), true, cx)
         };
         let close = |this: &mut QuillApp| this.playback.playlist_menu = None;
         let mut rows: Vec<AnyElement> = Vec::new();
@@ -438,8 +422,7 @@ impl QuillApp {
             .border_color(accent())
             .bg(bg_canvas())
             .children(rows);
-        div()
-            .id("playlist-menu-overlay")
+        self.context_menu_keys(div().id("playlist-menu-overlay"), cx)
             .track_focus(&self.frame.context_menu_focus)
             .occlude()
             .absolute()

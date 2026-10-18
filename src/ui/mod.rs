@@ -226,6 +226,7 @@ mod contacts;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod context_menu_focus_tests;
+mod context_menu_keys;
 mod conversation;
 mod custom_emoji_card;
 mod custom_keyboard;

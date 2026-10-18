@@ -668,6 +668,7 @@ fn claim_defaults(ra: &RebindableAction, claimed: &mut Vec<Keystroke>) -> Vec<St
 
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys(default_bindings());
+    cx.bind_keys(super::context_menu_keys::context_menu_bindings());
     trace_keys(cx);
 }
 
@@ -730,6 +731,7 @@ pub fn apply_custom_bindings(cx: &mut App, customs: &[CustomKeybinding]) {
     // switch on depth and the later binding wins.
     bindings.extend(composer_bindings());
     bindings.extend(super::chat_list_keys::chat_list_bindings());
+    bindings.extend(super::context_menu_keys::context_menu_bindings());
     cx.clear_key_bindings();
     cx.bind_keys(bindings);
 }
@@ -1056,6 +1058,9 @@ mod tests {
             ("enter", true, true),
             ("k", true, true),
             ("tab", false, false),
+            ("up", false, false),
+            ("down", false, false),
+            ("down", true, true),
             ("enter", false, false),
             ("q", true, false),
             ("w", true, false),
