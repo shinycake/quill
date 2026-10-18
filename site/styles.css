@@ -288,26 +288,36 @@ section { scroll-margin-top: 72px; }
 .foot p { margin: 6px 0; max-width: 760px; }
 .foot .foot-small { font-size: 12.5px; }
 
-/* Mac install: the Terminal installer first, the zip and its first-open steps second. */
-.mac { margin-top: 44px; }
-.mac-title { font-size: 22px; margin: 0 0 14px; letter-spacing: -0.01em; }
-.mac-card { position: relative; margin-top: 16px; padding: 26px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--line); }
-.mac-card.recommended { border-color: color-mix(in srgb, var(--accent) 60%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
-.mac-card h4 { margin: 0; font-size: 19px; letter-spacing: -0.01em; }
-.mac-card h5 { margin: 26px 0 10px; font-size: 15px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); }
-.mac-lede { margin: 6px 0 14px; color: var(--muted); }
+/* Install: per system, the one-line installer first, the download and its first-open steps second. */
+.install { margin-top: 44px; scroll-margin-top: 80px; }
+.inst-title { font-size: 22px; margin: 0 0 14px; letter-spacing: -0.01em; }
+.os-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 4px; }
+.os-tabs[hidden] { display: none; }
+.os-tabs button { padding: 8px 18px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); font: 600 14.5px var(--font); cursor: pointer; }
+.os-tabs button:hover { color: var(--text); }
+.os-tabs button[aria-selected="true"] { color: var(--accent-ink); background: var(--accent); border-color: transparent; }
+.os-panel + .os-panel { margin-top: 36px; }
+.os-name { margin: 0; font-size: 17px; color: var(--muted); }
+.js-tabs .os-panel + .os-panel { margin-top: 0; }
+.js-tabs .os-name { display: none; }
+.inst-card { position: relative; margin-top: 16px; padding: 26px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--line); }
+.inst-card.recommended { border-color: color-mix(in srgb, var(--accent) 60%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
+.inst-card h4 { margin: 0; font-size: 19px; letter-spacing: -0.01em; }
+.inst-card h5 { margin: 26px 0 10px; font-size: 15px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); }
+.inst-lede { margin: 6px 0 14px; color: var(--muted); }
 .badge { display: inline-block; margin-bottom: 10px; padding: 3px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 650; color: var(--accent-ink); background: linear-gradient(180deg, var(--accent), var(--accent-2)); }
-.mac-steps, .open-steps { margin: 0; padding-left: 22px; }
-.mac-steps li { margin: 8px 0; padding-left: 4px; }
+.inst-steps, .open-steps { margin: 0; padding-left: 22px; }
+.inst-steps li { margin: 8px 0; padding-left: 4px; }
 kbd { font-family: var(--font); font-size: 13px; padding: 1px 7px; border-radius: 6px; border: 1px solid var(--line); border-bottom-width: 2px; background: var(--surface-2); }
 .cmd { display: flex; align-items: stretch; gap: 8px; margin-top: 10px; }
 .cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-family: var(--mono); font-size: 13.5px; padding: 12px 14px; border-radius: 10px; background: var(--bg-2); border: 1px solid var(--line); user-select: all; }
 .copy { flex: none; padding: 0 16px; border-radius: 10px; border: 0; font: 600 14px var(--font); color: var(--accent-ink); background: linear-gradient(180deg, var(--accent), var(--accent-2)); cursor: pointer; }
 .copy:hover { filter: brightness(1.08); }
-.safe { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.safe { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); gap: 12px; }
 .safe li { padding: 14px 16px; border-radius: 12px; background: var(--surface-2); color: var(--muted); font-size: 14.5px; }
 .safe strong { display: block; color: var(--text); margin-bottom: 2px; }
 .why-note { margin: 16px 0 0; color: var(--faint); font-size: 14px; }
+.inst-lede code, .safe code, .inst-steps code.inline { font-family: var(--mono); font-size: 12.5px; background: var(--surface-2); padding: 1px 5px; border-radius: 5px; word-break: break-all; }
 .why-note code { font-family: var(--mono); font-size: 12.5px; background: var(--surface-2); padding: 1px 5px; border-radius: 5px; word-break: break-all; }
 .open-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; padding: 0; list-style: none; counter-reset: step; }
 .open-steps li { counter-increment: step; display: flex; flex-direction: column; gap: 12px; }
@@ -338,3 +348,14 @@ kbd { font-family: var(--font); font-size: 13px; padding: 1px 7px; border-radius
 .mock-settings .pane em { font-style: normal; font-weight: 600; color: var(--m-sub); }
 .mock-settings .row { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 9px; background: var(--m-btn); }
 .mock-settings .row .mbtn { align-self: flex-end; background: var(--m-bg); }
+
+/* Drawn stand-in for the SmartScreen dialog, which is blue in either Windows theme. */
+.mock-smartscreen { --m-bg: #0063b1; --m-text: #fff; --m-sub: #e6f0fa; --m-btn: rgba(255,255,255,.18); --m-line: rgba(255,255,255,.2);
+  display: flex; flex-direction: column; gap: 8px; padding: 16px; border-radius: 4px; max-width: 300px; }
+:root:not([data-theme="dark"]) .mock-smartscreen { --m-bg: #0063b1; --m-text: #fff; --m-sub: #e6f0fa; --m-btn: rgba(255,255,255,.18); --m-line: rgba(255,255,255,.2); }
+.mock-smartscreen b { font-size: 16px; font-weight: 400; }
+.mock-smartscreen span { color: var(--m-sub); }
+.mock-smartscreen .mmeta { margin-top: 2px; }
+.mock-smartscreen .mlink { align-self: flex-start; font-style: normal; text-decoration: underline; }
+.mock-smartscreen .mrow { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.mock-smartscreen .mbtn { border-radius: 2px; border: 1px solid var(--m-line); min-width: 84px; }

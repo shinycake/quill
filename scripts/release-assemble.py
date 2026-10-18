@@ -80,14 +80,35 @@ ad-hoc signed). Move `Quill.app` to Applications and run
 Quill once, then go to System Settings > Privacy & Security, click
 **Open Anyway** next to the Quill message, and confirm.
 
-**Linux (x86_64).** `tar -xzf quill-linux-x86_64-bundle.tar.gz`, then either run
-`quill-linux-x86_64/quill` in place or `quill-linux-x86_64/install.sh` to install
-under `~/.local` (pass a prefix to install elsewhere). Quill can update this
-package in place from Settings.
+**Linux (x86_64, glibc).** Paste this into a terminal to install or update
+Quill for your user, with no root needed:
 
-**Windows (x86_64, Windows 10+).** Unzip `quill-windows-x86_64.zip` anywhere and
-run `quill.exe`. The zip is not code-signed, so SmartScreen may warn: choose
-**More info > Run anyway**. No Visual C++ Redistributable is needed.
+```sh
+curl -fsSL https://raw.githubusercontent.com/shinycake/quill/main/scripts/linux-web-install.sh | bash
+```
+
+It downloads `quill-linux-x86_64-bundle.tar.gz`, checks its SHA-256, installs
+it under `~/.local` with a desktop entry, and names any system library that is
+missing. To do it by hand, `tar -xzf quill-linux-x86_64-bundle.tar.gz`, then run
+`quill-linux-x86_64/quill` in place or `quill-linux-x86_64/install.sh` (pass a
+prefix to install elsewhere). Quill can update this package in place from
+Settings.
+
+**Windows (x86_64, Windows 10+).** Paste this into PowerShell to install or
+update Quill for your user, with no administrator rights needed:
+
+```powershell
+irm https://raw.githubusercontent.com/shinycake/quill/main/scripts/windows-install.ps1 | iex
+```
+
+It downloads `quill-windows-x86_64.zip`, checks its SHA-256, installs it in
+`%LOCALAPPDATA%\Programs\Quill` with a Start menu shortcut, and adds Quill to
+Settings > Apps so you can remove it there. Quill starts without a SmartScreen
+warning (Smart App Control, when turned on, is a separate check and may still
+block it). If you download the zip in a browser instead, unzip it anywhere and
+run `quill.exe`. The zip is not code-signed, so SmartScreen warns the first
+time: choose **More info > Run anyway**. No Visual C++ Redistributable is
+needed.
 """
 
 

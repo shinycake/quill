@@ -227,6 +227,9 @@ impl QuillApp {
         menu: ChatMenuState,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        if menu.top_person {
+            return self.top_person_menu_overlay(menu, cx);
+        }
         let chat_id = menu.chat_id;
         let chat = self
             .session()
@@ -609,50 +612,11 @@ impl QuillApp {
             rows.push((45, row));
         }
         rows.sort_by_key(|(order, _)| *order);
-        let panel = div()
-            .id("chat-menu-panel")
-            .occlude()
-            .flex()
-            .flex_col()
-            .w(px(super::chat_menu_submenus::MENU_WIDTH))
-            .px_1()
-            .py_1()
-            .rounded_md()
-            .border_1()
-            .border_color(accent())
-            .bg(bg_canvas())
-            .children(rows.into_iter().map(|(_, row)| row));
-        div()
-            .id("chat-menu-overlay")
-            .track_focus(&self.frame.context_menu_focus)
-            .occlude()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .child(
-                div()
-                    .id("chat-menu-backdrop")
-                    .occlude()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.chat_list.menu = None;
-                        cx.notify();
-                    })),
-            )
-            .child(
-                anchored()
-                    .position(menu.position)
-                    .snap_to_window_with_margin(px(8.))
-                    .child(panel),
-            )
-            .focus_trap("chat-menu-focus", &self.frame.context_menu_focus)
-            .into_any_element()
+        self.chat_menu_shell(
+            menu.position,
+            rows.into_iter().map(|(_, row)| row).collect(),
+            cx,
+        )
     }
 
     /// MED4: Instant View reader overlay (TGX behavior — attempt IV

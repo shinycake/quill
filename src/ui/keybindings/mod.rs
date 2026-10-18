@@ -766,7 +766,7 @@ mod tests {
     fn reference_table_matches_resolved_defaults() {
         let defaults = default_bindings();
         // macOS adds ⌃⌘F first, for the Window menu's Toggle Full Screen.
-        let expected = if cfg!(target_os = "macos") { 105 } else { 104 };
+        let expected = if cfg!(target_os = "macos") { 107 } else { 106 };
         assert_eq!(defaults.len(), expected);
         for row in resolve_keybindings(&[]) {
             for chord in row.live {

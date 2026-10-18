@@ -261,6 +261,7 @@ impl LiveTdJson {
             .cloned()
             .ok_or(crate::telegram::ffi::TdJsonError::Load)?;
         let client_id = api.create_client_id();
+        crate::telegram::hub::stop_shared_before_tdlib_teardown();
         Ok(Self {
             api,
             client_id,

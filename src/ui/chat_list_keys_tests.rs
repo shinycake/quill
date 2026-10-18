@@ -335,7 +335,10 @@ fn arrows_in_the_search_field_walk_the_results_and_enter_opens_one(cx: &mut Test
     press(vcx, "up");
     assert_eq!(search_highlight(&app, vcx), order.first().copied());
     let target = match order.first().copied().expect("a result") {
-        SearchRow::Chat(id) | SearchRow::PublicChat(id) | SearchRow::Message(id, _) => id,
+        SearchRow::Chat(id)
+        | SearchRow::PublicChat(id)
+        | SearchRow::Message(id, _)
+        | SearchRow::Top(id) => id,
     };
     press(vcx, "enter");
     assert_eq!(open_chat(&app, vcx), Some(target));

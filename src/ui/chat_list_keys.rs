@@ -24,6 +24,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
+use quill::top_people::StripKey;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -45,6 +46,10 @@ actions!(
         ChatListEnd,
         /// Chat list focused: open the selected row (the first when none is).
         ChatListOpen,
+        /// Search field focused: step left in the top-people strip.
+        ChatListLeft,
+        /// Search field focused: step right in the top-people strip.
+        ChatListRight,
     ]
 );
 
@@ -78,6 +83,8 @@ pub(super) fn chat_list_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("down", ChatListDown, search),
         KeyBinding::new("pageup", ChatListPageUp, search),
         KeyBinding::new("pagedown", ChatListPageDown, search),
+        KeyBinding::new("left", ChatListLeft, search),
+        KeyBinding::new("right", ChatListRight, search),
     ]
 }
 
@@ -107,6 +114,8 @@ pub(super) enum SearchRow {
     Chat(ChatId),
     PublicChat(ChatId),
     Message(ChatId, MessageId),
+    /// A person of the top-people strip.
+    Top(ChatId),
 }
 
 /// The selection state (a `ChatListUi` field).
@@ -147,6 +156,20 @@ impl ChatListKeys {
             .filter(|row| self.search_order.borrow().contains(row))
     }
 
+    /// The result the keys (not the pointer) selected.
+    pub(in crate::ui) fn search_keyboard(&self) -> Option<SearchRow> {
+        self.search
+    }
+
+    pub(in crate::ui) fn set_search_keyboard(&mut self, row: Option<SearchRow>) {
+        self.search = row;
+    }
+
+    /// The results in the order the last frame drew them.
+    pub(in crate::ui) fn search_order(&self) -> Vec<SearchRow> {
+        self.search_order.borrow().clone()
+    }
+
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]
     pub(super) fn search_highlight(&self) -> Option<SearchRow> {
@@ -168,6 +191,23 @@ impl ChatListKeys {
 
     pub(super) fn push_search_row(&self, row: SearchRow) {
         self.search_order.borrow_mut().push(row);
+    }
+
+    /// A prepaint listener for a container whose children are exactly
+    /// `rows`, with no heading (the top-people tiles).
+    pub(in crate::ui) fn tiles_bounds_recorder(
+        &self,
+        rows: Vec<SearchRow>,
+    ) -> impl Fn(Vec<Bounds<Pixels>>, &mut Window, &mut App) + 'static {
+        let store = self.search_bounds.clone();
+        move |bounds, _, _| {
+            let Ok(mut store) = store.try_borrow_mut() else {
+                return;
+            };
+            for (row, row_bounds) in rows.iter().zip(bounds.iter()) {
+                store.insert(*row, *row_bounds);
+            }
+        }
     }
 
     /// A prepaint listener for one section of results: `rows` are its
@@ -304,9 +344,29 @@ impl QuillApp {
     ) {
         match self.chat_list_key_scope(window, cx) {
             Some(Scope::List) => self.step_list_selection(key, cx),
-            Some(Scope::Search) => self.step_search_selection(key, cx),
+            Some(Scope::Search) => {
+                if !self.nav_top_people(key, cx) {
+                    self.step_search_selection(key, cx);
+                }
+            }
             None => cx.propagate(),
         }
+    }
+
+    /// Left or Right in the search field: the top-people strip takes them
+    /// while it shows, else the field keeps its caret.
+    pub(super) fn chat_list_sideways(
+        &mut self,
+        key: StripKey,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.chat_list_key_scope(window, cx) == Some(Scope::Search)
+            && self.sideways_top_people(key, cx)
+        {
+            return;
+        }
+        cx.propagate();
     }
 
     /// Enter in the chat list: open the selected row, or select and open
@@ -405,7 +465,15 @@ impl QuillApp {
     }
 
     fn step_search_selection(&mut self, key: NavKey, cx: &mut Context<Self>) {
-        let order = self.chat_list.keys.search_order.borrow().clone();
+        let order: Vec<SearchRow> = self
+            .chat_list
+            .keys
+            .search_order
+            .borrow()
+            .iter()
+            .copied()
+            .filter(|row| !matches!(row, SearchRow::Top(_)))
+            .collect();
         let keys = &self.chat_list.keys;
         let current = keys
             .search
@@ -431,7 +499,7 @@ impl QuillApp {
 
     /// Scroll the results the least that shows `row` (tdesktop
     /// `scrollToFilteredSelected`).
-    fn reveal_search_row(&self, row: SearchRow) {
+    pub(in crate::ui) fn reveal_search_row(&self, row: SearchRow) {
         let Some(bounds) = self
             .chat_list
             .keys
@@ -471,7 +539,7 @@ impl QuillApp {
         self.chat_list.keys.search = None;
         self.chat_list.keys.search_mouse = None;
         match row {
-            SearchRow::Chat(id) | SearchRow::PublicChat(id) => {
+            SearchRow::Chat(id) | SearchRow::PublicChat(id) | SearchRow::Top(id) => {
                 self.select_search_chat(id, window, cx)
             }
             SearchRow::Message(chat_id, message_id) => {
@@ -605,6 +673,12 @@ impl QuillApp {
             }))
             .on_action(cx.listener(|this, _: &ChatListOpen, window, cx| {
                 this.chat_list_open(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ChatListLeft, window, cx| {
+                this.chat_list_sideways(StripKey::Left, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ChatListRight, window, cx| {
+                this.chat_list_sideways(StripKey::Right, window, cx);
             }))
     }
 

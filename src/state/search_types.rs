@@ -132,8 +132,8 @@ pub struct SearchState {
     /// An inline confirmation row is showing (tdesktop asks before clearing
     /// the history or disabling the frequent contacts).
     pub confirm: Option<SearchConfirm>,
-    /// The frequent contact whose "Remove from Recent" row is open.
-    pub top_menu: Option<ChatId>,
+    /// The top-people strip: collapsed to one row or expanded to a grid.
+    pub top_view: crate::top_people::StripView,
     /// `searchPublicPosts` said the free daily quota is spent.
     pub public_limits_exceeded: bool,
     /// Empty-query surface: `searchRecentlyFoundChats` (official Recent).
@@ -164,7 +164,7 @@ impl Default for SearchState {
             top_chats: Vec::new(),
             top_chats_disabled: false,
             confirm: None,
-            top_menu: None,
+            top_view: Default::default(),
             public_limits_exceeded: false,
             recents: false,
             tabs: SearchTabsState::default(),
@@ -197,7 +197,7 @@ impl SearchState {
         self.community_filter = None;
         self.filters = Default::default();
         self.confirm = None;
-        self.top_menu = None;
+        self.top_view = Default::default();
         self.status = SearchStatus::Closed;
         self.generation = self.generation.saturating_add(1);
         self.clear_results();
@@ -350,9 +350,6 @@ impl SearchState {
     pub fn remove_top_chat(&mut self, chat_id: ChatId) -> bool {
         let before = self.top_chats.len();
         self.top_chats.retain(|id| *id != chat_id);
-        if self.top_menu == Some(chat_id) {
-            self.top_menu = None;
-        }
         self.top_chats.len() != before
     }
 

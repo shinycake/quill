@@ -12,6 +12,10 @@
 //! so `libtdjson` is never unloaded while TDLib worker threads run. With no
 //! client registered the receive thread sleeps on a condition variable
 //! instead of polling `td_receive`.
+//!
+//! It is stopped once, at process exit, before TDLib's own teardown: `exit`
+//! destroys TDLib's static client manager, and a receive thread still inside
+//! `td_receive` then reads freed memory ([`stop_shared_before_tdlib_teardown`]).
 
 use crate::diagnostics::{Diagnostic, DiagnosticSink};
 use crate::telegram::client::{OwnedEnvelope, ReceiveBridge, copy_and_parse};
@@ -25,6 +29,10 @@ use std::time::Duration;
 
 /// Seconds one `td_receive` call may block. Shutdown is noticed after it.
 const RECEIVE_TIMEOUT_SECS: f64 = 0.2;
+
+/// How long process exit waits for the receive thread to leave
+/// `td_receive`: one receive timeout and a margin. Past it, exit goes on.
+const EXIT_STOP_WAIT: Duration = Duration::from_millis(500);
 
 /// Where the receive thread reads JSON from: `td_receive` live, a channel
 /// in tests. The argument is the timeout in seconds.
@@ -93,9 +101,11 @@ impl Routes {
 
     /// Block while no client is registered (up to `max`), so a process
     /// with no live account does not wake `td_receive` five times a second.
-    fn wait_for_client(&self, max: Duration) {
+    /// The shutdown flag is read under the lock [`TdHub::request_stop`]
+    /// notifies under, so a stop is never missed and waited out.
+    fn wait_for_client(&self, max: Duration, shutdown: &AtomicBool) {
         let map = lock(&self.map);
-        if map.is_empty() {
+        if map.is_empty() && !shutdown.load(Ordering::SeqCst) {
             let _ = self.changed.wait_timeout(map, max);
         }
     }
@@ -160,7 +170,13 @@ impl TdHub {
             Reuse::Stopped(None) | Reuse::None => Self::load_secured_api()?,
         };
         let receive = api.clone();
-        let source: ReceiveSource = Box::new(move |timeout| receive.receive(timeout));
+        let source: ReceiveSource = Box::new(move |timeout| {
+            let json = receive.receive(timeout);
+            // An idle loop still calls `td_receive`, which makes TDLib's
+            // client manager before any client id exists.
+            stop_shared_before_tdlib_teardown();
+            json
+        });
         let mut hub = TdHub::with_source(source, sink).map_err(|_| TdJsonError::Load)?;
         hub.api = Some(api);
         let hub = Arc::new(hub);
@@ -252,15 +268,67 @@ impl TdHub {
         self.stopped.load(Ordering::SeqCst)
     }
 
-    /// Stop the loop and join it. Only test hubs are ever stopped; the
-    /// shared one lives as long as the process.
+    /// Stop the loop and join it. Test hubs are stopped here; the shared
+    /// one only at process exit, with [`TdHub::stop_within`].
     pub fn shutdown(&self) {
-        self.shutdown.store(true, Ordering::SeqCst);
-        self.routes.changed.notify_all();
+        self.request_stop();
         if let Some(thread) = lock(&self.thread).take() {
             let _ = thread.join();
         }
     }
+
+    /// Stop the loop and wait up to `max` for its thread to end. True once
+    /// it has: it will never call `td_receive` again.
+    pub fn stop_within(&self, max: Duration) -> bool {
+        self.request_stop();
+        let Some(thread) = lock(&self.thread).take() else {
+            return true;
+        };
+        let deadline = std::time::Instant::now() + max;
+        while !thread.is_finished() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        if !thread.is_finished() {
+            return false;
+        }
+        let _ = thread.join();
+        true
+    }
+
+    fn request_stop(&self) {
+        self.shutdown.store(true, Ordering::SeqCst);
+        let _map = lock(&self.routes.map);
+        self.routes.changed.notify_all();
+    }
+}
+
+static EXIT_HOOK: std::sync::Once = std::sync::Once::new();
+
+/// Stop the shared hub's receive thread when the process exits, before
+/// TDLib destroys its static client manager under it. Call right after a
+/// client id is made or a `td_receive` returns: `atexit` hooks and static
+/// destructors run in reverse order of registration, and TDLib registers the
+/// manager's destructor when either first runs, so a hook registered after
+/// that runs first.
+pub fn stop_shared_before_tdlib_teardown() {
+    EXIT_HOOK.call_once(|| {
+        // SAFETY: `stop_shared_at_exit` is a plain `extern "C" fn()` that
+        // catches every panic. A failed registration leaves exit as before.
+        let _ = unsafe { libc::atexit(stop_shared_at_exit) };
+    });
+}
+
+/// Runs inside `exit`, so it never calls `std::thread::current()`: on macOS
+/// that ends the process silently once `exit` has torn down thread locals.
+extern "C" fn stop_shared_at_exit() {
+    crate::thread_guard::ffi_boundary((), || {
+        // Never block exit on the slot. It is held only while a hub is
+        // being made; that rare quit keeps the old behaviour.
+        let hub = crate::locks::try_lock_or_recover(&SHARED).and_then(|slot| slot.clone());
+        if let Some(hub) = hub {
+            hub.stop_within(EXIT_STOP_WAIT);
+        }
+    });
 }
 
 impl Drop for TdHub {
@@ -312,7 +380,7 @@ fn receive_one(
     shutdown: &AtomicBool,
     sink: &Arc<dyn DiagnosticSink>,
 ) {
-    routes.wait_for_client(Duration::from_secs(1));
+    routes.wait_for_client(Duration::from_secs(1), shutdown);
     if shutdown.load(Ordering::SeqCst) {
         return;
     }

@@ -58,6 +58,20 @@ curl -fsSL https://raw.githubusercontent.com/shinycake/quill/main/scripts/macos-
 
 Quill has no paid Apple Developer ID, so it isn't notarized. A zip downloaded in a browser is quarantined and macOS blocks the first launch; the script downloads with `curl`, which doesn't quarantine, checks the release's SHA-256 and the app's signature, and Quill opens without a warning. If you did download the zip in a browser, run `xattr -dr com.apple.quarantine /Applications/Quill.app` once, or allow it under System Settings > Privacy & Security > Open Anyway.
 
+On Linux (x86_64, glibc), paste this into a terminal. It installs Quill for your user under `~/.local`, with a desktop entry, and needs no root:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/shinycake/quill/main/scripts/linux-web-install.sh | bash
+```
+
+On Windows 10 or 11, paste this into PowerShell. It installs Quill for your user in `%LOCALAPPDATA%\Programs\Quill`, with a Start menu shortcut and an entry in Settings > Apps for removing it, and needs no administrator rights:
+
+```powershell
+irm https://raw.githubusercontent.com/shinycake/quill/main/scripts/windows-install.ps1 | iex
+```
+
+All three scripts check the download against the release's SHA-256 checksums and stop without installing anything if it doesn't match. Run the same command again to update. Quill isn't signed with a paid Microsoft certificate either, so a zip downloaded in a browser gets a SmartScreen warning on its first start (choose More info > Run anyway); files the script downloads aren't marked for that check.
+
 The packages target:
 
 - macOS 14 or later on Apple Silicon
@@ -412,7 +426,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] "This is your Archive" explainer <!-- parity:chatlist-archive-hint -->
 - [x] Chat row menu: Mute submenu with durations, direct Unmute, "Add to folder" submenu, Delete chat / Delete and leave / Leave group / Leave channel by chat kind (#1013) <!-- parity:chatlist-row-menu-submenus -->
 - [ ] Drop files, or dragged messages, on a chat row to send them there <!-- parity:chatlist-drop-on-row -->
-- [ ] Top-people strip in the empty search state (`getTopChats`) <!-- parity:chatlist-top-people -->
+- [x] Top-people strip in the empty search state (`getTopChats`) <!-- parity:chatlist-top-people -->
 - [ ] Forum rows show the latest topic titles <!-- parity:chatlist-forum-topic-titles -->
 - [ ] PSA and promoted-chat rows: badge and hide action <!-- parity:chatlist-psa-promoted -->
 

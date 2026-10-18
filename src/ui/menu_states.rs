@@ -20,6 +20,9 @@ pub struct ChatMenuState {
     /// The submenu opened beside its row (tdesktop opens Mute and Add to
     /// folder as submenus of the same popup).
     pub submenu: Option<ChatMenuSubmenu>,
+    /// Opened on a person of the search's top-people strip: tdesktop's
+    /// shorter entry menu with the "Remove from Recent" entries.
+    pub top_person: bool,
 }
 
 /// Which row of the chat menu has its submenu open.
@@ -35,6 +38,15 @@ impl ChatMenuState {
             chat_id,
             position,
             submenu: None,
+            top_person: false,
+        }
+    }
+
+    /// The menu of a top-people strip tile.
+    pub fn top_person(chat_id: ChatId, position: Point<Pixels>) -> Self {
+        Self {
+            top_person: true,
+            ..Self::at(chat_id, position)
         }
     }
 }
