@@ -30,6 +30,9 @@ jobs:
     name: installer-linux
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash  # with pipefail, so `installer | tee` fails with the installer
     steps:
       - uses: actions/checkout@v7
       - name: runtime libraries, virtual display, software Vulkan
@@ -121,6 +124,9 @@ jobs:
     name: installer-linux-refuses
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v7
       - name: musl (Alpine) is refused before downloading

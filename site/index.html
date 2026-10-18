@@ -178,7 +178,7 @@
           <button type="button" role="tab" id="tab-linux" aria-controls="linux-install">Linux</button>
         </div>
 
-        <div class="os-panel" id="mac-install" role="tabpanel" aria-labelledby="tab-mac">
+        <div class="os-panel" id="mac-install" aria-labelledby="tab-mac">
           <h4 class="os-name">On a Mac</h4>
           <div class="inst-card recommended">
             <span class="badge">Recommended</span>
@@ -253,7 +253,7 @@
           </div>
         </div>
 
-        <div class="os-panel" id="windows-install" role="tabpanel" aria-labelledby="tab-win">
+        <div class="os-panel" id="windows-install" aria-labelledby="tab-win">
           <h4 class="os-name">On Windows</h4>
           <div class="inst-card recommended">
             <span class="badge">Recommended</span>
@@ -316,7 +316,7 @@
           </div>
         </div>
 
-        <div class="os-panel" id="linux-install" role="tabpanel" aria-labelledby="tab-linux">
+        <div class="os-panel" id="linux-install" aria-labelledby="tab-linux">
           <h4 class="os-name">On Linux</h4>
           <div class="inst-card recommended">
             <span class="badge">Recommended</span>
@@ -355,7 +355,7 @@
               <li>Unpack it: <code class="inline">tar -xzf quill-linux-x86_64-bundle.tar.gz</code></li>
               <li>Run <code class="inline">quill-linux-x86_64/install.sh</code> to add Quill to your applications menu, or start <code class="inline">quill-linux-x86_64/quill</code> where it is.</li>
             </ol>
-            <p class="why-note">Quill needs a glibc-based x86_64 distribution, a Vulkan driver, and GTK 3, which every mainstream desktop has. On a minimal Debian or Ubuntu system, install them with <code>sudo apt install libgtk-3-0 libxkbcommon-x11-0 libvulkan1 mesa-vulkan-drivers</code>.</p>
+            <p class="why-note">Quill needs a glibc-based x86_64 distribution, a Vulkan driver, and GTK 3, which every mainstream desktop has. On a minimal Debian or Ubuntu system, install them with <code>sudo apt install libgtk-3-0 libxkbcommon-x11-0 libvulkan1 mesa-vulkan-drivers libfontconfig1 libasound2</code>.</p>
           </div>
         </div>
       </section>
@@ -383,7 +383,7 @@
       </details>
       <details>
         <summary>Why do I need to confirm the first launch?</summary>
-        <p>Releases aren't signed with a paid Apple or Microsoft certificate yet. On macOS, <a href="#mac-install">install with the Terminal command</a> and there's nothing to confirm, because macOS only checks apps downloaded in a browser. If you downloaded the zip, <a href="#mac-install">follow the steps to open it</a> once. On Windows, <a href="#windows-install">install with the PowerShell command</a> and there's nothing to confirm, because SmartScreen only checks programs downloaded in a browser. If you downloaded the zip, choose More info → Run anyway once. Each release lists SHA-256 checksums so you can verify the download.</p>
+        <p>Releases aren't signed with a paid Apple or Microsoft certificate yet. On macOS, <a href="#mac-install">install with the Terminal command</a> and there's nothing to confirm, because macOS only checks apps downloaded in a browser. If you downloaded the zip, <a href="#mac-install">follow the steps to open it</a> once. On Windows, <a href="#windows-install">install with the PowerShell command</a> and SmartScreen has nothing to confirm, because it only checks programs downloaded in a browser (Smart App Control, if you turned it on, is a separate check). If you downloaded the zip, choose More info → Run anyway once. Each release lists SHA-256 checksums so you can verify the download.</p>
       </details>
       <details>
         <summary>How can I help?</summary>

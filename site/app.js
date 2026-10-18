@@ -224,6 +224,7 @@ function setupInstallTabs() {
       const on = t === tab;
       t.setAttribute("aria-selected", String(on));
       t.tabIndex = on ? 0 : -1;
+      panelOf(t).setAttribute("role", "tabpanel");
       panelOf(t).hidden = !on;
     }
     if (focus) tab.focus();
@@ -237,15 +238,12 @@ function setupInstallTabs() {
     return true;
   }
   tabs.forEach((tab, i) => {
-    tab.addEventListener("click", () => {
-      select(tab, false);
-      history.replaceState(null, "", `#${tab.getAttribute("aria-controls")}`);
-    });
+    tab.addEventListener("click", () => select(tab, false));
     tab.addEventListener("keydown", (e) => {
-      const step = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
-      if (!step) return;
+      const to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[e.key];
+      if (to === undefined) return;
       e.preventDefault();
-      select(tabs[(i + step + tabs.length) % tabs.length], true);
+      select(tabs[(to + tabs.length) % tabs.length], true);
     });
   });
   document.getElementById("install").classList.add("js-tabs");
@@ -263,7 +261,12 @@ const showInstallFromHash = setupInstallTabs();
 setupHeroVideo();
 setupGallery();
 // The release cards and the missing list arrive late and push the install
-// panels down, so a link straight to one scrolls again once they're in.
+// panels down, so a link straight to one scrolls again once they're in,
+// unless the visitor has started scrolling on their own.
+let scrolledByHand = false;
+for (const type of ["wheel", "touchstart", "keydown"]) {
+  window.addEventListener(type, () => { scrolledByHand = true; }, { once: true, passive: true });
+}
 Promise.allSettled([renderMissing(), renderRelease()]).then(() => {
-  if (showInstallFromHash) showInstallFromHash(true);
+  if (showInstallFromHash && !scrolledByHand) showInstallFromHash(true);
 });

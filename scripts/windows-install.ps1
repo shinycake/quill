@@ -124,13 +124,25 @@ try {
         New-Item -ItemType Directory -Force $parent | Out-Null
         $staged = "$dest.installing"
         $old = "$dest.old"
+        # An earlier run stopped between its two renames: put Quill back first.
+        if (-not (Test-Path -LiteralPath $dest) -and (Test-Path -LiteralPath $old)) {
+            Move-Item -LiteralPath $old -Destination $dest
+        }
         foreach ($p in $staged, $old) {
             if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force }
         }
         Move-Item -LiteralPath $pkg -Destination $staged
         Get-ChildItem -LiteralPath $staged -Recurse -File | Unblock-File
         if (Test-Path -LiteralPath $dest) { Move-Item -LiteralPath $dest -Destination $old }
-        Move-Item -LiteralPath $staged -Destination $dest
+        # Antivirus scanning the new files can hold them for a moment.
+        $moved = $false
+        for ($i = 0; $i -lt 10 -and -not $moved; $i++) {
+            try { Move-Item -LiteralPath $staged -Destination $dest; $moved = $true } catch { Start-Sleep -Milliseconds 500 }
+        }
+        if (-not $moved) {
+            if (Test-Path -LiteralPath $old) { Move-Item -LiteralPath $old -Destination $dest }
+            Fail "couldn't replace $dest; close any window showing that folder and run this again"
+        }
         if (Test-Path -LiteralPath $old) {
             Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction SilentlyContinue
         }
@@ -155,15 +167,17 @@ try {
         # data (in %APPDATA%) is kept.
         $uninstall = @"
 `$ErrorActionPreference = 'SilentlyContinue'
-`$dest = '$($dest -replace "'", "''")'
+`$dest = '$([Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($dest))'
 `$exe = Join-Path `$dest 'quill.exe'
 Get-Process -Name quill | Where-Object { `$_.Path -eq `$exe } | ForEach-Object { Start-Process `$exe '--quit' -WindowStyle Hidden; `$_.WaitForExit(10000) | Out-Null }
 Remove-Item -LiteralPath `$dest -Recurse -Force
+# Keep the Settings > Apps entry while anything is left to remove.
+if (Test-Path -LiteralPath `$dest) { exit 1 }
 Remove-Item -LiteralPath (Join-Path ([Environment]::GetFolderPath('Programs')) 'Quill.lnk') -Force
 `$run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-if ((Get-ItemProperty `$run).Quill -like "*`$exe*") { Remove-ItemProperty `$run -Name Quill }
+if ("`$((Get-ItemProperty `$run).Quill)".Contains(`$exe)) { Remove-ItemProperty `$run -Name Quill }
 `$tg = 'HKCU:\Software\Classes\tg\shell\open\command'
-if ((Get-ItemProperty `$tg).'(default)' -like "*`$exe*") { Remove-Item 'HKCU:\Software\Classes\tg' -Recurse -Force }
+if ("`$((Get-ItemProperty `$tg).'(default)')".Contains(`$exe)) { Remove-Item 'HKCU:\Software\Classes\tg' -Recurse -Force }
 Remove-Item 'HKCU:\Software\Classes\AppUserModelId\org.shinycake.quill' -Recurse -Force
 Remove-Item '$uninstallKey' -Recurse -Force
 exit 0

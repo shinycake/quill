@@ -113,8 +113,19 @@ bash "$pkg/install.sh" "$prefix" >/dev/null || die "the package's install.sh fai
 version="$("$exe" --version 2>/dev/null || true)"
 say "Installed ${version:-Quill} to $dest"
 
-# Libraries the package expects from the system (README.txt lists them).
-missing="$(ldd "$exe" 2>/dev/null | awk '/not found/ {print $1}' | sort -u | tr '\n' ' ')"
+# Libraries the package expects from the system (README.txt lists them):
+# the ones it links, from ldd, and the ones it loads at runtime, from the
+# loader cache. A check that can't run reports nothing rather than guessing.
+missing=""
+if command -v ldd >/dev/null; then
+  missing="$(ldd "$exe" 2>/dev/null | awk '/not found/ {print $1}' | sort -u | tr '\n' ' ' || true)"
+fi
+cache="$( (ldconfig -p || /sbin/ldconfig -p) 2>/dev/null || true)"
+if [ -n "$cache" ]; then
+  for lib in libvulkan.so.1 libgtk-3.so.0; do
+    printf '%s\n' "$cache" | grep -qF "$lib (" || missing="$missing$lib "
+  done
+fi
 if [ -n "$missing" ]; then
   say "Quill needs these system libraries, which aren't installed: $missing"
   say "See $dest/README.txt for the packages that provide them."

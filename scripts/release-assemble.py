@@ -104,7 +104,8 @@ irm https://raw.githubusercontent.com/shinycake/quill/main/scripts/windows-insta
 It downloads `quill-windows-x86_64.zip`, checks its SHA-256, installs it in
 `%LOCALAPPDATA%\Programs\Quill` with a Start menu shortcut, and adds Quill to
 Settings > Apps so you can remove it there. Quill starts without a SmartScreen
-warning. If you download the zip in a browser instead, unzip it anywhere and
+warning (Smart App Control, when turned on, is a separate check and may still
+block it). If you download the zip in a browser instead, unzip it anywhere and
 run `quill.exe`. The zip is not code-signed, so SmartScreen warns the first
 time: choose **More info > Run anyway**. No Visual C++ Redistributable is
 needed.
