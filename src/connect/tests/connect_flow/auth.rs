@@ -12,6 +12,9 @@ fn driver_sends_parameters_then_reaches_wait_phone_via_injection() {
     let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
     let kick = driver.kickoff().unwrap();
     assert_eq!(kick.0, 1);
+    // A new client starts waiting for its parameters: they go out with the
+    // kickoff, before TDLib reports the state back.
+    assert!(driver.parameters_sent());
 
     let seq = AtomicU64::new(0);
     let wait_params = copy_and_parse(

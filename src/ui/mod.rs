@@ -236,6 +236,7 @@ mod downloads;
 mod draft_timer;
 mod drafts;
 mod drop_zones;
+pub mod early_connect;
 mod edit_media_tools;
 mod emoji_effect;
 mod emoji_sets;

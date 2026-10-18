@@ -197,6 +197,7 @@ fn ui_main(args: &[String]) {
     quill::start_files::push_launch_files(args);
 
     let credentials = quill::credentials::load();
+    ui::early_connect::begin(credentials.clone());
     let appearance = ui::QuillApp::load_appearance();
     quill::tray::set_tray_enabled(appearance.show_tray_icon);
     ui::window_frame::set_native(appearance.native_window_frame);
@@ -216,6 +217,7 @@ fn ui_main(args: &[String]) {
     quill::startup_trace::mark("app_launch");
     application.run(move |cx| {
         quill::startup_trace::mark("app_run");
+        ui::early_connect::open_if_ready();
         cx.set_app_identity("org.shinycake.quill", "Quill");
         #[cfg(windows)]
         quill::notify::register_toast_icon("org.shinycake.quill");
@@ -244,6 +246,7 @@ fn ui_main(args: &[String]) {
                 },
                 move |window, cx| {
                     quill::startup_trace::mark("window_open");
+                    ui::early_connect::open_if_ready();
                     ui::crash_notice::install(window, cx);
                     let view = cx.new(|cx| {
                         let mut app = ui::QuillApp::new(window, cx, credentials.clone());
@@ -292,6 +295,7 @@ fn ui_main(args: &[String]) {
                         })
                         .detach();
                     }
+                    view.update(cx, |app, cx| app.poll_before_first_frame(cx));
                     // The shell adds Quill's dialog hit-test barrier; Root
                     // hosts the kit dialog and notification layers.
                     let shell = cx.new(|_cx| ui::QuillShell::new(view));
