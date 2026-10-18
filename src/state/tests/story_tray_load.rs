@@ -75,3 +75,29 @@ fn a_page_that_loads_ends_the_wait() {
     let (_, wait) = session.stories.stories_active_retry.expect("a retry");
     assert_eq!(wait, STORIES_RETRY_FIRST, "the next failure starts over");
 }
+
+#[test]
+fn an_error_for_the_story_emoji_fetch_is_counted_and_backs_off() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(session.last_seq);
+    let extra = session.request(RequestPurpose::GetStoryCustomEmojiStickers, None);
+    let before = Instant::now();
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"x"}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(session.stories.custom_emoji_failures, 1);
+    assert!(session.stories.custom_emoji_fetch_waiting(before));
+    assert!(
+        !session
+            .stories
+            .custom_emoji_fetch_waiting(before + STORIES_RETRY_FIRST + Duration::from_secs(1))
+    );
+    session.accept_story_custom_emoji_stickers(Vec::new());
+    assert!(!session.stories.custom_emoji_fetch_waiting(before));
+}

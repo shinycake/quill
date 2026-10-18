@@ -77,6 +77,8 @@ pub(crate) struct ComposerUi {
     /// keystroke bumps it so only the latest quiet window fires (schema:
     /// "Do not call this function too often"; TGX rate-limits 400ms).
     pub(super) preview_token: u64,
+    /// The one timer behind the debounced draft save (`draft_timer.rs`).
+    pub(super) draft_timer: super::draft_timer::DraftTimer,
     /// The composer text before the last keystroke, for "Replace emoji
     /// automatically" (it only reacts to one typed character).
     pub(super) prev_text: String,
@@ -197,6 +199,7 @@ impl ComposerUi {
             inline_return: None,
             edit_replace_as_file: false,
             preview_token: 0,
+            draft_timer: Default::default(),
             prev_text: String::new(),
             markdown_revert: None,
             send_silent_once: false,

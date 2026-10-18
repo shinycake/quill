@@ -213,6 +213,9 @@ mod composer_field;
 mod composer_field_tests;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
+mod composer_keystroke_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 mod composer_sends_tests;
 mod composer_shortcuts;
 mod composer_suggest;
@@ -230,6 +233,7 @@ mod demo_stream;
 mod demos;
 mod derived_state_tests;
 mod downloads;
+mod draft_timer;
 mod drafts;
 mod drop_zones;
 mod edit_media_tools;

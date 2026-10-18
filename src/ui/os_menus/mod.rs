@@ -11,13 +11,16 @@
 //!   same as tdesktop's `[Desktop Action quit]`.
 //!
 //! GPUI builds the macOS menus from data, so they are rebuilt when what they
-//! show changes: a once-a-second check reads the account registry off the UI
-//! thread and compares the result with what is installed.
+//! show changes: a check on every applied batch compares the model built
+//! from memory, and reads the account registry off the UI thread only when
+//! that model moved, the registry was written, a background client was added
+//! or removed, or the last read is old (see [`sync`]).
 #![deny(clippy::indexing_slicing)]
 // The Dock and Window menus are macOS-only; Windows uses part of this.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
 
 mod dock;
+mod sync;
 mod window_menu;
 
 #[cfg(test)]
@@ -341,32 +344,50 @@ fn spawn_menu_sync(window: &mut Window, cx: &mut Context<QuillApp>) {
     })
     .detach();
     cx.spawn(async move |this, cx| {
-        let mut installed: Option<(DockModel, WindowMenuState)> = None;
+        let mut sync = sync::MenuSync::default();
         loop {
             // Taken before the work: a poke during it runs the loop again.
             let seen = quill::wake::CHROME.epoch();
-            let registry = cx
-                .background_executor()
-                .spawn(async { read_registry() })
-                .await;
+            let main_now = main_active.get();
+            let writes = quill::settings::registry_writes();
+            let built = |this: &QuillApp, registry: &Registry| {
+                let state = WindowMenuState {
+                    session_usable: this.os_menu_session_usable(),
+                    main_active: main_now,
+                };
+                (this.dock_model(registry), state)
+            };
+            // From memory first: most wakes (an applied batch) change
+            // nothing the menus show, and then the disk is not read.
+            let current = this
+                .update(cx, |this, _| {
+                    (built(this, sync.registry()), this.background.keys())
+                })
+                .ok();
+            let clients = current
+                .as_ref()
+                .map(|(_, keys)| keys.clone())
+                .unwrap_or_default();
+            let stale = current.as_ref().is_none_or(|(current, keys)| {
+                sync.needs_registry(std::time::Instant::now(), current, writes, keys)
+            });
+            if stale {
+                let registry = cx
+                    .background_executor()
+                    .spawn(async { read_registry() })
+                    .await;
+                sync.set_registry(registry, std::time::Instant::now(), writes, clients);
+            }
             let alive = this
                 .update(cx, |this, cx| {
-                    let model = this.dock_model(&registry);
-                    let state = WindowMenuState {
-                        session_usable: this.os_menu_session_usable(),
-                        main_active: main_active.get(),
-                    };
-                    let (dock_changed, menu_changed) = match &installed {
-                        Some((old_model, old_state)) => (old_model != &model, old_state != &state),
-                        None => (true, true),
-                    };
+                    let (model, state) = built(this, sync.registry());
+                    let (dock_changed, menu_changed) = sync.install(model.clone(), state);
                     if dock_changed {
                         cx.set_dock_menu(dock_menu_items(&dock_entries(&model)));
                     }
                     if menu_changed {
                         cx.set_menus(super::keybindings::app_menus_with(state));
                     }
-                    installed = Some((model, state));
                 })
                 .is_ok();
             if !alive {

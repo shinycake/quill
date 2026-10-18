@@ -22,6 +22,13 @@ pub struct StoriesState {
     /// reactions — the `getCustomEmojiStickers` response, keyed by
     /// sticker id (= custom emoji id).
     pub custom_emoji_stickers: HashMap<i64, StickerItem>,
+    /// `getCustomEmojiStickers` for the story picker failed: no new fetch
+    /// before this instant, and the wait before it, which doubles per
+    /// failure. An answer clears it.
+    pub custom_emoji_retry: Option<(Instant, Duration)>,
+    /// How many of those fetches failed. The story viewer's warm-up record
+    /// carries it, so a failure makes the next tick fetch again.
+    pub custom_emoji_failures: u32,
     /// Phase 9.2: poster chat ids whose active stories the driver should
     /// refresh with `getChatActiveStories`. Filled by the reducer on
     /// `updateStoryPostSucceeded` (a story posted from another client goes
@@ -145,6 +152,8 @@ impl StoriesState {
             stories_active_loaded: false,
             stories_active_exhausted: false,
             stories_active_retry: None,
+            custom_emoji_retry: None,
+            custom_emoji_failures: 0,
             story_retry: HashMap::new(),
             reply_attempted: HashSet::new(),
             missing: HashSet::new(),
@@ -200,6 +209,17 @@ impl StoriesState {
         let previous = self.story_retry.get(&story).copied();
         self.story_retry.insert(story, next_retry(previous, now));
         self.reply_attempted.remove(&story);
+    }
+
+    /// The story picker's `getCustomEmojiStickers` failed at `now`.
+    pub fn custom_emoji_fetch_failed(&mut self, now: Instant) {
+        self.custom_emoji_retry = Some(next_retry(self.custom_emoji_retry, now));
+        self.custom_emoji_failures = self.custom_emoji_failures.saturating_add(1);
+    }
+
+    /// Whether the next picker fetch still waits out a failed one.
+    pub fn custom_emoji_fetch_waiting(&self, now: Instant) -> bool {
+        self.custom_emoji_retry.is_some_and(|(at, _)| now < at)
     }
 
     /// Whether a prefetch of `story` still waits out a failed `getStory`.
