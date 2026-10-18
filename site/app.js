@@ -1,10 +1,11 @@
 "use strict";
 
 // Release assets the pipeline publishes (see .github/workflows/release.yml).
+// Each platform's card and the hero button open its install instructions.
 const PLATFORMS = [
-  { id: "mac", label: "macOS", detail: "Apple Silicon · macOS 14+", match: /^quill-macos-aarch64\.zip$/ },
-  { id: "win", label: "Windows", detail: "x64 · Windows 10+", match: /^quill-windows-x86_64\.zip$/ },
-  { id: "linux", label: "Linux", detail: "x86_64 · glibc", match: /^quill-linux-x86_64-bundle\.tar\.gz$/ },
+  { id: "mac", label: "macOS", detail: "Apple Silicon · macOS 14+", match: /^quill-macos-aarch64\.zip$/, panel: "mac-install" },
+  { id: "win", label: "Windows", detail: "x64 · Windows 10+", match: /^quill-windows-x86_64\.zip$/, panel: "windows-install" },
+  { id: "linux", label: "Linux", detail: "x86_64 · glibc", match: /^quill-linux-x86_64-bundle\.tar\.gz$/, panel: "linux-install" },
 ];
 
 function el(tag, attrs = {}, ...children) {
@@ -65,15 +66,13 @@ async function renderRelease() {
     const asset = release.assets.find((a) => p.match.test(a.name));
     if (!asset) continue;
     if (p.id === current) currentAsset = { p, asset };
-    // On a Mac the recommended path is the Terminal installer, explained below.
-    const mac = p.id === "mac";
     const card = el(
       "a",
-      { class: `plat${p.id === current ? " current" : ""}`, href: mac ? "#mac-install" : asset.url },
+      { class: `plat${p.id === current ? " current" : ""}`, href: `#${p.panel}` },
       el("span", { class: "name" }, p.label),
       el("span", { class: "meta" }, `${p.detail} · ${formatSize(asset.size)}`),
       asset.sha256 ? el("span", { class: "sha", title: "SHA-256" }, `SHA-256 ${asset.sha256}`) : null,
-      el("span", { class: "go" }, mac ? `Install ${release.tag}` : `Download ${release.tag}`),
+      el("span", { class: "go" }, `Install ${release.tag}`),
     );
     grid.append(card);
   }
@@ -86,9 +85,8 @@ async function renderRelease() {
   const hero = document.getElementById("hero-download");
   const meta = document.getElementById("hero-meta");
   if (currentAsset) {
-    const mac = currentAsset.p.id === "mac";
-    label.textContent = `${mac ? "Install" : "Download"} for ${currentAsset.p.label}`;
-    hero.href = mac ? "#mac-install" : currentAsset.asset.url;
+    label.textContent = `Install for ${currentAsset.p.label}`;
+    hero.href = `#${currentAsset.p.panel}`;
   } else {
     label.textContent = "Download";
   }
@@ -195,25 +193,77 @@ function setupHeroVideo() {
 }
 
 function setupCopy() {
-  const button = document.getElementById("mac-copy");
-  const code = document.getElementById("mac-cmd");
-  if (!button || !code || !navigator.clipboard) {
-    if (button) button.hidden = true;
-    return;
-  }
-  button.addEventListener("click", async () => {
-    try {
-      await navigator.clipboard.writeText(code.textContent);
-      button.textContent = "Copied";
-    } catch {
-      button.textContent = "Select and copy";
+  for (const button of document.querySelectorAll(".cmd .copy")) {
+    const code = button.parentElement.querySelector("code");
+    if (!code || !navigator.clipboard) {
+      button.hidden = true;
+      continue;
     }
-    setTimeout(() => { button.textContent = "Copy"; }, 2000);
+    button.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(code.textContent);
+        button.textContent = "Copied";
+      } catch {
+        button.textContent = "Select and copy";
+      }
+      setTimeout(() => { button.textContent = "Copy"; }, 2000);
+    });
+  }
+}
+
+// One install panel at a time: the visitor's own system first, or the one a
+// link (#windows-install, a platform card, the hero button) names. Without
+// script every panel shows, each under its own heading.
+function setupInstallTabs() {
+  const list = document.querySelector(".os-tabs");
+  if (!list) return;
+  const tabs = [...list.querySelectorAll("[role=tab]")];
+  const panelOf = (tab) => document.getElementById(tab.getAttribute("aria-controls"));
+  function select(tab, focus) {
+    for (const t of tabs) {
+      const on = t === tab;
+      t.setAttribute("aria-selected", String(on));
+      t.tabIndex = on ? 0 : -1;
+      panelOf(t).hidden = !on;
+    }
+    if (focus) tab.focus();
+  }
+  const byPanel = (id) => tabs.find((t) => t.getAttribute("aria-controls") === id);
+  function fromHash(instant) {
+    const tab = byPanel(location.hash.slice(1));
+    if (!tab) return false;
+    select(tab, false);
+    document.getElementById("install").scrollIntoView({ behavior: instant === true ? "instant" : "auto" });
+    return true;
+  }
+  tabs.forEach((tab, i) => {
+    tab.addEventListener("click", () => {
+      select(tab, false);
+      history.replaceState(null, "", `#${tab.getAttribute("aria-controls")}`);
+    });
+    tab.addEventListener("keydown", (e) => {
+      const step = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
+      if (!step) return;
+      e.preventDefault();
+      select(tabs[(i + step + tabs.length) % tabs.length], true);
+    });
   });
+  document.getElementById("install").classList.add("js-tabs");
+  list.hidden = false;
+  if (!fromHash()) {
+    const own = PLATFORMS.find((p) => p.id === detectPlatform());
+    select(byPanel(own ? own.panel : "mac-install"), false);
+  }
+  window.addEventListener("hashchange", fromHash);
+  return fromHash;
 }
 
 setupCopy();
+const showInstallFromHash = setupInstallTabs();
 setupHeroVideo();
 setupGallery();
-renderMissing();
-renderRelease();
+// The release cards and the missing list arrive late and push the install
+// panels down, so a link straight to one scrolls again once they're in.
+Promise.allSettled([renderMissing(), renderRelease()]).then(() => {
+  if (showInstallFromHash) showInstallFromHash(true);
+});

@@ -39,7 +39,10 @@ function Get-Url([string] $url, [string] $outFile) {
     if ($outFile) {
         Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $outFile
     } else {
-        (Invoke-WebRequest -UseBasicParsing -Uri $url).Content
+        # Text, decoded here: a byte[] returned from a function is unrolled.
+        $content = (Invoke-WebRequest -UseBasicParsing -Uri $url).Content
+        if ($content -is [byte[]]) { $content = [Text.Encoding]::UTF8.GetString($content) }
+        $content
     }
 }
 
@@ -82,7 +85,6 @@ try {
     $want = $env:QUILL_SHA256
     if (-not $want -and $sumsUrl) {
         try { $sums = Get-Url $sumsUrl } catch { Fail "couldn't fetch the release checksums ($($_.Exception.Message))" }
-        if ($sums -is [byte[]]) { $sums = [Text.Encoding]::UTF8.GetString($sums) }
         foreach ($line in ($sums -split "`n")) {
             $fields = $line.Trim() -split '\s+'
             if ($fields.Count -eq 2 -and $fields[1] -eq $asset) { $want = $fields[0] }
