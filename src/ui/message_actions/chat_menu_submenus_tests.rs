@@ -258,3 +258,66 @@ fn exit_entry_follows_the_chat_kind(cx: &mut TestAppContext) {
     });
     assert_eq!(action, Some(true));
 }
+
+#[gpui_kit::test]
+fn a_promotion_shapes_the_menu_like_use_top_promotion(cx: &mut TestAppContext) {
+    use quill::promotion::Promotion;
+    use quill::telegram::envelope::ChannelMemberStatus;
+    let (app, mut vcx, chat_id) = open(cx);
+    let vcx = &mut vcx;
+    // A channel the account is not in, which is what a promotion is.
+    let promote = |app: &Entity<QuillApp>,
+                   vcx: &mut VisualTestContext,
+                   p: Option<Promotion>,
+                   status: ChannelMemberStatus| {
+        app.update(vcx, |app, _| {
+            if let Some(session) = app.demo_session.as_mut() {
+                if let Some(chat) = session.chats.get_mut(&chat_id.0) {
+                    chat.kind = ChatKind::Supergroup {
+                        supergroup_id: 55,
+                        is_channel: true,
+                    };
+                    chat.my_member_status = Some(status);
+                }
+                match p {
+                    Some(p) => session.chat_list.promoted_chats.insert(chat_id.0, p),
+                    None => session.chat_list.promoted_chats.remove(&chat_id.0),
+                };
+            }
+        });
+        show_menu(app, vcx, chat_id);
+    };
+    let psa = || Promotion::Psa {
+        kind: "covid".into(),
+        text: String::new(),
+    };
+    // Not promoted: the usual rows.
+    promote(&app, vcx, None, ChannelMemberStatus::Left);
+    assert!(!present(vcx, "chat-menu-hide-promotion"));
+    assert!(present(vcx, "chat-menu-archive"));
+    assert!(present(vcx, "chat-menu-pin"));
+    assert!(present(vcx, "chat-menu-new-window"));
+    // A proxy sponsor: no hide, and no Archive or Pin.
+    promote(
+        &app,
+        vcx,
+        Some(Promotion::MtprotoProxy),
+        ChannelMemberStatus::Left,
+    );
+    assert!(!present(vcx, "chat-menu-hide-promotion"));
+    assert!(!present(vcx, "chat-menu-archive"));
+    assert!(!present(vcx, "chat-menu-pin"));
+    assert!(present(vcx, "chat-menu-new-window"));
+    // A joined channel is not promoted any more, whatever is left over.
+    promote(&app, vcx, Some(psa()), ChannelMemberStatus::Member);
+    assert!(!present(vcx, "chat-menu-hide-promotion"));
+    assert!(present(vcx, "chat-menu-archive"));
+    // A typed announcement: hide, but no Archive, Pin or new window.
+    promote(&app, vcx, Some(psa()), ChannelMemberStatus::Left);
+    assert!(present(vcx, "chat-menu-hide-promotion"));
+    assert!(!present(vcx, "chat-menu-archive"));
+    assert!(!present(vcx, "chat-menu-pin"));
+    assert!(!present(vcx, "chat-menu-new-window"));
+    click(vcx, "chat-menu-hide-promotion");
+    assert!(app.update(vcx, |app, _| app.chat_list.menu.is_none()));
+}

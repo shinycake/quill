@@ -42,6 +42,9 @@ pub enum ChatListPurpose {
     /// (the chat-list "Delete chat", Telegram X `Tdlib.deleteChat`).
     /// Response is `ok`; the row drops via its position update (order 0).
     RemoveChatFromList,
+    /// `deleteChatHistory` with `remove_from_chat_list: true` for "Hide this
+    /// announcement". Response is `ok`; the row drops via its position update.
+    HidePromotion,
     /// `leaveChat` sent before the history of a basic group is deleted (the
     /// chat-list "Delete and leave", tdesktop `ApiWrap::deleteConversation`).
     /// Its answer, ok or error, queues the `deleteChatHistory` step.
@@ -146,6 +149,7 @@ flat_purposes!(ChatList(ChatListPurpose) {
     ToggleChatIsMarkedAsUnread,
     DeleteChatHistory,
     RemoveChatFromList,
+    HidePromotion,
     LeaveBeforeDelete,
     SetPinnedChats,
     ReadChatList,

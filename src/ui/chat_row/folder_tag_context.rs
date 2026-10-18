@@ -190,6 +190,10 @@ impl QuillApp {
                     },
                     forum,
                     story_ring,
+                    self.session().and_then(|s| {
+                        let promotion = quill::promotion::top_promotion(s, chat)?;
+                        Some(s.chat_list.psa_labels.row(promotion))
+                    }),
                     muted_fg,
                     cx,
                 );

@@ -573,3 +573,7 @@
 "qll_chat_your_number" = "your number";
 "qll_chat_partly_sent" = "Only {sent} of {total} messages were sent. The rest are still here, so you can send them again.";
 "lng_context_view_profile" = "View profile";
+"lng_proxy_sponsor" = "Proxy sponsor";
+"lng_badge_psa_default" = "PSA";
+"lng_context_hide_psa" = "Hide this announcement";
+"qll_chat_could_not_hide_the_announcement" = "Could not hide the announcement";

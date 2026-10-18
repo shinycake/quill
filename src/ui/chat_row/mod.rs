@@ -368,6 +368,9 @@ pub(super) fn session_chat_row(
     // Active stories: the ring around the avatar (unread: accent gradient,
     // read: grey).
     story_ring: Option<StoryRing>,
+    // A promoted chat's badge ("Proxy sponsor", "PSA") in place of the date,
+    // and the announcement text in place of the preview.
+    promotion: Option<quill::promotion::RowBadge>,
     muted_fg: Hsla,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement + Styled + StatefulInteractiveElement + use<> {
@@ -379,6 +382,10 @@ pub(super) fn session_chat_row(
     } else {
         muted_fg
     };
+    let stamp = match promotion.as_ref() {
+        Some(badge) => Some((RowStatus::None, badge.label.clone())),
+        None => row_stamp(chat),
+    };
     let title: String = if saved {
         tr(keys::SAVED_MESSAGES).to_string()
     } else {
@@ -386,11 +393,22 @@ pub(super) fn session_chat_row(
     };
     // A draft leads with a red "Draft:" (and a reply mark); anything else
     // is the plain preview line.
-    let (preview, draft): (String, Option<bool>) = match chat.sidebar_line() {
-        SidebarLine::Text(text) => (text, None),
-        SidebarLine::Draft(draft) => (draft.text, Some(draft.reply)),
-    };
-    let activity = chat.peer_activity();
+    // The announcement of a promoted chat comes first (tdesktop
+    // `topPromotionMessage`).
+    let (preview, draft): (String, Option<bool>) =
+        match promotion.as_ref().and_then(|badge| badge.preview.clone()) {
+            Some(text) => (text, None),
+            None => match chat.sidebar_line() {
+                SidebarLine::Text(text) => (text, None),
+                SidebarLine::Draft(draft) => (draft.text, Some(draft.reply)),
+            },
+        };
+    // A promoted row paints only the announcement: no typing line and no
+    // sender of the last message (tdesktop's promoted branch).
+    let announced = promotion
+        .as_ref()
+        .is_some_and(|badge| badge.preview.is_some());
+    let activity = chat.peer_activity().filter(|_| !announced);
     // Slice chatlist-list-style: the icon/entities describe
     // `last_preview` only — draft/typing/activity lines render unstyled.
     // (When the shown text equals `last_preview` the entities describe
@@ -662,7 +680,7 @@ pub(super) fn session_chat_row(
                                             this.child(forum_badge(id, cx))
                                         }),
                                 )
-                                .when_some(row_stamp(chat), |this, (status, stamp)| {
+                                .when_some(stamp, |this, (status, stamp)| {
                                     this.child(
                                         div()
                                             .flex()
@@ -699,7 +717,11 @@ pub(super) fn session_chat_row(
                                     .font_semibold()
                                     .truncate()
                                     .text_color(muted_fg)
-                                    .child(chat.last_preview_sender.clone()),
+                                    .child(if announced {
+                                        String::new()
+                                    } else {
+                                        chat.last_preview_sender.clone()
+                                    }),
                             )
                         })
                         .child(
@@ -919,65 +941,9 @@ const CHAT_ROW_AVATAR: f32 = 46.;
 
 mod folder_tag_context;
 pub(in crate::ui) use folder_tag_context::FolderTagContext;
+mod promoted_demo;
+mod selected_fg;
+pub(crate) use selected_fg::selected_secondary_fg;
 mod with_call_badge;
 #[allow(unused_imports)]
 pub use with_call_badge::*;
-
-/// Opacity of the foreground used for secondary text (time, preview) on
-/// the selected chat row.
-const SELECTED_SECONDARY_ALPHA: f32 = 0.78;
-
-/// Secondary text colour on the selected row's tinted fill: the theme
-/// foreground, softened but kept above WCAG AA (4.5:1) on that fill in
-/// both themes (the grey `muted_foreground` is only 3.2:1 there).
-pub(crate) fn selected_secondary_fg(foreground: Hsla) -> Hsla {
-    foreground.opacity(SELECTED_SECONDARY_ALPHA)
-}
-
-#[cfg(test)]
-mod selected_row_tests {
-    use gpui_kit::{Hsla, Rgba, rgb};
-
-    fn blend(top: Rgba, a: f32, under: Rgba) -> Rgba {
-        Rgba {
-            r: top.r * a + under.r * (1. - a),
-            g: top.g * a + under.g * (1. - a),
-            b: top.b * a + under.b * (1. - a),
-            a: 1.,
-        }
-    }
-    fn lum(c: Rgba) -> f32 {
-        let f = |v: f32| {
-            if v <= 0.03928 {
-                v / 12.92
-            } else {
-                ((v + 0.055) / 1.055).powf(2.4)
-            }
-        };
-        0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b)
-    }
-    fn ratio(a: Rgba, b: Rgba) -> f32 {
-        let (x, y) = (lum(a), lum(b));
-        (x.max(y) + 0.05) / (x.min(y) + 0.05)
-    }
-
-    /// Selected-row secondary text on the 25% primary tint, both themes.
-    #[test]
-    fn selected_secondary_text_meets_aa() {
-        // (foreground, sidebar, primary) of the default light and dark themes.
-        for (fg, sidebar, primary) in [
-            (0x1f2328, 0xfafafa, 0x0969da),
-            (0xe6edf3, 0x22272e, 0x2f81f7),
-        ] {
-            let fgh: Hsla = rgb(fg).into();
-            let text: Rgba = super::selected_secondary_fg(fgh).into();
-            let tint = blend(rgb(primary), 0.25, rgb(sidebar));
-            let shown = blend(text, text.a, tint);
-            assert!(
-                ratio(shown, tint) >= 4.5,
-                "fg {fg:x}: {}",
-                ratio(shown, tint)
-            );
-        }
-    }
-}

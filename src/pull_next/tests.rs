@@ -247,7 +247,9 @@ fn next_channel_is_the_first_unread_channel_in_list_order() {
         Some(ChatId(5))
     );
     // The promoted chat and restricted channels are skipped.
-    s.chat_list.promoted_chats.insert(5);
+    s.chat_list
+        .promoted_chats
+        .insert(5, crate::promotion::Promotion::MtprotoProxy);
     s.groups.supergroup_restricted.insert(6);
     assert_eq!(find_next_unread_channel(&s, ChatId(1), None), None);
     // The archive comes last.
@@ -267,12 +269,26 @@ fn promotion_comes_from_the_position_source() {
     if let Some(owned) = crate::telegram::client::copy_and_parse(json, &seq, &sink) {
         s.apply(owned);
     }
-    assert!(s.chat_list.promoted_chats.contains(&42));
+    assert_eq!(
+        s.chat_list.promoted_chats.get(&42),
+        Some(&crate::promotion::Promotion::MtprotoProxy)
+    );
+    let json = r#"{"@type":"updateChatPosition","chat_id":42,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"9","is_pinned":false,"source":{"@type":"chatSourcePublicServiceAnnouncement","type":"covid","text":"Wash your hands"}}}"#;
+    if let Some(owned) = crate::telegram::client::copy_and_parse(json, &seq, &sink) {
+        s.apply(owned);
+    }
+    assert_eq!(
+        s.chat_list
+            .promoted_chats
+            .get(&42)
+            .and_then(|p| p.psa_kind()),
+        Some("covid")
+    );
     let json = r#"{"@type":"updateChatPosition","chat_id":42,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"9","is_pinned":false,"source":null}}"#;
     if let Some(owned) = crate::telegram::client::copy_and_parse(json, &seq, &sink) {
         s.apply(owned);
     }
-    assert!(!s.chat_list.promoted_chats.contains(&42));
+    assert!(!s.chat_list.promoted_chats.contains_key(&42));
 }
 
 #[test]

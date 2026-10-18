@@ -74,10 +74,15 @@ impl Session {
             .or_insert_with(|| placeholder_chat(pos.chat_id));
         match pos.list {
             ChatList::Main => {
-                if pos.order != 0 && pos.is_promoted {
-                    self.chat_list.promoted_chats.insert(pos.chat_id.0);
-                } else {
-                    self.chat_list.promoted_chats.remove(&pos.chat_id.0);
+                match pos.promotion.filter(|_| pos.order != 0) {
+                    Some(promotion) => {
+                        self.chat_list
+                            .promoted_chats
+                            .insert(pos.chat_id.0, promotion);
+                    }
+                    None => {
+                        self.chat_list.promoted_chats.remove(&pos.chat_id.0);
+                    }
                 }
                 if pos.order == 0 {
                     chat.in_main_list = false;

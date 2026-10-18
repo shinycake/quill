@@ -52,7 +52,7 @@ fn find_in_list<'a>(
             chat.id != current
                 && chat.is_channel()
                 && chat.unread_count > 0
-                && !session.chat_list.promoted_chats.contains(&chat.id.0)
+                && crate::promotion::top_promotion(session, chat).is_none()
                 && !chat_unavailable(session, chat)
         })
         .map(|chat| chat.id)
