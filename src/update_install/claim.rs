@@ -190,6 +190,12 @@ pub(super) fn take_over_with(
             return Err(Refused::Failed(None, error));
         }
     };
+    // Only a claim this user wrote (and nobody else can change) is applied.
+    if !super::trusted_file(path) {
+        return Err(Refused::Taken(io::Error::other(
+            "Update claim is not this user's own",
+        )));
+    }
     let _ = file.lock_shared();
     let applying = path.with_extension(APPLYING_EXT);
     let claim = match super::swap::retry(|| rename(path, &applying)) {

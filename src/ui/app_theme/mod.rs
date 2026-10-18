@@ -9,6 +9,7 @@
 //! its rows on top of it (`chat_palette`).
 #![deny(clippy::indexing_slicing)]
 
+pub(crate) mod call_chrome;
 mod chooser;
 mod editor;
 pub(crate) mod kit_colors;

@@ -43,15 +43,20 @@ impl QuillApp {
     fn demo_update(&mut self, demo: UpdateDemo) {
         // The demo window is not an installed copy: show the update switches
         // as on an install that can replace itself, or with
-        // `QUILL_DEMO_SELF_UPDATE=0` as on one that cannot.
-        // `QUILL_DEMO_AUTO_UPDATE=1` starts with "Install updates
-        // automatically" on.
+        // `QUILL_DEMO_SELF_UPDATE=<reason>` (`0`, `translocated`,
+        // `disk-image`, `read-only`, `package-manager`, `not-writable`,
+        // `owned-by-another`, `checking`) as on one that cannot, for that
+        // reason. `QUILL_DEMO_AUTO_UPDATE=1` starts
+        // with "Install updates automatically" on.
         #[cfg(feature = "demo-capture")]
         {
-            let supported = std::env::var("QUILL_DEMO_SELF_UPDATE")
-                .ok()
-                .is_none_or(|v| v != "0");
-            quill::update_install::force_self_update_available(Some(supported));
+            let availability = match std::env::var("QUILL_DEMO_SELF_UPDATE") {
+                Ok(name) => {
+                    quill::update_install::Unavailable::from_demo_name(&name).map_or(Ok(()), Err)
+                }
+                Err(_) => Ok(()),
+            };
+            quill::update_install::force_self_update_available(Some(availability));
             if std::env::var("QUILL_DEMO_AUTO_UPDATE").is_ok_and(|v| v == "1") {
                 quill::advanced::auto_update::set_install_automatically(true);
             }

@@ -241,7 +241,6 @@ impl QuillApp {
             chat.is_pinned
         };
         let unread = chat.is_marked_as_unread || chat.unread_count > 0;
-        let muted = chat.is_muted();
         let archived = chat.in_archive;
         let can_clear = chat.can_be_deleted_only_for_self || chat.can_be_deleted_for_all_users;
         let can_revoke = chat.can_be_deleted_for_all_users;
@@ -253,7 +252,6 @@ impl QuillApp {
         let row_hover = cx.theme().accent;
         macro_rules! item {
             ($order:expr, $icon:expr, $id:expr, $label:expr, $this:ident, $cx:ident, $body:block) => {
-                let danger = $id == "chat-menu-delete";
                 rows.push((
                     $order,
                     div()
@@ -266,12 +264,15 @@ impl QuillApp {
                         .rounded_md()
                         .cursor_pointer()
                         .text_sm()
-                        .text_color(if danger { danger_bright() } else { text_menu() })
+                        .text_color(text_menu())
                         .hover(|style| style.bg(row_hover))
                         .role(gpui_kit::Role::MenuItem)
                         .aria_label($label)
                         .child(Icon::new($icon).size(px(16.)))
                         .child($label)
+                        .on_hover($cx.listener(|this, hovered, _, cx| {
+                            this.chat_menu_row_hovered(*hovered, cx);
+                        }))
                         .on_click($cx.listener(move |$this, _, _, $cx| $body))
                         .into_any_element(),
                 ));
@@ -298,6 +299,9 @@ impl QuillApp {
                         .aria_label($label)
                         .child(Icon::new($icon).size(px(16.)))
                         .child($label)
+                        .on_hover($cx.listener(|this, hovered, _, cx| {
+                            this.chat_menu_row_hovered(*hovered, cx);
+                        }))
                         .on_click($cx.listener(move |$this, _, $window, $cx| $body))
                         .into_any_element(),
                 ));
@@ -359,23 +363,9 @@ impl QuillApp {
                 cx.notify();
             }
         );
-        item!(
-            30,
-            if muted { Lucide::Bell } else { Lucide::BellOff },
-            "chat-menu-mute",
-            if muted {
-                tr(keys::Q_CHAT_UNMUTE_NOTIFICATIONS)
-            } else {
-                tr(keys::Q_CHAT_MUTE_NOTIFICATIONS)
-            },
-            this,
-            cx,
-            {
-                this.apply_chat_mute(chat_id, if muted { 0 } else { MUTE_FOREVER }, cx);
-                this.chat_list.menu = None;
-                cx.notify();
-            }
-        );
+        if let Some(row) = self.chat_menu_mute_row(menu, &chat, row_hover, cx) {
+            rows.push((30, row));
+        }
         item!(
             40,
             if unread {
@@ -612,20 +602,11 @@ impl QuillApp {
                 }
             );
         }
-        if can_clear {
-            item!(
-                90,
-                Lucide::Trash,
-                "chat-menu-delete",
-                tr(keys::Q_CHAT_DELETE_CHAT),
-                this,
-                cx,
-                {
-                    this.open_group_confirm(chat_id, GroupConfirmAction::RemoveFromList, cx);
-                    this.chat_list.menu = None;
-                    cx.notify();
-                }
-            );
+        if let Some(row) = self.chat_menu_exit_row(&chat, can_clear, row_hover, cx) {
+            rows.push((90, row));
+        }
+        if let Some(row) = self.chat_menu_folder_row(menu, &chat, row_hover, cx) {
+            rows.push((45, row));
         }
         rows.sort_by_key(|(order, _)| *order);
         let panel = div()
@@ -633,7 +614,7 @@ impl QuillApp {
             .occlude()
             .flex()
             .flex_col()
-            .min_w(px(200.))
+            .w(px(super::chat_menu_submenus::MENU_WIDTH))
             .px_1()
             .py_1()
             .rounded_md()

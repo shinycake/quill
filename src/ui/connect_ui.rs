@@ -1,9 +1,12 @@
 //! connection status UI.
 #![deny(clippy::indexing_slicing)]
 
+use super::early_connect::First;
 use crate::ui::status_note::StatusNote;
 use quill::auth::view_for;
-use quill::connect::{ConnectBlocker, ConnectGate, evaluate_gate, start_prepared_live_connect};
+use quill::connect::{
+    ConnectBlocker, ConnectGate, LiveConnect, evaluate_gate, start_prepared_live_connect,
+};
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::DiscardSink;
 use quill::ids::AccountKey;
@@ -29,9 +32,16 @@ pub enum ConnectUiStatus {
     Live,
 }
 
+/// A first connection's preparation: the folders the startup sweep deleted
+/// (under the app root) and the prepared client or why there is none.
+pub(super) type Prepared = (
+    Option<(std::path::PathBuf, Vec<AccountKey>)>,
+    Result<(TelegramCredentials, quill::connect::PreparedConnect), ConnectBlocker>,
+);
+
 /// `swept`: folders the startup sweep just deleted (their records are
 /// cleared on the UI thread afterwards).
-fn prepare_startup(
+pub(super) fn prepare_startup(
     credentials: Option<TelegramCredentials>,
     root: Option<std::path::PathBuf>,
     secrets: &dyn SecretStore,
@@ -76,12 +86,20 @@ pub(super) fn live_status_for(auth: &AuthorizationState) -> String {
 }
 
 impl super::app::QuillApp {
+    /// Apply what TDLib answered while the window was being set up, so the
+    /// first frame draws it instead of the one after the poll loop's
+    /// first tick.
+    pub fn poll_before_first_frame(&mut self, cx: &mut gpui_kit::Context<Self>) {
+        self.poll_live(cx);
+    }
+
     pub(super) fn start_connection(&mut self, cx: &mut gpui_kit::Context<Self>) {
         // The lock-screen log out is deleting the local data; it starts the
         // connection itself once that is gone.
         if self.background.wiping {
             return;
         }
+        quill::startup_trace::mark("connect_start");
         self.connection.generation += 1;
         let generation = self.connection.generation;
         let credentials = self.credentials.clone();
@@ -92,12 +110,32 @@ impl super::app::QuillApp {
         // The first connection of the run first deletes folders an earlier
         // run left for deletion (it quit before their clients had closed).
         let sweep = self.startup_sweep();
+        // The run's first connection was begun in `main`.
+        let early = match super::early_connect::take() {
+            Some(First::Opened { swept, client }) if self.live.is_none() => {
+                quill::startup_trace::mark("prepare_done");
+                self.finish_sweep(&swept.0, &swept.1);
+                self.open_client(*client, cx);
+                // TDLib has been opening its database while the window was
+                // built: apply what it has answered (and send what that
+                // asks for) before the first frame.
+                self.poll_live(cx);
+                return;
+            }
+            Some(First::Preparing(early)) => Some(early),
+            _ => None,
+        };
         let root = self.accounts_root();
         let secrets = self.secrets();
         // Nothing deletes a folder while this preparation (which creates
         // the account's folders) still runs.
         self.background.screen_preparing += 1;
         let connect = cx.background_executor().spawn(async move {
+            if let Some(early) = early
+                && let Ok(Some(prepared)) = early.await
+            {
+                return prepared;
+            }
             let swept = sweep.map(|sweep| sweep.run());
             let done: &[AccountKey] = swept.as_ref().map_or(&[], |(_, keys)| keys.as_slice());
             let prepared = prepare_startup(credentials, root, secrets().as_ref(), done);
@@ -105,6 +143,7 @@ impl super::app::QuillApp {
         });
         Self::spawn_main(cx, async move |this, cx| {
             let (swept, prepared) = connect.await;
+            quill::startup_trace::mark("prepare_done");
             let _ = this.update(cx, |this, _| {
                 this.background.screen_preparing =
                     this.background.screen_preparing.saturating_sub(1);
@@ -167,11 +206,23 @@ impl super::app::QuillApp {
         prepared: Result<(TelegramCredentials, quill::connect::PreparedConnect), ConnectBlocker>,
         cx: &mut gpui_kit::Context<Self>,
     ) {
-        let result = prepared.and_then(|(credentials, prepared)| {
-            start_prepared_live_connect(credentials, prepared, Arc::new(DiscardSink))
-        });
+        self.open_client(
+            prepared.and_then(|(credentials, prepared)| {
+                start_prepared_live_connect(credentials, prepared, Arc::new(DiscardSink))
+            }),
+            cx,
+        );
+    }
+
+    /// Put the opened client on screen, or say why there is none.
+    fn open_client(
+        &mut self,
+        result: Result<LiveConnect, ConnectBlocker>,
+        cx: &mut gpui_kit::Context<Self>,
+    ) {
         match result {
             Ok(mut live) => {
+                quill::startup_trace::mark("client_open");
                 live.driver.set_stream_volume(self.playback.volume);
                 self.live = Some(live);
             }

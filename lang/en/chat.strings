@@ -58,6 +58,12 @@
 "lng_message_ph" = "Write a message…";
 "lng_message_stars_ph#one" = "Message for {count} Star";
 "lng_message_stars_ph#other" = "Message for {count} Stars";
+"lng_mute_menu_duration" = "Mute for…";
+"lng_mute_menu_duration_any" = "Mute for {duration}";
+"lng_mute_menu_duration_forever" = "Mute forever";
+"lng_mute_menu_sound_off" = "Disable sound";
+"lng_mute_menu_sound_on" = "Enable sound";
+"lng_mute_menu_sound_select" = "Select tone";
 "lng_new_contact_add_name" = "Add {user} to contacts";
 "lng_new_contact_share" = "Share my phone number";
 "lng_new_contact_share_sure" = "Do you want to share your phone number {phone} with {user}?";
@@ -68,6 +74,7 @@
 "lng_pinned_unpin_sure" = "Would you like to unpin this message?";
 "lng_polls_menu_item" = "Poll";
 "lng_polls_option_added_by" = "Added by {user}";
+"lng_profile_clear_and_exit" = "Delete and leave";
 "lng_profile_copy_phone" = "Copy Phone Number";
 "lng_profile_export_chat" = "Export chat history";
 "lng_recent_chats" = "Chats";
@@ -93,6 +100,7 @@
 "lng_shortcuts_archive_chat" = "Archive chat";
 "lng_sr_chat_column_message" = "Message";
 "lng_sr_message_column_dice" = "Dice";
+"lng_sure_delete_and_exit" = "Are you sure you want to delete all message history and leave «{group}»?\n\nThis action cannot be undone.";
 "lng_view_button_voice_chat_channel" = "Live stream";
 "qll_chat_active_now" = "Active now";
 "qll_chat_add_a_caption" = "Add a caption…";

@@ -36,11 +36,27 @@ impl QuillApp {
                             tr(keys::GROUP_INVITE_CONTEXT_DELETE).to_string(),
                         )
                     }
-                    GroupConfirmAction::RemoveFromList => (
-                        tr(keys::Q_PEOPLE_DELETE_CHAT).to_string(),
-                        tr(keys::Q_PEOPLE_DELETE_THIS_CHAT_AND_ITS).to_string(),
-                        tr(keys::GROUP_INVITE_CONTEXT_DELETE).to_string(),
-                    ),
+                    GroupConfirmAction::RemoveFromList => {
+                        let group = this
+                            .session()
+                            .and_then(|session| session.chats.get(&dialog_state.chat_id.0))
+                            .filter(|chat| {
+                                matches!(chat.kind, quill::telegram::envelope::ChatKind::BasicGroup { .. })
+                            })
+                            .map(|chat| chat.title.clone());
+                        match group {
+                            Some(group) => (
+                                tr(keys::PROFILE_CLEAR_AND_EXIT).to_string(),
+                                tr_with(keys::SURE_DELETE_AND_EXIT, &[("group", group.as_str())]),
+                                tr(keys::GROUP_INVITE_CONTEXT_DELETE).to_string(),
+                            ),
+                            None => (
+                                tr(keys::Q_PEOPLE_DELETE_CHAT).to_string(),
+                                tr(keys::Q_PEOPLE_DELETE_THIS_CHAT_AND_ITS).to_string(),
+                                tr(keys::GROUP_INVITE_CONTEXT_DELETE).to_string(),
+                            ),
+                        }
+                    }
                     GroupConfirmAction::BlockUser { block } => {
                         if block {
                             (

@@ -37,6 +37,7 @@ impl Render for QuillApp {
         // there (a chat window's, when this draw interrupts its input) is
         // restored once the root is built, and around its layout and paint
         // (`WindowScope`).
+        quill::startup_trace::mark("first_render");
         let outer_scope = self.windows.scope;
         self.set_window_scope(None);
         self.windows.main = Some(window.window_handle());

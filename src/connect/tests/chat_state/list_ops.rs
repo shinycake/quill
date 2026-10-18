@@ -566,6 +566,68 @@ fn cl1_remove_chat_from_list_sends_delete_history() {
 }
 
 #[test]
+fn delete_and_leave_a_basic_group_leaves_then_deletes_the_history() {
+    // tdesktop `ApiWrap::deleteConversation` and Telegram X
+    // `Tdlib.deleteChat`: leave the basic group first, then delete the
+    // history with `remove_from_chat_list`, whether leaving worked or not.
+    for leave_answer in [
+        r#"{"@type":"ok","@extra":"EXTRA"}"#,
+        r#"{"@type":"error","@extra":"EXTRA","code":400,"message":"USER_NOT_PARTICIPANT"}"#,
+    ] {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = ViewCtlSender::new();
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        for json in [
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":9,"title":"Club","type":{"@type":"chatTypeBasicGroup","basic_group_id":4},"unread_count":0,"can_be_deleted_only_for_self":true,"can_be_deleted_for_all_users":false}}"#,
+        ] {
+            driver
+                .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+                .unwrap();
+        }
+
+        let extra = driver
+            .delete_and_leave_basic_group(ChatId(9))
+            .expect("send")
+            .expect("sent");
+        let sent_types = |recorder: &ViewCtlSender| -> Vec<String> {
+            recorder
+                .snapshot()
+                .iter()
+                .filter_map(|j| serde_json::from_str::<Value>(j).ok())
+                .filter_map(|v| v["@type"].as_str().map(str::to_string))
+                .filter(|t| t == "leaveChat" || t == "deleteChatHistory")
+                .collect()
+        };
+        assert_eq!(
+            sent_types(&recorder),
+            ["leaveChat"],
+            "the history is not deleted before the leave answers"
+        );
+        let answer = leave_answer.replace("EXTRA", &extra.0.to_string());
+        driver
+            .ingest(copy_and_parse(&answer, &seq, &dyn_sink).unwrap())
+            .unwrap();
+        assert_eq!(sent_types(&recorder), ["leaveChat", "deleteChatHistory"]);
+        let delete = recorder
+            .snapshot()
+            .into_iter()
+            .find(|j| j.contains("deleteChatHistory"))
+            .expect("deleteChatHistory sent");
+        let value: Value = serde_json::from_str(&delete).unwrap();
+        assert_eq!(value["chat_id"], 9);
+        assert_eq!(value["remove_from_chat_list"], true);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[test]
 fn mark_chat_as_read_works_after_the_history_was_dropped() {
     // A closed chat's history can be dropped (`state::history_prune`): the
     // chat summary's last message is what the read marker views then.

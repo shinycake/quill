@@ -28,6 +28,7 @@ mod system_font;
 mod theme_color;
 
 pub use color::*;
+pub use mono_font::{installed_font_names, prefetch_installed_font_names};
 pub use motion::*;
 pub use registry::*;
 pub use schema::*;

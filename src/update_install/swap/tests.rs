@@ -35,8 +35,8 @@ fn plain(_: &Path, _: &Path) -> io::Result<Exchange> {
     Ok(Exchange::Unsupported)
 }
 
-/// The real exchange (atomic on Linux, the plain path elsewhere) and the
-/// forced plain path.
+/// The real exchange (atomic on Linux and macOS, the plain path elsewhere)
+/// and the forced plain path.
 const STRATEGIES: [(&str, ExchangeFn); 2] = [("exchange", exchange), ("plain", plain)];
 
 #[test]
@@ -198,9 +198,9 @@ fn an_incomplete_install_with_a_backup_is_left_alone() {
     fs::remove_dir_all(root).unwrap();
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
-fn renameat2_exchanges_two_directories() {
+fn the_atomic_exchange_swaps_two_directories() {
     let root = scratch("exchange");
     let (a, b) = (root.join("a"), root.join("b"));
     tree(&a, &[("f", "a")]);
@@ -490,4 +490,40 @@ fn windows_held_leftovers_stay_listed_until_they_can_go() {
     assert_eq!(remove_leftovers(&root), 1);
     assert!(!root.join(LEFTOVERS_FILE).exists());
     fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn swap_dir_leaves_both_trees_intact_when_the_backup_cannot_be_made() {
+    // The backup folder cannot be written (App Management on macOS 13+
+    // refuses the rename with EPERM in the same way): the exchange path swaps
+    // back, the plain path fails before its second rename. Nothing moved.
+    use std::os::unix::fs::PermissionsExt;
+    for (tag, strategy) in STRATEGIES {
+        let root = scratch(&format!("dir-no-backup-{tag}"));
+        let (install, staged) = (root.join("quill"), root.join("new"));
+        let closed = root.join("closed");
+        fs::create_dir_all(&closed).unwrap();
+        tree(&install, &[("quill", "old")]);
+        tree(&staged, &[("quill", "new")]);
+        fs::set_permissions(&closed, fs::Permissions::from_mode(0o555)).unwrap();
+        if dir_writable(&closed) {
+            // Root writes anywhere; nothing to test here.
+            fs::remove_dir_all(root).unwrap();
+            continue;
+        }
+        let result = swap_dir_with(
+            &install,
+            &staged,
+            &closed.join("bak"),
+            || panic!("{tag}: nothing to launch"),
+            strategy,
+        );
+        assert!(result.is_err(), "{tag}");
+        assert_eq!(read(&install.join("quill")), "old", "{tag}");
+        assert_eq!(read(&staged.join("quill")), "new", "{tag}");
+        fs::set_permissions(&closed, fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(names(&root), ["closed", "new", "quill"], "{tag}");
+        fs::remove_dir_all(root).unwrap();
+    }
 }

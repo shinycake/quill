@@ -42,6 +42,10 @@ pub enum ChatListPurpose {
     /// (the chat-list "Delete chat", Telegram X `Tdlib.deleteChat`).
     /// Response is `ok`; the row drops via its position update (order 0).
     RemoveChatFromList,
+    /// `leaveChat` sent before the history of a basic group is deleted (the
+    /// chat-list "Delete and leave", tdesktop `ApiWrap::deleteConversation`).
+    /// Its answer, ok or error, queues the `deleteChatHistory` step.
+    LeaveBeforeDelete,
     /// Slice CL2: `setPinnedChats` (schema 1.8.67, line 13681).
     /// Response is `ok`; the new pinned order arrives via
     /// `updateChatPosition`. Rollback restores the swapped `order`
@@ -142,6 +146,7 @@ flat_purposes!(ChatList(ChatListPurpose) {
     ToggleChatIsMarkedAsUnread,
     DeleteChatHistory,
     RemoveChatFromList,
+    LeaveBeforeDelete,
     SetPinnedChats,
     ReadChatList,
     ClearRecentlyFoundChats,

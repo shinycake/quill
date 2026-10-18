@@ -134,12 +134,11 @@ impl QuillApp {
         self.chat_prefs.spellcheck_enabled = true;
         // stories-high-contrast: `QUILL_DEMO_THEME=high-contrast`
         // captures the dialog with the HC theme selected.
-        self.appearance.theme =
-            if std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("high-contrast") {
-                ThemeChoice::HighContrast
-            } else {
-                ThemeChoice::Dark
-            };
+        self.appearance.theme = match std::env::var("QUILL_DEMO_THEME").as_deref() {
+            Ok("high-contrast") => ThemeChoice::HighContrast,
+            Ok("light") => ThemeChoice::Light,
+            _ => ThemeChoice::Dark,
+        };
         self.appearance.accent_rgb = 0x2f81f7;
         self.appearance.wallpaper_rgb = Some(0x0e1621);
         self.appearance.font_size_px = 16;

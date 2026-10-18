@@ -644,6 +644,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Parity slice: queued remove-from-folder edits go out once the
         // `getChatFolder` spec arrives.
         self.maybe_finish_folder_removals()?;
+        self.maybe_finish_leave_deletes()?;
         if became_ready {
             // Phase 9.1: the story tray needs `updateChatActiveStories`
             // updates; one `loadActiveStories(storyListMain)` per Ready.

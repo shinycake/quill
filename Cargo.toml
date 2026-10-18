@@ -223,7 +223,10 @@ ashpd = { version = "0.13", optional = true, default-features = false, features 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Security keys over IOKit HID (src/webauthn/ctap2/hid_macos.rs).
 core-foundation-sys = "0.8"
+# Code-signature checks of a staged update (src/update_install/macos).
+core-foundation = "0.10"
 security-framework = "3"
+security-framework-sys = "2"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAlert", "NSHapticFeedback", "NSMenu", "NSView", "NSWindow", "NSScreen", "NSPasteboard", "NSPasteboardItem", "NSImage", "NSFont", "NSStringDrawing", "NSAttributedString", "NSImageRep", "NSBitmapImageRep", "NSGraphics", "NSSpellChecker", "NSApplication", "NSDockTile", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSResponder", "NSAppearance", "NSBezierPath", "NSColor", "NSColorSpace", "NSGraphicsContext", "NSWorkspace", "NSTouchBar", "NSTouchBarItem", "NSCustomTouchBarItem", "NSPopoverTouchBarItem", "NSScrubber", "NSScrubberItemView", "NSScrubberLayout", "NSSegmentedControl", "NSSlider", "NSImageView", "NSScrollView", "NSClipView", "NSGestureRecognizer", "NSPressGestureRecognizer", "NSTouch", "NSEvent", "NSTextField", "NSUserInterfaceItemIdentification", "NSCell", "NSText", "NSParagraphStyle", "NSTextAttachment", "block2"], optional = true }
 # Native video playback (AVPlayer → CVPixelBuffer → GPUI surface).
 objc2 = { version = "0.6", optional = true }

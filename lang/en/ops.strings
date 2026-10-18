@@ -669,8 +669,16 @@
 "qll_ops_info_2" = "ℹ Info";
 "qll_ops_install_the_release_package_from" = "Install the release package from GitHub for this installation.";
 "qll_ops_install_updates_automatically" = "Install updates automatically";
-"qll_ops_install_updates_automatically_macos" = "On macOS, Quill updates through the release package from GitHub for now.";
 "qll_ops_install_updates_automatically_unavailable" = "Not available for this installation: it cannot replace itself.";
+"qll_ops_self_update_translocated" = "macOS opened Quill from a temporary copy. Move Quill.app to your Applications folder and open it from there.";
+"qll_ops_self_update_disk_image" = "Quill is running from a disk image. Drag Quill.app to your Applications folder and open it from there.";
+"qll_ops_self_update_read_only" = "Quill is on a read-only disk, so it cannot replace itself.";
+"qll_ops_self_update_package_manager" = "A package manager installed this copy of Quill and installs its updates.";
+"qll_ops_self_update_not_writable" = "You do not have permission to change the folder Quill is installed in.";
+"qll_ops_self_update_owned_by_another" = "Another user installed this copy of Quill, so it cannot replace itself.";
+"qll_ops_self_update_checking" = "Checking whether this installation can update itself…";
+"qll_ops_update_signed_differently" = "This copy of Quill is signed differently from the release, so it updates manually. Install the release package from GitHub.";
+"qll_ops_update_failed_verification" = "The downloaded app did not pass verification. Nothing was installed.";
 "qll_ops_install_updates_automatically_hint" = "Quill downloads new versions in the background and installs them the next time it starts.";
 "qll_ops_invite_links" = "{active} invite links";
 "qll_ops_invite_links_need_a_live" = "invite links need a live connection (demo)";

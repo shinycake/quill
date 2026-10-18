@@ -610,6 +610,11 @@ impl Session {
                 .retain(|(id, _), _| *id != chat_id.0);
             self.groups.basic_group_members.remove(&chat_id.0);
         }
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::LeaveBeforeDelete)
+            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+        {
+            self.chat_list.delete_after_leave.push(chat_id);
+        }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::LeaveChat)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
             && let Some(chat) = self.chats.get_mut(&chat_id.0)

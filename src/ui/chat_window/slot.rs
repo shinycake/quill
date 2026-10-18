@@ -159,6 +159,16 @@ impl QuillApp {
         Some(result)
     }
 
+    /// Clear the pending chrome notify on `chat_id`'s slot without putting
+    /// the window in scope (it cannot be, or its state is not in place).
+    pub(in crate::ui) fn clear_slot_chrome_notify(&self, chat_id: ChatId) {
+        if let Some(slot) = self.windows.slot_for(chat_id)
+            && let Ok(slot) = slot.try_borrow()
+        {
+            slot.history.chrome_notify_pending.set(false);
+        }
+    }
+
     /// An input event started in `chat`'s window (`None`: the main
     /// window): its state goes in place, and dialogs opened by what the
     /// event does belong to that window.

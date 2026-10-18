@@ -17,7 +17,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
-use crate::ui::call_panel::{CALL_BG, CallPanel};
+use crate::ui::app_theme::call_chrome;
+use crate::ui::call_panel::CallPanel;
 use crate::ui::call_panel_backdrop::backdrop;
 use crate::ui::frame_clock::trace_slice_render;
 use crate::ui::video_player::{Purpose, VideoPlayer, video_frame};
@@ -223,7 +224,7 @@ impl Render for CallPictureView {
             CallPicture::Remote => video,
             // An image rounds itself (the preview is never a surface).
             CallPicture::Local => {
-                video.corner_radii(Corners::all(px(PREVIEW_RADIUS)), rgb(CALL_BG).into())
+                video.corner_radii(Corners::all(px(PREVIEW_RADIUS)), call_chrome::surface())
             }
         })
     }
@@ -291,7 +292,7 @@ impl Render for CallWindowRoot {
             .size_full()
             .relative()
             .overflow_hidden()
-            .bg(rgb(CALL_BG))
+            .bg(call_chrome::surface())
             .children(ground.map(|image| {
                 img(ImageSource::Render(image))
                     .absolute()
