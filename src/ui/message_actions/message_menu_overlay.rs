@@ -709,10 +709,13 @@ impl QuillApp {
         rows.extend(self.menu_media_rows(chat_id, &message, actions, cx));
         // The task or poll option under the pointer, a shared contact's phone.
         rows.extend(self.menu_item_rows(chat_id, message_id, content, can_reply, cx));
+        rows.extend(self.menu_gift_row(chat_id, &message, cx));
+        rows.extend(self.menu_block_sender_row(chat_id, &message, cx));
         let reportable = !message.pending
             && message.id.0 > 0
             && !message.is_outgoing
             && !saved
+            && !self.is_replies_chat(chat_id)
             && actions.is_none_or(|a| a.can_report_chat);
         if reportable {
             let report = menu_row(
@@ -776,6 +779,7 @@ impl QuillApp {
             ));
         }
         let mut audience_rows = self.menu_audience_rows(chat_id, &message, cx);
+        self.add_origin_rows(&mut audience_rows, chat_id, &message);
         audience_rows.extend(self.menu_author_row(chat_id, message_id, cx));
         if !audience_rows.is_empty() {
             rows.push(menu_separator(order::AUDIENCE - 1));

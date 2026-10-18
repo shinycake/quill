@@ -114,6 +114,9 @@ pub struct MessageForwardInfo {
     /// `messageForwardInfo.source`: the chat and message the forward was
     /// made from, when TDLib knows both.
     pub source: Option<(ChatId, MessageId)>,
+    /// `messageForwardInfo.public_service_announcement_type` ("" for a
+    /// plain forward).
+    pub psa_type: String,
 }
 
 /// Same-chat / known-chat reply metadata from `message.reply_to`.
@@ -661,6 +664,11 @@ pub(crate) fn parse_forward_info(value: Option<&Value>) -> Option<MessageForward
                     .unwrap_or(0)
                     .sat_i32(),
                 source: parse_forward_source(value.get("source")),
+                psa_type: value
+                    .get("public_service_announcement_type")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
             })
         }
         _ => None,

@@ -51,6 +51,7 @@ gpui_kit::assets::icon_assets!(
         LogOut,
         RotateCw,
         Forward,
+        Gift,
         Download,
         MessageSquare,
         ChevronLeft,

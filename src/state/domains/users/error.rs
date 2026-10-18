@@ -70,6 +70,10 @@ impl Session {
                     err.code
                 ));
             }
+            Some(RequestPurpose::BlockSenderFromReplies) => {
+                self.chats_state.chat_action_error =
+                    Some(format!("could not block the sender (error {})", err.code));
+            }
             // Slice A6: contacts mutations — the notice surfaces
             // in the contacts settings section.
             Some(RequestPurpose::RemoveContact) => {

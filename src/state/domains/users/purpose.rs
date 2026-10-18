@@ -87,6 +87,9 @@ pub enum UsersPurpose {
     /// `UserFullInfoData.blocked` authoritatively (the `ok` response
     /// itself carries no state).
     SetMessageSenderBlockList { block: bool },
+    /// `blockMessageSenderFromReplies` (the Replies chat's "Block" box).
+    /// Response is `ok`.
+    BlockSenderFromReplies,
     /// B10: `setBirthdate` (schema 1.8.67, line 14841). Response is
     /// `ok`; the new value arrives via `updateUserFullInfo`.
     SetBirthdate,
@@ -143,6 +146,7 @@ flat_purposes!(Users(UsersPurpose) {
     ClearImportedContacts,
     AddContactByPhone,
     SharePhoneNumber,
+    BlockSenderFromReplies,
     SetBirthdate,
     SetMainProfileTab,
     SetPersonalChat,

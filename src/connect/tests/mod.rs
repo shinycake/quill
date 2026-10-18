@@ -85,6 +85,7 @@ mod pull_next;
 mod quick_replies;
 mod reactions_live;
 mod registration;
+mod replies_block;
 mod reply_keyboard;
 mod search;
 mod search_tabs;

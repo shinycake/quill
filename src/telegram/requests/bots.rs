@@ -263,3 +263,24 @@ pub fn get_recent_inline_bots(extra: RequestId) -> String {
     })
     .to_string()
 }
+
+/// `blockMessageSenderFromReplies message_id:int53 delete_message:Bool
+/// delete_all_messages:Bool report_spam:Bool = Ok;` (`schema/td_api.tl`,
+/// line 14893): tdesktop's `contacts.blockFromReplies`.
+pub fn block_message_sender_from_replies(
+    extra: RequestId,
+    message_id: i64,
+    delete_message: bool,
+    delete_all_messages: bool,
+    report_spam: bool,
+) -> String {
+    json!({
+        "@type": "blockMessageSenderFromReplies",
+        "@extra": extra.as_extra(),
+        "message_id": message_id,
+        "delete_message": delete_message,
+        "delete_all_messages": delete_all_messages,
+        "report_spam": report_spam,
+    })
+    .to_string()
+}
