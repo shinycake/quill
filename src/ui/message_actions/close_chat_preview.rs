@@ -289,6 +289,7 @@ impl QuillApp {
                     $order,
                     div()
                         .id($id)
+                        .test_support()
                         .flex()
                         .items_center()
                         .gap_3()

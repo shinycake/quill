@@ -399,7 +399,10 @@ pub(super) fn session_chat_row(
                 SidebarLine::Draft(draft) => (draft.text, Some(draft.reply)),
             },
         };
-    let activity = chat.peer_activity();
+    // A promoted row paints only the announcement: no typing line and no
+    // sender of the last message (tdesktop's promoted branch).
+    let announced = promotion.as_ref().is_some_and(|badge| badge.preview.is_some());
+    let activity = chat.peer_activity().filter(|_| !announced);
     // Slice chatlist-list-style: the icon/entities describe
     // `last_preview` only — draft/typing/activity lines render unstyled.
     // (When the shown text equals `last_preview` the entities describe
@@ -678,8 +681,13 @@ pub(super) fn session_chat_row(
                                     .truncate()
                                     .text_color(muted_fg)
                                     .child(
-                                        topic_names
-                                            .unwrap_or_else(|| chat.last_preview_sender.clone()),
+                                        topic_names.unwrap_or_else(|| {
+                                            if announced {
+                                                String::new()
+                                            } else {
+                                                chat.last_preview_sender.clone()
+                                            }
+                                        }),
                                     ),
                             )
                         })

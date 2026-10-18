@@ -296,6 +296,7 @@ fn a_promotion_shapes_the_menu_like_use_top_promotion(cx: &mut TestAppContext) {
     assert!(!present(vcx, "chat-menu-hide-promotion"));
     assert!(present(vcx, "chat-menu-archive"));
     assert!(present(vcx, "chat-menu-pin"));
+    assert!(present(vcx, "chat-menu-new-window"));
     // A proxy sponsor: no hide, and no Archive or Pin.
     promote(
         &app,
@@ -306,6 +307,7 @@ fn a_promotion_shapes_the_menu_like_use_top_promotion(cx: &mut TestAppContext) {
     assert!(!present(vcx, "chat-menu-hide-promotion"));
     assert!(!present(vcx, "chat-menu-archive"));
     assert!(!present(vcx, "chat-menu-pin"));
+    assert!(present(vcx, "chat-menu-new-window"));
     // A joined channel is not promoted any more, whatever is left over.
     promote(&app, vcx, Some(psa()), ChannelMemberStatus::Member);
     assert!(!present(vcx, "chat-menu-hide-promotion"));
