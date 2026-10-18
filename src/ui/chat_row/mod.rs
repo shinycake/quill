@@ -401,7 +401,9 @@ pub(super) fn session_chat_row(
         };
     // A promoted row paints only the announcement: no typing line and no
     // sender of the last message (tdesktop's promoted branch).
-    let announced = promotion.as_ref().is_some_and(|badge| badge.preview.is_some());
+    let announced = promotion
+        .as_ref()
+        .is_some_and(|badge| badge.preview.is_some());
     let activity = chat.peer_activity().filter(|_| !announced);
     // Slice chatlist-list-style: the icon/entities describe
     // `last_preview` only — draft/typing/activity lines render unstyled.
