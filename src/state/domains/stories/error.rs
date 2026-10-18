@@ -73,6 +73,10 @@ impl Session {
                     }
                 }
             }
+            Some(RequestPurpose::GetStoryCustomEmojiStickers) => {
+                self.stories
+                    .custom_emoji_fetch_failed(std::time::Instant::now());
+            }
             Some(RequestPurpose::SearchPublicStories) => {
                 self.fail_story_search(format!("Could not search stories: {}", error_reason(err)));
             }

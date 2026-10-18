@@ -79,9 +79,12 @@ impl QuillApp {
     /// asked for again). Only the sticker-metadata fetch is gated: it runs
     /// when the story, the ids it needs or the stickers known changed, and
     /// that fact is recorded only after the fetch succeeded, so a failed
-    /// fetch is retried on the next tick. Returns whether a fetch ran.
+    /// fetch is retried on the next tick. A TDLib error answer counts as a
+    /// failure too (`StoriesState::custom_emoji_failures` is part of the
+    /// record), and the retry waits out `custom_emoji_retry`. Returns
+    /// whether a fetch ran.
     pub(in crate::ui) fn warm_story_custom_emoji(&mut self) -> bool {
-        self.warm_story_custom_emoji_with(|app, ids| {
+        self.warm_story_custom_emoji_with(std::time::Instant::now(), |app, ids| {
             app.live.as_mut().is_some_and(|live| {
                 live.driver
                     .maybe_fetch_story_custom_emoji_stickers(ids)
@@ -94,14 +97,24 @@ impl QuillApp {
     /// whether the fetch succeeded.
     pub(in crate::ui) fn warm_story_custom_emoji_with(
         &mut self,
+        now: std::time::Instant,
         fetch: impl FnOnce(&mut Self, &[i64]) -> bool,
     ) -> bool {
         let ids = self.story_custom_emoji_fetch_ids();
-        let known = self
-            .session()
-            .map_or(0, |s| s.stories.custom_emoji_stickers.len());
-        let key = (self.stories.viewer.current().map(|i| i.key()), ids, known);
-        let fetched = self.stories.emoji_warm.as_ref() != Some(&key);
+        let (known, failures, waiting) = self.session().map_or((0, 0, false), |s| {
+            (
+                s.stories.custom_emoji_stickers.len(),
+                s.stories.custom_emoji_failures,
+                s.stories.custom_emoji_fetch_waiting(now),
+            )
+        });
+        let key = (
+            self.stories.viewer.current().map(|i| i.key()),
+            ids,
+            known,
+            failures,
+        );
+        let fetched = !waiting && self.stories.emoji_warm.as_ref() != Some(&key);
         if fetched && fetch(self, &key.1) {
             self.stories.emoji_warm = Some(key);
         }

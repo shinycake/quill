@@ -11,7 +11,7 @@ use quill::story_viewer::{StoryPlayback, StoryViewer};
 use std::time::Instant;
 
 /// The facts the custom-emoji warm-up of the story viewer depends on.
-pub(super) type EmojiWarm = (Option<(quill::ids::ChatId, i32)>, Vec<i64>, usize);
+pub(super) type EmojiWarm = (Option<(quill::ids::ChatId, i32)>, Vec<i64>, usize, u32);
 
 pub(crate) struct StoryUi {
     /// Stories strip tiles and sideways scroll (`quill::stories_strip`).

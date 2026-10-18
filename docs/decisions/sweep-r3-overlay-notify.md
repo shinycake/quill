@@ -15,9 +15,11 @@ and `ensure_story_custom_emoji_downloads`) moved into
 `warm_story_custom_emoji`. The downloads check (`ensure_story_custom_emoji_downloads`,
 cheap and deduped) still runs every tick, so a failed or dropped download is
 asked for again. Only the sticker-metadata fetch is gated, by the last
-`(story, ids needed, stickers known)` in `StoryUi::emoji_warm`, and that key is
-recorded only after the fetch succeeded. A fetch that failed (no live session,
-request error) is retried on the next tick. The record is cleared when the
+`(story, ids needed, stickers known, failures)` in `StoryUi::emoji_warm`, and
+that key is recorded only after the request was sent. A request that could not
+be sent (no live session) is retried on the next tick. A TDLib error answer
+raises `StoriesState::custom_emoji_failures`, so the recorded key no longer
+matches, and the retry waits out `custom_emoji_retry` (5 s, doubling). The record is cleared when the
 viewer closes.
 
 **Call clock.** The 1 s tick calls `notify_call_clock`: the open chat's
@@ -47,7 +49,8 @@ poll; left as is.
 
 ## Behavior notes
 
-- A failed custom-emoji sticker fetch is retried on the next tick; a
+- A custom-emoji sticker fetch that could not be sent is retried on the next
+  tick, and one TDLib answered with an error is retried after its backoff; a
   successful one is not repeated until the story, its needs or the known
   stickers change, or the viewer reopens.
 - Nothing here claims a speed-up; the numbers were not measured.

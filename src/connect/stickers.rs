@@ -531,6 +531,31 @@ impl<S: JsonSender> ConnectDriver<S> {
         })
     }
 
+    /// Whether the composer's sticker and animated-emoji suggestions have
+    /// nothing to do for `text`: the path is live, the text does not end in
+    /// an emoji, and neither suggestion nor its request is held. Then
+    /// `update_sticker_suggestions` and `update_animated_emoji_suggestion`
+    /// would only clear what is already clear.
+    pub fn composer_suggestions_idle(&self, text: &str) -> bool {
+        let stickers = &self.session.stickers.stickers;
+        let emoji = &self.session.stickers.emoji;
+        self.chats_path_active()
+            && suggest_emoji_for(text).is_none()
+            && stickers.suggestions.is_empty()
+            && stickers.suggest_for.is_none()
+            && !stickers.suggest_waiting_for_sets
+            && emoji.animated_emoji.is_none()
+            && emoji.animated_emoji_for.is_none()
+            && !self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::SuggestStickers)
+            && !self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::GetAnimatedEmoji)
+    }
+
     /// Slice S12: refresh the composer sticker suggestions for the
     /// current composer text. `None` mode or no trailing emoji clears
     /// the row; an unchanged emoji is not re-requested; a stale

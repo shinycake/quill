@@ -61,7 +61,9 @@ fn the_emoji_warm_up_fetches_once_per_story_and_need(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_app(cx, "ready-story-viewer");
     let vcx = &mut vcx;
     let warm = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
-        app.update(vcx, |app, _| app.warm_story_custom_emoji_with(|_, _| true))
+        app.update(vcx, |app, _| {
+            app.warm_story_custom_emoji_with(std::time::Instant::now(), |_, _| true)
+        })
     };
     assert!(warm(&app, vcx), "the first tick warms");
     assert!(!warm(&app, vcx), "the next tick finds nothing new");
@@ -82,7 +84,9 @@ fn a_failed_emoji_fetch_is_retried_on_the_next_tick(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_app(cx, "ready-story-viewer");
     let vcx = &mut vcx;
     let tick = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, ok: bool| {
-        app.update(vcx, |app, _| app.warm_story_custom_emoji_with(|_, _| ok))
+        app.update(vcx, |app, _| {
+            app.warm_story_custom_emoji_with(std::time::Instant::now(), |_, _| ok)
+        })
     };
     assert!(tick(&app, vcx, false), "the first fetch runs and fails");
     assert!(
@@ -92,4 +96,31 @@ fn a_failed_emoji_fetch_is_retried_on_the_next_tick(cx: &mut TestAppContext) {
     assert!(tick(&app, vcx, false), "the next tick tries again");
     assert!(tick(&app, vcx, true), "and again; this time it succeeds");
     assert!(!tick(&app, vcx, true), "now it is recorded and gated");
+}
+
+#[gpui_kit::test]
+fn a_tdlib_error_for_the_emoji_fetch_makes_the_next_tick_fetch_again(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx, "ready-story-viewer");
+    let vcx = &mut vcx;
+    let now = std::time::Instant::now();
+    let warm = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, at| {
+        app.update(vcx, |app, _| {
+            app.warm_story_custom_emoji_with(at, |_, _| true)
+        })
+    };
+    assert!(warm(&app, vcx, now), "the fetch was sent and recorded");
+    assert!(!warm(&app, vcx, now), "nothing new while it is out");
+    // TDLib answers the request with an error.
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.stories.custom_emoji_fetch_failed(now);
+        }
+    });
+    assert!(!warm(&app, vcx, now), "the retry waits out its backoff");
+    let later = now + quill::state::STORIES_RETRY_FIRST + std::time::Duration::from_secs(1);
+    assert!(
+        warm(&app, vcx, later),
+        "after the wait the fetch runs again"
+    );
+    assert!(!warm(&app, vcx, later), "and is recorded again");
 }

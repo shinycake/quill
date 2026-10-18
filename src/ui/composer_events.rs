@@ -104,8 +104,7 @@ impl QuillApp {
                 // codex:spellcheck-native: shift underlines with
                 // the edit and debounce a background re-check.
                 self.sync_spellcheck(&text, cx);
-                self.sync_sticker_suggestions(&text, cx);
-                self.sync_animated_emoji_suggestion(&text, cx);
+                self.sync_composer_suggestions(&text, cx);
             }
         }
         if let InputEvent::PressEnter { secondary, shift } = event {

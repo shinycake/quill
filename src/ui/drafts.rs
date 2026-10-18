@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::draft_timer::DraftTimerStep;
 use gpui_kit::*;
 use quill::composer::{ComposerReplyTo, DraftTopic, QuoteSelection, draft_text_to_store};
 use quill::connect::DraftSaveOutcome;
@@ -225,16 +226,36 @@ impl QuillApp {
         delay: Duration,
         cx: &mut Context<Self>,
     ) {
+        if !self
+            .composer_ui
+            .draft_timer
+            .arm(token, delay, std::time::Instant::now())
+        {
+            return;
+        }
         // window-scope: the pending draft names its own chat and topic (and
         // its token), so the commit needs no window's state.
         cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(delay).await;
-            this.update(cx, |this, _cx| {
-                if let Some(live) = this.live.as_mut() {
-                    let _ = live.driver.commit_debounced_draft(token);
+            loop {
+                let step = this
+                    .update(cx, |this, _cx| {
+                        this.composer_ui.draft_timer.step(std::time::Instant::now())
+                    })
+                    .unwrap_or(DraftTimerStep::Idle);
+                match step {
+                    DraftTimerStep::Idle => break,
+                    DraftTimerStep::Sleep(wait) => cx.background_executor().timer(wait).await,
+                    DraftTimerStep::Fire(token) => {
+                        this.update(cx, |this, _cx| {
+                            if let Some(live) = this.live.as_mut() {
+                                let _ = live.driver.commit_debounced_draft(token);
+                            }
+                        })
+                        .ok();
+                        break;
+                    }
                 }
-            })
-            .ok();
+            }
         })
         .detach();
     }

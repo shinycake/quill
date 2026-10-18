@@ -115,8 +115,19 @@ fn load_registry(app_root: &Path) -> AccountRegistry {
     registry
 }
 
+/// Counts registry writes in this process. A reader that caches the registry
+/// (the Dock and Window menus) compares it to know a write happened since.
+static REGISTRY_WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// How many times this process has written `accounts.json`; it moves on
+/// every sign-in, removal, active-account switch or setting change.
+pub fn registry_writes() -> u64 {
+    REGISTRY_WRITES.load(std::sync::atomic::Ordering::Acquire)
+}
+
 fn save_registry(app_root: &Path, registry: &AccountRegistry) -> std::io::Result<()> {
     let written = write_json_atomic(&registry_path(app_root), registry);
+    REGISTRY_WRITES.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     // The active account may have changed; the in-memory test flag follows.
     crate::advanced::test_environment::invalidate_active_test(app_root);
     written
@@ -507,6 +518,30 @@ mod account_registry_tests {
         // Removing the active account falls back to a remaining one.
         remove_account(&root, &k1).expect("remove works");
         assert_eq!(active_account(&root), AccountKey::primary());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn every_registry_writer_moves_the_write_count() {
+        // The count is process-wide and other tests write too, so each step
+        // only asserts that it moved.
+        let root = tmp_root("write-count");
+        let mut last = registry_writes();
+        let mut moved = |what: &str| {
+            let now = registry_writes();
+            assert!(now > last, "{what} did not move the write count");
+            last = now;
+        };
+        let key = add_account(&root, "Work").expect("add works");
+        moved("add_account");
+        set_active_account(&root, &key).expect("set works");
+        moved("set_active_account");
+        set_notify_from_all(&root, false).expect("set works");
+        moved("set_notify_from_all");
+        mark_for_deletion(&root, std::slice::from_ref(&key)).expect("mark works");
+        moved("mark_for_deletion");
+        remove_account(&root, &key).expect("remove works");
+        moved("remove_account");
         let _ = std::fs::remove_dir_all(&root);
     }
 

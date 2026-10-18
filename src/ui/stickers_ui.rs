@@ -49,14 +49,27 @@ impl QuillApp {
         self.notify_composer(cx);
     }
 
-    pub(super) fn sync_animated_emoji_suggestion(&mut self, text: &str, cx: &mut Context<Self>) {
+    /// A keystroke's sticker and animated-emoji suggestions: the driver is
+    /// asked only when the text ends in an emoji or something is still held
+    /// to clear, and the composer is notified once.
+    pub(super) fn sync_composer_suggestions(&mut self, text: &str, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut()
-            && live.driver.update_animated_emoji_suggestion(text).is_err()
+            && !live.driver.composer_suggestions_idle(text)
         {
-            self.connection.set_note(StatusNote::error(tr(
-                keys::Q_MEDIA_COULD_NOT_LOAD_ANIMATED_EMOJI,
-            )));
-            cx.notify();
+            if live.driver.update_sticker_suggestions(text).is_err() {
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_MEDIA_COULD_NOT_LOAD_STICKER_SUGGESTIONS,
+                )));
+                cx.notify();
+            }
+            if let Some(live) = self.live.as_mut()
+                && live.driver.update_animated_emoji_suggestion(text).is_err()
+            {
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_MEDIA_COULD_NOT_LOAD_ANIMATED_EMOJI,
+                )));
+                cx.notify();
+            }
         }
         self.notify_composer(cx);
     }

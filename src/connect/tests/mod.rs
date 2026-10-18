@@ -20,6 +20,7 @@ mod chat_list;
 mod chat_state;
 mod chat_window;
 mod closing;
+mod composer_suggestions_idle;
 mod connect_flow;
 mod deep_link_routing;
 mod deep_links;
