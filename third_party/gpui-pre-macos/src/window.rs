@@ -78,7 +78,7 @@ use std::{
     rc::Rc,
     sync::{
         Arc, Once, Weak,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -664,6 +664,12 @@ unsafe fn apply_simple_fullscreen_plan(
 /// once (the frame waker) and restarts the link.
 const FRAME_IDLE_AFTER: Duration = Duration::from_millis(250);
 
+/// Quill: how long a window must stay idle (display link stopped) before
+/// its spare drawables are freed. Long enough that typing, reading a
+/// message or a pause in scrolling keeps them; the first frame after a
+/// release allocates one window-sized surface.
+const DRAWABLE_RELEASE_AFTER: Duration = Duration::from_secs(3);
+
 /// Quill: lock-free state shared by the display link, `schedule_frame`
 /// and the frame waker (see `step`).
 #[derive(Default)]
@@ -673,6 +679,9 @@ struct FrameIdle {
     /// The display link was stopped because nothing needed frames; the
     /// frame waker requests one step to start it again.
     stopped: AtomicBool,
+    /// Counts idle stops, so a drawable release scheduled by one stop is
+    /// skipped once the window drew again, even if it went idle again.
+    idle_stops: AtomicU64,
 }
 
 struct MacWindowState {
@@ -3071,6 +3080,8 @@ extern "C" fn window_did_change_occlusion_state(this: &Object, _: Sel, _: id) {
             lock.start_display_link();
         } else {
             lock.stop_display_link();
+            // Quill: nothing is drawn until the window shows again.
+            lock.renderer.release_idle_drawables();
         }
     }
     drop(lock);
@@ -3454,6 +3465,22 @@ extern "C" fn step(view: *mut c_void) {
     {
         lock.stop_display_link();
         idle.stopped.store(true, Ordering::Relaxed);
+        let stop = idle.idle_stops.fetch_add(1, Ordering::Relaxed) + 1;
+        let window = Arc::downgrade(&window_state);
+        if let Ok(when) = DRAWABLE_RELEASE_AFTER.try_into() {
+            let _ = DispatchQueue::main().after(when, move || {
+                let Some(window) = window.upgrade() else {
+                    return;
+                };
+                let mut lock = window.lock();
+                let idle = &lock.frame_idle;
+                if idle.stopped.load(Ordering::Relaxed)
+                    && idle.idle_stops.load(Ordering::Relaxed) == stop
+                {
+                    lock.renderer.release_idle_drawables();
+                }
+            });
+        }
     }
 }
 

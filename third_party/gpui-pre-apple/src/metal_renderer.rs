@@ -462,6 +462,26 @@ impl MetalRenderer {
         self.update_path_intermediate_textures(size);
     }
 
+    /// QUILL: frees the layer's spare drawables while the window is idle.
+    ///
+    /// A `CAMetalLayer` keeps up to `maximumDrawableCount` (3) window-sized
+    /// surfaces in its pool for as long as the window lives, 33 MB each for
+    /// a 1700×1240 pt window at 2x. A drawable size change empties the pool;
+    /// setting the size back right away leaves only the surface on screen,
+    /// which the layer keeps showing until the next present. The next frame
+    /// allocates a fresh drawable.
+    pub fn release_idle_drawables(&mut self) {
+        let Some(layer) = &self.layer else {
+            return;
+        };
+        let size = layer.drawable_size();
+        if size.width <= 1.0 || size.height <= 1.0 {
+            return;
+        }
+        layer.set_drawable_size(CGSize::new(1.0, 1.0));
+        layer.set_drawable_size(size);
+    }
+
     fn update_path_intermediate_textures(&mut self, size: Size<DevicePixels>) {
         // We are uncertain when this happens, but sometimes size can be 0 here. Most likely before
         // the layout pass on window creation. Zero-sized texture creation causes SIGABRT.

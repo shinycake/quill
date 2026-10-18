@@ -44,3 +44,11 @@ whose text system 0.3.9 moved here):
   attributes or a font, and a glyph whose string index is negative, instead
   of unwrapping; the font is read with `CFDictionary::find`, since `get`
   panics on a missing key. See `docs/decisions/gpui-fork-panics.md`.
+
+The Quill project also changed it in 2026 to give back idle window memory
+(`docs/decisions/idle-drawables.md`):
+
+- `src/metal_renderer.rs`: `MetalRenderer::release_idle_drawables` sets the
+  layer's drawable size to 1×1 and back, which empties the drawable pool
+  (up to three window-sized surfaces). The surface on screen stays as the
+  layer's contents until the next present.
