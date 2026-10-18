@@ -512,11 +512,13 @@ impl QuillApp {
                 }
             });
         }
-        let vanishing = self.history.vanishing.borrow();
-        // The rows are kept while it runs: the frame clock drives it.
-        if !vanishing.is_empty() {
+        // The rows are kept while it runs: the frame clock drives it. The
+        // tick is requested with no borrow held.
+        let running = !self.history.vanishing.borrow().is_empty();
+        if running {
             self.request_animation_tick(60, cx);
         }
+        let vanishing = self.history.vanishing.borrow();
         let clouds: Vec<(f32, Rc<Vec<Grain>>)> = vanishing
             .iter()
             .filter_map(|ghost| Some((ghost.elapsed()?, ghost.grains.clone())))

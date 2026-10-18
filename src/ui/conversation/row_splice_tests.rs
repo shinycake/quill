@@ -673,10 +673,10 @@ fn two_reads_in_one_round_see_the_same_phase(cx: &mut TestAppContext) {
         &[&delete(&[5])],
         Expect::Build,
     );
-    // Just before the end of the row phase (1.05s: wipe plus a 0.6s
-    // collapse), with the clock running free so only the pin holds it.
+    // Shortly before the end of the row phase (1.05s: wipe plus a 0.6s
+    // collapse), 50 ms of margin so a stall cannot start in the dust, with the clock running free so only the pin holds it.
     let (first, second, later) = app.update(vcx, |app, _| {
-        app.set_vanishing_clock(1.03);
+        app.set_vanishing_clock(1.00);
         app.release_vanishing_clock();
         app.pin_vanish_now();
         let first = app.vanish_rows_hash();
