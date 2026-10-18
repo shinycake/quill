@@ -31,9 +31,6 @@ use quill::telegram::envelope::CallState;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-const ANSWER_BG: u32 = 0x66c95b;
-const HANGUP_BG: u32 = 0xd75a5a;
-
 /// How long an ended call's window lingers on "call ended".
 const ENDED_LINGER: Duration = Duration::from_millis(1600);
 
@@ -473,8 +470,8 @@ fn call_button(
     let (bg, fg, rotate) = match style {
         ButtonLook::Plain => (call_chrome::wash(), call_chrome::text(), false),
         ButtonLook::Active => (call_chrome::active(), call_chrome::on_active(), false),
-        ButtonLook::Answer => (rgb(ANSWER_BG).into(), white(), false),
-        ButtonLook::Hangup => (rgb(HANGUP_BG).into(), white(), true),
+        ButtonLook::Answer => (call_chrome::answer_fill(), white(), false),
+        ButtonLook::Hangup => (call_chrome::hangup_fill(), white(), true),
     };
     let mut icon = Icon::new(icon).with_size(px(22.)).text_color(fg);
     if rotate {

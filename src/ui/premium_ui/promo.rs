@@ -33,6 +33,13 @@ const ICON_TINTS: [(u32, u32); 5] = [
 
 /// The stickers the stickers preview shows: the one that was clicked
 /// first, then the examples.
+/// Text and icons on the promo's gradients. The gradients are fixed brand
+/// colours, so the foreground is a fixed white too and never follows a
+/// custom theme.
+fn on_brand() -> Rgba {
+    rgb(0xffffff)
+}
+
 fn preview_stickers(
     hub: &quill::premium_hub::PremiumHub,
 ) -> impl Iterator<Item = &quill::telegram::envelope::StickerItem> {
@@ -65,7 +72,7 @@ fn feature_icon(index: usize) -> Div {
         .child(
             Icon::new(IconName::StarFill)
                 .with_size(px(15.))
-                .text_color(crate::ui::chat_theme::text_on_fill()),
+                .text_color(on_brand()),
         )
 }
 
@@ -275,7 +282,7 @@ impl QuillApp {
                         .child(
                             Icon::new(IconName::StarFill)
                                 .with_size(px(32.))
-                                .text_color(rgb(0xffffff)),
+                                .text_color(on_brand()),
                         ),
                 )
                 .when(subscribed, |this| {
@@ -396,7 +403,7 @@ impl QuillApp {
                         .rounded_sm()
                         .text_xs()
                         .font_semibold()
-                        .text_color(rgb(0xffffff))
+                        .text_color(on_brand())
                         .bg(rgb(0x6b93ff))
                         .child(format!("-{}%", plan.discount_percentage)),
                 );
@@ -609,7 +616,7 @@ impl QuillApp {
             None => stage.child(
                 Icon::new(IconName::StarFill)
                     .with_size(px(48.))
-                    .text_color(rgb(0xffffff)),
+                    .text_color(on_brand()),
             ),
         };
         let mut dots = div().flex().items_center().justify_center().gap_1p5();

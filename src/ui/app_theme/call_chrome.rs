@@ -172,6 +172,17 @@ pub(crate) fn danger_fill() -> Hsla {
     hc_or(rgba(0xf75c_5c7f).into(), rgb(0xb3261e).into())
 }
 
+/// The answer and hang-up buttons of the call window. The normal colours
+/// are tdesktop's and carry white at under 4.5:1; high contrast darkens
+/// them so the white glyph reads.
+pub(crate) fn answer_fill() -> Hsla {
+    hc_or(rgb(0x66c95b).into(), rgb(0x1a6b2a).into())
+}
+
+pub(crate) fn hangup_fill() -> Hsla {
+    hc_or(rgb(0xd75a5a).into(), rgb(0xb3261e).into())
+}
+
 /// The ring around the answer button.
 pub(crate) fn answer_ring() -> Hsla {
     rgba(0x50eb_4140).into()
@@ -180,11 +191,11 @@ pub(crate) fn answer_ring() -> Hsla {
 #[cfg(test)]
 mod tests {
     use super::{
-        border, group_muted, group_raised, group_raised_over, high_contrast, menu_surface, muted,
-        surface, text,
+        GROUP_MUTED, MUTED, SURFACE, border, caption, chip, danger_fill, group_muted, group_raised,
+        group_raised_over, group_surface, high_contrast, menu_surface, muted, surface, text,
     };
     use crate::ui::chat_theme::set_high_contrast;
-    use gpui_kit::{Hsla, Rgba};
+    use gpui_kit::{Hsla, Rgba, hsla, rgb, rgba};
 
     fn lum(c: Hsla) -> f32 {
         let c = Rgba::from(c);
@@ -201,6 +212,26 @@ mod tests {
     fn ratio(fg: Hsla, bg: Hsla) -> f32 {
         let (a, b) = (lum(fg), lum(bg));
         (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    /// `over` painted on `under`, ignoring `over`'s alpha channel's source.
+    fn over(top: Hsla, under: Hsla) -> Hsla {
+        let (t, u) = (Rgba::from(top), Rgba::from(under));
+        let mix = |a: f32, b: f32| a * t.a + b * (1. - t.a);
+        Rgba {
+            r: mix(t.r, u.r),
+            g: mix(t.g, u.g),
+            b: mix(t.b, u.b),
+            a: 1.,
+        }
+        .into()
+    }
+
+    fn same(a: Hsla, b: Hsla) -> bool {
+        let (a, b) = (Rgba::from(a), Rgba::from(b));
+        [(a.r, b.r), (a.g, b.g), (a.b, b.b), (a.a, b.a)]
+            .iter()
+            .all(|(x, y)| (x - y).abs() < 0.002)
     }
 
     #[test]
@@ -229,6 +260,72 @@ mod tests {
         set_high_contrast(true);
         assert!(ratio(text(), surface()) >= normal.0);
         assert!(ratio(border(), menu_surface()) >= normal.1);
+        set_high_contrast(false);
+    }
+
+    #[test]
+    fn normal_themes_keep_the_old_literals() {
+        set_high_contrast(false);
+        let pairs: [(Hsla, Hsla); 22] = [
+            (surface(), rgb(0x1b1f23).into()),
+            (group_surface(), rgb(0x1a2026).into()),
+            (group_raised(), rgb(0x2c333d).into()),
+            (group_raised_over(), rgb(0x323a45).into()),
+            (menu_surface(), rgb(0x2a2f35).into()),
+            (muted(), rgb(0xaaabac).into()),
+            (group_muted(), rgb(0xa3a9b0).into()),
+            (border(), hsla(0., 0., 1., 0.12)),
+            (super::glass_border(), hsla(0., 0., 1., 0.25)),
+            (text(), hsla(0., 0., 1., 1.)),
+            (super::glass(), hsla(0., 0., 0., 0.55)),
+            (super::glass_over(), hsla(0., 0., 0., 0.75)),
+            (chip(), rgba(0x0000_0099).into()),
+            (super::chip_over(), rgba(0x0000_00cc).into()),
+            (caption(), rgba(0xffff_ffe0).into()),
+            (super::scrim(), hsla(0., 0., 0., 0.5)),
+            (super::pill(), hsla(0., 0., 0., 0.3)),
+            (super::video_shade_top(), hsla(0., 0., 0., 0.45)),
+            (super::video_shade_bottom(), hsla(0., 0., 0., 0.5)),
+            (super::muted_fill(), rgb(0x8f8f8f).into()),
+            (super::danger_tint(), rgba(0xeb53_5333).into()),
+            (danger_fill(), rgba(0xf75c_5c7f).into()),
+        ];
+        for (index, (token, literal)) in pairs.iter().enumerate() {
+            assert!(same(*token, *literal), "token {index} drifted");
+        }
+        assert_eq!(
+            (SURFACE, MUTED, GROUP_MUTED),
+            (0x1b1f23, 0xaaabac, 0x91979e)
+        );
+    }
+
+    #[test]
+    fn caption_chip_and_danger_text_stay_readable() {
+        for high in [false, true] {
+            set_high_contrast(high);
+            // A caption sits on a dark scrim over the picture: judge it on
+            // the darkest the tile can be under the chip, and on the panel.
+            let ground = over(chip(), group_surface());
+            assert!(
+                ratio(over(caption(), ground), ground) >= 4.5,
+                "caption on chip, hc {high}"
+            );
+            assert!(
+                ratio(text(), over(chip(), rgb(0x808080).into())) >= 3.0,
+                "chip icon on mid grey, hc {high}"
+            );
+            assert!(
+                ratio(text(), over(danger_fill(), group_surface())) >= 3.0,
+                "white on the danger fill, hc {high}"
+            );
+        }
+        set_high_contrast(true);
+        assert!(ratio(text(), danger_fill()) >= 4.5);
+        assert!(ratio(text(), super::answer_fill()) >= 4.5);
+        assert!(ratio(text(), super::hangup_fill()) >= 4.5);
+        set_high_contrast(false);
+        assert!(same(super::answer_fill(), rgb(0x66c95b).into()));
+        assert!(same(super::hangup_fill(), rgb(0xd75a5a).into()));
         set_high_contrast(false);
     }
 }
