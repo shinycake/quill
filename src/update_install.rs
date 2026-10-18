@@ -449,7 +449,9 @@ enum Refusal {
     /// Signed by someone else than the running copy: this copy updates by
     /// hand, and the release is not downloaded again (`remember_refused`).
     SignedDifferently,
-    /// A broken signature, another bundle identifier, another version.
+    /// A broken signature, another bundle identifier, another version
+    /// (the signature check exists on macOS only).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Invalid,
     /// The executable did not answer the version probe.
     Probe,
