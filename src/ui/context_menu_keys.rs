@@ -1,5 +1,5 @@
-//! Keyboard side of the small context menus (archive row, story tile,
-//! playlist track, folder tab): one item builder with its focus handle and
+//! Keyboard side of the context menus (archive row, story tile, playlist
+//! track, folder tab, message, chat row): one item builder with its focus handle and
 //! focus ring, and Up/Down that move between the menu's own items.
 //!
 //! Telegram Desktop (`Ui::Menu::handleKeyPress`, lib_ui/ui/widgets/menu/
@@ -24,32 +24,46 @@ use super::app::QuillApp;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
 use gpui_kit::*;
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 
 /// Width of the focus ring drawn inside an item's edge.
 const RING_WIDTH: f32 = 2.;
 
-/// Focus handles of the enabled items of the open menu, in drawing order.
-/// Handles are kept by position so they survive re-renders; `begin` runs at
-/// the top of every frame and each enabled item drawn after it claims the
-/// next slot.
+/// Focus handles of the enabled items of the open menu. Handles are kept by
+/// claim position so they survive re-renders; `begin` runs at the top of
+/// every frame and each enabled item drawn after it claims the next slot,
+/// with a sort key that says where the row sits in the menu (menus that sort
+/// their rows after building them pass the row's order).
 #[derive(Default)]
 pub(super) struct ContextMenuItems {
     handles: RefCell<Vec<FocusHandle>>,
-    drawn: Cell<usize>,
+    keys: RefCell<Vec<u32>>,
+}
+
+/// Sort key of a submenu row: just after its parent row (`order`), in the
+/// order the submenu draws them.
+pub(super) fn submenu_key(order: u8, index: usize) -> u32 {
+    (u32::from(order) << 8) + 1 + u32::try_from(index).unwrap_or(0)
+}
+
+/// Sort key of a top-level row with the given order.
+pub(super) fn row_key(order: u8) -> u32 {
+    u32::from(order) << 8
 }
 
 impl ContextMenuItems {
     /// A new frame starts: no item has been drawn yet. The handles are
-    /// retained across frames; only the claim counter resets.
+    /// retained across frames; only the claims reset.
     pub(super) fn begin(&self) {
-        self.drawn.set(0);
+        self.keys.borrow_mut().clear();
     }
 
-    /// The handle for the next enabled item drawn this frame.
-    fn claim(&self, cx: &App) -> FocusHandle {
-        let slot = self.drawn.get();
-        self.drawn.set(slot + 1);
+    /// The handle for the next enabled item drawn this frame, which sorts
+    /// at `key` among the menu's items.
+    fn claim(&self, key: u32, cx: &App) -> FocusHandle {
+        let mut keys = self.keys.borrow_mut();
+        let slot = keys.len();
+        keys.push(key);
         let mut handles = self.handles.borrow_mut();
         if let Some(handle) = handles.get(slot) {
             return handle.clone();
@@ -63,22 +77,67 @@ impl ContextMenuItems {
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]
     pub(super) fn enabled_count(&self) -> usize {
-        self.drawn.get()
+        self.keys.borrow().len()
     }
 
-    /// The handle after (or before) the focused one, wrapping; with none
-    /// focused, the first (or last). `None` when the menu has no enabled item.
+    /// The sort keys of the rows drawn this frame, in the order Up and Down
+    /// walk them.
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
+    pub(super) fn sorted_keys(&self) -> Vec<u32> {
+        let mut keys = self.keys.borrow().clone();
+        keys.sort_unstable();
+        keys
+    }
+
+    /// The handle after (or before) the focused one in key order, wrapping;
+    /// with none focused, the first (or last). `None` when the menu has no
+    /// enabled item.
     pub(super) fn step(&self, forward: bool, window: &Window) -> Option<FocusHandle> {
         let handles = self.handles.borrow();
-        let live = handles.get(..self.drawn.get())?;
+        let keys = self.keys.borrow();
+        let mut live: Vec<(u32, &FocusHandle)> = keys
+            .iter()
+            .zip(handles.iter())
+            .map(|(key, handle)| (*key, handle))
+            .collect();
+        live.sort_by_key(|(key, _)| *key);
         let count = live.len();
-        let next = match live.iter().position(|handle| handle.is_focused(window)) {
+        let next = match live
+            .iter()
+            .position(|(_, handle)| handle.is_focused(window))
+        {
             Some(at) if forward => (at + 1) % count,
             Some(at) => (at + count - 1) % count,
             None if forward => 0,
             None => count.checked_sub(1)?,
         };
-        live.get(next).cloned()
+        live.get(next).map(|(_, handle)| (*handle).clone())
+    }
+}
+
+fn focus_ring(cx: &App) -> BoxShadow {
+    BoxShadow {
+        color: cx.theme().ring,
+        offset: point(px(0.), px(0.)),
+        blur_radius: px(0.),
+        spread_radius: px(RING_WIDTH),
+        inset: true,
+    }
+}
+
+/// Makes a hand-built menu row reachable by keyboard: it joins the open
+/// menu's items at `key`, so Up, Down and Tab reach it and Enter or Space
+/// run its `on_click`, and shows the shared focus ring while focused.
+pub(super) trait MenuKeyTarget: Sized {
+    fn menu_key_target(self, key: u32, items: &ContextMenuItems, cx: &App) -> Self;
+}
+
+impl<T: StatefulInteractiveElement> MenuKeyTarget for T {
+    fn menu_key_target(self, key: u32, items: &ContextMenuItems, cx: &App) -> Self {
+        let ring = focus_ring(cx);
+        self.track_focus(&items.claim(key, cx))
+            .focus_visible(|style| style.shadow(vec![ring]))
     }
 }
 
@@ -97,15 +156,7 @@ pub(super) fn context_menu_item(
     items: &ContextMenuItems,
     cx: &App,
 ) -> Stateful<Div> {
-    let theme = cx.theme();
-    let hover = theme.accent;
-    let ring = BoxShadow {
-        color: theme.ring,
-        offset: point(px(0.), px(0.)),
-        blur_radius: px(0.),
-        spread_radius: px(RING_WIDTH),
-        inset: true,
-    };
+    let hover = cx.theme().accent;
     let item = div()
         .id(id)
         .flex()
@@ -121,10 +172,10 @@ pub(super) fn context_menu_item(
         .child(Icon::new(icon).size(px(16.)).text_color(color))
         .child(label);
     if enabled {
+        let key = u32::try_from(items.keys.borrow().len()).unwrap_or(u32::MAX);
         item.cursor_pointer()
             .hover(|style| style.bg(hover))
-            .track_focus(&items.claim(cx))
-            .focus_visible(|style| style.shadow(vec![ring]))
+            .menu_key_target(key, items, cx)
     } else {
         item.opacity(0.5)
     }

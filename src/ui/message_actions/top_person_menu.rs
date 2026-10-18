@@ -98,6 +98,9 @@ impl QuillApp {
                     tr(keys::CONTEXT_NEW_WINDOW).to_string(),
                     false,
                     hover,
+                    row_key(5),
+                    &self.frame.context_menu_items,
+                    cx,
                 )
                 .on_hover(cx.listener(|this, hovered, _, cx| {
                     this.chat_menu_row_hovered(*hovered, cx);
@@ -121,6 +124,9 @@ impl QuillApp {
                 tr(keys::PROFILE_SEND_MESSAGE).to_string(),
                 false,
                 hover,
+                row_key(10),
+                &self.frame.context_menu_items,
+                cx,
             )
             .on_hover(cx.listener(|this, hovered, _, cx| {
                 this.chat_menu_row_hovered(*hovered, cx);
@@ -143,6 +149,9 @@ impl QuillApp {
                 tr(keys::CONTEXT_VIEW_PROFILE).to_string(),
                 false,
                 hover,
+                row_key(50),
+                &self.frame.context_menu_items,
+                cx,
             )
             .on_hover(cx.listener(|this, hovered, _, cx| {
                 this.chat_menu_row_hovered(*hovered, cx);
@@ -168,6 +177,9 @@ impl QuillApp {
                 tr(keys::Q_CHAT_REMOVE_FROM_RECENT_2).to_string(),
                 true,
                 hover,
+                row_key(60),
+                &self.frame.context_menu_items,
+                cx,
             )
             .on_hover(cx.listener(|this, hovered, _, cx| {
                 this.chat_menu_row_hovered(*hovered, cx);
@@ -186,6 +198,9 @@ impl QuillApp {
                 tr(keys::Q_CHAT_REMOVE_ALL_DISABLE).to_string(),
                 true,
                 hover,
+                row_key(70),
+                &self.frame.context_menu_items,
+                cx,
             )
             .on_hover(cx.listener(|this, hovered, _, cx| {
                 this.chat_menu_row_hovered(*hovered, cx);

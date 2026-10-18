@@ -474,6 +474,7 @@ impl QuillApp {
                 "link-popup-explorer",
                 address,
                 |this| this.message_ui.link_popup = None,
+                None,
                 cx,
             )
         });

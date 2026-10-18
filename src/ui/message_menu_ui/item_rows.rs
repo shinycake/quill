@@ -95,6 +95,7 @@ impl QuillApp {
                 "menu-copy-phone",
                 tr(keys::PROFILE_COPY_PHONE),
                 false,
+                &self.frame.context_menu_items,
                 cx,
                 move |this, _, cx| {
                     cx.write_to_clipboard(ClipboardItem::new_string(phone.clone()));
@@ -137,6 +138,7 @@ impl QuillApp {
                 "menu-retract-vote",
                 tr(keys::Q_CHAT_RETRACT_VOTE),
                 false,
+                &self.frame.context_menu_items,
                 cx,
                 move |this, _, cx| {
                     this.retract_poll_vote(chat_id, message_id, cx);
@@ -163,6 +165,7 @@ impl QuillApp {
             "menu-copy-option",
             tr(keys::CONTEXT_COPY_POLL_OPTION),
             false,
+            &self.frame.context_menu_items,
             cx,
             move |this, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
@@ -178,6 +181,7 @@ impl QuillApp {
                 "menu-copy-option-link",
                 tr(keys::CONTEXT_COPY_POLL_OPTION_LINK),
                 false,
+                &self.frame.context_menu_items,
                 cx,
                 move |this, _, cx| {
                     this.copy_item_link(chat_id, message_id, &link_item, cx);
@@ -194,6 +198,7 @@ impl QuillApp {
                 "menu-delete-option",
                 tr(keys::CONTEXT_DELETE_POLL_OPTION),
                 true,
+                &self.frame.context_menu_items,
                 cx,
                 move |this, _, cx| {
                     this.delete_poll_option_item(chat_id, message_id, &option_id, cx);
@@ -219,6 +224,7 @@ impl QuillApp {
                     "menu-option-added-by",
                     tr_with(keys::POLLS_OPTION_ADDED_BY, &[("user", &name)]),
                     false,
+                    &self.frame.context_menu_items,
                     cx,
                     move |this, window, cx| {
                         this.message_ui.menu = None;
@@ -274,6 +280,7 @@ impl QuillApp {
             id,
             tr(label),
             false,
+            &self.frame.context_menu_items,
             cx,
             move |this, window, cx| {
                 this.begin_reply_to(
@@ -317,6 +324,7 @@ impl QuillApp {
                     "menu-author",
                     tr_with(keys::CONTEXT_SENT_BY, &[("user", &name)]),
                     false,
+                    &self.frame.context_menu_items,
                     cx,
                     move |this, window, cx| {
                         this.message_ui.menu = None;

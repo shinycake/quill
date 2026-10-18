@@ -5,6 +5,7 @@
 //! chat kind (`addDeleteChat`, `addLeaveChat`).
 
 use super::*;
+use crate::ui::context_menu_keys::ContextMenuItems;
 use crate::ui::menu_states::{ChatMenuState, ChatMenuSubmenu};
 use gpui_kit::TestSupportExt;
 use gpui_kit::assets::IconName;
@@ -30,13 +31,17 @@ fn period_text(seconds: i32) -> String {
 }
 
 /// One menu row: icon, label, optional trailing marker. Danger rows read
-/// in the attention colour.
+/// in the attention colour. `key` places it among the menu's keyboard items
+/// (`row_key` of its order; `submenu_key` for a submenu row).
 pub(super) fn menu_row(
     id: impl Into<ElementId>,
     icon: Option<IconName>,
     label: String,
     danger: bool,
     hover: Hsla,
+    key: u32,
+    items: &ContextMenuItems,
+    cx: &App,
 ) -> impl ParentElement + IntoElement + StatefulInteractiveElement + Styled {
     div()
         .id(id)
@@ -52,6 +57,7 @@ pub(super) fn menu_row(
         .text_sm()
         .text_color(if danger { danger_bright() } else { text_menu() })
         .hover(|style| style.bg(hover))
+        .menu_key_target(key, items, cx)
         .role(gpui_kit::Role::MenuItem)
         .aria_label(label.clone())
         .child(match icon {
@@ -150,6 +156,9 @@ impl QuillApp {
                     tr(keys::MUTE_MENU_UNMUTE).to_string(),
                     false,
                     hover,
+                    row_key(30),
+                    &self.frame.context_menu_items,
+                    cx,
                 )
                 .on_hover(cx.listener(|this, hovered, _, cx| {
                     this.chat_menu_row_hovered(*hovered, cx);
@@ -161,14 +170,49 @@ impl QuillApp {
                 .into_any_element(),
             );
         }
+        let open = menu.submenu == Some(ChatMenuSubmenu::Mute);
+        let parent = menu_row(
+            "chat-menu-mute",
+            Some(IconName::BellOff),
+            tr(keys::Q_CHAT_MUTE_NOTIFICATIONS).to_string(),
+            false,
+            hover,
+            row_key(30),
+            &self.frame.context_menu_items,
+            cx,
+        )
+        .child(Icon::new(IconName::ChevronRight).size(px(14.)))
+        .on_hover(cx.listener(|this, hovered, _, cx| {
+            if *hovered {
+                this.open_chat_submenu(ChatMenuSubmenu::Mute, cx);
+            }
+        }))
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.open_chat_submenu(ChatMenuSubmenu::Mute, cx);
+        }));
+        // The submenu rows join the keyboard items only while it is open, so
+        // they are built after their parent row and sort right after it.
+        if !open {
+            return Some(parent.into_any_element());
+        }
+        let items = &self.frame.context_menu_items;
         let settings = &chat.notification_settings;
         let sound_off = !settings.use_default_sound && settings.sound_id == 0;
-        let open = menu.submenu == Some(ChatMenuSubmenu::Mute);
-        let sub_item = |id: &'static str, icon: IconName, label: String| {
-            menu_row(id, Some(icon), label, false, hover)
+        let sub_item = |index: usize, id: &'static str, icon: IconName, label: String| {
+            menu_row(
+                id,
+                Some(icon),
+                label,
+                false,
+                hover,
+                submenu_key(30, index),
+                items,
+                cx,
+            )
         };
         let mut rows: Vec<AnyElement> = vec![
             sub_item(
+                0,
                 "chat-mute-tone",
                 IconName::Music,
                 tr(keys::MUTE_MENU_SOUND_SELECT).to_string(),
@@ -178,6 +222,7 @@ impl QuillApp {
             }))
             .into_any_element(),
             sub_item(
+                1,
                 "chat-mute-sound",
                 if sound_off {
                     IconName::Volume2
@@ -198,13 +243,17 @@ impl QuillApp {
             }))
             .into_any_element(),
         ];
-        for (id, seconds) in [
+        for (index, (id, seconds)) in [
             ("chat-mute-1h", MUTE_FOR_1_HOUR),
             ("chat-mute-8h", MUTE_FOR_8_HOURS),
             ("chat-mute-2d", MUTE_FOR_2_DAYS),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
             rows.push(
                 sub_item(
+                    2 + index,
                     id,
                     IconName::BellOff,
                     tr_with(
@@ -221,6 +270,7 @@ impl QuillApp {
         }
         rows.push(
             sub_item(
+                5,
                 "chat-mute-custom",
                 IconName::Timer,
                 tr(keys::MUTE_MENU_DURATION).to_string(),
@@ -232,6 +282,7 @@ impl QuillApp {
         );
         rows.push(
             sub_item(
+                6,
                 "chat-mute-forever",
                 IconName::BellOff,
                 tr(keys::MUTE_MENU_DURATION_FOREVER).to_string(),
@@ -242,26 +293,7 @@ impl QuillApp {
             }))
             .into_any_element(),
         );
-        Some(
-            menu_row(
-                "chat-menu-mute",
-                Some(IconName::BellOff),
-                tr(keys::Q_CHAT_MUTE_NOTIFICATIONS).to_string(),
-                false,
-                hover,
-            )
-            .child(Icon::new(IconName::ChevronRight).size(px(14.)))
-            .on_hover(cx.listener(|this, hovered, _, cx| {
-                if *hovered {
-                    this.open_chat_submenu(ChatMenuSubmenu::Mute, cx);
-                }
-            }))
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.open_chat_submenu(ChatMenuSubmenu::Mute, cx);
-            }))
-            .when(open, |row| row.child(submenu_panel(rows)))
-            .into_any_element(),
-        )
+        Some(parent.child(submenu_panel(rows)).into_any_element())
     }
 
     /// The "Add to folder" row (order 45) with a submenu that lists every
@@ -280,17 +312,43 @@ impl QuillApp {
         }
         let chat_id = menu.chat_id;
         let open = menu.submenu == Some(ChatMenuSubmenu::Folders);
-        let rows: Vec<AnyElement> = folders
-            .iter()
-            .map(|folder| {
-                let folder_id = folder.id;
-                let contains = chat.folder_positions.contains_key(&folder_id);
+        let parent = menu_row(
+            "chat-menu-folder",
+            Some(IconName::Folder),
+            tr(keys::FILTERS_MENU_ADD).to_string(),
+            false,
+            hover,
+            row_key(45),
+            &self.frame.context_menu_items,
+            cx,
+        )
+        .child(Icon::new(IconName::ChevronRight).size(px(14.)))
+        .on_hover(cx.listener(|this, hovered, _, cx| {
+            if *hovered {
+                this.open_chat_submenu(ChatMenuSubmenu::Folders, cx);
+            }
+        }))
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.open_chat_submenu(ChatMenuSubmenu::Folders, cx);
+        }));
+        if !open {
+            return Some(parent.into_any_element());
+        }
+        let items = &self.frame.context_menu_items;
+        let mut rows: Vec<AnyElement> = Vec::new();
+        for (index, folder) in folders.iter().enumerate() {
+            let folder_id = folder.id;
+            let contains = chat.folder_positions.contains_key(&folder_id);
+            rows.push(
                 menu_row(
                     format!("chat-menu-folder-{folder_id}"),
                     contains.then_some(IconName::Check),
                     folder.name.clone(),
                     false,
                     hover,
+                    submenu_key(45, index),
+                    items,
+                    cx,
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if contains {
@@ -300,29 +358,10 @@ impl QuillApp {
                     }
                     this.close_chat_menu(cx);
                 }))
-                .into_any_element()
-            })
-            .collect();
-        Some(
-            menu_row(
-                "chat-menu-folder",
-                Some(IconName::Folder),
-                tr(keys::FILTERS_MENU_ADD).to_string(),
-                false,
-                hover,
-            )
-            .child(Icon::new(IconName::ChevronRight).size(px(14.)))
-            .on_hover(cx.listener(|this, hovered, _, cx| {
-                if *hovered {
-                    this.open_chat_submenu(ChatMenuSubmenu::Folders, cx);
-                }
-            }))
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.open_chat_submenu(ChatMenuSubmenu::Folders, cx);
-            }))
-            .when(open, |row| row.child(submenu_panel(rows)))
-            .into_any_element(),
-        )
+                .into_any_element(),
+            );
+        }
+        Some(parent.child(submenu_panel(rows)).into_any_element())
     }
 
     /// The delete or leave row (order 90): "Delete chat" for a user,
@@ -370,6 +409,9 @@ impl QuillApp {
                 label.to_string(),
                 true,
                 hover,
+                row_key(90),
+                &self.frame.context_menu_items,
+                cx,
             )
             .on_hover(cx.listener(|this, hovered, _, cx| {
                 this.chat_menu_row_hovered(*hovered, cx);

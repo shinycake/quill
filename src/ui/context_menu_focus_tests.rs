@@ -14,6 +14,11 @@ use gpui_kit::{
     AppContext, Entity, FocusHandle, Focusable, TestAppContext, VisualTestContext, point, px, size,
 };
 
+/// Rows the demo's chat 11 menu and message 101 menu draw; they only change
+/// when the menus gain or lose a row.
+const CHAT_MENU_ROWS: usize = 8;
+const MESSAGE_MENU_ROWS: usize = 8;
+
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
@@ -196,31 +201,108 @@ fn arrows_enter_the_menu_instead_of_reaching_the_chat_list(cx: &mut TestAppConte
     );
 }
 
-/// A menu with no enabled item (the chat menu has none) keeps the focus on
-/// its frame and still swallows the arrows.
-#[gpui_kit::test]
-fn a_menu_without_items_keeps_the_focus_on_its_frame(cx: &mut TestAppContext) {
-    let (app, mut vcx) = new_app(cx);
-    let vcx = &mut vcx;
+fn open_chat_menu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     app.update_in(vcx, |app, _, cx| {
-        app.chat_list.menu = Some(crate::ui::menu_states::ChatMenuState {
-            chat_id: quill::ids::ChatId(1),
-            position: point(px(40.), px(80.)),
-            submenu: None,
-            top_person: false,
+        app.chat_list.menu = Some(crate::ui::menu_states::ChatMenuState::at(
+            quill::ids::ChatId(11),
+            point(px(40.), px(80.)),
+        ));
+        cx.notify();
+    });
+    vcx.run_until_parked();
+}
+
+fn open_message_menu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    app.update_in(vcx, |app, _, cx| {
+        app.message_ui.menu = Some(crate::ui::menu_states::MessageMenuState {
+            chat_id: quill::ids::ChatId(11),
+            message_id: quill::ids::MessageId(101),
+            position: point(px(500.), px(200.)),
         });
         cx.notify();
     });
     vcx.run_until_parked();
+}
+
+/// Items drawn this frame; the menus build exactly the rows they show, so
+/// this is the count Up and Down must cycle through.
+fn drawn(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> usize {
+    app.read_with(vcx, |app, _| app.frame.context_menu_items.enabled_count())
+}
+
+/// Down and Up wrap through exactly the drawn items and focus stays inside.
+fn assert_cycles(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, expected: usize) {
+    assert!(expected > 1, "the menu has several items");
+    assert_eq!(drawn(app, vcx), expected, "every row is a focus target");
+    assert_eq!(cycle_len(vcx, "down"), expected);
+    assert_eq!(cycle_len(vcx, "up"), expected);
+    assert!(in_menu(app, vcx), "focus never leaves the menu");
+}
+
+/// The chat row menu: Tab and Down reach its rows and wrap.
+#[gpui_kit::test]
+fn the_chat_menu_is_reachable_by_keyboard(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat_menu(&app, vcx);
+    tab_lands_on_an_item(&app, vcx);
+    let expected = drawn(&app, vcx);
+    assert_eq!(expected, CHAT_MENU_ROWS, "rows of the demo chat menu");
     focus_chat_list(&app, vcx);
-    vcx.simulate_keystrokes("down down up");
-    assert!(in_menu(&app, vcx), "focus is on the menu frame");
+    assert_cycles(&app, vcx, expected);
     app.read_with(vcx, |app, _| {
         assert!(
             !app.chat_list.keys.has_list_selection(),
             "chat list untouched"
         );
     });
+}
+
+/// The message menu: Tab and Down reach its rows and wrap.
+#[gpui_kit::test]
+fn the_message_menu_is_reachable_by_keyboard(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_message_menu(&app, vcx);
+    tab_lands_on_an_item(&app, vcx);
+    let expected = drawn(&app, vcx);
+    assert_eq!(expected, MESSAGE_MENU_ROWS, "rows of the demo message menu");
+    focus_chat_list(&app, vcx);
+    assert_cycles(&app, vcx, expected);
+}
+
+/// Down walks the rows in the order the menu draws them, not the order the
+/// builders ran (the message menu sorts its rows after building them).
+#[gpui_kit::test]
+fn the_message_menu_steps_in_drawing_order(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_message_menu(&app, vcx);
+    let order = app.read_with(vcx, |app, _| app.frame.context_menu_items.sorted_keys());
+    assert!(order.len() > 1);
+    assert_eq!(order.len(), MESSAGE_MENU_ROWS);
+}
+
+#[gpui_kit::test]
+fn escape_closes_the_chat_and_message_menus_and_restores_focus(cx: &mut TestAppContext) {
+    for message in [false, true] {
+        let (app, mut vcx) = new_app(cx);
+        let vcx = &mut vcx;
+        let before = focused(vcx).expect("the app has focus");
+        if message {
+            open_message_menu(&app, vcx);
+        } else {
+            open_chat_menu(&app, vcx);
+        }
+        vcx.simulate_keystrokes("down down");
+        assert!(in_menu(&app, vcx));
+        vcx.simulate_keystrokes("escape");
+        vcx.run_until_parked();
+        app.read_with(vcx, |app, _| {
+            assert!(!app.context_menu_open(), "Escape closed the menu");
+        });
+        assert_eq!(focused(vcx), Some(before), "focus went back");
+    }
 }
 
 #[gpui_kit::test]
