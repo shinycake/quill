@@ -646,6 +646,8 @@ mod conversation_part1;
 mod history_message_list;
 mod history_scroll_memory;
 mod render_history_row_body;
+mod row_build;
 pub(super) mod row_chrome;
+mod row_splice;
 mod rows_cache;
 pub(super) use rows_cache::{HistoryRowsKey, RowsInput};

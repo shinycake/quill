@@ -31,3 +31,7 @@ are drawn (not empty), the time footer sits inside the bubble.
 - Scroll with `w:x,y,0,-200,s;w:x,y,0,-200,m;w:x,y,0,0,e`; a single wheel
   event without phases may not move the list.
 - `rg QUILL_DEMO_HISTORY_ANIM src` for the history animation switches.
+- Messages arriving, reacted to and deleted in the open chat:
+  `QUILL_DEMO_UPDATE_STREAM=4 QUILL_DEMO_STREAM_OPEN=1` with a pause step
+  (`QUILL_DEMO_CLICK=p:7000`); `QUILL_TRACE_TICKS=1` prints row builds,
+  splices and patches per second. `ready-group-commands` shows sender runs.

@@ -496,11 +496,12 @@ fn a_change_of_sender_or_album_does_not_keep_the_place(cx: &mut TestAppContext) 
 }
 
 #[gpui_kit::test]
-fn an_edit_that_makes_a_message_album_media_builds_the_rows_again(cx: &mut TestAppContext) {
+fn an_edit_that_makes_a_message_album_media_builds_its_rows_again(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");
     let vcx = &mut vcx;
     open_group(&app, vcx);
     let (built, patched) = counts(&app, vcx);
+    let splices = app.read_with(vcx, |app, _| app.history.row_stats.splices);
     apply(
         &app,
         vcx,
@@ -510,8 +511,16 @@ fn an_edit_that_makes_a_message_album_media_builds_the_rows_again(cx: &mut TestA
     );
     let (built_after, patched_after) = counts(&app, vcx);
     assert_eq!(patched_after, patched, "no row patched in place");
-    assert!(built_after > built, "the rows were built again");
+    assert_eq!(built_after, built, "the other rows kept");
+    assert_eq!(
+        app.read_with(vcx, |app, _| app.history.row_stats.splices),
+        splices + 1,
+        "the rows around it built again"
+    );
 }
 
 #[path = "rows_cache_long_tests.rs"]
 mod long;
+
+#[path = "row_splice_tests.rs"]
+mod splice;

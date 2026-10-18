@@ -91,13 +91,14 @@ impl QuillApp {
         };
         let rows_started = std::time::Instant::now();
         let mark = self.chrome_mark();
-        let (build, patch) = match messages {
-            RowsInput::Build(messages) => (Some(messages), Vec::new()),
-            RowsInput::Patch(patch) => (None, patch),
-            RowsInput::Keep => (None, Vec::new()),
+        let (build, splice, patch) = match messages {
+            RowsInput::Build(messages) => (Some(messages), None, Vec::new()),
+            RowsInput::Splice(splice) => (None, Some(splice), Vec::new()),
+            RowsInput::Patch(patch) => (None, None, patch),
+            RowsInput::Keep => (None, None, Vec::new()),
         };
         let cloned = build.as_ref().map_or(0, |list| list.len() as u64);
-        let chrome_due = if build.is_none() {
+        let chrome_due = if build.is_none() && splice.is_none() {
             self.chrome_due_rows()
         } else {
             Vec::new()
@@ -109,150 +110,19 @@ impl QuillApp {
             media_roots: &media_roots,
             wide: self.chat_wide(),
         };
+        let row_build = super::row_build::RowBuild {
+            chrome: &chrome_inputs,
+            epoch: mark.epoch,
+            highlight: highlight_id,
+            unread_anchor,
+            is_secret,
+        };
         if let Some(mut messages) = build {
             // Deleted messages dissolve in place before they go.
             self.merge_vanishing(&mut messages, cx);
-            let mut divider_placed = false;
-            let mut first_unread = |message: &HistoryMessage| {
-                let first = !divider_placed
-                    && !message.is_outgoing
-                    && unread_anchor.is_some_and(|anchor| message.id.0 > anchor.0);
-                divider_placed |= first;
-                first
-            };
-            let groups = quill::album::group_media_albums(
-                &messages,
-                |message| message.media_album_id,
-                |message| message.is_outgoing,
-                |message| quill::album::is_album_media(&message.content),
-            );
-            let mut rows: Vec<HistoryRow> = Vec::with_capacity(groups.len());
-            // Sender of each row (first item for albums): a run is consecutive
-            // rows from one sender. The name heads a run; the avatar sits
-            // beside its last row, with a spacer keeping earlier rows aligned.
-            let identities: Vec<(bool, Option<MessageSender>)> = groups
-                .iter()
-                .map(|group| match group {
-                    quill::album::HistoryGroup::Album { messages, .. } => messages
-                        .first()
-                        .map(|m| (m.is_outgoing, m.sender))
-                        .unwrap_or((false, None)),
-                    quill::album::HistoryGroup::Single(message) => {
-                        (message.is_outgoing, message.sender)
-                    }
-                })
-                .collect();
-            // Each group's span over `messages` (album id, item count): the
-            // rows below take the messages by value instead of cloning them.
-            let spans: Vec<(Option<i64>, usize)> = groups
-                .iter()
-                .map(|group| match group {
-                    quill::album::HistoryGroup::Album { album_id, messages } => {
-                        (Some(*album_id), messages.len())
-                    }
-                    quill::album::HistoryGroup::Single(_) => (None, 1),
-                })
-                .collect();
-            drop(groups);
-            let mut owned = messages.into_iter();
-            let mut previous = None;
-            let mut spot_of =
-                |message: &HistoryMessage, next_same_sender: bool, with_headers: bool| {
-                    let identity = (message.is_outgoing, message.sender);
-                    let sender_changed = previous != Some(identity);
-                    previous = Some(identity);
-                    ChromeSpot {
-                        sender_changed,
-                        next_same_sender,
-                        with_headers,
-                    }
-                };
-            let now = quill::local_time::civil_local(quill::local_time::now_unix());
-            let mut previous_day: Option<i64> = None;
-            let mut day_label = |date: i32| {
-                if date <= 0 {
-                    return None;
-                }
-                let civil = quill::local_time::civil_local(i64::from(date));
-                let day = civil.day_number();
-                (previous_day.replace(day) != Some(day))
-                    .then(|| quill::local_time::day_label(&civil, &now))
-            };
-            for (index, (album, len)) in spans.into_iter().enumerate() {
-                let next_same_sender = identities
-                    .get(index + 1)
-                    .is_some_and(|next| Some(next) == identities.get(index));
-                match album {
-                    Some(album_id) => {
-                        let album_messages: Vec<HistoryMessage> =
-                            owned.by_ref().take(len).collect();
-                        let Some(first) = album_messages.first() else {
-                            continue;
-                        };
-                        // Same chrome rule as single rows, from the first item.
-                        let spot = spot_of(first, next_same_sender, false);
-                        let chrome = Box::new(chrome_inputs.chrome(first, spot));
-                        let day_label = day_label(first.date);
-                        let unread_divider = first_unread(first);
-                        rows.push(HistoryRow::Album {
-                            album_id,
-                            messages: album_messages,
-                            chrome,
-                            chrome_stamp: mark.epoch,
-                            spot,
-                            day_label,
-                            unread_divider,
-                        })
-                    }
-                    None => {
-                        let Some(message) = owned.next() else {
-                            break;
-                        };
-                        let spot = spot_of(&message, next_same_sender, true);
-                        let chrome = chrome_inputs.chrome(&message, spot);
-                        let row_day_label = day_label(message.date);
-                        let row_unread_divider = first_unread(&message);
-                        rows.push(HistoryRow::Single(Box::new(HistoryRowInputs {
-                            chrome,
-                            chrome_stamp: mark.epoch,
-                            spot,
-                            highlighted: highlight_id == Some(message.id),
-                            run_start: spot.sender_changed && index > 0,
-                            joined_above: !spot.sender_changed
-                                && row_day_label.is_none()
-                                && !row_unread_divider,
-                            day_label: row_day_label,
-                            unread_divider: row_unread_divider,
-                            fact_check_expanded: self
-                                .message_ui
-                                .fact_check_expanded
-                                .contains(&(message.chat_id.0, message.id.0)),
-                            is_secret,
-                            vanishing: self.vanish_progress(message.id),
-                            message,
-                        })));
-                    }
-                }
-            }
-            // A bot's streaming reply (`updatePendingMessage`) is its next
-            // incoming message, growing as it arrives (Telegram Desktop).
-            if let Some(message) = self.streaming_bot_message(cx) {
-                let spot = spot_of(&message, true, false);
-                let chrome = chrome_inputs.chrome(&message, spot);
-                rows.push(HistoryRow::Single(Box::new(HistoryRowInputs {
-                    chrome,
-                    chrome_stamp: mark.epoch,
-                    spot,
-                    highlighted: false,
-                    run_start: spot.sender_changed,
-                    joined_above: !spot.sender_changed,
-                    day_label: None,
-                    unread_divider: false,
-                    fact_check_expanded: false,
-                    is_secret: false,
-                    vanishing: None,
-                    message,
-                })));
+            let (mut rows, seed) = self.build_rows(messages, Default::default(), None, &row_build);
+            if let Some(row) = self.streaming_bot_row(&seed, &row_build, cx) {
+                rows.push(row);
             }
             // kit Phase 3: sync the scroller state with the new row list.
             let count = rows.len();
@@ -370,45 +240,13 @@ impl QuillApp {
                     (Some(_), _, Some((prev_first, _)))
                         if first == Some(prev_first) && count > prev_count =>
                     {
-                        // New messages appended at the tail — tail-follow keeps
-                        // the view pinned when the user is at the bottom. A
-                        // newer page must not be skipped that way: keep the old
-                        // last row in view and read on from there.
-                        let added = count.saturating_sub(prev_count);
-                        let newer_page = self.history.had_newer;
-                        let mut following = false;
-                        self.history.scroller.update(cx, |state, cx| {
-                            following = state.is_following_tail();
-                            state.append(added, cx);
-                            if newer_page && following {
-                                state.scroll_to_item(prev_count.saturating_sub(1), cx);
-                            }
-                        });
-                        // tdesktop reveals a few new rows at the bottom of a
-                        // history that is pinned there (`itemRevealDuration`);
-                        // an inactive window just snaps.
-                        if following
-                            && !newer_page
-                            && prev_count > 0
-                            && added <= NEW_ROW_REVEAL_MAX
-                            && self.frame.window_active.get()
-                            && self.frame.motion.list_fills.get()
-                        {
-                            self.frame
-                                .motion
-                                .start_reveal(prev_count, std::time::Instant::now());
-                        }
-                        // A sent message turns a freeform wallpaper. The
-                        // appended rows are in the new list; the stored one
-                        // is still the old, shorter list.
-                        if following
-                            && !newer_page
-                            && rows.get(prev_count.min(count)..count).is_some_and(|added| {
+                        // The appended rows are in the new list; the stored
+                        // one is still the old, shorter list.
+                        let outgoing =
+                            rows.get(prev_count.min(count)..count).is_some_and(|added| {
                                 added.iter().any(super::chat_palette::row_is_outgoing)
-                            })
-                        {
-                            self.rotate_wallpaper_on_send(cx);
-                        }
+                            });
+                        self.append_tail_rows(prev_count, count, outgoing, cx);
                     }
                     (_, Some(_), Some((_, prev_last)))
                         if last == Some(prev_last) && count > prev_count =>
@@ -445,10 +283,6 @@ impl QuillApp {
                     state.remeasure(cx);
                 });
             }
-            self.history.ends = match (first, last) {
-                (Some(first), Some(last)) => Some((first, last)),
-                _ => None,
-            };
             self.history.rows = rows;
             self.history.chrome_epoch = mark.epoch;
             self.history.chrome_seen = mark.revision;
@@ -457,30 +291,13 @@ impl QuillApp {
             }
             self.history.row_stats.note_built(rows_started);
             self.history.row_stats.messages_cloned += cloned;
-            self.history.had_newer = has_newer;
-            self.history_a11y_rows_changed(cx);
-            // A new or replaced window: start at the saved position, else the
-            // jump target, else the "Unread messages" divider, else the bottom.
-            if self.history.anchor_pending && !self.history.rows.is_empty() && !saved_open_pending {
-                self.history.anchor_pending = false;
-                self.anchor_opened_history(history_key, highlight_id, cx);
-            }
-            // Chat-search jump: scroll the highlight into view once per new
-            // `highlight_id` (current code only outlined the message).
-            if highlight_id != self.history.last_highlight {
-                self.history.last_highlight = highlight_id;
-                if let Some(target) = highlight_id
-                    && let Some(ix) = self
-                        .history
-                        .rows
-                        .iter()
-                        .position(|row| row.contains(target))
-                {
-                    self.history.scroller.update(cx, |state, cx| {
-                        state.scroll_to_item(ix, cx);
-                    });
-                }
-            }
+            self.rows_replaced(history_key, highlight_id, saved_open_pending, has_newer, cx);
+        } else if let Some(splice) = splice {
+            // Messages came or went: build the rows around them again and
+            // keep the rest.
+            let spliced = self.splice_rows(splice, &row_build);
+            self.commit_spliced_rows(spliced, mark, rows_started, cx);
+            self.rows_replaced(history_key, highlight_id, saved_open_pending, has_newer, cx);
         } else {
             // Kept rows: patch the messages changed in place and bring the
             // chrome around the viewport up to date.
@@ -854,5 +671,89 @@ impl QuillApp {
             })
             .child(element)
             .into_any_element()
+    }
+}
+
+impl QuillApp {
+    /// New rows at the tail: tail-follow keeps the view pinned when the
+    /// user is at the bottom. A newer page must not be skipped that way:
+    /// keep the old last row in view and read on from there. `outgoing`:
+    /// one of the new rows is the user's own.
+    pub(super) fn append_tail_rows(
+        &mut self,
+        prev_count: usize,
+        count: usize,
+        outgoing: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let added = count.saturating_sub(prev_count);
+        let newer_page = self.history.had_newer;
+        let mut following = false;
+        self.history.scroller.update(cx, |state, cx| {
+            following = state.is_following_tail();
+            state.append(added, cx);
+            if newer_page && following {
+                state.scroll_to_item(prev_count.saturating_sub(1), cx);
+            }
+        });
+        // tdesktop reveals a few new rows at the bottom of a history that
+        // is pinned there (`itemRevealDuration`); an inactive window just
+        // snaps.
+        if following
+            && !newer_page
+            && prev_count > 0
+            && added <= NEW_ROW_REVEAL_MAX
+            && self.frame.window_active.get()
+            && self.frame.motion.list_fills.get()
+        {
+            self.frame
+                .motion
+                .start_reveal(prev_count, std::time::Instant::now());
+        }
+        // A sent message turns a freeform wallpaper.
+        if following && !newer_page && outgoing {
+            self.rotate_wallpaper_on_send(cx);
+        }
+    }
+
+    /// After rows were built or spliced: note the list's ends, anchor a
+    /// new window and scroll to a new jump target.
+    fn rows_replaced(
+        &mut self,
+        history_key: quill::state::ScrollKey,
+        highlight_id: Option<MessageId>,
+        saved_open_pending: bool,
+        has_newer: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let rows = &self.history.rows;
+        self.history.ends = rows
+            .first()
+            .and_then(HistoryRow::first_id)
+            .zip(rows.last().and_then(HistoryRow::last_id));
+        self.history.had_newer = has_newer;
+        self.history_a11y_rows_changed(cx);
+        // A new or replaced window: start at the saved position, else the
+        // jump target, else the "Unread messages" divider, else the bottom.
+        if self.history.anchor_pending && !self.history.rows.is_empty() && !saved_open_pending {
+            self.history.anchor_pending = false;
+            self.anchor_opened_history(history_key, highlight_id, cx);
+        }
+        // Chat-search jump: scroll the highlight into view once per new
+        // `highlight_id` (current code only outlined the message).
+        if highlight_id != self.history.last_highlight {
+            self.history.last_highlight = highlight_id;
+            if let Some(target) = highlight_id
+                && let Some(ix) = self
+                    .history
+                    .rows
+                    .iter()
+                    .position(|row| row.contains(target))
+            {
+                self.history.scroller.update(cx, |state, cx| {
+                    state.scroll_to_item(ix, cx);
+                });
+            }
+        }
     }
 }

@@ -37,6 +37,7 @@ pub(super) struct Work {
     pub(super) chrome_built: u64,
     pub(super) rows_patched: u64,
     pub(super) rebuilds: u64,
+    pub(super) splices: u64,
     pub(super) messages_cloned: u64,
 }
 
@@ -45,6 +46,7 @@ fn work(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Work {
         chrome_built: crate::ui::conversation::row_chrome::chrome_built(),
         rows_patched: app.history.row_stats.rows_patched,
         rebuilds: app.history.row_stats.rebuilds,
+        splices: app.history.row_stats.splices,
         messages_cloned: app.history.row_stats.messages_cloned,
     })
 }
@@ -57,6 +59,7 @@ fn work_for(app: &Entity<QuillApp>, cx: &mut VisualTestContext, update: &str) ->
         chrome_built: after.chrome_built - before.chrome_built,
         rows_patched: after.rows_patched - before.rows_patched,
         rebuilds: after.rebuilds - before.rebuilds,
+        splices: after.splices - before.splices,
         messages_cloned: after.messages_cloned - before.messages_cloned,
     }
 }
@@ -64,6 +67,11 @@ fn work_for(app: &Entity<QuillApp>, cx: &mut VisualTestContext, update: &str) ->
 const OTHER_CHAT_MESSAGE: &str = r#"{"@type":"updateNewMessage","message":{"id":77,"chat_id":12,"sender_id":{"@type":"messageSenderUser","user_id":12},"is_outgoing":false,"date":1790700000,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Elsewhere.","entities":[]}}}}"#;
 const FILE_PROGRESS: &str = r#"{"@type":"updateFile","file":{"@type":"file","id":4242,"size":1000000,"expected_size":1000000,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":true,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":1000,"downloaded_size":1000},"remote":{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":1000000}}}"#;
 const EDIT: &str = r#"{"@type":"updateMessageContent","chat_id":31,"message_id":1500,"new_content":{"@type":"messageText","text":{"@type":"formattedText","text":"Edited.","entities":[]}}}"#;
+const VIEW_COUNT: &str = r#"{"@type":"updateMessageInteractionInfo","chat_id":31,"message_id":1980,"interaction_info":{"@type":"messageInteractionInfo","view_count":7,"forward_count":0}}"#;
+const NEW_AT_END: &str = r#"{"@type":"updateNewMessage","message":{"id":2000,"chat_id":31,"sender_id":{"@type":"messageSenderUser","user_id":22},"is_outgoing":false,"date":1790692000,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Just in.","entities":[]}}}}"#;
+const DELETE_MIDDLE: &str = r#"{"@type":"updateDeleteMessages","chat_id":31,"message_ids":[1500],"is_permanent":true,"from_cache":false}"#;
+const SEND_PENDING: &str = r#"{"@type":"updateNewMessage","message":{"id":2001,"chat_id":31,"is_outgoing":true,"date":1790692060,"sending_state":{"@type":"messageSendingStatePending","sending_id":0},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Sending.","entities":[]}}}}"#;
+const SEND_SUCCEEDED: &str = r#"{"@type":"updateMessageSendSucceeded","old_message_id":2001,"message":{"id":2002,"chat_id":31,"is_outgoing":true,"date":1790692060,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Sending.","entities":[]}}}}"#;
 const REACTION: &str = r#"{"@type":"updateMessageInteractionInfo","chat_id":31,"message_id":1990,"interaction_info":{"@type":"messageInteractionInfo","view_count":0,"forward_count":0,"reactions":{"@type":"messageReactions","reactions":[{"@type":"messageReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"total_count":1,"is_chosen":false,"recent_sender_ids":[]}],"are_tags":false}}}"#;
 
 #[gpui_kit::test]
@@ -78,6 +86,11 @@ fn measure_work_per_update_on_a_long_history(cx: &mut TestAppContext) {
         ("off-screen file progress", FILE_PROGRESS),
         ("edit one message", EDIT),
         ("reaction on one message", REACTION),
+        ("view count of one message", VIEW_COUNT),
+        ("new message at the end", NEW_AT_END),
+        ("delete one in the middle", DELETE_MIDDLE),
+        ("own message sent (pending row)", SEND_PENDING),
+        ("send succeeded (pending to sent)", SEND_SUCCEEDED),
     ] {
         let work = work_for(&app, vcx, update);
         println!("MEASURE {name}: {work:?}");
@@ -113,6 +126,7 @@ fn an_unrelated_update_rebuilds_no_rows(cx: &mut TestAppContext) {
             chrome_built: 0,
             rows_patched: 0,
             rebuilds: 0,
+            splices: 0,
             messages_cloned: 0
         },
         "download progress of a file no row shows"
@@ -137,6 +151,28 @@ fn editing_one_message_rebuilds_one_row(cx: &mut TestAppContext) {
         single(app, 1500).map(|row| quill::state::effective_preview(&row.message))
     });
     assert_eq!(edited.as_deref(), Some("Edited."));
+}
+
+#[gpui_kit::test]
+fn a_message_coming_or_going_builds_only_the_rows_around_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    long_group(&app, vcx);
+    for update in [NEW_AT_END, DELETE_MIDDLE, SEND_PENDING, SEND_SUCCEEDED] {
+        let work = work_for(&app, vcx, update);
+        assert_eq!((work.rebuilds, work.splices), (0, 1), "{update}");
+        // The changed row and a neighbour on each side.
+        assert!(work.messages_cloned <= 3, "{work:?}");
+        assert!(work.chrome_built <= NEAR_VIEWPORT + 3, "{work:?}");
+    }
+    let rows = app.read_with(vcx, |app, cx| {
+        (
+            app.history.rows.len(),
+            app.history.scroller.read(cx).item_count(),
+        )
+    });
+    // 1003, plus the new message and the sent one, less the deleted one.
+    assert_eq!(rows, (1004, 1004));
 }
 
 #[gpui_kit::test]

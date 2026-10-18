@@ -72,6 +72,11 @@ pub(crate) struct RowCacheStats {
     pub(crate) rows_patched: u64,
     /// Messages copied out of the session to build or patch rows.
     pub(crate) messages_cloned: u64,
+    /// Runs of rows built again around messages that came or went
+    /// (`RowsInput::Splice`), the rest of the list kept.
+    pub(crate) splices: u64,
+    /// Rows those runs built.
+    pub(crate) rows_spliced: u64,
 }
 
 impl RowCacheStats {
@@ -79,6 +84,14 @@ impl RowCacheStats {
         self.rebuilds += 1;
         super::frame_clock::trace_history_rows("rebuilds", 1);
         super::frame_clock::trace_history_rows("rebuild us", micros(started));
+    }
+
+    pub(crate) fn note_spliced(&mut self, rows: usize, started: std::time::Instant) {
+        self.splices += 1;
+        self.rows_spliced += rows as u64;
+        super::frame_clock::trace_history_rows("splices", 1);
+        super::frame_clock::trace_history_rows("rows spliced", rows);
+        super::frame_clock::trace_history_rows("splice us", micros(started));
     }
 
     pub(crate) fn note_patched(&mut self, rows: usize, started: std::time::Instant) {
@@ -222,6 +235,14 @@ impl HistoryRow {
                     && self.unread_divider() == other.unread_divider()
             }
             _ => false,
+        }
+    }
+
+    /// The messages the row shows, oldest first.
+    pub(crate) fn messages(&self) -> &[HistoryMessage] {
+        match self {
+            HistoryRow::Single(inputs) => std::slice::from_ref(&inputs.message),
+            HistoryRow::Album { messages, .. } => messages,
         }
     }
 
