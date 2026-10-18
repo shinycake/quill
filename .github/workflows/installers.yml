@@ -1,0 +1,209 @@
+name: installers
+# The one-line installers (docs/decisions/one-line-installers.md), run against
+# the latest published release on hosted runners: a fresh install, an update
+# while the installed Quill is running, a bad checksum (must install nothing)
+# and removal. Linux also runs on bare distribution containers as a normal
+# user. The macOS installer is checked in package-macos.yml.
+on:
+  pull_request:
+    paths:
+      - scripts/linux-web-install.sh
+      - scripts/linux-install.sh
+      - scripts/windows-install.ps1
+      - .github/workflows/installers.yml
+  push:
+    branches: [main]
+    paths:
+      - scripts/linux-web-install.sh
+      - scripts/linux-install.sh
+      - scripts/windows-install.ps1
+      - .github/workflows/installers.yml
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: installer-linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash  # with pipefail, so `installer | tee` fails with the installer
+    steps:
+      - uses: actions/checkout@v7
+      - name: runtime libraries, virtual display, software Vulkan
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-0t64 libxkbcommon-x11-0 libvulkan1 libfontconfig1 libasound2t64 \
+            mesa-vulkan-drivers xvfb xauth desktop-file-utils
+      - name: install (as piped from curl)
+        env:
+          QUILL_NO_OPEN: "1"
+        run: |
+          bash < scripts/linux-web-install.sh | tee "$RUNNER_TEMP/install.log"
+          grep -q '^Checksum OK$' "$RUNNER_TEMP/install.log"
+          opt="$HOME/.local/opt/quill"
+          "$HOME/.local/bin/quill" --version | grep '^Quill '
+          test "$(readlink "$HOME/.local/bin/quill")" = "$opt/quill"
+          entry="$HOME/.local/share/applications/org.shinycake.quill.desktop"
+          grep -qx "Exec=$opt/quill %u" "$entry"
+          desktop-file-validate "$entry"
+          ls "$HOME"/.local/share/icons/hicolor/*/apps/quill.png
+      - name: update while Quill is running
+        env:
+          QUILL_NO_OPEN: "1"
+        run: |
+          export VK_ICD_FILENAMES="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -n1)"
+          export QUILL_DATA_ROOT="$RUNNER_TEMP/data"
+          exe="$HOME/.local/opt/quill/quill"
+          xvfb-run -a "$exe" >"$RUNNER_TEMP/app.log" 2>&1 &
+          for _ in $(seq 1 60); do pgrep -fx "$exe" >/dev/null && break; sleep 1; done
+          sleep 5
+          pgrep -fx "$exe" || { cat "$RUNNER_TEMP/app.log"; exit 1; }
+          bash < scripts/linux-web-install.sh | tee "$RUNNER_TEMP/update.log"
+          grep -q '^Quitting Quill to update it$' "$RUNNER_TEMP/update.log"
+          if pgrep -fx "$exe"; then echo "Quill is still running" >&2; exit 1; fi
+          "$exe" --version
+      - name: a bad checksum installs nothing
+        env:
+          QUILL_PREFIX: ${{ runner.temp }}/bad
+          QUILL_SHA256: "0000000000000000000000000000000000000000000000000000000000000000"
+        run: |
+          if bash < scripts/linux-web-install.sh 2> "$RUNNER_TEMP/bad.log"; then exit 1; fi
+          grep -q 'checksum mismatch' "$RUNNER_TEMP/bad.log"
+          test ! -e "$QUILL_PREFIX/opt/quill"
+      - name: remove
+        run: |
+          "$HOME/.local/opt/quill/install.sh" --uninstall
+          test ! -e "$HOME/.local/opt/quill"
+          test ! -e "$HOME/.local/bin/quill"
+          test ! -e "$HOME/.local/share/applications/org.shinycake.quill.desktop"
+
+  # Bare images, nothing but curl added, run as a normal user: the installer
+  # must need no root, and must name the system libraries it can't find.
+  linux-distros:
+    name: installer-linux-${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: debian, image: "debian:stable-slim", setup: "apt-get update && apt-get install -y --no-install-recommends curl ca-certificates", libs: "apt-get install -y --no-install-recommends libgtk-3-0t64 libxkbcommon-x11-0 libvulkan1 libfontconfig1 libasound2t64" }
+          - { name: fedora, image: "fedora:latest", setup: "dnf install -y --setopt=install_weak_deps=False curl gzip tar shadow-utils util-linux", libs: "dnf install -y --setopt=install_weak_deps=False gtk3 libxkbcommon-x11 vulkan-loader fontconfig alsa-lib" }
+          - { name: arch, image: "archlinux:latest", setup: "pacman -Sy --noconfirm curl", libs: "pacman -S --noconfirm gtk3 libxkbcommon-x11 vulkan-icd-loader fontconfig alsa-lib" }
+    container: ${{ matrix.image }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: curl and a normal user
+        run: |
+          ${{ matrix.setup }}
+          useradd -m tester
+      - uses: actions/checkout@v7
+      - name: install without the desktop libraries
+        run: |
+          cp scripts/linux-web-install.sh /tmp/i.sh && chmod 644 /tmp/i.sh
+          su tester -c 'QUILL_NO_OPEN=1 bash < /tmp/i.sh' | tee /tmp/bare.log
+          grep -q 'needs these system libraries' /tmp/bare.log
+          test -x /home/tester/.local/opt/quill/quill
+      - name: install again with them
+        run: |
+          ${{ matrix.libs }}
+          su tester -c 'QUILL_NO_OPEN=1 bash < /tmp/i.sh' | tee /tmp/full.log
+          if grep -q 'needs these system libraries' /tmp/full.log; then exit 1; fi
+          su tester -c '/home/tester/.local/opt/quill/quill --version' | grep '^Quill '
+
+  linux-refuses:
+    name: installer-linux-refuses
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - name: musl (Alpine) is refused before downloading
+        run: |
+          out="$(docker run --rm -v "$PWD/scripts:/s:ro" alpine:latest sh -c 'apk add -q bash curl && adduser -D t && su t -c "bash < /s/linux-web-install.sh"' 2>&1 || true)"
+          echo "$out"
+          echo "$out" | grep -q 'needs a glibc-based distribution'
+      - name: root without a prefix is refused
+        run: |
+          if sudo bash < scripts/linux-web-install.sh 2> "$RUNNER_TEMP/root.log"; then exit 1; fi
+          grep -q 'not root' "$RUNNER_TEMP/root.log"
+
+  windows:
+    name: installer-windows-${{ matrix.shell }}
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows PowerShell 5.1 is what a fresh Windows 10 or 11 opens.
+        shell: [powershell, pwsh]
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: install (as piped from irm)
+        env:
+          QUILL_NO_OPEN: "1"
+        run: |
+          Get-Content -Raw scripts/windows-install.ps1 | Invoke-Expression
+          if ($LASTEXITCODE -ne 0) { throw 'installer failed' }
+          $dest = Join-Path $env:LOCALAPPDATA 'Programs\Quill'
+          $exe = Join-Path $dest 'quill.exe'
+          . scripts/windows-common.ps1
+          $v = Invoke-QuillExe $exe @('--version')
+          Write-Host $v
+          if ($v -notmatch '^Quill \d') { throw "unexpected --version: $v" }
+          $marked = @(Get-ChildItem -Recurse -File $dest | Where-Object { Get-Item -LiteralPath $_.FullName -Stream Zone.Identifier -ErrorAction SilentlyContinue })
+          if ($marked.Count) { throw "files carry the Mark of the Web: $($marked.Name -join ', ')" }
+          $lnk = Join-Path ([Environment]::GetFolderPath('Programs')) 'Quill.lnk'
+          $target = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk).TargetPath
+          if ($target -ne $exe) { throw "shortcut points at '$target'" }
+          $entry = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Quill'
+          if ($entry.DisplayName -ne 'Quill' -or $entry.InstallLocation -ne $dest) { throw 'Settings > Apps entry is wrong' }
+      - name: update while Quill is running
+        env:
+          QUILL_NO_OPEN: "1"
+          QUILL_DATA_ROOT: ${{ runner.temp }}\data
+        run: |
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\Quill\quill.exe'
+          $app = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 10
+          if ($app.HasExited) { throw "Quill exited on its own with $($app.ExitCode)" }
+          $log = Join-Path $env:RUNNER_TEMP 'update.log'
+          Get-Content -Raw scripts/windows-install.ps1 | Invoke-Expression *>&1 | Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) { throw 'installer failed' }
+          if (-not (Select-String -Quiet -Path $log -Pattern 'Quitting Quill to update it')) { throw 'the running copy was not noticed' }
+          if (-not $app.HasExited) { throw 'Quill is still running' }
+      - name: a bad checksum installs nothing
+        env:
+          QUILL_NO_OPEN: "1"
+          QUILL_INSTALL_DIR: ${{ runner.temp }}\bad
+          QUILL_SHA256: "0000000000000000000000000000000000000000000000000000000000000000"
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'bad.log'
+          Get-Content -Raw scripts/windows-install.ps1 | Invoke-Expression *>&1 | Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 1) { throw 'the installer did not fail' }
+          if (-not (Select-String -Quiet -Path $log -Pattern 'checksum mismatch')) { throw 'no checksum message' }
+          if (Test-Path $env:QUILL_INSTALL_DIR) { throw 'something was installed' }
+          $global:LASTEXITCODE = 0
+      - name: remove from Settings > Apps
+        run: |
+          $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Quill'
+          $cmd = (Get-ItemProperty $key).UninstallString
+          $p = Start-Process -FilePath cmd.exe -ArgumentList '/c', $cmd -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "uninstall exited with $($p.ExitCode)" }
+          if (Test-Path (Join-Path $env:LOCALAPPDATA 'Programs\Quill')) { throw 'install folder is still there' }
+          if (Test-Path (Join-Path ([Environment]::GetFolderPath('Programs')) 'Quill.lnk')) { throw 'shortcut is still there' }
+          if (Test-Path $key) { throw 'Settings > Apps entry is still there' }
