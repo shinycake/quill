@@ -9,6 +9,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::app_theme::call_chrome;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{Icon, Sizable};
 use gpui_kit::prelude::FluentBuilder;
@@ -160,16 +161,16 @@ pub(super) fn with_corner<V: 'static>(
                 .right(px(4.))
                 .size(px(18.))
                 .rounded_full()
-                .bg(hsla(0., 0., 0., 0.55))
+                .bg(call_chrome::glass())
                 .border_1()
-                .border_color(hsla(0., 0., 1., 0.25))
+                .border_color(call_chrome::glass_border())
                 .flex()
                 .items_center()
                 .justify_center()
                 .cursor_pointer()
                 .role(Role::Button)
                 .aria_label(label)
-                .hover(|style| style.bg(hsla(0., 0., 0., 0.75)))
+                .hover(|style| style.bg(call_chrome::glass_over()))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     on_toggle(this, target, window, cx);
                 }))
@@ -202,9 +203,9 @@ pub(super) fn menu_overlay<V: 'static>(
         .overflow_y_scroll()
         .py(px(6.))
         .rounded(px(10.))
-        .bg(rgb(0x2a2f35))
+        .bg(call_chrome::menu_surface())
         .border_1()
-        .border_color(hsla(0., 0., 1., 0.12))
+        .border_color(call_chrome::border())
         .shadow_lg()
         .flex()
         .flex_col()
@@ -218,7 +219,7 @@ pub(super) fn menu_overlay<V: 'static>(
                 .pt(px(6.))
                 .pb(px(2.))
                 .text_size(px(11.))
-                .text_color(rgb(0xaaabac))
+                .text_color(call_chrome::muted())
                 .child(section.title),
         );
         if section.items.is_empty() {
@@ -227,7 +228,7 @@ pub(super) fn menu_overlay<V: 'static>(
                     .px(px(12.))
                     .py(px(6.))
                     .text_size(px(13.))
-                    .text_color(rgb(0xaaabac))
+                    .text_color(call_chrome::muted())
                     .child(tr_with(
                         keys::Q_OPS_NO_FOUND,
                         &[("to_lowercase", &(section.title.to_lowercase()).to_string())],
@@ -252,7 +253,7 @@ pub(super) fn menu_overlay<V: 'static>(
                     .cursor_pointer()
                     .role(Role::Button)
                     .aria_label(item.name.clone())
-                    .hover(|style| style.bg(hsla(0., 0., 1., 0.1)))
+                    .hover(|style| style.bg(call_chrome::wash_over()))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         pick(this, kind, id.clone(), window, cx);
                     }))

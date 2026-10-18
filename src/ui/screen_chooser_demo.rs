@@ -30,6 +30,17 @@ register_demos![
     .timing(2500, 4000),
 ];
 
+impl QuillApp {
+    /// `QUILL_DEMO_THEME=high-contrast`: the call demos switch the app to
+    /// the high-contrast theme (the generic demo prefs only know dark).
+    pub(in crate::ui) fn demo_high_contrast(&mut self, cx: &mut Context<Self>) {
+        if std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("high-contrast") {
+            self.appearance.theme = quill::settings::ThemeChoice::HighContrast;
+            self.apply_appearance(cx);
+        }
+    }
+}
+
 /// The shared window (hidden, so the share is paused).
 const SHARED: &str = "window:42";
 
@@ -174,6 +185,7 @@ fn feed(variant: usize, repeat: bool, cx: &mut App) -> Option<DemoFeed> {
 
 impl QuillApp {
     fn demo_call_screen_share(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.demo_high_contrast(cx);
         let denied = std::env::var_os("QUILL_DEMO_SCREEN_DENIED").is_some();
         let audio = std::env::var_os("QUILL_DEMO_SCREEN_AUDIO").is_some();
         let Some(session) = self.demo_session.as_mut() else {

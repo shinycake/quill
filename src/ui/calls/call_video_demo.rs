@@ -3,7 +3,7 @@
 //! sits mirrored in the corner, both pictures sent at 30 fps through live
 //! feeds. The call window opens beside the main window; capture it with
 //! `QUILL_DEMO_CAPTURE_WINDOWS=1`. `QUILL_DEMO_SCREEN=1`: Maya shares her
-//! screen instead.
+//! screen instead. `QUILL_DEMO_DEVICES=1`: the device menu is open.
 #![deny(clippy::indexing_slicing)]
 
 use super::demo_feed::{DemoFeed, demo_feed};
@@ -11,7 +11,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::demo::demo_media_allowlist;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
-use quill::calls::engine::{RemoteVideoState, TransportState};
+use quill::calls::engine::{MediaDevice, MediaDeviceKind, RemoteVideoState, TransportState};
 use quill::calls::live_video::LiveKey;
 use quill::diagnostics::DiagnosticSink;
 use quill::state::{ActiveCall, Session};
@@ -36,6 +36,7 @@ register_demos![
 impl QuillApp {
     fn demo_video_call(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let screen = std::env::var_os("QUILL_DEMO_SCREEN").is_some();
+        self.demo_high_contrast(cx);
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             let sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
@@ -55,8 +56,31 @@ impl QuillApp {
                 self.demo_ui.group_feeds.insert(key, feed);
             }
         }
+        if std::env::var_os("QUILL_DEMO_DEVICES").is_some() {
+            self.demo_ui.call_devices = Some(demo_devices());
+            self.demo_ui.selected_devices = (Some("mic-1".into()), Some("spk-1".into()));
+        }
         cx.notify();
     }
+}
+
+/// The devices the menu lists under `QUILL_DEMO_DEVICES=1`.
+fn demo_devices() -> Vec<MediaDevice> {
+    let device = |id: &str, name: &str, kind| MediaDevice {
+        id: id.into(),
+        name: name.into(),
+        kind,
+    };
+    vec![
+        device(
+            "mic-1",
+            "MacBook Pro Microphone",
+            MediaDeviceKind::Microphone,
+        ),
+        device("mic-2", "AirPods Pro", MediaDeviceKind::Microphone),
+        device("spk-1", "MacBook Pro Speakers", MediaDeviceKind::Speaker),
+        device("spk-2", "AirPods Pro", MediaDeviceKind::Speaker),
+    ]
 }
 
 /// Maya, and a connected video call with her camera (or screen) on and

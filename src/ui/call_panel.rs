@@ -19,6 +19,7 @@ use super::call_panel_devices::{self as devices, DeviceMenuTarget};
 use super::calls::call_video::{CallPicture, CallWindowRoot};
 use super::chat_row::chat_avatar;
 use super::nested_click::SwallowPress;
+use crate::ui::app_theme::call_chrome;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{ActiveTheme, Icon, Root, Sizable};
@@ -30,12 +31,6 @@ use quill::telegram::envelope::CallState;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-/// lib_ui `colors.palette`.
-const BG: u32 = 0x1b1f23;
-/// The window's dark ground, under the pictures.
-pub(crate) const CALL_BG: u32 = BG;
-const NAME_FG: u32 = 0xffffff;
-const STATUS_FG: u32 = 0xaaabac;
 const ANSWER_BG: u32 = 0x66c95b;
 const HANGUP_BG: u32 = 0xd75a5a;
 
@@ -339,7 +334,7 @@ impl QuillApp {
         );
         let muted = call.muted;
         let bg: Hsla = if muted {
-            rgb(0x8f8f8f).into()
+            call_chrome::muted_fill()
         } else {
             cx.theme().primary
         };
@@ -354,7 +349,7 @@ impl QuillApp {
                 .cursor_pointer()
                 .role(Role::Button)
                 .aria_label(label)
-                .hover(|style| style.bg(hsla(0., 0., 1., 0.12)))
+                .hover(|style| style.bg(call_chrome::wash()))
                 .child(
                     Icon::new(icon)
                         .with_size(px(18.))
@@ -451,9 +446,19 @@ impl CallPanel {
             owner: owner.downgrade(),
             _observe: cx.observe(owner, |_, _, cx| cx.notify()),
             pinned_on_top: false,
-            devices_menu: None,
+            devices_menu: demo_devices_menu(),
         }
     }
+}
+
+/// `QUILL_DEMO_DEVICES=1` (demo-capture only): the call window opens with
+/// the audio device menu showing.
+fn demo_devices_menu() -> Option<DeviceMenuTarget> {
+    #[cfg(feature = "demo-capture")]
+    if std::env::var_os("QUILL_DEMO_DEVICES").is_some() {
+        return Some(DeviceMenuTarget::Audio);
+    }
+    None
 }
 
 /// One round control: a 44 pt disc and an 11 pt label (tdesktop
@@ -466,8 +471,8 @@ fn call_button(
     on_click: impl Fn(&mut App) + 'static,
 ) -> impl IntoElement {
     let (bg, fg, rotate) = match style {
-        ButtonLook::Plain => (hsla(0., 0., 1., 0.12), white(), false),
-        ButtonLook::Active => (hsla(0., 0., 1., 0.9), rgb(0x222222).into(), false),
+        ButtonLook::Plain => (call_chrome::wash(), call_chrome::text(), false),
+        ButtonLook::Active => (call_chrome::active(), call_chrome::on_active(), false),
         ButtonLook::Answer => (rgb(ANSWER_BG).into(), white(), false),
         ButtonLook::Hangup => (rgb(HANGUP_BG).into(), white(), true),
     };
@@ -504,7 +509,7 @@ fn call_button(
                         .inset(px(-6.))
                         .rounded_full()
                         .border_2()
-                        .border_color(rgba(0x50eb4140));
+                        .border_color(call_chrome::answer_ring());
                     // Battery and animations: a still ring.
                     let ring = if quill::power_saving::on(quill::power_saving::Flag::Calls) {
                         ring.opacity(0.6).into_any_element()
@@ -524,7 +529,7 @@ fn call_button(
         .child(
             div()
                 .text_size(px(11.))
-                .text_color(rgb(NAME_FG))
+                .text_color(call_chrome::text())
                 .child(label),
         )
 }
@@ -763,19 +768,19 @@ impl Render for CallPanel {
         let name = div()
             .text_size(px(21.))
             .font_weight(FontWeight::SEMIBOLD)
-            .text_color(rgb(NAME_FG))
+            .text_color(call_chrome::text())
             .truncate()
             .child(snap.name.clone());
         let status = div()
             .text_size(px(14.))
-            .text_color(rgb(STATUS_FG))
+            .text_color(call_chrome::muted())
             .child(snap.status.clone());
         // tdesktop `callRemoteAudioMute`: a 12 px line under the status
         // while the peer's microphone is off.
         let mic_off = snap.remote_muted.then(|| {
             div()
                 .text_size(px(12.))
-                .text_color(rgb(STATUS_FG))
+                .text_color(call_chrome::muted())
                 .child(microphone_off_line(&snap.name))
         });
 
@@ -795,7 +800,7 @@ impl Render for CallPanel {
                         .px(px(10.))
                         .py(px(4.))
                         .rounded_full()
-                        .bg(hsla(0., 0., 0., 0.3))
+                        .bg(call_chrome::pill())
                         .text_size(px(18.))
                         .flex()
                         .gap(px(4.))
@@ -877,8 +882,8 @@ impl Render for CallPanel {
                 this.child(div().absolute().top_0().left_0().right_0().h(px(124.)).bg(
                     linear_gradient(
                         180.,
-                        linear_color_stop(hsla(0., 0., 0., 0.45), 0.),
-                        linear_color_stop(hsla(0., 0., 0., 0.), 1.),
+                        linear_color_stop(call_chrome::video_shade_top(), 0.),
+                        linear_color_stop(call_chrome::clear(), 1.),
                     ),
                 ))
                 .child(
@@ -890,8 +895,8 @@ impl Render for CallPanel {
                         .h(px(124.))
                         .bg(linear_gradient(
                             0.,
-                            linear_color_stop(hsla(0., 0., 0., 0.5), 0.),
-                            linear_color_stop(hsla(0., 0., 0., 0.), 1.),
+                            linear_color_stop(call_chrome::video_shade_bottom(), 0.),
+                            linear_color_stop(call_chrome::clear(), 1.),
                         )),
                 )
             })
@@ -908,7 +913,7 @@ impl Render for CallPanel {
                         cx.notify();
                     },
                 )
-                .text_color(rgb(NAME_FG))
+                .text_color(call_chrome::text())
                 .top(px(10.)),
             )
             .child(

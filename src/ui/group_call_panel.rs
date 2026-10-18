@@ -25,20 +25,21 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::state::ActiveGroupCall;
 
+use crate::ui::app_theme::call_chrome;
 use quill::lang::{keys, tr, tr_with};
 use std::time::Duration;
 
 /// lib_ui `colors.palette`.
-pub(super) const BG: u32 = 0x1a2026;
-pub(super) const MEMBERS_BG: u32 = 0x2c333d;
-pub(super) const MEMBERS_BG_OVER: u32 = 0x323a45;
+pub(super) const BG: u32 = call_chrome::GROUP_SURFACE;
+pub(super) const MEMBERS_BG: u32 = call_chrome::GROUP_RAISED;
+pub(super) const MEMBERS_BG_OVER: u32 = call_chrome::GROUP_RAISED_OVER;
 pub(super) const ACTIVE_FG: u32 = 0x4db8ff;
 pub(super) const MEMBER_ACTIVE: u32 = 0x8deb90;
 pub(super) const MEMBER_INACTIVE_ICON: u32 = 0x84888f;
 pub(super) const MEMBER_INACTIVE_STATUS: u32 = 0x61c0ff;
-pub(super) const MEMBER_MUTED_ICON: u32 = 0xed7372;
-pub(super) const MEMBER_NOT_JOINED: u32 = 0x91979e;
 pub(super) const LEAVE_BG: u32 = 0xf75c5c7f;
+pub(super) const MEMBER_MUTED_ICON: u32 = 0xed7372;
+pub(super) const MEMBER_NOT_JOINED: u32 = call_chrome::GROUP_MUTED;
 
 /// A member menu entry's effect.
 pub(super) type MemberAction = Box<dyn Fn(&mut QuillApp, &mut Context<QuillApp>)>;
@@ -132,7 +133,10 @@ impl QuillApp {
             .session()
             .and_then(|s| s.calls.active_group_call.clone())
         else {
-            return div().size_full().bg(rgb(BG)).into_any_element();
+            return div()
+                .size_full()
+                .bg(call_chrome::group_surface())
+                .into_any_element();
         };
         let state = mute_state(&call);
         // Your own microphone: the halo follows the level while live.
@@ -202,7 +206,7 @@ impl QuillApp {
                 .gap(px(14.))
                 .cursor_pointer()
                 .text_color(rgb(ACTIVE_FG))
-                .hover(|style| style.bg(rgb(MEMBERS_BG_OVER)))
+                .hover(|style| style.bg(call_chrome::group_raised_over()))
                 .on_click(cx.listener(|this, _, _, cx| this.group_call_invite_row_clicked(cx)))
                 .child(
                     div()
@@ -234,7 +238,7 @@ impl QuillApp {
             .child(
                 div()
                     .rounded(px(12.))
-                    .bg(rgb(MEMBERS_BG))
+                    .bg(call_chrome::group_raised())
                     .overflow_hidden()
                     .py(px(4.))
                     .children(invite_row)
@@ -264,7 +268,7 @@ impl QuillApp {
                 this.child(
                     self.group_call_messages_section(div().id("group-call-chat"), &call, cx)
                         .rounded(px(12.))
-                        .bg(rgb(MEMBERS_BG))
+                        .bg(call_chrome::group_raised())
                         .p(px(10.)),
                 )
             });
@@ -288,7 +292,7 @@ impl QuillApp {
             .child(
                 div()
                     .text_size(px(13.))
-                    .text_color(rgb(MEMBER_NOT_JOINED))
+                    .text_color(call_chrome::group_muted())
                     .child(subtitle),
             )
             .child(
@@ -310,7 +314,7 @@ impl QuillApp {
                     .mb(px(8.))
                     .p(px(10.))
                     .rounded(px(10.))
-                    .bg(rgba(0xeb535333))
+                    .bg(call_chrome::danger_tint())
                     .text_size(px(13.))
                     .cursor_pointer()
                     .on_click(cx.listener(|this, _, _, cx| this.dismiss_group_call_error(cx)))
@@ -323,7 +327,7 @@ impl QuillApp {
                 .mb(px(8.))
                 .p(px(10.))
                 .rounded(px(10.))
-                .bg(rgba(0xeb535333))
+                .bg(call_chrome::danger_tint())
                 .text_size(px(13.))
                 .text_color(white())
                 .cursor_pointer()
@@ -335,7 +339,7 @@ impl QuillApp {
             div()
                 .absolute()
                 .inset_0()
-                .bg(hsla(0., 0., 0., 0.5))
+                .bg(call_chrome::scrim())
                 .flex()
                 .items_center()
                 .justify_center()
@@ -370,7 +374,7 @@ impl QuillApp {
                 .mb(px(8.))
                 .p(px(10.))
                 .rounded(px(10.))
-                .bg(rgb(MEMBERS_BG))
+                .bg(call_chrome::group_raised())
                 .text_size(px(12.))
                 .flex()
                 .flex_col()
@@ -382,7 +386,7 @@ impl QuillApp {
                 )
                 .child(
                     div()
-                        .text_color(rgb(MEMBER_NOT_JOINED))
+                        .text_color(call_chrome::group_muted())
                         .truncate()
                         .child(url.clone()),
                 )
@@ -418,7 +422,7 @@ impl QuillApp {
             .relative()
             .flex()
             .flex_col()
-            .bg(rgb(BG))
+            .bg(call_chrome::group_surface())
             .text_color(white())
             .child(header)
             .children(banner)
@@ -447,7 +451,7 @@ impl QuillApp {
             div()
                 .absolute()
                 .inset_0()
-                .bg(hsla(0., 0., 0., 0.5))
+                .bg(call_chrome::scrim())
                 .flex()
                 .items_center()
                 .justify_center()
@@ -537,9 +541,9 @@ impl QuillApp {
                 },
                 tr(keys::GROUP_CALL_VIDEO),
                 if video_on {
-                    hsla(0., 0., 1., 0.12)
+                    call_chrome::wash()
                 } else {
-                    hsla(0., 0., 1., 0.9)
+                    call_chrome::active()
                 },
             )
             .on_click(cx.listener(|this, _, _, cx| this.toggle_group_call_video(cx)))
@@ -552,7 +556,7 @@ impl QuillApp {
             } else {
                 tr(keys::GROUP_CALL_CLOSE)
             },
-            rgba(LEAVE_BG).into(),
+            call_chrome::danger_fill(),
         )
         .on_click(cx.listener(move |this, _, _, cx| {
             if joined {
@@ -652,7 +656,7 @@ impl QuillApp {
             .children(state.sublabel().map(|sub| {
                 div()
                     .text_size(px(12.))
-                    .text_color(rgb(MEMBER_NOT_JOINED))
+                    .text_color(call_chrome::group_muted())
                     .child(sub)
             }))
             .children(
@@ -662,7 +666,7 @@ impl QuillApp {
                     .map(|hint| {
                         div()
                             .text_size(px(12.))
-                            .text_color(rgb(MEMBER_NOT_JOINED))
+                            .text_color(call_chrome::group_muted())
                             .child(hint)
                     }),
             );
@@ -743,7 +747,7 @@ impl QuillApp {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .hover(|style| style.bg(hsla(0., 0., 1., 0.12)))
+                            .hover(|style| style.bg(call_chrome::wash()))
                             .swallow_press()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.toggle_group_call_self_mute(cx);
@@ -789,7 +793,7 @@ impl QuillApp {
                         .flex()
                         .items_center()
                         .justify_center()
-                        .hover(|style| style.bg(hsla(0., 0., 1., 0.12)))
+                        .hover(|style| style.bg(call_chrome::wash()))
                         .swallow_press()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.leave_active_group_call(cx);
