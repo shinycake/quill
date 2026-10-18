@@ -577,7 +577,34 @@ impl QuillApp {
         chat: &quill::state::ChatSummary,
         cx: &mut Context<QuillApp>,
     ) -> PreviewEmoji {
-        let entities = &chat.last_preview_style.entities;
+        self.sidebar_emoji_images(&chat.last_preview_style.entities, cx)
+    }
+
+    /// [`Self::preview_emoji_images`] for the custom emoji a forum row shows
+    /// as topic icons.
+    pub(super) fn topic_icon_images(
+        &self,
+        icons: &[i64],
+        cx: &mut Context<QuillApp>,
+    ) -> PreviewEmoji {
+        let entities: Vec<quill::text::TextEntity> = icons
+            .iter()
+            .map(|id| quill::text::TextEntity {
+                utf8_start: 0,
+                utf8_end: 0,
+                kind: quill::text::TextEntityKind::CustomEmoji {
+                    custom_emoji_id: *id,
+                },
+            })
+            .collect();
+        self.sidebar_emoji_images(&entities, cx)
+    }
+
+    fn sidebar_emoji_images(
+        &self,
+        entities: &[quill::text::TextEntity],
+        cx: &mut Context<QuillApp>,
+    ) -> PreviewEmoji {
         if !self.slices.in_sidebar()
             || super::anim_layer::current().is_none()
             || power_saving::on(power_saving::Flag::EmojiChat)

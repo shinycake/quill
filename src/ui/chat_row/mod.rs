@@ -364,7 +364,7 @@ pub(super) fn session_chat_row(
     kind_icon: Option<IconName>,
     // A forum row (`displayAsForum`): its topics fill the second line, the
     // last message the third.
-    forum: Option<quill::state::RowForum>,
+    forum: Option<topic_titles::ForumLine>,
     // Active stories: the ring around the avatar (unread: accent gradient,
     // read: grey).
     story_ring: Option<StoryRing>,
@@ -452,17 +452,24 @@ pub(super) fn session_chat_row(
     // kit Phase 4: the unread indicator is a kit `Badge` overlaying the
     // avatar — `(count, is_dot)`.
     let has_mentions = chat.unread_mention_count > 0;
-    let unread_indicator = match &forum {
-        Some(forum) => (forum.unread_topics > 0).then_some((forum.unread_topics, false)),
+    let jump = forum.as_ref().and_then(|line| line.jump(selected));
+    let unread_indicator = match forum.as_ref().map(|line| &line.forum) {
+        Some(forum) if forum.unread_topics > 0 => Some((forum.unread_topics, false)),
+        Some(forum) => forum.dot.then_some((0, true)),
         None => chat_unread_indicator(chat),
     };
     let has_reactions = chat.unread_reaction_count > 0;
     // The counters at the trailing edge: on the topics line of a forum row,
     // else on the preview line.
+    let badge_muted = match forum.as_ref().map(|line| &line.forum) {
+        Some(forum) if forum.unread_topics > 0 => forum.badge_muted,
+        _ => chat.is_muted(),
+    };
     let badges = row_badges::row_badges(
         chat,
         archived,
         muted_fg,
+        badge_muted,
         unread_indicator,
         has_reactions,
         has_mentions,
@@ -729,9 +736,9 @@ pub(super) fn session_chat_row(
                                 .flex()
                                 .items_center()
                                 .gap_2()
-                                .child(
-                                    div()
-                                        .flex_1()
+                                .child({
+                                    let message = div()
+                                        .when(jump.is_none(), |this| this.flex_1())
                                         .min_w_0()
                                         .flex()
                                         .min_w_0()
@@ -823,8 +830,20 @@ pub(super) fn session_chat_row(
                                                     ),
                                                 )
                                                 .into_any_element(),
-                                        }),
-                                )
+                                        });
+                                    match jump {
+                                        Some(topic) => topic_titles::jump_message(
+                                            id,
+                                            topic,
+                                            selecting,
+                                            muted_fg,
+                                            message.into_any_element(),
+                                            cx,
+                                        )
+                                        .into_any_element(),
+                                        None => message.into_any_element(),
+                                    }
+                                })
                                 .children(plain_badges),
                         ),
                 ),

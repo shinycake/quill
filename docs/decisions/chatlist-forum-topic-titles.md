@@ -38,49 +38,65 @@ Parity id: `chatlist-forum-topic-titles`.
   the row. A forum row is always drawn with the three-line height, so the
   virtual list, the pinned-drag heights and the row agree. `chat_row_forum`
   returns the titles (latest message first, at most eight, hidden skipped,
-  General as "# General"), whether the list loaded, the number of unread
-  topics and the jump target.
-- `chat_row/topic_titles.rs` draws the second line: one elided `StyledText`
-  with bold runs for unread titles, "Loading…" or "No chats" from lang keys,
-  and the jump chip (`forum-jump-<chat>`). The chip is the only clickable part:
-  it opens the chat on the topic of the last message, Ctrl/Cmd-click opens a
-  new window, and while selecting it is plain so the row toggles its check.
-  It is not drawn on the open row. `chat_row/row_badges.rs` holds the counters
-  so they can sit on either line.
-- The unread badge of a forum row counts unread topics.
-- Topic lists load from the update hook (`maybe_preload_topics`): on a new
-  chat, a chat entering the main list, and `updateSupergroup` with `is_forum`,
-  plus once when the account becomes ready for forums that arrived earlier. A
-  forum is marked asked only after its request went out; a TDLib error is final
-  (`forum_topics_failed`) and the row reads "No chats". The per-poll walk over
-  the first 40 chats is gone.
+  General as "# General", each with its custom emoji icon), whether the list
+  loaded, the badge and the jump target.
+- `chat_row/topic_titles.rs` draws the second line: the titles as elided text
+  (the last text piece shrinks and ends in an ellipsis) with bold, coloured
+  unread titles and the topic icons drawn as pictures before their titles,
+  through the same still and animated emoji path as the preview line. The icon
+  ids join the custom emoji the driver resolves. "Loading…" and "No chats" come
+  from lang keys.
+- The jump chip is two parts on the same fill, as `FillJumpToLastBg`: the unread
+  topic's title on the topics line and the message line with the arrow at its
+  end. A click on either part opens that topic (Ctrl/Cmd-click: a new window).
+  The press is not swallowed, so pinned drag and the long-press peek start from
+  the chip; only the click stops, so the row does not open the chat again. The
+  chip is plain while selecting (the row toggles) and is not drawn on the open
+  row. Nothing else on the line is clickable.
+- The badge follows `IncludeInBadge::UnmutedOrAll`: unmuted unread topics, or
+  all of them (grey) when every one is muted; a forum marked as unread with no
+  unread topic keeps its dot. `chat_row/row_badges.rs` holds the counters so
+  they can sit on either line.
+- Topic lists load from the update hook (`maybe_preload_topics`) for forums in
+  a chat list: on a new chat, on any chat position, on `updateSupergroup` with
+  `is_forum` (the chat id is derived from the supergroup id, no scan), and once
+  when the account becomes ready for forums that arrived earlier. A forum is
+  marked asked only after its request went out; a TDLib error is final
+  (`forum_topics_failed`) and the row reads "No chats". Bots with topics are
+  preloaded as before.
 - `note_forum_topic_message` also advances the topic's `last_message_id`, so
   the titles reorder at once.
-- Tests start from default appearance preferences instead of reading the
-  machine's saved ones.
+- UI tests run on a temp app root: `new_with_demo` calls
+  `use_isolated_app_root` under `cfg(test)`, so no test reads or writes the
+  owner's real settings, and a test fails if a window resolves the real root.
 
 ## Deviations
 
-- Topic icons: Quill has no custom emoji inside a text line of the list, so the
-  custom-emoji icon in front of a title is not drawn (General's "# " is).
-- The jump chip surrounds the first title and an arrow, not the title and the
-  message line as one two-part shape, and the click area is the chip only.
-- The gap between titles is an en space plus a three-per-em space, about 8px
-  at the row font.
+- The two chip parts are separate rounded rectangles; tdesktop joins them with
+  inverted corner pixmaps where their widths differ.
+- The gap between titles is an en space plus a thin space, about 8px at the
+  row font.
+- Unread titles that sit after a topic icon keep their bold and colour; a
+  title whose icon picture has not downloaded yet shows without it.
 - Hidden topics are filtered out; tdesktop's `topicsList` handling of a hidden
   General was not confirmed.
 
 ## How verified
 
 - State tests: order, unread flag, "# General", `forum_rows_follow_display_as_forum`
-  (row lines, loaded, unread topics, jump target).
-- Driver test: topics are requested when a supergroup turns into a forum, once,
-  not after an error, and later when the account was not ready.
+  (row lines, loaded, unread topics, jump target), the unmuted-or-all badge,
+  the dot and the icon ids sent for resolving. A unit test checks the piece
+  layout with an icon.
+- Driver test: topics are requested when a forum in a chat list appears or
+  enters one, once, not after an error, not for a forum in no list, and later
+  when the account was not ready.
 - GPUI tests (`chat_row/topic_titles_tests.rs`): the forum row is exactly the
   three-line height and the plain row keeps two, the topics line sits between
   name and message and stays in the row, the badge is on the topics line and
-  counts topics, a click on the line opens the chat without a topic, the chip
-  opens the last message's topic, and in selection mode both toggle the row.
+  counts topics, a click on the line opens the chat without a topic, either
+  chip part opens the last message's topic, a press on the chip starts the
+  long-press peek, and in selection mode both toggle the row. A guard test
+  checks that UI test windows use a temp app root.
 - Light and dark captures of `ready-forum-row-topics` were viewed: date,
   topics line with the jump chip, ellipsis, badge, "Loading…" and the message
   line.

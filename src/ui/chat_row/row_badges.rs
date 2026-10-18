@@ -9,6 +9,7 @@ pub(super) fn row_badges(
     chat: &ChatSummary,
     archived: bool,
     muted_fg: Hsla,
+    muted: bool,
     unread_indicator: Option<(i32, bool)>,
     has_reactions: bool,
     has_mentions: bool,
@@ -16,7 +17,6 @@ pub(super) fn row_badges(
     cx: &App,
 ) -> impl IntoElement + use<> {
     let id = chat.id;
-    let muted = chat.is_muted();
     div()
         .flex()
         .flex_none()

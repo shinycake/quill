@@ -5,10 +5,8 @@ use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::RequestPurpose;
 use crate::state::ThreadsPurpose;
 use crate::subsection_tabs::SubsectionTabsMode;
-use crate::telegram::envelope::ChatKind;
 use crate::telegram::envelope::{
-    ChatList, ChatListPayload, ChatsPayload, GroupsPayload, MessagesPayload, ThreadsPayload,
-    UsersPayload,
+    ChatListPayload, ChatsPayload, GroupsPayload, MessagesPayload, ThreadsPayload, UsersPayload,
 };
 use crate::telegram::envelope::{EnvelopePayload, MUTE_FOREVER};
 use crate::telegram::requests::{
@@ -38,11 +36,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Some(ChatId(user_id.0))
             }
             EnvelopePayload::Chats(ChatsPayload::UpdateNewChat { chat_id, .. }) => Some(*chat_id),
-            // A chat entering the main list (tdesktop preloads the topics of
-            // every forum in the list).
-            EnvelopePayload::ChatList(ChatListPayload::UpdateChatPosition(position))
-                if position.list == ChatList::Main =>
-            {
+            // A chat entering a list (tdesktop preloads the topics of every
+            // forum in a chat list).
+            EnvelopePayload::ChatList(ChatListPayload::UpdateChatPosition(position)) => {
                 Some(position.chat_id)
             }
             _ => None,
@@ -67,19 +63,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// opened (tdesktop `Forum::preloadTopics`). The private chat id of a
     /// bot equals the bot's user id.
     pub(crate) fn maybe_preload_topics(&mut self, chat: Option<ChatId>, supergroup: Option<i64>) {
-        let mut ids: Vec<ChatId> = chat.into_iter().collect();
-        if let Some(id) = supergroup {
-            ids.extend(
-                self.session
-                    .chats
-                    .values()
-                    .filter(|c| {
-                        matches!(c.kind, ChatKind::Supergroup { supergroup_id, .. } if supergroup_id == id)
-                    })
-                    .map(|c| c.id),
-            );
-        }
-        for chat_id in ids {
+        // A supergroup's chat id is derived from its id (the bot API id).
+        let from_supergroup = supergroup.map(|id| ChatId(-1_000_000_000_000 - id));
+        for chat_id in chat.into_iter().chain(from_supergroup) {
             self.preload_topics(chat_id);
         }
     }
@@ -97,13 +83,13 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// already on its way). Not ready yet: it is asked later. A TDLib error
     /// is final (tdesktop does not retry either).
     fn preload_topics(&mut self, chat_id: ChatId) {
-        let forum = self
-            .session
-            .chats
-            .get(&chat_id.0)
-            .is_some_and(|chat| chat.is_forum_chat())
-            || self.session.bot_topics(chat_id).is_some();
-        if !forum
+        // Forums in a chat list (`history->inChatList()`), and bots with
+        // topics, whose topics also fill their row.
+        let listed = self.session.chats.get(&chat_id.0).is_some_and(|chat| {
+            chat.is_forum_chat()
+                && (chat.in_main_list || chat.in_archive || !chat.folder_positions.is_empty())
+        }) || self.session.bot_topics(chat_id).is_some();
+        if !listed
             || !self.chats_path_active()
             || self.session.threads.forum_row_asked.contains(&chat_id.0)
         {

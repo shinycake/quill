@@ -25,6 +25,8 @@ impl QuillApp {
     ) -> Self {
         #[cfg(test)]
         quill::wake::isolate_current_thread();
+        #[cfg(test)]
+        quill::settings::use_isolated_app_root(quill::scratch::process_dir("quill-ui-tests"));
         super::tooltip_timing::install(cx);
         quill::media_tools::warm_up();
         let chat = cx.new(SyntheticChat::new);

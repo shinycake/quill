@@ -50,6 +50,8 @@ pub struct RowTopic {
     pub id: i32,
     pub name: String,
     pub unread: bool,
+    /// The topic's custom emoji icon (0 = none), drawn before the title.
+    pub icon: i64,
 }
 
 /// What a forum's chat row shows below the name: the topic titles and the
@@ -60,8 +62,14 @@ pub struct RowForum {
     /// The topic list arrived (or failed): empty then reads "No chats", not
     /// "Loading…".
     pub loaded: bool,
-    /// Topics with unread messages (the badge counts topics, not messages).
+    /// The badge counts topics, not messages: the unmuted topics with unread
+    /// messages, or all of them when every one is muted
+    /// (`IncludeInBadge::UnmutedOrAll`).
     pub unread_topics: i32,
+    /// A forum marked as unread with no unread topic shows a dot.
+    pub dot: bool,
+    /// Every unread topic is muted: the badge is grey.
+    pub badge_muted: bool,
     /// The topic of the forum's last message when it has unread messages:
     /// the jump chip opens it.
     pub jump: Option<i32>,
@@ -230,18 +238,42 @@ impl Session {
             return None;
         }
         let topics = self.chat_row_topics(chat_id);
-        let unread_topics = self.threads.forum_topics.get(&chat_id.0).map_or(0, |all| {
-            all.iter()
-                .filter(|t| {
-                    !t.is_hidden && !matches!(self.topic_badge(chat_id, t), TopicBadge::None)
-                })
-                .count()
-        });
+        let chat = self.chats.get(&chat_id.0);
+        let (mut unmuted, mut muted) = (0usize, 0usize);
+        for t in self
+            .threads
+            .forum_topics
+            .get(&chat_id.0)
+            .into_iter()
+            .flatten()
+        {
+            if t.is_hidden || matches!(self.topic_badge(chat_id, t), TopicBadge::None) {
+                continue;
+            }
+            let settings = &t.notification_settings;
+            let is_muted = if settings.use_default_mute_for {
+                chat.is_some_and(|c| c.is_muted())
+            } else {
+                settings.is_muted()
+            };
+            if is_muted {
+                muted += 1;
+            } else {
+                unmuted += 1;
+            }
+        }
+        let (shown, badge_muted) = if unmuted > 0 {
+            (unmuted, false)
+        } else {
+            (muted, muted > 0)
+        };
         let jump = topics.first().filter(|t| t.unread).map(|t| t.id);
         Some(RowForum {
             loaded: self.threads.forum_topics.contains_key(&chat_id.0)
                 || self.threads.forum_topics_failed.contains(&chat_id.0),
-            unread_topics: i32::try_from(unread_topics).unwrap_or(i32::MAX),
+            unread_topics: i32::try_from(shown).unwrap_or(i32::MAX),
+            dot: shown == 0 && chat.is_some_and(|c| c.is_marked_as_unread),
+            badge_muted,
             jump,
             topics,
         })
@@ -272,6 +304,11 @@ impl Session {
                     t.name.clone()
                 },
                 unread: !matches!(self.topic_badge(chat_id, t), TopicBadge::None),
+                icon: if t.is_general {
+                    0
+                } else {
+                    t.icon_custom_emoji_id
+                },
             })
             .collect()
     }

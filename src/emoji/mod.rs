@@ -585,6 +585,10 @@ impl Session {
             // The verifying bot's icon before the title.
             ids.extend(self.chat_bot_verification_icon(chat));
         }
+        // Custom emoji icons of the topics listed on forum rows.
+        for topics in self.threads.forum_topics.values() {
+            ids.extend(topics.iter().map(|t| t.icon_custom_emoji_id));
+        }
         if let Some(options) = &self.stickers.message_reaction_options {
             ids.extend(options.all().into_iter().filter_map(|choice| match choice {
                 crate::state::ReactionChoice::CustomEmoji(id) => Some(id),

@@ -93,7 +93,7 @@ impl QuillApp {
                 let active = self.frame.window_active.get();
                 let forum = self.session().and_then(|s| s.chat_row_forum(chat.id));
                 let has_badge = match &forum {
-                    Some(forum) => forum.unread_topics > 0,
+                    Some(forum) => forum.unread_topics > 0 || forum.dot,
                     None => chat_unread_indicator(chat).is_some(),
                 };
                 let fx = self.frame.row_fx.borrow_mut().observe(
@@ -103,6 +103,20 @@ impl QuillApp {
                     active,
                     std::time::Instant::now(),
                 );
+                let forum = forum.map(|forum| {
+                    let icons: Vec<i64> = forum
+                        .topics
+                        .iter()
+                        .map(|t| t.icon)
+                        .filter(|icon| *icon > 0)
+                        .collect();
+                    let emoji = if icons.is_empty() {
+                        Default::default()
+                    } else {
+                        self.topic_icon_images(&icons, cx)
+                    };
+                    super::topic_titles::ForumLine { forum, emoji }
+                });
                 if fx.animating {
                     self.request_animation_tick(60, cx);
                 }

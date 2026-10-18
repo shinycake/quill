@@ -117,11 +117,53 @@ fn a_click_on_the_topics_line_opens_the_chat_not_a_topic(cx: &mut TestAppContext
 }
 
 #[gpui_kit::test]
-fn the_jump_chip_opens_the_topic_of_the_last_message(cx: &mut TestAppContext) {
+fn the_jump_chip_spans_both_lines_and_opens_the_topic_of_the_last_message(cx: &mut TestAppContext) {
     let (app, mut vcx) = open(cx);
     let vcx = &mut vcx;
+    let title = shown(vcx, ("forum-jump", 71));
+    let message = shown(vcx, ("forum-jump-message", 71));
+    // The message part sits under the title part, in the same row.
+    assert!(message.origin.y >= title.bottom());
+    assert!(message.origin.x <= title.origin.x + px(2.));
     click(vcx, ("forum-jump", 71));
     assert_eq!(opened(&app, vcx), (Some(ChatId(71)), Some(6)));
+    // The message part opens it too (on another forum's chip after a reset).
+    click(vcx, ("forum-titles", 72));
+    assert_eq!(opened(&app, vcx), (Some(ChatId(72)), None));
+    click(vcx, ("forum-jump-message", 71));
+    assert_eq!(opened(&app, vcx), (Some(ChatId(71)), Some(6)));
+}
+
+#[gpui_kit::test]
+fn a_press_on_the_chip_still_starts_the_long_press_peek(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    let vcx = &mut vcx;
+    let at = shown(vcx, ("forum-jump", 71)).center();
+    vcx.simulate_mouse_down(
+        at,
+        gpui_kit::MouseButton::Left,
+        gpui_kit::Modifiers::default(),
+    );
+    let pressed = app.update(vcx, |app, _| {
+        app.chat_list.preview_press.map(|(chat, _)| chat)
+    });
+    assert_eq!(pressed, Some(ChatId(71)));
+}
+
+/// Every UI test window runs on a temp app root, so settings a test changes
+/// never reach the owner's real preferences.
+#[gpui_kit::test]
+fn ui_test_windows_never_resolve_the_real_app_root(cx: &mut TestAppContext) {
+    let (_app, _vcx) = open(cx);
+    let temp = std::env::temp_dir();
+    let root = quill::settings::safe_app_root().expect("an app root");
+    assert!(root.starts_with(&temp), "{root:?} is outside {temp:?}");
+    let paths = QuillApp::appearance_paths();
+    assert!(
+        paths.root.starts_with(&temp),
+        "{:?} is outside {temp:?}",
+        paths.root
+    );
 }
 
 #[gpui_kit::test]

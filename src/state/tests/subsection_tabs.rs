@@ -381,3 +381,61 @@ fn forum_rows_follow_display_as_forum() {
     session.threads.forum_topics_failed.insert(16);
     assert!(session.chat_row_forum(ChatId(16)).expect("row").loaded);
 }
+
+/// The forum badge follows `IncludeInBadge::UnmutedOrAll`, a forum marked as
+/// unread keeps its dot, and topic icons are listed for resolving.
+#[test]
+fn forum_badge_counts_unmuted_topics_and_icons_are_resolved() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, &bot_user(43, true, true));
+    apply_json(&mut session, &seq, &sink, &private_chat(43));
+    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(43)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &topics_answer(extra.0, 43, &[2, 3]),
+    );
+    let set = |session: &mut Session, id: i32, muted: bool, icon: i64| {
+        let topic = session
+            .threads
+            .forum_topics
+            .get_mut(&43)
+            .and_then(|topics| topics.iter_mut().find(|t| t.forum_topic_id == id))
+            .expect("topic");
+        topic.notification_settings.use_default_mute_for = false;
+        topic.notification_settings.mute_for = if muted { 2147483647 } else { 0 };
+        topic.icon_custom_emoji_id = icon;
+    };
+    let row = |session: &Session| session.chat_row_forum(ChatId(43)).expect("row");
+    // One muted and one unmuted unread topic: the badge counts the unmuted.
+    set(&mut session, 2, true, 0);
+    set(&mut session, 3, false, 777);
+    let shown = row(&session);
+    assert_eq!((shown.unread_topics, shown.badge_muted), (1, false));
+    assert_eq!(shown.topics.first().map(|t| t.icon), Some(777));
+    assert!(session.open_chat_custom_emoji_ids().contains(&777));
+    // Every unread topic muted: all count, and the badge is grey.
+    set(&mut session, 3, true, 777);
+    let shown = row(&session);
+    assert_eq!((shown.unread_topics, shown.badge_muted), (2, true));
+    // Nothing unread but the chat marked as unread: a dot.
+    for id in [2, 3] {
+        if let Some(topic) = session
+            .threads
+            .forum_topics
+            .get_mut(&43)
+            .and_then(|topics| topics.iter_mut().find(|t| t.forum_topic_id == id))
+        {
+            topic.unread_count = 0;
+            topic.last_read_inbox_message_id = 900;
+        }
+    }
+    if let Some(chat) = session.chats.get_mut(&43) {
+        chat.is_marked_as_unread = true;
+    }
+    let shown = row(&session);
+    assert_eq!(shown.unread_topics, 0);
+    assert!(shown.dot);
+}
