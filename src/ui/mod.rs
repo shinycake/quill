@@ -223,6 +223,9 @@ mod composer_ui;
 mod composer_unicode;
 mod connect_ui;
 mod contacts;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod context_menu_focus_tests;
 mod conversation;
 mod custom_emoji_card;
 mod custom_keyboard;

@@ -104,6 +104,7 @@ impl Render for QuillApp {
             || self.chat_list.menu.is_some()
             || self.chat_list.archive_menu.is_some()
             || self.chat_list.global.story_menu.is_some()
+            || self.playback.playlist_menu.is_some()
             || self.folders.tab_menu.is_some();
         if menu_open && !self.frame.context_menu_was_open {
             self.frame.context_menu_previous_focus = window.focused(cx);

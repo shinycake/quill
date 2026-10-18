@@ -155,6 +155,7 @@ impl QuillApp {
                 .role(Role::MenuItem)
                 .aria_label(label)
                 .tab_index(0)
+                .focus_visible(|style| style.bg(hover))
                 .child(Icon::new(icon).size(px(16.)).text_color(color))
                 .child(label)
                 .on_click(cx.listener(move |this, _, window, cx| {
