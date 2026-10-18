@@ -287,3 +287,8 @@ section { scroll-margin-top: 72px; }
 .foot-brand img { border-radius: 6px; }
 .foot p { margin: 6px 0; max-width: 760px; }
 .foot .foot-small { font-size: 12.5px; }
+
+.mac-install { margin-top: 22px; }
+.mac-install p { color: var(--muted); font-size: 14.5px; }
+.mac-install pre { margin-top: 8px; background: var(--surface-2); border-radius: 8px; padding: 10px 12px; overflow-x: auto; }
+.mac-install code { font-family: var(--mono); font-size: 13px; user-select: all; white-space: pre; }

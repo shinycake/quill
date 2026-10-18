@@ -175,7 +175,11 @@
         <div class="notes" id="whatsnew-body"></div>
         <a class="more" id="whatsnew-link" href="https://github.com/shinycake/quill/releases">All releases</a>
       </div>
-      <p class="reqs">macOS 14 or later on Apple Silicon · Windows 10 or later (x64) · Linux x86_64 with glibc. Builds aren't signed with a paid developer certificate yet, so your system will ask you to confirm the first launch.</p>
+      <div class="mac-install">
+        <p>On a Mac, the easiest way is to paste this into Terminal. It installs Quill in Applications, and Quill opens without a security warning:</p>
+        <pre><code>curl -fsSL https://raw.githubusercontent.com/shinycake/quill/main/scripts/macos-install.sh | bash</code></pre>
+      </div>
+      <p class="reqs">macOS 14 or later on Apple Silicon · Windows 10 or later (x64) · Linux x86_64 with glibc. Builds aren't signed with a paid developer certificate yet, so a download from the browser asks you to confirm the first launch.</p>
     </section>
 
     <section class="faq wrap" aria-labelledby="faq-title">
@@ -194,7 +198,7 @@
       </details>
       <details>
         <summary>Why do I need to confirm the first launch?</summary>
-        <p>Releases aren't signed with a paid Apple or Microsoft certificate yet. On macOS, open System Settings → Privacy &amp; Security and choose Open Anyway. On Windows, choose More info → Run anyway. Each release lists SHA-256 checksums so you can verify the download.</p>
+        <p>Releases aren't signed with a paid Apple or Microsoft certificate yet. On macOS, install with the Terminal command above and there's nothing to confirm: macOS only checks apps downloaded in a browser. If you used the browser, run <code>xattr -dr com.apple.quarantine /Applications/Quill.app</code> in Terminal, or open System Settings → Privacy &amp; Security and choose Open Anyway. On Windows, choose More info → Run anyway. Each release lists SHA-256 checksums so you can verify the download.</p>
       </details>
       <details>
         <summary>How can I help?</summary>
