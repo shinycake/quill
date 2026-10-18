@@ -193,6 +193,23 @@ impl ChatListKeys {
         self.search_order.borrow_mut().push(row);
     }
 
+    /// A prepaint listener for a container whose children are exactly
+    /// `rows`, with no heading (the top-people tiles).
+    pub(in crate::ui) fn tiles_bounds_recorder(
+        &self,
+        rows: Vec<SearchRow>,
+    ) -> impl Fn(Vec<Bounds<Pixels>>, &mut Window, &mut App) + 'static {
+        let store = self.search_bounds.clone();
+        move |bounds, _, _| {
+            let Ok(mut store) = store.try_borrow_mut() else {
+                return;
+            };
+            for (row, row_bounds) in rows.iter().zip(bounds.iter()) {
+                store.insert(*row, *row_bounds);
+            }
+        }
+    }
+
     /// A prepaint listener for one section of results: `rows` are its
     /// results in order, drawn after the section heading (child 0).
     pub(super) fn section_bounds_recorder(

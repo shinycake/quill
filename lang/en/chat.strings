@@ -572,3 +572,4 @@
 "qll_chat_your_account_is_frozen_and_2" = "Your account is frozen and read-only. Open the banner at the top for details.";
 "qll_chat_your_number" = "your number";
 "qll_chat_partly_sent" = "Only {sent} of {total} messages were sent. The rest are still here, so you can send them again.";
+"lng_context_view_profile" = "View profile";

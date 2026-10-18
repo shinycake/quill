@@ -323,7 +323,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    pub(super) fn close_search_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn close_search_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             live.driver.close_search();
         } else if let Some(session) = self.demo_session.as_mut() {

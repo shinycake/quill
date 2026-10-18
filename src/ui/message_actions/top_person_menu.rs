@@ -7,7 +7,6 @@ use super::chat_menu_submenus::{MENU_WIDTH, menu_row};
 use super::*;
 use crate::ui::menu_states::ChatMenuState;
 use gpui_kit::assets::IconName as Lucide;
-use quill::chatlist_menu::profile_label;
 use quill::lang::{keys, tr};
 use quill::state::SearchConfirm;
 
@@ -87,15 +86,12 @@ impl QuillApp {
         else {
             return div().into_any_element();
         };
-        let saved = self
-            .session()
-            .is_some_and(|session| session.is_saved_messages(chat_id));
         let hover = cx.theme().accent;
         let border = cx.theme().border;
         let separator = move || div().h(px(1.)).mx_2().my_1().bg(border).into_any_element();
         let mut rows: Vec<AnyElement> = Vec::new();
         if self.can_open_chat_window(&chat) {
-            rows.push(
+            rows.push(selectable(
                 menu_row(
                     "top-menu-new-window",
                     Some(Lucide::ExternalLink),
@@ -103,13 +99,19 @@ impl QuillApp {
                     false,
                     hover,
                 )
+                .on_hover(cx.listener(|this, hovered, _, cx| {
+                    this.chat_menu_row_hovered(*hovered, cx);
+                }))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.chat_list.menu = None;
                     this.open_chat_in_new_window(chat_id, window, cx);
+                    // `descriptor.closeCallback`: the search closes.
+                    this.close_search_ui(window, cx);
                     cx.notify();
                 }))
                 .into_any_element(),
-            );
+                "top-menu-new-window",
+            ));
             rows.push(separator());
         }
         rows.push(
@@ -133,31 +135,31 @@ impl QuillApp {
         if let Some(row) = self.chat_menu_folder_row(menu, &chat, hover, cx) {
             rows.push(row);
         }
-        if let Some(label) = profile_label(&chat.kind, saved) {
-            rows.push(
-                menu_row(
-                    "top-menu-profile",
-                    Some(Lucide::CircleUser),
-                    label.to_string(),
-                    false,
-                    hover,
-                )
-                .on_hover(cx.listener(|this, hovered, _, cx| {
-                    this.chat_menu_row_hovered(*hovered, cx);
-                }))
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.chat_list.menu = None;
-                    if let Some(target) = this
-                        .session()
-                        .and_then(|session| session.info_panel_target_for_chat(chat_id))
-                    {
-                        this.open_info_panel_target(target, window, cx);
-                    }
-                    cx.notify();
-                }))
-                .into_any_element(),
-            );
-        }
+        // Every peer has a profile, Saved Messages included.
+        rows.push(selectable(
+            menu_row(
+                "top-menu-profile",
+                Some(Lucide::CircleUser),
+                tr(keys::CONTEXT_VIEW_PROFILE).to_string(),
+                false,
+                hover,
+            )
+            .on_hover(cx.listener(|this, hovered, _, cx| {
+                this.chat_menu_row_hovered(*hovered, cx);
+            }))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.chat_list.menu = None;
+                if let Some(target) = this
+                    .session()
+                    .and_then(|session| session.info_panel_target_for_chat(chat_id))
+                {
+                    this.open_info_panel_target(target, window, cx);
+                }
+                cx.notify();
+            }))
+            .into_any_element(),
+            "top-menu-profile",
+        ));
         rows.push(separator());
         rows.push(selectable(
             menu_row(

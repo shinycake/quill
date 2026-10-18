@@ -64,8 +64,28 @@ the removal entries were not a menu.
 
 - The unread badge uses the kit badge, which caps at "99+" like Quill's chat
   rows; tdesktop's strip prints "1K" above 999.
-- The strip width is estimated from the sidebar width minus the results
-  padding, not measured.
+- The strip width is the list's laid-out width (`list_width()`, which is the
+  whole window in one column) less the sidebar's padding and border (25 px),
+  not a measured width. The UI tests compare it with the drawn strip at a
+  narrowed list and in the one-column layout.
+- "Open in new window" in the tile menu closes the search like tdesktop's
+  `closeCallback`. A plain Cmd/Ctrl-click on a tile opens the window and
+  leaves the search open.
+- The menu's "View profile" is always offered (Saved Messages included), with
+  the lang key `lng_context_view_profile`. tdesktop swaps the text for groups
+  and channels, which the strip never holds (it lists users).
+
+## Review fixes
+
+- A drag on the collapsed row no longer blocks later clicks: the drag is
+  cleared on every press and release and consumed by the click.
+- Left with no selection stays with the search field; only Right enters the
+  strip (`selectByKeyboard`). Up with only a pointer over a tile does nothing.
+- Keys scroll the results only as far as it takes to show the tile (tile
+  bounds are recorded like the other result rows); entering from the field
+  still shows the top.
+- The header link ("Show more" and "Collapse") is the same ghost button as
+  Recent's "Clear".
 
 ## How verified
 

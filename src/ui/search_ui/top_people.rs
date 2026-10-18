@@ -13,17 +13,20 @@ use gpui_kit::component::badge::Badge;
 use quill::lang::{keys, tr};
 use quill::top_people::{self as model, StripKey, StripMove, StripView, TopPerson};
 
-/// The sidebar's side padding around the results.
-const SIDE_GUTTER: f32 = 16.;
+/// What the sidebar takes from the list's width before the results: its
+/// `p_3` padding on both sides (24) and the right border (1).
+const LIST_CHROME: f32 = 25.;
 /// `QApplication::startDragDistance`.
 const START_DRAG: f32 = 4.;
 /// The presence dot on a tile's avatar.
 const DOT: f32 = 12.;
 
 impl QuillApp {
-    /// The width the strip lays out in.
+    /// The width the strip lays out in: the list as laid out (narrowed
+    /// beside the chat, the whole window in one column) less the sidebar's
+    /// own padding.
     fn top_people_width(&self) -> f32 {
-        (f32::from(self.frame.sidebar_width) - 2. * SIDE_GUTTER).max(model::TILE_WIDTH)
+        (f32::from(self.list_width()) - LIST_CHROME).max(model::TILE_WIDTH)
     }
 
     /// The strip's people, its columns when expanded, and whether it is
@@ -78,6 +81,7 @@ impl QuillApp {
             return;
         };
         search.top_view = search.top_view.toggled();
+        self.search_ui.top_drag.set(None);
         let expanding = search.top_view.expanded();
         self.search_ui
             .top_toggled_at
@@ -150,7 +154,13 @@ impl QuillApp {
                 this.bg(cx.theme().selection)
             })
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-                if this.search_ui.top_drag.get().is_some_and(|drag| drag.moved) {
+                // A drag that scrolled the row is not a click.
+                if this
+                    .search_ui
+                    .top_drag
+                    .take()
+                    .is_some_and(|drag| drag.moved)
+                {
                     return;
                 }
                 // Ctrl (Cmd on macOS) opens the chat in its own window
@@ -177,6 +187,9 @@ impl QuillApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    // A new press starts clean; the row, when the strip is
+                    // collapsed, records its own drag after this.
+                    this.search_ui.top_drag.set(None);
                     this.begin_chat_preview_press(id, event.position, cx);
                 }),
             )
@@ -232,10 +245,15 @@ impl QuillApp {
                 self.top_tile(person, title, single, menu_target, cx)
             })
             .collect();
+        let tile_rows: Vec<SearchRow> = people
+            .iter()
+            .map(|person| SearchRow::Top(person.chat_id))
+            .collect();
         let as_grid = expanded || progress > 0.;
         let body = if as_grid {
             let scrolled = f32::from(self.search_ui.top_scroll.offset().x).min(0.);
             div()
+                .on_children_prepainted(self.chat_list.keys.tiles_bounds_recorder(tile_rows))
                 .id("search-frequent-grid")
                 .flex()
                 .flex_wrap()
@@ -246,6 +264,7 @@ impl QuillApp {
                 .into_any_element()
         } else {
             div()
+                .on_children_prepainted(self.chat_list.keys.tiles_bounds_recorder(tile_rows))
                 .id("search-frequent-row")
                 .flex()
                 .items_start()
@@ -262,6 +281,14 @@ impl QuillApp {
                             moved: false,
                         }));
                     }),
+                )
+                .on_mouse_up(
+                    MouseButton::Left,
+                    cx.listener(|this, _, _, _| this.search_ui.top_drag.set(None)),
+                )
+                .on_mouse_up_out(
+                    MouseButton::Left,
+                    cx.listener(|this, _, _, _| this.search_ui.top_drag.set(None)),
                 )
                 .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
                     if event.pressed_button != Some(MouseButton::Left) {
@@ -297,7 +324,6 @@ impl QuillApp {
                 Button::new("search-frequent-toggle")
                     .label(label)
                     .ghost()
-                    .xsmall()
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_top_people(cx))),
             )
         });
@@ -322,6 +348,7 @@ impl QuillApp {
                 .child(
                     div()
                         .id("search-frequent-strip")
+                        .debug_selector(|| "top-strip".to_string())
                         .relative()
                         .w_full()
                         .h(px(height))
@@ -343,9 +370,9 @@ impl QuillApp {
         self.chat_list
             .keys
             .set_search_keyboard(Some(SearchRow::Top(id)));
-        self.search_ui
-            .results_scroll
-            .set_offset(point(px(0.), px(0.)));
+        // Scroll the results only as far as it takes to show the tile
+        // (`scrollToRequests`), so a tall grid keeps its place.
+        self.reveal_search_row(SearchRow::Top(id));
         if !expanded {
             let scroll = &self.search_ui.top_scroll;
             let current = -f32::from(scroll.offset().x);
@@ -408,7 +435,14 @@ impl QuillApp {
                     }
                     true
                 }
-                None if !other_selected => go(self, None, StripKey::Down, cx),
+                None if !other_selected => {
+                    // Entering from the field shows the top of the results
+                    // (`_chatsScroll->scrollTo(0)`).
+                    self.search_ui
+                        .results_scroll
+                        .set_offset(point(px(0.), px(0.)));
+                    go(self, None, StripKey::Down, cx)
+                }
                 None => false,
             },
             NavKey::Up => match on_tile {
@@ -421,6 +455,11 @@ impl QuillApp {
                 }
                 None => {
                     let selection = self.chat_list.keys.search_selection();
+                    // A pointer resting on a tile is not a selection the
+                    // keys can move from: nothing happens.
+                    if matches!(selection, Some(SearchRow::Top(_))) {
+                        return true;
+                    }
                     if selection.is_some() && selection == others.first().copied() {
                         self.chat_list.keys.set_search_keyboard(None);
                         go(self, None, StripKey::Up, cx)

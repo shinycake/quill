@@ -181,7 +181,10 @@ pub fn step(
     let columns = columns.max(1);
     let Some(current) = selected.map(|index| index.min(last)) else {
         return match key {
-            StripKey::Left | StripKey::Right => StripMove::Select(0),
+            // Only Right enters (`_selected + 1 < size`); Left has nothing
+            // before the first tile and stays with the search field.
+            StripKey::Right => StripMove::Select(0),
+            StripKey::Left => StripMove::Leave,
             StripKey::Up => {
                 let rows = if expanded { rows(count, columns) } else { 1 };
                 StripMove::Select(rows.saturating_sub(1).saturating_mul(columns).min(last))
@@ -279,6 +282,7 @@ mod tests {
         use StripKey::*;
         let walk = |sel, key| step(sel, key, 8, 5, false);
         assert_eq!(walk(None, Right), StripMove::Select(0));
+        assert_eq!(walk(None, Left), StripMove::Leave);
         assert_eq!(walk(None, Down), StripMove::Select(0));
         assert_eq!(walk(None, Up), StripMove::Select(0));
         assert_eq!(walk(Some(0), Left), StripMove::Unchanged);
