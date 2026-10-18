@@ -410,7 +410,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Chat preview from the keyboard (Ctrl+]) <!-- parity:chatlist-preview-key -->
 - [x] Main menu: My Profile, Contacts, Calls, Night Mode, account list, Set Emoji Status, My Stories, My Groups and Channels <!-- parity:chatlist-main-menu -->
 - [x] "This is your Archive" explainer <!-- parity:chatlist-archive-hint -->
-- [ ] Chat row menu: Mute submenu with durations, direct Unmute, "Add to folder" submenu, Delete chat / Delete and leave / Leave group / Leave channel by chat kind (#1013) <!-- parity:chatlist-row-menu-submenus -->
+- [x] Chat row menu: Mute submenu with durations, direct Unmute, "Add to folder" submenu, Delete chat / Delete and leave / Leave group / Leave channel by chat kind (#1013) <!-- parity:chatlist-row-menu-submenus -->
 - [ ] Drop files, or dragged messages, on a chat row to send them there <!-- parity:chatlist-drop-on-row -->
 - [ ] Top-people strip in the empty search state (`getTopChats`) <!-- parity:chatlist-top-people -->
 - [ ] Forum rows show the latest topic titles <!-- parity:chatlist-forum-topic-titles -->
