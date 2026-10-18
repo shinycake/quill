@@ -134,4 +134,5 @@ mod close_chat_preview;
 #[cfg(feature = "demo-capture")]
 mod go_to_tests;
 mod message_menu_overlay;
+mod top_person_menu;
 mod unpin_from_banner;

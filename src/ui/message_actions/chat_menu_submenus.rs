@@ -31,7 +31,7 @@ fn period_text(seconds: i32) -> String {
 
 /// One menu row: icon, label, optional trailing marker. Danger rows read
 /// in the attention colour.
-fn menu_row(
+pub(super) fn menu_row(
     id: impl Into<ElementId>,
     icon: Option<IconName>,
     label: String,

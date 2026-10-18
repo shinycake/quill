@@ -323,7 +323,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    pub(super) fn close_search_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn close_search_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             live.driver.close_search();
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -387,7 +387,7 @@ impl QuillApp {
     }
 
     /// "Remove from Recent" on a frequent contact (`removeTopChat`).
-    pub(super) fn remove_top_chat(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn remove_top_chat(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.remove_top_chat(chat_id) {
                 self.connection.set_note(StatusNote::error(user_error_for(
@@ -419,11 +419,10 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Show (or dismiss) an inline confirmation / the frequent-contact row.
-    pub(super) fn set_search_prompt(
+    /// Show (or dismiss) an inline confirmation.
+    pub(in crate::ui) fn set_search_prompt(
         &mut self,
         confirm: Option<SearchConfirm>,
-        top_menu: Option<ChatId>,
         cx: &mut Context<Self>,
     ) {
         let search = if let Some(live) = self.live.as_mut() {
@@ -433,7 +432,6 @@ impl QuillApp {
         };
         if let Some(search) = search {
             search.confirm = confirm;
-            search.top_menu = top_menu;
         }
         cx.notify();
     }
@@ -441,7 +439,7 @@ impl QuillApp {
     /// The user accepted the pending confirmation.
     pub(super) fn accept_search_confirm(&mut self, cx: &mut Context<Self>) {
         let confirm = self.session().and_then(|s| s.search.search.confirm);
-        self.set_search_prompt(None, None, cx);
+        self.set_search_prompt(None, cx);
         match confirm {
             Some(SearchConfirm::ClearRecents) => self.clear_search_recents(cx),
             Some(SearchConfirm::DisableTopChats) => self.set_top_chats_disabled(true, cx),
@@ -932,6 +930,8 @@ mod chat_search_bar;
 mod search_results;
 mod tab_results;
 mod tab_strip;
+mod top_people;
+mod top_people_demo;
 
 #[cfg(test)]
 mod match_tests {

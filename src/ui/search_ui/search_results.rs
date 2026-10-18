@@ -254,7 +254,6 @@ impl QuillApp {
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.set_search_prompt(
                                                 Some(SearchConfirm::ClearRecents),
-                                                None,
                                                 cx,
                                             );
                                         })),

@@ -76,8 +76,11 @@
 "lng_polls_option_added_by" = "Added by {user}";
 "lng_profile_clear_and_exit" = "Delete and leave";
 "lng_profile_copy_phone" = "Copy Phone Number";
+"lng_profile_send_message" = "Send Message";
 "lng_profile_export_chat" = "Export chat history";
 "lng_recent_chats" = "Chats";
+"lng_recent_frequent_all" = "Show all";
+"lng_recent_frequent_collapse" = "Collapse";
 "lng_recent_clear_sure" = "Do you want to clear your search history?";
 "lng_reply_in_another_chat" = "Reply in Another Chat";
 "lng_report_message_title" = "Report message";
@@ -408,7 +411,6 @@
 "qll_chat_reminder" = "Reminder";
 "qll_chat_remove_all" = "Remove all";
 "qll_chat_remove_all_disable" = "Remove all & Disable";
-"qll_chat_remove_from_recent" = "Remove {name} from Recent";
 "qll_chat_remove_from_recent_2" = "Remove from Recent";
 "qll_chat_remove_from_recent_3" = "Remove {row_title} from Recent";
 "qll_chat_remove_spoiler" = "Remove spoiler";
@@ -524,7 +526,6 @@
 "qll_chat_this_chat_was_added_to" = "This chat was added to community \"{name}\"";
 "qll_chat_this_chat_was_added_to_2" = "This chat was added to community";
 "qll_chat_this_chat_was_removed_from" = "This chat was removed from community";
-"qll_chat_this_contact" = "this contact";
 "qll_chat_this_conversation_type_is_not" = "This conversation type is not supported yet.";
 "qll_chat_this_message_is_unavailable" = "This message is unavailable.";
 "qll_chat_this_topic_is_closed_new" = "This topic is closed — new messages are disabled.";
@@ -571,3 +572,4 @@
 "qll_chat_your_account_is_frozen_and_2" = "Your account is frozen and read-only. Open the banner at the top for details.";
 "qll_chat_your_number" = "your number";
 "qll_chat_partly_sent" = "Only {sent} of {total} messages were sent. The rest are still here, so you can send them again.";
+"lng_context_view_profile" = "View profile";

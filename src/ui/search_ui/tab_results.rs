@@ -386,7 +386,7 @@ impl QuillApp {
                         .small()
                         .accessibility_label(tr(keys::Q_CHAT_SEARCH_PUBLIC_POSTS_WITH_STARS))
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.set_search_prompt(Some(SearchConfirm::PaidPostSearch), None, cx);
+                            this.set_search_prompt(Some(SearchConfirm::PaidPostSearch), cx);
                         })),
                 )
                 .children(unlock.map(|line| div().text_xs().text_color(muted).child(line)))
