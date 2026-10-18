@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 /// in-memory one). Called on workers.
 pub(in crate::ui) type SecretsFactory = Arc<dyn Fn() -> Box<dyn SecretStore> + Send + Sync>;
 
-pub(super) fn live_secrets() -> SecretsFactory {
+pub(in crate::ui) fn live_secrets() -> SecretsFactory {
     Arc::new(quill::platform::live_secret_store)
 }
 
@@ -65,6 +65,16 @@ pub(in crate::ui) struct Sweep {
 }
 
 impl Sweep {
+    /// Every folder recorded for deletion under `root`: the run's first
+    /// sweep, before any client exists.
+    pub(in crate::ui) fn pending(root: PathBuf, secrets: SecretsFactory) -> Self {
+        Self {
+            keys: pending_deletes(&root),
+            root,
+            secrets,
+        }
+    }
+
     /// Returns the keys whose folders are gone.
     pub(in crate::ui) fn run(self) -> (PathBuf, Vec<AccountKey>) {
         let store = (self.secrets)();

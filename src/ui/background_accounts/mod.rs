@@ -39,7 +39,7 @@ mod calls;
 pub(super) mod chrome;
 mod clicks;
 pub(super) mod closing;
-pub(super) mod deleting;
+pub(in crate::ui) mod deleting;
 mod switch;
 
 /// Clicks on notifications of accounts that are not on screen, queued by

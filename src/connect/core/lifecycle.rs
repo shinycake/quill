@@ -79,11 +79,17 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Kick the JSON client so authorization updates start flowing.
+    ///
+    /// A new client always starts in `authorizationStateWaitTdlibParameters`,
+    /// so the parameters go out at once: TDLib opens its database while the
+    /// window is still being built, instead of after the UI thread has read
+    /// the first state back.
     pub fn kickoff(&mut self) -> Result<RequestId, ConnectSendError> {
         let extra = self
             .session
             .request(RequestPurpose::GetAuthorizationState, None);
         self.sender.send_json(&get_authorization_state(extra))?;
+        self.maybe_send_parameters()?;
         Ok(extra)
     }
 
