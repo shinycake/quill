@@ -42,6 +42,8 @@ pub fn begin(credentials: Option<TelegramCredentials>) {
     let (done, early) = oneshot::channel();
     let spawned = quill::thread_guard::spawn_guarded("quill-early-connect", move || {
         let _ = done.send(prepare(credentials));
+        // After the send: the client must not wait for the call engine.
+        quill::calls::engine::preload_ntgcalls();
     });
     if spawned.is_ok() {
         FIRST.with(|first| *first.borrow_mut() = Some(First::Preparing(early)));
@@ -62,7 +64,6 @@ fn prepare(credentials: Option<TelegramCredentials>) -> Option<Prepared> {
     if prepared.is_ok() {
         // The client opens on the main thread, over the library loaded here.
         let _ = quill::telegram::hub::TdHub::shared(Arc::new(DiscardSink));
-        quill::calls::engine::preload_ntgcalls();
     }
     Some((Some(swept), prepared))
 }
