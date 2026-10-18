@@ -248,7 +248,7 @@ impl QuillApp {
                         IconName::Video
                     })
                     .with_size(px(16.))
-                    .text_color(rgb(MEMBER_NOT_JOINED)),
+                    .text_color(crate::ui::app_theme::call_chrome::group_muted()),
                 )
             })
             .child(Icon::new(mic).with_size(px(20.)).text_color(rgb(mic_color)));
@@ -351,7 +351,7 @@ impl QuillApp {
                     .accessibility_label(tr(keys::PROFILE_ACTION_SHORT_MORE))
                     .ghost()
                     .xsmall()
-                    .text_color(rgb(MEMBER_NOT_JOINED))
+                    .text_color(crate::ui::app_theme::call_chrome::group_muted())
                     .dropdown_menu(build),
             )
             .into_any_element()

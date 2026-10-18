@@ -47,3 +47,27 @@ status text and heavier chips.
 The group panel's secondary text (`0x91979e` on the `0x2c333d` rows) was
 4.3:1, under AA. The panel now draws it at `0xa3a9b0` (4.8:1 on the hover
 row). Other screens that import the old constant are unchanged.
+
+## Follow-up (sweep-r3-call-tokens-2)
+
+- Group member rows (`group_call_members.rs`) draw "not joined" text with
+  `call_chrome::group_muted()` (AA on the raised rows, white in high
+  contrast) instead of the old 4.3:1 literal. Story chrome and the video
+  overlay still import the legacy constant.
+- Premium promo: the white on the brand gradients (feature icon, hero star,
+  discount badge, fallback star) is one fixed `on_brand()` white. The
+  gradients are fixed brand colours, so custom themes and the themed
+  `text_on_fill()` no longer recolour one icon.
+- `demo_high_contrast` is `cfg(feature = "demo-capture")`.
+- Answer and hang-up buttons: `call_chrome::answer_fill()` / `hangup_fill()`.
+  Normal themes keep tdesktop's `0x66c95b` / `0xd75a5a`; high contrast
+  darkens them (`0x1a6b2a`, `0xb3261e`) so white reaches 4.5:1.
+- Tokens audit: neither gpui-kit's theme colours nor `app_theme` /
+  `chat_theme` has a fixed white-on-brand or call-stage token (`text_on_fill`
+  follows the installed theme by design), so the new names are the only ones.
+- Tests pin every normal-theme token to the old literal and check caption,
+  chip icon and white-on-danger contrast in normal and high contrast.
+
+Verification: group call window (`ready-call-screen-share`, three themes)
+and unit tests. The demo has no not-joined member and offline Premium promo
+data is not injected, so those two screens are covered by tests only.
