@@ -86,7 +86,7 @@ impl QuillApp {
                 }
                 BackgroundCallPlan::Ring => {
                     // Answering needs the engine to know the call already.
-                    live.attach_call_engine(&MemorySink::new());
+                    live.attach_call_engine(&DiscardSink);
                     let session = &live.driver.session;
                     let caller = session
                         .user(user_id)

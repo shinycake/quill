@@ -91,7 +91,7 @@ impl QuillApp {
         self.connection
             .set_note(StatusNote::silent(live_status_for(&auth)));
         self.auth_ui.demo_state = auth;
-        live.attach_call_engine(&MemorySink::new());
+        live.attach_call_engine(&DiscardSink);
         // The auto-switch runs on screen; its settings are the app's.
         live.driver.reload_proxy_prefs();
         live.driver.set_stream_volume(self.playback.volume);

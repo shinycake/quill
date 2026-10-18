@@ -36,6 +36,16 @@ pub trait DiagnosticSink: Send + Sync {
     fn record(&self, event: Diagnostic);
 }
 
+/// Drops every diagnostic. The live client receives every TDLib update,
+/// so a sink that keeps them grows for as long as the app runs.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct DiscardSink;
+
+impl DiagnosticSink for DiscardSink {
+    fn record(&self, _event: Diagnostic) {}
+}
+
+/// Keeps every diagnostic, for tests and short-lived probes.
 #[derive(Debug, Default, Clone)]
 pub struct MemorySink {
     inner: Arc<Mutex<Vec<Diagnostic>>>,

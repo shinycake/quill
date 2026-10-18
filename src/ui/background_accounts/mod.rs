@@ -19,7 +19,7 @@
 use super::app::QuillApp;
 use gpui_kit::*;
 use quill::connect::{ClosingSet, LiveConnect, start_background_live_connect};
-use quill::diagnostics::MemorySink;
+use quill::diagnostics::DiscardSink;
 use quill::ids::{AccountKey, ChatId};
 use quill::lang::{keys, tr};
 use quill::notify::NotificationAction;
@@ -296,11 +296,7 @@ impl QuillApp {
                         return;
                     }
                     let started = prepared.and_then(|prepared| {
-                        start_background_live_connect(
-                            credentials,
-                            prepared,
-                            Arc::new(MemorySink::new()),
-                        )
+                        start_background_live_connect(credentials, prepared, Arc::new(DiscardSink))
                     });
                     let (live, status) = match started {
                         Ok(live) => (Some(live), BackgroundStatus::Connecting),
