@@ -70,6 +70,12 @@ impl Session {
                 self.chats_state.chat_action_error =
                     Some(format!("could not clear history (error {})", err.code));
             }
+            // tdesktop deletes the history whether or not leaving worked.
+            Some(RequestPurpose::LeaveBeforeDelete) => {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.chat_list.delete_after_leave.push(chat_id);
+                }
+            }
             Some(RequestPurpose::RemoveChatFromList) => {
                 self.chats_state.chat_action_error =
                     Some(format!("could not delete the chat (error {})", err.code));

@@ -9,8 +9,8 @@ use crate::telegram::requests::{
     ArchiveChatListSettings, add_chat_to_list, add_chat_to_list_value, clear_recently_found_chats,
     create_chat_folder, create_private_chat, delete_chat, delete_chat_folder, delete_chat_history,
     edit_chat_folder, get_archive_chat_list_settings, get_chat_folder, get_chat_lists_to_add_chat,
-    load_chats_list, read_chat_list, remove_chat_action_bar, reorder_chat_folders, report_chat,
-    set_archive_chat_list_settings, set_pinned_chats, toggle_chat_folder_tags,
+    leave_chat, load_chats_list, read_chat_list, remove_chat_action_bar, reorder_chat_folders,
+    report_chat, set_archive_chat_list_settings, set_pinned_chats, toggle_chat_folder_tags,
     toggle_chat_is_marked_as_unread, toggle_chat_is_pinned, view_messages,
 };
 
@@ -620,6 +620,42 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         Ok(Some(extra))
+    }
+
+    /// "Delete and leave" on a basic group. tdesktop leaves first
+    /// (`messages.deleteChatUser` for self) and deletes the history
+    /// whether or not that worked (`ApiWrap::deleteConversation`);
+    /// Telegram X sends `setChatMemberStatus(left)` then
+    /// `deleteChatHistory`. Here `leaveChat` goes out now and
+    /// `maybe_finish_leave_deletes` sends the history deletion once it
+    /// answers, ok or error.
+    pub fn delete_and_leave_basic_group(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::LeaveBeforeDelete;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self.sender.send_json(&leave_chat(extra, chat_id)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Send the queued history deletions of chats whose `leaveChat`
+    /// finished.
+    pub(crate) fn maybe_finish_leave_deletes(&mut self) -> Result<(), ConnectSendError> {
+        let queue = std::mem::take(&mut self.session.chat_list.delete_after_leave);
+        for chat_id in queue {
+            self.remove_chat_from_list(chat_id)?;
+        }
+        Ok(())
     }
 
     /// Slice CL3: `reportChat` (TDLib 1.8.67, schema line 15693) — the

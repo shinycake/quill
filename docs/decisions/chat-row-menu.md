@@ -40,6 +40,14 @@ durations and the folder add and remove calls already existed
 - Delete chat of a basic group reads "Delete and leave" and its confirmation uses
   `lng_sure_delete_and_exit`. Supergroups and channels get "Leave group" or
   "Leave channel" (the existing leave confirmation) instead of "Delete chat".
+- Confirming "Delete and leave" on a basic group sends `leaveChat` first and
+  `deleteChatHistory` with `remove_from_chat_list` once that answers, ok or
+  error. tdesktop does the same in `ApiWrap::deleteConversation`
+  (`api/apiwrap.cpp:2189`: `messages.deleteChatUser` for self, then
+  `deleteHistory` on done or fail) and Telegram X in `Tdlib.deleteChat`
+  (`Tdlib.java:5338`: `setChatMemberStatus(left)`, then `DeleteChatHistory`).
+  Other kinds still send only `deleteChatHistory`. Driver test:
+  `delete_and_leave_a_basic_group_leaves_then_deletes_the_history`.
 - New keys in `lang/en/chat.strings` copied from tdesktop's `lang.strings`.
 
 ## Deviations

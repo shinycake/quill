@@ -293,6 +293,16 @@ impl QuillApp {
         }
         // The chats still in the list, read before the live borrow.
         let selected_chats = self.selected_chat_ids();
+        // A basic group must be left before its history goes.
+        let is_basic_group = self
+            .session()
+            .and_then(|session| session.chats.get(&dialog.chat_id.0))
+            .is_some_and(|chat| {
+                matches!(
+                    chat.kind,
+                    quill::telegram::envelope::ChatKind::BasicGroup { .. }
+                )
+            });
         let note = match self.live.as_mut() {
             Some(live) => {
                 let result = match dialog.action {
@@ -338,6 +348,10 @@ impl QuillApp {
                     // Slice CL1: chat-list "Delete chat" —
                     // `deleteChatHistory` with `remove_from_chat_list:
                     // true` (Telegram X `Tdlib.deleteChat`).
+                    GroupConfirmAction::RemoveFromList if is_basic_group => live
+                        .driver
+                        .delete_and_leave_basic_group(dialog.chat_id)
+                        .map(|sent| sent_note(sent, tr(keys::Q_PEOPLE_DELETING_CHAT))),
                     GroupConfirmAction::RemoveFromList => live
                         .driver
                         .remove_chat_from_list(dialog.chat_id)
