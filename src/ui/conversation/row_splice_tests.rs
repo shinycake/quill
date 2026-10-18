@@ -611,6 +611,83 @@ fn a_dissolve_keeps_the_rows_key_until_it_moves_on(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn only_the_closing_gap_is_remeasured_by_list_index(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    mixed_group(&app, vcx);
+    quill::power_saving::set(0);
+    quill::power_saving::set_force_all(false);
+    quill::power_saving::set_os_reduce_motion(false);
+    app.update(vcx, |app, _| {
+        app.begin_vanish(ChatId(GROUP), &[MessageId(id(5))]);
+        app.paint_vanishing_for_test();
+    });
+    check(
+        &app,
+        vcx,
+        "delete while dissolving",
+        &[&delete(&[5])],
+        Expect::Build,
+    );
+    let closing = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, secs: f32| {
+        app.update(vcx, |app, _| app.set_vanishing_clock(secs));
+        app.update(vcx, |_, cx| cx.notify());
+        frames(vcx);
+        app.read_with(vcx, |app, _| {
+            let list_ix = app
+                .history
+                .rows
+                .iter()
+                .position(|row| row.first_id() == Some(MessageId(id(5))));
+            (app.closing_rows(), list_ix)
+        })
+    };
+    let (before, _) = closing(&app, vcx, 0.05);
+    assert!(before.is_empty(), "not while the row is cut away");
+    for _ in 0..3 {
+        let (rows, list_ix) = closing(&app, vcx, 0.6);
+        let list_ix = list_ix.expect("the ghost's row is among the rows");
+        assert_eq!(rows, vec![list_ix], "its list index, every frame");
+        assert_ne!(list_ix, 5, "a list index, not the history index");
+    }
+    let (after, _) = closing(&app, vcx, 1.2);
+    assert!(after.is_empty(), "stops after the collapse window");
+}
+
+#[gpui_kit::test]
+fn two_reads_in_one_round_see_the_same_phase(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    mixed_group(&app, vcx);
+    quill::power_saving::set(0);
+    quill::power_saving::set_force_all(false);
+    quill::power_saving::set_os_reduce_motion(false);
+    app.update(vcx, |app, _| {
+        app.begin_vanish(ChatId(GROUP), &[MessageId(id(5))]);
+        app.paint_vanishing_for_test();
+    });
+    check(
+        &app,
+        vcx,
+        "delete while dissolving",
+        &[&delete(&[5])],
+        Expect::Build,
+    );
+    let (first, second, later) = app.update(vcx, |app, _| {
+        app.set_vanishing_clock(0.05);
+        let first = app.vanish_rows_hash();
+        // Time passes inside the round: the pinned instant holds.
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        let second = app.vanish_rows_hash();
+        // The next round pins again and sees the later phase.
+        app.set_vanishing_clock(1.2);
+        (first, second, app.vanish_rows_hash())
+    });
+    assert_eq!(first, second, "both reads see the phase of the pin");
+    assert_ne!(second, later, "the next round sees the new phase");
+}
+
+#[gpui_kit::test]
 fn an_unreadable_dissolve_fails_closed(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");
     let vcx = &mut vcx;

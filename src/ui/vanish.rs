@@ -471,8 +471,43 @@ impl QuillApp {
             .into_any_element()
     }
 
+    /// List indices (into the built rows, not the message history) of the
+    /// rows whose gap is closing: only those are measured again each frame.
+    pub(super) fn closing_rows(&self) -> Vec<usize> {
+        let Ok(vanishing) = self.history.vanishing.try_borrow() else {
+            return Vec::new();
+        };
+        vanishing
+            .iter()
+            .filter(|ghost| ghost.row.is_some())
+            .filter(|ghost| {
+                ghost
+                    .elapsed()
+                    .is_some_and(|t| t >= WIPE && t < WIPE + ghost.collapse())
+            })
+            .filter_map(|ghost| {
+                let id = ghost.message.id;
+                self.history
+                    .rows
+                    .iter()
+                    .position(|row| row.first_id() == Some(id))
+            })
+            .collect()
+    }
+
     /// The dust of every crumbling message, over the history.
     pub(super) fn vanish_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        // The list keeps each row's measured height, so a gap that is
+        // closing is measured again every frame to pull the rows below up.
+        // The borrow is dropped before the list is updated.
+        let closing = self.closing_rows();
+        if !closing.is_empty() {
+            self.history.scroller.update(cx, |state, cx| {
+                for row in closing {
+                    let _ = state.remeasure_items(row..row + 1, cx);
+                }
+            });
+        }
         let vanishing = self.history.vanishing.borrow();
         // The rows are kept while it runs: the frame clock drives it.
         if !vanishing.is_empty() {

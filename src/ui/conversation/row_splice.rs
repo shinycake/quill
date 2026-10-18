@@ -47,6 +47,8 @@ impl QuillApp {
         tail: usize,
     ) -> Option<RowSplice> {
         // A crumbling message is merged into the rows on a full build only.
+        // Its only caller, `history_rows_input`, pins the dissolve clock
+        // before the key, so this reads the instant the key was made at.
         if self.stream_rows_hash().is_some() || self.vanish_rows_hash().is_some() {
             return None;
         }

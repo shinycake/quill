@@ -113,7 +113,8 @@ pub(crate) struct HistoryUi {
     /// The instant the rows being worked out are judged at, so the rows key
     /// and the build agree on how far each dissolve has got.
     pub(super) vanish_now: std::cell::Cell<Option<std::time::Instant>>,
-    /// A test holds the instant still so frames cannot cross a phase.
+    /// Test-only, never cleared: holds `vanish_now` still so frames cannot
+    /// cross a phase. Production leaves it false and repins every round.
     pub(super) vanish_held: std::cell::Cell<bool>,
     /// Phase B3: the open chat whose self-destruct countdown badges are
     /// ticking (`Some` exactly while the 1s tick task runs). Mirrors
