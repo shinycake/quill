@@ -57,7 +57,7 @@ pub const SEARCH_LIMIT: i32 = 20;
 pub const RECENT_SEARCH_LIMIT: i32 = 50;
 /// `getTopChats.limit` for the "Frequent contacts" strip (tdesktop shows the
 /// first row and expands on "Show all"; TDLib allows up to 30).
-pub const TOP_CHATS_LIMIT: i32 = 20;
+pub const TOP_CHATS_LIMIT: i32 = 30;
 /// tdesktop `kSearchRequestDelay` / `AutoSearchTimeout` (config.h): 900 ms.
 /// ComposeSearch `requestSearchDelayed` uses the same `AutoSearchTimeout`.
 pub const SEARCH_DEBOUNCE: Duration = Duration::from_millis(900);

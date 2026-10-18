@@ -216,3 +216,27 @@ fn a_refused_remove_surfaces_a_note() {
             .is_some_and(|note| note.contains("recent search"))
     );
 }
+
+#[test]
+fn top_people_lists_known_chats_by_first_name_and_hides_when_disabled() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    for json in [
+        r#"{"@type":"updateUser","user":{"id":31,"first_name":"Ada","last_name":"Lovelace","type":{"@type":"userTypeRegular"},"status":{"@type":"userStatusOnline","expires":4102444800}}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":31,"title":"Ada Lovelace","type":{"@type":"chatTypePrivate","user_id":31},"unread_count":4}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":32,"title":"Grace Hopper","type":{"@type":"chatTypePrivate","user_id":32},"unread_count":0,"is_marked_as_unread":true}}"#,
+    ] {
+        apply_json(&mut session, &seq, &sink, json);
+    }
+    // 99 is not a chat the account knows: tdesktop skips inaccessible users.
+    session.search.search.top_chats = vec![ChatId(31), ChatId(99), ChatId(32)];
+    let people = crate::top_people::top_people(&session);
+    let names: Vec<&str> = people.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, vec!["Ada", "Grace"]);
+    assert_eq!(people.first().and_then(|p| p.unread()), Some((4, false)));
+    assert_eq!(people.get(1).and_then(|p| p.unread()), Some((0, true)));
+    assert!(people.first().is_some_and(|p| p.online));
+    assert!(people.iter().all(|p| !p.muted));
+    session.search.search.top_chats_disabled = true;
+    assert!(crate::top_people::top_people(&session).is_empty());
+}

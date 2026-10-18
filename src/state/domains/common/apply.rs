@@ -49,7 +49,6 @@ impl Session {
                     self.search.search.top_chats_disabled = *off;
                     if *off {
                         self.search.search.top_chats.clear();
-                        self.search.search.top_menu = None;
                     }
                 }
                 if name == "my_id"

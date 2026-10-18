@@ -448,7 +448,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.search.search.top_chats_disabled = disabled;
         if disabled {
             self.session.search.search.top_chats.clear();
-            self.session.search.search.top_menu = None;
         }
         Ok(extra)
     }

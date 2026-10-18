@@ -15,6 +15,22 @@ pub(crate) struct SearchUi {
     pub(super) results_scroll: ScrollHandle,
     /// The search generation the results scroll was last reset for.
     pub(super) seen_generation: std::cell::Cell<u64>,
+    /// Sideways scroll of the top-people strip.
+    pub(super) top_scroll: ScrollHandle,
+    /// When the top-people strip last expanded or collapsed (its
+    /// animation runs from here).
+    pub(super) top_toggled_at: std::cell::Cell<Option<std::time::Instant>>,
+    /// A press on the top-people strip: where the pointer and the scroll
+    /// started, and whether it has become a drag.
+    pub(super) top_drag: std::cell::Cell<Option<TopDrag>>,
+}
+
+/// A drag that scrolls the top-people strip (`stripMouseMoveEvent`).
+#[derive(Clone, Copy)]
+pub(super) struct TopDrag {
+    pub(super) start_x: Pixels,
+    pub(super) start_scroll: Pixels,
+    pub(super) moved: bool,
 }
 
 impl SearchUi {
@@ -29,6 +45,9 @@ impl SearchUi {
             tabs_scroll: ScrollHandle::new(),
             results_scroll: ScrollHandle::new(),
             seen_generation: std::cell::Cell::new(0),
+            top_scroll: ScrollHandle::new(),
+            top_toggled_at: std::cell::Cell::new(None),
+            top_drag: std::cell::Cell::new(None),
         }
     }
 }
