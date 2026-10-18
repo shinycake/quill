@@ -82,6 +82,7 @@ impl super::app::QuillApp {
         if self.background.wiping {
             return;
         }
+        quill::startup_trace::mark("connect_start");
         self.connection.generation += 1;
         let generation = self.connection.generation;
         let credentials = self.credentials.clone();
@@ -105,6 +106,7 @@ impl super::app::QuillApp {
         });
         Self::spawn_main(cx, async move |this, cx| {
             let (swept, prepared) = connect.await;
+            quill::startup_trace::mark("prepare_done");
             let _ = this.update(cx, |this, _| {
                 this.background.screen_preparing =
                     this.background.screen_preparing.saturating_sub(1);
@@ -172,6 +174,7 @@ impl super::app::QuillApp {
         });
         match result {
             Ok(mut live) => {
+                quill::startup_trace::mark("client_open");
                 live.driver.set_stream_volume(self.playback.volume);
                 self.live = Some(live);
             }

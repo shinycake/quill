@@ -62,6 +62,7 @@ fn attach_parent_console() {
 }
 
 fn main() {
+    quill::startup_trace::mark("main");
     quill::crash_log::install_panic_hook();
     #[cfg(windows)]
     attach_parent_console();
@@ -212,7 +213,9 @@ fn ui_main(args: &[String]) {
             }
         }
     });
+    quill::startup_trace::mark("app_launch");
     application.run(move |cx| {
+        quill::startup_trace::mark("app_run");
         cx.set_app_identity("org.shinycake.quill", "Quill");
         #[cfg(windows)]
         quill::notify::register_toast_icon("org.shinycake.quill");
@@ -240,12 +243,14 @@ fn ui_main(args: &[String]) {
                     ..ui::window_frame::window_options("Quill")
                 },
                 move |window, cx| {
+                    quill::startup_trace::mark("window_open");
                     ui::crash_notice::install(window, cx);
                     let view = cx.new(|cx| {
                         let mut app = ui::QuillApp::new(window, cx, credentials.clone());
                         app.pending_deep_link = pending_deep_link.clone();
                         app
                     });
+                    quill::startup_trace::mark("app_new");
                     install_main_window_tray(window, cx, &view);
                     install_link_inbox(window, cx, &view);
                     if window.focused(cx).is_none() {
@@ -483,6 +488,12 @@ fn quill_application(interface_scale_pct: u16) -> gpui_kit::Application {
     use ui::interface_zoom::{ZoomPlatform, set_initial_zoom, zoom_for_percent};
     set_initial_zoom(zoom_for_percent(interface_scale_pct));
     let platform = gpui_kit::platform::current_platform(false);
+    // The kit's theme init lists the installed fonts; started now, the list
+    // is ready by then instead of being built on the main thread.
+    gpui_kit::component::theme::prefetch_installed_font_names(
+        std::sync::Arc::new(gpui_kit::TextSystem::new(platform.text_system())),
+        &platform.background_executor(),
+    );
     gpui_kit::Application::with_platform(std::rc::Rc::new(ZoomPlatform::new(platform)))
 }
 

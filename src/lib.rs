@@ -187,6 +187,7 @@ pub mod spellcheck;
 pub mod star_packs;
 pub mod stars_gift;
 pub mod start_files;
+pub mod startup_trace;
 pub mod stat_chart;
 pub mod state;
 pub mod sticker_image;
