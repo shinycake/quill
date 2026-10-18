@@ -199,7 +199,7 @@ fn topic_updates_keep_tabs_current() {
             .unwrap()
     };
     assert_eq!(t3(&session).unread_count, 1);
-    assert_eq!(t3(&session).last_message_id, 103);
+    assert_eq!(t3(&session).last_message_id, 500);
     assert_eq!(t3(&session).last_message_preview, "ping");
 
     // Pin + mute + read up to the last message.
@@ -336,4 +336,43 @@ fn topic_badge_follows_tdesktop_for_unknown_read_position() {
         .last_read_inbox_message_id = MessageId(503000000000);
     assert_eq!(badge(&session, 481359), TopicBadge::Dot);
     assert_eq!(badge(&session, 479296), TopicBadge::None);
+}
+
+/// A forum row is three lines whatever the setting; a bot that creates its
+/// own topics is one only once it has a topic. "Loading…" ends with the
+/// answer or a failure, and the badge counts topics with unread messages.
+#[test]
+fn forum_rows_follow_display_as_forum() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, &bot_user(43, true, false));
+    apply_json(&mut session, &seq, &sink, &private_chat(43));
+    assert!(session.chat_row_forum(ChatId(43)).is_none());
+    assert_eq!(session.chat_row_lines(ChatId(43), 2), 2);
+    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(43)));
+    apply_json(&mut session, &seq, &sink, &topics_answer(extra.0, 43, &[2, 3]));
+    let row = session.chat_row_forum(ChatId(43)).expect("a forum row");
+    assert!(row.loaded);
+    // Both topics are unread; the newest is first and is the jump target.
+    assert_eq!(row.unread_topics, 2);
+    assert_eq!(row.jump, Some(3));
+    assert_eq!(session.chat_row_lines(ChatId(43), 2), 3);
+
+    // A forum is a forum row at once; "Loading…" until the answer or an error.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":16,"title":"F","type":{"@type":"chatTypeSupergroup","supergroup_id":16,"is_channel":false},"unread_count":0}}"#,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":16,"is_forum":true}}"#,
+    );
+    let row = session.chat_row_forum(ChatId(16)).expect("a forum row");
+    assert!(!row.loaded && row.topics.is_empty());
+    session.threads.forum_topics_failed.insert(16);
+    assert!(session.chat_row_forum(ChatId(16)).expect("row").loaded);
 }

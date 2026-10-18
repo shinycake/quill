@@ -6,6 +6,7 @@ use crate::ids::{ChatId, MessageId};
 use crate::platform::MemorySecretStore;
 use crate::settings::load_media_prefs;
 use crate::subsection_tabs::SubsectionTabsMode;
+use crate::telegram::envelope::AuthorizationState;
 use crate::telegram::client::copy_and_parse;
 use serde_json::Value;
 use std::sync::Arc;
@@ -336,10 +337,10 @@ fn opening_topic_reads_it_and_never_resurrects_a_stale_count() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Forums at the top of the main list load their topics once, before they
-/// are opened, so the row can list the titles.
+/// A forum loads its topics when it appears, once, and only after a request
+/// really went out; an error is final.
 #[test]
-fn forum_rows_load_their_topics_once() {
+fn forums_load_their_topics_when_they_appear() {
     let store = MemorySecretStore::new();
     let (dir, prepared) = prepared_tmp(&store);
     let sink = Arc::new(MemorySink::new());
@@ -352,20 +353,53 @@ fn forum_rows_load_their_topics_once() {
             .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
             .unwrap();
     };
-    ingest(
-        &mut driver,
-        r#"{"@type":"updateNewChat","chat":{"id":61,"title":"Forum","type":{"@type":"chatTypeSupergroup","supergroup_id":61,"is_channel":false},"unread_count":0,"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"5","is_pinned":false}]}}"#,
-    );
+    let chat = |id: i64| {
+        format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"Forum","type":{{"@type":"chatTypeSupergroup","supergroup_id":{id},"is_channel":false}},"unread_count":0}}}}"#
+        )
+    };
+    // A plain supergroup asks for nothing; turning into a forum does.
+    ingest(&mut driver, &chat(61));
+    assert!(sent(&recorder, "getForumTopics").is_empty());
     ingest(
         &mut driver,
         r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":61,"is_forum":true}}"#,
     );
-    driver.pump_forum_row_topics();
     let fetches = sent(&recorder, "getForumTopics");
     assert_eq!(fetches.len(), 1);
     assert_eq!(fetches[0]["chat_id"], 61);
-    // Each forum is asked once, even if the answer never comes.
-    driver.pump_forum_row_topics();
+    assert!(driver.session.threads.forum_row_asked.contains(&61));
+    // Entering the list does not ask again.
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateChatPosition","chat_id":61,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"5","is_pinned":false}}"#,
+    );
     assert_eq!(sent(&recorder, "getForumTopics").len(), 1);
+    // A TDLib error is final: the row reads "No chats" and nothing is resent.
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHANNEL_INVALID"}}"#,
+            fetches[0]["@extra"].as_str().unwrap()
+        ),
+    );
+    assert!(driver.session.threads.forum_topics_failed.contains(&61));
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateChatPosition","chat_id":61,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"6","is_pinned":false}}"#,
+    );
+    assert_eq!(sent(&recorder, "getForumTopics").len(), 1);
+    // A forum seen while the account is not ready is asked later.
+    driver.session.auth = AuthorizationState::WaitPhoneNumber;
+    ingest(&mut driver, &chat(62));
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":62,"is_forum":true}}"#,
+    );
+    assert_eq!(sent(&recorder, "getForumTopics").len(), 1);
+    assert!(!driver.session.threads.forum_row_asked.contains(&62));
+    driver.session.auth = AuthorizationState::Ready;
+    driver.preload_known_forums();
+    assert_eq!(sent(&recorder, "getForumTopics").len(), 2);
     let _ = std::fs::remove_dir_all(&dir);
 }

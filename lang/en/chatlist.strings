@@ -62,6 +62,7 @@
 "lng_filters_link_subtitle" = "Invite link";
 "lng_filters_name_unread" = "Unread";
 "lng_filters_new" = "New Folder";
+"lng_filters_no_chats" = "No chats";
 "lng_filters_recommended" = "Recommended folders";
 "lng_filters_recommended_add" = "Add";
 "lng_filters_remove_sure" = "This will remove the folder, your chats will not be deleted.";

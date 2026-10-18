@@ -1,7 +1,8 @@
 #![cfg(test)]
 #![cfg(feature = "demo-capture")]
-//! A forum row's topic titles through GPUI: they list the latest topics,
-//! and a click opens that topic without the row's own click firing.
+//! A forum row through GPUI: the three-line layout with the topics line and
+//! the unread-topic badge, and that only the jump chip is clickable on that
+//! line.
 
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
@@ -9,7 +10,7 @@ use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
-use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
+use gpui_kit::{AppContext, Bounds, Entity, Pixels, TestAppContext, VisualTestContext, px, size};
 use quill::ids::ChatId;
 
 fn frames(vcx: &mut VisualTestContext) {
@@ -35,17 +36,21 @@ fn open(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     });
     let app: Entity<QuillApp> = slot.borrow().clone().expect("app");
     let mut vcx = VisualTestContext::from_window(handle.into(), cx);
-    // Saved settings of another test may ask for three-line rows, whose
-    // topic line is plain text.
-    app.update(&mut vcx, |app, cx| {
-        app.appearance.preview_lines = 2;
-        cx.notify();
-    });
     frames(&mut vcx);
     (app, vcx)
 }
 
-fn click(vcx: &mut VisualTestContext, id: &'static str) {
+/// The bounds of an element that is in view; fails when it is missing or
+/// clipped away.
+fn shown(vcx: &mut VisualTestContext, id: (&'static str, u64)) -> Bounds<Pixels> {
+    vcx.update(|window, _| {
+        let target = window.find(id);
+        assert!(target.visible(), "{id:?} is not visible");
+        target.bounds()
+    })
+}
+
+fn click(vcx: &mut VisualTestContext, id: (&'static str, u64)) {
     vcx.update(|window, cx| window.click(id, cx));
     frames(vcx);
 }
@@ -59,34 +64,82 @@ fn opened(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> (Option<ChatId
 }
 
 #[gpui_kit::test]
-fn the_row_lists_the_latest_topics_with_unread_ones_marked(cx: &mut TestAppContext) {
-    let (app, mut vcx) = open(cx);
-    let topics = app.update(&mut vcx, |app, _| {
-        app.session()
-            .map(|s| s.chat_row_topics(ChatId(71)))
-            .unwrap_or_default()
-    });
-    let shown: Vec<(&str, bool)> = topics.iter().map(|t| (t.name.as_str(), t.unread)).collect();
+fn a_forum_row_is_three_lines_and_a_plain_row_keeps_its_height(cx: &mut TestAppContext) {
+    let (_app, mut vcx) = open(cx);
+    let vcx = &mut vcx;
+    let forum = shown(vcx, ("chat-row", 71));
+    let plain = shown(vcx, ("chat-row", 11));
+    let line = quill::chatlist_style::chat_row_height_px(false, 3);
+    assert_eq!(f32::from(forum.size.height), line);
     assert_eq!(
-        shown,
-        [
-            ("Off topic", true),
-            ("Release planning", false),
-            ("Backend", true),
-            ("Design", false),
-            ("Announcements", false),
-        ]
+        f32::from(plain.size.height),
+        quill::chatlist_style::chat_row_height_px(false, 2)
     );
-    assert!(vcx.update(|window, _| window.try_find("row-topic-71-6").is_some()));
+    // The topics line sits between the name and the message line.
+    let titles = shown(vcx, ("forum-titles", 71));
+    assert!(titles.origin.y > forum.origin.y + px(20.));
+    assert!(titles.bottom() < forum.bottom() - px(14.));
+    // Titles that do not fit end in an ellipsis inside the row, never past it.
+    assert!(titles.right() <= forum.right());
 }
 
 #[gpui_kit::test]
-fn a_title_opens_its_topic_and_not_just_the_chat(cx: &mut TestAppContext) {
+fn the_badge_counts_unread_topics_not_messages(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    let (unread_topics, messages) = app.update(&mut vcx, |app, _| {
+        let session = app.session().expect("session");
+        (
+            session.chat_row_forum(ChatId(71)).map(|f| f.unread_topics),
+            session
+                .chats
+                .get(&71)
+                .map(|chat| chat.unread_count)
+                .unwrap_or_default(),
+        )
+    });
+    // Two topics have unread messages; the chat itself counts none.
+    assert_eq!(unread_topics, Some(2));
+    assert_eq!(messages, 0);
+    let badge = shown(&mut vcx, ("unread-pill", 71));
+    let titles = shown(&mut vcx, ("forum-titles", 71));
+    // The badge is on the topics line, at its right.
+    assert!(badge.origin.x >= titles.right());
+    assert!(badge.origin.y >= titles.origin.y - px(4.));
+    assert!(badge.bottom() <= titles.bottom() + px(8.));
+}
+
+#[gpui_kit::test]
+fn a_click_on_the_topics_line_opens_the_chat_not_a_topic(cx: &mut TestAppContext) {
     let (app, mut vcx) = open(cx);
     let vcx = &mut vcx;
-    // The newest titles are the ones in view; later ones clip at the edge.
-    click(vcx, "row-topic-71-6");
+    click(vcx, ("forum-titles", 72));
+    assert_eq!(opened(&app, vcx), (Some(ChatId(72)), None));
+}
+
+#[gpui_kit::test]
+fn the_jump_chip_opens_the_topic_of_the_last_message(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    let vcx = &mut vcx;
+    click(vcx, ("forum-jump", 71));
     assert_eq!(opened(&app, vcx), (Some(ChatId(71)), Some(6)));
-    click(vcx, "row-topic-72-4");
-    assert_eq!(opened(&app, vcx), (Some(ChatId(72)), Some(4)));
+}
+
+#[gpui_kit::test]
+fn selection_mode_toggles_the_row_from_its_topics_line_and_chip(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    let vcx = &mut vcx;
+    let before = opened(&app, vcx);
+    app.update_in(vcx, |app, _, cx| app.toggle_chat_selected(ChatId(72), cx));
+    frames(vcx);
+    click(vcx, ("forum-titles", 71));
+    click(vcx, ("forum-jump", 71));
+    let (selected, now) = app.update(vcx, |app, _| {
+        (app.chat_list.selected.clone(), app.session().map(|s| (s.open_chat, s.open_topic)))
+    });
+    // Titles toggled the check, the chip toggled it back: neither opened anything.
+    assert!(selected.contains(&72));
+    assert!(!selected.contains(&71));
+    assert_eq!(now, Some(before));
+    click(vcx, ("forum-titles", 71));
+    assert!(app.update(vcx, |app, _| app.chat_list.selected.contains(&71)));
 }

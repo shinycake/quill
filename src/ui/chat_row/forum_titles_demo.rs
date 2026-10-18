@@ -37,7 +37,7 @@ impl QuillApp {
         let sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         // (chat id, title, [(topic id, name, unread)]); the highest topic
         // id is the most recently active.
-        let forums: [(i64, &str, &[(i32, &str, u32)]); 2] = [
+        let forums: [(i64, &str, &[(i32, &str, u32)]); 3] = [
             (
                 71,
                 "Dev Forum",
@@ -54,9 +54,24 @@ impl QuillApp {
                 "Hiking Club",
                 &[(2, "Trips", 0), (3, "Gear", 0), (4, "Photos", 0)],
             ),
+            // Its topics have not arrived: the line reads "Loading…".
+            (73, "New Forum", &[]),
         ];
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        if let Some(owned) = copy_and_parse(
+            r#"{"@type":"updateUser","user":{"id":81,"first_name":"Maya","last_name":"","type":{"@type":"userTypeRegular"}}}"#,
+            &seq,
+            &sink,
+        ) {
+            session.apply(owned);
+        }
         for (n, (chat, title, topics)) in forums.iter().enumerate() {
             let order = 9_000_000_000_000_000_100_i64 - n as i64;
+            let newest = topics.iter().max_by_key(|t| t.0).map_or(0, |t| t.0);
+            let last = 100 + newest;
+            let said = topics.iter().max_by_key(|t| t.0).map_or("", |t| t.1);
             let updates = [
                 format!(
                     r#"{{"@type":"updateNewChat","chat":{{"id":{chat},"title":"{title}","type":{{"@type":"chatTypeSupergroup","supergroup_id":{chat},"is_channel":false}},"unread_count":0}}}}"#
@@ -67,11 +82,18 @@ impl QuillApp {
                 format!(
                     r#"{{"@type":"updateChatPosition","chat_id":{chat},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"{order}","is_pinned":false}}}}"#
                 ),
+                format!(
+                    r#"{{"@type":"updateChatLastMessage","chat_id":{chat},"last_message":{{"id":{last},"chat_id":{chat},"sender_id":{{"@type":"messageSenderUser","user_id":81}},"date":{date},"is_outgoing":false,"topic_id":{{"@type":"messageTopicForum","forum_topic_id":{newest}}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Latest in {said}","entities":[]}}}}}},"positions":[{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"{order}","is_pinned":false}}]}}"#,
+                    date = now.saturating_sub(120 + 600 * n as u64)
+                ),
             ];
             for json in updates {
                 if let Some(owned) = copy_and_parse(&json, &seq, &sink) {
                     session.apply(owned);
                 }
+            }
+            if topics.is_empty() {
+                continue;
             }
             let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(*chat)));
             let list: Vec<String> = topics

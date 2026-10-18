@@ -27,6 +27,10 @@ pub struct ThreadsState {
     /// list recent topic titles), so a failed answer is not asked again
     /// every poll.
     pub forum_row_asked: HashSet<i64>,
+    /// Forum chats whose topic list request failed: the row then reads "No
+    /// chats" instead of "Loading…" (tdesktop marks the list loaded on a
+    /// failure) and is not asked again.
+    pub forum_topics_failed: HashSet<i64>,
     /// Slice G2: channel-comments viewer — the latest
     /// `getMessageThreadHistory` result (channel post → comment thread).
     pub thread: Option<ThreadView>,
@@ -43,6 +47,7 @@ impl ThreadsState {
             saved: SavedMessagesState::default(),
             forum_tabs_supergroups: HashSet::new(),
             forum_row_asked: HashSet::new(),
+            forum_topics_failed: HashSet::new(),
             thread: None,
         }
     }

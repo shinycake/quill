@@ -51,6 +51,7 @@ impl Session {
                             topic,
                         );
                     }
+                    self.threads.forum_topics_failed.remove(&chat_id.0);
                     self.threads.forum_topics.insert(chat_id.0, topics);
                 }
             }

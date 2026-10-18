@@ -498,6 +498,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .recent_custom_emoji_ids
             .clone();
         let topic_chat = Self::possible_topic_chat(&owned.envelope.payload);
+        let forum_supergroup = Self::possible_forum_supergroup(&owned.envelope.payload);
         let topic_refresh = Self::possible_topic_refresh(&owned.envelope.payload);
         let previous_seq = self.session.last_seq;
         // B7: the step waiting for this answer (basic group upgrade,
@@ -516,7 +517,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some((followup, ok)) = admin_followup {
             self.run_admin_followup(followup, ok);
         }
-        self.maybe_fetch_bot_topics(topic_chat);
+        self.maybe_preload_topics(topic_chat, forum_supergroup);
         self.maybe_refresh_forum_topic(topic_refresh);
         if self.session.last_seq != previous_seq {
             self.session.remember_emoji_pack_usage(&used_emoji);
@@ -632,6 +633,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             let _ = self.get_community_full_info(community_id);
         }
         let became_ready = !was_ready && matches!(self.session.auth, AuthorizationState::Ready);
+        if became_ready {
+            self.preload_known_forums();
+        }
         if became_ready || load_chats_ok {
             self.maybe_load_main_chats()?;
         }

@@ -5,7 +5,11 @@ use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::RequestPurpose;
 use crate::state::ThreadsPurpose;
 use crate::subsection_tabs::SubsectionTabsMode;
-use crate::telegram::envelope::{ChatsPayload, MessagesPayload, ThreadsPayload, UsersPayload};
+use crate::telegram::envelope::ChatKind;
+use crate::telegram::envelope::{
+    ChatList, ChatListPayload, ChatsPayload, GroupsPayload, MessagesPayload, ThreadsPayload,
+    UsersPayload,
+};
 use crate::telegram::envelope::{EnvelopePayload, MUTE_FOREVER};
 use crate::telegram::requests::{
     get_forum_topic, set_forum_topic_notification_settings, view_messages,
@@ -34,44 +38,79 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Some(ChatId(user_id.0))
             }
             EnvelopePayload::Chats(ChatsPayload::UpdateNewChat { chat_id, .. }) => Some(*chat_id),
+            // A chat entering the main list (tdesktop preloads the topics of
+            // every forum in the list).
+            EnvelopePayload::ChatList(ChatListPayload::UpdateChatPosition(position))
+                if position.list == ChatList::Main =>
+            {
+                Some(position.chat_id)
+            }
             _ => None,
         }
     }
 
-    /// Load a bot chat's topic list once it is known to have topics, so the
-    /// chat row can show the topic names, as Telegram Desktop's forum rows
-    /// do. The private chat id equals the bot's user id.
-    pub(crate) fn maybe_fetch_bot_topics(&mut self, chat_id: Option<ChatId>) {
-        if let Some(chat_id) = chat_id
-            && self.session.bot_topics(chat_id).is_some()
-        {
-            let _ = self.maybe_fetch_forum_topics(chat_id);
+    /// A supergroup that just turned out to be a forum (`updateSupergroup`):
+    /// the chats backed by it are checked after `apply`.
+    pub(crate) fn possible_forum_supergroup(payload: &EnvelopePayload) -> Option<i64> {
+        match payload {
+            EnvelopePayload::Groups(GroupsPayload::UpdateSupergroup {
+                supergroup_id,
+                is_forum: true,
+                ..
+            }) => Some(*supergroup_id),
+            _ => None,
         }
     }
 
-    /// Ask for the topic list of the forums at the top of the main list, so
-    /// their rows can list recent topic titles before the forum is opened
-    /// (Telegram Desktop loads them with the list). Each forum is asked once;
-    /// a handful per call keeps a long list from flooding the connection.
-    pub fn pump_forum_row_topics(&mut self) {
-        const WINDOW: usize = 40;
-        const PER_PUMP: usize = 4;
-        let wanted: Vec<ChatId> = self
+    /// Load the topic list of a forum (or a bot with topics) as soon as it
+    /// is known, so its chat row can list the titles before the chat is
+    /// opened (tdesktop `Forum::preloadTopics`). The private chat id of a
+    /// bot equals the bot's user id.
+    pub(crate) fn maybe_preload_topics(&mut self, chat: Option<ChatId>, supergroup: Option<i64>) {
+        let mut ids: Vec<ChatId> = chat.into_iter().collect();
+        if let Some(id) = supergroup {
+            ids.extend(
+                self.session
+                    .chats
+                    .values()
+                    .filter(|c| {
+                        matches!(c.kind, ChatKind::Supergroup { supergroup_id, .. } if supergroup_id == id)
+                    })
+                    .map(|c| c.id),
+            );
+        }
+        for chat_id in ids {
+            self.preload_topics(chat_id);
+        }
+    }
+
+    /// Every forum already known, once the account is ready: updates that
+    /// came before are asked for then.
+    pub(crate) fn preload_known_forums(&mut self) {
+        let ids: Vec<ChatId> = self.session.chats.keys().map(|id| ChatId(*id)).collect();
+        for chat_id in ids {
+            self.preload_topics(chat_id);
+        }
+    }
+
+    /// Each forum is asked once, and only after a request went out (or one is
+    /// already on its way). Not ready yet: it is asked later. A TDLib error
+    /// is final (tdesktop does not retry either).
+    fn preload_topics(&mut self, chat_id: ChatId) {
+        let forum = self
             .session
-            .ordered_chats()
-            .into_iter()
-            .take(WINDOW)
-            .filter(|chat| chat.is_forum_chat())
-            .map(|chat| chat.id)
-            .filter(|id| {
-                !self.session.threads.forum_topics.contains_key(&id.0)
-                    && !self.session.threads.forum_row_asked.contains(&id.0)
-            })
-            .take(PER_PUMP)
-            .collect();
-        for chat_id in wanted {
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.is_forum_chat())
+            || self.session.bot_topics(chat_id).is_some();
+        if !forum
+            || !self.chats_path_active()
+            || self.session.threads.forum_row_asked.contains(&chat_id.0)
+        {
+            return;
+        }
+        if self.maybe_fetch_forum_topics(chat_id).is_ok() {
             self.session.threads.forum_row_asked.insert(chat_id.0);
-            let _ = self.maybe_fetch_forum_topics(chat_id);
         }
     }
 

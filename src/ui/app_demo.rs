@@ -42,7 +42,13 @@ impl QuillApp {
                 .auto_grow(1, 3)
                 .submit_on_enter(submit_on_enter)
         });
-        let appearance_prefs = Self::load_appearance();
+        // Tests start from the defaults: the saved prefs of the machine (or of
+        // another test) must not decide what a window shows.
+        let appearance_prefs = if cfg!(test) {
+            quill::settings::AppearancePrefs::default()
+        } else {
+            Self::load_appearance()
+        };
         let accent_picker = Self::new_accent_picker(appearance_prefs.accent_rgb, window, cx);
         let font_picker = Self::new_font_picker(&appearance_prefs.font_family, window, cx);
         let emoji_search_input = cx.new(|cx| {

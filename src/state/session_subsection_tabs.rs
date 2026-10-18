@@ -52,6 +52,21 @@ pub struct RowTopic {
     pub unread: bool,
 }
 
+/// What a forum's chat row shows below the name: the topic titles and the
+/// unread-topic count.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RowForum {
+    pub topics: Vec<RowTopic>,
+    /// The topic list arrived (or failed): empty then reads "No chats", not
+    /// "Loading…".
+    pub loaded: bool,
+    /// Topics with unread messages (the badge counts topics, not messages).
+    pub unread_topics: i32,
+    /// The topic of the forum's last message when it has unread messages:
+    /// the jump chip opens it.
+    pub jump: Option<i32>,
+}
+
 /// The bot-side topic flags of a private chat (`userTypeBot`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BotTopics {
@@ -178,6 +193,64 @@ impl Session {
             })
     }
 
+    /// Whether the chat list draws the chat as a forum row
+    /// (`PeerData::displayAsForum`): a forum, or a bot with topics once the
+    /// topics are the bot's own or at least one exists.
+    pub fn chat_shown_as_forum(&self, chat_id: ChatId) -> bool {
+        if self
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.is_forum_chat())
+        {
+            return true;
+        }
+        self.bot_topics(chat_id).is_some_and(|bot| {
+            bot.allows_users_to_create_topics
+                || self
+                    .threads
+                    .forum_topics
+                    .get(&chat_id.0)
+                    .is_some_and(|topics| !topics.is_empty())
+        })
+    }
+
+    /// The preview lines the chat row is drawn with: a forum row is always
+    /// the three-line one (name, topics, last message).
+    pub fn chat_row_lines(&self, chat_id: ChatId, setting: u8) -> u8 {
+        if self.chat_shown_as_forum(chat_id) {
+            crate::chatlist_style::PREVIEW_LINES_MAX
+        } else {
+            setting
+        }
+    }
+
+    /// The forum row's second line, `None` for any other chat.
+    pub fn chat_row_forum(&self, chat_id: ChatId) -> Option<RowForum> {
+        if !self.chat_shown_as_forum(chat_id) {
+            return None;
+        }
+        let topics = self.chat_row_topics(chat_id);
+        let unread_topics = self
+            .threads
+            .forum_topics
+            .get(&chat_id.0)
+            .map_or(0, |all| {
+                all.iter()
+                    .filter(|t| {
+                        !t.is_hidden && !matches!(self.topic_badge(chat_id, t), TopicBadge::None)
+                    })
+                    .count()
+            });
+        let jump = topics.first().filter(|t| t.unread).map(|t| t.id);
+        Some(RowForum {
+            loaded: self.threads.forum_topics.contains_key(&chat_id.0)
+                || self.threads.forum_topics_failed.contains(&chat_id.0),
+            unread_topics: i32::try_from(unread_topics).unwrap_or(i32::MAX),
+            jump,
+            topics,
+        })
+    }
+
     /// The chat-list row's topic titles for a chat with topics: the most
     /// recently active topics first (Telegram Desktop's `Forum::
     /// reorderLastTopics`, at most `kShowTopicNamesCount` = 8), each with
@@ -197,7 +270,11 @@ impl Session {
             .take(ROW_TOPIC_COUNT)
             .map(|t| RowTopic {
                 id: t.forum_topic_id,
-                name: t.name.clone(),
+                name: if t.is_general {
+                    format!("# {}", t.name)
+                } else {
+                    t.name.clone()
+                },
                 unread: !matches!(self.topic_badge(chat_id, t), TopicBadge::None),
             })
             .collect()
@@ -351,6 +428,7 @@ impl Session {
         };
         topic.last_message_preview =
             effective_content(&message.content, message.ephemeral.as_ref()).preview();
+        topic.last_message_id = topic.last_message_id.max(message.id.0);
         if !topic.is_pinned && topic.order != top {
             topic.order = top + 1;
         }

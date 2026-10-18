@@ -490,9 +490,6 @@ impl QuillApp {
             self.video_pip_account_ended(&account, cx);
         }
         self.forget_sends_after_auth(&prev_auth, saw_logging_out);
-        if let Some(live) = self.live.as_mut() {
-            live.driver.pump_forum_row_topics();
-        }
         if ingested {
             self.check_video_pip(cx);
             // The tray, the badge and the OS menus follow what was applied.
