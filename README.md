@@ -256,6 +256,14 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] "N Seen / N Reacted" row with reader and reactor lists and read date <!-- parity:menu-seen-by -->
 - [x] "Sent today at 12:34" row in the message menu <!-- parity:menu-sent-time-row -->
 - [x] Translate message and Translate selected text <!-- parity:menu-translate -->
+- [x] Reply to a single poll option or checklist task: "Reply to Option" / "Reply to Task" in the menu, the reply bar shows the item, drafts keep it (#1001) <!-- parity:menu-reply-poll-option-task -->
+- [x] Poll option page: Retract vote, Reply to Option, Copy Option, Copy Option Link, Delete Item, Added by with date (#1001) <!-- parity:menu-poll-option-page -->
+- [x] "Sent by {user}" row for messages posted as a chat (`getMessageAuthor`) (#1001) <!-- parity:menu-sent-by -->
+- [x] Copy Phone Number on a contact message (#1001) <!-- parity:menu-copy-contact-phone -->
+- [ ] "Original date" row for forwarded messages, as tdesktop's context menu shows it <!-- parity:menu-forward-original-date -->
+- [ ] "Send Another Gift" on gift service messages <!-- parity:menu-send-another-gift -->
+- [ ] Block sender from the Replies chat menu <!-- parity:menu-replies-block-sender -->
+- [ ] Save selected rich messages as HTML <!-- parity:menu-save-selection-html -->
 - [x] Reply in Another Chat <!-- parity:menu-reply-another-chat -->
 - [x] Reply options popover: Update Quote, Do Not Reply, Show in Chat <!-- parity:menu-reply-options -->
 - [x] Reply with a timecode on videos and voice messages <!-- parity:menu-reply-timecode -->
@@ -302,6 +310,12 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Keyboard buttons that request users, a chat or a phone number <!-- parity:composer-keyboard-request-buttons -->
 - [x] Inline bot results in a grid and the "switch to PM" button <!-- parity:composer-inline-grid -->
 - [x] Recent inline bots suggested when typing @ <!-- parity:composer-recent-inline-bots -->
+- [ ] Remove a recent inline bot from the "@" suggestions (blocked: TDLib 1.8.68 has no method to remove a recent inline bot) <!-- parity:composer-remove-recent-inline-bot -->
+- [x] "Cancel editing?" confirmation when Esc would drop a changed edit (#996) <!-- parity:composer-cancel-edit-confirm -->
+- [x] Field placeholder follows the context: editing, broadcast, silent broadcast, Stars price; in chat windows too (#996) <!-- parity:composer-context-placeholder -->
+- [ ] Field placeholder for an anonymous admin and for an inline bot's own placeholder text <!-- parity:composer-placeholder-anon-inline -->
+- [x] Clickable reply and edit bars: click opens reply options or jumps to the edited message, Ctrl/Cmd or right click jumps to the replied message (#996) <!-- parity:composer-bar-clicks -->
+- [x] "@" and "/" suggestions follow the caret, with tdesktop's mention rules (#993) <!-- parity:composer-caret-triggers -->
 - [x] Greeting sticker in an empty private chat <!-- parity:composer-greeting-sticker -->
 - [x] Up arrow on a pending media message opens its caption for editing <!-- parity:composer-up-edit-media -->
 - [x] Date formatting (Formatting > Date) and the Insert Unicode control character menu in the composer <!-- parity:composer-unicode-menu -->
@@ -396,6 +410,11 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Chat preview from the keyboard (Ctrl+]) <!-- parity:chatlist-preview-key -->
 - [x] Main menu: My Profile, Contacts, Calls, Night Mode, account list, Set Emoji Status, My Stories, My Groups and Channels <!-- parity:chatlist-main-menu -->
 - [x] "This is your Archive" explainer <!-- parity:chatlist-archive-hint -->
+- [x] Chat row menu: Mute submenu with durations, direct Unmute, "Add to folder" submenu, Delete chat / Delete and leave / Leave group / Leave channel by chat kind (#1013) <!-- parity:chatlist-row-menu-submenus -->
+- [ ] Drop files, or dragged messages, on a chat row to send them there <!-- parity:chatlist-drop-on-row -->
+- [ ] Top-people strip in the empty search state (`getTopChats`) <!-- parity:chatlist-top-people -->
+- [ ] Forum rows show the latest topic titles <!-- parity:chatlist-forum-topic-titles -->
+- [ ] PSA and promoted-chat rows: badge and hide action <!-- parity:chatlist-psa-promoted -->
 
 ### Profiles & shared media
 
@@ -403,6 +422,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] "Copy Mention" in the profile and user-info context menus <!-- parity:profile-copy-mention -->
 - [x] Edit contact and Share contact from a profile <!-- parity:profile-contact-actions -->
 - [x] Copy phone, name, username and link from profile rows <!-- parity:profile-copy-rows -->
+- [x] Copy / Translate (and the Selected variants) on a user's bio and a chat's description, under tdesktop's SkipTranslate rules (#990) <!-- parity:profile-about-translate -->
 - [x] Set or suggest a personal photo for a contact <!-- parity:profile-personal-photo -->
 - [x] Private notes about a user <!-- parity:profile-private-note -->
 - [x] Groups in common list <!-- parity:profile-groups-in-common -->
@@ -868,6 +888,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Similar bots section in the bot profile: getBotSimilarBots, names resolved from the user cache, tap opens the bot chat (state.rs, connect.rs, ui/mod.rs) <!-- parity:bots-similar -->
 - [x] `/` command menu merging chat-specific bot commands and global getCommands (state.rs:3100) <!-- parity:bots-command-menu -->
 - [x] Ephemeral-command icon in the bot command list (BotCommand.is_ephemeral) <!-- parity:bots-ephemeral-command-icon -->
+- [x] "/" command menu in groups lists every bot's commands as /cmd@bot, fetching unknown bot users (#993) <!-- parity:bots-group-commands -->
+- [ ] Enter on a "/" menu row sends the command (Tab inserts it), as tdesktop does <!-- parity:bots-command-menu-enter-sends -->
 - [x] Inline mode: type @bot in composer, inline query results list, send an inline result (`getInlineQueryResults` backend from S9; this slice adds: `@bot query` trigger parse, bot resolution via local user cache with `searchPublicChat` fallback, 100ms-debounced queries, results dropdown with keyboard/mouse pick + next-page loading, `sendInlineQueryResultMessage` send, secret-chat alert on the typed path) <!-- parity:bots-inline-mode -->
 - [x] Games: send / play, high scores (no game code at all) — render `messageGame` as a card (thumbnail/title/text/description); Play reuses the B1 `press_game_button` flow (`callbackQueryPayloadGame` → answer URL opens in OS browser); inline high-score panel via `getGameHighScores` keyed on the current user (toggle open/close); bot profile panel gets a Games section (games cached per bot from `messageGame` traffic in the shared `upsert_message` choke point) with Send buttons → `sendMessage`+`inputMessageGame`; chat-list preview `🎮 {title}` <!-- parity:bots-games -->
 - [x] Poll creation dialog: question, add/remove options (2–10), validation errors, anonymous + multiple-answer toggles (ui/mod.rs:14860, poll.rs:112) <!-- parity:bots-poll-create -->
@@ -1099,6 +1121,8 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Battery and animations: power saving per category <!-- parity:appearance-power-saving -->
 - [x] Chat list quick action on swipe and middle-click (partial: swipe setting exists) <!-- parity:appearance-quick-action -->
 - [x] Spellcheck dictionaries manager with language downloads <!-- parity:appearance-dictionaries -->
+- [ ] 12/24-hour clock that follows the system setting, everywhere Quill shows a time <!-- parity:appearance-clock-format -->
+- [ ] History day separators show the year only by tdesktop's rule (shared-media rows follow it since #991) <!-- parity:render-day-separator-year -->
 
 ### Settings: data, proxy & advanced
 
@@ -1140,6 +1164,8 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Manual "Check for updates" action in Settings/menu <!-- parity:platform-update-check-manual -->
 - [x] Update-available UI: non-intrusive banner/dialog showing the new version and release notes <!-- parity:platform-update-available-ui -->
 - [x] One-click download, install, and restart (replace own binary, relaunch; user confirms — no silent auto-install) <!-- parity:platform-update-install -->
+- [x] Opt-in "Install updates automatically" (off by default): downloads and stages a release, installs it at the next start; Linux and Windows (#994) <!-- parity:platform-update-auto-install -->
+- [x] macOS in-place update of Quill.app behind the same setting: strict signature, designated-requirement and checksum checks before the swap, rollback, location checks (#1008) <!-- parity:platform-update-macos-bundle -->
 - [x] Honest updater states: already up to date, no network, download/install failed with retry (partial: #282 implements release-check states and retry; download/install failure states remain) <!-- parity:platform-update-states -->
 - [x] Outdated-feature placeholder: placeholder card with one-tap update button when the app can't render a new feature <!-- parity:platform-update-placeholder --> (merged #294: readable unsupported-message card and official release/download action; expired media has an expiry notice without an update action; native AX proof)
 - [x] Update changelog display after updates <!-- parity:platform-update-changelog -->
