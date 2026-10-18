@@ -110,6 +110,11 @@ pub(crate) struct HistoryUi {
     pub(super) stream_reveal: std::cell::RefCell<super::bot_stream::StreamReveal>,
     /// Deleted messages still dissolving (`vanish`).
     pub(super) vanishing: std::cell::RefCell<Vec<super::vanish::Vanishing>>,
+    /// The instant the rows being worked out are judged at, so the rows key
+    /// and the build agree on how far each dissolve has got.
+    pub(super) vanish_now: std::cell::Cell<Option<std::time::Instant>>,
+    /// A test holds the instant still so frames cannot cross a phase.
+    pub(super) vanish_held: std::cell::Cell<bool>,
     /// Phase B3: the open chat whose self-destruct countdown badges are
     /// ticking (`Some` exactly while the 1s tick task runs). Mirrors
     /// `slow_mode_tick_chat`.
@@ -176,6 +181,8 @@ impl HistoryUi {
             autoscroll: Default::default(),
             stream_reveal: Default::default(),
             vanishing: Default::default(),
+            vanish_now: Default::default(),
+            vanish_held: Default::default(),
             self_destruct_tick_chat: None,
             live_location_tick_chat: None,
             topic_info_open: false,

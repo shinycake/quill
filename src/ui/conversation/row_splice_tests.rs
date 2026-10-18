@@ -554,7 +554,10 @@ fn a_dissolve_keeps_the_rows_key_until_it_moves_on(cx: &mut TestAppContext) {
     quill::power_saving::set_force_all(false);
     quill::power_saving::set_os_reduce_motion(false);
     let key = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
-        app.read_with(vcx, |app, _| app.vanish_rows_hash())
+        app.read_with(vcx, |app, _| {
+            app.pin_vanish_now();
+            app.vanish_rows_hash()
+        })
     };
     assert_eq!(key(&app, vcx), None, "no dissolve, no key part");
     app.update(vcx, |app, _| {
@@ -605,6 +608,35 @@ fn a_dissolve_keeps_the_rows_key_until_it_moves_on(cx: &mut TestAppContext) {
     app.update(vcx, |_, cx| cx.notify());
     frames(vcx);
     assert_eq!(key(&app, vcx), None, "finished dissolves are dropped");
+}
+
+#[gpui_kit::test]
+fn an_unreadable_dissolve_fails_closed(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    mixed_group(&app, vcx);
+    let revision = app.read_with(vcx, |app, _| {
+        app.session()
+            .and_then(|s| s.histories.get(&GROUP))
+            .map(|h| h.messages.revision())
+    });
+    let revision = revision.expect("the open chat's history");
+    let landed = text_message(id(MESSAGES + 1), Some(21), BASE_DATE + 20 * 86400, "");
+    check(&app, vcx, "one new message", &[&landed], Expect::Splice);
+    let (idle, busy, splice) = app.read_with(vcx, |app, _| {
+        let idle = app.vanish_rows_hash();
+        let held = app.history.vanishing.borrow_mut();
+        let busy = app.vanish_rows_hash();
+        let splice = app
+            .session()
+            .and_then(|s| s.histories.get(&GROUP))
+            .and_then(|h| app.row_splice(&h.messages, h.messages.instance(), revision, None, 0));
+        drop(held);
+        (idle, busy, splice.is_some())
+    });
+    assert_eq!(idle, None, "no dissolve, no key part");
+    assert!(busy.is_some(), "an unreadable dissolve moves the rows key");
+    assert!(!splice, "and the splice stands down");
 }
 
 #[gpui_kit::test]
