@@ -10,9 +10,10 @@
 //! list and the `tg:` URL handler see the replaced bundle, not a process that
 //! happens to run from it.
 //!
-//! Plans, claims and receipts live beside the bundle, not inside it: a file
-//! added under `Contents/` breaks the bundle's seal, which the next update's
-//! check would then refuse.
+//! Plans, claims, receipts, staged bundles and the backup live in a private
+//! folder beside the bundle (`.quill-updates-<uid>`, mode 0700, same
+//! volume): a file added under `Contents/` would break the bundle's seal,
+//! and the bundle's own folder (Applications) is shared with every admin.
 #![deny(clippy::indexing_slicing)]
 
 pub(super) mod codesign;
@@ -59,14 +60,6 @@ pub(super) fn bundle_of(exe: &Path) -> Option<PathBuf> {
 /// The executable inside `bundle`.
 pub(super) fn executable(bundle: &Path) -> PathBuf {
     bundle.join("Contents").join("MacOS").join(PACKAGE_EXE)
-}
-
-/// The receipt beside the bundle (`.Quill.app.last-update.json`), where a
-/// file does not break the bundle's seal.
-pub(super) fn receipt_for(exe: &Path) -> Option<PathBuf> {
-    let bundle = bundle_of(exe)?;
-    let name = bundle.file_name()?.to_string_lossy();
-    Some(bundle.parent()?.join(format!(".{name}.last-update.json")))
 }
 
 // Where the bundle sits.
@@ -117,8 +110,10 @@ pub(super) fn translocated(path: &Path) -> bool {
         .any(|part| matches!(part, Component::Normal(name) if name == "AppTranslocation"))
 }
 
-/// Homebrew keeps cask apps under `Caskroom` (and links them into
-/// Applications, which a canonical path resolves).
+/// Homebrew-owned paths: the Cellar, the prefix, and a cask whose `app`
+/// artifact stays under `Caskroom` (a cask that moves its bundle into
+/// Applications looks like a hand install and is not detected; no Quill
+/// cask exists today).
 pub(super) fn homebrew_cask(path: &Path) -> bool {
     path.components()
         .any(|part| matches!(part, Component::Normal(name) if name == "Caskroom"))
@@ -298,20 +293,13 @@ fn remove_quarantine_attribute(path: &Path) -> io::Result<()> {
 
 /// Starts the bundle at `bundle` with `args` through LaunchServices
 /// (`open -n -a`), as tdesktop's updater does with `launchApplicationAtURL`.
-/// `open` does not pass the caller's environment on, so Quill's own
-/// variables (`QUILL_*`: a data root or a release fixture in test builds)
-/// are forwarded the way a Linux relaunch inherits them.
+/// The launched app inherits this process's environment (`man open`, and
+/// `tests::open_starts_the_bundle_with_its_arguments_and_environment`), so
+/// nothing is passed on the command line: `open`'s argv is readable by every
+/// local user, and the environment can hold `QUILL_API_*`.
 pub(super) fn launch(bundle: &Path, args: &[String]) -> io::Result<()> {
     let mut command = Command::new("/usr/bin/open");
     command.arg("-n").arg("-a").arg(bundle);
-    for (key, value) in std::env::vars_os() {
-        if key.as_bytes().starts_with(b"QUILL_") {
-            let mut pair = key;
-            pair.push("=");
-            pair.push(value);
-            command.arg("--env").arg(pair);
-        }
-    }
     if !args.is_empty() {
         command.arg("--args").args(args);
     }

@@ -17,6 +17,7 @@
 #[cfg(not(target_os = "macos"))]
 mod bundle;
 mod claim;
+mod layout;
 #[cfg(target_os = "macos")]
 mod macos;
 mod manifest;
@@ -27,6 +28,14 @@ pub use staged::{apply_on_start, update_in_progress};
 
 use crate::lang::{Key, keys};
 use crate::updater::{ReleaseInfo, UpdateState};
+// Staging (`ensure_private_dir`) is part of the UI build only.
+#[cfg_attr(not(feature = "ui"), allow(unused_imports))]
+use layout::{
+    Layout, ensure_private_dir, owned_by_me, package_exe, plans_dir, receipt_for, result_path,
+    staged_for, trusted_dir, trusted_file, update_dirs,
+};
+#[cfg(test)]
+use layout::{trusted_dir_as, trusted_file_as};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::{self, OpenOptions};
@@ -90,6 +99,11 @@ pub enum Unavailable {
     PackageManager,
     /// The folder cannot be written without elevation.
     NotWritable,
+    /// Another user owns the install, or the update folder beside it, so
+    /// this user could not clear a backup or trust the update files.
+    OwnedByAnother,
+    /// The startup thread has not answered yet; the switch waits.
+    Checking,
 }
 
 impl Unavailable {
@@ -101,6 +115,8 @@ impl Unavailable {
             Self::ReadOnly => keys::Q_OPS_SELF_UPDATE_READ_ONLY,
             Self::PackageManager => keys::Q_OPS_SELF_UPDATE_PACKAGE_MANAGER,
             Self::NotWritable => keys::Q_OPS_SELF_UPDATE_NOT_WRITABLE,
+            Self::OwnedByAnother => keys::Q_OPS_SELF_UPDATE_OWNED_BY_ANOTHER,
+            Self::Checking => keys::Q_OPS_SELF_UPDATE_CHECKING,
         }
     }
 
@@ -114,112 +130,11 @@ impl Unavailable {
             "read-only" => Self::ReadOnly,
             "package-manager" => Self::PackageManager,
             "not-writable" => Self::NotWritable,
+            "owned-by-another" => Self::OwnedByAnother,
+            "checking" => Self::Checking,
             _ => return None,
         })
     }
-}
-
-/// Where an install keeps its pieces.
-struct Layout {
-    /// What an update replaces: the package directory (Linux, Windows) or
-    /// the app bundle (macOS).
-    install: PathBuf,
-    /// Plans, claims and receipts: inside the install directory, or beside
-    /// the bundle on macOS, whose seal an added file would break.
-    plans: PathBuf,
-    /// Where a staged package waits, on the same volume: beside the install
-    /// directory (Linux and macOS exchange the two) or inside it (Windows
-    /// moves files).
-    stage_root: PathBuf,
-}
-
-impl Layout {
-    /// The layout of the package `exe` belongs to; `None` when `exe` is not
-    /// Quill's package executable (a plain cargo build, a renamed binary, a
-    /// platform without a package).
-    fn of(exe: &Path) -> Option<Layout> {
-        #[cfg(target_os = "macos")]
-        {
-            let install = macos::bundle_of(exe)?;
-            let beside = install.parent()?.to_path_buf();
-            Some(Layout {
-                install,
-                plans: beside.clone(),
-                stage_root: beside,
-            })
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            if !BUNDLE_UPDATES || !packaged(exe) {
-                return None;
-            }
-            let install = exe.parent()?.to_path_buf();
-            let stage_root = if cfg!(windows) {
-                install.clone()
-            } else {
-                install.parent()?.to_path_buf()
-            };
-            Some(Layout {
-                plans: install.clone(),
-                install,
-                stage_root,
-            })
-        }
-    }
-
-    /// Where the previous install waits after a swap until the new version's
-    /// first start (Linux and macOS).
-    fn backup(&self) -> Option<PathBuf> {
-        backup_for(&self.install)
-    }
-}
-
-/// Where the plans, claims and receipts of the install `exe` belongs to
-/// live. A bare executable (a dev build) keeps them beside itself.
-fn plans_dir(exe: &Path) -> Option<PathBuf> {
-    Layout::of(exe)
-        .map(|layout| layout.plans)
-        .or_else(|| exe.parent().map(Path::to_path_buf))
-}
-
-fn receipt_for(exe: &Path) -> PathBuf {
-    #[cfg(target_os = "macos")]
-    if let Some(path) = macos::receipt_for(exe) {
-        return path;
-    }
-    exe.with_extension("last-update.json")
-}
-
-fn result_path() -> Option<PathBuf> {
-    std::env::current_exe().ok().map(|p| receipt_for(&p))
-}
-
-/// The package executable at `exe` sits next to the package's TDLib.
-#[cfg(not(target_os = "macos"))]
-fn packaged(exe: &Path) -> bool {
-    exe.file_name().is_some_and(|n| n == PACKAGE_EXE)
-        && exe
-            .parent()
-            .is_some_and(|install| install.join(PACKAGE_SENTINEL).is_file())
-}
-
-/// The executable inside a staged package.
-fn package_exe(staged: &Path) -> PathBuf {
-    #[cfg(target_os = "macos")]
-    {
-        macos::executable(staged)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        staged.join(PACKAGE_EXE)
-    }
-}
-
-/// Where a swap keeps the previous install directory or bundle:
-/// `.quill.update-backup` (`.Quill.app.update-backup`) beside it.
-fn backup_for(install: &Path) -> Option<PathBuf> {
-    let name = install.file_name()?.to_string_lossy();
-    Some(install.with_file_name(format!(".{name}.update-backup")))
 }
 
 /// What a finished update leaves for the new version's first start: Windows
@@ -235,23 +150,26 @@ fn finish_previous_update() {
     else {
         return;
     };
-    let Some(layout) = Layout::of(&exe) else {
-        return;
-    };
     let _ = crate::thread_guard::spawn_guarded("quill-update-cleanup", move || {
+        // First, so the Settings rows stop saying "checking" at once; render
+        // never computes it (`availability_now`).
+        let _ = can_install_here();
+        let Some(layout) = Layout::of(&exe) else {
+            return;
+        };
         if cfg!(windows) {
             swap::remove_leftovers(&layout.install);
         } else if let Some(backup) = layout.backup() {
             // This version started, so the previous one is no longer needed.
             let _ = swap::recover_or_clear_backup(&layout.install, &exe, &backup);
         }
-        let _ = can_install_here();
     });
 }
 
 pub fn startup_state() -> UpdateState {
     finish_previous_update();
     let result = result_path()
+        .filter(|p| trusted_file(p))
         .and_then(|p| fs::read(p).ok())
         .and_then(|b| serde_json::from_slice::<InstallResult>(&b).ok());
     match result {
@@ -405,13 +323,25 @@ fn installable(exe: &Path) -> Result<(), Unavailable> {
     if swap::distro_managed(&layout.install) {
         return Err(Unavailable::PackageManager);
     }
+    // Another user's install: its backup could never be cleared, and its
+    // update files could not be trusted (`trusted_file`).
+    if !owned_by_me(&layout.install)
+        || (fs::symlink_metadata(&layout.plans).is_ok() && !trusted_dir(&layout.plans))
+    {
+        return Err(Unavailable::OwnedByAnother);
+    }
     // Windows renames files inside the install directory; Linux also swaps
-    // the directory itself, so its parent must be writable too; macOS only
-    // renames the bundle within its parent.
-    let writable = swap::dir_writable(&layout.stage_root)
-        && (cfg!(target_os = "macos")
-            || layout.install == layout.stage_root
-            || swap::dir_writable(&layout.install));
+    // the directory itself, so its parent must be writable too; macOS swaps
+    // the bundle (its folder must be writable) with the staged one in the
+    // private update folder, which is created on first use.
+    let stage_writable = if fs::symlink_metadata(&layout.stage_root).is_ok() {
+        swap::dir_writable(&layout.stage_root)
+    } else {
+        layout.stage_root.parent().is_some_and(swap::dir_writable)
+    };
+    let writable = stage_writable
+        && (layout.install == layout.stage_root || swap::dir_writable(&layout.install))
+        && (!cfg!(target_os = "macos") || layout.install.parent().is_some_and(swap::dir_writable));
     if writable {
         Ok(())
     } else {
@@ -419,13 +349,15 @@ fn installable(exe: &Path) -> Result<(), Unavailable> {
     }
 }
 
+static AVAILABILITY: std::sync::OnceLock<Result<(), Unavailable>> = std::sync::OnceLock::new();
+
 /// Whether this installation can replace itself without elevation, and why
 /// not (app bundle in a read-only place, package manager, Program Files,
 /// AppImage, a plain cargo build); anything else is pointed at the release
-/// download instead. Probed once.
+/// download instead. Probed once, on the startup thread
+/// (`finish_previous_update`) or by the first caller off the render path.
 fn availability() -> Result<(), Unavailable> {
-    static ANSWER: std::sync::OnceLock<Result<(), Unavailable>> = std::sync::OnceLock::new();
-    *ANSWER.get_or_init(|| {
+    *AVAILABILITY.get_or_init(|| {
         let exe = std::env::current_exe()
             .and_then(fs::canonicalize)
             .map_err(|_| Unavailable::NotPackaged)?;
@@ -433,18 +365,27 @@ fn availability() -> Result<(), Unavailable> {
     })
 }
 
+/// The probed answer, or `None` while the startup thread is still at it.
+/// Render reads only this: it never touches the disk.
+fn availability_now() -> Option<Result<(), Unavailable>> {
+    AVAILABILITY.get().copied()
+}
+
+/// Whether a download may be staged here. Computes the answer when the
+/// startup thread has not yet; never called from render.
 pub fn can_install_here() -> bool {
     availability().is_ok()
 }
 
 /// Whether "Install updates automatically" can work here, or the reason it
-/// cannot (the hint under the switch).
+/// cannot (the hint under the switch), `Unavailable::Checking` until the
+/// startup thread has answered.
 pub fn self_update_availability() -> Result<(), Unavailable> {
     #[cfg(any(test, feature = "demo-capture"))]
     if let Some(forced) = FORCED_AVAILABLE.lock().ok().and_then(|guard| *guard) {
         return forced;
     }
-    availability()
+    availability_now().unwrap_or(Err(Unavailable::Checking))
 }
 
 pub fn self_update_available() -> bool {
@@ -484,27 +425,89 @@ fn unpack_package(archive: &Path, staged: &Path) -> std::io::Result<()> {
 /// The checks a staged package passes before its plan is written, and again
 /// in the helper before the swap: on macOS the strict code-signature chain
 /// (`macos::codesign`), then the version probe of the package executable.
-fn verify_staged(
-    layout: &Layout,
-    staged: &Path,
-    release: &ReleaseInfo,
-) -> Result<(), &'static str> {
+fn verify_staged(layout: &Layout, staged: &Path, release: &ReleaseInfo) -> Result<(), Refusal> {
     #[cfg(target_os = "macos")]
     match macos::codesign::verify(&layout.install, staged, &release.version) {
         Ok(()) => {}
         Err(macos::codesign::Rejection::Mismatch(detail)) => {
             eprintln!("quill: update refused: {detail}");
-            return Err(crate::lang::tr(keys::Q_OPS_UPDATE_SIGNED_DIFFERENTLY));
+            return Err(Refusal::SignedDifferently);
         }
         Err(macos::codesign::Rejection::Invalid(detail)) => {
             eprintln!("quill: update refused: {detail}");
-            return Err(crate::lang::tr(keys::Q_OPS_UPDATE_FAILED_VERIFICATION));
+            return Err(Refusal::Invalid);
         }
     }
     #[cfg(not(target_os = "macos"))]
     let _ = layout;
-    probe_binary(&package_exe(staged), &release.version)
-        .map_err(|_| "The downloaded binary failed its version check. Nothing was installed.")
+    probe_binary(&package_exe(staged), &release.version).map_err(|_| Refusal::Probe)
+}
+
+/// Why a staged package was not accepted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Refusal {
+    /// Signed by someone else than the running copy: this copy updates by
+    /// hand, and the release is not downloaded again (`remember_refused`).
+    SignedDifferently,
+    /// A broken signature, another bundle identifier, another version.
+    Invalid,
+    /// The executable did not answer the version probe.
+    Probe,
+}
+
+impl Refusal {
+    fn message(self) -> &'static str {
+        match self {
+            Self::SignedDifferently => crate::lang::tr(keys::Q_OPS_UPDATE_SIGNED_DIFFERENTLY),
+            Self::Invalid => crate::lang::tr(keys::Q_OPS_UPDATE_FAILED_VERIFICATION),
+            Self::Probe => "The downloaded binary failed its version check. Nothing was installed.",
+        }
+    }
+}
+
+impl From<Refusal> for std::io::Error {
+    fn from(refusal: Refusal) -> Self {
+        std::io::Error::other(refusal.message())
+    }
+}
+
+/// Verification, then (macOS) the quarantine mark goes: only a bundle that
+/// passed every check loses it, so a refused one stays quarantined.
+fn accept_staged(layout: &Layout, staged: &Path, release: &ReleaseInfo) -> Result<(), Refusal> {
+    verify_staged(layout, staged, release)?;
+    #[cfg(target_os = "macos")]
+    macos::remove_quarantine(staged).map_err(|_| Refusal::Invalid)?;
+    Ok(())
+}
+
+#[derive(Serialize, Deserialize)]
+struct Refused {
+    version: String,
+}
+
+fn refused_path(layout: &Layout) -> PathBuf {
+    layout.plans.join("refused-release.json")
+}
+
+/// A release refused as signed differently is remembered, so that neither
+/// the launch check nor the button downloads it again.
+fn remember_refused(layout: &Layout, version: &str) {
+    let path = refused_path(layout);
+    let _ = fs::remove_file(&path);
+    if let Ok(bytes) = serde_json::to_vec(&Refused {
+        version: version.to_string(),
+    }) {
+        let _ = write_private(&path, &bytes);
+    }
+}
+
+fn refused_before(layout: &Layout, version: &str) -> bool {
+    let path = refused_path(layout);
+    trusted_file(&path)
+        && fs::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Refused>(&bytes).ok())
+            .is_some_and(|refused| refused.version == version)
 }
 
 /// Before staging a new package (the running install is intact): drops what
@@ -552,6 +555,13 @@ pub fn download_and_stage(release: &ReleaseInfo) -> Result<PathBuf, &'static str
         .and_then(fs::canonicalize)
         .map_err(|_| "Could not locate the installed executable.")?;
     let layout = Layout::of(&target).ok_or("Invalid executable location.")?;
+    if refused_before(&layout, &release.version) {
+        return Err(Refusal::SignedDifferently.message());
+    }
+    // macOS: the private update folder, created closed to everyone else.
+    ensure_private_dir(&layout.stage_root).map_err(
+        |_| "Could not create the update folder beside Quill. Check folder permissions.",
+    )?;
     clear_interrupted_update(&target, &layout);
     let stamp = format!(
         "{}{}-{}-{}",
@@ -566,16 +576,16 @@ pub fn download_and_stage(release: &ReleaseInfo) -> Result<PathBuf, &'static str
     let staged = layout.stage_root.join(format!("{stamp}.new"));
     let archive = layout.stage_root.join(format!("{stamp}.archive"));
     let plan_path = layout.plans.join(format!("{stamp}.json"));
-    let (url, https_only) = crate::updater::download_url(&asset.url);
+    let source = crate::updater::download_source(&asset.url);
     let result = (|| {
         let agent = ureq::Agent::config_builder()
-            .https_only(https_only)
-            .max_redirects(3)
+            .https_only(source.https_only)
+            .max_redirects(source.redirects)
             .timeout_global(Some(Duration::from_secs(300)))
             .build()
             .new_agent();
         let mut response = agent
-            .get(&url)
+            .get(&source.url)
             .header("User-Agent", "Quill-updater")
             .call()
             .map_err(|_| "Download failed. Check your connection and retry.")?;
@@ -605,11 +615,12 @@ pub fn download_and_stage(release: &ReleaseInfo) -> Result<PathBuf, &'static str
         unpack_package(&archive, &staged)
             .map_err(|_| "The downloaded package could not be unpacked. Nothing was installed.")?;
         let _ = fs::remove_file(&archive);
-        verify_staged(&layout, &staged, release)?;
-        // Only a bundle that passed every check loses its quarantine mark.
-        #[cfg(target_os = "macos")]
-        macos::remove_quarantine(&staged)
-            .map_err(|_| "The downloaded app could not be prepared. Nothing was installed.")?;
+        accept_staged(&layout, &staged, release).map_err(|refusal| {
+            if refusal == Refusal::SignedDifferently {
+                remember_refused(&layout, &release.version);
+            }
+            refusal.message()
+        })?;
         // The package may wait on disk until the next start; the helper
         // checks every file against this first.
         let files = manifest::of(&staged)
@@ -799,7 +810,7 @@ fn install_bundle(
         return Err(std::io::Error::other("Invalid update handoff"));
     }
     manifest::verify(&plan.staged, &plan.files)?;
-    verify_staged(layout, &plan.staged, &plan.release).map_err(std::io::Error::other)?;
+    verify_staged(layout, &plan.staged, &plan.release)?;
     if cfg!(windows) {
         write_result(receipt_for(target), &plan.release, false)?;
         return swap::swap_files(&layout.install, &plan.staged, launch);
@@ -880,7 +891,7 @@ fn apply_claimed(
                 plan.as_ref().map_or(&[][..], |plan| plan.args.as_slice()),
             );
             if let Some(plan) = plan
-                && is_temp_entry(&plan.staged)
+                && staged_for(&plan.staged, &target)
             {
                 let _ = swap::remove_any(&plan.staged);
             }
@@ -915,7 +926,7 @@ fn apply_plan(
         // Written first: the restarted version reads it at once.
         let _ = write_result(receipt_for(&target), &plan.release, true);
         let _ = relaunch();
-        if is_temp_entry(&plan.staged) {
+        if staged_for(&plan.staged, &target) {
             let _ = swap::remove_any(&plan.staged);
         }
     }

@@ -38,7 +38,7 @@ const SIGNING_INFORMATION: SecCSFlags = 1 << 1;
 
 /// `codesign --verify --deep --strict`, every architecture, and no
 /// certificate fetch over the network.
-const STRICT: SecCSFlags = kSecCSStrictValidate
+pub(super) const STRICT: SecCSFlags = kSecCSStrictValidate
     | kSecCSCheckNestedCode
     | kSecCSCheckAllArchitectures
     | kSecCSNoNetworkAccess;
@@ -162,7 +162,7 @@ fn gather(running: &Path, staged: &Path, version: &str) -> Result<Facts, String>
 }
 
 /// `None` when the code has no valid signature at all.
-fn signer(code: &SecStaticCode, info: &SigningInfo) -> Option<Signer> {
+pub(super) fn signer(code: &SecStaticCode, info: &SigningInfo) -> Option<Signer> {
     check(code, kSecCSBasicValidateOnly, None).ok()?;
     Some(if info.certificate_count() > 0 {
         Signer::Certificate
@@ -179,13 +179,13 @@ fn status_result(status: OSStatus) -> Result<(), String> {
     }
 }
 
-fn static_code(path: &Path) -> Result<SecStaticCode, String> {
+pub(super) fn static_code(path: &Path) -> Result<SecStaticCode, String> {
     let url = CFURL::from_path(path, true).ok_or_else(|| "invalid bundle path".to_string())?;
     SecStaticCode::from_path(&url, Flags::NONE).map_err(|error| error.to_string())
 }
 
 /// `identifier "<id>"` for a plain identifier.
-fn identifier_requirement(identifier: &str) -> Option<SecRequirement> {
+pub(super) fn identifier_requirement(identifier: &str) -> Option<SecRequirement> {
     if identifier.is_empty() || identifier.contains(['"', '\\']) {
         return None;
     }
@@ -193,7 +193,7 @@ fn identifier_requirement(identifier: &str) -> Option<SecRequirement> {
 }
 
 /// `SecStaticCodeCheckValidity`, with or without a requirement.
-fn check(
+pub(super) fn check(
     code: &SecStaticCode,
     flags: SecCSFlags,
     requirement: Option<&SecRequirement>,
@@ -206,7 +206,7 @@ fn check(
     status_result(status)
 }
 
-fn designated_requirement(code: &SecStaticCode) -> Result<SecRequirement, String> {
+pub(super) fn designated_requirement(code: &SecStaticCode) -> Result<SecRequirement, String> {
     let mut requirement: SecRequirementRef = std::ptr::null_mut();
     // SAFETY: `code` is a live static-code object; on success the out
     // pointer holds a requirement object this process owns one reference to.
@@ -223,10 +223,10 @@ fn designated_requirement(code: &SecStaticCode) -> Result<SecRequirement, String
 }
 
 /// A `SecCodeCopySigningInformation` answer.
-struct SigningInfo(CFDictionary);
+pub(super) struct SigningInfo(CFDictionary);
 
 impl SigningInfo {
-    fn of(code: &SecStaticCode) -> Result<Self, String> {
+    pub(super) fn of(code: &SecStaticCode) -> Result<Self, String> {
         let mut dictionary: CFDictionaryRef = std::ptr::null();
         // SAFETY: `code` is a live static-code object; on success the out
         // pointer holds a dictionary this process owns one reference to.
@@ -266,7 +266,7 @@ impl SigningInfo {
     }
 
     /// The certificate chain's length (0 for an ad-hoc signature).
-    fn certificate_count(&self) -> usize {
+    pub(super) fn certificate_count(&self) -> usize {
         Self::value_in(&self.0, "certificates")
             .and_then(|value| value.downcast::<CFArray>())
             .map_or(0, |array| usize::try_from(array.len()).unwrap_or(0))

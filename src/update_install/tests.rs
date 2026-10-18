@@ -129,6 +129,7 @@ enum App {
 }
 
 impl App {
+    #[cfg(target_os = "macos")]
     fn version(self) -> &'static str {
         match self {
             App::New => "999.0.0",
@@ -200,7 +201,7 @@ impl Fixture {
     }
 
     fn backup(&self) -> PathBuf {
-        backup_for(&self.install).unwrap()
+        Layout::of(&self.target).unwrap().backup().unwrap()
     }
 
     /// A file of the package other than the executable.
@@ -256,13 +257,15 @@ fn bundle_fixture(tag: &str, old_app: App, new_app: App) -> Fixture {
     } else {
         root.join("opt/quill")
     };
-    let staged = root.join("opt/.quill-update-1-999.0.0-1.new");
     write_app(&install, old_app, b"old-td");
-    write_app(&staged, new_app, b"new-td");
     let target = package_exe(&install);
-    let plan_path = plans_dir(&target)
-        .unwrap()
-        .join(".quill-update-1-999.0.0-1.json");
+    // The stage folder: beside the package on Linux, the private update
+    // folder on macOS (created closed to other users, as staging does).
+    let layout = Layout::of(&target).unwrap();
+    ensure_private_dir(&layout.stage_root).unwrap();
+    let staged = layout.stage_root.join(".quill-update-1-999.0.0-1.new");
+    write_app(&staged, new_app, b"new-td");
+    let plan_path = layout.plans.join(".quill-update-1-999.0.0-1.json");
     let old_exe = fs::read(&target).unwrap();
     Fixture {
         root,
@@ -422,11 +425,12 @@ fn staging_first_clears_what_an_interrupted_update_left() {
     fs::write(&fx.plan_path, b"{}").unwrap();
     let backup = fx.backup();
     fs::create_dir_all(&backup).unwrap();
-    fs::write(fx.root.join("opt/.quill-update-2-1.0.0-3.archive"), b"x").unwrap();
     let layout = Layout::of(&fx.target).unwrap();
+    let archive = layout.stage_root.join(".quill-update-2-1.0.0-3.archive");
+    fs::write(&archive, b"x").unwrap();
     clear_interrupted_update(&fx.target, &layout);
     assert!(!backup.exists() && !fx.staged.exists() && !fx.plan_path.exists());
-    assert!(!fx.root.join("opt/.quill-update-2-1.0.0-3.archive").exists());
+    assert!(!archive.exists());
     assert!(fx.target.exists() && fx.payload(&fx.install).exists());
     fs::remove_dir_all(fx.root).unwrap();
 }
@@ -453,5 +457,87 @@ fn only_a_writable_unmanaged_package_can_self_update() {
         assert_eq!(installable(&fx.target), Err(Unavailable::NotWritable));
     }
     fs::set_permissions(&parent, fs::Permissions::from_mode(0o755)).unwrap();
+    // Linux: a read-only install directory too (Windows and Linux rename
+    // inside it; macOS only renames the bundle as a whole).
+    if cfg!(target_os = "linux") {
+        fs::set_permissions(&fx.install, fs::Permissions::from_mode(0o555)).unwrap();
+        if !swap::dir_writable(&fx.install) {
+            assert_eq!(installable(&fx.target), Err(Unavailable::NotWritable));
+        }
+        fs::set_permissions(&fx.install, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    // An update folder another user could write to is not trusted.
+    fs::set_permissions(&layout_of(&fx).plans, fs::Permissions::from_mode(0o777)).unwrap();
+    assert_eq!(installable(&fx.target), Err(Unavailable::OwnedByAnother));
+    fs::set_permissions(&layout_of(&fx).plans, fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(installable(&fx.target), Ok(()));
+    fs::remove_dir_all(fx.root).unwrap();
+}
+
+fn layout_of(fx: &Fixture) -> Layout {
+    Layout::of(&fx.target).unwrap()
+}
+
+#[test]
+fn only_this_users_closed_files_and_folders_are_trusted() {
+    use std::os::unix::fs::MetadataExt;
+    use std::os::unix::fs::PermissionsExt;
+    let root = std::env::temp_dir().join(format!("quill-trusted-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let file = root.join(".quill-update-1.json");
+    write_private(&file, b"{}").unwrap();
+    assert!(trusted_file(&file));
+    let me = fs::metadata(&file).unwrap().uid();
+    // Another owner, or a group or world write bit, and the file is ignored.
+    assert!(!trusted_file_as(
+        &fs::metadata(&file).unwrap(),
+        me.wrapping_add(1)
+    ));
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o664)).unwrap();
+    assert!(!trusted_file(&file));
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o602)).unwrap();
+    assert!(!trusted_file(&file));
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(trusted_file(&file));
+    // A link is never a trusted file, whatever it points at.
+    let link = root.join(".quill-update-2.json");
+    std::os::unix::fs::symlink(&file, &link).unwrap();
+    assert!(!trusted_file(&link));
+    // Folders: this user's, closed to world writes (group write stays
+    // allowed, a private-group umask makes 775 folders the norm).
+    assert!(trusted_dir(&root));
+    assert!(!trusted_dir_as(
+        &fs::metadata(&root).unwrap(),
+        me.wrapping_add(1)
+    ));
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o775)).unwrap();
+    assert!(trusted_dir(&root));
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o777)).unwrap();
+    assert!(!trusted_dir(&root));
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(!trusted_dir(&file));
+    // A private folder is created closed, and one left open is refused.
+    let private = root.join(".quill-updates-test");
+    ensure_private_dir(&private).unwrap();
+    assert_eq!(fs::metadata(&private).unwrap().mode() & 0o777, 0o700);
+    assert!(ensure_private_dir(&private).is_ok());
+    fs::set_permissions(&private, fs::Permissions::from_mode(0o777)).unwrap();
+    assert!(ensure_private_dir(&private).is_err());
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn a_release_refused_as_signed_differently_is_not_downloaded_again() {
+    let fx = bundle_fixture("bundle-refused", App::Old, App::New);
+    let layout = layout_of(&fx);
+    assert!(!refused_before(&layout, "999.0.0"));
+    remember_refused(&layout, "999.0.0");
+    assert!(refused_before(&layout, "999.0.0"));
+    assert!(!refused_before(&layout, "999.0.1"));
+    // Only this user's own note counts.
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(refused_path(&layout), fs::Permissions::from_mode(0o666)).unwrap();
+    assert!(!refused_before(&layout, "999.0.0"));
     fs::remove_dir_all(fx.root).unwrap();
 }

@@ -247,7 +247,7 @@ impl QuillApp {
                         .label(tr(keys::Q_OPS_RESTART_TO_UPDATE))
                         .on_click(cx.listener(|this, _, _, cx| this.restart_to_update(cx))),
                 );
-            } else if release.asset.is_some() && quill::update_install::can_install_here() {
+            } else if release.asset.is_some() && quill::update_install::self_update_available() {
                 let release = release.clone();
                 section = section.child(
                     Button::new("install-quill-update")

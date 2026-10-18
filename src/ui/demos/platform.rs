@@ -44,8 +44,9 @@ impl QuillApp {
         // The demo window is not an installed copy: show the update switches
         // as on an install that can replace itself, or with
         // `QUILL_DEMO_SELF_UPDATE=<reason>` (`0`, `translocated`,
-        // `disk-image`, `read-only`, `package-manager`, `not-writable`) as on
-        // one that cannot, for that reason. `QUILL_DEMO_AUTO_UPDATE=1` starts
+        // `disk-image`, `read-only`, `package-manager`, `not-writable`,
+        // `owned-by-another`, `checking`) as on one that cannot, for that
+        // reason. `QUILL_DEMO_AUTO_UPDATE=1` starts
         // with "Install updates automatically" on.
         #[cfg(feature = "demo-capture")]
         {

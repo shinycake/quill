@@ -54,22 +54,52 @@ pub fn update_asset_name() -> String {
 pub(crate) fn fixture_base() -> Option<String> {
     std::env::var("QUILL_UPDATE_FIXTURE_URL")
         .ok()
-        .filter(|url| url.starts_with("http://127.0.0.1:"))
+        .filter(|url| local_fixture_url(url))
         .map(|url| url.trim_end_matches('/').to_string())
 }
 
-/// Where a release asset is downloaded from, and whether only HTTPS is
-/// allowed: the asset's GitHub URL, or its path under the test fixture.
+/// Exactly `http://127.0.0.1:<port>`, optionally with a trailing slash: no
+/// userinfo (`127.0.0.1:80@evil` would make `evil` the host), no path.
+#[cfg(any(test, feature = "demo-capture"))]
+pub(crate) fn local_fixture_url(url: &str) -> bool {
+    url.strip_prefix("http://127.0.0.1:")
+        .map(|port| port.trim_end_matches('/'))
+        .is_some_and(|port| {
+            (1..=5).contains(&port.len()) && port.bytes().all(|b| b.is_ascii_digit())
+        })
+}
+
+/// Where a release asset is downloaded from.
 // Downloading is part of the UI build only.
 #[cfg_attr(not(feature = "ui"), allow(dead_code))]
-pub(crate) fn download_url(asset_url: &str) -> (String, bool) {
+pub(crate) struct DownloadSource {
+    pub url: String,
+    /// Only HTTPS is allowed (GitHub); the local fixture speaks HTTP.
+    pub https_only: bool,
+    /// GitHub serves assets through a redirect; the fixture must not
+    /// redirect anywhere.
+    pub redirects: u32,
+}
+
+/// The asset's GitHub URL, or its path under the test fixture.
+// Downloading is part of the UI build only.
+#[cfg_attr(not(feature = "ui"), allow(dead_code))]
+pub(crate) fn download_source(asset_url: &str) -> DownloadSource {
     #[cfg(feature = "demo-capture")]
     if let Some(base) = fixture_base()
         && let Some(rest) = asset_url.strip_prefix(&format!("{RELEASES_URL}/download/"))
     {
-        return (format!("{base}/download/{rest}"), false);
+        return DownloadSource {
+            url: format!("{base}/download/{rest}"),
+            https_only: false,
+            redirects: 0,
+        };
     }
-    (asset_url.to_string(), true)
+    DownloadSource {
+        url: asset_url.to_string(),
+        https_only: true,
+        redirects: 3,
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -329,7 +359,22 @@ mod tests {
             assert_eq!(asset, name);
         }
         let github = format!("{RELEASES_URL}/download/v1.0.0/{asset}");
-        assert_eq!(download_url(&github), (github.clone(), true));
+        let source = download_source(&github);
+        assert_eq!(source.url, github);
+        assert!(source.https_only);
+        assert_eq!(source.redirects, 3);
+    }
+
+    #[test]
+    fn only_a_bare_loopback_origin_is_a_fixture_url() {
+        assert!(local_fixture_url("http://127.0.0.1:18765"));
+        assert!(local_fixture_url("http://127.0.0.1:8/"));
+        assert!(!local_fixture_url("http://127.0.0.1:80@evil.com/"));
+        assert!(!local_fixture_url("http://127.0.0.1:80/path"));
+        assert!(!local_fixture_url("http://127.0.0.1"));
+        assert!(!local_fixture_url("https://127.0.0.1:443"));
+        assert!(!local_fixture_url("http://localhost:80"));
+        assert!(!local_fixture_url("http://127.0.0.1:123456"));
     }
 
     #[test]
