@@ -83,7 +83,7 @@ impl ContextMenuItems {
 }
 
 /// One row of a context menu: icon and label in `color`, a hover fill, a
-/// focus handle from `items` (so Up and Down reach it and Enter or Space
+/// focus handle from `items` (so Up, Down and Tab reach it and Enter or Space
 /// run it) and, while keyboard-focused, a ring inside its edge in the theme's
 /// focus colour. The ring is an inset shadow, so it takes no room and hover
 /// (a fill) and focus (a ring) read differently. A disabled row is dimmed and
