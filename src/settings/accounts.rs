@@ -274,6 +274,12 @@ pub fn safe_app_root() -> Option<PathBuf> {
     if let Some(root) = ISOLATED_APP_ROOT.get() {
         return Some(root.clone());
     }
+    // Test installs of the self-updater run beside the user's own Quill with
+    // their own data root. Release builds have no such switch.
+    #[cfg(feature = "demo-capture")]
+    if let Some(root) = std::env::var_os("QUILL_DATA_ROOT").filter(|root| !root.is_empty()) {
+        return Some(PathBuf::from(root));
+    }
     directories::ProjectDirs::from("org", "shinycake", APP_DIR_NAME)
         .map(|dirs| dirs.data_dir().to_path_buf())
 }

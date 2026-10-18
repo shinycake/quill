@@ -343,7 +343,11 @@ fn update_section(
     supported: bool,
 ) -> (Entity<QuillApp>, VisualTestContext) {
     let (app, _shell, mut vcx) = new_app_on(cx, "ready-update-install");
-    quill::update_install::force_self_update_available(Some(supported));
+    quill::update_install::force_self_update_available(Some(if supported {
+        Ok(())
+    } else {
+        Err(quill::update_install::Unavailable::NotPackaged)
+    }));
     app.update(&mut vcx, |_, cx| cx.notify());
     let mut shown = false;
     for _ in 0..40 {
@@ -412,7 +416,7 @@ fn a_release_the_check_finds_is_staged_only_when_opted_in(cx: &mut TestAppContex
     use quill::updater::{RELEASES_URL, ReleaseAsset, ReleaseInfo, UpdateState};
     let _guard = AUTO_UPDATE_STATE.lock().unwrap_or_else(|e| e.into_inner());
     // Forced: the download in the background refuses at once, offline.
-    quill::update_install::force_self_update_available(Some(true));
+    quill::update_install::force_self_update_available(Some(Ok(())));
     let (app, _shell, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     let release = ReleaseInfo {

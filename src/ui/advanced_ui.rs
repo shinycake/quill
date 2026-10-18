@@ -292,7 +292,7 @@ impl QuillApp {
         }
         let row = auto_update::row_state(
             auto_update::install_automatically(),
-            quill::update_install::self_update_available(),
+            quill::update_install::self_update_availability(),
         );
         let label = tr(keys::Q_OPS_INSTALL_UPDATES_AUTOMATICALLY);
         Some(

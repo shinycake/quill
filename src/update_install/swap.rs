@@ -1,7 +1,8 @@
 //! Installing a staged package over the running one, with rollback.
 //!
 //! Linux swaps the whole install directory with one atomic
-//! `renameat2(RENAME_EXCHANGE)`, so the install path always holds a complete
+//! `renameat2(RENAME_EXCHANGE)`, macOS the app bundle with
+//! `renamex_np(RENAME_SWAP)`, so the install path always holds a complete
 //! tree. Filesystems without it get two plain renames, and
 //! [`recover_or_clear_backup`] brings an interrupted swap back before the next
 //! update. Windows cannot replace a running `quill.exe` or a loaded DLL, but it
@@ -42,8 +43,9 @@ fn combine(primary: io::Error, rollback: io::Error) -> io::Error {
 // Linux: the install directory as a whole.
 
 enum Exchange {
-    // Only Linux has the exchange; elsewhere the plain renames always run.
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    // Linux and macOS have the exchange; elsewhere the plain renames always
+    // run.
+    #[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
     Done,
     Unsupported,
 }
@@ -84,7 +86,30 @@ fn exchange(a: &Path, b: &Path) -> io::Result<Exchange> {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+/// Atomically swaps the two paths (both must exist) on APFS and HFS+.
+#[cfg(target_os = "macos")]
+fn exchange(a: &Path, b: &Path) -> io::Result<Exchange> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let invalid = |_| io::Error::other("Invalid path");
+    let a = CString::new(a.as_os_str().as_bytes()).map_err(invalid)?;
+    let b = CString::new(b.as_os_str().as_bytes()).map_err(invalid)?;
+    // SAFETY: both pointers are NUL-terminated strings owned above that
+    // outlive the call; renamex_np only reads them.
+    let rc = unsafe { libc::renamex_np(a.as_ptr(), b.as_ptr(), libc::RENAME_SWAP) };
+    if rc == 0 {
+        return Ok(Exchange::Done);
+    }
+    let error = io::Error::last_os_error();
+    match error.raw_os_error() {
+        // A file system without RENAME_SWAP (a network share), two volumes,
+        // or a sandbox: the plain renames then fail safely.
+        Some(libc::ENOTSUP | libc::EINVAL | libc::EXDEV | libc::EPERM) => Ok(Exchange::Unsupported),
+        _ => Err(error),
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn exchange(_: &Path, _: &Path) -> io::Result<Exchange> {
     Ok(Exchange::Unsupported)
 }

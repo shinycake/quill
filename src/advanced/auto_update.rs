@@ -8,6 +8,7 @@
 //! starts. Quill never restarts itself.
 
 use crate::lang::{Key, keys};
+use crate::update_install::Unavailable;
 use crate::updater::{ReleaseInfo, UpdateState};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -113,25 +114,22 @@ pub struct RowState {
 }
 
 /// The row for a stored choice on an install that can or cannot update
-/// itself. Where it cannot, the switch is off and disabled, and the hint says
-/// why (macOS: the app updates through the release package).
-pub fn row_state(stored: bool, self_update_supported: bool) -> RowState {
-    if self_update_supported {
-        RowState {
+/// itself (`update_install::self_update_availability`). Where it cannot, the
+/// switch is off and disabled, and the hint says why: a translocated app, a
+/// disk image, a read-only disk, a package manager, a folder without write
+/// rights, or not a package at all.
+pub fn row_state(stored: bool, availability: Result<(), Unavailable>) -> RowState {
+    match availability {
+        Ok(()) => RowState {
             checked: stored,
             enabled: true,
             hint: keys::Q_OPS_INSTALL_UPDATES_AUTOMATICALLY_HINT,
-        }
-    } else {
-        RowState {
+        },
+        Err(why) => RowState {
             checked: false,
             enabled: false,
-            hint: if cfg!(target_os = "macos") {
-                keys::Q_OPS_INSTALL_UPDATES_AUTOMATICALLY_MACOS
-            } else {
-                keys::Q_OPS_INSTALL_UPDATES_AUTOMATICALLY_UNAVAILABLE
-            },
-        }
+            hint: why.hint(),
+        },
     }
 }
 
@@ -221,10 +219,18 @@ mod tests {
 
     #[test]
     fn the_row_is_disabled_and_off_where_the_install_cannot_update_itself() {
-        let row = row_state(true, false);
+        let row = row_state(true, Err(Unavailable::NotPackaged));
         assert!(!row.enabled && !row.checked);
-        let row = row_state(true, true);
+        let row = row_state(true, Ok(()));
         assert!(row.enabled && row.checked);
-        assert_ne!(row_state(false, true).hint, row_state(false, false).hint);
+        assert_ne!(
+            row_state(false, Ok(())).hint,
+            row_state(false, Err(Unavailable::NotPackaged)).hint
+        );
+        // Each location problem has its own hint.
+        assert_ne!(
+            row_state(false, Err(Unavailable::Translocated)).hint,
+            row_state(false, Err(Unavailable::ReadOnly)).hint
+        );
     }
 }

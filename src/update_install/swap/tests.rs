@@ -35,8 +35,8 @@ fn plain(_: &Path, _: &Path) -> io::Result<Exchange> {
     Ok(Exchange::Unsupported)
 }
 
-/// The real exchange (atomic on Linux, the plain path elsewhere) and the
-/// forced plain path.
+/// The real exchange (atomic on Linux and macOS, the plain path elsewhere)
+/// and the forced plain path.
 const STRATEGIES: [(&str, ExchangeFn); 2] = [("exchange", exchange), ("plain", plain)];
 
 #[test]
@@ -198,9 +198,9 @@ fn an_incomplete_install_with_a_backup_is_left_alone() {
     fs::remove_dir_all(root).unwrap();
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
-fn renameat2_exchanges_two_directories() {
+fn the_atomic_exchange_swaps_two_directories() {
     let root = scratch("exchange");
     let (a, b) = (root.join("a"), root.join("b"));
     tree(&a, &[("f", "a")]);

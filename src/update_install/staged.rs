@@ -3,7 +3,8 @@
 //! next launch, whatever the "update automatically" switch says by then).
 //!
 //! Quill stages the download with the install plan beside the install
-//! directory. On launch, once this process owns the single-instance lock and
+//! directory (beside the bundle on macOS, `update_install::plans_dir`). On
+//! launch, once this process owns the single-instance lock and
 //! before the UI or any account opens, a valid newer staged update is claimed
 //! and handed to the existing helper, and this process exits; the helper
 //! installs it and starts the new version with this launch's arguments.
@@ -14,7 +15,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::claim::{self, Kind, Liveness};
-use super::{BUNDLE_UPDATES, InstallPlan, installable, read_plan, valid_release};
+use super::{InstallPlan, installable, plans_dir, read_plan, valid_release};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -30,8 +31,8 @@ enum Verdict {
 fn verdict(plan: &InstallPlan, exe: &Path) -> Verdict {
     let present = fs::symlink_metadata(&plan.staged).is_ok();
     if plan.target == exe
-        && plan.bundle == BUNDLE_UPDATES
-        && (!plan.bundle || !plan.files.is_empty())
+        && plan.bundle
+        && !plan.files.is_empty()
         && present
         && valid_release(&plan.release)
     {
@@ -134,13 +135,13 @@ enum Start {
 fn on_start(
     exe: &Path,
     relaunch: &[String],
-    can_install: impl FnOnce(&Path) -> bool,
+    can_install: impl FnOnce(&Path) -> Result<(), super::Unavailable>,
     launch: impl FnOnce(&Path) -> std::io::Result<()>,
 ) -> Start {
-    let Some(install) = exe.parent() else {
+    let Some(plans) = plans_dir(exe) else {
         return Start::Run;
     };
-    let files = update_files(install);
+    let files = update_files(&plans);
     if files.is_empty() {
         return Start::Run;
     }
@@ -156,7 +157,7 @@ fn on_start(
         .filter(|(path, kind)| *kind == Kind::Ready && path.exists())
         .map(|(path, _)| path)
         .collect::<Vec<_>>();
-    if ready.is_empty() || !can_install(exe) {
+    if ready.is_empty() || can_install(exe).is_err() {
         return Start::Run;
     }
     let Some((plan_path, mut plan)) = pick(ready, exe) else {
@@ -183,8 +184,8 @@ fn current_exe() -> Option<PathBuf> {
 /// lock while the new version starts).
 pub fn update_in_progress() -> bool {
     current_exe()
-        .and_then(|exe| exe.parent().map(update_files))
-        .is_some_and(|files| any_live(&files, SystemTime::now()).0)
+        .and_then(|exe| plans_dir(&exe))
+        .is_some_and(|plans| any_live(&update_files(&plans), SystemTime::now()).0)
 }
 
 /// Called once at startup, after the single-instance lock and before the UI:
@@ -204,7 +205,7 @@ pub fn apply_on_start(args: &[String]) -> bool {
 mod tests {
     use super::{Start, Verdict, on_start, pick, verdict};
     use crate::update_install::swap::TEMP_PREFIX;
-    use crate::update_install::{BUNDLE_UPDATES, InstallPlan, InstallResult, read_plan};
+    use crate::update_install::{InstallPlan, InstallResult, read_plan};
     use crate::updater::{RELEASES_URL, ReleaseAsset, ReleaseInfo, update_asset_name};
     use std::cell::Cell;
     use std::fs;
@@ -232,7 +233,7 @@ mod tests {
             staged: staged.clone(),
             parent: 1,
             release: release(version),
-            bundle: BUNDLE_UPDATES,
+            bundle: true,
             args: Vec::new(),
             files: crate::update_install::manifest::of(dir)
                 .unwrap()
@@ -358,7 +359,7 @@ mod tests {
         let start = on_start(
             &exe,
             &relaunch,
-            |_| true,
+            |_| Ok(()),
             |claim| {
                 handed = Some(claim.to_path_buf());
                 Ok(())
@@ -377,7 +378,7 @@ mod tests {
         let second = on_start(
             &exe,
             &[],
-            |_| true,
+            |_| Ok(()),
             |_| {
                 helpers.set(helpers.get() + 1);
                 Ok(())
@@ -415,7 +416,7 @@ mod tests {
             let start = on_start(
                 &exe,
                 &[],
-                |_| true,
+                |_| Ok(()),
                 |_| panic!("no helper for a dead claim"),
             );
             assert_eq!(start, Start::Run, "{tag}");
@@ -426,7 +427,7 @@ mod tests {
             assert_eq!(failed.release.version, "999.0.0");
             // The next start opens normally too.
             assert_eq!(
-                on_start(&exe, &[], |_| true, |_| panic!("nothing left")),
+                on_start(&exe, &[], |_| Ok(()), |_| panic!("nothing left")),
                 Start::Run
             );
             fs::remove_dir_all(dir).unwrap();
@@ -437,7 +438,7 @@ mod tests {
     fn a_claim_just_handed_off_is_left_to_its_helper() {
         let (dir, claim) = abandoned("fresh-claim", "claim", Duration::ZERO);
         let exe = dir.join("quill");
-        let start = on_start(&exe, &[], |_| true, |_| panic!("no second helper"));
+        let start = on_start(&exe, &[], |_| Ok(()), |_| panic!("no second helper"));
         assert_eq!(start, Start::Exit);
         assert!(claim.exists());
         assert!(receipt(&exe).is_none());
@@ -452,7 +453,7 @@ mod tests {
         let start = on_start(
             &exe,
             &[],
-            |_| true,
+            |_| Ok(()),
             |_| Err(std::io::Error::other("spawn failed")),
         );
         assert_eq!(start, Start::Run);
