@@ -30,9 +30,9 @@ pub(crate) struct HistoryRowInputs {
     /// row's height depends on it.
     pub(crate) fact_check_expanded: bool,
     pub(crate) is_secret: bool,
-    /// Delete animation progress (0..1) while the deleted message
-    /// dissolves; `None` for live messages.
-    pub(crate) vanishing: Option<f32>,
+    /// The deleted message is dissolving; its progress is read at render
+    /// (`vanish_progress`), so the row stays the same while it runs.
+    pub(crate) vanishing: bool,
 }
 
 /// The part of a row derived from the session rather than from its

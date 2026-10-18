@@ -200,7 +200,7 @@ impl QuillApp {
                             .fact_check_expanded
                             .contains(&(message.chat_id.0, message.id.0)),
                         is_secret: build.is_secret,
-                        vanishing: self.vanish_progress(message.id),
+                        vanishing: self.vanish_progress(message.id).is_some(),
                         message,
                     })));
                 }
@@ -242,7 +242,7 @@ impl QuillApp {
             unread_divider: false,
             fact_check_expanded: false,
             is_secret: false,
-            vanishing: None,
+            vanishing: false,
             message,
         })))
     }

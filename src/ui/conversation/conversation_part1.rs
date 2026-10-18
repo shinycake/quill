@@ -109,7 +109,7 @@ impl QuillApp {
                 .is_none_or(|c| chat_allows_polls(c.permissions.as_ref()))
         });
         let top = part.top();
-        let dust = top.then(|| self.vanish_overlay()).flatten();
+        let dust = top.then(|| self.vanish_overlay(cx)).flatten();
         let player_bar = top.then(|| self.player_bar(cx)).flatten();
         let call_bar = top
             .then(|| self.call_bar(cx).or_else(|| self.group_call_bar(cx)))

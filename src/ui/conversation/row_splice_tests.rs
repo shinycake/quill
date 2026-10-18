@@ -179,7 +179,6 @@ fn compare_with_full_build(
             assert_eq!(after.splices, before.splices + 1, "{name}");
         }
         Expect::Build => {
-            // More than once while something animates: its key moves each frame.
             assert!(after.rebuilds > before.rebuilds, "{name}: built whole");
             assert_eq!(after.splices, before.splices, "{name}: not spliced");
         }
@@ -544,6 +543,68 @@ fn a_crumbling_message_makes_the_rows_build_whole(cx: &mut TestAppContext) {
         splice_since(app)
     });
     assert_eq!(after, Some(true), "one new message splices without dust");
+}
+
+#[gpui_kit::test]
+fn a_dissolve_keeps_the_rows_key_until_it_moves_on(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    mixed_group(&app, vcx);
+    quill::power_saving::set(0);
+    quill::power_saving::set_force_all(false);
+    quill::power_saving::set_os_reduce_motion(false);
+    let key = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| app.vanish_rows_hash())
+    };
+    assert_eq!(key(&app, vcx), None, "no dissolve, no key part");
+    app.update(vcx, |app, _| {
+        app.begin_vanish(ChatId(GROUP), &[MessageId(id(5))]);
+        app.paint_vanishing_for_test();
+    });
+    check(
+        &app,
+        vcx,
+        "delete while dissolving",
+        &[&delete(&[5])],
+        Expect::Build,
+    );
+    // Frames take a good tenth of a second here: pin the animation's clock
+    // to the phase under test before each stretch of them.
+    let frames_at = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, secs: f32| {
+        app.update(vcx, |app, _| app.set_vanishing_clock(secs));
+        let builds = stats(app, vcx).rebuilds;
+        let first = key(app, vcx);
+        for _ in 0..3 {
+            app.update(vcx, |_, cx| cx.notify());
+            frames(vcx);
+            assert_eq!(key(app, vcx), first, "same key on every frame at {secs}s");
+        }
+        (first, builds)
+    };
+    // The message is among the rows, being cut away.
+    let (rows, builds) = frames_at(&app, vcx, 0.05);
+    assert!(rows.is_some(), "the dissolve runs");
+    assert_eq!(
+        stats(&app, vcx).rebuilds,
+        builds,
+        "frames of a dissolve build no rows"
+    );
+    // The row is gone and only dust is left: the key moves, once.
+    let (dust, builds) = frames_at(&app, vcx, 1.2);
+    assert_ne!(dust, rows, "the row's end changes the key");
+    let rebuilt = stats(&app, vcx).rebuilds;
+    assert!(rebuilt > builds, "the row's end builds the rows again");
+    assert_eq!(
+        rebuilt,
+        builds + 1,
+        "and only once, not on every frame of the dust"
+    );
+    // The dust settles: the dissolve ends, and so does its key part.
+    app.update(vcx, |app, _| app.set_vanishing_clock(2.5));
+    assert_ne!(key(&app, vcx), dust, "the dissolve's end changes the key");
+    app.update(vcx, |_, cx| cx.notify());
+    frames(vcx);
+    assert_eq!(key(&app, vcx), None, "finished dissolves are dropped");
 }
 
 #[gpui_kit::test]

@@ -265,7 +265,39 @@ pub(super) struct Vanishing {
     grains: Rc<Vec<Grain>>,
 }
 
+/// How far a crumbling message has got, as far as the history rows care:
+/// the rows change when this does, never while the animation runs on.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum Phase {
+    /// Deletion requested, not landed yet.
+    Waiting,
+    /// The message (cut away, then its gap closing) is among the rows.
+    InRows,
+    /// Only dust is left, painted over the history.
+    Dust,
+    /// Nothing left to show: due to be dropped.
+    Done,
+}
+
 impl Vanishing {
+    fn phase(&self, now: Instant) -> Phase {
+        let Some(started) = self.started else {
+            return if now.duration_since(self.requested) < VANISH_WAIT {
+                Phase::Waiting
+            } else {
+                Phase::Done
+            };
+        };
+        let t = now.duration_since(started).as_secs_f32();
+        if t >= DUST_LIFE {
+            Phase::Done
+        } else if self.row.is_some() && t < WIPE + self.collapse() {
+            Phase::InRows
+        } else {
+            Phase::Dust
+        }
+    }
+
     fn elapsed(&self) -> Option<f32> {
         Some(self.started?.elapsed().as_secs_f32())
     }
@@ -338,17 +370,10 @@ impl QuillApp {
 
     /// Put the crumbling messages back among `messages` (oldest first)
     /// while their gap closes; drop the finished ones.
-    pub(super) fn merge_vanishing(
-        &self,
-        messages: &mut Vec<HistoryMessage>,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn merge_vanishing(&self, messages: &mut Vec<HistoryMessage>) {
         let now = Instant::now();
         let mut vanishing = self.history.vanishing.borrow_mut();
-        vanishing.retain(|ghost| match ghost.started {
-            Some(started) => now.duration_since(started).as_secs_f32() < DUST_LIFE,
-            None => now.duration_since(ghost.requested) < VANISH_WAIT,
-        });
+        vanishing.retain(|ghost| ghost.phase(now) != Phase::Done);
         let chat = messages.first().map(|m| m.chat_id);
         let mut added = false;
         for ghost in vanishing.iter_mut() {
@@ -365,8 +390,7 @@ impl QuillApp {
                 }));
             }
             // The row stays (cut away, then closing) until its gap is gone.
-            let t = ghost.elapsed().unwrap_or(0.);
-            if ghost.row.is_some() && t < WIPE + ghost.collapse() {
+            if ghost.phase(now) == Phase::InRows {
                 messages.push(ghost.message.clone());
                 added = true;
             }
@@ -374,29 +398,33 @@ impl QuillApp {
         if added {
             messages.sort_by_key(|m| m.id.0);
         }
-        if !vanishing.is_empty() {
-            self.request_animation_tick(60, cx);
-        }
     }
 
     /// Seconds since a crumbling message left the history.
     pub(super) fn vanish_progress(&self, id: MessageId) -> Option<f32> {
-        let vanishing = self.history.vanishing.borrow();
+        let vanishing = self.history.vanishing.try_borrow().ok()?;
         vanishing
             .iter()
             .find(|ghost| ghost.message.id == id)?
             .elapsed()
     }
 
-    /// For the history rows key: a fresh value every frame while a
-    /// message crumbles.
-    pub(super) fn vanish_rows_hash(&self) -> Option<u128> {
-        let vanishing = self.history.vanishing.borrow();
-        (!vanishing.is_empty()).then(|| {
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |elapsed| elapsed.as_nanos())
-        })
+    /// For the history rows key: which messages crumble and how far each
+    /// has got (`Phase`), not the animation's progress. The rows read that
+    /// at render (`vanish_progress`), so the key only changes when a
+    /// dissolve starts, moves on to dust or ends.
+    pub(super) fn vanish_rows_hash(&self) -> Option<u64> {
+        use std::hash::{Hash, Hasher};
+        let vanishing = self.history.vanishing.try_borrow().ok()?;
+        if vanishing.is_empty() {
+            return None;
+        }
+        let now = Instant::now();
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for ghost in vanishing.iter() {
+            (ghost.message.id.0, ghost.phase(now)).hash(&mut hasher);
+        }
+        Some(hasher.finish())
     }
 
     /// A crumbling message's row, `t` seconds in: the message cut away
@@ -423,8 +451,12 @@ impl QuillApp {
     }
 
     /// The dust of every crumbling message, over the history.
-    pub(super) fn vanish_overlay(&self) -> Option<AnyElement> {
+    pub(super) fn vanish_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let vanishing = self.history.vanishing.borrow();
+        // The rows are kept while it runs: the frame clock drives it.
+        if !vanishing.is_empty() {
+            self.request_animation_tick(60, cx);
+        }
         let clouds: Vec<(f32, Rc<Vec<Grain>>)> = vanishing
             .iter()
             .filter_map(|ghost| Some((ghost.elapsed()?, ghost.grains.clone())))
@@ -458,6 +490,31 @@ impl QuillApp {
             .size_full()
             .into_any_element(),
         )
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+impl QuillApp {
+    /// Give every dissolve a painted row (nothing is painted in a test) so
+    /// its row phase lasts about a second.
+    pub(super) fn paint_vanishing_for_test(&self) {
+        let area = Bounds::new(point(px(0.), px(0.)), size(px(300.), px(2000.)));
+        for ghost in self.history.vanishing.borrow_mut().iter_mut() {
+            ghost.row = Some(area);
+            ghost.bubble = Some(area);
+        }
+    }
+
+    /// Put every started dissolve `secs` into its animation.
+    pub(super) fn set_vanishing_clock(&self, secs: f32) {
+        let back = Duration::from_secs_f32(secs);
+        let now = Instant::now();
+        for ghost in self.history.vanishing.borrow_mut().iter_mut() {
+            if ghost.started.is_some() {
+                ghost.started = now.checked_sub(back);
+            }
+        }
     }
 }
 

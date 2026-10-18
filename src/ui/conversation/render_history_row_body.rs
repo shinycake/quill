@@ -187,7 +187,10 @@ impl QuillApp {
                 // The side the bubble sits on (`hasRightLayout`): the wide
                 // layout keeps outgoing messages on the left.
                 let right = quill::chat_wide::has_right_layout(message.is_outgoing, look.wide);
-                let vanishing = inputs.vanishing;
+                let vanishing = inputs
+                    .vanishing
+                    .then(|| self.vanish_progress(row_msg))
+                    .flatten();
                 let highlighted = inputs.highlighted;
                 let failed = message.failed;
                 let run_start = inputs.run_start;
