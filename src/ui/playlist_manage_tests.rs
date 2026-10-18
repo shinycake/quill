@@ -141,6 +141,27 @@ fn tab_reaches_the_track_menu_items(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn escape_closes_the_track_menu(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_playlist(&app, vcx);
+    app.update_in(vcx, |app, _, cx| {
+        app.open_playlist_menu(FileId(2), point(px(300.), px(200.)), cx);
+    });
+    vcx.run_until_parked();
+    vcx.simulate_keystrokes("down");
+    vcx.simulate_keystrokes("escape");
+    vcx.run_until_parked();
+    app.read_with(vcx, |app, _| {
+        assert!(
+            app.playback.playlist_menu.is_none(),
+            "Escape closed the menu"
+        );
+        assert!(!app.context_menu_open());
+    });
+}
+
+#[gpui_kit::test]
 fn down_and_up_wrap_through_the_track_menu_items(cx: &mut TestAppContext) {
     let (app, _shell, mut vcx) = new_app(cx);
     let vcx = &mut vcx;

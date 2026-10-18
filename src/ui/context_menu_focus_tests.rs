@@ -161,7 +161,11 @@ fn down_cycles_every_story_menu_item(cx: &mut TestAppContext) {
     });
     vcx.run_until_parked();
     let expected = app.read_with(vcx, |app, _| app.story_menu_entries(1).len());
-    assert!(expected > 0, "the story menu has items");
+    let drawn = app.read_with(vcx, |app, _| app.frame.context_menu_items.enabled_count());
+    assert_eq!(
+        drawn, expected,
+        "every story menu entry is a focusable item"
+    );
     assert_eq!(cycle_len(vcx, "down"), expected);
     assert_eq!(cycle_len(vcx, "up"), expected);
 }
@@ -203,6 +207,7 @@ fn a_menu_without_items_keeps_the_focus_on_its_frame(cx: &mut TestAppContext) {
             chat_id: quill::ids::ChatId(1),
             position: point(px(40.), px(80.)),
             submenu: None,
+            top_person: false,
         });
         cx.notify();
     });

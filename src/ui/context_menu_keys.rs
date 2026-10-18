@@ -16,7 +16,7 @@
 //! focus.
 //!
 //! The arrows are not in the shortcut list and cannot be rebound: the
-//! keystroke interceptor (`app_demo.rs`) handles them, because they must
+//! keystroke interceptor (`app_demo.rs`, via `context_menu_key`) handles them, because they must
 //! work while the focus is still outside the menu.
 #![deny(clippy::indexing_slicing)]
 
@@ -40,7 +40,8 @@ pub(super) struct ContextMenuItems {
 }
 
 impl ContextMenuItems {
-    /// A new frame starts: no item has been drawn yet.
+    /// A new frame starts: no item has been drawn yet. The handles are
+    /// retained across frames; only the claim counter resets.
     pub(super) fn begin(&self) {
         self.drawn.set(0);
     }
@@ -82,7 +83,7 @@ impl ContextMenuItems {
 }
 
 /// One row of a context menu: icon and label in `color`, a hover fill, a
-/// focus handle from `items` (so Up, Down and Tab reach it and Enter or Space
+/// focus handle from `items` (so Up and Down reach it and Enter or Space
 /// run it) and, while keyboard-focused, a ring inside its edge in the theme's
 /// focus colour. The ring is an inset shadow, so it takes no room and hover
 /// (a fill) and focus (a ring) read differently. A disabled row is dimmed and
@@ -156,6 +157,30 @@ impl QuillApp {
         true
     }
 
+    /// The keystroke interceptor's hook: with a context menu open, Escape
+    /// closes it and Up/Down move its focus. Returns whether the key was
+    /// taken. The arrows are swallowed whenever a menu is open, even one with
+    /// no items and with the focus moved back to the composer; they never
+    /// reach the chat list under it.
+    pub(super) fn context_menu_key(
+        &mut self,
+        key: &Keystroke,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.context_menu_open() {
+            return false;
+        }
+        if key.key == "escape" {
+            return self.dismiss_context_menus(cx);
+        }
+        if let Some(forward) = arrow_direction(key) {
+            self.move_context_menu_focus(forward, window, cx);
+            return true;
+        }
+        super::keybindings::context_menu_captures_key(key)
+    }
+
     /// Up or Down with a menu open: focus the next (or previous) enabled item
     /// of that menu, wrapping, wherever the focus was. With no enabled item
     /// (the message and chat menus, or every item disabled) the menu frame
@@ -170,6 +195,11 @@ impl QuillApp {
         }
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "context_menu_focus_tests.rs"]
+mod context_menu_focus_tests;
 
 /// `Some(true)` for a plain Down, `Some(false)` for a plain Up.
 pub(super) fn arrow_direction(key: &Keystroke) -> Option<bool> {
