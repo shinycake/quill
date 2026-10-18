@@ -359,6 +359,14 @@ impl QuillApp {
         if live.driver.end_batch().is_err() {
             send_failed = true;
         }
+        if quill::startup_trace::enabled() {
+            if matches!(live.driver.session.auth, AuthorizationState::Ready) {
+                quill::startup_trace::mark("auth_ready");
+            }
+            if !live.driver.session.main_order.is_empty() {
+                quill::startup_trace::mark("chats_loaded");
+            }
+        }
         // The receive thread ended on its own (panic or closed channel):
         // nothing more will arrive, so surface it like an unexpected
         // Closed with a Retry instead of a UI that silently goes stale.

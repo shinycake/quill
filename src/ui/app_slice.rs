@@ -543,6 +543,13 @@ impl QuillApp {
                 }
             }
             SliceKind::Sidebar => {
+                if quill::startup_trace::enabled()
+                    && self
+                        .session()
+                        .is_some_and(|session| !session.main_order.is_empty())
+                {
+                    quill::startup_trace::mark("chat_list");
+                }
                 let auth_state = self.current_auth();
                 let auth = quill::auth::view_for(&auth_state);
                 self.sidebar(&auth, false, false, false, false, window, cx)

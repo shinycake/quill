@@ -6,7 +6,7 @@
 use super::QuillApp;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectState};
-use gpui_kit::component::theme::{ActiveTheme, Theme};
+use gpui_kit::component::theme::{ActiveTheme, Theme, installed_font_names};
 use gpui_kit::component::{IndexPath, StyledExt as _};
 use gpui_kit::*;
 use quill::lang::{keys, tr};
@@ -16,10 +16,10 @@ use std::sync::OnceLock;
 /// The first entry of the font list: the platform default (`lng_font_default`).
 const DEFAULT_LABEL: &str = "Default";
 
-/// Installed font families, queried once: fonts don't change while running.
+/// Installed font families, from the kit's list (enumerated once per run).
 fn installed_fonts(cx: &App) -> &'static [String] {
     static FONTS: OnceLock<Vec<String>> = OnceLock::new();
-    FONTS.get_or_init(|| quill::font_choice::choices(cx.text_system().all_font_names()))
+    FONTS.get_or_init(|| quill::font_choice::choices(installed_font_names(cx).iter().cloned()))
 }
 
 /// The family to draw the interface in: the stored choice when it is still
