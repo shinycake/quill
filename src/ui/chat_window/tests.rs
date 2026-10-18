@@ -913,3 +913,28 @@ fn a_chat_window_shows_the_placeholder_of_its_own_chat(cx: &mut TestAppContext) 
     });
     assert_eq!(main_text, "Write a message…");
 }
+
+#[gpui_kit::test]
+fn a_pending_chrome_notify_clears_when_the_window_lost_its_view(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let _chat_window = h.open_in_new_window(OTHER, cx);
+    let slot = h
+        .app
+        .read_with(cx, |app, _| app.windows.slot_for(OTHER))
+        .expect("slot");
+    slot.borrow().history.chrome_notify_pending.set(true);
+    // The window is live, but its session view is gone.
+    h.app.update(cx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.close_window_chat(OTHER);
+        }
+    });
+    h.app.update(cx, |app, cx| {
+        assert!(app.in_window_scope(Some(OTHER), cx, |_, _| ()).is_none());
+        app.finish_chrome_notify(Some(OTHER), cx);
+    });
+    assert!(
+        !slot.borrow().history.chrome_notify_pending.get(),
+        "the flag cannot stick"
+    );
+}
