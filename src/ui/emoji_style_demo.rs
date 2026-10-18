@@ -57,8 +57,14 @@ impl QuillApp {
         let sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
-            for (id, outgoing, text) in MESSAGES {
-                let message = serde_json::json!({
+            // Flags in a bold title too: the chat header and the chat list.
+            let title = serde_json::json!({
+                "@type": "updateChatTitle",
+                "chat_id": 11,
+                "title": "Road trip \u{1f1fa}\u{1f1f8} \u{1f1e8}\u{1f1e6} \u{1f680}"
+            });
+            let messages = MESSAGES.into_iter().map(|(id, outgoing, text)| {
+                serde_json::json!({
                     "@type": "updateNewMessage",
                     "message": {
                         "id": id,
@@ -70,9 +76,10 @@ impl QuillApp {
                             "text": {"@type": "formattedText", "text": text, "entities": []}
                         }
                     }
-                });
-                if let Some(owned) = copy_and_parse(&message.to_string(), &self.demo_ui.seq, &sink)
-                {
+                })
+            });
+            for update in std::iter::once(title).chain(messages) {
+                if let Some(owned) = copy_and_parse(&update.to_string(), &self.demo_ui.seq, &sink) {
                     session.apply(owned);
                 }
             }

@@ -148,9 +148,13 @@ pub(crate) fn titlebar_hidden() -> bool {
 /// The bar above the window content: the kit `TitleBar` with Quill's own
 /// frame, or, with the system frame, a slim action row that drops the caption
 /// and the caption buttons (the OS draws both) and the drag area.
+///
+/// An in-window menu bar (Linux and Windows) leads the same row under both
+/// frames, in place of the caption, so the window has one bar, not two.
 #[derive(IntoElement)]
 pub(crate) struct FrameTitleBar {
     caption: Option<AnyElement>,
+    menu: Option<AnyElement>,
     children: SmallVec<[AnyElement; 2]>,
     on_close_window: Option<Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>>,
     /// Overrides [`use_native`] (tests draw both frames on any platform).
@@ -161,6 +165,7 @@ impl FrameTitleBar {
     pub(crate) fn new() -> Self {
         Self {
             caption: None,
+            menu: None,
             children: SmallVec::new(),
             on_close_window: None,
             native: None,
@@ -177,6 +182,13 @@ impl FrameTitleBar {
     /// The window title, shown only in Quill's own bar.
     pub(crate) fn caption(mut self, caption: impl IntoElement) -> Self {
         self.caption = Some(caption.into_any_element());
+        self
+    }
+
+    /// The in-window menu bar, leading the row under both frames. It takes
+    /// the caption's place: the OS already names the window in its taskbar.
+    pub(crate) fn menu(mut self, menu: impl IntoElement) -> Self {
+        self.menu = Some(menu.into_any_element());
         self
     }
 
@@ -198,8 +210,18 @@ impl ParentElement for FrameTitleBar {
 
 impl RenderOnce for FrameTitleBar {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        // The menu fills the free width so its trailing space still drags.
+        let menu = self.menu.map(|menu| {
+            div()
+                .h_full()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .items_center()
+                .child(menu)
+        });
         if self.native.unwrap_or_else(use_native) {
-            if self.children.is_empty() {
+            if self.children.is_empty() && menu.is_none() {
                 return div().into_any_element();
             }
             let theme = cx.theme();
@@ -214,15 +236,20 @@ impl RenderOnce for FrameTitleBar {
                 .bg(theme.title_bar)
                 .border_b_1()
                 .border_color(theme.title_bar_border)
+                .children(menu)
                 .children(self.children)
                 .into_any_element();
         }
         let on_close = self.on_close_window;
+        let lead = match menu {
+            Some(menu) => Some(menu.into_any_element()),
+            None => self.caption,
+        };
         TitleBar::new()
             .when_some(on_close, |bar, close| {
                 bar.on_close_window(move |event, window, cx| close(event, window, cx))
             })
-            .children(self.caption)
+            .children(lead)
             .children(self.children)
             .into_any_element()
     }

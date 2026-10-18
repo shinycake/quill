@@ -555,24 +555,14 @@ impl Render for QuillApp {
             .on_action(cx.listener(|this, _: &ComposerPastePlain, window, cx| {
                 this.paste_plain_text(window, cx);
             }))
-            // kit Phase 7: in-window menu bar on Linux/Windows (macOS uses
-            // the native menu bar installed by `setup_app_menus`).
-            .when(cfg!(not(target_os = "macos")), |this| {
-                this.child(
-                    div()
-                        .h(px(30.))
-                        .w_full()
-                        .flex_none()
-                        .bg(cx.theme().title_bar)
-                        .border_b_1()
-                        .border_color(cx.theme().title_bar_border)
-                        .child(self.menu_bar.clone()),
-                )
-            })
             .child(title_bar(
                 self.pane_mode(),
                 self.live.is_some(),
                 self.search_is_open(),
+                // kit Phase 7: the in-window menu bar on Linux/Windows leads
+                // the title row (macOS uses the native menu bar installed by
+                // `setup_app_menus`).
+                cfg!(not(target_os = "macos")).then(|| self.menu_bar.clone()),
                 cx,
             ))
             .children(self.frozen_banner(cx))

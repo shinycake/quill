@@ -326,5 +326,9 @@ gpui-pre-macos = { path = "third_party/gpui-pre-macos" }
 # the window has nothing to draw.
 gpui-pre-linux = { path = "third_party/gpui-pre-linux" }
 gpui-pre-windows = { path = "third_party/gpui-pre-windows" }
+# Colour emoji on Linux (docs/decisions/linux-titlebar-emoji.md): gpui-pre-wgpu
+# 0.3.9 shaping emoji graphemes with Noto Color Emoji, so flags and keycaps are
+# not drawn with FreeSans' boxed letters.
+gpui-pre-wgpu = { path = "third_party/gpui-pre-wgpu" }
 gpui-pre-apple = { path = "third_party/gpui-pre-apple" }
 gpui-pre = { path = "third_party/gpui-pre" }
