@@ -40,11 +40,9 @@ thread_local! {
 /// on the main thread, before the application starts.
 pub fn begin(credentials: Option<TelegramCredentials>) {
     let (done, early) = oneshot::channel();
-    let spawned = std::thread::Builder::new()
-        .name("quill-early-connect".into())
-        .spawn(move || {
-            let _ = done.send(prepare(credentials));
-        });
+    let spawned = quill::thread_guard::spawn_guarded("quill-early-connect", move || {
+        let _ = done.send(prepare(credentials));
+    });
     if spawned.is_ok() {
         FIRST.with(|first| *first.borrow_mut() = Some(First::Preparing(early)));
     }
