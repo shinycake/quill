@@ -301,8 +301,11 @@ impl Vanishing {
         }
     }
 
-    fn elapsed(&self) -> Option<f32> {
-        Some(self.started?.elapsed().as_secs_f32())
+    /// Seconds into the animation at `now`, the instant the rest of the
+    /// vanish logic judges (`vanish_now`), so paint, the rows hash and the
+    /// remeasure all agree.
+    fn elapsed(&self, now: Instant) -> Option<f32> {
+        Some(now.duration_since(self.started?).as_secs_f32())
     }
 
     fn collapse(&self) -> f32 {
@@ -417,11 +420,12 @@ impl QuillApp {
     /// Seconds since a crumbling message left the history. `None` on a
     /// borrow conflict too: the row is drawn unchanged for that one frame.
     pub(super) fn vanish_progress(&self, id: MessageId) -> Option<f32> {
+        let now = self.vanish_now();
         let vanishing = self.history.vanishing.try_borrow().ok()?;
         vanishing
             .iter()
             .find(|ghost| ghost.message.id == id)?
-            .elapsed()
+            .elapsed(now)
     }
 
     /// For the history rows key: which messages crumble and how far each
@@ -474,10 +478,11 @@ impl QuillApp {
     /// List indices (into the built rows, not the message history) of the
     /// rows whose gap is closing: only those are measured again each frame.
     ///
-    /// This reads the real elapsed time, not the pinned instant: the
-    /// collapse window has margins wide enough that a frame's difference
-    /// cannot skip or repeat a row.
+    /// This reads the same instant as paint and the rows hash
+    /// (`vanish_now`: the pinned or held one, else the current one), so the
+    /// remeasure and the drawn gap agree however long a frame takes.
     pub(super) fn closing_rows(&self) -> Vec<usize> {
+        let now = self.vanish_now();
         let Ok(vanishing) = self.history.vanishing.try_borrow() else {
             return Vec::new();
         };
@@ -486,7 +491,7 @@ impl QuillApp {
             .filter(|ghost| ghost.row.is_some())
             .filter(|ghost| {
                 ghost
-                    .elapsed()
+                    .elapsed(now)
                     .is_some_and(|t| t >= WIPE && t < WIPE + ghost.collapse())
             })
             .filter_map(|ghost| {
@@ -518,10 +523,11 @@ impl QuillApp {
         if running {
             self.request_animation_tick(60, cx);
         }
+        let now = self.vanish_now();
         let vanishing = self.history.vanishing.borrow();
         let clouds: Vec<(f32, Rc<Vec<Grain>>)> = vanishing
             .iter()
-            .filter_map(|ghost| Some((ghost.elapsed()?, ghost.grains.clone())))
+            .filter_map(|ghost| Some((ghost.elapsed(now)?, ghost.grains.clone())))
             .filter(|(_, grains)| !grains.is_empty())
             .collect();
         if clouds.is_empty() {

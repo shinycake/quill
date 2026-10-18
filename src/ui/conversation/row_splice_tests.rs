@@ -674,11 +674,12 @@ fn two_reads_in_one_round_see_the_same_phase(cx: &mut TestAppContext) {
         Expect::Build,
     );
     // Shortly before the end of the row phase (1.05s: wipe plus a 0.6s
-    // collapse), 50 ms of margin so a stall cannot start in the dust, with the clock running free so only the pin holds it.
+    // collapse). The clock set also pins its instant, and the hold is
+    // lifted so the pin alone keeps the phase: how long the runner takes
+    // to get from here to the first read cannot move it.
     let (first, second, later) = app.update(vcx, |app, _| {
         app.set_vanishing_clock(1.00);
-        app.release_vanishing_clock();
-        app.pin_vanish_now();
+        app.history.vanish_held.set(false);
         let first = app.vanish_rows_hash();
         // Time passes inside the round and crosses the boundary: the
         // pinned instant holds.
