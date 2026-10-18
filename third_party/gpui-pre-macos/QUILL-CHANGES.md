@@ -91,3 +91,12 @@ Picture-in-Picture (`docs/decisions/video-pip.md`):
   windows only `acceptsMouseMovedEvents = YES`, which delivers mouse moves
   to the key window alone, so a panel opened without focus never saw
   hover, cursor or mouse-exit events.
+
+The Quill project also changed it in 2026 to give back idle window memory
+(`docs/decisions/idle-drawables.md`):
+
+- `src/window.rs`: when `step` stops the display link for idling, it
+  schedules `MetalRenderer::release_idle_drawables` 3 s later on the main
+  queue (`DRAWABLE_RELEASE_AFTER`); `FrameIdle::idle_stops` skips the
+  release if the window drew in between. An occluded window releases at
+  once.
