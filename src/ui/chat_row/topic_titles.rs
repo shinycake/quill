@@ -15,7 +15,10 @@ use quill::state::{RowForum, RowTopic};
 const SKIP: &str = "\u{2002}\u{2004}";
 
 /// The titles as one text and the runs that style the unread ones.
-fn titles_text(topics: &[RowTopic], unread_fg: Hsla) -> (String, Vec<(std::ops::Range<usize>, HighlightStyle)>) {
+fn titles_text(
+    topics: &[RowTopic],
+    unread_fg: Hsla,
+) -> (String, Vec<(std::ops::Range<usize>, HighlightStyle)>) {
     let mut text = String::new();
     let mut runs = Vec::new();
     for (i, topic) in topics.iter().enumerate() {
@@ -78,7 +81,9 @@ pub(super) fn forum_topics_line(
             this.child(div().truncate().child(tr(key)))
         })
         .when_some(jump, |this, topic| {
-            this.child(jump_chip(chat_id, topic, selecting, unread_fg, muted_fg, cx))
+            this.child(jump_chip(
+                chat_id, topic, selecting, unread_fg, muted_fg, cx,
+            ))
         })
         .when(!rest.is_empty(), |this| {
             let (text, runs) = titles_text(&rest, unread_fg);
@@ -130,18 +135,22 @@ fn jump_chip(
                 .text_color(unread_fg)
                 .child(topic.name.clone()),
         )
-        .child(Icon::new(IconName::ChevronRight).size(px(12.)).text_color(muted_fg))
+        .child(
+            Icon::new(IconName::ChevronRight)
+                .size(px(12.))
+                .text_color(muted_fg),
+        )
         // While selecting the chip is plain: the row toggles the check.
         .when(!selecting, |this| {
-            this.cursor_pointer()
-                .swallow_press()
-                .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+            this.cursor_pointer().swallow_press().on_click(cx.listener(
+                move |this, event: &ClickEvent, window, cx| {
                     if event.modifiers().secondary() {
                         this.open_chat_in_new_window(chat_id, window, cx);
                     } else {
                         this.select_listed_chat(chat_id, window, cx);
                         this.select_topic_ui(topic_id, cx);
                     }
-                }))
+                },
+            ))
         })
 }

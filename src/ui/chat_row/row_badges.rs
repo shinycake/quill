@@ -25,9 +25,7 @@ pub(super) fn row_badges(
         .when(has_reactions, |this| this.child(reaction_badge(muted)))
         .when(has_mentions, |this| this.child(mention_badge()))
         .map(|this| match unread_indicator {
-            Some((count, dot)) => {
-                this.child(unread_pill(id, count, dot, muted, badge_scale, cx))
-            }
+            Some((count, dot)) => this.child(unread_pill(id, count, dot, muted, badge_scale, cx)),
             None if pinned_here(chat, archived) && !has_mentions && !has_reactions => {
                 this.child(row_glyph(IconName::Pin, muted_fg))
             }

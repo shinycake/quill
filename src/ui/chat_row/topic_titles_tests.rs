@@ -134,7 +134,10 @@ fn selection_mode_toggles_the_row_from_its_topics_line_and_chip(cx: &mut TestApp
     click(vcx, ("forum-titles", 71));
     click(vcx, ("forum-jump", 71));
     let (selected, now) = app.update(vcx, |app, _| {
-        (app.chat_list.selected.clone(), app.session().map(|s| (s.open_chat, s.open_topic)))
+        (
+            app.chat_list.selected.clone(),
+            app.session().map(|s| (s.open_chat, s.open_topic)),
+        )
     });
     // Titles toggled the check, the chip toggled it back: neither opened anything.
     assert!(selected.contains(&72));

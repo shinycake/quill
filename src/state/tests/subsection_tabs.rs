@@ -350,7 +350,12 @@ fn forum_rows_follow_display_as_forum() {
     assert!(session.chat_row_forum(ChatId(43)).is_none());
     assert_eq!(session.chat_row_lines(ChatId(43), 2), 2);
     let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(43)));
-    apply_json(&mut session, &seq, &sink, &topics_answer(extra.0, 43, &[2, 3]));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &topics_answer(extra.0, 43, &[2, 3]),
+    );
     let row = session.chat_row_forum(ChatId(43)).expect("a forum row");
     assert!(row.loaded);
     // Both topics are unread; the newest is first and is the jump target.

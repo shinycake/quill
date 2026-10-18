@@ -108,6 +108,11 @@ impl QuillApp {
 
     /// Load persisted prefs (defaults when the file is missing/corrupt).
     pub(crate) fn load_appearance() -> AppearancePrefs {
+        // Tests start from the defaults: the saved prefs of the machine (or
+        // of another test) must not decide what a window shows.
+        if cfg!(test) {
+            return AppearancePrefs::default();
+        }
         let prefs = load_appearance_prefs(&Self::appearance_paths());
         quill::tray::monochrome::set_monochrome(prefs.tray_icon_monochrome);
         prefs

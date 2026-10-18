@@ -230,17 +230,13 @@ impl Session {
             return None;
         }
         let topics = self.chat_row_topics(chat_id);
-        let unread_topics = self
-            .threads
-            .forum_topics
-            .get(&chat_id.0)
-            .map_or(0, |all| {
-                all.iter()
-                    .filter(|t| {
-                        !t.is_hidden && !matches!(self.topic_badge(chat_id, t), TopicBadge::None)
-                    })
-                    .count()
-            });
+        let unread_topics = self.threads.forum_topics.get(&chat_id.0).map_or(0, |all| {
+            all.iter()
+                .filter(|t| {
+                    !t.is_hidden && !matches!(self.topic_badge(chat_id, t), TopicBadge::None)
+                })
+                .count()
+        });
         let jump = topics.first().filter(|t| t.unread).map(|t| t.id);
         Some(RowForum {
             loaded: self.threads.forum_topics.contains_key(&chat_id.0)
