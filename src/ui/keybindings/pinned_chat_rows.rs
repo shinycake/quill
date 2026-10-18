@@ -279,8 +279,8 @@ pub fn setup_app_menus(cx: &mut App) {
     GlobalState::global_mut(cx).set_app_menus(owned);
 }
 
-// Context menus own typing and chat shortcuts; native focus traversal
-// (Tab, Up and Down) and activation still work, as do macOS window commands.
+// Context menus own typing and chat shortcuts; native focus traversal and
+// activation still work, as do macOS window commands.
 pub(in crate::ui) fn context_menu_captures_key(key: &Keystroke) -> bool {
     if key.modifiers.platform && matches!(key.key.as_str(), "q" | "w" | "m") {
         return false;
@@ -288,7 +288,7 @@ pub(in crate::ui) fn context_menu_captures_key(key: &Keystroke) -> bool {
     if !key.modifiers.control
         && !key.modifiers.platform
         && !key.modifiers.alt
-        && matches!(key.key.as_str(), "tab" | "up" | "down" | "enter" | "space")
+        && matches!(key.key.as_str(), "tab" | "enter" | "space")
     {
         return false;
     }

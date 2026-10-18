@@ -249,13 +249,21 @@ impl QuillApp {
                     label: &'static str,
                     on_click: Box<dyn Fn(&mut QuillApp, &mut Context<QuillApp>)>,
                     cx: &mut Context<QuillApp>| {
-            context_menu_item(id, icon, label, text_menu().into(), true, cx)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.chat_list.archive_menu = None;
-                    on_click(this, cx);
-                    cx.notify();
-                }))
-                .into_any_element()
+            context_menu_item(
+                id,
+                icon,
+                label,
+                text_menu().into(),
+                true,
+                &self.frame.context_menu_items,
+                cx,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.chat_list.archive_menu = None;
+                on_click(this, cx);
+                cx.notify();
+            }))
+            .into_any_element()
         };
         let mut rows: Vec<AnyElement> = Vec::new();
         if !in_menu {
@@ -318,7 +326,8 @@ impl QuillApp {
             .border_color(accent())
             .bg(bg_canvas())
             .children(rows);
-        self.context_menu_keys(div().id("archive-menu-overlay"), cx)
+        div()
+            .id("archive-menu-overlay")
             .track_focus(&self.frame.context_menu_focus)
             .occlude()
             .absolute()

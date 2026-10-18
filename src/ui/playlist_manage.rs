@@ -264,7 +264,15 @@ impl QuillApp {
         let finder = cfg!(target_os = "macos");
         let row = |id: &'static str, icon: IconName, label: &'static str, danger: bool| {
             let color = if danger { danger_bright() } else { text_menu() };
-            context_menu_item(id, icon, label, color.into(), true, cx)
+            context_menu_item(
+                id,
+                icon,
+                label,
+                color.into(),
+                true,
+                &self.frame.context_menu_items,
+                cx,
+            )
         };
         let close = |this: &mut QuillApp| this.playback.playlist_menu = None;
         let mut rows: Vec<AnyElement> = Vec::new();
@@ -422,7 +430,8 @@ impl QuillApp {
             .border_color(accent())
             .bg(bg_canvas())
             .children(rows);
-        self.context_menu_keys(div().id("playlist-menu-overlay"), cx)
+        div()
+            .id("playlist-menu-overlay")
             .track_focus(&self.frame.context_menu_focus)
             .occlude()
             .absolute()

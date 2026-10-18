@@ -11,7 +11,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
-use quill::stories_menu::{StoryMenuAction, StoryMenuFacts, story_menu};
+use quill::stories_menu::{StoryMenuAction, StoryMenuFacts, StoryMenuItem, story_menu};
 use quill::telegram::envelope::{ChatKind, StoryListView};
 
 impl QuillApp {
@@ -82,12 +82,8 @@ impl QuillApp {
         })
     }
 
-    pub(super) fn story_menu_overlay(
-        &self,
-        chat_id: i64,
-        position: Point<Pixels>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    /// The entries the story tile menu shows for this chat.
+    pub(super) fn story_menu_entries(&self, chat_id: i64) -> Vec<StoryMenuItem> {
         let kind = self
             .session()
             .and_then(|s| s.chats.get(&chat_id))
@@ -95,12 +91,21 @@ impl QuillApp {
             .unwrap_or(ChatKind::Unknown);
         let is_self = matches!(kind, ChatKind::Private { user_id }
             if self.session().and_then(|s| s.my_user_id) == Some(user_id.0));
-        let items = story_menu(&StoryMenuFacts {
+        story_menu(&StoryMenuFacts {
             kind: &kind,
             is_self,
             hidden: self.story_tile_hidden(chat_id),
             muted: self.story_tile_muted(chat_id),
-        });
+        })
+    }
+
+    pub(super) fn story_menu_overlay(
+        &self,
+        chat_id: i64,
+        position: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let items = self.story_menu_entries(chat_id);
         let rows: Vec<AnyElement> = items
             .into_iter()
             .enumerate()
@@ -117,6 +122,7 @@ impl QuillApp {
                     entry.label,
                     text_menu().into(),
                     true,
+                    &self.frame.context_menu_items,
                     cx,
                 )
                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -139,7 +145,8 @@ impl QuillApp {
             .border_color(accent())
             .bg(bg_canvas())
             .children(rows);
-        self.context_menu_keys(div().id("story-menu-overlay"), cx)
+        div()
+            .id("story-menu-overlay")
             .track_focus(&self.frame.context_menu_focus)
             .occlude()
             .absolute()

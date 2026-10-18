@@ -140,13 +140,21 @@ impl QuillApp {
             } else {
                 Hsla::from(text_menu())
             };
-            context_menu_item(id, icon, label, color, true, cx)
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.folders.tab_menu = None;
-                    on_click(this, window, cx);
-                    cx.notify();
-                }))
-                .into_any_element()
+            context_menu_item(
+                id,
+                icon,
+                label,
+                color,
+                true,
+                &self.frame.context_menu_items,
+                cx,
+            )
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.folders.tab_menu = None;
+                on_click(this, window, cx);
+                cx.notify();
+            }))
+            .into_any_element()
         };
         let unread = self.folder_has_unread(menu.folder_id);
         let mut rows: Vec<AnyElement> = Vec::new();
@@ -221,7 +229,8 @@ impl QuillApp {
             .border_color(accent())
             .bg(bg_canvas())
             .children(rows);
-        self.context_menu_keys(div().id("folder-tab-menu-overlay"), cx)
+        div()
+            .id("folder-tab-menu-overlay")
             .track_focus(&self.frame.context_menu_focus)
             .occlude()
             .absolute()

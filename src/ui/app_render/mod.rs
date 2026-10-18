@@ -100,6 +100,7 @@ impl Render for QuillApp {
             self.request_animation_tick(30, cx);
         }
         let status_toast = self.status_toast_visible(cx);
+        self.frame.context_menu_items.begin();
         let menu_open = self.context_menu_open();
         if menu_open && !self.frame.context_menu_was_open {
             self.frame.context_menu_previous_focus = window.focused(cx);

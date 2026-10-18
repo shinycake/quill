@@ -369,19 +369,18 @@ impl QuillApp {
             if !capturing {
                 let menu_handled = menu_app
                     .update(cx, |this, cx| {
-                        if this.message_ui.menu.is_none()
-                            && this.chat_list.menu.is_none()
-                            && this.chat_list.archive_menu.is_none()
-                            && this.folders.tab_menu.is_none()
-                        {
+                        if !this.context_menu_open() {
                             return false;
                         }
                         if event.keystroke.key == "escape" {
-                            this.message_ui.menu = None;
-                            this.chat_list.menu = None;
-                            this.chat_list.archive_menu = None;
-                            this.folders.tab_menu = None;
-                            cx.notify();
+                            return this.dismiss_context_menus(cx);
+                        }
+                        // The open menu takes the arrows, wherever the focus
+                        // was; they never reach the chat list under it.
+                        if let Some(forward) =
+                            super::context_menu_keys::arrow_direction(&event.keystroke)
+                        {
+                            this.move_context_menu_focus(forward, window, cx);
                             return true;
                         }
                         super::keybindings::context_menu_captures_key(&event.keystroke)
