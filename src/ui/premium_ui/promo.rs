@@ -65,7 +65,7 @@ fn feature_icon(index: usize) -> Div {
         .child(
             Icon::new(IconName::StarFill)
                 .with_size(px(15.))
-                .text_color(rgb(0xffffff)),
+                .text_color(crate::ui::chat_theme::text_on_fill()),
         )
 }
 

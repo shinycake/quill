@@ -31,6 +31,7 @@ use quill::calls::tile_pin::{TileKey, stage_tile};
 use quill::lang::{keys, tr, tr_with};
 use quill::state::ActiveGroupCall;
 use quill::telegram::envelope::{MessageSender, ParsedGroupCallParticipant};
+use crate::ui::app_theme::call_chrome;
 
 struct Tile {
     key: TileKey,
@@ -344,7 +345,7 @@ fn tile_view(tile: Tile, large: bool, cx: &mut Context<QuillApp>) -> AnyElement 
         .when(!large, |this| this.w(relative(0.49)).h(px(120.)))
         .overflow_hidden()
         .rounded(px(10.))
-        .bg(rgb(0x000000))
+        .bg(black())
         .cursor_pointer()
         .role(Role::Button)
         .aria_label(label)
@@ -369,7 +370,7 @@ fn tile_view(tile: Tile, large: bool, cx: &mut Context<QuillApp>) -> AnyElement 
                 .max_w(relative(0.8))
                 .truncate()
                 .text_size(px(12.))
-                .text_color(rgba(0xffffffe0))
+                .text_color(call_chrome::caption())
                 .child(tile.name),
         )
         .when(pinned, |this| {
@@ -381,7 +382,7 @@ fn tile_view(tile: Tile, large: bool, cx: &mut Context<QuillApp>) -> AnyElement 
                     .top(px(6.))
                     .size(px(24.))
                     .rounded_full()
-                    .bg(rgba(0x00000099))
+                    .bg(call_chrome::chip())
                     .flex()
                     .items_center()
                     .justify_center()
@@ -407,7 +408,7 @@ fn tile_view(tile: Tile, large: bool, cx: &mut Context<QuillApp>) -> AnyElement 
                 .top(px(6.))
                 .size(px(24.))
                 .rounded_full()
-                .bg(rgba(0x00000099))
+                .bg(call_chrome::chip())
                 .flex()
                 .items_center()
                 .justify_center()
@@ -436,8 +437,8 @@ fn stage_button(
         .id(id)
         .size(px(34.))
         .rounded_full()
-        .bg(rgba(0x00000099))
-        .hover(|style| style.bg(rgba(0x000000cc)))
+        .bg(call_chrome::chip())
+        .hover(|style| style.bg(call_chrome::chip_over()))
         .flex()
         .items_center()
         .justify_center()
@@ -460,7 +461,7 @@ fn stage_view(tile: Tile, volume: Option<AnyElement>, cx: &mut Context<QuillApp>
         .debug_selector(|| "group-call-stage".into())
         .relative()
         .size_full()
-        .bg(rgb(0x000000))
+        .bg(black())
         .overflow_hidden()
         .child(
             div()
@@ -482,7 +483,7 @@ fn stage_view(tile: Tile, volume: Option<AnyElement>, cx: &mut Context<QuillApp>
                 .max_w(relative(0.7))
                 .truncate()
                 .text_size(px(14.))
-                .text_color(rgba(0xffffffe0))
+                .text_color(call_chrome::caption())
                 .child(tile.name),
         )
         .child(

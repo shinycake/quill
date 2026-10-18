@@ -174,6 +174,7 @@ fn feed(variant: usize, repeat: bool, cx: &mut App) -> Option<DemoFeed> {
 
 impl QuillApp {
     fn demo_call_screen_share(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.demo_high_contrast(cx);
         let denied = std::env::var_os("QUILL_DEMO_SCREEN_DENIED").is_some();
         let audio = std::env::var_os("QUILL_DEMO_SCREEN_AUDIO").is_some();
         let Some(session) = self.demo_session.as_mut() else {
