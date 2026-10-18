@@ -51,10 +51,7 @@ impl QuillApp {
         };
         let topic = self.open_draft_topic(chat_id);
         let text = self.composer_markup(cx);
-        let reply = self
-            .composer_ui
-            .reply()
-            .and_then(|reply| reply.send_reply(chat_id));
+        let reply = self.draft_reply(self.composer_ui.reply(), chat_id);
         self.save_chat_draft(chat_id, topic, &text, reply, delayed, cx);
     }
 
@@ -70,18 +67,12 @@ impl QuillApp {
             return (String::new(), None, now_ms);
         };
         if self.composer_ui.pending_edit.is_some() {
-            let reply = self
-                .composer_ui
-                .saved_edit_reply
-                .as_ref()
-                .and_then(|saved| saved.send_reply(chat_id));
+            let reply = self.draft_reply(self.composer_ui.saved_edit_reply.as_ref(), chat_id);
             return (self.composer_ui.saved_edit_draft.clone(), reply, now_ms);
         }
         (
             self.composer_markup(cx),
-            self.composer_ui
-                .reply()
-                .and_then(|reply| reply.send_reply(chat_id)),
+            self.draft_reply(self.composer_ui.reply(), chat_id),
             now_ms,
         )
     }
@@ -147,18 +138,12 @@ impl QuillApp {
         };
         let topic = self.open_draft_topic(chat_id);
         let (text, reply) = if self.composer_ui.pending_edit.is_some() {
-            let reply = self
-                .composer_ui
-                .saved_edit_reply
-                .as_ref()
-                .and_then(|saved| saved.send_reply(chat_id));
+            let reply = self.draft_reply(self.composer_ui.saved_edit_reply.as_ref(), chat_id);
             (self.composer_ui.saved_edit_draft.clone(), reply)
         } else {
             (
                 self.composer_markup(cx),
-                self.composer_ui
-                    .reply()
-                    .and_then(|reply| reply.send_reply(chat_id)),
+                self.draft_reply(self.composer_ui.reply(), chat_id),
             )
         };
         self.save_chat_draft(chat_id, topic, &text, reply, false, cx);

@@ -266,6 +266,31 @@ fn a_reply_started_in_a_chat_window_stays_in_that_window(cx: &mut TestAppContext
 }
 
 #[gpui_kit::test]
+fn a_chat_windows_reply_to_a_deleted_option_sends_a_plain_reply(cx: &mut TestAppContext) {
+    use quill::composer::{ComposerReplyTo, ReplyItem};
+    let h = new_app(cx);
+    let _chat_window = h.open_in_new_window(OTHER, cx);
+    // The window's message has no poll options, so a reply to option "gone"
+    // points at an item that no longer exists.
+    let (sent, draft) = h.app.update(cx, |app, cx| {
+        app.in_window_scope(Some(OTHER), cx, |app, cx| {
+            app.composer_ui.set_reply(Some(
+                ComposerReplyTo::new(OTHER, OTHER_LAST)
+                    .to_item(ReplyItem::PollOption("gone".into())),
+            ));
+            let sent = app.send_reply_for(OTHER, cx).map(|reply| reply.item);
+            let draft = app
+                .draft_reply(app.composer_ui.reply(), OTHER)
+                .map(|reply| reply.item);
+            (sent, draft)
+        })
+        .expect("the window's scope")
+    });
+    assert_eq!(sent, Some(ReplyItem::Message));
+    assert_eq!(draft, Some(ReplyItem::Message));
+}
+
+#[gpui_kit::test]
 fn the_emoji_panel_opens_in_the_window_that_asked(cx: &mut TestAppContext) {
     let h = new_app(cx);
     let chat_window = h.open_in_new_window(OTHER, cx);

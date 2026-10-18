@@ -40,7 +40,11 @@ impl QuillApp {
     /// new sender cannot skip this.
     pub(super) fn reply_for_send(&mut self, cx: &mut Context<Self>) -> Option<ComposerReplyTo> {
         self.cancel_gone_reply(cx);
-        self.composer_ui.reply().cloned()
+        let reply = self.composer_ui.reply()?;
+        Some(match self.session() {
+            Some(session) => reply.effective(session),
+            None => reply.clone(),
+        })
     }
 
     /// [`Self::reply_for_send`] as the request's reply target for `chat_id`
@@ -52,6 +56,20 @@ impl QuillApp {
     ) -> Option<SendReply> {
         self.reply_for_send(cx)
             .and_then(|reply| reply.send_target(chat_id))
+    }
+
+    /// The reply a draft stores for `chat_id`, with a deleted task or option
+    /// dropped (see `ComposerReplyTo::effective_item`).
+    pub(super) fn draft_reply(
+        &self,
+        reply: Option<&ComposerReplyTo>,
+        chat_id: ChatId,
+    ) -> Option<SendReply> {
+        let reply = reply?;
+        match self.session() {
+            Some(session) => reply.effective(session).send_reply(chat_id),
+            None => reply.send_reply(chat_id),
+        }
     }
 
     /// The reply bar points at a message that is not in memory (a chat

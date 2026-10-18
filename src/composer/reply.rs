@@ -77,6 +77,40 @@ impl ComposerReplyTo {
         self
     }
 
+    /// The task or option this reply points at, only while the message still
+    /// has it. A reply to a deleted item reads as a plain reply, so the bar,
+    /// the send and the draft agree in every window without rewriting state.
+    /// A message that is not in memory keeps its item (nothing says it is gone).
+    pub fn effective_item(&self, session: &crate::state::Session) -> ReplyItem {
+        if self.item.is_message() {
+            return ReplyItem::Message;
+        }
+        let gone = session
+            .reply_target(self.chat_id, self.message_id)
+            .is_some_and(|message| {
+                super::reply_item::item_text(
+                    crate::telegram::envelope::effective_content(
+                        &message.content,
+                        message.ephemeral.as_ref(),
+                    ),
+                    &self.item,
+                )
+                .is_none()
+            });
+        if gone {
+            ReplyItem::Message
+        } else {
+            self.item.clone()
+        }
+    }
+
+    /// This reply with [`Self::effective_item`] applied.
+    pub fn effective(&self, session: &crate::state::Session) -> Self {
+        let mut reply = self.clone();
+        reply.item = self.effective_item(session);
+        reply
+    }
+
     /// Slice G1: reply carrying a validated partial quote.
     pub fn with_quote(chat_id: ChatId, message_id: MessageId, quote: QuoteSelection) -> Self {
         Self {

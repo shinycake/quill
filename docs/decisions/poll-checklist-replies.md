@@ -34,9 +34,11 @@ Round 3 of the composer gap list (C6, M1, M2, M4).
   and Copy Option Link only when it answered `can_get_link`; the requests are
   sent only then. The properties request carries a key of the option id, so an
   answer for another option of the same poll is dropped.
-- A reply whose task or option disappeared falls back to a plain reply (per
-  frame upkeep), so the bar, the send and the draft agree. A closed menu forgets
-  its option and properties.
+- A reply whose task or option disappeared reads as a plain reply:
+  `ComposerReplyTo::effective_item(&Session)` is derived where the item is read
+  (the reply bar, `reply_for_send`, the draft builders), so every window agrees
+  and render writes no state. The next menu open overwrites the menu's option
+  and properties.
 - "Sent by {user}" under the date lines when `messageProperties.can_get_author`;
   `getMessageAuthor` runs with the other audience requests, the row is Loading,
   then the name (opens the profile), or nothing on failure.

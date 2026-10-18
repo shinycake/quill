@@ -181,29 +181,6 @@ fn an_option_that_cannot_be_deleted_has_no_delete_row(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn closing_the_menu_forgets_the_option(cx: &mut TestAppContext) {
-    let (app, mut vcx) = new_app(cx);
-    let vcx = &mut vcx;
-    facts(&app, vcx, "poll");
-    vcx.update(|window, cx| window.right_click(("poll-option", (POLL * 64 + 1) as u64), cx));
-    frames(vcx);
-    assert!(app.read_with(vcx, |app, _| {
-        app.session()
-            .is_some_and(|s| s.messages.poll_option_menu.is_some())
-    }));
-    app.update(vcx, |app, cx| {
-        app.message_ui.menu = None;
-        cx.notify();
-    });
-    frames(vcx);
-    assert_eq!(menu_item(&app, vcx), ReplyItem::Message);
-    assert!(app.read_with(vcx, |app, _| {
-        app.session()
-            .is_some_and(|s| s.messages.poll_option_menu.is_none())
-    }));
-}
-
-#[gpui_kit::test]
 fn a_reply_to_a_vanished_task_becomes_a_plain_reply(cx: &mut TestAppContext) {
     use quill::composer::ComposerReplyTo;
     let (app, mut vcx) = new_app(cx);
@@ -215,13 +192,15 @@ fn a_reply_to_a_vanished_task_becomes_a_plain_reply(cx: &mut TestAppContext) {
         cx.notify();
     });
     frames(vcx);
-    assert_eq!(reply_item(&app, vcx), Some(ReplyItem::Message));
-    let sent = app.read_with(vcx, |app, _| {
-        app.composer_ui
-            .reply()
-            .and_then(|reply| reply.send_target(GROUP))
+    let (sent, draft) = app.update(vcx, |app, cx| {
+        let sent = app.send_reply_for(GROUP, cx).map(|reply| reply.item);
+        let draft = app
+            .draft_reply(app.composer_ui.reply(), GROUP)
+            .map(|reply| reply.item);
+        (sent, draft)
     });
-    assert_eq!(sent.map(|reply| reply.item), Some(ReplyItem::Message));
+    assert_eq!(sent, Some(ReplyItem::Message));
+    assert_eq!(draft, Some(ReplyItem::Message));
 }
 
 #[gpui_kit::test]

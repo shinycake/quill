@@ -39,53 +39,6 @@ impl QuillApp {
             && item_text(content, &self.message_ui.menu_item).is_some()
     }
 
-    /// A reply whose task or option is gone from the message (it was
-    /// deleted) falls back to a plain reply, so the bar, the send and the
-    /// draft all agree.
-    pub(in crate::ui) fn drop_stale_reply_item(&mut self) {
-        let Some(reply) = self.composer_ui.reply() else {
-            return;
-        };
-        if reply.item.is_message() {
-            return;
-        }
-        let stale = self
-            .session()
-            .and_then(|s| s.reply_target(reply.chat_id, reply.message_id))
-            .is_some_and(|message| {
-                item_text(
-                    quill::telegram::envelope::effective_content(
-                        &message.content,
-                        message.ephemeral.as_ref(),
-                    ),
-                    &reply.item,
-                )
-                .is_none()
-            });
-        if stale {
-            let mut plain = reply.clone();
-            plain.item = ReplyItem::Message;
-            self.composer_ui.set_reply(Some(plain));
-        }
-    }
-
-    /// Per-frame upkeep: a closed menu forgets the task or option it was
-    /// opened over (and what TDLib allowed for it), and a reply to an item
-    /// that no longer exists becomes a plain reply.
-    pub(in crate::ui) fn sync_item_menu(&mut self) {
-        if self.message_ui.menu.is_none() && !self.message_ui.menu_item.is_message() {
-            self.message_ui.menu_item = ReplyItem::Message;
-            let session = match self.live.as_mut() {
-                Some(live) => Some(&mut live.driver.session),
-                None => self.demo_session.as_mut(),
-            };
-            if let Some(session) = session {
-                session.messages.poll_option_menu = None;
-            }
-        }
-        self.drop_stale_reply_item();
-    }
-
     /// What TDLib allowed for the right-clicked option, once it answered.
     fn option_properties(
         &self,

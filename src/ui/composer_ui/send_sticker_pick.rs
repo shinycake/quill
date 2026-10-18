@@ -802,7 +802,9 @@ impl QuillApp {
         let item_line = message.as_ref().and_then(|m| {
             quill::composer::reply_item::item_text(
                 quill::telegram::envelope::effective_content(&m.content, m.ephemeral.as_ref()),
-                &reply.item,
+                &self
+                    .session()
+                    .map_or_else(|| reply.item.clone(), |s| reply.effective_item(s)),
             )
         });
         // Slice G1: show the quoted part when the reply carries one.
