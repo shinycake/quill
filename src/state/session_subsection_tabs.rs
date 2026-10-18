@@ -41,6 +41,17 @@ pub enum TopicBadge {
     Dot,
 }
 
+/// How many topic titles a chat row lists (`kShowTopicNamesCount`).
+pub const ROW_TOPIC_COUNT: usize = 8;
+
+/// One topic title on a chat row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RowTopic {
+    pub id: i32,
+    pub name: String,
+    pub unread: bool,
+}
+
 /// The bot-side topic flags of a private chat (`userTypeBot`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BotTopics {
@@ -167,22 +178,29 @@ impl Session {
             })
     }
 
-    /// The chat-list row's topic line for a chat with topics: topic names in
-    /// topic order (Telegram Desktop's forum rows list them on the second
-    /// line). `None` until topics are loaded or when there are none.
-    pub fn chat_row_topic_names(&self, chat_id: ChatId) -> Option<String> {
+    /// The chat-list row's topic titles for a chat with topics: the most
+    /// recently active topics first (Telegram Desktop's `Forum::
+    /// reorderLastTopics`, at most `kShowTopicNamesCount` = 8), each with
+    /// whether it has unread messages. Empty until topics are loaded.
+    pub fn chat_row_topics(&self, chat_id: ChatId) -> Vec<RowTopic> {
         if !self.chat_has_topics(chat_id) {
-            return None;
+            return Vec::new();
         }
-        let names: Vec<&str> = self
+        let mut topics: Vec<&ForumTopic> = self
             .ordered_forum_topic_refs(chat_id)
             .into_iter()
-            .filter(|t| !t.is_hidden)
-            .take(8)
-            .map(|t| t.name.as_str())
-            .filter(|name| !name.is_empty())
+            .filter(|t| !t.is_hidden && !t.name.is_empty())
             .collect();
-        (!names.is_empty()).then(|| names.join("  "))
+        topics.sort_by_key(|t| std::cmp::Reverse(t.last_message_id));
+        topics
+            .into_iter()
+            .take(ROW_TOPIC_COUNT)
+            .map(|t| RowTopic {
+                id: t.forum_topic_id,
+                name: t.name.clone(),
+                unread: !matches!(self.topic_badge(chat_id, t), TopicBadge::None),
+            })
+            .collect()
     }
 
     /// Telegram Desktop's topic header while a tab topic is open: the

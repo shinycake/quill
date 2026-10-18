@@ -49,6 +49,32 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// Ask for the topic list of the forums at the top of the main list, so
+    /// their rows can list recent topic titles before the forum is opened
+    /// (Telegram Desktop loads them with the list). Each forum is asked once;
+    /// a handful per call keeps a long list from flooding the connection.
+    pub fn pump_forum_row_topics(&mut self) {
+        const WINDOW: usize = 40;
+        const PER_PUMP: usize = 4;
+        let wanted: Vec<ChatId> = self
+            .session
+            .ordered_chats()
+            .into_iter()
+            .take(WINDOW)
+            .filter(|chat| chat.is_forum_chat())
+            .map(|chat| chat.id)
+            .filter(|id| {
+                !self.session.threads.forum_topics.contains_key(&id.0)
+                    && !self.session.threads.forum_row_asked.contains(&id.0)
+            })
+            .take(PER_PUMP)
+            .collect();
+        for chat_id in wanted {
+            self.session.threads.forum_row_asked.insert(chat_id.0);
+            let _ = self.maybe_fetch_forum_topics(chat_id);
+        }
+    }
+
     /// A topic whose TDLib state may have changed: its read position or
     /// settings (`updateForumTopic`), its info (`updateForumTopicInfo`, e.g.
     /// a new topic) or a new message in it. Checked before `apply`.

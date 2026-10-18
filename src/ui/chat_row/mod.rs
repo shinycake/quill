@@ -25,6 +25,10 @@ use quill::telegram::envelope::{
     ChatKind, EphemeralMessageContent, MessageContent, effective_content,
 };
 use quill::text::TextEntity;
+mod forum_titles_demo;
+mod topic_titles;
+#[cfg(test)]
+mod topic_titles_tests;
 /// Slice CL: floating chat-list peek preview — the chat being previewed
 /// plus where it floated from (`MouseDownEvent.position` is in window
 /// coordinates, same as the overlay's `.left()`/`.top()`).
@@ -357,9 +361,9 @@ pub(super) fn session_chat_row(
     preview_emoji: super::sticker_playback::PreviewEmoji,
     // Telegram Desktop marks groups, channels and bots before the title.
     kind_icon: Option<IconName>,
-    // Subsection tabs: topic names for bots with topics and forums (the
+    // Subsection tabs: topic titles for bots with topics and forums (the
     // sender line in 3-line rows, the preview line in 2-line rows).
-    topic_names: Option<String>,
+    topics: Vec<quill::state::RowTopic>,
     // Active stories: the ring around the avatar (unread: accent gradient,
     // read: grey).
     story_ring: Option<StoryRing>,
@@ -374,7 +378,8 @@ pub(super) fn session_chat_row(
     } else {
         muted_fg
     };
-    let topic_line = topic_names.clone().filter(|_| row_style.preview_lines < 3);
+    let topic_names = topic_titles::topics_text(&topics);
+    let topic_line = (row_style.preview_lines < 3 && !topics.is_empty()).then_some(());
     let title: String = if saved {
         tr(keys::SAVED_MESSAGES).to_string()
     } else {
@@ -748,13 +753,12 @@ pub(super) fn session_chat_row(
                                                 )
                                                 .child(div().min_w_0().truncate().child(line.text))
                                                 .into_any_element(),
-                                            None if topic_line.is_some() => div()
-                                                .min_w_0()
-                                                .flex_1()
-                                                .text_xs()
-                                                .truncate()
-                                                .child(topic_line.unwrap_or_default())
-                                                .into_any_element(),
+                                            None if topic_line.is_some() => {
+                                                topic_titles::topic_titles_line(
+                                                    id, &topics, muted_fg, cx,
+                                                )
+                                                .into_any_element()
+                                            }
                                             None => div()
                                                 .min_w_0()
                                                 .flex_1()

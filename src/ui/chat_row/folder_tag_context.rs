@@ -181,7 +181,9 @@ impl QuillApp {
                         }
                         _ => None,
                     },
-                    self.session().and_then(|s| s.chat_row_topic_names(chat.id)),
+                    self.session()
+                        .map(|s| s.chat_row_topics(chat.id))
+                        .unwrap_or_default(),
                     story_ring,
                     muted_fg,
                     cx,

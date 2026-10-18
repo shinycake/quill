@@ -215,10 +215,12 @@ fn topic_updates_keep_tabs_current() {
     assert_eq!(topic.unread_count, 0);
 
     // Chat-row topic line.
-    assert_eq!(
-        session.chat_row_topic_names(ChatId(41)).as_deref(),
-        Some("T3  New  Trips")
-    );
+    let names: Vec<String> = session
+        .chat_row_topics(ChatId(41))
+        .into_iter()
+        .map(|t| t.name)
+        .collect();
+    assert_eq!(names, ["T3", "Trips", "New"]);
 }
 
 /// `getForumTopic` answers replace the cached topic with TDLib's state,

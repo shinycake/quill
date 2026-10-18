@@ -335,3 +335,37 @@ fn opening_topic_reads_it_and_never_resurrects_a_stale_count() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Forums at the top of the main list load their topics once, before they
+/// are opened, so the row can list the titles.
+#[test]
+fn forum_rows_load_their_topics_once() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    };
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateNewChat","chat":{"id":61,"title":"Forum","type":{"@type":"chatTypeSupergroup","supergroup_id":61,"is_channel":false},"unread_count":0,"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"5","is_pinned":false}]}}"#,
+    );
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":61,"is_forum":true}}"#,
+    );
+    driver.pump_forum_row_topics();
+    let fetches = sent(&recorder, "getForumTopics");
+    assert_eq!(fetches.len(), 1);
+    assert_eq!(fetches[0]["chat_id"], 61);
+    // Each forum is asked once, even if the answer never comes.
+    driver.pump_forum_row_topics();
+    assert_eq!(sent(&recorder, "getForumTopics").len(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
