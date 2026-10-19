@@ -274,9 +274,9 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Poll option page: Retract vote, Reply to Option, Copy Option, Copy Option Link, Delete Item, Added by with date (#1001) <!-- parity:menu-poll-option-page -->
 - [x] "Sent by {user}" row for messages posted as a chat (`getMessageAuthor`) (#1001) <!-- parity:menu-sent-by -->
 - [x] Copy Phone Number on a contact message (#1001) <!-- parity:menu-copy-contact-phone -->
-- [ ] "Original date" row for forwarded messages, as tdesktop's context menu shows it <!-- parity:menu-forward-original-date -->
-- [ ] "Send Another Gift" on gift service messages <!-- parity:menu-send-another-gift -->
-- [ ] Block sender from the Replies chat menu <!-- parity:menu-replies-block-sender -->
+- [x] "Original date" row for forwarded messages, as tdesktop's context menu shows it <!-- parity:menu-forward-original-date -->
+- [x] "Send Another Gift" on gift service messages <!-- parity:menu-send-another-gift -->
+- [x] Block sender from the Replies chat menu <!-- parity:menu-replies-block-sender -->
 - [ ] Save selected rich messages as HTML <!-- parity:menu-save-selection-html -->
 - [x] Reply in Another Chat <!-- parity:menu-reply-another-chat -->
 - [x] Reply options popover: Update Quote, Do Not Reply, Show in Chat <!-- parity:menu-reply-options -->

@@ -1,3 +1,0 @@
-parity:menu-forward-original-date
-parity:menu-send-another-gift
-parity:menu-replies-block-sender
