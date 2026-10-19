@@ -61,6 +61,20 @@ fn attach_parent_console() {
     }
 }
 
+/// Exits when this binary carries the test feature (cargo gives it to every
+/// target while tests are built): its app root is a temp folder, so starting
+/// the app could sign in there and wipe the folder at quit.
+#[allow(clippy::exit, reason = "refuses to start a test-feature binary")]
+fn refuse_test_build() {
+    #[cfg(feature = "test-support")]
+    {
+        eprintln!(
+            "This Quill binary was built with the test-support feature and cannot start the app. Build it without that feature."
+        );
+        std::process::exit(2);
+    }
+}
+
 fn main() {
     quill::startup_trace::mark("main");
     quill::crash_log::install_panic_hook();
@@ -79,6 +93,10 @@ fn main() {
         println!("{}", if cfg!(feature = "ui") { "ui" } else { "core" });
         return;
     }
+    // A binary built with the test feature keeps its data in a temp folder, so
+    // it must never start the app: it could sign in there and wipe the
+    // folder at quit.
+    refuse_test_build();
     if args.get(1).is_some_and(|a| a == "--apply-update") {
         let result = args
             .get(2)

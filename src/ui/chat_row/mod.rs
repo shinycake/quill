@@ -27,6 +27,7 @@ use quill::telegram::envelope::{
 use quill::text::TextEntity;
 mod forum_titles_demo;
 mod row_badges;
+mod topic_fit;
 mod topic_titles;
 #[cfg(test)]
 mod topic_titles_tests;

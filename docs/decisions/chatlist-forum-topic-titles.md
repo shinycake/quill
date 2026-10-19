@@ -71,13 +71,19 @@ Parity id: `chatlist-forum-topic-titles`.
   `test-support` feature (which the bin's tests get through the existing self
   dev-dependency, so `cargo test --lib` and the bin's tests both have it)
   `safe_app_root()` returns a per-process temp folder from the first call, with
-  no window needed. The real-folder branch records itself and a test asserts
-  it was never taken. (The notification avatar cache dir still uses the real
+  no window needed. A lib test asserts the root is under the temp dir and is
+  not the real data dir. A binary built with `test-support` refuses to start
+  the app (message, exit code 2), so one run by hand cannot sign in and wipe
+  its folder at quit. (The notification avatar cache dir still uses the real
   cache path; it is not a preference.)
-- The icons sit in the one elided row: every title and icon is a flex item
-  whose shrink weight grows from left to right, so the first title that no
-  longer fits ends in "…" and what follows collapses to nothing. Icons are
-  whole or gone.
+- The topics line is measured, as tdesktop does (`dialogs_topics_view.cpp:
+  221-238`): `chat_row/topic_fit.rs` shapes each title with the window's text
+  system during prepaint (read-only, nothing kept), puts whole titles on while
+  they fit, elides the first that does not with "…" and drops the rest. When
+  less than an ellipsis is left the line stops. An icon is whole or gone: a
+  title whose icon and an ellipsis do not both fit is dropped. The fitting is
+  a pure function with unit tests (190px title then an icon topic, sixteen
+  titles with icons) plus GPUI tests on the laid-out line.
 
 ## Deviations
 

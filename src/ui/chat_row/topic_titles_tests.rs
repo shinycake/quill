@@ -152,7 +152,6 @@ fn a_press_on_the_chip_still_starts_the_long_press_peek(cx: &mut TestAppContext)
 
 /// The library resolves a per-process temp folder in every test process, so no
 /// test (window or not, in any order) reaches the owner's real preferences.
-/// Fails if the real-folder branch of `safe_app_root()` is ever taken.
 #[gpui_kit::test]
 fn tests_never_resolve_the_real_app_root(cx: &mut TestAppContext) {
     let (_app, _vcx) = open(cx);
@@ -160,7 +159,6 @@ fn tests_never_resolve_the_real_app_root(cx: &mut TestAppContext) {
     let root = quill::settings::safe_app_root().expect("an app root");
     assert!(root.starts_with(&temp), "{root:?} is outside {temp:?}");
     assert!(QuillApp::appearance_paths().root.starts_with(&temp));
-    assert!(!quill::settings::real_app_root_was_resolved());
 }
 
 #[gpui_kit::test]
