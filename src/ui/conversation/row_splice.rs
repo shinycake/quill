@@ -47,6 +47,9 @@ impl QuillApp {
         tail: usize,
     ) -> Option<RowSplice> {
         // A crumbling message is merged into the rows on a full build only.
+        // In the app, `conversation` pins the dissolve clock once per frame,
+        // so this reads the instant the key was made at. Tests that call
+        // this directly pin it themselves (`pin_vanish_now`).
         if self.stream_rows_hash().is_some() || self.vanish_rows_hash().is_some() {
             return None;
         }

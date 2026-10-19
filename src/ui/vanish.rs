@@ -34,6 +34,9 @@ const COLLAPSE_PER_PX: f32 = 0.000_15;
 const COLLAPSE_MAX: f32 = 0.6;
 /// The last grain is gone by then.
 const DUST_LIFE: f32 = 2.0;
+
+/// Rows key part when the dissolves cannot be read (their cell is borrowed).
+const VANISH_BUSY: u64 = u64::MAX;
 /// About this many grains per message at most (they get coarser beyond).
 const MAX_GRAINS: f32 = 7000.;
 /// The bubble's corner radius, in points.
@@ -265,9 +268,44 @@ pub(super) struct Vanishing {
     grains: Rc<Vec<Grain>>,
 }
 
+/// How far a crumbling message has got, as far as the history rows care:
+/// the rows change when this does, never while the animation runs on.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum Phase {
+    /// Deletion requested, not landed yet.
+    Waiting,
+    /// The message (cut away, then its gap closing) is among the rows.
+    InRows,
+    /// Only dust is left, painted over the history.
+    Dust,
+    /// Nothing left to show: due to be dropped.
+    Done,
+}
+
 impl Vanishing {
-    fn elapsed(&self) -> Option<f32> {
-        Some(self.started?.elapsed().as_secs_f32())
+    fn phase(&self, now: Instant) -> Phase {
+        let Some(started) = self.started else {
+            return if now.duration_since(self.requested) < VANISH_WAIT {
+                Phase::Waiting
+            } else {
+                Phase::Done
+            };
+        };
+        let t = now.duration_since(started).as_secs_f32();
+        if t >= DUST_LIFE {
+            Phase::Done
+        } else if self.row.is_some() && t < WIPE + self.collapse() {
+            Phase::InRows
+        } else {
+            Phase::Dust
+        }
+    }
+
+    /// Seconds into the animation at `now`, the instant the rest of the
+    /// vanish logic judges (`vanish_now`), so paint, the rows hash and the
+    /// remeasure all agree.
+    fn elapsed(&self, now: Instant) -> Option<f32> {
+        Some(now.duration_since(self.started?).as_secs_f32())
     }
 
     fn collapse(&self) -> f32 {
@@ -338,17 +376,10 @@ impl QuillApp {
 
     /// Put the crumbling messages back among `messages` (oldest first)
     /// while their gap closes; drop the finished ones.
-    pub(super) fn merge_vanishing(
-        &self,
-        messages: &mut Vec<HistoryMessage>,
-        cx: &mut Context<Self>,
-    ) {
-        let now = Instant::now();
+    pub(super) fn merge_vanishing(&self, messages: &mut Vec<HistoryMessage>) {
+        let now = self.vanish_now();
+        self.prune_vanishing(now);
         let mut vanishing = self.history.vanishing.borrow_mut();
-        vanishing.retain(|ghost| match ghost.started {
-            Some(started) => now.duration_since(started).as_secs_f32() < DUST_LIFE,
-            None => now.duration_since(ghost.requested) < VANISH_WAIT,
-        });
         let chat = messages.first().map(|m| m.chat_id);
         let mut added = false;
         for ghost in vanishing.iter_mut() {
@@ -365,8 +396,7 @@ impl QuillApp {
                 }));
             }
             // The row stays (cut away, then closing) until its gap is gone.
-            let t = ghost.elapsed().unwrap_or(0.);
-            if ghost.row.is_some() && t < WIPE + ghost.collapse() {
+            if ghost.phase(now) == Phase::InRows {
                 messages.push(ghost.message.clone());
                 added = true;
             }
@@ -374,29 +404,63 @@ impl QuillApp {
         if added {
             messages.sort_by_key(|m| m.id.0);
         }
-        if !vanishing.is_empty() {
-            self.request_animation_tick(60, cx);
+    }
+
+    /// Drop the dissolves that are over, or whose deletion never landed.
+    /// Runs every frame (`vanish_overlay`), not only when rows are built:
+    /// a pane without rows (no chat, an empty or loading one) would keep
+    /// them, and the tick, forever.
+    fn prune_vanishing(&self, now: Instant) {
+        if let Ok(mut vanishing) = self.history.vanishing.try_borrow_mut() {
+            vanishing.retain(|ghost| ghost.phase(now) != Phase::Done);
         }
     }
 
-    /// Seconds since a crumbling message left the history.
+    /// Judge the dissolves at one instant for this frame: taken once at the
+    /// top of `conversation`, read by the rows work and the dust alike.
+    pub(super) fn pin_vanish_now(&self) {
+        if !self.history.vanish_held.get() {
+            self.history.vanish_now.set(Some(Instant::now()));
+        }
+    }
+
+    fn vanish_now(&self) -> Instant {
+        self.history.vanish_now.get().unwrap_or_else(Instant::now)
+    }
+
+    /// Seconds since a crumbling message left the history. `None` on a
+    /// borrow conflict too: the row is drawn unchanged for that one frame.
     pub(super) fn vanish_progress(&self, id: MessageId) -> Option<f32> {
-        let vanishing = self.history.vanishing.borrow();
+        let now = self.vanish_now();
+        let vanishing = self.history.vanishing.try_borrow().ok()?;
         vanishing
             .iter()
             .find(|ghost| ghost.message.id == id)?
-            .elapsed()
+            .elapsed(now)
     }
 
-    /// For the history rows key: a fresh value every frame while a
-    /// message crumbles.
-    pub(super) fn vanish_rows_hash(&self) -> Option<u128> {
-        let vanishing = self.history.vanishing.borrow();
-        (!vanishing.is_empty()).then(|| {
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |elapsed| elapsed.as_nanos())
-        })
+    /// For the history rows key: which messages crumble and how far each
+    /// has got (`Phase`), not the animation's progress. The rows read that
+    /// at render (`vanish_progress`), so the key only changes when a
+    /// dissolve starts, moves on to dust or ends.
+    ///
+    /// A borrow conflict hashes a sentinel, never `None`: the rows are then
+    /// built whole and the splice stands down, rather than assuming no
+    /// dissolve runs.
+    pub(super) fn vanish_rows_hash(&self) -> Option<u64> {
+        use std::hash::{Hash, Hasher};
+        let Ok(vanishing) = self.history.vanishing.try_borrow() else {
+            return Some(VANISH_BUSY);
+        };
+        if vanishing.is_empty() {
+            return None;
+        }
+        let now = self.vanish_now();
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for ghost in vanishing.iter() {
+            (ghost.message.id.0, ghost.phase(now)).hash(&mut hasher);
+        }
+        Some(hasher.finish())
     }
 
     /// A crumbling message's row, `t` seconds in: the message cut away
@@ -422,12 +486,60 @@ impl QuillApp {
             .into_any_element()
     }
 
+    /// List indices (into the built rows, not the message history) of the
+    /// rows whose gap is closing: only those are measured again each frame.
+    ///
+    /// This reads the same instant as paint and the rows hash
+    /// (`vanish_now`: the pinned or held one, else the current one), so the
+    /// remeasure and the drawn gap agree however long a frame takes.
+    pub(super) fn closing_rows(&self) -> Vec<usize> {
+        let now = self.vanish_now();
+        let Ok(vanishing) = self.history.vanishing.try_borrow() else {
+            return Vec::new();
+        };
+        vanishing
+            .iter()
+            .filter(|ghost| ghost.row.is_some())
+            .filter(|ghost| {
+                ghost
+                    .elapsed(now)
+                    .is_some_and(|t| t >= WIPE && t < WIPE + ghost.collapse())
+            })
+            .filter_map(|ghost| {
+                let id = ghost.message.id;
+                self.history
+                    .rows
+                    .iter()
+                    .position(|row| row.first_id() == Some(id))
+            })
+            .collect()
+    }
+
     /// The dust of every crumbling message, over the history.
-    pub(super) fn vanish_overlay(&self) -> Option<AnyElement> {
+    pub(super) fn vanish_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.prune_vanishing(self.vanish_now());
+        // The list keeps each row's measured height, so a gap that is
+        // closing is measured again every frame to pull the rows below up.
+        // The borrow is dropped before the list is updated.
+        let closing = self.closing_rows();
+        if !closing.is_empty() {
+            self.history.scroller.update(cx, |state, cx| {
+                for row in closing {
+                    let _ = state.remeasure_items(row..row + 1, cx);
+                }
+            });
+        }
+        // The rows are kept while it runs: the frame clock drives it. The
+        // tick is requested with no borrow held.
+        let running = !self.history.vanishing.borrow().is_empty();
+        if running {
+            self.request_animation_tick(60, cx);
+        }
+        let now = self.vanish_now();
         let vanishing = self.history.vanishing.borrow();
         let clouds: Vec<(f32, Rc<Vec<Grain>>)> = vanishing
             .iter()
-            .filter_map(|ghost| Some((ghost.elapsed()?, ghost.grains.clone())))
+            .filter_map(|ghost| Some((ghost.elapsed(now)?, ghost.grains.clone())))
             .filter(|(_, grains)| !grains.is_empty())
             .collect();
         if clouds.is_empty() {
@@ -458,6 +570,50 @@ impl QuillApp {
             .size_full()
             .into_any_element(),
         )
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+impl QuillApp {
+    /// Give every dissolve a painted row (nothing is painted in a test) so
+    /// its row phase lasts about a second.
+    pub(super) fn paint_vanishing_for_test(&self) {
+        let area = Bounds::new(point(px(0.), px(0.)), size(px(300.), px(2000.)));
+        for ghost in self.history.vanishing.borrow_mut().iter_mut() {
+            ghost.row = Some(area);
+            ghost.bubble = Some(area);
+        }
+    }
+
+    /// Let `secs` pass for every dissolve, started or not, without waiting.
+    pub(super) fn age_vanishing_for_test(&self, secs: f32) {
+        let back = Duration::from_secs_f32(secs);
+        for ghost in self.history.vanishing.borrow_mut().iter_mut() {
+            ghost.requested = ghost.requested.checked_sub(back).unwrap_or(ghost.requested);
+            ghost.started = ghost.started.and_then(|at| at.checked_sub(back));
+        }
+    }
+
+    /// The dissolves still held, and the clock the frame last pinned.
+    pub(super) fn vanishing_state_for_test(&self) -> (usize, Option<Instant>) {
+        (
+            self.history.vanishing.borrow().len(),
+            self.history.vanish_now.get(),
+        )
+    }
+
+    /// Put every started dissolve `secs` into its animation.
+    pub(super) fn set_vanishing_clock(&self, secs: f32) {
+        let back = Duration::from_secs_f32(secs);
+        let now = Instant::now();
+        self.history.vanish_now.set(Some(now));
+        self.history.vanish_held.set(true);
+        for ghost in self.history.vanishing.borrow_mut().iter_mut() {
+            if ghost.started.is_some() {
+                ghost.started = now.checked_sub(back);
+            }
+        }
     }
 }
 
