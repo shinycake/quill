@@ -109,6 +109,11 @@ impl QuillApp {
                     .map(|chat| chat.title.clone())
                     .filter(|title| !title.is_empty())
                     .unwrap_or(signature);
+                let title = if title.trim().is_empty() {
+                    tr(keys::Q_MISC_CHANNEL).to_string()
+                } else {
+                    title
+                };
                 RepliesBlock::new(message.id, title.clone(), title, false)
             }
             RepliesSender::Hidden(name) => RepliesBlock::new(message.id, name.clone(), name, false),

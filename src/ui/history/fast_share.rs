@@ -11,7 +11,6 @@ use quill::lang::{keys, tr};
 use quill::state::{HistoryMessage, Session};
 use quill::telegram::envelope::{ChatKind, MessageContent, MessageOrigin, effective_content};
 
-/// The "Replies" system user (tdesktop `isRepliesChat`).
 /// The "Verification Codes" system user (tdesktop `isVerifyCodes`).
 const VERIFY_CODES_USER_ID: i64 = 489_000;
 

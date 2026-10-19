@@ -8,18 +8,26 @@
 
 use crate::ids::{ChatId, MessageId};
 use crate::lang::{keys, tr_with};
-use crate::local_time::{CivilTime, hhmm, month_name};
-use crate::state::{HistoryMessage, Session};
+use crate::local_time::{CivilTime, hhmm};
+use crate::state::{HistoryMessage, Session, short_date_time};
 use crate::telegram::envelope::{
     GiftOrigin, MessageContent, MessageOrigin, MessageSender, ServiceAction,
 };
 
+/// The Replies chat on the production servers.
+const PRODUCTION_REPLIES_CHAT_ID: i64 = 1_271_266_957;
+
 impl Session {
     /// The chat is the Replies chat (tdesktop `PeerData::isRepliesChat`).
     /// Its id comes from the TDLib option `replies_bot_chat_id`, which
-    /// differs on the test environment.
+    /// differs on the test environment; until the option arrives the
+    /// production id stands in, as in Telegram X.
     pub fn is_replies_chat(&self, chat_id: ChatId) -> bool {
-        self.users_state.replies_bot_chat_id == Some(chat_id.0)
+        let id = self
+            .users_state
+            .replies_bot_chat_id
+            .unwrap_or(PRODUCTION_REPLIES_CHAT_ID);
+        id == chat_id.0
     }
 }
 
@@ -30,17 +38,7 @@ pub fn original_date_text(date: &CivilTime, now: &CivilTime) -> String {
     match now.day_number() - date.day_number() {
         0 => tr_with(keys::MEDIAVIEW_TODAY, &[("time", &time)]),
         1 => tr_with(keys::MEDIAVIEW_YESTERDAY, &[("time", &time)]),
-        _ => {
-            let day = format!(
-                "{} {}",
-                month_name(date.month).chars().take(3).collect::<String>(),
-                date.day
-            );
-            tr_with(
-                keys::MEDIAVIEW_DATE_TIME,
-                &[("date", &day), ("time", &time)],
-            )
-        }
+        _ => short_date_time(date, now),
     }
 }
 
@@ -306,6 +304,8 @@ mod tests {
         assert_eq!(original_date_text(&today, &now), "today at 20:42");
         assert_eq!(original_date_text(&yesterday, &now), "yesterday at 21:42");
         assert_eq!(original_date_text(&older, &now), "Sep 18 at 21:42");
+        let far = crate::local_time::civil_at(1_790_631_720 - 400 * 86_400, 0);
+        assert_eq!(original_date_text(&far, &now), "Aug 24, 2025 at 21:42");
     }
 
     #[test]
@@ -340,6 +340,7 @@ mod tests {
             std::sync::Arc::new(crate::diagnostics::MemorySink::new());
         let mut session = crate::state::Session::new(crate::ids::AccountKey::primary(), sink);
         assert!(!session.is_replies_chat(ChatId(708_513)));
+        assert!(session.is_replies_chat(ChatId(1_271_266_957)));
         session.users_state.apply_option(
             "replies_bot_chat_id",
             &crate::telegram::envelope::OptionValue::Integer(708_513),

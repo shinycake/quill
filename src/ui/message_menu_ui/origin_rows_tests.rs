@@ -34,6 +34,7 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     });
     let app: Entity<QuillApp> = slot.borrow().clone().unwrap();
     let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+    vcx.update(|_, cx| cx.set_reduce_motion(true));
     frames(&mut vcx);
     (app, vcx)
 }
@@ -137,7 +138,6 @@ fn blocking_a_reply_sender_asks_first(cx: &mut TestAppContext) {
     assert!(has(vcx, "replies-block-delete"));
     assert!(has(vcx, "replies-block-delete-all"));
 
-    frames(vcx);
     click(vcx, "replies-block-delete-all");
     let delete_all = app.read_with(vcx, |app, _| {
         app.session()
