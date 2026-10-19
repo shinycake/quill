@@ -275,6 +275,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] "Sent by {user}" row for messages posted as a chat (`getMessageAuthor`) (#1001) <!-- parity:menu-sent-by -->
 - [x] Copy Phone Number on a contact message (#1001) <!-- parity:menu-copy-contact-phone -->
 - [x] "Original date" row for forwarded messages, as tdesktop's context menu shows it <!-- parity:menu-forward-original-date -->
+- [ ] "Edited" row in the message menu is an icon plus a bare date, as tdesktop shows it <!-- parity:menu-edited-date-row -->
 - [x] "Send Another Gift" on gift service messages <!-- parity:menu-send-another-gift -->
 - [x] Block sender from the Replies chat menu <!-- parity:menu-replies-block-sender -->
 - [ ] Save selected rich messages as HTML <!-- parity:menu-save-selection-html -->
