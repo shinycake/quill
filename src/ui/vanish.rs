@@ -378,8 +378,8 @@ impl QuillApp {
     /// while their gap closes; drop the finished ones.
     pub(super) fn merge_vanishing(&self, messages: &mut Vec<HistoryMessage>) {
         let now = self.vanish_now();
+        self.prune_vanishing(now);
         let mut vanishing = self.history.vanishing.borrow_mut();
-        vanishing.retain(|ghost| ghost.phase(now) != Phase::Done);
         let chat = messages.first().map(|m| m.chat_id);
         let mut added = false;
         for ghost in vanishing.iter_mut() {
@@ -406,7 +406,18 @@ impl QuillApp {
         }
     }
 
-    /// Judge the dissolves at one instant for this round of rows work.
+    /// Drop the dissolves that are over, or whose deletion never landed.
+    /// Runs every frame (`vanish_overlay`), not only when rows are built:
+    /// a pane without rows (no chat, an empty or loading one) would keep
+    /// them, and the tick, forever.
+    fn prune_vanishing(&self, now: Instant) {
+        if let Ok(mut vanishing) = self.history.vanishing.try_borrow_mut() {
+            vanishing.retain(|ghost| ghost.phase(now) != Phase::Done);
+        }
+    }
+
+    /// Judge the dissolves at one instant for this frame: taken once at the
+    /// top of `conversation`, read by the rows work and the dust alike.
     pub(super) fn pin_vanish_now(&self) {
         if !self.history.vanish_held.get() {
             self.history.vanish_now.set(Some(Instant::now()));
@@ -506,6 +517,7 @@ impl QuillApp {
 
     /// The dust of every crumbling message, over the history.
     pub(super) fn vanish_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.prune_vanishing(self.vanish_now());
         // The list keeps each row's measured height, so a gap that is
         // closing is measured again every frame to pull the rows below up.
         // The borrow is dropped before the list is updated.
@@ -578,6 +590,23 @@ impl QuillApp {
     pub(super) fn release_vanishing_clock(&self) {
         self.history.vanish_held.set(false);
         self.history.vanish_now.set(None);
+    }
+
+    /// Let `secs` pass for every dissolve, started or not, without waiting.
+    pub(super) fn age_vanishing_for_test(&self, secs: f32) {
+        let back = Duration::from_secs_f32(secs);
+        for ghost in self.history.vanishing.borrow_mut().iter_mut() {
+            ghost.requested = ghost.requested.checked_sub(back).unwrap_or(ghost.requested);
+            ghost.started = ghost.started.and_then(|at| at.checked_sub(back));
+        }
+    }
+
+    /// The dissolves still held, and the clock the frame last pinned.
+    pub(super) fn vanishing_state_for_test(&self) -> (usize, Option<Instant>) {
+        (
+            self.history.vanishing.borrow().len(),
+            self.history.vanish_now.get(),
+        )
     }
 
     /// Put every started dissolve `secs` into its animation.

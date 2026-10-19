@@ -13,6 +13,11 @@ impl QuillApp {
         part: ConversationPart,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        if part.top() {
+            // One instant for the rows work and the dust of this frame, in
+            // panes that build no rows too.
+            self.pin_vanish_now();
+        }
         let mode = self.pane_mode();
         let history = match mode {
             _ if !part.top() => Empty.into_any_element(),

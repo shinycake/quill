@@ -524,3 +524,6 @@ mod long;
 
 #[path = "row_splice_tests.rs"]
 mod splice;
+
+#[path = "rows_vanish_tests.rs"]
+mod vanish;

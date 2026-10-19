@@ -95,7 +95,6 @@ impl QuillApp {
         messages: impl FnOnce() -> Vec<HistoryMessage>,
     ) -> (HistoryRowsKey, RowsInput) {
         let today = quill::local_time::civil_local(quill::local_time::now_unix()).day_number();
-        self.pin_vanish_now();
         let key = HistoryRowsKey {
             list: source.list,
             chat: source.chat.map(|chat| chat.0),
