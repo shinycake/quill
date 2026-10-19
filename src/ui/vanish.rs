@@ -586,12 +586,6 @@ impl QuillApp {
         }
     }
 
-    /// Let the dissolve clock run again after `set_vanishing_clock`.
-    pub(super) fn release_vanishing_clock(&self) {
-        self.history.vanish_held.set(false);
-        self.history.vanish_now.set(None);
-    }
-
     /// Let `secs` pass for every dissolve, started or not, without waiting.
     pub(super) fn age_vanishing_for_test(&self, secs: f32) {
         let back = Duration::from_secs_f32(secs);
