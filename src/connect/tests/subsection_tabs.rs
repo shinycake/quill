@@ -7,6 +7,7 @@ use crate::platform::MemorySecretStore;
 use crate::settings::load_media_prefs;
 use crate::subsection_tabs::SubsectionTabsMode;
 use crate::telegram::client::copy_and_parse;
+use crate::telegram::envelope::AuthorizationState;
 use serde_json::Value;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -19,7 +20,7 @@ fn bot_user_json(id: i64, has_topics: bool, allows: bool) -> String {
 
 fn bot_chat_json(id: i64) -> String {
     format!(
-        r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"Bot","type":{{"@type":"chatTypePrivate","user_id":{id}}},"unread_count":0}}}}"#
+        r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"Bot","type":{{"@type":"chatTypePrivate","user_id":{id}}},"unread_count":0,"positions":[{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"1","is_pinned":false}}]}}}}"#
     )
 }
 
@@ -333,5 +334,85 @@ fn opening_topic_reads_it_and_never_resurrects_a_stale_count() {
         driver.session.ordered_forum_topics(ChatId(41))[0].unread_count,
         0
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A forum in a chat list loads its topics when it appears, once, and only
+/// after a request really went out; an error is final.
+#[test]
+fn forums_in_a_list_load_their_topics_when_they_appear() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    };
+    // The chat id of supergroup `n`.
+    let id = |n: i64| -1_000_000_000_000 - n;
+    let chat = |n: i64, listed: bool| {
+        let positions = if listed {
+            r#","positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"5","is_pinned":false}]"#
+        } else {
+            ""
+        };
+        format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":{},"title":"Forum","type":{{"@type":"chatTypeSupergroup","supergroup_id":{n},"is_channel":false}},"unread_count":0{positions}}}}}"#,
+            id(n)
+        )
+    };
+    let forum = |n: i64| {
+        format!(
+            r#"{{"@type":"updateSupergroup","supergroup":{{"@type":"supergroup","id":{n},"is_forum":true}}}}"#
+        )
+    };
+    // A plain supergroup asks for nothing; turning into a forum does.
+    ingest(&mut driver, &chat(61, true));
+    assert!(sent(&recorder, "getForumTopics").is_empty());
+    ingest(&mut driver, &forum(61));
+    let fetches = sent(&recorder, "getForumTopics");
+    assert_eq!(fetches.len(), 1);
+    assert_eq!(fetches[0]["chat_id"], id(61));
+    assert!(driver.session.threads.forum_row_asked.contains(&id(61)));
+    // A repeated update does not ask again.
+    ingest(&mut driver, &forum(61));
+    assert_eq!(sent(&recorder, "getForumTopics").len(), 1);
+    // A TDLib error is final: the row reads "No chats" and nothing is resent.
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHANNEL_INVALID"}}"#,
+            fetches[0]["@extra"].as_str().unwrap()
+        ),
+    );
+    assert!(driver.session.threads.forum_topics_failed.contains(&id(61)));
+    ingest(&mut driver, &forum(61));
+    assert_eq!(sent(&recorder, "getForumTopics").len(), 1);
+    // A forum that is in no chat list is not preloaded; once it enters one it is.
+    ingest(&mut driver, &chat(63, false));
+    ingest(&mut driver, &forum(63));
+    assert_eq!(sent(&recorder, "getForumTopics").len(), 1);
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"updateChatPosition","chat_id":{},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"7","is_pinned":false}}}}"#,
+            id(63)
+        ),
+    );
+    assert_eq!(sent(&recorder, "getForumTopics").len(), 2);
+    // A forum seen while the account is not ready is asked later.
+    driver.session.auth = AuthorizationState::WaitPhoneNumber;
+    ingest(&mut driver, &chat(62, true));
+    ingest(&mut driver, &forum(62));
+    assert_eq!(sent(&recorder, "getForumTopics").len(), 2);
+    assert!(!driver.session.threads.forum_row_asked.contains(&id(62)));
+    driver.session.auth = AuthorizationState::Ready;
+    driver.preload_known_forums();
+    assert_eq!(sent(&recorder, "getForumTopics").len(), 3);
     let _ = std::fs::remove_dir_all(&dir);
 }

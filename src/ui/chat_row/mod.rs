@@ -25,6 +25,12 @@ use quill::telegram::envelope::{
     ChatKind, EphemeralMessageContent, MessageContent, effective_content,
 };
 use quill::text::TextEntity;
+mod forum_titles_demo;
+mod row_badges;
+mod topic_fit;
+mod topic_titles;
+#[cfg(test)]
+mod topic_titles_tests;
 /// Slice CL: floating chat-list peek preview — the chat being previewed
 /// plus where it floated from (`MouseDownEvent.position` is in window
 /// coordinates, same as the overlay's `.left()`/`.top()`).
@@ -357,9 +363,9 @@ pub(super) fn session_chat_row(
     preview_emoji: super::sticker_playback::PreviewEmoji,
     // Telegram Desktop marks groups, channels and bots before the title.
     kind_icon: Option<IconName>,
-    // Subsection tabs: topic names for bots with topics and forums (the
-    // sender line in 3-line rows, the preview line in 2-line rows).
-    topic_names: Option<String>,
+    // A forum row (`displayAsForum`): its topics fill the second line, the
+    // last message the third.
+    forum: Option<topic_titles::ForumLine>,
     // Active stories: the ring around the avatar (unread: accent gradient,
     // read: grey).
     story_ring: Option<StoryRing>,
@@ -381,7 +387,6 @@ pub(super) fn session_chat_row(
         Some(badge) => Some((RowStatus::None, badge.label.clone())),
         None => row_stamp(chat),
     };
-    let topic_line = topic_names.clone().filter(|_| row_style.preview_lines < 3);
     let title: String = if saved {
         tr(keys::SAVED_MESSAGES).to_string()
     } else {
@@ -414,7 +419,6 @@ pub(super) fn session_chat_row(
     // comes from the first strong character (a Latin name: left-to-right).
     let combine_prefix = preview_sender.is_some()
         && from_last
-        && topic_line.is_none()
         && activity.is_none()
         && chat.last_preview_thumb.is_none()
         && quill::text::has_rtl_text(&preview);
@@ -449,8 +453,37 @@ pub(super) fn session_chat_row(
     // kit Phase 4: the unread indicator is a kit `Badge` overlaying the
     // avatar — `(count, is_dot)`.
     let has_mentions = chat.unread_mention_count > 0;
-    let unread_indicator = chat_unread_indicator(chat);
+    let jump = forum.as_ref().and_then(|line| line.jump(selected));
+    let unread_indicator = match forum.as_ref().map(|line| &line.forum) {
+        // tdesktop never marks a forum itself: only its topics count
+        // (`history.cpp:2765-2770`, `data_thread.cpp:117-119`).
+        Some(forum) => (forum.unread_topics > 0).then_some((forum.unread_topics, false)),
+        None => chat_unread_indicator(chat),
+    };
     let has_reactions = chat.unread_reaction_count > 0;
+    // The counters at the trailing edge: on the topics line of a forum row,
+    // else on the preview line.
+    let badge_muted = match forum.as_ref().map(|line| &line.forum) {
+        Some(forum) if forum.unread_topics > 0 => forum.badge_muted,
+        _ => chat.is_muted(),
+    };
+    let badges = row_badges::row_badges(
+        chat,
+        archived,
+        muted_fg,
+        badge_muted,
+        unread_indicator,
+        has_reactions,
+        has_mentions,
+        fx.badge,
+        cx,
+    )
+    .into_any_element();
+    let (forum_badges, plain_badges) = if forum.is_some() {
+        (Some(badges), None)
+    } else {
+        (None, Some(badges))
+    };
     // kit Phase 7: screen-reader label for the row.
     let row_label = if draft.is_some() {
         tr_with(
@@ -672,7 +705,18 @@ pub(super) fn session_chat_row(
                                     )
                                 }),
                         )
-                        .when(row_style.preview_lines >= 3, |this| {
+                        .when_some(forum.as_ref(), |this, forum| {
+                            this.child(topic_titles::forum_topics_line(
+                                id,
+                                forum,
+                                selected,
+                                selecting,
+                                muted_fg,
+                                forum_badges,
+                                cx,
+                            ))
+                        })
+                        .when(forum.is_none() && row_style.preview_lines >= 3, |this| {
                             // Slice chatlist-list-style: the third line
                             // names the sender ("You" / author signature /
                             // chat title).
@@ -682,15 +726,11 @@ pub(super) fn session_chat_row(
                                     .font_semibold()
                                     .truncate()
                                     .text_color(muted_fg)
-                                    .child(
-                                        topic_names.unwrap_or_else(|| {
-                                            if announced {
-                                                String::new()
-                                            } else {
-                                                chat.last_preview_sender.clone()
-                                            }
-                                        }),
-                                    ),
+                                    .child(if announced {
+                                        String::new()
+                                    } else {
+                                        chat.last_preview_sender.clone()
+                                    }),
                             )
                         })
                         .child(
@@ -698,9 +738,9 @@ pub(super) fn session_chat_row(
                                 .flex()
                                 .items_center()
                                 .gap_2()
-                                .child(
-                                    div()
-                                        .flex_1()
+                                .child({
+                                    let message = div()
+                                        .when(jump.is_none(), |this| this.flex_1())
                                         .min_w_0()
                                         .flex()
                                         .min_w_0()
@@ -714,7 +754,7 @@ pub(super) fn session_chat_row(
                                         .when_some(
                                             preview_sender
                                                 .clone()
-                                                .filter(|_| from_last && topic_line.is_none())
+                                                .filter(|_| from_last)
                                                 .filter(|_| !combine_prefix),
                                             |this, sender| {
                                                 this.child(
@@ -733,7 +773,7 @@ pub(super) fn session_chat_row(
                                         .when_some(
                                             chat.last_preview_thumb
                                                 .clone()
-                                                .filter(|_| from_last && topic_line.is_none()),
+                                                .filter(|_| from_last),
                                             |this, mini| {
                                                 this.child(
                                                     img(super::image_budget::sized_image(
@@ -771,13 +811,6 @@ pub(super) fn session_chat_row(
                                                 )
                                                 .child(div().min_w_0().truncate().child(line.text))
                                                 .into_any_element(),
-                                            None if topic_line.is_some() => div()
-                                                .min_w_0()
-                                                .flex_1()
-                                                .text_xs()
-                                                .truncate()
-                                                .child(topic_line.unwrap_or_default())
-                                                .into_any_element(),
                                             None => div()
                                                 .min_w_0()
                                                 .flex_1()
@@ -799,41 +832,21 @@ pub(super) fn session_chat_row(
                                                     ),
                                                 )
                                                 .into_any_element(),
-                                        }),
-                                )
-                                // Slice CL3: TGX order — ♥ reactions, @ mentions,
-                                // then the unread counter at the trailing edge.
-                                .child(
-                                    div()
-                                        .flex()
-                                        .flex_none()
-                                        .items_center()
-                                        .gap_1()
-                                        .when(has_reactions, |this| {
-                                            this.child(reaction_badge(chat.is_muted()))
-                                        })
-                                        .when(has_mentions, |this| this.child(mention_badge()))
-                                        .map(|this| match unread_indicator {
-                                            Some((count, dot)) => this.child(unread_pill(
-                                                id,
-                                                count,
-                                                dot,
-                                                chat.is_muted(),
-                                                fx.badge,
-                                                cx,
-                                            )),
-                                            None if pinned_here(chat, archived)
-                                                && !has_mentions
-                                                && !has_reactions =>
-                                            {
-                                                this.child(row_glyph(
-                                                    IconName::Pin,
-                                                    muted_fg,
-                                                ))
-                                            }
-                                            None => this,
-                                        }),
-                                ),
+                                        });
+                                    match jump {
+                                        Some(topic) => topic_titles::jump_message(
+                                            id,
+                                            topic,
+                                            selecting,
+                                            muted_fg,
+                                            message.into_any_element(),
+                                            cx,
+                                        )
+                                        .into_any_element(),
+                                        None => message.into_any_element(),
+                                    }
+                                })
+                                .children(plain_badges),
                         ),
                 ),
         )

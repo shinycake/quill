@@ -199,7 +199,7 @@ fn topic_updates_keep_tabs_current() {
             .unwrap()
     };
     assert_eq!(t3(&session).unread_count, 1);
-    assert_eq!(t3(&session).last_message_id, 103);
+    assert_eq!(t3(&session).last_message_id, 500);
     assert_eq!(t3(&session).last_message_preview, "ping");
 
     // Pin + mute + read up to the last message.
@@ -215,10 +215,12 @@ fn topic_updates_keep_tabs_current() {
     assert_eq!(topic.unread_count, 0);
 
     // Chat-row topic line.
-    assert_eq!(
-        session.chat_row_topic_names(ChatId(41)).as_deref(),
-        Some("T3  New  Trips")
-    );
+    let names: Vec<String> = session
+        .chat_row_topics(ChatId(41))
+        .into_iter()
+        .map(|t| t.name)
+        .collect();
+    assert_eq!(names, ["T3", "Trips", "New"]);
 }
 
 /// `getForumTopic` answers replace the cached topic with TDLib's state,
@@ -334,4 +336,105 @@ fn topic_badge_follows_tdesktop_for_unknown_read_position() {
         .last_read_inbox_message_id = MessageId(503000000000);
     assert_eq!(badge(&session, 481359), TopicBadge::Dot);
     assert_eq!(badge(&session, 479296), TopicBadge::None);
+}
+
+/// A forum row is three lines whatever the setting; a bot that creates its
+/// own topics is one only once it has a topic. "Loading…" ends with the
+/// answer or a failure, and the badge counts topics with unread messages.
+#[test]
+fn forum_rows_follow_display_as_forum() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, &bot_user(43, true, false));
+    apply_json(&mut session, &seq, &sink, &private_chat(43));
+    assert!(session.chat_row_forum(ChatId(43)).is_none());
+    assert_eq!(session.chat_row_lines(ChatId(43), 2), 2);
+    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(43)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &topics_answer(extra.0, 43, &[2, 3]),
+    );
+    let row = session.chat_row_forum(ChatId(43)).expect("a forum row");
+    assert!(row.loaded);
+    // Both topics are unread; the newest is first and is the jump target.
+    assert_eq!(row.unread_topics, 2);
+    assert_eq!(row.jump, Some(3));
+    assert_eq!(session.chat_row_lines(ChatId(43), 2), 3);
+
+    // A forum is a forum row at once; "Loading…" until the answer or an error.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":16,"title":"F","type":{"@type":"chatTypeSupergroup","supergroup_id":16,"is_channel":false},"unread_count":0}}"#,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":16,"is_forum":true}}"#,
+    );
+    let row = session.chat_row_forum(ChatId(16)).expect("a forum row");
+    assert!(!row.loaded && row.topics.is_empty());
+    session.threads.forum_topics_failed.insert(16);
+    assert!(session.chat_row_forum(ChatId(16)).expect("row").loaded);
+}
+
+/// The forum badge follows `IncludeInBadge::UnmutedOrAll`, ignores the unread
+/// mark, and topic icons are listed for resolving.
+#[test]
+fn forum_badge_counts_unmuted_topics_and_icons_are_resolved() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, &bot_user(43, true, true));
+    apply_json(&mut session, &seq, &sink, &private_chat(43));
+    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(43)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &topics_answer(extra.0, 43, &[2, 3]),
+    );
+    let set = |session: &mut Session, id: i32, muted: bool, icon: i64| {
+        let topic = session
+            .threads
+            .forum_topics
+            .get_mut(&43)
+            .and_then(|topics| topics.iter_mut().find(|t| t.forum_topic_id == id))
+            .expect("topic");
+        topic.notification_settings.use_default_mute_for = false;
+        topic.notification_settings.mute_for = if muted { 2147483647 } else { 0 };
+        topic.icon_custom_emoji_id = icon;
+    };
+    let row = |session: &Session| session.chat_row_forum(ChatId(43)).expect("row");
+    // One muted and one unmuted unread topic: the badge counts the unmuted.
+    set(&mut session, 2, true, 0);
+    set(&mut session, 3, false, 777);
+    let shown = row(&session);
+    assert_eq!((shown.unread_topics, shown.badge_muted), (1, false));
+    assert_eq!(shown.topics.first().map(|t| t.icon), Some(777));
+    assert!(session.open_chat_custom_emoji_ids().contains(&777));
+    // Every unread topic muted: all count, and the badge is grey.
+    set(&mut session, 3, true, 777);
+    let shown = row(&session);
+    assert_eq!((shown.unread_topics, shown.badge_muted), (2, true));
+    // Nothing unread but the chat marked as unread: no badge and no dot
+    // (tdesktop ignores the mark on a forum).
+    for id in [2, 3] {
+        if let Some(topic) = session
+            .threads
+            .forum_topics
+            .get_mut(&43)
+            .and_then(|topics| topics.iter_mut().find(|t| t.forum_topic_id == id))
+        {
+            topic.unread_count = 0;
+            topic.last_read_inbox_message_id = 900;
+        }
+    }
+    if let Some(chat) = session.chats.get_mut(&43) {
+        chat.is_marked_as_unread = true;
+    }
+    assert_eq!(row(&session).unread_topics, 0);
 }

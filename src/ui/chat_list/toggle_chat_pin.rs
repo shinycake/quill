@@ -348,7 +348,9 @@ impl QuillApp {
                                     folder_tags.show,
                                     folder,
                                 ),
-                                self.appearance.preview_lines,
+                                self.session().map_or(self.appearance.preview_lines, |s| {
+                                    s.chat_row_lines(chat.id, self.appearance.preview_lines)
+                                }),
                             )
                         };
                         let mut items: Vec<ChatListItem> = Vec::with_capacity(chats.len() + 2);

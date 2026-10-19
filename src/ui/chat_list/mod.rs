@@ -601,13 +601,15 @@ impl QuillApp {
             let names = quill::folder_limits::tag_names(&session.chat_list.chat_folders);
             let tags = session.chat_list.are_folder_tags_enabled;
             let viewing = self.folders.tab;
-            let lines = self.appearance.preview_lines;
+            let setting = self.appearance.preview_lines;
             let heights = ids
                 .iter()
                 .filter_map(|id| {
                     let chat = session.chats.get(id)?;
-                    let height =
-                        chat_row_height(&chat_row_tags(chat, &names, tags, viewing), lines);
+                    let height = chat_row_height(
+                        &chat_row_tags(chat, &names, tags, viewing),
+                        session.chat_row_lines(chat.id, setting),
+                    );
                     Some((*id, f32::from(height)))
                 })
                 .collect();

@@ -91,13 +91,32 @@ impl QuillApp {
                 // Online dot and new-badge animations: 150 ms, only while
                 // the window is active (inactive windows snap).
                 let active = self.frame.window_active.get();
+                let forum = self.session().and_then(|s| s.chat_row_forum(chat.id));
+                let has_badge = match &forum {
+                    Some(forum) => forum.unread_topics > 0,
+                    None => chat_unread_indicator(chat).is_some(),
+                };
                 let fx = self.frame.row_fx.borrow_mut().observe(
                     chat.id.0,
                     online,
-                    chat_unread_indicator(chat).is_some(),
+                    has_badge,
                     active,
                     std::time::Instant::now(),
                 );
+                let forum = forum.map(|forum| {
+                    let icons: Vec<i64> = forum
+                        .topics
+                        .iter()
+                        .map(|t| t.icon)
+                        .filter(|icon| *icon > 0)
+                        .collect();
+                    let emoji = if icons.is_empty() {
+                        Default::default()
+                    } else {
+                        self.topic_icon_images(&icons, cx)
+                    };
+                    super::topic_titles::ForumLine { forum, emoji }
+                });
                 if fx.animating {
                     self.request_animation_tick(60, cx);
                 }
@@ -156,7 +175,9 @@ impl QuillApp {
                     self.bot_verify_icon_path(chat),
                     // Slice chatlist-list-style: Settings → Appearance.
                     ChatListRowStyle::new(
-                        self.appearance.preview_lines,
+                        self.session().map_or(self.appearance.preview_lines, |s| {
+                            s.chat_row_lines(chat.id, self.appearance.preview_lines)
+                        }),
                         self.appearance.chat_list_media_icons,
                         self.appearance.chat_list_rich_preview,
                     ),
@@ -181,7 +202,7 @@ impl QuillApp {
                         }
                         _ => None,
                     },
-                    self.session().and_then(|s| s.chat_row_topic_names(chat.id)),
+                    forum,
                     story_ring,
                     self.session().and_then(|s| {
                         let promotion = quill::promotion::top_promotion(s, chat)?;

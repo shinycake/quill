@@ -280,6 +280,23 @@ pub fn safe_app_root() -> Option<PathBuf> {
     if let Some(root) = std::env::var_os("QUILL_DATA_ROOT").filter(|root| !root.is_empty()) {
         return Some(PathBuf::from(root));
     }
+    // Test processes (the lib's tests and, through the self dev-dependency,
+    // the binary's) never see the real folder, even before any window or
+    // explicit isolation: the first read or write already lands in a
+    // per-process temp folder.
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        Some(crate::scratch::process_dir("quill-test-root"))
+    }
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
+        real_app_root()
+    }
+}
+
+/// The platform data directory. Never reached in a test process.
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+fn real_app_root() -> Option<PathBuf> {
     directories::ProjectDirs::from("org", "shinycake", APP_DIR_NAME)
         .map(|dirs| dirs.data_dir().to_path_buf())
 }
@@ -299,6 +316,16 @@ pub fn use_isolated_app_root(root: PathBuf) -> bool {
 mod tests {
     use super::*;
     use std::fs;
+
+    /// A test process resolves the app root to a temp folder before anything
+    /// else runs, with no window and no explicit isolation: the owner's data
+    /// directory is never the answer.
+    #[test]
+    fn the_app_root_is_a_temp_folder_in_tests() {
+        let root = safe_app_root().expect("an app root");
+        assert!(root.starts_with(std::env::temp_dir()), "{root:?}");
+        assert_ne!(Some(root), real_app_root());
+    }
 
     #[test]
     fn account_paths_are_scoped() {

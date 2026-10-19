@@ -213,6 +213,7 @@ pub(super) fn unread_pill(
     let k = 0.6 + 0.4 * scale;
     div()
         .id(("unread-pill", chat_id.0 as u64))
+        .test_support()
         .flex_none()
         .h(px(20.))
         .min_w(px(20.))

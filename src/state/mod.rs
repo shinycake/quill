@@ -212,7 +212,7 @@ pub use session_reply::{
 pub use session_reply_keyboard::*;
 pub use session_saved::{SAVED_PAGE, SAVED_TOPICS_PAGE};
 pub use session_share::ShareSearch;
-pub use session_subsection_tabs::{BotTopics, TopicBadge};
+pub use session_subsection_tabs::{BotTopics, ROW_TOPIC_COUNT, RowForum, RowTopic, TopicBadge};
 pub use session_translate::*;
 pub use shared_media_meta::*;
 pub use shared_media_months::*;
