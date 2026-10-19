@@ -38,10 +38,17 @@ reaction strip above the message menu is not a tab stop yet.
 
 ## How verified
 
-- GPUI tests (`context_menu_focus_tests`): Tab and Down reach the rows of the
-  chat menu and of the message menu and wrap; the counts are the rows the
-  menus draw (`enabled_count`); the arrows leave the chat list selection
-  alone; Escape closes both menus and restores focus.
+- GPUI tests (`context_menu_focus_tests`): Down and Up walk the rows of the
+  chat menu and of the message menu in the order they are painted (read from
+  the accessibility tree, so the expected sequence and row count do not come
+  from the sort keys); breaking one row's key makes the test fail. Tab wraps
+  inside the menu and never reaches the chat list, Enter and Space run the
+  focused row, a menu with no items or only disabled items keeps the focus on
+  its frame, and a submenu's keys stay between its parent and the next row.
+  The arrows leave the chat list selection alone; Escape closes both menus
+  and restores focus.
+- `submenu_key` clamps the index to 254 so a long submenu cannot spill into
+  the next row's keys; no RefCell guard is held across a GPUI call.
 - `--screenshot-demo ready-chats` with a right-click on a message and on a
   chat row, then `k:down` and `k:down;k:down;k:up`, in light and dark; PNGs
   read back, not committed.

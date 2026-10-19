@@ -16,8 +16,8 @@
 //! focus.
 //!
 //! The arrows are not in the shortcut list and cannot be rebound: the
-//! keystroke interceptor (`app_demo.rs`, via `context_menu_key`) handles them, because they must
-//! work while the focus is still outside the menu.
+//! keystroke interceptor (`app_demo.rs`, via `context_menu_key`) handles
+//! them, because they must work while the focus is still outside the menu.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
@@ -42,9 +42,18 @@ pub(super) struct ContextMenuItems {
 
 /// Sort key of a submenu row: just after its parent row (`order`), in the
 /// order the submenu draws them.
+///
+/// The low byte holds `1 + index`, so a submenu has room for
+/// [`MAX_SUBMENU_ROWS`] rows; later rows share the last slot and keep
+/// their drawing order (the sort is stable) instead of spilling into the
+/// next row's keys.
 pub(super) fn submenu_key(order: u8, index: usize) -> u32 {
-    (u32::from(order) << 8) + 1 + u32::try_from(index).unwrap_or(0)
+    let slot = u8::try_from(index.min(MAX_SUBMENU_ROWS - 1)).map_or(0, u32::from);
+    (u32::from(order) << 8) + 1 + slot
 }
+
+/// Submenu rows that get a distinct sort key under one parent row.
+pub(super) const MAX_SUBMENU_ROWS: usize = 255;
 
 /// Sort key of a top-level row with the given order.
 pub(super) fn row_key(order: u8) -> u32 {
@@ -61,15 +70,18 @@ impl ContextMenuItems {
     /// The handle for the next enabled item drawn this frame, which sorts
     /// at `key` among the menu's items.
     fn claim(&self, key: u32, cx: &App) -> FocusHandle {
-        let mut keys = self.keys.borrow_mut();
-        let slot = keys.len();
-        keys.push(key);
-        let mut handles = self.handles.borrow_mut();
-        if let Some(handle) = handles.get(slot) {
-            return handle.clone();
+        let slot = {
+            let mut keys = self.keys.borrow_mut();
+            let slot = keys.len();
+            keys.push(key);
+            slot
+        };
+        let existing = self.handles.borrow().get(slot).cloned();
+        if let Some(handle) = existing {
+            return handle;
         }
         let handle = cx.focus_handle().tab_stop(true);
-        handles.push(handle.clone());
+        self.handles.borrow_mut().push(handle.clone());
         handle
     }
 
@@ -80,29 +92,23 @@ impl ContextMenuItems {
         self.keys.borrow().len()
     }
 
-    /// The sort keys of the rows drawn this frame, in the order Up and Down
-    /// walk them.
-    #[cfg(test)]
-    #[cfg(feature = "demo-capture")]
-    pub(super) fn sorted_keys(&self) -> Vec<u32> {
-        let mut keys = self.keys.borrow().clone();
-        keys.sort_unstable();
-        keys
-    }
-
     /// The handle after (or before) the focused one in key order, wrapping;
     /// with none focused, the first (or last). `None` when the menu has no
     /// enabled item.
     pub(super) fn step(&self, forward: bool, window: &Window) -> Option<FocusHandle> {
-        let handles = self.handles.borrow();
-        let keys = self.keys.borrow();
-        let mut live: Vec<(u32, &FocusHandle)> = keys
-            .iter()
-            .zip(handles.iter())
-            .map(|(key, handle)| (*key, handle))
-            .collect();
+        let mut live: Vec<(u32, FocusHandle)> = {
+            let handles = self.handles.borrow();
+            let keys = self.keys.borrow();
+            keys.iter()
+                .zip(handles.iter())
+                .map(|(key, handle)| (*key, handle.clone()))
+                .collect()
+        };
         live.sort_by_key(|(key, _)| *key);
         let count = live.len();
+        if count == 0 {
+            return None;
+        }
         let next = match live
             .iter()
             .position(|(_, handle)| handle.is_focused(window))
@@ -110,9 +116,9 @@ impl ContextMenuItems {
             Some(at) if forward => (at + 1) % count,
             Some(at) => (at + count - 1) % count,
             None if forward => 0,
-            None => count.checked_sub(1)?,
+            None => count.saturating_sub(1),
         };
-        live.get(next).map(|(_, handle)| (*handle).clone())
+        live.get(next).map(|(_, handle)| handle.clone())
     }
 }
 

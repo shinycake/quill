@@ -40,6 +40,8 @@ pub mod order {
     pub const COPY_LINK: u8 = 41;
     /// "Translate" (`ui/translate_ui.rs`).
     pub const TRANSLATE: u8 = 42;
+    /// "View in Explorer" of a TON address shares Translate's slot.
+    pub const TON_EXPLORER: u8 = 42;
     pub const COPY_POST_LINK: u8 = 45;
     pub const FORWARD: u8 = 50;
     /// "Add Offer" follows Forward (tdesktop `AddOfferAction`).

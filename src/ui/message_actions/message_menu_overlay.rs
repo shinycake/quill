@@ -324,12 +324,12 @@ impl QuillApp {
             if let quill::text::LinkTarget::TonAddress(address) = &link {
                 let address = address.clone();
                 rows.push((
-                    42,
+                    order::TON_EXPLORER,
                     super::super::ton_wallet_ui::explorer_menu_row(
                         "menu-ton-explorer",
                         address,
                         |this| this.message_ui.menu = None,
-                        Some((&self.frame.context_menu_items, row_key(42))),
+                        Some((&self.frame.context_menu_items, row_key(order::TON_EXPLORER))),
                         cx,
                     ),
                 ));
