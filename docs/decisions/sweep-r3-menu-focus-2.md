@@ -43,8 +43,9 @@ reaction strip above the message menu is not a tab stop yet.
   the accessibility tree, so the expected sequence and row count do not come
   from the sort keys); breaking one row's key makes the test fail. Tab wraps
   inside the menu and never reaches the chat list, Enter and Space run the
-  focused row, a menu with no items or only disabled items keeps the focus on
-  its frame, and a submenu's keys stay between its parent and the next row.
+  focused row (tested on the chat and message menus; the other menus use the
+  same helper, #1018), a menu with no items or only disabled items keeps the
+  focus on its frame (that covers stepping only, not Enter), and a submenu's keys stay between its parent and the next row.
   The arrows leave the chat list selection alone; Escape closes both menus
   and restores focus.
 - `submenu_key` clamps the index to 254 so a long submenu cannot spill into

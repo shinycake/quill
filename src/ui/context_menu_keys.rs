@@ -48,7 +48,7 @@ pub(super) struct ContextMenuItems {
 /// their drawing order (the sort is stable) instead of spilling into the
 /// next row's keys.
 pub(super) fn submenu_key(order: u8, index: usize) -> u32 {
-    let slot = u8::try_from(index.min(MAX_SUBMENU_ROWS - 1)).map_or(0, u32::from);
+    let slot = index.min(MAX_SUBMENU_ROWS - 1) as u32;
     (u32::from(order) << 8) + 1 + slot
 }
 

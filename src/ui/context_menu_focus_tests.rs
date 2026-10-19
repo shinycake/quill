@@ -226,14 +226,20 @@ struct ScreenRow {
     focused: bool,
 }
 
-/// Every menu item the last frame painted, top to bottom (then left to
-/// right), read from the accessibility tree rather than from the focus list
-/// the keyboard walks.
+/// Every focusable menu item the last frame painted, top to bottom (then left
+/// to right), read from the accessibility tree rather than from the focus
+/// list the keyboard walks. Disabled rows carry the same role but no focus
+/// binding (`focused()` is `None`; a plain div has no a11y disabled flag), so
+/// they are left out, as the keyboard skips them.
 fn rows_on_screen(vcx: &mut VisualTestContext) -> Vec<ScreenRow> {
     let mut rows: Vec<(f32, f32, ScreenRow)> = vcx.update(|window, _| {
         gpui_base::test_support::snapshots(window)
             .into_iter()
-            .filter(|row| row.role() == Some(gpui_kit::Role::MenuItem) && row.visible())
+            .filter(|row| {
+                row.role() == Some(gpui_kit::Role::MenuItem)
+                    && row.visible()
+                    && row.focused().is_some()
+            })
             .map(|row| {
                 let bounds = row.bounds();
                 let screen = ScreenRow {
