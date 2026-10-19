@@ -287,14 +287,12 @@ crate::ui::shell::register_dialogs! {
 }
 
 /// The chats of the `ready-origin-menus` demo.
-#[cfg(feature = "demo-capture")]
 mod demo_ids {
     use quill::ids::ChatId;
     pub(in crate::ui) const FORWARD_CHAT: ChatId = ChatId(41);
     pub(in crate::ui) const GIFT_CHAT: ChatId = ChatId(42);
     pub(in crate::ui) const REPLIES_CHAT: ChatId = ChatId(1_271_266_957);
 }
-#[cfg(feature = "demo-capture")]
 pub(in crate::ui) use demo_ids::*;
 
 #[cfg(test)]

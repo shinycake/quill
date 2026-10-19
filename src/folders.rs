@@ -319,6 +319,7 @@ mod tests {
             phone_number: String::new(),
             is_contact,
             is_bot,
+            is_deleted: false,
             is_inline: false,
             has_topics: false,
             allows_users_to_create_topics: false,

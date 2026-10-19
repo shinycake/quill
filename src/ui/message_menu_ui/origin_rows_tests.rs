@@ -137,6 +137,7 @@ fn blocking_a_reply_sender_asks_first(cx: &mut TestAppContext) {
     assert!(has(vcx, "replies-block-delete"));
     assert!(has(vcx, "replies-block-delete-all"));
 
+    frames(vcx);
     click(vcx, "replies-block-delete-all");
     let delete_all = app.read_with(vcx, |app, _| {
         app.session()
