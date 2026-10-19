@@ -352,8 +352,8 @@ mod tests {
         use super::super::{FittedTitles, Picture, Title};
         use gpui_kit::test::TestWindowExt;
         use gpui_kit::{
-            Context, ImageSource, InteractiveElement, IntoElement, ParentElement, Render,
-            StatefulInteractiveElement, Styled, TestAppContext, TestSupportExt, Window, div, px,
+            Context, ImageSource, InteractiveElement, IntoElement, ParentElement, Render, Styled,
+            TestAppContext, TestSupportExt, Window, div, px,
         };
 
         struct Line(Vec<(String, bool)>);
