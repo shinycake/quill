@@ -119,7 +119,7 @@ impl QuillApp {
         };
         if let Some(mut messages) = build {
             // Deleted messages dissolve in place before they go.
-            self.merge_vanishing(&mut messages, cx);
+            self.merge_vanishing(&mut messages);
             let (mut rows, seed) = self.build_rows(messages, Default::default(), None, &row_build);
             if let Some(row) = self.streaming_bot_row(&seed, &row_build, cx) {
                 rows.push(row);

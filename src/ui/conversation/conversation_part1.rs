@@ -13,6 +13,11 @@ impl QuillApp {
         part: ConversationPart,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        if part.top() {
+            // One instant for the rows work and the dust of this frame, in
+            // panes that build no rows too.
+            self.pin_vanish_now();
+        }
         let mode = self.pane_mode();
         let history = match mode {
             _ if !part.top() => Empty.into_any_element(),
@@ -109,7 +114,7 @@ impl QuillApp {
                 .is_none_or(|c| chat_allows_polls(c.permissions.as_ref()))
         });
         let top = part.top();
-        let dust = top.then(|| self.vanish_overlay()).flatten();
+        let dust = top.then(|| self.vanish_overlay(cx)).flatten();
         let player_bar = top.then(|| self.player_bar(cx)).flatten();
         let call_bar = top
             .then(|| self.call_bar(cx).or_else(|| self.group_call_bar(cx)))
