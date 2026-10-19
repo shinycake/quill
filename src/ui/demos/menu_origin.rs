@@ -5,12 +5,9 @@
 use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
-use quill::ids::ChatId;
 use quill::state::Session;
 
-pub(in crate::ui) const FORWARD_CHAT: ChatId = ChatId(41);
-pub(in crate::ui) const GIFT_CHAT: ChatId = ChatId(42);
-pub(in crate::ui) const REPLIES_CHAT: ChatId = ChatId(quill::message_menu_origin::REPLIES_USER_ID);
+use crate::ui::message_menu_ui::origin_rows::{FORWARD_CHAT, GIFT_CHAT, REPLIES_CHAT};
 
 register_demos![
     // The original date of a forward, "Send Another Gift" and the Replies
@@ -72,15 +69,19 @@ fn apply_origin_menus(
     };
     let gift = r#"{"@type":"updateNewMessage","message":{"id":50,"chat_id":42,"sender_id":{"@type":"messageSenderUser","user_id":1},"is_outgoing":true,"date":1700000050,"content":{"@type":"messageGiftedStars","gifter_user_id":1,"receiver_user_id":42,"currency":"USD","amount":499,"star_count":500}}}"#.to_string();
     let mut jsons: Vec<String> = vec![
+        format!(
+            r#"{{"@type":"updateOption","name":"replies_bot_chat_id","value":{{"@type":"optionValueInteger","value":"{}"}}}}"#,
+            REPLIES_CHAT.0
+        ),
         user(32, "Nora"),
         user(41, "Ada"),
         user(42, "Mira"),
-        user(quill::message_menu_origin::REPLIES_USER_ID, "Replies"),
+        user(REPLIES_CHAT.0, "Replies"),
     ];
     for (id, title, order) in [
         (41, "Ada", "60"),
         (42, "Mira", "59"),
-        (quill::message_menu_origin::REPLIES_USER_ID, "Replies", "58"),
+        (REPLIES_CHAT.0, "Replies", "58"),
     ] {
         jsons.extend(chat(id, title, order).split('|').map(str::to_string));
     }
@@ -88,7 +89,7 @@ fn apply_origin_menus(
     jsons.push(gift);
     jsons.push(forwarded(
         60,
-        quill::message_menu_origin::REPLIES_USER_ID,
+        REPLIES_CHAT.0,
         "Great post, thanks for sharing",
     ));
     for json in jsons {

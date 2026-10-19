@@ -89,6 +89,8 @@ pub struct ParsedUser {
     pub phone_number: String,
     pub is_contact: bool,
     pub is_bot: bool,
+    /// `userTypeDeleted`: the account was deleted.
+    pub is_deleted: bool,
     /// Bots slice: `userTypeBot.is_inline` (schema 1.8.67, line 2424) —
     /// whether the bot supports inline mode (`getInlineQueryResults`).
     /// False for non-bots and for bots without inline mode enabled.
@@ -308,6 +310,11 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         .and_then(|t| t.get("@type"))
         .and_then(Value::as_str)
         == Some("userTypeBot");
+    let is_deleted = value
+        .get("type")
+        .and_then(|t| t.get("@type"))
+        .and_then(Value::as_str)
+        == Some("userTypeDeleted");
     // Bots slice: `userTypeBot.is_inline` — only present on the bot
     // type object; defaults false for everyone else.
     let is_inline = value
@@ -399,6 +406,7 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         phone_number,
         is_contact,
         is_bot,
+        is_deleted,
         is_inline,
         has_topics,
         allows_users_to_create_topics,

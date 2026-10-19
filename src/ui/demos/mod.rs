@@ -15,7 +15,7 @@ mod info_actions;
 mod info_panels;
 mod item_menus;
 mod media;
-pub(in crate::ui) mod menu_origin;
+mod menu_origin;
 mod messages;
 mod payments;
 mod platform;

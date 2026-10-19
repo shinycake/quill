@@ -631,7 +631,7 @@ mod delete_member_reaction;
 pub(in crate::ui) mod item_rows;
 mod menu_add_to_set_rows;
 mod menu_save_to_rows;
-mod origin_rows;
+pub(in crate::ui) mod origin_rows;
 
 #[cfg(test)]
 mod tests {

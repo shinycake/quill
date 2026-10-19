@@ -32,7 +32,8 @@ All in `history/view/history_view_context_menu.cpp` unless noted.
 
 ## What Quill does now
 
-- Original date row: `message_menu_origin::original_date` (forward not marked as
+- Original date row: text goes through the lang keys `lng_mediaview_today`,
+  `_yesterday` and `_date_time` (`original_date_text`). `message_menu_origin::original_date` (forward not marked as
   an announcement, or an import) feeds an info row with the Forward icon and
   `read_date_label`, placed like tdesktop. TDLib has no story forwards in
   `forward_info`, so only the PSA check applies. `psa_type` is now parsed.
@@ -40,9 +41,19 @@ All in `history/view/history_view_context_menu.cpp` unless noted.
 - Send Another Gift: `send_another_gift_offered` maps TDLib's service actions
   onto tdesktop's flags (giveaway code and prize are not gifts; an upgrade
   inverts the side). The recipient check is `Session::gift_recipient`, which
-  already excludes bots. Opens the existing send-gift dialog for the message's
+  excludes bots (tdesktop does not; Quill's send-gift dialog has no bot
+  recipient, so this stays a deliberate deviation). The service account
+  (777000) and deleted accounts are excluded as in tdesktop, and a refunded
+  upgraded gift and a code made by a channel follow tdesktop's flags. Opens the existing send-gift dialog for the message's
   chat.
-- Block user in Replies: row for the forward origin (a user or a hidden sender),
+- Block user in Replies: the Replies chat is the id in TDLib's option
+  `replies_bot_chat_id` (`Session::is_replies_chat`; the test environment
+  differs). The row shows for every message there, after Select (tdesktop's
+  history view order), for a user, a channel or anonymous-admin origin (the
+  box then names the chat and has no confirmation line, as for a non-user peer
+  in `PeerMenuBlockUserBox`) and for a hidden sender. A hidden sender is a
+  deliberate deviation: tdesktop's `originalSender()` has no peer there, but
+  TDLib's request works by message id, so Quill keeps the row,
   a kit dialog (`BlockFromReplies`) with three checkboxes, `blockMessageSenderFromReplies`
   via `submit_replies_block`, the toast on confirm, an error note if the send
   fails. State lives in `UsersState::replies_block`, so the dialog renders from

@@ -218,7 +218,9 @@ pub enum ServiceAction {
         /// Resale / offer price, formatted in `Money` terms.
         price: Option<Money>,
     },
-    RefundedUpgradedGift,
+    RefundedUpgradedGift {
+        origin: GiftOrigin,
+    },
     /// A gift/giveaway service message drawn as a bubble card; `action`
     /// keeps the one-line wording (chat list preview, accessibility).
     WithCard {
@@ -427,6 +429,18 @@ fn resale_price(value: Option<&Value>) -> Option<Money> {
             amount: i(value, "gram_cent_count"),
         }),
         _ => None,
+    }
+}
+
+fn gift_origin(origin: Option<&Value>) -> GiftOrigin {
+    match origin.and_then(|o| o.get("@type")).and_then(Value::as_str) {
+        Some("upgradedGiftOriginTransfer") => GiftOrigin::Transfer,
+        Some("upgradedGiftOriginResale") => GiftOrigin::Resale,
+        Some("upgradedGiftOriginBlockchain") => GiftOrigin::Blockchain,
+        Some("upgradedGiftOriginPrepaidUpgrade") => GiftOrigin::PrepaidUpgrade,
+        Some("upgradedGiftOriginOffer") => GiftOrigin::Offer,
+        Some("upgradedGiftOriginCraft") => GiftOrigin::Craft,
+        _ => GiftOrigin::Upgrade,
     }
 }
 
@@ -687,18 +701,7 @@ impl ServiceAction {
             }
             "messageUpgradedGift" => {
                 let origin_value = value.get("origin");
-                let origin = match origin_value
-                    .and_then(|o| o.get("@type"))
-                    .and_then(Value::as_str)
-                {
-                    Some("upgradedGiftOriginTransfer") => GiftOrigin::Transfer,
-                    Some("upgradedGiftOriginResale") => GiftOrigin::Resale,
-                    Some("upgradedGiftOriginBlockchain") => GiftOrigin::Blockchain,
-                    Some("upgradedGiftOriginPrepaidUpgrade") => GiftOrigin::PrepaidUpgrade,
-                    Some("upgradedGiftOriginOffer") => GiftOrigin::Offer,
-                    Some("upgradedGiftOriginCraft") => GiftOrigin::Craft,
-                    _ => GiftOrigin::Upgrade,
-                };
+                let origin = gift_origin(origin_value);
                 A::UpgradedGift {
                     name: upgraded_gift_name(value.get("gift")),
                     sender: sender(value, "sender_id"),
@@ -707,7 +710,9 @@ impl ServiceAction {
                     price: resale_price(origin_value.and_then(|o| o.get("price"))),
                 }
             }
-            "messageRefundedUpgradedGift" => A::RefundedUpgradedGift,
+            "messageRefundedUpgradedGift" => A::RefundedUpgradedGift {
+                origin: gift_origin(value.get("origin")),
+            },
             "messageUpgradedGiftPurchaseOffer" => A::GiftOffer {
                 name: upgraded_gift_name(value.get("gift")),
                 price: resale_price(value.get("price")).unwrap_or(Money {

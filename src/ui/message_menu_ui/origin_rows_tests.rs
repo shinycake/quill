@@ -2,9 +2,9 @@
 //! `ready-origin-menus` demo (gpui-kit's test support needs the
 //! `demo-capture` feature).
 use crate::ui::app::QuillApp;
-use crate::ui::demos::menu_origin::{FORWARD_CHAT, GIFT_CHAT, REPLIES_CHAT};
 use crate::ui::keybindings::bind_keys;
 use crate::ui::menu_states::MessageMenuState;
+use crate::ui::message_menu_ui::origin_rows::{FORWARD_CHAT, GIFT_CHAT, REPLIES_CHAT};
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;

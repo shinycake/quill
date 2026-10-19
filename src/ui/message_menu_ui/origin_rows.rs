@@ -10,8 +10,7 @@
 use super::*;
 use gpui_kit::component::checkbox::Checkbox;
 use quill::message_menu_origin::{
-    REPLIES_USER_ID, RepliesBlock, RepliesSender, original_date, replies_sender,
-    send_another_gift_offered,
+    RepliesBlock, RepliesSender, original_date, replies_sender, send_another_gift_offered,
 };
 use quill::telegram::envelope::{ChatKind, effective_content};
 
@@ -33,7 +32,7 @@ impl QuillApp {
             order::AUDIENCE,
             "menu-original-date",
             Some(IconName::Forward),
-            read_date_label(&when, &now),
+            quill::message_menu_origin::original_date_text(&when, &now),
         );
         let private = self
             .session()
@@ -58,7 +57,18 @@ impl QuillApp {
         if !send_another_gift_offered(content, message.is_outgoing) {
             return None;
         }
-        self.session()?.gift_recipient(chat_id)?;
+        let session = self.session()?;
+        // tdesktop skips the notifications account and deleted accounts.
+        let unreachable = chat_id.0 == quill::ton_wallet::SERVICE_NOTIFICATIONS_CHAT_ID
+            || matches!(
+                session.chats.get(&chat_id.0).map(|chat| &chat.kind),
+                Some(ChatKind::Private { user_id })
+                    if session.user(user_id.0).is_some_and(|user| user.is_deleted)
+            );
+        if unreachable {
+            return None;
+        }
+        session.gift_recipient(chat_id)?;
         Some(menu_row(
             order::MEDIA,
             IconName::Gift,
@@ -81,7 +91,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<MenuRow> {
         let session = self.session()?;
-        if !self.is_replies_chat(chat_id) || message.id.0 <= 0 || message.pending {
+        if !session.is_replies_chat(chat_id) || message.id.0 <= 0 || message.pending {
             return None;
         }
         let block = match replies_sender(message)? {
@@ -92,10 +102,19 @@ impl QuillApp {
                     .map_or_else(|| user.display_name(), str::to_string);
                 RepliesBlock::new(message.id, short, user.display_name(), true)
             }
+            RepliesSender::Chat { chat_id, signature } => {
+                let title = session
+                    .chats
+                    .get(&chat_id)
+                    .map(|chat| chat.title.clone())
+                    .filter(|title| !title.is_empty())
+                    .unwrap_or(signature);
+                RepliesBlock::new(message.id, title.clone(), title, false)
+            }
             RepliesSender::Hidden(name) => RepliesBlock::new(message.id, name.clone(), name, false),
         };
         Some(menu_row(
-            order::REPORT + 1,
+            order::SELECT + 1,
             IconName::Ban,
             "menu-block-sender",
             tr(keys::PROFILE_BLOCK_USER),
@@ -109,15 +128,6 @@ impl QuillApp {
                 cx.notify();
             },
         ))
-    }
-
-    /// The chat is the Replies chat (tdesktop `isRepliesChat`).
-    pub(in crate::ui) fn is_replies_chat(&self, chat_id: ChatId) -> bool {
-        self.session()
-            .and_then(|s| s.chats.get(&chat_id.0))
-            .is_some_and(
-                |chat| matches!(chat.kind, ChatKind::Private { user_id } if user_id.0 == REPLIES_USER_ID),
-            )
     }
 
     fn origin_session_mut(&mut self) -> Option<&mut Session> {
@@ -275,6 +285,17 @@ crate::ui::shell::register_dialogs! {
         QuillApp::build_replies_block_dialog,
     ),
 }
+
+/// The chats of the `ready-origin-menus` demo.
+#[cfg(feature = "demo-capture")]
+mod demo_ids {
+    use quill::ids::ChatId;
+    pub(in crate::ui) const FORWARD_CHAT: ChatId = ChatId(41);
+    pub(in crate::ui) const GIFT_CHAT: ChatId = ChatId(42);
+    pub(in crate::ui) const REPLIES_CHAT: ChatId = ChatId(1_271_266_957);
+}
+#[cfg(feature = "demo-capture")]
+pub(in crate::ui) use demo_ids::*;
 
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]

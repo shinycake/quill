@@ -715,7 +715,7 @@ impl QuillApp {
             && message.id.0 > 0
             && !message.is_outgoing
             && !saved
-            && !self.is_replies_chat(chat_id)
+            && !self.session().is_some_and(|s| s.is_replies_chat(chat_id))
             && actions.is_none_or(|a| a.can_report_chat);
         if reportable {
             let report = menu_row(

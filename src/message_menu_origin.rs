@@ -6,12 +6,43 @@
 //! (`history/view/history_view_context_menu.cpp`).
 #![deny(clippy::indexing_slicing)]
 
-use crate::ids::MessageId;
-use crate::state::HistoryMessage;
-use crate::telegram::envelope::{GiftOrigin, MessageContent, MessageOrigin, ServiceAction};
+use crate::ids::{ChatId, MessageId};
+use crate::lang::{keys, tr_with};
+use crate::local_time::{CivilTime, hhmm, month_name};
+use crate::state::{HistoryMessage, Session};
+use crate::telegram::envelope::{
+    GiftOrigin, MessageContent, MessageOrigin, MessageSender, ServiceAction,
+};
 
-/// The user id of the Replies chat (tdesktop `PeerData::isRepliesChat`).
-pub const REPLIES_USER_ID: i64 = 1_271_266_957;
+impl Session {
+    /// The chat is the Replies chat (tdesktop `PeerData::isRepliesChat`).
+    /// Its id comes from the TDLib option `replies_bot_chat_id`, which
+    /// differs on the test environment.
+    pub fn is_replies_chat(&self, chat_id: ChatId) -> bool {
+        self.users_state.replies_bot_chat_id == Some(chat_id.0)
+    }
+}
+
+/// "today at 12:34", "yesterday at 12:34", "Apr 15 at 00:20"
+/// (`FormatReadDate`: `lng_mediaview_today`, `_yesterday`, `_date_time`).
+pub fn original_date_text(date: &CivilTime, now: &CivilTime) -> String {
+    let time = hhmm(date);
+    match now.day_number() - date.day_number() {
+        0 => tr_with(keys::MEDIAVIEW_TODAY, &[("time", &time)]),
+        1 => tr_with(keys::MEDIAVIEW_YESTERDAY, &[("time", &time)]),
+        _ => {
+            let day = format!(
+                "{} {}",
+                month_name(date.month).chars().take(3).collect::<String>(),
+                date.day
+            );
+            tr_with(
+                keys::MEDIAVIEW_DATE_TIME,
+                &[("date", &day), ("time", &time)],
+            )
+        }
+    }
+}
 
 /// When the message was first sent, for a forward or an imported message.
 /// tdesktop skips announcements (`psaType`) and forwarded stories; TDLib
@@ -43,14 +74,24 @@ pub fn send_another_gift_offered(content: &MessageContent, outgoing: bool) -> bo
         ServiceAction::UpgradedGift {
             origin: GiftOrigin::Upgrade,
             ..
+        }
+        | ServiceAction::RefundedUpgradedGift {
+            origin: GiftOrigin::Upgrade,
         } => !outgoing,
         ServiceAction::GiftedPremium { .. }
         | ServiceAction::GiftedStars { .. }
         | ServiceAction::GiftedGrams { .. }
         | ServiceAction::Gift { .. }
         | ServiceAction::UpgradedGift { .. }
+        | ServiceAction::RefundedUpgradedGift { .. }
         | ServiceAction::GiftOffer { .. } => outgoing,
-        ServiceAction::PremiumGiftCode { from_giveaway, .. } => !from_giveaway && outgoing,
+        // A code made by a channel or a giveaway is not a gift (tdesktop
+        // `slug.isEmpty() || !channel`).
+        ServiceAction::PremiumGiftCode {
+            from_giveaway,
+            creator,
+            ..
+        } => !from_giveaway && !matches!(creator, Some(MessageSender::Chat { .. })) && outgoing,
         ServiceAction::Theme {
             gift_name: Some(_), ..
         } => outgoing,
@@ -62,19 +103,42 @@ pub fn send_another_gift_offered(content: &MessageContent, outgoing: bool) -> bo
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RepliesSender {
     User(i64),
+    /// A reply posted as a channel or an anonymous admin.
+    Chat {
+        chat_id: i64,
+        signature: String,
+    },
     Hidden(String),
 }
 
 /// The original sender of a message in the Replies chat, when the menu
 /// offers to block them (tdesktop `item->originalSender()`).
 pub fn replies_sender(message: &HistoryMessage) -> Option<RepliesSender> {
-    match &message.forward_info.as_ref()?.origin {
-        MessageOrigin::User { user_id } => Some(RepliesSender::User(user_id.0)),
-        MessageOrigin::HiddenUser { sender_name } => {
-            Some(RepliesSender::Hidden(sender_name.clone()))
+    let Some(info) = message.forward_info.as_ref() else {
+        return match message.sender? {
+            MessageSender::User { user_id } => Some(RepliesSender::User(user_id)),
+            MessageSender::Chat { chat_id } => Some(RepliesSender::Chat {
+                chat_id,
+                signature: String::new(),
+            }),
+        };
+    };
+    Some(match &info.origin {
+        MessageOrigin::User { user_id } => RepliesSender::User(user_id.0),
+        MessageOrigin::HiddenUser { sender_name } => RepliesSender::Hidden(sender_name.clone()),
+        MessageOrigin::Chat {
+            chat_id,
+            author_signature,
         }
-        _ => None,
-    }
+        | MessageOrigin::Channel {
+            chat_id,
+            author_signature,
+            ..
+        } => RepliesSender::Chat {
+            chat_id: chat_id.0,
+            signature: author_signature.clone(),
+        },
+    })
 }
 
 /// The open "Block {name}" box for a reply: the three checkboxes
@@ -112,14 +176,14 @@ impl RepliesBlock {
 #[cfg(test)]
 mod tests {
     use super::{
-        REPLIES_USER_ID, RepliesBlock, RepliesSender, original_date, replies_sender,
+        RepliesBlock, RepliesSender, original_date, original_date_text, replies_sender,
         send_another_gift_offered,
     };
     use crate::ids::{ChatId, MessageId, UserId};
     use crate::state::HistoryMessage;
     use crate::telegram::envelope::{
-        GiftOrigin, MessageContent, MessageForwardInfo, MessageImportInfo, MessageOrigin, Money,
-        ServiceAction,
+        GiftOrigin, MessageContent, MessageForwardInfo, MessageImportInfo, MessageOrigin,
+        MessageSender, Money, ServiceAction,
     };
 
     fn base() -> HistoryMessage {
@@ -234,9 +298,81 @@ mod tests {
     }
 
     #[test]
+    fn the_original_date_reads_like_the_read_time() {
+        let now = crate::local_time::civil_at(1_790_631_720, 0);
+        let today = crate::local_time::civil_at(1_790_631_720 - 3600, 0);
+        let yesterday = crate::local_time::civil_at(1_790_631_720 - 86_400, 0);
+        let older = crate::local_time::civil_at(1_790_631_720 - 10 * 86_400, 0);
+        assert_eq!(original_date_text(&today, &now), "today at 20:42");
+        assert_eq!(original_date_text(&yesterday, &now), "yesterday at 21:42");
+        assert_eq!(original_date_text(&older, &now), "Sep 18 at 21:42");
+    }
+
+    #[test]
+    fn refunded_upgrades_and_channel_codes_follow_tdesktop() {
+        let refunded = |origin| action(ServiceAction::RefundedUpgradedGift { origin });
+        assert!(send_another_gift_offered(
+            &refunded(GiftOrigin::Upgrade),
+            false
+        ));
+        assert!(send_another_gift_offered(
+            &refunded(GiftOrigin::Transfer),
+            true
+        ));
+        let code = |creator| {
+            action(ServiceAction::PremiumGiftCode {
+                creator,
+                from_giveaway: false,
+                unclaimed: false,
+                money: money(),
+            })
+        };
+        assert!(send_another_gift_offered(&code(None), true));
+        assert!(!send_another_gift_offered(
+            &code(Some(MessageSender::Chat { chat_id: -100 })),
+            true
+        ));
+    }
+
+    #[test]
+    fn the_replies_chat_comes_from_the_option() {
+        let sink: std::sync::Arc<dyn crate::diagnostics::DiagnosticSink> =
+            std::sync::Arc::new(crate::diagnostics::MemorySink::new());
+        let mut session = crate::state::Session::new(crate::ids::AccountKey::primary(), sink);
+        assert!(!session.is_replies_chat(ChatId(708_513)));
+        session.users_state.apply_option(
+            "replies_bot_chat_id",
+            &crate::telegram::envelope::OptionValue::Integer(708_513),
+        );
+        assert!(session.is_replies_chat(ChatId(708_513)));
+        assert!(!session.is_replies_chat(ChatId(1_271_266_957)));
+    }
+
+    #[test]
+    fn a_channel_reply_names_the_channel() {
+        let mut message = base();
+        message.forward_info = Some(MessageForwardInfo {
+            origin: MessageOrigin::Channel {
+                chat_id: ChatId(-100),
+                message_id: MessageId(1),
+                author_signature: "sig".into(),
+            },
+            date: 1,
+            source: None,
+            psa_type: String::new(),
+        });
+        assert_eq!(
+            replies_sender(&message),
+            Some(RepliesSender::Chat {
+                chat_id: -100,
+                signature: "sig".into()
+            })
+        );
+    }
+
+    #[test]
     fn the_block_box_starts_with_everything_checked() {
         let block = RepliesBlock::new(MessageId(3), "Ada".into(), "Ada L".into(), true);
         assert!(block.report_spam && block.delete_message && block.delete_all);
-        assert_eq!(REPLIES_USER_ID, 1_271_266_957);
     }
 }
