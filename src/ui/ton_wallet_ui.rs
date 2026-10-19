@@ -177,10 +177,11 @@ pub(super) fn explorer_menu_row(
     id: &'static str,
     address: String,
     on_open: impl Fn(&mut QuillApp) + 'static,
+    key_target: Option<(&super::context_menu_keys::ContextMenuItems, u32)>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_hover = cx.theme().accent;
-    div()
+    let row = div()
         .id(id)
         .flex()
         .items_center()
@@ -200,8 +201,15 @@ pub(super) fn explorer_menu_row(
         .on_click(cx.listener(move |this, _, _, cx| {
             on_open(this);
             this.open_ton_explorer(&address, cx);
-        }))
-        .into_any_element()
+        }));
+    match key_target {
+        Some((items, key)) => {
+            use super::context_menu_keys::MenuKeyTarget;
+            row.menu_key_target(key, items, cx)
+        }
+        None => row,
+    }
+    .into_any_element()
 }
 
 /// The transfer of a wallet-transfer service message, if it is one.

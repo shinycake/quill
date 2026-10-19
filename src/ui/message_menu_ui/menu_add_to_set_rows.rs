@@ -51,6 +51,7 @@ impl QuillApp {
                 ("menu-add-to-set", set_id as u64),
                 title,
                 false,
+                &self.frame.context_menu_items,
                 cx,
                 move |this, _, cx| {
                     this.add_existing_to_owned_set(set_id, kind, &item, cx);

@@ -7,6 +7,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::context_menu_keys::{ContextMenuItems, MenuKeyTarget, row_key};
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::status_note::StatusNote;
@@ -102,6 +103,7 @@ pub(super) fn menu_row(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
     danger: bool,
+    items: &ContextMenuItems,
     cx: &mut Context<QuillApp>,
     on_click: impl Fn(&mut QuillApp, &mut Window, &mut Context<QuillApp>) + 'static,
 ) -> MenuRow {
@@ -122,6 +124,7 @@ pub(super) fn menu_row(
             .text_sm()
             .text_color(if danger { danger_bright() } else { text_menu() })
             .hover(|style| style.bg(row_hover))
+            .menu_key_target(row_key(order), items, cx)
             .role(gpui_kit::Role::MenuItem)
             .aria_label(label.clone())
             .child(Icon::new(icon).size(px(16.)))
@@ -315,6 +318,7 @@ impl QuillApp {
                 action.id(),
                 label,
                 false,
+                &self.frame.context_menu_items,
                 cx,
                 move |this, window, cx| {
                     let _ = window;

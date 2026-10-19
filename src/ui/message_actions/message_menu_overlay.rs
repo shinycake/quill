@@ -98,6 +98,7 @@ impl QuillApp {
                         .text_sm()
                         .text_color(if danger { danger_bright() } else { text_menu() })
                         .hover(|style| style.bg(row_hover))
+                        .menu_key_target(row_key($order), &self.frame.context_menu_items, $cx)
                         .role(gpui_kit::Role::MenuItem)
                         .aria_label($label)
                         .child(Icon::new($icon).size(px(16.)))
@@ -164,6 +165,11 @@ impl QuillApp {
                     .text_sm()
                     .text_color(text_menu())
                     .hover(|style| style.bg(row_hover))
+                    .menu_key_target(
+                        row_key(order::REPLY_TIMECODE),
+                        &self.frame.context_menu_items,
+                        cx,
+                    )
                     .role(gpui_kit::Role::MenuItem)
                     .aria_label(tr_with(
                         keys::Q_CHAT_REPLY_WITH_TIMECODE,
@@ -318,11 +324,12 @@ impl QuillApp {
             if let quill::text::LinkTarget::TonAddress(address) = &link {
                 let address = address.clone();
                 rows.push((
-                    42,
+                    order::TON_EXPLORER,
                     super::super::ton_wallet_ui::explorer_menu_row(
                         "menu-ton-explorer",
                         address,
                         |this| this.message_ui.menu = None,
+                        Some((&self.frame.context_menu_items, row_key(order::TON_EXPLORER))),
                         cx,
                     ),
                 ));
@@ -696,6 +703,7 @@ impl QuillApp {
                 "menu-cancel-upload",
                 tr(keys::Q_CHAT_CANCEL_UPLOAD),
                 true,
+                &self.frame.context_menu_items,
                 cx,
                 move |this, _, cx| {
                     this.cancel_message_upload(chat_id, message_id, cx);
@@ -721,6 +729,7 @@ impl QuillApp {
                 "menu-report",
                 tr(keys::Q_CHAT_REPORT),
                 false,
+                &self.frame.context_menu_items,
                 cx,
                 move |this, _, cx| {
                     // A grouped album reports every photo in it.
@@ -763,6 +772,11 @@ impl QuillApp {
                     .max_w(px(260.))
                     .text_color(text_muted())
                     .hover(|style| style.bg(row_hover))
+                    .menu_key_target(
+                        row_key(order::EMOJI_PACKS),
+                        &self.frame.context_menu_items,
+                        cx,
+                    )
                     .role(gpui_kit::Role::MenuItem)
                     .aria_label(format!("{before}{bold}{after}"))
                     .child(before)
@@ -827,6 +841,7 @@ impl QuillApp {
                         _ => tr(keys::Q_CHAT_BACK),
                     },
                     false,
+                    &self.frame.context_menu_items,
                     cx,
                     |this, _, cx| {
                         this.message_ui.menu_ui.page = MessageMenuPage::Main;
