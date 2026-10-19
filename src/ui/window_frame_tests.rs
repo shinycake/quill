@@ -8,6 +8,7 @@ use crate::ui::window_frame::{
 };
 use gpui_kit::WindowDecorations;
 use gpui_kit::component::Root;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
     AppContext, Context, InteractiveElement, IntoElement, ParentElement, Render, Styled,
@@ -16,6 +17,7 @@ use gpui_kit::{
 
 struct BarView {
     native: bool,
+    menu: bool,
 }
 
 impl Render for BarView {
@@ -34,15 +36,27 @@ impl Render for BarView {
                         .id("action")
                         .debug_selector(|| "action".into())
                         .child("Search"),
-                ),
+                )
+                .when(self.menu, |bar| {
+                    bar.menu(
+                        div()
+                            .id("menu")
+                            .debug_selector(|| "menu".into())
+                            .child("File"),
+                    )
+                }),
         )
     }
 }
 
 fn bar(cx: &mut TestAppContext, native: bool) -> VisualTestContext {
+    bar_with(cx, native, false)
+}
+
+fn bar_with(cx: &mut TestAppContext, native: bool, menu: bool) -> VisualTestContext {
     cx.update(gpui_kit::init);
     let handle = cx.open_window(size(px(600.), px(200.)), move |window, cx| {
-        let view = cx.new(|_| BarView { native });
+        let view = cx.new(|_| BarView { native, menu });
         Root::new(view, window, cx)
     });
     let mut vcx = VisualTestContext::from_window(handle.into(), cx);
@@ -67,6 +81,29 @@ fn system_frame_keeps_only_the_actions_and_no_caption(cx: &mut TestAppContext) {
     );
     let action = vcx.debug_bounds("action").expect("actions stay");
     // Right-aligned in the slim row.
+    assert!(action.origin.x > px(300.));
+}
+
+#[gpui_kit::test]
+fn own_frame_puts_the_menu_in_the_title_row(cx: &mut TestAppContext) {
+    let mut vcx = bar_with(cx, false, true);
+    let menu = vcx.debug_bounds("menu").expect("menu in the bar");
+    let action = vcx.debug_bounds("action").expect("actions stay");
+    assert!(
+        vcx.debug_bounds("caption").is_none(),
+        "menu replaces caption"
+    );
+    assert_eq!(menu.center().y, action.center().y, "one row");
+    assert!(menu.origin.x < action.origin.x);
+}
+
+#[gpui_kit::test]
+fn system_frame_puts_the_menu_beside_the_actions(cx: &mut TestAppContext) {
+    let mut vcx = bar_with(cx, true, true);
+    let menu = vcx.debug_bounds("menu").expect("menu in the row");
+    let action = vcx.debug_bounds("action").expect("actions stay");
+    assert_eq!(menu.center().y, action.center().y, "one row");
+    assert!(menu.origin.x < px(100.));
     assert!(action.origin.x > px(300.));
 }
 

@@ -15,6 +15,7 @@ pub(super) fn title_bar(
     mode: PaneMode,
     live: bool,
     search_open: bool,
+    menu_bar: Option<Entity<gpui_kit::component::menu::AppMenuBar>>,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement {
     let _ = live;
@@ -31,6 +32,7 @@ pub(super) fn title_bar(
             cx.quit();
         })
         .caption(div().font_semibold().text_sm().child(title))
+        .when_some(menu_bar, |bar, menu| bar.menu(menu))
         .child(
             div()
                 .flex()

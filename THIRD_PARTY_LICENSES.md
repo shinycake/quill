@@ -1528,6 +1528,7 @@ Used by:
 - [gpui-pre-apple 0.3.9](https://github.com/zed-industries/zed)
 - [gpui-pre-linux 0.3.9](https://github.com/zed-industries/zed)
 - [gpui-pre-macos 0.3.9](https://github.com/zed-industries/zed)
+- [gpui-pre-wgpu 0.3.9](https://github.com/zed-industries/zed)
 - [gpui-pre-windows 0.3.9](https://github.com/zed-industries/zed)
 - [gpui-pre-collections 0.3.9](https://github.com/zed-industries/zed)
 - [gpui-pre-derive-refineable 0.3.9](https://github.com/zed-industries/zed)
@@ -1539,7 +1540,6 @@ Used by:
 - [gpui-pre-shared-string 0.3.9](https://github.com/zed-industries/zed)
 - [gpui-pre-sum-tree 0.3.9](https://github.com/zed-industries/zed)
 - [gpui-pre-util 0.3.9](https://github.com/zed-industries/zed)
-- [gpui-pre-wgpu 0.3.9](https://github.com/zed-industries/zed)
 - [gpui-pre-ztracing-macro 0.3.9](https://github.com/zed-industries/zed)
 - [gpui-pre-ztracing 0.3.9](https://github.com/zed-industries/zed)
 
