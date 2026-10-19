@@ -5,7 +5,7 @@
 
 use crate::ids::FileId;
 use crate::lang::{Key, keys, tr, tr_with};
-use crate::local_time::{civil_local, hhmm};
+use crate::local_time::{CivilTime, civil_local, hhmm};
 use crate::message_a11y::format_duration_text;
 use crate::telegram::envelope::{
     MessageContent, MessageOrigin, MessageSender, MiniThumbnail, ParsedMessage, TextContent,
@@ -401,6 +401,15 @@ fn needs_year(year: i64, month: i64, now_year: i64, now_month: i64) -> bool {
 /// tdesktop `langDateTime`: "Oct 10 at 07:00", with the year by
 /// [`needs_year`].
 fn date_time(date: i32, now: i64) -> String {
+    if date <= 0 {
+        return String::new();
+    }
+    short_date_time(&civil_local(i64::from(date)), &civil_local(now))
+}
+
+/// [`date_time`] over already-split times, so callers (and tests) choose
+/// the time zone.
+pub fn short_date_time(at: &CivilTime, current: &CivilTime) -> String {
     const MONTHS: [Key; 12] = [
         keys::MONTH1_SMALL,
         keys::MONTH2_SMALL,
@@ -415,17 +424,12 @@ fn date_time(date: i32, now: i64) -> String {
         keys::MONTH11_SMALL,
         keys::MONTH12_SMALL,
     ];
-    if date <= 0 {
-        return String::new();
-    }
-    let at = civil_local(i64::from(date));
     let month = usize::from(at.month.clamp(1, 12))
         .checked_sub(1)
         .and_then(|ix| MONTHS.get(ix))
         .map(|key| tr(*key))
         .unwrap_or_default();
     let day = at.day.to_string();
-    let current = civil_local(now);
     let day_part = if !needs_year(
         at.year,
         i64::from(at.month),
@@ -445,7 +449,7 @@ fn date_time(date: i32, now: i64) -> String {
     };
     tr_with(
         keys::MEDIAVIEW_DATE_TIME,
-        &[("date", &day_part), ("time", &hhmm(&at))],
+        &[("date", &day_part), ("time", &hhmm(at))],
     )
 }
 

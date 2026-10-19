@@ -1,0 +1,7 @@
+// message menu (gift resend and the Replies chat's block box).
+"lng_blocked_list_confirm_reply" = "Delete this reply";
+"lng_blocked_list_confirm_reply_all" = "Delete all replies from {user}";
+"lng_blocked_list_confirm_title" = "Block {name}";
+"lng_context_gift_send" = "Send Another Gift";
+"qll_chat_couldnt_block_the_sender_try_again" = "Couldn't block the sender. Try again.";
+"lng_new_contact_block_done" = "{user} is now blocked";

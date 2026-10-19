@@ -34,6 +34,26 @@ impl QuillApp {
     /// Open the dialog for the open chat's user or channel.
     pub(super) fn open_send_gift_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let chat = self.session().and_then(|s| s.open_chat);
+        self.open_send_gift_in(chat, window, cx);
+    }
+
+    /// Open the dialog for the user or channel of `chat` (a gift message's
+    /// "Send Another Gift").
+    pub(super) fn open_send_gift_for(
+        &mut self,
+        chat: quill::ids::ChatId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_send_gift_in(Some(chat), window, cx);
+    }
+
+    fn open_send_gift_in(
+        &mut self,
+        chat: Option<quill::ids::ChatId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let opened = chat.and_then(|chat| {
             self.live
                 .as_mut()

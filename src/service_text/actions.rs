@@ -405,7 +405,7 @@ pub fn render_action(action: &ServiceAction, ctx: &ServiceCtx<'_>) -> ServiceTex
         A::WithCard { action, .. } => render_action(action, ctx),
         A::TonWalletTransfer(transfer) => super::wallet::transfer_line(transfer, ctx),
         A::TonConnectRequest(request) => text(&request.service_line()),
-        A::RefundedUpgradedGift => text(
+        A::RefundedUpgradedGift { .. } => text(
             "This gift was downgraded because a request to refund the payment related to this gift was made, and the money was returned.",
         ),
         A::GiftOffer { name, price, state } => match state {

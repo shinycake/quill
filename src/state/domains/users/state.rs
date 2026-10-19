@@ -28,6 +28,11 @@ pub struct UsersState {
     /// error, cleared by the next mutation; shown in the contacts
     /// settings section.
     pub contacts_notice: Option<String>,
+    /// The open "Block {name}" box for a reply in the Replies chat.
+    pub replies_block: Option<crate::message_menu_origin::RepliesBlock>,
+    /// The option `replies_bot_chat_id`: the Replies chat (it differs on
+    /// the test environment).
+    pub replies_bot_chat_id: Option<i64>,
     /// Phase 6: cached `getUserFullInfo` bios, keyed by user id. Presence
     /// records "fetched" so the driver never refetches.
     pub user_full_infos: HashMap<i64, UserFullInfoData>,
@@ -111,6 +116,12 @@ impl UsersState {
         {
             self.bio_length_max = limit;
         }
+        if name == "replies_bot_chat_id"
+            && let crate::telegram::envelope::OptionValue::Integer(id) = value
+            && *id > 0
+        {
+            self.replies_bot_chat_id = Some(*id);
+        }
     }
 
     pub(crate) fn new() -> Self {
@@ -122,6 +133,8 @@ impl UsersState {
             contacts: None,
             contacts_error: false,
             contacts_notice: None,
+            replies_block: None,
+            replies_bot_chat_id: None,
             user_full_infos: HashMap::new(),
             username_check: None,
             username_check_pending: None,

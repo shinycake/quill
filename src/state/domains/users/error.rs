@@ -70,6 +70,12 @@ impl Session {
                     err.code
                 ));
             }
+            Some(RequestPurpose::BlockSenderFromReplies) => {
+                self.chats_state.chat_action_error = Some(
+                    crate::lang::tr(crate::lang::keys::Q_CHAT_COULDNT_BLOCK_THE_SENDER_TRY_AGAIN)
+                        .to_string(),
+                );
+            }
             // Slice A6: contacts mutations — the notice surfaces
             // in the contacts settings section.
             Some(RequestPurpose::RemoveContact) => {

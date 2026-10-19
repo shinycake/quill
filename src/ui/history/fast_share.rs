@@ -11,8 +11,6 @@ use quill::lang::{keys, tr};
 use quill::state::{HistoryMessage, Session};
 use quill::telegram::envelope::{ChatKind, MessageContent, MessageOrigin, effective_content};
 
-/// The "Replies" system user (tdesktop `isRepliesChat`).
-const REPLIES_USER_ID: i64 = 1_271_266_957;
 /// The "Verification Codes" system user (tdesktop `isVerifyCodes`).
 const VERIFY_CODES_USER_ID: i64 = 489_000;
 
@@ -50,7 +48,7 @@ pub(super) fn facts(message: &HistoryMessage, session: Option<&Session>) -> Opti
     let shows_forwarder = match kind {
         ChatKind::Private { user_id } => {
             session.is_saved_messages(message.chat_id)
-                || user_id.0 == REPLIES_USER_ID
+                || session.is_replies_chat(message.chat_id)
                 || user_id.0 == VERIFY_CODES_USER_ID
         }
         _ => false,
