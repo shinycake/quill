@@ -20,7 +20,7 @@ fn bot_user_json(id: i64, has_topics: bool, allows: bool) -> String {
 
 fn bot_chat_json(id: i64) -> String {
     format!(
-        r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"Bot","type":{{"@type":"chatTypePrivate","user_id":{id}}},"unread_count":0}}}}"#
+        r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"Bot","type":{{"@type":"chatTypePrivate","user_id":{id}}},"unread_count":0,"positions":[{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"1","is_pinned":false}}]}}}}"#
     )
 }
 

@@ -382,8 +382,8 @@ fn forum_rows_follow_display_as_forum() {
     assert!(session.chat_row_forum(ChatId(16)).expect("row").loaded);
 }
 
-/// The forum badge follows `IncludeInBadge::UnmutedOrAll`, a forum marked as
-/// unread keeps its dot, and topic icons are listed for resolving.
+/// The forum badge follows `IncludeInBadge::UnmutedOrAll`, ignores the unread
+/// mark, and topic icons are listed for resolving.
 #[test]
 fn forum_badge_counts_unmuted_topics_and_icons_are_resolved() {
     let (mut session, sink) = session();
@@ -420,7 +420,8 @@ fn forum_badge_counts_unmuted_topics_and_icons_are_resolved() {
     set(&mut session, 3, true, 777);
     let shown = row(&session);
     assert_eq!((shown.unread_topics, shown.badge_muted), (2, true));
-    // Nothing unread but the chat marked as unread: a dot.
+    // Nothing unread but the chat marked as unread: no badge and no dot
+    // (tdesktop ignores the mark on a forum).
     for id in [2, 3] {
         if let Some(topic) = session
             .threads
@@ -435,7 +436,5 @@ fn forum_badge_counts_unmuted_topics_and_icons_are_resolved() {
     if let Some(chat) = session.chats.get_mut(&43) {
         chat.is_marked_as_unread = true;
     }
-    let shown = row(&session);
-    assert_eq!(shown.unread_topics, 0);
-    assert!(shown.dot);
+    assert_eq!(row(&session).unread_topics, 0);
 }

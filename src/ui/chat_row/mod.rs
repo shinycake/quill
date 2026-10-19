@@ -454,8 +454,9 @@ pub(super) fn session_chat_row(
     let has_mentions = chat.unread_mention_count > 0;
     let jump = forum.as_ref().and_then(|line| line.jump(selected));
     let unread_indicator = match forum.as_ref().map(|line| &line.forum) {
-        Some(forum) if forum.unread_topics > 0 => Some((forum.unread_topics, false)),
-        Some(forum) => forum.dot.then_some((0, true)),
+        // tdesktop never marks a forum itself: only its topics count
+        // (`history.cpp:2765-2770`, `data_thread.cpp:117-119`).
+        Some(forum) => (forum.unread_topics > 0).then_some((forum.unread_topics, false)),
         None => chat_unread_indicator(chat),
     };
     let has_reactions = chat.unread_reaction_count > 0;

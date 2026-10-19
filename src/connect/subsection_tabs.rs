@@ -83,12 +83,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// already on its way). Not ready yet: it is asked later. A TDLib error
     /// is final (tdesktop does not retry either).
     fn preload_topics(&mut self, chat_id: ChatId) {
-        // Forums in a chat list (`history->inChatList()`), and bots with
-        // topics, whose topics also fill their row.
+        // Only chats in a chat list (`history->inChatList()`): forums, and
+        // bots with topics, whose topics also fill their row.
         let listed = self.session.chats.get(&chat_id.0).is_some_and(|chat| {
-            chat.is_forum_chat()
+            (chat.is_forum_chat() || self.session.bot_topics(chat_id).is_some())
                 && (chat.in_main_list || chat.in_archive || !chat.folder_positions.is_empty())
-        }) || self.session.bot_topics(chat_id).is_some();
+        });
         if !listed
             || !self.chats_path_active()
             || self.session.threads.forum_row_asked.contains(&chat_id.0)

@@ -54,21 +54,30 @@ Parity id: `chatlist-forum-topic-titles`.
   chip is plain while selecting (the row toggles) and is not drawn on the open
   row. Nothing else on the line is clickable.
 - The badge follows `IncludeInBadge::UnmutedOrAll`: unmuted unread topics, or
-  all of them (grey) when every one is muted; a forum marked as unread with no
-  unread topic keeps its dot. `chat_row/row_badges.rs` holds the counters so
+  all of them (grey) when every one is muted. The "marked as unread" flag is
+  ignored on a forum, as in tdesktop (`history.cpp:2765-2770`,
+  `data_thread.cpp:117-119`). `chat_row/row_badges.rs` holds the counters so
   they can sit on either line.
 - Topic lists load from the update hook (`maybe_preload_topics`) for forums in
   a chat list: on a new chat, on any chat position, on `updateSupergroup` with
   `is_forum` (the chat id is derived from the supergroup id, no scan), and once
   when the account becomes ready for forums that arrived earlier. A forum is
   marked asked only after its request went out; a TDLib error is final
-  (`forum_topics_failed`) and the row reads "No chats". Bots with topics are
-  preloaded as before.
+  (`forum_topics_failed`) and the row reads "No chats". Bots with topics
+  follow the same rule: only when they are in a chat list.
 - `note_forum_topic_message` also advances the topic's `last_message_id`, so
   the titles reorder at once.
-- UI tests run on a temp app root: `new_with_demo` calls
-  `use_isolated_app_root` under `cfg(test)`, so no test reads or writes the
-  owner's real settings, and a test fails if a window resolves the real root.
+- Tests never see the owner's app folder: under `cfg(test)` or the
+  `test-support` feature (which the bin's tests get through the existing self
+  dev-dependency, so `cargo test --lib` and the bin's tests both have it)
+  `safe_app_root()` returns a per-process temp folder from the first call, with
+  no window needed. The real-folder branch records itself and a test asserts
+  it was never taken. (The notification avatar cache dir still uses the real
+  cache path; it is not a preference.)
+- The icons sit in the one elided row: every title and icon is a flex item
+  whose shrink weight grows from left to right, so the first title that no
+  longer fits ends in "…" and what follows collapses to nothing. Icons are
+  whole or gone.
 
 ## Deviations
 
@@ -85,8 +94,9 @@ Parity id: `chatlist-forum-topic-titles`.
 
 - State tests: order, unread flag, "# General", `forum_rows_follow_display_as_forum`
   (row lines, loaded, unread topics, jump target), the unmuted-or-all badge,
-  the dot and the icon ids sent for resolving. A unit test checks the piece
-  layout with an icon.
+  that the unread mark is ignored and the icon ids sent for resolving. Unit
+  and GPUI tests check the piece layout and that a long title before an icon
+  topic elides at the line's edge with the icon gone, and an icon is whole.
 - Driver test: topics are requested when a forum in a chat list appears or
   enters one, once, not after an error, not for a forum in no list, and later
   when the account was not ready.

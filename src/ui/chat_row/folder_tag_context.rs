@@ -93,7 +93,7 @@ impl QuillApp {
                 let active = self.frame.window_active.get();
                 let forum = self.session().and_then(|s| s.chat_row_forum(chat.id));
                 let has_badge = match &forum {
-                    Some(forum) => forum.unread_topics > 0 || forum.dot,
+                    Some(forum) => forum.unread_topics > 0,
                     None => chat_unread_indicator(chat).is_some(),
                 };
                 let fx = self.frame.row_fx.borrow_mut().observe(

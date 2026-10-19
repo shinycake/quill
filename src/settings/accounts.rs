@@ -280,8 +280,40 @@ pub fn safe_app_root() -> Option<PathBuf> {
     if let Some(root) = std::env::var_os("QUILL_DATA_ROOT").filter(|root| !root.is_empty()) {
         return Some(PathBuf::from(root));
     }
+    // Test processes (the lib's tests and, through the self dev-dependency,
+    // the binary's) never see the real folder, even before any window or
+    // explicit isolation: the first read or write already lands in a
+    // per-process temp folder.
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        Some(crate::scratch::process_dir("quill-test-root"))
+    }
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
+        real_app_root()
+    }
+}
+
+/// The platform data directory. In a test process this is never called; the
+/// flag below records it if it ever is.
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+fn real_app_root() -> Option<PathBuf> {
+    #[cfg(any(test, feature = "test-support"))]
+    REAL_APP_ROOT_RESOLVED.store(true, std::sync::atomic::Ordering::SeqCst);
     directories::ProjectDirs::from("org", "shinycake", APP_DIR_NAME)
         .map(|dirs| dirs.data_dir().to_path_buf())
+}
+
+/// Set when the real data directory was resolved in a test process. A test
+/// asserts it stays `false`.
+#[cfg(any(test, feature = "test-support"))]
+static REAL_APP_ROOT_RESOLVED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Whether this test process ever resolved the owner's real data directory.
+#[cfg(any(test, feature = "test-support"))]
+pub fn real_app_root_was_resolved() -> bool {
+    REAL_APP_ROOT_RESOLVED.load(std::sync::atomic::Ordering::SeqCst)
 }
 
 static ISOLATED_APP_ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();

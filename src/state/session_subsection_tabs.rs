@@ -66,8 +66,6 @@ pub struct RowForum {
     /// messages, or all of them when every one is muted
     /// (`IncludeInBadge::UnmutedOrAll`).
     pub unread_topics: i32,
-    /// A forum marked as unread with no unread topic shows a dot.
-    pub dot: bool,
     /// Every unread topic is muted: the badge is grey.
     pub badge_muted: bool,
     /// The topic of the forum's last message when it has unread messages:
@@ -272,7 +270,6 @@ impl Session {
             loaded: self.threads.forum_topics.contains_key(&chat_id.0)
                 || self.threads.forum_topics_failed.contains(&chat_id.0),
             unread_topics: i32::try_from(shown).unwrap_or(i32::MAX),
-            dot: shown == 0 && chat.is_some_and(|c| c.is_marked_as_unread),
             badge_muted,
             jump,
             topics,
