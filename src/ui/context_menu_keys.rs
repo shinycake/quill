@@ -15,12 +15,16 @@
 //! no handle and are skipped. With no enabled item the menu frame keeps the
 //! focus.
 //!
-//! Submenus (popup_menu.cpp:577-590): Right, or Enter, on a row with a
-//! submenu opens it and focuses its first item; Left, or Escape, inside it
-//! closes only the submenu and gives the focus back to the parent row. Up and
-//! Down inside a submenu stay in it, and on the menu's own rows they skip the
-//! submenu's. Left stays "close" and Right stays "open" in right-to-left
-//! layouts too (owner decision, not mirrored).
+//! Submenus: `PopupMenu::_activeSubmenu` is set whenever a submenu is shown,
+//! by hover or by key (popup_menu.cpp:540), and while it is set
+//! `handleKeyPress` hands every key to the submenu first
+//! (popup_menu.cpp:577-590). Here `ChatMenuState::submenu` is that state, and
+//! with it open the keys go to the submenu whichever row has the focus: Down
+//! and Up enter and walk its rows (with none selected, Down takes the first and
+//! Up the last, `Menu::handleKeyPress`), Left or Escape close only the submenu
+//! and focus the parent row. With it closed, Right, or Enter, on a row with a
+//! submenu opens it and focuses its first item. Left stays "close" and Right
+//! stays "open" in right-to-left layouts too (owner decision, not mirrored).
 //!
 //! The arrows are not in the shortcut list and cannot be rebound: the
 //! keystroke interceptor (`app_demo.rs`, via `context_menu_key`) handles
@@ -178,33 +182,41 @@ impl ContextMenuItems {
             .map(|(_, submenu)| *submenu)
     }
 
-    /// The handle after (or before) the focused one, wrapping; with none
-    /// focused, the first (or last). Inside a submenu only that submenu's
-    /// rows are walked; elsewhere only the menu's own rows. `None` when
-    /// there is no such item.
-    pub(super) fn step(&self, forward: bool, window: &Window) -> Option<FocusHandle> {
-        let live = self.live();
-        let focused = live
+    /// The sort key of the row that owns `submenu`, if drawn this frame.
+    fn parent_of(&self, submenu: ChatMenuSubmenu) -> Option<u32> {
+        self.parents
+            .borrow()
             .iter()
-            .find(|(_, handle)| handle.is_focused(window))
-            .map(|(key, _)| *key);
-        let group: Vec<&(u32, FocusHandle)> = match focused.filter(|key| is_submenu_key(*key)) {
-            Some(key) => live
-                .iter()
-                .filter(|(other, _)| {
-                    is_submenu_key(*other) && parent_key(*other) == parent_key(key)
-                })
-                .collect(),
-            None => live
-                .iter()
-                .filter(|(key, _)| !is_submenu_key(*key))
-                .collect(),
-        };
+            .find(|(_, candidate)| *candidate == submenu)
+            .map(|(parent, _)| *parent)
+    }
+
+    /// The handle after (or before) the focused one, wrapping; with none of
+    /// the group focused, the first (or last). `inside` names the parent row
+    /// of an open submenu, whose rows are then the group; otherwise the
+    /// group is the menu's own rows. `None` when the group is empty.
+    pub(super) fn step(
+        &self,
+        forward: bool,
+        inside: Option<u32>,
+        window: &Window,
+    ) -> Option<FocusHandle> {
+        let live = self.live();
+        let group: Vec<&(u32, FocusHandle)> = live
+            .iter()
+            .filter(|(key, _)| match inside {
+                Some(parent) => is_submenu_key(*key) && parent_key(*key) == parent,
+                None => !is_submenu_key(*key),
+            })
+            .collect();
         let count = group.len();
         if count == 0 {
             return None;
         }
-        let next = match group.iter().position(|(key, _)| Some(*key) == focused) {
+        let next = match group
+            .iter()
+            .position(|(_, handle)| handle.is_focused(window))
+        {
             Some(at) if forward => (at + 1) % count,
             Some(at) => (at + count - 1) % count,
             None if forward => 0,
@@ -334,8 +346,14 @@ impl QuillApp {
         super::keybindings::context_menu_captures_key(key)
     }
 
-    /// Left, Right, Escape and Enter on a submenu row or its parent row.
-    /// Returns whether the key was taken.
+    /// The submenu that is open, by hover or by key.
+    fn open_submenu(&self) -> Option<ChatMenuSubmenu> {
+        self.chat_list.menu.as_ref().and_then(|menu| menu.submenu)
+    }
+
+    /// Up, Down, Left, Right, Escape and Enter where a submenu is involved.
+    /// With one open every such key is for it, whichever row has the focus
+    /// (`PopupMenu::handleKeyPress`). Returns whether the key was taken.
     fn submenu_key_press(
         &mut self,
         key: &Keystroke,
@@ -345,30 +363,51 @@ impl QuillApp {
         if key.modifiers.modified() {
             return false;
         }
-        let (focused, submenu, parent) = {
+        let name = key.key.as_str();
+        let (focused, own, open_parent) = {
             let items = &self.frame.context_menu_items;
-            let Some(focused) = items.focused_key(window) else {
-                return false;
-            };
+            let focused = items.focused_key(window);
+            let open_parent = self.open_submenu().and_then(|s| items.parent_of(s));
             (
                 focused,
-                items.submenu_of(focused),
-                items.handle_for(parent_key(focused)),
+                focused.and_then(|key| items.submenu_of(key)),
+                open_parent,
             )
         };
-        match key.key.as_str() {
-            "right" | "enter" => {
-                let Some(submenu) = submenu else {
-                    return false;
-                };
-                self.open_submenu_and_focus_first(focused, submenu, cx);
-                true
-            }
-            "left" | "escape" if is_submenu_key(focused) => {
-                self.close_chat_submenu(cx);
-                if let Some(parent) = parent {
-                    window.focus(&parent, cx);
+        if let Some(parent) = open_parent {
+            match name {
+                "down" | "up" => {
+                    let forward = name == "down";
+                    let next = self
+                        .frame
+                        .context_menu_items
+                        .step(forward, Some(parent), window);
+                    if let Some(next) = next {
+                        window.focus(&next, cx);
+                    }
+                    return true;
                 }
+                "left" | "escape" => {
+                    self.close_chat_submenu(cx);
+                    let handle = self.frame.context_menu_items.handle_for(parent);
+                    if let Some(handle) = handle {
+                        window.focus(&handle, cx);
+                    }
+                    return true;
+                }
+                "right" | "enter" if focused == Some(parent) => {
+                    let first = self.frame.context_menu_items.handle_for(parent + 1);
+                    if let Some(first) = first {
+                        window.focus(&first, cx);
+                    }
+                    return true;
+                }
+                _ => {}
+            }
+        }
+        match (name, focused, own) {
+            ("right" | "enter", Some(focused), Some(submenu)) => {
+                self.open_submenu_and_focus_first(focused, submenu, cx);
                 true
             }
             _ => false,
@@ -393,7 +432,7 @@ impl QuillApp {
     /// (the message and chat menus, or every item disabled) the menu frame
     /// takes the focus, so the arrows never reach what is under the menu.
     pub(super) fn move_context_menu_focus(&self, forward: bool, window: &mut Window, cx: &mut App) {
-        match self.frame.context_menu_items.step(forward, window) {
+        match self.frame.context_menu_items.step(forward, None, window) {
             Some(item) => window.focus(&item, cx),
             None if !self.frame.context_menu_focus.contains_focused(window, cx) => {
                 window.focus(&self.frame.context_menu_focus, cx)
