@@ -27,21 +27,42 @@ permissions:
 
 jobs:
   linux:
-    name: installer-linux
-    runs-on: ubuntu-latest
+    name: installer-linux (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-latest }
+          - { arch: aarch64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     defaults:
       run:
         shell: bash  # with pipefail, so `installer | tee` fails with the installer
     steps:
       - uses: actions/checkout@v7
+      # Releases before the first arm64 build have no aarch64 package: skip
+      # that leg instead of failing until one is published.
+      - name: the release has a package for this CPU
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' \
+              | grep -qx 'quill-linux-${{ matrix.arch }}-bundle.tar.gz'; then
+            echo "SKIP=false" >> "$GITHUB_ENV"
+          else
+            echo "::notice::the latest release has no ${{ matrix.arch }} Linux package yet"
+            echo "SKIP=true" >> "$GITHUB_ENV"
+          fi
       - name: runtime libraries, virtual display, software Vulkan
+        if: env.SKIP != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libgtk-3-0t64 libxkbcommon-x11-0 libvulkan1 libfontconfig1 libasound2t64 \
             mesa-vulkan-drivers xvfb xauth desktop-file-utils
       - name: install (as piped from curl)
+        if: env.SKIP != 'true'
         env:
           QUILL_NO_OPEN: "1"
         run: |
@@ -55,6 +76,7 @@ jobs:
           desktop-file-validate "$entry"
           ls "$HOME"/.local/share/icons/hicolor/*/apps/quill.png
       - name: update while Quill is running
+        if: env.SKIP != 'true'
         env:
           QUILL_NO_OPEN: "1"
         run: |
@@ -70,6 +92,7 @@ jobs:
           if pgrep -fx "$exe"; then echo "Quill is still running" >&2; exit 1; fi
           "$exe" --version
       - name: a bad checksum installs nothing
+        if: env.SKIP != 'true'
         env:
           QUILL_PREFIX: ${{ runner.temp }}/bad
           QUILL_SHA256: "0000000000000000000000000000000000000000000000000000000000000000"
@@ -78,6 +101,7 @@ jobs:
           grep -q 'checksum mismatch' "$RUNNER_TEMP/bad.log"
           test ! -e "$QUILL_PREFIX/opt/quill"
       - name: remove
+        if: env.SKIP != 'true'
         run: |
           "$HOME/.local/opt/quill/install.sh" --uninstall
           test ! -e "$HOME/.local/opt/quill"

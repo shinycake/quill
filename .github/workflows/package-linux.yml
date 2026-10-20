@@ -28,8 +28,16 @@ env:
 
 jobs:
   linux-package:
-    name: linux-package
-    runs-on: ubuntu-22.04
+    name: linux-package (${{ matrix.arch }})
+    # One native build per CPU, both on Ubuntu 22.04 so the package needs
+    # glibc 2.35 at most (docs/decisions/linux-arm64.md).
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-22.04 }
+          - { arch: aarch64, runner: ubuntu-22.04-arm }
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
@@ -119,51 +127,51 @@ jobs:
       - name: package
         run: bash scripts/linux-package.sh
       - name: check package (ELF dependencies)
-        run: bash scripts/check-bundle-elf.sh dist/linux/quill-linux-x86_64
+        run: bash scripts/check-bundle-elf.sh dist/linux/quill-linux-${{ matrix.arch }}
       - name: checker negative test (unbundled OpenSSL must fail)
         run: |
-          cp -a dist/linux/quill-linux-x86_64 "$RUNNER_TEMP/neg"
+          cp -a dist/linux/quill-linux-${{ matrix.arch }} "$RUNNER_TEMP/neg"
           rm "$RUNNER_TEMP/neg/lib/libssl.so.3"
           if bash scripts/check-bundle-elf.sh "$RUNNER_TEMP/neg"; then echo "checker accepted a package missing libssl" >&2; exit 1; fi
       - name: run from package (no env vars)
         run: |
-          env -u LD_LIBRARY_PATH -u QUILL_TDJSON_PATH dist/linux/quill-linux-x86_64/quill --version
-          test "$(dist/linux/quill-linux-x86_64/quill --build-info)" = ui
-          python3 scripts/check-bundle-dlopen.py dist/linux/quill-linux-x86_64
-          env -u LD_LIBRARY_PATH dist/linux/quill-linux-x86_64/quill --video-probe tests/fixtures/clip-h264-aac.mp4
-          env -u LD_LIBRARY_PATH dist/linux/quill-linux-x86_64/quill --video-probe tests/fixtures/clip-vp9.webm
+          env -u LD_LIBRARY_PATH -u QUILL_TDJSON_PATH dist/linux/quill-linux-${{ matrix.arch }}/quill --version
+          test "$(dist/linux/quill-linux-${{ matrix.arch }}/quill --build-info)" = ui
+          python3 scripts/check-bundle-dlopen.py dist/linux/quill-linux-${{ matrix.arch }}
+          env -u LD_LIBRARY_PATH dist/linux/quill-linux-${{ matrix.arch }}/quill --video-probe tests/fixtures/clip-h264-aac.mp4
+          env -u LD_LIBRARY_PATH dist/linux/quill-linux-${{ matrix.arch }}/quill --video-probe tests/fixtures/clip-vp9.webm
       - name: embedded credentials match the request
         env:
           WANT_EMBED: ${{ inputs.embed_credentials && secrets.TELEGRAM_API_ID != '' && secrets.TELEGRAM_API_HASH != '' }}
         run: |
-          got="$(dist/linux/quill-linux-x86_64/quill --embedded-credentials)"
+          got="$(dist/linux/quill-linux-${{ matrix.arch }}/quill --embedded-credentials)"
           want=none; [ "$WANT_EMBED" = true ] && want=embedded
           echo "embedded credentials: $got"
           test "$got" = "$want"
       - name: smoke the extracted tarball
         run: |
           mkdir -p "$RUNNER_TEMP/extract"
-          tar -C "$RUNNER_TEMP/extract" -xzf dist/linux/quill-linux-x86_64-bundle.tar.gz
-          "$RUNNER_TEMP/extract/quill-linux-x86_64/quill" --version
-          bash "$RUNNER_TEMP/extract/quill-linux-x86_64/install.sh" "$RUNNER_TEMP/prefix"
+          tar -C "$RUNNER_TEMP/extract" -xzf dist/linux/quill-linux-${{ matrix.arch }}-bundle.tar.gz
+          "$RUNNER_TEMP/extract/quill-linux-${{ matrix.arch }}/quill" --version
+          bash "$RUNNER_TEMP/extract/quill-linux-${{ matrix.arch }}/install.sh" "$RUNNER_TEMP/prefix"
           "$RUNNER_TEMP/prefix/bin/quill" --version
-          bash scripts/check-ffmpeg-tools.sh "$RUNNER_TEMP/extract/quill-linux-x86_64" \
+          bash scripts/check-ffmpeg-tools.sh "$RUNNER_TEMP/extract/quill-linux-${{ matrix.arch }}" \
             --expect-encoder mpeg4 --expect-encoder aac --expect-encoder mjpeg --expect-encoder png
           grep -q "^Exec=$RUNNER_TEMP/prefix/opt/quill/quill" "$RUNNER_TEMP/prefix/share/applications/org.shinycake.quill.desktop"
           grep -qx "Exec=$RUNNER_TEMP/prefix/opt/quill/quill --quit" "$RUNNER_TEMP/prefix/share/applications/org.shinycake.quill.desktop"
       # The in-app updater (src/updater.rs) downloads the bare executable named
-      # quill-linux-x86_64 and swaps it in place inside the package directory,
+      # quill-linux-<arch> and swaps it in place inside the package directory,
       # so ship the packaged binary (RUNPATH $ORIGIN/lib) under that name.
       - name: updater binary
         run: |
           mkdir -p dist/update
-          cp dist/linux/quill-linux-x86_64/quill dist/update/quill-linux-x86_64
-          test "$(dist/update/quill-linux-x86_64 --release-asset-name)" = quill-linux-x86_64
+          cp dist/linux/quill-linux-${{ matrix.arch }}/quill dist/update/quill-linux-${{ matrix.arch }}
+          test "$(dist/update/quill-linux-${{ matrix.arch }} --release-asset-name)" = quill-linux-${{ matrix.arch }}
       - uses: actions/upload-artifact@v7
         with:
-          name: quill-linux-x86_64-bundle
+          name: quill-linux-${{ matrix.arch }}-bundle
           path: |
-            dist/linux/quill-linux-x86_64-bundle.tar.gz
-            dist/linux/quill-linux-x86_64-bundle.tar.gz.sha256
-            dist/update/quill-linux-x86_64
+            dist/linux/quill-linux-${{ matrix.arch }}-bundle.tar.gz
+            dist/linux/quill-linux-${{ matrix.arch }}-bundle.tar.gz.sha256
+            dist/update/quill-linux-${{ matrix.arch }}
           if-no-files-found: error
