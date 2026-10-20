@@ -386,6 +386,8 @@ impl QuillApp {
                             quill::chatlist_archive::ArchiveRowMode::Hidden => {}
                         }
                         if show_main_list {
+                            // A file drag over the list freezes its order.
+                            self.keep_frozen_order(&mut chats, |chat| chat.id.0);
                             // A live pinned drag shows its swapped order
                             // (tdesktop moves rows while dragging); stable,
                             // so unpinned rows keep their place.
@@ -422,6 +424,7 @@ impl QuillApp {
                                     reorder.position(chat.id.0).unwrap_or(usize::MAX)
                                 });
                             }
+                            self.keep_frozen_order(&mut archived, |chat| chat.id.0);
                             if archived.is_empty() && filter == ChatListFilter::Archived {
                                 list = list.child(chat_list_empty_state(
                                     "📦",
