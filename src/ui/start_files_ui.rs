@@ -104,7 +104,7 @@ impl QuillApp {
     }
 
     /// Why `chat` takes none of the files, if it does not.
-    fn start_files_refusal(&self, chat: ChatId) -> Option<&'static str> {
+    pub(in crate::ui) fn start_files_refusal(&self, chat: ChatId) -> Option<&'static str> {
         let session = self.session()?;
         let summary = session.chats.get(&chat.0)?;
         (!SendRights::for_chat(session, summary, now_unix()).allows_any_file())

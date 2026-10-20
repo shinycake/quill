@@ -185,6 +185,7 @@
 "qll_chatlist_no_unread_chats" = "No unread chats";
 "qll_chatlist_not_now" = "Not now";
 "qll_chatlist_open_the_chat_to_mark" = "open the chat to mark it as read";
+"qll_chatlist_open_the_forum_and_drop" = "Open the forum and choose a topic to send files there.";
 "qll_chatlist_phone" = "Phone";
 "qll_chatlist_phone_number" = "Phone number";
 "qll_chatlist_pin_request_already_in_flight" = "pin request already in flight";
