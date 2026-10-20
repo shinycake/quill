@@ -72,6 +72,7 @@ impl HistoryState {
                 self.loaded_complete = false;
             }
         }
+        self.drop_unread_bar_for(&doomed);
         for id in &doomed {
             self.messages.remove(id);
             self.visible.remove(id);

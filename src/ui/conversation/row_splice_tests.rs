@@ -339,7 +339,8 @@ fn patched_and_spliced_rows_equal_a_full_build(cx: &mut TestAppContext) {
         vcx,
         "first unread deleted",
         &[&delete(&[READ_UP_TO + 1])],
-        Expect::Splice,
+        // The bar leaves with its message, so the rows key changes.
+        Expect::Build,
     );
     check(
         &app,
