@@ -114,7 +114,9 @@ fn show_alert(title: &str, detail: &str) {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
-    if zenity.is_ok() {
+    // A dialog that could not reach the display exits non-zero (as does one
+    // closed from its title bar): fall through to the notification.
+    if zenity.is_ok_and(|status| status.success()) {
         return;
     }
     let kdialog = Command::new("kdialog")
@@ -123,16 +125,17 @@ fn show_alert(title: &str, detail: &str) {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
-    if kdialog.is_ok() {
+    if kdialog.is_ok_and(|status| status.success()) {
         return;
     }
+    #[cfg(target_os = "linux")]
     if let Err(error) = notify(title, detail) {
         eprintln!("quill: could not show a notification either: {error}");
     }
 }
 
 /// A critical desktop notification that stays until dismissed.
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(target_os = "linux")]
 fn notify(title: &str, detail: &str) -> zbus::Result<()> {
     use quill::notify::dbus::{APP_NAME, BUS_NAME, DESKTOP_ENTRY, INTERFACE, OBJECT_PATH};
     use std::collections::HashMap;
@@ -150,7 +153,8 @@ fn notify(title: &str, detail: &str) -> zbus::Result<()> {
         .replace('<', "&lt;")
         .replace('>', "&gt;");
     let _id: u32 = proxy.call(
-        tr(keys::Q_PREFS_NOTIFY),
+        // The D-Bus method name, never translated.
+        "Notify",
         &(
             APP_NAME,
             0_u32,

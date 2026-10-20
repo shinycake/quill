@@ -38,8 +38,10 @@ pub(super) enum Missing {
     Loader,
     Driver,
     /// Drivers are installed but none gave a device that can draw.
+    /// `hardware`: one of them is for a real graphics card.
     UsableDevice {
         drivers: Vec<String>,
+        hardware: bool,
     },
 }
 
@@ -68,13 +70,17 @@ pub(super) fn diagnose(detail: &str, setup: &Setup) -> Option<Missing> {
     {
         return None;
     }
-    let mut drivers: Vec<String> = setup
+    let mut drivers: Vec<String> = Vec::new();
+    for driver in &setup.drivers {
+        if !drivers.contains(&driver.name) {
+            drivers.push(driver.name.clone());
+        }
+    }
+    let hardware = setup
         .drivers
         .iter()
-        .map(|driver| driver.name.clone())
-        .collect();
-    drivers.dedup();
-    Some(Missing::UsableDevice { drivers })
+        .any(|driver| driver.kind == DriverKind::Hardware);
+    Some(Missing::UsableDevice { drivers, hardware })
 }
 
 /// The alert body for `missing`.
@@ -82,7 +88,7 @@ pub(super) fn message(missing: &Missing, virtio_gpu: bool, detail: &str) -> Stri
     let mut parts = vec![match missing {
         Missing::Loader => tr(keys::Q_MISC_VULKAN_NO_LOADER).to_owned(),
         Missing::Driver => tr(keys::Q_MISC_VULKAN_NO_DRIVER).to_owned(),
-        Missing::UsableDevice { drivers } => tr_with(
+        Missing::UsableDevice { drivers, .. } => tr_with(
             keys::Q_MISC_VULKAN_NO_DEVICE,
             &[("drivers", &drivers.join(", "))],
         ),
@@ -94,7 +100,9 @@ pub(super) fn message(missing: &Missing, virtio_gpu: bool, detail: &str) -> Stri
         parts.push(tr(keys::Q_MISC_VULKAN_VIRTIO).to_owned());
     }
     parts.push(tr(keys::Q_MISC_VULKAN_INSTALL_LAVAPIPE).to_owned());
-    if !virtio_gpu {
+    if matches!(missing, Missing::UsableDevice { hardware: true, .. }) {
+        parts.push(tr(keys::Q_MISC_VULKAN_CHECK_HARDWARE).to_owned());
+    } else if !virtio_gpu {
         parts.push(tr(keys::Q_MISC_VULKAN_INSTALL_HARDWARE).to_owned());
     }
     parts.push(tr_with(
@@ -276,7 +284,8 @@ mod tests {
                 )
             ),
             Some(Missing::UsableDevice {
-                drivers: vec!["Virtio (Venus)".to_owned()]
+                drivers: vec!["Virtio (Venus)".to_owned()],
+                hardware: false,
             })
         );
     }
@@ -293,6 +302,30 @@ mod tests {
         );
         assert_eq!(diagnose(NO_DEVICE, &with_lavapipe), None);
         assert_eq!(diagnose("Device lost", &setup(true, &[], false)), None);
+    }
+
+    #[test]
+    fn installed_card_driver_gets_a_check_instead_of_an_install() {
+        let missing = diagnose(
+            NO_DEVICE,
+            &setup(
+                true,
+                &[
+                    ("radeon_icd.x86_64.json", "libvulkan_radeon.so"),
+                    ("radeon_icd.i686.json", "libvulkan_radeon.so"),
+                ],
+                false,
+            ),
+        );
+        assert_eq!(
+            missing,
+            Some(Missing::UsableDevice {
+                drivers: vec!["radeon".to_owned()],
+                hardware: true,
+            })
+        );
+        let text = missing.map(|missing| message(&missing, false, NO_DEVICE));
+        assert!(text.is_some_and(|text| text.contains("/dev/dri")));
     }
 
     #[test]
