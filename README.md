@@ -328,7 +328,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Remove a recent inline bot from the "@" suggestions (blocked: TDLib 1.8.68 has no method to remove a recent inline bot) <!-- parity:composer-remove-recent-inline-bot -->
 - [x] "Cancel editing?" confirmation when Esc would drop a changed edit (#996) <!-- parity:composer-cancel-edit-confirm -->
 - [x] Field placeholder follows the context: editing, broadcast, silent broadcast, Stars price; in chat windows too (#996) <!-- parity:composer-context-placeholder -->
-- [ ] Field placeholder for an anonymous admin and for an inline bot's own placeholder text <!-- parity:composer-placeholder-anon-inline -->
+- [x] Field placeholder for an anonymous admin and for an inline bot's own placeholder text <!-- parity:composer-placeholder-anon-inline -->
 - [ ] Forum topic field placeholder "Message in {topic}" <!-- parity:composer-placeholder-forum-topic -->
 - [ ] "Off-thread message" placeholder when a bot chat is opened outside its thread <!-- parity:composer-placeholder-bot-offthread -->
 - [ ] A bot reply keyboard's own placeholder text shown in the field <!-- parity:composer-placeholder-bot-keyboard -->
@@ -909,7 +909,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] `/` command menu merging chat-specific bot commands and global getCommands (state.rs:3100) <!-- parity:bots-command-menu -->
 - [x] Ephemeral-command icon in the bot command list (BotCommand.is_ephemeral) <!-- parity:bots-ephemeral-command-icon -->
 - [x] "/" command menu in groups lists every bot's commands as /cmd@bot, fetching unknown bot users (#993) <!-- parity:bots-group-commands -->
-- [ ] Enter on a "/" menu row sends the command (Tab inserts it), as tdesktop does <!-- parity:bots-command-menu-enter-sends -->
+- [x] Enter on a "/" menu row sends the command (Tab inserts it), as tdesktop does <!-- parity:bots-command-menu-enter-sends -->
 - [x] Inline mode: type @bot in composer, inline query results list, send an inline result (`getInlineQueryResults` backend from S9; this slice adds: `@bot query` trigger parse, bot resolution via local user cache with `searchPublicChat` fallback, 100ms-debounced queries, results dropdown with keyboard/mouse pick + next-page loading, `sendInlineQueryResultMessage` send, secret-chat alert on the typed path) <!-- parity:bots-inline-mode -->
 - [x] Games: send / play, high scores (no game code at all) — render `messageGame` as a card (thumbnail/title/text/description); Play reuses the B1 `press_game_button` flow (`callbackQueryPayloadGame` → answer URL opens in OS browser); inline high-score panel via `getGameHighScores` keyed on the current user (toggle open/close); bot profile panel gets a Games section (games cached per bot from `messageGame` traffic in the shared `upsert_message` choke point) with Send buttons → `sendMessage`+`inputMessageGame`; chat-list preview `🎮 {title}` <!-- parity:bots-games -->
 - [x] Poll creation dialog: question, add/remove options (2–10), validation errors, anonymous + multiple-answer toggles (ui/mod.rs:14860, poll.rs:112) <!-- parity:bots-poll-create -->

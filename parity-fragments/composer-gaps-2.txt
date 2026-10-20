@@ -1,2 +1,0 @@
-parity:bots-command-menu-enter-sends
-parity:composer-placeholder-anon-inline
