@@ -13,6 +13,7 @@
 use super::*;
 use crate::ui::status_note::StatusNote;
 use quill::drop_modes::{DragEntry, DragState, DropAction, classify};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -39,9 +40,9 @@ pub(in crate::ui) struct DropOnRow {
     /// The one-second wait that opens the row's chat; replacing or dropping
     /// it cancels it.
     rest: Option<Task<()>>,
-    /// The order of the rows when the drag arrived; the list keeps it while
-    /// this is not empty.
-    frozen: Vec<i64>,
+    /// Each chat's position when the drag arrived; the list keeps that order
+    /// while this is not empty.
+    frozen: HashMap<i64, usize>,
     /// Ends the freeze two seconds after the last update.
     unfreeze: Option<Task<()>>,
     /// A screenshot demo's fixed drag (no live drag exists there).
@@ -62,6 +63,15 @@ impl DropOnRow {
     }
 }
 
+/// Sorts `rows` by the position each had when the list froze; rows that came
+/// since go last, in their order. Does nothing while the list is not frozen.
+fn sort_frozen<T>(rows: &mut [T], frozen: &HashMap<i64, usize>, id: impl Fn(&T) -> i64) {
+    if frozen.is_empty() {
+        return;
+    }
+    rows.sort_by_key(|row| frozen.get(&id(row)).copied().unwrap_or(usize::MAX));
+}
+
 impl QuillApp {
     /// Whether the row of `chat_id` is the drop target of a live file drag.
     pub(in crate::ui) fn drop_hover_row(&self, chat_id: ChatId, cx: &App) -> bool {
@@ -72,17 +82,7 @@ impl QuillApp {
     /// Keeps the rows in the order they had when a file drag arrived, while
     /// the list is frozen; rows that came since go last, in their order.
     pub(in crate::ui) fn keep_frozen_order<T>(&self, rows: &mut [T], id: impl Fn(&T) -> i64) {
-        let frozen = &self.chat_list.drop_on_row.frozen;
-        if frozen.is_empty() {
-            return;
-        }
-        rows.sort_by_key(|row| {
-            let id = id(row);
-            frozen
-                .iter()
-                .position(|seen| *seen == id)
-                .unwrap_or(usize::MAX)
-        });
+        sort_frozen(rows, &self.chat_list.drop_on_row.frozen, id);
     }
 
     /// The file drag left the row or the window, or ended.
@@ -153,7 +153,7 @@ impl QuillApp {
     /// Freezes the list order at what is shown now, for two more seconds.
     fn freeze_list(&mut self, window: &Window, cx: &mut Context<Self>) {
         if self.chat_list.drop_on_row.frozen.is_empty() {
-            let order: Vec<i64> = self
+            let order: HashMap<i64, usize> = self
                 .chat_list
                 .items
                 .iter()
@@ -161,6 +161,8 @@ impl QuillApp {
                     ChatListItem::Chat { id, .. } => Some(id.0),
                     _ => None,
                 })
+                .enumerate()
+                .map(|(position, id)| (id, position))
                 .collect();
             self.chat_list.drop_on_row.frozen = order;
         }
@@ -305,5 +307,31 @@ impl QuillApp {
         let state = &mut self.chat_list.drop_on_row;
         state.hover = Some(ChatId(12));
         state.preview = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sort_frozen;
+    use std::collections::HashMap;
+
+    #[test]
+    fn a_frozen_list_of_thousands_keeps_its_order_and_new_rows_go_last() {
+        const N: i64 = 5000;
+        let frozen: HashMap<i64, usize> = (0..N).map(|id| (id, id as usize)).collect();
+        // Shuffled by new activity (a stride walk coprime with N), plus two new rows.
+        let mut rows: Vec<i64> = (0..N).map(|i| (i * 1237) % N).collect();
+        rows.push(N + 1);
+        rows.push(N);
+        sort_frozen(&mut rows, &frozen, |id| *id);
+        let expected: Vec<i64> = (0..N).chain([N + 1, N]).collect();
+        assert_eq!(rows, expected);
+    }
+
+    #[test]
+    fn an_unfrozen_list_is_left_alone() {
+        let mut rows = vec![3, 1, 2];
+        sort_frozen(&mut rows, &HashMap::new(), |id| *id);
+        assert_eq!(rows, vec![3, 1, 2]);
     }
 }

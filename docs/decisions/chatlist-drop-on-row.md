@@ -68,6 +68,15 @@
 - tdesktop's `ComputeMimeDataState` also refuses files over the size limit and
   non-local URLs; `classify` does not check size (as for the conversation drop).
 
+- Known: if the pointer rests on a row for more than two seconds on Linux
+  (X11/Wayland send no repeat update) and the list reorders under it, the lit
+  row can differ from the row under the pointer; a drop then lands on the lit
+  row only when both agree, otherwise it is refused. Refusing is the safer
+  outcome. A refused drag still freezes the list for two seconds, which is
+  harmless.
+- The frozen order is a map from chat id to position, so keeping it costs
+  O(n log n) on a list of thousands.
+
 ## How verified
 
 - GPUI tests dispatch `FileDropEvent`s at the list: one row lights up and the
@@ -75,7 +84,10 @@
   single folder is archived; a drop on a forum row or on a chat that takes no
   files opens and attaches nothing; a folder-plus-file drag is refused; one
   second of rest opens the chat; updates at the same point do not restart the
-  wait but a real move does; leaving the window cancels the wait; the list keeps
+  wait but a real move does; leaving the window cancels the wait (also after a rest of 900 ms, and when the
+  drag comes back over the same row); a row half under the header takes the
+  drag only on its visible part; a frozen order of 5000 chats stays in order
+  with new rows last; the list keeps
   its order while hovered and moves after two seconds.
 - Light and dark captures of `ready-drop-on-row` were viewed.
 - Not run with a real OS drag on any platform.

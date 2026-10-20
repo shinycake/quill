@@ -29,13 +29,17 @@ fn frames(vcx: &mut VisualTestContext) {
 }
 
 fn open(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+    open_sized(cx, 800.)
+}
+
+fn open_sized(cx: &mut TestAppContext, height: f32) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     crate::ui::interface_zoom::set_initial_zoom(1.);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
     let demo = ScreenshotDemo::named("ready-forum-row-topics");
-    let handle = cx.open_window(size(px(1100.), px(800.)), move |window, cx| {
+    let handle = cx.open_window(size(px(1100.), px(height)), move |window, cx| {
         let view = cx.new(|cx| QuillApp::new_with_demo(window, cx, None, Some(demo)));
         *slot_in.borrow_mut() = Some(view.clone());
         let shell = cx.new(|_| QuillShell::new(view));
@@ -143,15 +147,9 @@ fn a_single_folder_is_dropped_as_one_archive(cx: &mut TestAppContext) {
     assert!(lit(vcx, 12), "a single folder is accepted");
     file_drop(vcx, FileDropEvent::Submit { position: at });
     assert_eq!(open_chat(&app, vcx), Some(ChatId(12)));
-    // The archive is built in the background.
-    for _ in 0..50 {
-        if attached(&app, vcx) > before {
-            break;
-        }
-        vcx.executor().advance_clock(Duration::from_millis(50));
-        frames(vcx);
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    // The archive is built in the background; the test executor runs it.
+    vcx.executor().allow_parking();
+    wait(vcx, 50);
     assert_eq!(attached(&app, vcx), before + 1);
 }
 
@@ -268,15 +266,73 @@ fn moving_the_pointer_restarts_the_wait(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn leaving_the_window_cancels_the_wait(cx: &mut TestAppContext) {
+    // The same drag comes back over the same row (a second `Entered`): the
+    // wait that was running when it left must not fire on its own clock.
     let (app, mut vcx) = open(cx);
     let vcx = &mut vcx;
     let at = row_centre(vcx, 12);
-    entered(vcx, at, vec![dropped_file("leave.txt")]);
+    let paths = vec![dropped_file("leave.txt")];
+    entered(vcx, at, paths.clone());
     wait(vcx, 500);
+    file_drop(vcx, FileDropEvent::Exited);
+    assert!(!lit(vcx, 12));
+    entered(vcx, at, paths);
+    // 1100 ms after the first entry, 600 ms after the second.
+    wait(vcx, 600);
+    assert_ne!(open_chat(&app, vcx), Some(ChatId(12)), "the old wait fired");
+    wait(vcx, 500);
+    assert_eq!(open_chat(&app, vcx), Some(ChatId(12)));
+}
+
+#[gpui_kit::test]
+fn a_rest_that_ends_with_the_drag_leaving_opens_nothing(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    let vcx = &mut vcx;
+    let at = row_centre(vcx, 12);
+    entered(vcx, at, vec![dropped_file("rest-exit.txt")]);
+    wait(vcx, 900);
     file_drop(vcx, FileDropEvent::Exited);
     wait(vcx, 1500);
     assert_ne!(open_chat(&app, vcx), Some(ChatId(12)));
     assert!(!lit(vcx, 12));
+}
+
+#[gpui_kit::test]
+fn only_the_visible_part_of_a_row_takes_the_drag(cx: &mut TestAppContext) {
+    // A short window, so the list scrolls.
+    let (app, mut vcx) = open_sized(cx, 420.);
+    let vcx = &mut vcx;
+    // Scroll the list so the first row sits half under the header.
+    app.update(vcx, |app, _| {
+        let handle = app.chat_list.scroll.base_handle();
+        handle.set_offset(point(px(0.), px(-24.)));
+    });
+    frames(vcx);
+    let viewport_top = app.update(vcx, |app, _| {
+        app.chat_list.scroll.base_handle().bounds().origin.y
+    });
+    let hidden = row_top(vcx, 71);
+    assert!(
+        hidden < viewport_top.into(),
+        "the row starts above the viewport"
+    );
+    let x = row_centre(vcx, 71).x;
+    entered(
+        vcx,
+        point(x, viewport_top - px(6.)),
+        vec![dropped_file("hidden.txt")],
+    );
+    assert!(!lit(vcx, 71), "the hidden part does not light the row");
+    wait(vcx, 1100);
+    assert_ne!(open_chat(&app, vcx), Some(ChatId(71)));
+    // The part below the header does.
+    file_drop(
+        vcx,
+        FileDropEvent::Pending {
+            position: point(x, viewport_top + px(6.)),
+        },
+    );
+    assert!(lit(vcx, 71));
 }
 
 fn move_chat_to_top(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, chat: i64) {
