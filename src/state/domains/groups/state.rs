@@ -113,6 +113,10 @@ pub struct GroupsState {
     /// supergroup (schema 1.8.67, line 1090). Gates welcome-message
     /// management.
     pub supergroup_send_welcome_right: HashMap<i64, bool>,
+    /// The viewer posts as the group in this supergroup (own status,
+    /// `rights.is_anonymous` or the owner's `is_anonymous`), kept current by
+    /// `updateSupergroup`.
+    pub supergroup_anonymous: HashMap<i64, bool>,
     /// `can_manage_video_chats` of the viewer's administrator status in a
     /// supergroup or channel (`updateSupergroup` / `getSupergroup`).
     pub supergroup_manage_video_chats_right: HashMap<i64, bool>,
@@ -288,6 +292,7 @@ impl GroupsState {
             supergroup_manage_topics_right: HashMap::new(),
             supergroup_change_info_right: HashMap::new(),
             supergroup_send_welcome_right: HashMap::new(),
+            supergroup_anonymous: HashMap::new(),
             supergroup_manage_video_chats_right: HashMap::new(),
             chat_has_welcome_messages: HashMap::new(),
             welcome_messages: HashMap::new(),

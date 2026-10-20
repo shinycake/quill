@@ -14,6 +14,7 @@ use quill::ids::{ChatId, MessageId};
 const GROUP: ChatId = ChatId(-2002);
 const PAID_USER: ChatId = ChatId(51);
 const CHANNEL: ChatId = ChatId(-1002000000001);
+const SUPERGROUP: ChatId = ChatId(-1002000000002);
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
@@ -319,4 +320,80 @@ fn the_bar_handler_for_a_media_reply_offers_another_chat(cx: &mut TestAppContext
     let clicks = app.update(vcx, |app, cx| app.bar_clicks(BarKind::Edit, None, cx));
     vcx.update(|window, cx| (clicks.run)(BarAction::ReplyElsewhere, window, cx));
     assert!(app.read_with(vcx, |app, _| app.share.reply_elsewhere_open));
+}
+
+fn supergroup_status(app: &Entity<QuillApp>, cx: &mut VisualTestContext, status: &str) {
+    app.update(cx, |app, _| {
+        use std::sync::atomic::Ordering;
+        let (sink, seq) = (app.demo_ui.sink.clone(), &app.demo_ui.seq);
+        if let Some(session) = app.demo_session.as_mut() {
+            seq.store(session.last_seq, Ordering::SeqCst);
+            let json = format!(
+                r#"{{"@type":"updateSupergroup","supergroup":{{"@type":"supergroup","id":2000000002,"status":{status}}}}}"#
+            );
+            let dyn_sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> = sink;
+            if let Some(owned) = quill::telegram::client::copy_and_parse(&json, seq, &dyn_sink) {
+                session.apply(owned);
+            }
+        }
+    });
+    frames(cx);
+}
+
+#[gpui_kit::test]
+fn an_anonymous_admin_sends_anonymously_until_demoted_or_revealed(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat(&app, vcx, SUPERGROUP);
+    assert_eq!(placeholder(&app, vcx), "Send anonymously…");
+    // The owner turns "Remain anonymous" off.
+    supergroup_status(
+        &app,
+        vcx,
+        r#"{"@type":"chatMemberStatusAdministrator","can_be_edited":false,"rights":{"@type":"chatAdministratorRights","is_anonymous":false}}"#,
+    );
+    assert_eq!(placeholder(&app, vcx), "Write a message…");
+    supergroup_status(
+        &app,
+        vcx,
+        r#"{"@type":"chatMemberStatusAdministrator","can_be_edited":false,"rights":{"@type":"chatAdministratorRights","is_anonymous":true}}"#,
+    );
+    assert_eq!(placeholder(&app, vcx), "Send anonymously…");
+    // The owner posts anonymously too; a demotion clears it at once.
+    supergroup_status(
+        &app,
+        vcx,
+        r#"{"@type":"chatMemberStatusCreator","is_anonymous":true,"is_member":true}"#,
+    );
+    assert_eq!(placeholder(&app, vcx), "Send anonymously…");
+    supergroup_status(&app, vcx, r#"{"@type":"chatMemberStatusMember"}"#);
+    assert_eq!(placeholder(&app, vcx), "Write a message…");
+}
+
+#[gpui_kit::test]
+fn an_inline_bots_hint_follows_the_typed_name(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat(&app, vcx, PAID_USER);
+    let hint = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, cx| app.inline_bot_hint_text(cx))
+    };
+    assert_eq!(hint(&app, vcx), None);
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.bots.inline_bot_resolve = Some(quill::state::InlineBotResolve::Resolved {
+                username: "gifbot".into(),
+                user_id: 61,
+                is_inline: Some(true),
+            });
+        }
+    });
+    set_field(&app, vcx, "@gifbot ");
+    assert_eq!(hint(&app, vcx).as_deref(), Some("Search GIFs"));
+    set_field(&app, vcx, "@gifbot cats");
+    assert_eq!(hint(&app, vcx), None);
+    set_field(&app, vcx, "@gifbot");
+    assert_eq!(hint(&app, vcx).as_deref(), Some("Search GIFs"));
+    set_field(&app, vcx, "");
+    assert_eq!(hint(&app, vcx), None);
 }

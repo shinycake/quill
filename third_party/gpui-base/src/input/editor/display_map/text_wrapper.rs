@@ -447,6 +447,11 @@ impl TextWrapper {
         self.update_all(&self.text.clone(), cx);
     }
 
+    /// The font and size the text was last wrapped with.
+    pub(crate) fn text_style(&self) -> (&Font, Pixels) {
+        (&self.font, self.font_size)
+    }
+
     pub(crate) fn set_font(&mut self, font: Font, font_size: Pixels, cx: &mut App) {
         if self.font.eq(&font) && self.font_size == font_size {
             return;

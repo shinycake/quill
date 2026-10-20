@@ -468,6 +468,27 @@ pub(crate) fn parse_send_welcome_messages_right(value: Option<&Value>) -> Option
         .and_then(Value::as_bool)
 }
 
+/// Whether the own status posts as the group: `rights.is_anonymous` of a
+/// `chatMemberStatusAdministrator`, `is_anonymous` of a
+/// `chatMemberStatusCreator`; false for any other status.
+pub(crate) fn parse_anonymous_status(value: Option<&Value>) -> bool {
+    let Some(value) = value else {
+        return false;
+    };
+    match value.get("@type").and_then(Value::as_str) {
+        Some("chatMemberStatusAdministrator") => value
+            .get("rights")
+            .and_then(|rights| rights.get("is_anonymous"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        Some("chatMemberStatusCreator") => value
+            .get("is_anonymous")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
 /// `chatMember` (TDLib 1.8.67). Returns `None` when `member_id` or `status`
 /// is missing or unparseable.
 pub(crate) fn parse_chat_member(value: Option<&Value>) -> Option<ParsedChatMember> {
@@ -586,3 +607,7 @@ pub(crate) fn parse_can_transfer_ownership_result(
         _ => None,
     }
 }
+
+#[cfg(test)]
+#[path = "composer_hint_tests.rs"]
+mod composer_hint_tests;

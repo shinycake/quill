@@ -1,10 +1,14 @@
 //! The compose field's placeholder follows the chat (tdesktop
 //! `updateFieldPlaceholder`): "New message…" while editing, "Message for N
-//! Stars" in paid chats, "Broadcast a message…" in channels.
+//! Stars" in paid chats, "Broadcast a message…" in channels, "Send
+//! anonymously…" for an anonymous admin. An inline bot's own hint is drawn
+//! after `@bot ` while that is all that is typed.
 
 use super::*;
-use quill::composer::{ComposerPlaceholder, PlaceholderFacts};
+use gpui_kit::component::input::TextareaState;
+use quill::composer::{ComposerPlaceholder, PlaceholderFacts, inline_bot_hint};
 use quill::lang::{keys, tr};
+use quill::state::InlineBotResolve;
 
 impl QuillApp {
     /// What the open chat says about the field.
@@ -24,6 +28,7 @@ impl QuillApp {
             stars_per_message: session.paid_send_price(chat),
             broadcast,
             silent: broadcast && self.composer_effective_silent(),
+            anonymous_admin: !broadcast && session.chat_posts_anonymously(chat),
         }
     }
 
@@ -48,4 +53,119 @@ impl QuillApp {
         self.composer
             .update(cx, |input, cx| input.set_placeholder(text, window, cx));
     }
+
+    /// The hint of the inline bot named at the start of the field, once the
+    /// bot is resolved and has one (tdesktop `_inlineBot`).
+    pub(in crate::ui) fn inline_bot_hint_text(&self, cx: &App) -> Option<String> {
+        let session = self.session()?;
+        let Some(InlineBotResolve::Resolved {
+            username, user_id, ..
+        }) = session.bots.inline_bot_resolve.as_ref()
+        else {
+            return None;
+        };
+        let user = session.users.get(user_id)?;
+        if !user.is_bot {
+            return None;
+        }
+        let text = self.composer.read(cx).value().to_string();
+        inline_bot_hint(
+            &text,
+            self.composer_ui.pending_edit.is_some(),
+            username,
+            &user.inline_query_placeholder,
+        )
+        .map(str::to_string)
+    }
+
+    /// The inline bot's hint, painted over the field right after the typed
+    /// `@bot` (tdesktop `setPlaceholder(text, username.size() + 2)`). The
+    /// field itself only shows a placeholder while empty.
+    pub(in crate::ui) fn inline_bot_hint_overlay(&self, cx: &App) -> Option<AnyElement> {
+        let hint = self.inline_bot_hint_text(cx)?;
+        let composer = self.composer.clone();
+        let color: Hsla = cx.theme().muted_foreground;
+        Some(
+            canvas(
+                |_, _, _| (),
+                move |bounds, (), window, cx| {
+                    paint_inline_hint(&composer, &hint, color, bounds, window, cx);
+                },
+            )
+            .absolute()
+            .inset_0()
+            .into_any_element(),
+        )
+    }
+}
+
+fn paint_inline_hint(
+    composer: &Entity<TextareaState>,
+    hint: &str,
+    color: Hsla,
+    clip: Bounds<Pixels>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let state = composer.read(cx);
+    let text = state.value().to_string();
+    let Some((last_start, last)) = text.char_indices().next_back() else {
+        return;
+    };
+    let Some(rect) = state
+        .range_to_rects(&(last_start..text.len()))
+        .into_iter()
+        .next_back()
+    else {
+        return;
+    };
+    // The field's own font and size.
+    let (font, font_size) = state.text_style();
+    let system = window.text_system().clone();
+    let shape = |text: &str| {
+        let run = TextRun {
+            len: text.len(),
+            font: font.clone(),
+            color,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        system.shape_line(text.to_string().into(), font_size, &[run], None)
+    };
+    // Right after the name there is no separator yet: leave room for one.
+    let gap = if last.is_whitespace() {
+        px(0.)
+    } else {
+        shape(" ").width
+    };
+    let left = rect.right() + gap;
+    let room = clip.right() - left;
+    let mut line = shape(hint);
+    if line.width > room {
+        // Elide at the field edge, as lib_ui does for a placeholder.
+        let mut kept: Vec<char> = hint.chars().collect();
+        while !kept.is_empty() {
+            kept.pop();
+            let mut cut: String = kept.iter().collect();
+            cut.push('…');
+            line = shape(&cut);
+            if line.width <= room {
+                break;
+            }
+        }
+        if line.width > room {
+            return;
+        }
+    }
+    window.with_content_mask(Some(ContentMask { bounds: clip }), |window| {
+        let _ = line.paint(
+            point(left, rect.top()),
+            rect.size.height,
+            TextAlign::Left,
+            None,
+            window,
+            cx,
+        );
+    });
 }

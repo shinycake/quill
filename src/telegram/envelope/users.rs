@@ -95,6 +95,9 @@ pub struct ParsedUser {
     /// whether the bot supports inline mode (`getInlineQueryResults`).
     /// False for non-bots and for bots without inline mode enabled.
     pub is_inline: bool,
+    /// `userTypeBot.inline_query_placeholder`: the hint the field shows
+    /// after `@bot ` is typed. Empty for non-bots and bots without one.
+    pub inline_query_placeholder: String,
     /// Subsection tabs: `userTypeBot.has_topics` (schema 1.8.67, line
     /// 816) — the private chat with this bot is split into forum topics
     /// (`getForumTopics` works on it). False for non-bots.
@@ -322,6 +325,13 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         .and_then(|t| t.get("is_inline"))
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let inline_query_placeholder = value
+        .get("type")
+        .filter(|_| is_bot)
+        .and_then(|t| t.get("inline_query_placeholder"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
     let bot_flag = |field: &str| {
         value
             .get("type")
@@ -408,6 +418,7 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         is_bot,
         is_deleted,
         is_inline,
+        inline_query_placeholder,
         has_topics,
         allows_users_to_create_topics,
         can_join_groups,

@@ -3194,6 +3194,13 @@ impl<M: InputModeKind> InputBaseState<M> {
         cx.notify();
     }
 
+    /// The font and size the input lays its text out with, so an overlay
+    /// (an inline bot's hint) can match it.
+    pub fn text_style(&self) -> (gpui::Font, gpui::Pixels) {
+        let (font, size) = self.display_map.text_style();
+        (font.clone(), size)
+    }
+
     /// Laid-out line height; `None` before first layout.
     pub fn line_height(&self) -> Option<gpui::Pixels> {
         self.last_layout.as_ref().map(|l| l.line_height)

@@ -321,6 +321,7 @@ mod tests {
             is_bot,
             is_deleted: false,
             is_inline: false,
+            inline_query_placeholder: String::new(),
             has_topics: false,
             allows_users_to_create_topics: false,
             can_join_groups: false,

@@ -268,6 +268,11 @@ impl DisplayMap {
         self.rebuild_fold_projection();
     }
 
+    /// The font and size the input lays its text out with.
+    pub fn text_style(&self) -> (&Font, Pixels) {
+        self.wrap_map.text_style()
+    }
+
     /// Set font parameters
     pub fn set_font(&mut self, font: Font, font_size: Pixels, cx: &mut App) {
         self.wrap_map.set_font(font, font_size, cx);

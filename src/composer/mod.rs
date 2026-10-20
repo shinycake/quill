@@ -64,7 +64,7 @@ pub use media_prep::{
     AnimationSize, PREP_BUDGET, PrepareError, PreparedFile, PreparedMedia, PreparedNote,
     send_path_for,
 };
-pub use placeholder::{ComposerPlaceholder, PlaceholderFacts, edit_text_changed};
+pub use placeholder::{ComposerPlaceholder, PlaceholderFacts, edit_text_changed, inline_bot_hint};
 pub use reply::ReplyItem;
 pub use reply::{ComposerReplyTo, QuoteSelection, cancel_reply_draft, quote_position};
 pub use send::{

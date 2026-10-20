@@ -82,3 +82,10 @@ sets it as the root's `aria_label`. The kit `Slider` and composed sliders
 both render through the base `Slider` from the same state, so a label set
 where the state is built names either one. Quill uses it for the video
 player's "Seek" and "Volume" sliders (`docs/decisions/video-player-controls.md`).
+
+## Text style accessor
+
+`InputState::text_style` (through `DisplayMap`, `WrapMap` and `TextWrapper`)
+returns the font and size the input lays its text out with. Quill's inline bot
+hint is drawn over the field and uses it, so the hint follows the field's own
+style (`docs/decisions/composer-gaps-2.md`).

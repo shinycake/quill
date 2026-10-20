@@ -51,7 +51,7 @@ register_demos![
     .setup(QuillApp::demo_group_commands),
     // The reply and edit bars, the "Cancel editing?" box and the field's
     // placeholders. `QUILL_DEMO_BARS` is `reply`, `edit`, `confirm`,
-    // `stars`, `broadcast` or `silent`.
+    // `stars`, `broadcast`, `silent`, `anonymous` or `inline`.
     DemoSpec::chats(
         "ready-composer-bars",
         "screenshot demo — reply and edit bars, placeholders (injected, no live Telegram)"
@@ -118,6 +118,8 @@ impl QuillApp {
             let chat = match mode.as_str() {
                 "stars" => ChatId(51),
                 "broadcast" | "silent" => ChatId(-1002000000001),
+                "anonymous" => ChatId(-1002000000002),
+                "inline" => ChatId(51),
                 _ => ChatId(-2002),
             };
             session.open_chat(chat);
@@ -145,6 +147,14 @@ impl QuillApp {
                 }
             }
             "silent" => self.toggle_composer_silent(),
+            "inline" => {
+                self.composer.update(cx, |input, cx| {
+                    input.set_value("@gifbot ", window, cx);
+                    input.focus(window, cx);
+                    let end = input.value().len();
+                    input.set_selected_range(end..end, cx);
+                });
+            }
             _ => {}
         }
         cx.notify();
@@ -271,10 +281,15 @@ fn apply_composer_bars(
         r#"{"@type":"updateChatPosition","chat_id":51,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"55","is_pinned":false}}"#.to_string(),
         r#"{"@type":"updateNewChat","chat":{"id":-1002000000001,"title":"Quill news","type":{"@type":"chatTypeSupergroup","supergroup_id":2000000001,"is_channel":true},"unread_count":0}}"#.to_string(),
         r#"{"@type":"updateChatPosition","chat_id":-1002000000001,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"52","is_pinned":false}}"#.to_string(),
+        r#"{"@type":"updateUser","user":{"id":61,"first_name":"GIF","usernames":{"@type":"usernames","active_usernames":["gifbot"],"disabled_usernames":[],"editable_username":"gifbot"},"type":{"@type":"userTypeBot","is_inline":true,"inline_query_placeholder":"Search GIFs"},"status":{"@type":"userStatusOffline","was_online":1}}}"#.to_string(),
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":2000000002,"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":false,"rights":{"@type":"chatAdministratorRights","is_anonymous":true}}}}"#.to_string(),
+        r#"{"@type":"updateNewChat","chat":{"id":-1002000000002,"title":"Quill makers","type":{"@type":"chatTypeSupergroup","supergroup_id":2000000002,"is_channel":false},"unread_count":0}}"#.to_string(),
+        r#"{"@type":"updateChatPosition","chat_id":-1002000000002,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"51","is_pinned":false}}"#.to_string(),
         message(10, -2002, 31, false, "Where should we go on Saturday?"),
         message(11, -2002, 1, true, "Saturday works, let's meet at 7"),
         message(12, 51, 51, false, "Hi! Quick question about the schedule"),
         message(13, -1002000000001, 1, true, "Release notes are up"),
+        message(14, -1002000000002, 31, false, "Who is on call this week?"),
     ];
     for json in jsons {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
@@ -287,6 +302,11 @@ fn apply_composer_bars(
             None,
         );
     }
+    session.bots.inline_bot_resolve = Some(quill::state::InlineBotResolve::Resolved {
+        username: "gifbot".into(),
+        user_id: 61,
+        is_inline: Some(true),
+    });
     session.payments.paid_messages.record_answer(
         51,
         quill::paid_messages::CanSend::HasPaidMessages { stars: 25 },

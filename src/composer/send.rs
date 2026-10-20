@@ -101,6 +101,10 @@ pub struct SendOptions {
     /// (schema 1.8.67), so `send_text` strips blockquote entities instead
     /// of letting TDLib drop them.
     pub is_secret: bool,
+    /// Send the text exactly as written: no composer markup is parsed, so a
+    /// command like `/my_cmd@some_bot` keeps its underscores. The send is not
+    /// the composer's content, so it keeps the chat draft (`clear_draft` off).
+    pub literal_text: bool,
     /// S15: `messageSendOptions.update_order_of_installed_sticker_sets`
     /// (TDLib 1.8.67, `schema/td_api.tl:5934`) — pass true when the user
     /// explicitly chose a sticker from an installed set so TDLib moves

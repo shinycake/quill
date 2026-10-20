@@ -197,6 +197,7 @@ fn resolve_inline_bot_private_chat_resolves_with_cached_inline_flag() {
             username: "gif".into(),
             is_bot: true,
             is_inline: true,
+            inline_query_placeholder: String::new(),
             ..Default::default()
         },
     );

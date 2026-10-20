@@ -16,6 +16,9 @@ pub struct PlaceholderFacts {
     pub broadcast: bool,
     /// Posts to the broadcast channel go out silently.
     pub silent: bool,
+    /// The chat is a supergroup (not a broadcast channel) where the viewer
+    /// is an administrator who posts as the group.
+    pub anonymous_admin: bool,
 }
 
 /// One of the compose field's placeholders.
@@ -26,10 +29,12 @@ pub enum ComposerPlaceholder {
     Stars(i64),
     Broadcast,
     SilentBroadcast,
+    Anonymous,
 }
 
 impl ComposerPlaceholder {
-    /// The first case that applies: edit, Stars, broadcast, plain.
+    /// The first case that applies: edit, Stars, broadcast, anonymous
+    /// admin, plain.
     pub fn for_facts(facts: PlaceholderFacts) -> Self {
         if facts.editing {
             Self::Edit
@@ -39,6 +44,8 @@ impl ComposerPlaceholder {
             Self::SilentBroadcast
         } else if facts.broadcast {
             Self::Broadcast
+        } else if facts.anonymous_admin {
+            Self::Anonymous
         } else {
             Self::Message
         }
@@ -52,8 +59,32 @@ impl ComposerPlaceholder {
             Self::Stars(count) => trn(keys::MESSAGE_STARS_PH, count),
             Self::Broadcast => tr(keys::BROADCAST_PH).to_string(),
             Self::SilentBroadcast => tr(keys::BROADCAST_SILENT_PH).to_string(),
+            Self::Anonymous => tr(keys::SEND_ANONYMOUS_PH).to_string(),
         }
     }
+}
+
+/// The hint an inline bot gives after `@bot ` is typed (tdesktop
+/// `updateFieldPlaceholder` with `_inlineBot`, drawn after the first
+/// `username.len() + 2` symbols). `text` is the field, `bot_username` the
+/// resolved bot and `placeholder` its `inline_query_placeholder`. `None`
+/// once anything but the `@bot` token and one separator is typed, while
+/// editing, and for a bot without a placeholder.
+pub fn inline_bot_hint<'a>(
+    text: &str,
+    editing: bool,
+    bot_username: &str,
+    placeholder: &'a str,
+) -> Option<&'a str> {
+    if editing || placeholder.is_empty() {
+        return None;
+    }
+    // The name and at most one plain space after it (a newline or a tab is
+    // not the separator tdesktop waits for).
+    let typed = text.strip_prefix('@')?;
+    let name = typed.strip_suffix(' ').unwrap_or(typed);
+    name.eq_ignore_ascii_case(bot_username)
+        .then_some(placeholder)
 }
 
 /// Whether the field differs from the message being edited
@@ -72,6 +103,7 @@ mod tests {
             stars_per_message: stars,
             broadcast,
             silent,
+            anonymous_admin: false,
         }
     }
 
@@ -117,6 +149,51 @@ mod tests {
             ComposerPlaceholder::for_facts(facts(false, 0, false, true)),
             ComposerPlaceholder::Message
         );
+    }
+
+    #[test]
+    fn an_anonymous_admin_is_asked_to_send_anonymously() {
+        let anonymous = |editing, stars, broadcast| PlaceholderFacts {
+            anonymous_admin: true,
+            ..facts(editing, stars, broadcast, false)
+        };
+        assert_eq!(
+            ComposerPlaceholder::for_facts(anonymous(false, 0, false)),
+            ComposerPlaceholder::Anonymous
+        );
+        // Editing, Stars and a broadcast channel all come first.
+        assert_eq!(
+            ComposerPlaceholder::for_facts(anonymous(true, 0, false)),
+            ComposerPlaceholder::Edit
+        );
+        assert_eq!(
+            ComposerPlaceholder::for_facts(anonymous(false, 3, false)),
+            ComposerPlaceholder::Stars(3)
+        );
+        assert_eq!(
+            ComposerPlaceholder::for_facts(anonymous(false, 0, true)),
+            ComposerPlaceholder::Broadcast
+        );
+        assert_eq!(ComposerPlaceholder::Anonymous.text(), "Send anonymously…");
+    }
+
+    #[test]
+    fn an_inline_bot_hints_right_after_its_name() {
+        use super::inline_bot_hint;
+        let hint = |text, editing| inline_bot_hint(text, editing, "gif", "Search GIFs");
+        assert_eq!(hint("@gif", false), Some("Search GIFs"));
+        assert_eq!(hint("@gif ", false), Some("Search GIFs"));
+        assert_eq!(hint("@GIF ", false), Some("Search GIFs"));
+        // A second space, a query or an edit hide it.
+        assert_eq!(hint("@gif  ", false), None);
+        assert_eq!(hint("@gif\n", false), None);
+        assert_eq!(hint("@gif\t", false), None);
+        assert_eq!(hint("@gif cats", false), None);
+        assert_eq!(hint("@gif ", true), None);
+        // Another bot, no bot, or a bot without a hint.
+        assert_eq!(hint("@other ", false), None);
+        assert_eq!(hint("gif ", false), None);
+        assert_eq!(inline_bot_hint("@gif ", false, "gif", ""), None);
     }
 
     #[test]
