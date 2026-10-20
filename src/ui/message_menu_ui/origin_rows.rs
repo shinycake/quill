@@ -75,6 +75,7 @@ impl QuillApp {
             "menu-send-another-gift",
             tr(keys::CONTEXT_GIFT_SEND),
             false,
+            &self.frame.context_menu_items,
             cx,
             move |this, window, cx| {
                 this.message_ui.menu = None;
@@ -124,6 +125,7 @@ impl QuillApp {
             "menu-block-sender",
             tr(keys::PROFILE_BLOCK_USER),
             false,
+            &self.frame.context_menu_items,
             cx,
             move |this, _, cx| {
                 this.message_ui.menu = None;
