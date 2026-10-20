@@ -298,7 +298,8 @@ pub fn send_text(
                 "entities": entities_json
             },
             "link_preview_options": link_preview_options,
-            "clear_draft": true
+            // A menu command is not the draft, so it must not drop it.
+            "clear_draft": !options.literal_text
         }
     })
     .to_string()

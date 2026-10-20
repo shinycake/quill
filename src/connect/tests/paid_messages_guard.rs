@@ -49,6 +49,33 @@ fn a_sticker_into_a_paid_chat_waits_for_the_confirmation() {
 }
 
 #[test]
+fn a_menu_command_into_a_paid_chat_waits_for_the_confirmation() {
+    use crate::composer::{ComposerSnapshot, SendOptions};
+    let mut f = fixture();
+    paid_chat(&mut f, 25);
+    let view = f.1.session.view_generation;
+    let snap = ComposerSnapshot::capture(ChatId(600), view, "/my_cmd@some_bot").with_send_options(
+        SendOptions {
+            literal_text: true,
+            ..SendOptions::default()
+        },
+    );
+    f.1.send_snapshot(&snap).unwrap();
+    assert!(requests(&f, "sendMessage").is_empty(), "nothing went out");
+    let held = f.1.held_paid_send().expect("held for the confirmation");
+    assert_eq!((held.per_message, held.messages), (25, 1));
+    f.1.release_paid_send(false).unwrap();
+    let sent = requests(&f, "sendMessage");
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["options"]["paid_message_star_count"], 25);
+    assert_eq!(
+        sent[0]["input_message_content"]["text"]["text"],
+        "/my_cmd@some_bot"
+    );
+    cleanup(f);
+}
+
+#[test]
 fn forwards_carry_price_times_messages() {
     let mut f = fixture();
     paid_chat(&mut f, 10);

@@ -7,25 +7,12 @@ use super::*;
 use quill::composer::SendOptions;
 
 impl QuillApp {
-    /// Whether sending in the open chat waits for a Stars confirmation.
-    pub(in crate::ui) fn bot_command_needs_paid_confirm(&self) -> bool {
-        let Some(session) = self.session() else {
-            return false;
-        };
-        let Some(chat) = session.open_chat else {
-            return false;
-        };
-        quill::paid_messages::needs_confirmation(
-            &session.payments.paid_messages.trust,
-            chat.0,
-            session.send_gate(chat).stars(),
-        )
-    }
-
     /// Send `command` (`/cmd` or `/cmd@bot`) to the open chat as a text-only
     /// message with the current reply target. It is not silent or scheduled
     /// unless the chat's own silent setting says so, and it respects slow
-    /// mode and the viewer's rights. Returns false when the live path is not
+    /// mode and the viewer's rights. A chat that charges Stars holds the send
+    /// for the usual confirmation (the paid guard), as tdesktop's
+    /// `sendBotCommand` does. Returns false when the live path is not
     /// available (not signed in), so the caller falls back to the plain
     /// composer send. A demo session applies the message locally.
     pub(in crate::ui) fn send_menu_command(

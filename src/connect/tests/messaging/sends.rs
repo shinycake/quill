@@ -333,7 +333,8 @@ fn history_paging_keeps_going_on_short_pages_and_stops_without_progress() {
 }
 
 /// A picked bot command goes out as a text message of its own: the command
-/// text with its underscores escaped, no media, whatever sits in the tray.
+/// text exactly as written (underscores kept, no entities), no media, and
+/// the chat draft is left alone.
 #[test]
 fn a_bot_command_is_one_plain_text_message() {
     use crate::composer::{ComposerSnapshot, SendOptions};
@@ -388,4 +389,6 @@ fn a_bot_command_is_one_plain_text_message() {
         serde_json::json!([])
     );
     assert_eq!(request["options"]["disable_notification"], true);
+    // The command is not the draft: TDLib must keep "see you" stored.
+    assert_eq!(request["input_message_content"]["clear_draft"], false);
 }

@@ -19,8 +19,10 @@ reply target, silent mode and slow mode. The `/` token is removed, the rest of
 the field stays with the caret at the end, and the draft is saved explicitly
 (`note_open_draft`); the text is never recorded as what Send took. Tab is
 unchanged (insert, then a space). The menu stays closed while a message is
-being edited (tdesktop `history_widget.cpp:1983`). A chat that needs a paid
-confirmation falls back to inserting the command. The "Edit Quick Replies" row
+being edited (tdesktop `history_widget.cpp:1983`). A chat that charges Stars
+holds the send in the paid guard and shows the usual confirmation before it
+goes out (tdesktop `checkSendPayment`). The send keeps `clear_draft` off, so the
+stored draft survives. The "Edit Quick Replies" row
 keeps opening its dialog. Not signed in, the old submit path is the fallback.
 
 ## Anonymous admin placeholder (`composer-placeholder-anon-inline`)

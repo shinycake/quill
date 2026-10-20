@@ -218,10 +218,6 @@ impl QuillApp {
             self.send_quick_reply_row(shortcut_id, window, cx);
             return;
         }
-        if self.bot_command_needs_paid_confirm() {
-            self.insert_command_menu_index(index, window, cx);
-            return;
-        }
         let Some((range, prefix)) = self.command_trigger(cx) else {
             return;
         };
@@ -236,8 +232,8 @@ impl QuillApp {
             input.focus(window, cx);
         });
         if self.send_menu_command(&command, cx) {
-            // TDLib drops the chat draft on a send; the kept text is saved
-            // again at once, and nothing in the send refers to it.
+            // The send leaves the chat draft alone (`clear_draft` is off for
+            // a menu command); the kept text is saved at once.
             if self.composer.read(cx).value().is_empty() {
                 if let Some(chat_id) = self.open_chat_id() {
                     self.forget_local_draft(chat_id);
