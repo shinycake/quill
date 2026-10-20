@@ -31,8 +31,14 @@ const BUBBLE_PAD_X: f32 = 8.;
 const BUBBLE_PAD_BOTTOM: f32 = 6.;
 /// Between the badge and the time.
 const FOOTER_GAP: f32 = 3.;
-/// The time's box ("12:34" in the footer's 12 px).
-const TIME_WIDTH: f32 = 30.;
+/// The time's box in the footer's 12 px: "12:34", or "12:34 PM" in the
+/// 12-hour clock.
+fn time_width() -> f32 {
+    match quill::clock_style::ClockStyle::current() {
+        quill::clock_style::ClockStyle::Hour24 => 30.,
+        quill::clock_style::ClockStyle::Hour12 => 50.,
+    }
+}
 const FPS: u32 = 60;
 /// The card keeps this far from the window's edges, like the menu.
 const WINDOW_MARGIN: f32 = 8.;
@@ -251,7 +257,7 @@ impl QuillApp {
 /// of the width left of the centre).
 fn sample_bubble(badge_cell: Div) -> AnyElement {
     let badge_center = (PREVIEW_SIDE / 2. - PREVIEW_SIDE / 3., PREVIEW_SIDE / 2.);
-    let right = badge_center.0 + badge::CELL / 2. + FOOTER_GAP + TIME_WIDTH + BUBBLE_PAD_X;
+    let right = badge_center.0 + badge::CELL / 2. + FOOTER_GAP + time_width() + BUBBLE_PAD_X;
     let bottom = badge_center.1 + badge::CELL / 2. + BUBBLE_PAD_BOTTOM;
     let time = quill::local_time::hhmm(&quill::local_time::civil_local(
         quill::local_time::now_unix(),
@@ -318,7 +324,7 @@ fn sample_bubble(badge_cell: Div) -> AnyElement {
                         .child(badge_cell)
                         .child(
                             div()
-                                .w(px(TIME_WIDTH))
+                                .w(px(time_width()))
                                 .text_size(px(12.))
                                 .text_color(text_muted())
                                 .text_right()

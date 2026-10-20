@@ -41,6 +41,7 @@ pub mod chatlist_suggestions;
 pub mod checklist;
 pub mod child_reap;
 pub mod child_timeout;
+pub mod clock_style;
 pub mod code_language;
 pub mod collectible_info;
 pub mod community_mode;

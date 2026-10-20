@@ -299,6 +299,7 @@ mod demo_ids {
     pub(in crate::ui) const FORWARD_CHAT: ChatId = ChatId(41);
     pub(in crate::ui) const GIFT_CHAT: ChatId = ChatId(42);
     pub(in crate::ui) const REPLIES_CHAT: ChatId = ChatId(1_271_266_957);
+    pub(in crate::ui) const TIMES_CHAT: ChatId = ChatId(43);
 }
 pub(in crate::ui) use demo_ids::*;
 

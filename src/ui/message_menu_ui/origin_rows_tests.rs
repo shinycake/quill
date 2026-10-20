@@ -100,6 +100,27 @@ fn a_forward_shows_when_it_was_first_sent(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn an_edited_message_gets_the_edited_date_row(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_menu_on(&app, vcx, FORWARD_CHAT, MessageId(40));
+    assert!(!has(vcx, "menu-edited"));
+    app.update(vcx, |app, cx| {
+        if let Some(message) = app
+            .demo_session
+            .as_mut()
+            .and_then(|session| session.histories.get_mut(&FORWARD_CHAT.0))
+            .and_then(|history| history.messages.get_mut(&40))
+        {
+            message.extras.edit_date = message.date + 600;
+        }
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(has(vcx, "menu-edited"));
+}
+
+#[gpui_kit::test]
 fn only_a_gift_you_sent_offers_another(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;

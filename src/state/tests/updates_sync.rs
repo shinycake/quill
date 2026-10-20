@@ -109,10 +109,8 @@ fn freeze_state_sets_and_clears_the_restriction() {
     assert!(session.is_frozen());
     let info = session.sync.freeze.clone().unwrap();
     assert_eq!(info.appeal_link, "https://t.me/spambot");
-    assert_eq!(
-        freeze_deadline_label(&info, 1_700_000_000),
-        "February 12, 2024"
-    );
+    // Nov 2023 to Feb 2024: inside tdesktop's three-month window, no year.
+    assert_eq!(freeze_deadline_label(&info, 1_700_000_000), "February 12");
     apply(
         &mut session,
         r#"{"@type":"updateFreezeState","is_frozen":false}"#,

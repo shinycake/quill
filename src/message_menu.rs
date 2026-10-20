@@ -403,19 +403,7 @@ pub fn reacted_label(count: usize) -> String {
 /// "today at 12:34", "yesterday at 12:34", "Oct 6 at 12:34"
 /// (`FormatReadDate`).
 pub fn read_date_label(date: &CivilTime, now: &CivilTime) -> String {
-    let time = hhmm(date);
-    match now.day_number() - date.day_number() {
-        0 => format!("today at {time}"),
-        1 => format!("yesterday at {time}"),
-        _ => format!(
-            "{} at {time}",
-            crate::local_time::month_name(date.month)
-                .chars()
-                .take(3)
-                .collect::<String>()
-                + &format!(" {}", date.day)
-        ),
-    }
+    crate::message_menu_origin::original_date_text(date, now)
 }
 
 /// The private-chat "seen" line for an outgoing message
@@ -458,9 +446,10 @@ pub fn sent_label(date: &CivilTime, now: &CivilTime) -> String {
     }
 }
 
-/// "Edited today at 12:36" (the date row `WhenEdited` shows).
+/// "today at 12:36": the bare date of the Edited row. tdesktop's
+/// `WhenEdited` shows only the date; the pencil icon says what it is.
 pub fn edited_label(date: &CivilTime, now: &CivilTime) -> String {
-    format!("Edited {}", read_date_label(date, now))
+    read_date_label(date, now)
 }
 
 /// The file name "Save As..." proposes: the file's own name, else the
@@ -985,12 +974,28 @@ mod tests {
     }
 
     #[test]
-    fn edited_row_reads_like_the_read_date() {
+    fn edited_row_is_the_bare_read_date() {
         let now = civil_at(NOW, 0);
         let earlier = civil_at(NOW - 600, 0);
         assert_eq!(
             crate::message_menu::edited_label(&earlier, &now),
-            "Edited today at 21:32"
+            "today at 21:32"
+        );
+        let last_year = civil_at(NOW - 400 * 86_400, 0);
+        assert_eq!(
+            crate::message_menu::edited_label(&last_year, &now),
+            "24.08.25 at 21:42"
+        );
+    }
+
+    #[test]
+    fn the_clock_follows_the_pinned_style() {
+        let now = civil_at(NOW, 0);
+        let earlier = civil_at(NOW - 600, 0);
+        let _twelve = crate::clock_style::ClockStyle::Hour12.pin();
+        assert_eq!(
+            crate::message_menu::edited_label(&earlier, &now),
+            "today at 9:32 PM"
         );
     }
 
