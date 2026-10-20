@@ -175,7 +175,11 @@ fn a_drop_on_a_chat_that_takes_no_files_does_not_open_it(cx: &mut TestAppContext
     // A group that allows text but no files.
     app.update(vcx, |app, _| {
         let id = ChatId(13);
-        if let Some(summary) = app.demo_session.as_mut().and_then(|s| s.chats.get_mut(&id.0)) {
+        if let Some(summary) = app
+            .demo_session
+            .as_mut()
+            .and_then(|s| s.chats.get_mut(&id.0))
+        {
             summary.kind = quill::telegram::envelope::ChatKind::Supergroup {
                 supergroup_id: 4242,
                 is_channel: false,
@@ -253,7 +257,11 @@ fn moving_the_pointer_restarts_the_wait(cx: &mut TestAppContext) {
         },
     );
     wait(vcx, 800);
-    assert_ne!(open_chat(&app, vcx), Some(ChatId(12)), "the move restarted it");
+    assert_ne!(
+        open_chat(&app, vcx),
+        Some(ChatId(12)),
+        "the move restarted it"
+    );
     wait(vcx, 400);
     assert_eq!(open_chat(&app, vcx), Some(ChatId(12)));
 }

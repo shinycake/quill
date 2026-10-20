@@ -78,7 +78,10 @@ impl QuillApp {
         }
         rows.sort_by_key(|row| {
             let id = id(row);
-            frozen.iter().position(|seen| *seen == id).unwrap_or(usize::MAX)
+            frozen
+                .iter()
+                .position(|seen| *seen == id)
+                .unwrap_or(usize::MAX)
         });
     }
 
@@ -212,8 +215,9 @@ impl QuillApp {
         if session.is_some_and(|s| {
             s.chat_shown_as_forum(chat_id) || s.direct_messages_role(chat_id).is_some()
         }) {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_CHATLIST_OPEN_THE_FORUM_AND_DROP)));
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_CHATLIST_OPEN_THE_FORUM_AND_DROP,
+            )));
             return;
         }
         self.select_listed_chat(chat_id, window, cx);
