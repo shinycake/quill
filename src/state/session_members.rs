@@ -180,7 +180,6 @@ impl Session {
                 member.admin_rights.map(|r| r.can_restrict_members),
             );
             chat.set_admin_can_pin_messages(member.admin_rights.map(|r| r.can_pin_messages));
-            chat.set_my_is_anonymous_admin(member.is_anonymous);
             chat.set_my_restriction(member.restriction);
             // Slice G2: sign-messages + welcome-message rights for the
             // channel path.

@@ -28,11 +28,7 @@ impl QuillApp {
             stars_per_message: session.paid_send_price(chat),
             broadcast,
             silent: broadcast && self.composer_effective_silent(),
-            anonymous_admin: !broadcast
-                && session
-                    .chats
-                    .get(&chat.0)
-                    .is_some_and(|chat| chat.my_is_anonymous_admin),
+            anonymous_admin: !broadcast && session.chat_posts_anonymously(chat),
         }
     }
 
@@ -123,29 +119,53 @@ fn paint_inline_hint(
     else {
         return;
     };
-    // The kit composer renders at `text_sm` (Input Size::Medium).
-    let font_size = window.rem_size() * 0.875;
-    let font = window.text_style().font();
-    let run = |len: usize| TextRun {
-        len,
-        font: font.clone(),
-        color,
-        background_color: None,
-        underline: None,
-        strikethrough: None,
-    };
+    // The field's own font and size.
+    let (font, font_size) = state.text_style();
     let system = window.text_system().clone();
-    let line = system.shape_line(hint.to_string().into(), font_size, &[run(hint.len())], None);
+    let shape = |text: &str| {
+        let run = TextRun {
+            len: text.len(),
+            font: font.clone(),
+            color,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        system.shape_line(text.to_string().into(), font_size, &[run], None)
+    };
     // Right after the name there is no separator yet: leave room for one.
     let gap = if last.is_whitespace() {
         px(0.)
     } else {
-        system
-            .shape_line(" ".into(), font_size, &[run(1)], None)
-            .width
+        shape(" ").width
     };
-    let origin = point(rect.right() + gap, rect.top());
+    let left = rect.right() + gap;
+    let room = clip.right() - left;
+    let mut line = shape(hint);
+    if line.width > room {
+        // Elide at the field edge, as lib_ui does for a placeholder.
+        let mut kept: Vec<char> = hint.chars().collect();
+        while !kept.is_empty() {
+            kept.pop();
+            let mut cut: String = kept.iter().collect();
+            cut.push('…');
+            line = shape(&cut);
+            if line.width <= room {
+                break;
+            }
+        }
+        if line.width > room {
+            return;
+        }
+    }
     window.with_content_mask(Some(ContentMask { bounds: clip }), |window| {
-        let _ = line.paint(origin, rect.size.height, TextAlign::Left, None, window, cx);
+        let _ = line.paint(
+            point(left, rect.top()),
+            rect.size.height,
+            TextAlign::Left,
+            None,
+            window,
+            cx,
+        );
     });
 }

@@ -100,6 +100,9 @@ pub enum GroupsPayload {
         /// `chatMemberStatusAdministrator`; `None` for any other status or
         /// a missing rights block. tdesktop `canManageGroupCall`.
         can_manage_video_chats: Option<bool>,
+        /// The own status posts as the group (`rights.is_anonymous` of an
+        /// administrator, `is_anonymous` of the owner).
+        is_anonymous: bool,
         /// Slice G1: `supergroup.join_by_request` (schema 1.8.67, lines
         /// 2733/2746) — drives the "Approve new members" toggle.
         join_by_request: bool,
@@ -178,6 +181,9 @@ pub enum GroupsPayload {
         /// `chatMemberStatusAdministrator`; `None` for any other status or
         /// a missing rights block. tdesktop `canManageGroupCall`.
         can_manage_video_chats: Option<bool>,
+        /// The own status posts as the group (`rights.is_anonymous` of an
+        /// administrator, `is_anonymous` of the owner).
+        is_anonymous: bool,
         /// Slice G1: `supergroup.join_by_request` (schema 1.8.67, lines
         /// 2733/2746) — drives the "Approve new members" toggle.
         join_by_request: bool,

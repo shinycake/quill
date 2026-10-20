@@ -262,7 +262,11 @@ pub fn send_text(
     // so formatting genuinely reaches the wire on every text send.
     // M1 fix-up: secret chats strip `textEntityTypeBlockQuote` (schema:
     // unsupported there) — see `secret_chat_entities`.
-    let (clean_text, entities) = parse_format_markup(text);
+    let (clean_text, entities) = if options.literal_text {
+        (text.to_owned(), Vec::new())
+    } else {
+        parse_format_markup(text)
+    };
     let entities = secret_chat_entities(entities, options.is_secret);
     let entities_json: Vec<Value> = entities.iter().map(format_entity_json).collect();
     // Phase S1: secret chats never get link previews (TGX default-off —

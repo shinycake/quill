@@ -433,6 +433,20 @@ impl Session {
         }
     }
 
+    /// Whether the viewer posts as the group in this chat: an anonymous
+    /// administrator or owner of a supergroup.
+    pub fn chat_posts_anonymously(&self, chat_id: ChatId) -> bool {
+        match self.chats.get(&chat_id.0).map(|chat| &chat.kind) {
+            Some(ChatKind::Supergroup { supergroup_id, .. }) => self
+                .groups
+                .supergroup_anonymous
+                .get(supergroup_id)
+                .copied()
+                .unwrap_or(false),
+            _ => false,
+        }
+    }
+
     /// Slice G2: whether the viewer may manage welcome messages —
     /// creator, or an admin with `can_send_welcome_messages` (schema
     /// 1.8.67, line 1090). Same two paths as `chat_can_change_info`.

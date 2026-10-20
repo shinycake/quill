@@ -55,10 +55,6 @@ pub struct ParsedChatMember {
     /// status or an absent rights block. Drives the promote/edit-rights
     /// flows and the `can_promote_members` gate.
     pub admin_rights: Option<ChatAdminRights>,
-    /// The administrator (or creator) posts as the group: `rights.is_anonymous`
-    /// of an administrator, `chatMemberStatusCreator.is_anonymous` of the
-    /// owner. False for every other status.
-    pub is_anonymous: bool,
     /// Slice G1: `chatMember.tag` (schema 1.8.67, line 2526) — the
     /// admin custom title (set via `setChatMemberTag`, line 13598).
     pub tag: String,
@@ -472,6 +468,27 @@ pub(crate) fn parse_send_welcome_messages_right(value: Option<&Value>) -> Option
         .and_then(Value::as_bool)
 }
 
+/// Whether the own status posts as the group: `rights.is_anonymous` of a
+/// `chatMemberStatusAdministrator`, `is_anonymous` of a
+/// `chatMemberStatusCreator`; false for any other status.
+pub(crate) fn parse_anonymous_status(value: Option<&Value>) -> bool {
+    let Some(value) = value else {
+        return false;
+    };
+    match value.get("@type").and_then(Value::as_str) {
+        Some("chatMemberStatusAdministrator") => value
+            .get("rights")
+            .and_then(|rights| rights.get("is_anonymous"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        Some("chatMemberStatusCreator") => value
+            .get("is_anonymous")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
 /// `chatMember` (TDLib 1.8.67). Returns `None` when `member_id` or `status`
 /// is missing or unparseable.
 pub(crate) fn parse_chat_member(value: Option<&Value>) -> Option<ParsedChatMember> {
@@ -483,24 +500,12 @@ pub(crate) fn parse_chat_member(value: Option<&Value>) -> Option<ParsedChatMembe
     } else {
         None
     };
-    let is_anonymous = match status {
-        ChannelMemberStatus::Administrator => {
-            admin_rights.is_some_and(|rights| rights.is_anonymous)
-        }
-        ChannelMemberStatus::Creator => value
-            .get("status")
-            .and_then(|status| status.get("is_anonymous"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
-        _ => false,
-    };
     Some(ParsedChatMember {
         member_id,
         status,
         admin_can_post_messages,
         admin_can_invite_users: parse_invite_users_right(value.get("status")),
         admin_rights,
-        is_anonymous,
         tag: value
             .get("tag")
             .and_then(Value::as_str)

@@ -930,4 +930,5 @@ mod cancel_edit_confirm;
 mod command_menu;
 mod copy_inline_text;
 mod field_placeholder;
+mod send_bot_command;
 mod toggle_composer_silent;

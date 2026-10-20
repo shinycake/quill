@@ -1,17 +1,9 @@
 //! What the field hints depend on: whether the viewer posts as the group
 //! and an inline bot's own placeholder.
 
-use super::chat_members::parse_chat_member;
+use super::chat_members::parse_anonymous_status;
 use super::users::parse_user;
 use serde_json::{Value, json};
-
-fn member(status: Value) -> Value {
-    json!({
-        "@type": "chatMember",
-        "member_id": {"@type": "messageSenderUser", "user_id": 7},
-        "status": status,
-    })
-}
 
 fn administrator(is_anonymous: bool) -> Value {
     json!({
@@ -22,7 +14,7 @@ fn administrator(is_anonymous: bool) -> Value {
 }
 
 fn anonymous(status: Value) -> Option<bool> {
-    parse_chat_member(Some(&member(status))).map(|m| m.is_anonymous)
+    Some(parse_anonymous_status(Some(&status)))
 }
 
 #[test]

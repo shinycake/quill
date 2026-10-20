@@ -122,23 +122,79 @@ fn a_slash_after_other_text_opens_nothing(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn enter_sends_the_command_and_leaves_the_text_after_the_caret(cx: &mut TestAppContext) {
+fn enter_sends_the_command_alone_and_keeps_the_rest_of_the_field(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
+    // A photo waits in the tray.
+    let photo = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("docs/screenshots/fixtures/demo-thumb.png");
+    app.update(vcx, |app, _| {
+        let attachment = quill::composer::ComposerAttachment::pick(
+            &photo,
+            quill::composer::AttachmentKind::Photo,
+        );
+        app.seed_demo_attachments(attachment.into_iter().collect());
+    });
     type_text(&app, vcx, "/st and more", 3);
     assert_eq!(
         menu_commands(&app, vcx),
         ["/start@weatherbot", "/start@pollbot"]
     );
+    let before = sent_texts(&app, vcx).len();
     vcx.update(|window, cx| {
         app.update(cx, |app, cx| {
             assert!(app.pick_command_menu_selection(window, cx));
         });
     });
-    // Tab would have put `/start@weatherbot` in the field; Enter takes the
-    // token out and keeps only what followed the caret.
-    assert_eq!(composer_text(&app, vcx).0, " and more");
+    // Tab would have put `/start@weatherbot` in the field. Enter sends it as
+    // its own text message, with no caption on the tray's photo.
+    let sent = sent_texts(&app, vcx);
+    assert_eq!(sent.len(), before + 1);
+    assert_eq!(sent.last().map(String::as_str), Some("/start@weatherbot"));
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.pending_attachments().len(), 1, "the tray is untouched");
+        assert!(app.composer_ui.clear_draft_on_success.is_none());
+    });
+    // What followed the caret stays, the caret at its end, and it is saved
+    // as the chat's draft.
+    assert_eq!(composer_text(&app, vcx), (" and more".to_string(), 9));
+    let draft = app.read_with(vcx, |app, _| {
+        let chat = app.open_chat_id()?;
+        let topic = app.open_draft_topic(chat);
+        app.session()?
+            .draft_for(chat, topic)
+            .map(|d| d.text.clone())
+    });
+    assert_eq!(draft.as_deref(), Some(" and more"));
     assert!(menu_commands(&app, vcx).is_empty());
+}
+
+fn sent_texts(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Vec<String> {
+    app.read_with(cx, |app, _| {
+        let Some(session) = app.session() else {
+            return Vec::new();
+        };
+        let Some(chat) = session.open_chat else {
+            return Vec::new();
+        };
+        session
+            .histories
+            .get(&chat.0)
+            .map(|history| {
+                history
+                    .messages
+                    .values()
+                    .filter(|message| message.is_outgoing)
+                    .filter_map(|message| match &message.content {
+                        quill::telegram::envelope::MessageContent::Text(text) => {
+                            Some(text.text.clone())
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    })
 }
 
 #[gpui_kit::test]
@@ -152,4 +208,46 @@ fn enter_without_a_menu_is_not_consumed(cx: &mut TestAppContext) {
         });
     });
     assert_eq!(composer_text(&app, vcx).0, "hello");
+}
+
+#[gpui_kit::test]
+fn the_slash_menu_stays_closed_while_a_message_is_edited(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    // An own message to edit, in the open group.
+    app.update(vcx, |app, _| {
+        use std::sync::atomic::Ordering;
+        let (sink, seq) = (app.demo_ui.sink.clone(), &app.demo_ui.seq);
+        if let Some(session) = app.demo_session.as_mut() {
+            seq.store(session.last_seq, Ordering::SeqCst);
+            let json = r#"{"@type":"updateNewMessage","message":{"id":99,"chat_id":-2001,"sender_id":{"@type":"messageSenderUser","user_id":1},"is_outgoing":true,"date":1700000099,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"please hurry","entities":[]}}}}"#;
+            if let Some(owned) = quill::telegram::client::copy_and_parse(json, seq, &{
+                let dyn_sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> = sink;
+                dyn_sink
+            }) {
+                session.apply(owned);
+            }
+        }
+    });
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            let edit = app
+                .session()
+                .and_then(|session| session.last_editable_message(quill::ids::ChatId(-2001)));
+            assert!(edit.is_some(), "the group has an own message to edit");
+            if let Some(edit) = edit {
+                app.begin_edit(edit, window, cx);
+            }
+        });
+    });
+    // The menu the demo opened is gone, and typing a command opens nothing.
+    assert!(menu_commands(&app, vcx).is_empty());
+    type_text(&app, vcx, "/st hurry", 3);
+    assert!(menu_commands(&app, vcx).is_empty());
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            assert!(!app.pick_command_menu_selection(window, cx));
+        });
+    });
+    assert_eq!(composer_text(&app, vcx).0, "/st hurry");
 }

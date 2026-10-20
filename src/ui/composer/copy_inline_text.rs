@@ -193,6 +193,8 @@ impl QuillApp {
         });
         let field = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&field);
+        // The `/` menu is off while a message is edited.
+        self.sync_command_menu(cx);
         cx.notify();
     }
 
@@ -206,6 +208,7 @@ impl QuillApp {
         self.set_composer_markup(&restored, window, cx);
         let restored = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&restored);
+        self.sync_command_menu(cx);
         self.connection
             .set_note(StatusNote::silent(tr(keys::Q_CHAT_EDIT_CANCELLED)));
         cx.notify();

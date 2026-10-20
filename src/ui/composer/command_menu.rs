@@ -31,7 +31,10 @@ impl QuillApp {
         // Bots slice: the `@bot` inline trigger owns the composer start —
         // the `/` menu never competes with the inline-results dropdown.
         let inline_active = quill::composer::inline_query_trigger(&text).is_some();
-        let triggered = self.command_trigger(cx).is_some() && !inline_active;
+        // tdesktop turns command autocomplete off while a message is edited.
+        let triggered = self.command_trigger(cx).is_some()
+            && !inline_active
+            && self.composer_ui.pending_edit.is_none();
         let open_chat = self.session().and_then(|session| session.open_chat);
         if triggered {
             self.load_quick_replies_for_menu();
@@ -215,21 +218,45 @@ impl QuillApp {
             self.send_quick_reply_row(shortcut_id, window, cx);
             return;
         }
+        if self.bot_command_needs_paid_confirm() {
+            self.insert_command_menu_index(index, window, cx);
+            return;
+        }
         let Some((range, prefix)) = self.command_trigger(cx) else {
             return;
         };
         let command = item.command_text(commands_with_username(&items, &prefix));
         self.close_command_menu(cx);
         // The text after the caret stays in the field (tdesktop keeps
-        // `getTextWithTagsPart(cursor)`).
+        // `getTextWithTagsPart(cursor)`), with the caret at its end.
         self.replace_composer_text(range, "", window, cx);
+        self.composer.update(cx, |input, cx| {
+            let end = input.value().len();
+            input.set_selected_range(end..end, cx);
+            input.focus(window, cx);
+        });
+        if self.send_menu_command(&command, cx) {
+            // TDLib drops the chat draft on a send; the kept text is saved
+            // again at once, and nothing in the send refers to it.
+            if self.composer.read(cx).value().is_empty() {
+                if let Some(chat_id) = self.open_chat_id() {
+                    self.forget_local_draft(chat_id);
+                }
+            } else {
+                self.note_open_draft(false, cx);
+            }
+            return;
+        }
+        // Demo and connecting panes have no live send: the composer's own
+        // path reports it, then the kept text goes back.
         let rest = self.composer_markup(cx);
-        self.composer
-            .update(cx, |input, cx| input.focus(window, cx));
         self.submit_composer(command, window, cx);
-        // Sending empties the field; what followed the caret goes back.
         if !rest.is_empty() && self.composer.read(cx).value().is_empty() {
             self.set_composer_markup(&rest, window, cx);
+            self.composer.update(cx, |input, cx| {
+                let end = input.value().len();
+                input.set_selected_range(end..end, cx);
+            });
         }
     }
 }

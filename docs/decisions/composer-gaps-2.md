@@ -11,11 +11,17 @@ text after the caret (`getTextWithTagsPart(cursor)`). Enter is ignored while
 the mouse chose the row (`_mouseSelection`, line 1573). Quill's rows have no
 hover selection, so that case cannot arise.
 
-Quill used to insert the command on Enter as well as on Tab. Enter now takes
-the same path as a click on a row (`send_command_menu_index`): it sends
-`/cmd` or `/cmd@bot`, removes the `/` token and keeps what followed the caret.
-Tab is unchanged (insert, then a space). The "Edit Quick Replies" row keeps
-opening its dialog.
+Quill used to insert the command on Enter as well as on Tab. Enter now goes
+through `send_menu_command` (`src/ui/composer/send_bot_command.rs`): a separate,
+text-only message (`SendOptions.literal_text`, so `/my_cmd@some_bot` keeps its
+underscores) that leaves the media tray, caption and draft alone. It honours the
+reply target, silent mode and slow mode. The `/` token is removed, the rest of
+the field stays with the caret at the end, and the draft is saved explicitly
+(`note_open_draft`); the text is never recorded as what Send took. Tab is
+unchanged (insert, then a space). The menu stays closed while a message is
+being edited (tdesktop `history_widget.cpp:1983`). A chat that needs a paid
+confirmation falls back to inserting the command. The "Edit Quick Replies" row
+keeps opening its dialog. Not signed in, the old submit path is the fallback.
 
 ## Anonymous admin placeholder (`composer-placeholder-anon-inline`)
 
@@ -25,10 +31,12 @@ Anonymous`, the placeholder is `lng_send_anonymous_ph`. Priority: editing,
 Stars price, forum topic (Quill has no topic placeholder yet), broadcast
 (silent or not), anonymous admin, plain.
 
-`ParsedChatMember.is_anonymous` is `rights.is_anonymous` for an administrator
-and `chatMemberStatusCreator.is_anonymous` for the owner; `accept_own_chat_member`
-stores it on the chat, and `PlaceholderFacts.anonymous_admin` feeds the
-existing priority list in `src/composer/placeholder.rs`.
+Anonymity comes from `updateSupergroup.status` (and `supergroup` responses
+for the open chat): `parse_anonymous_status` reads `rights.is_anonymous` for an
+administrator and `chatMemberStatusCreator.is_anonymous` for the owner. It is
+stored in `groups.supergroup_anonymous`, so a demotion or a "remain anonymous"
+toggle refreshes it. `Session::chat_posts_anonymously` feeds
+`PlaceholderFacts.anonymous_admin`.
 
 ## Inline bot placeholder
 
@@ -44,7 +52,10 @@ TDLib: `userTypeBot.inline_query_placeholder`, parsed into
 `ParsedUser.inline_query_placeholder`. The gpui-kit input only draws a
 placeholder for an empty field, so the hint is a canvas over the field (the
 same technique as the spell-check underlines) placed after the last typed
-character. `inline_bot_hint` in `src/composer/placeholder.rs` holds the rule.
+character, in the input's own font and size (a small vendored gpui-base accessor,
+`InputState::text_style`, see `third_party/gpui-base/QUILL-CHANGES.md`), elided
+with an ellipsis at the field edge. Right-to-left text relies on platform
+shaping. Only `@bot` or `@bot ` (a plain space) shows it, never a newline. `inline_bot_hint` in `src/composer/placeholder.rs` holds the rule.
 
 ## Verified
 

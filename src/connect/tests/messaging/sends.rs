@@ -331,3 +331,61 @@ fn history_paging_keeps_going_on_short_pages_and_stops_without_progress() {
     assert_eq!(driver.fetch_history().unwrap(), None);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A picked bot command goes out as a text message of its own: the command
+/// text with its underscores escaped, no media, whatever sits in the tray.
+#[test]
+fn a_bot_command_is_one_plain_text_message() {
+    use crate::composer::{ComposerSnapshot, SendOptions};
+
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    for json in [
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+    ] {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    }
+    driver.select_chat(ChatId(7)).unwrap();
+    let snap = ComposerSnapshot::capture(
+        ChatId(7),
+        driver.session.view_generation,
+        "/my_cmd@some_bot",
+    )
+    .with_send_options(SendOptions {
+        disable_notification: true,
+        literal_text: true,
+        ..SendOptions::default()
+    });
+    driver.send_snapshot(&snap).unwrap();
+    let sent: Vec<Value> = recorder
+        .snapshot()
+        .iter()
+        .filter_map(|json| serde_json::from_str(json).ok())
+        .filter(|json: &Value| json["@type"] == "sendMessage")
+        .collect();
+    let [request] = sent.as_slice() else {
+        panic!("one sendMessage, got {sent:?}");
+    };
+    assert_eq!(
+        request["input_message_content"]["@type"],
+        "inputMessageText"
+    );
+    assert_eq!(
+        request["input_message_content"]["text"]["text"],
+        "/my_cmd@some_bot"
+    );
+    assert_eq!(
+        request["input_message_content"]["text"]["entities"],
+        serde_json::json!([])
+    );
+    assert_eq!(request["options"]["disable_notification"], true);
+}

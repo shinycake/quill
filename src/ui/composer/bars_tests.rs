@@ -322,22 +322,51 @@ fn the_bar_handler_for_a_media_reply_offers_another_chat(cx: &mut TestAppContext
     assert!(app.read_with(vcx, |app, _| app.share.reply_elsewhere_open));
 }
 
+fn supergroup_status(app: &Entity<QuillApp>, cx: &mut VisualTestContext, status: &str) {
+    app.update(cx, |app, _| {
+        use std::sync::atomic::Ordering;
+        let (sink, seq) = (app.demo_ui.sink.clone(), &app.demo_ui.seq);
+        if let Some(session) = app.demo_session.as_mut() {
+            seq.store(session.last_seq, Ordering::SeqCst);
+            let json = format!(
+                r#"{{"@type":"updateSupergroup","supergroup":{{"@type":"supergroup","id":2000000002,"status":{status}}}}}"#
+            );
+            let dyn_sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> = sink;
+            if let Some(owned) = quill::telegram::client::copy_and_parse(&json, seq, &dyn_sink) {
+                session.apply(owned);
+            }
+        }
+    });
+    frames(cx);
+}
+
 #[gpui_kit::test]
-fn an_anonymous_admin_sends_anonymously(cx: &mut TestAppContext) {
+fn an_anonymous_admin_sends_anonymously_until_demoted_or_revealed(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     open_chat(&app, vcx, SUPERGROUP);
     assert_eq!(placeholder(&app, vcx), "Send anonymously…");
-    app.update(vcx, |app, _| {
-        if let Some(chat) = app
-            .demo_session
-            .as_mut()
-            .and_then(|session| session.chats.get_mut(&SUPERGROUP.0))
-        {
-            chat.set_my_is_anonymous_admin(false);
-        }
-    });
-    frames(vcx);
+    // The owner turns "Remain anonymous" off.
+    supergroup_status(
+        &app,
+        vcx,
+        r#"{"@type":"chatMemberStatusAdministrator","can_be_edited":false,"rights":{"@type":"chatAdministratorRights","is_anonymous":false}}"#,
+    );
+    assert_eq!(placeholder(&app, vcx), "Write a message…");
+    supergroup_status(
+        &app,
+        vcx,
+        r#"{"@type":"chatMemberStatusAdministrator","can_be_edited":false,"rights":{"@type":"chatAdministratorRights","is_anonymous":true}}"#,
+    );
+    assert_eq!(placeholder(&app, vcx), "Send anonymously…");
+    // The owner posts anonymously too; a demotion clears it at once.
+    supergroup_status(
+        &app,
+        vcx,
+        r#"{"@type":"chatMemberStatusCreator","is_anonymous":true,"is_member":true}"#,
+    );
+    assert_eq!(placeholder(&app, vcx), "Send anonymously…");
+    supergroup_status(&app, vcx, r#"{"@type":"chatMemberStatusMember"}"#);
     assert_eq!(placeholder(&app, vcx), "Write a message…");
 }
 

@@ -282,6 +282,7 @@ fn apply_composer_bars(
         r#"{"@type":"updateNewChat","chat":{"id":-1002000000001,"title":"Quill news","type":{"@type":"chatTypeSupergroup","supergroup_id":2000000001,"is_channel":true},"unread_count":0}}"#.to_string(),
         r#"{"@type":"updateChatPosition","chat_id":-1002000000001,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"52","is_pinned":false}}"#.to_string(),
         r#"{"@type":"updateUser","user":{"id":61,"first_name":"GIF","usernames":{"@type":"usernames","active_usernames":["gifbot"],"disabled_usernames":[],"editable_username":"gifbot"},"type":{"@type":"userTypeBot","is_inline":true,"inline_query_placeholder":"Search GIFs"},"status":{"@type":"userStatusOffline","was_online":1}}}"#.to_string(),
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":2000000002,"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":false,"rights":{"@type":"chatAdministratorRights","is_anonymous":true}}}}"#.to_string(),
         r#"{"@type":"updateNewChat","chat":{"id":-1002000000002,"title":"Quill makers","type":{"@type":"chatTypeSupergroup","supergroup_id":2000000002,"is_channel":false},"unread_count":0}}"#.to_string(),
         r#"{"@type":"updateChatPosition","chat_id":-1002000000002,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"51","is_pinned":false}}"#.to_string(),
         message(10, -2002, 31, false, "Where should we go on Saturday?"),
@@ -300,13 +301,6 @@ fn apply_composer_bars(
             quill::telegram::envelope::ChannelMemberStatus::Creator,
             None,
         );
-    }
-    if let Some(chat) = session.chats.get_mut(&-1002000000002) {
-        chat.set_member_status(
-            quill::telegram::envelope::ChannelMemberStatus::Administrator,
-            None,
-        );
-        chat.set_my_is_anonymous_admin(true);
     }
     session.bots.inline_bot_resolve = Some(quill::state::InlineBotResolve::Resolved {
         username: "gifbot".into(),

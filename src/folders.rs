@@ -286,7 +286,6 @@ mod tests {
             my_admin_can_promote_members: None,
             my_admin_can_restrict_members: None,
             my_admin_can_pin_messages: None,
-            my_is_anonymous_admin: false,
             my_restriction: None,
             my_rights_fetched: false,
             is_forum: None,

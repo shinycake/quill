@@ -146,6 +146,10 @@ impl WrapMap {
         self.wrapper.set_wrapping_indent(wrapping_indent, cx);
     }
 
+    pub(super) fn text_style(&self) -> (&Font, Pixels) {
+        self.wrapper.text_style()
+    }
+
     /// Set font parameters
     pub(super) fn set_font(&mut self, font: Font, font_size: Pixels, cx: &mut App) {
         self.wrapper.set_font(font, font_size, cx);

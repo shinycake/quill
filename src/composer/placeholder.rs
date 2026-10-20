@@ -79,11 +79,12 @@ pub fn inline_bot_hint<'a>(
     if editing || placeholder.is_empty() {
         return None;
     }
-    let (username, query) = crate::composer::inline_query_trigger(text)?;
-    if !username.eq_ignore_ascii_case(bot_username) || !query.is_empty() {
-        return None;
-    }
-    (text.chars().count() <= username.len().saturating_add(2)).then_some(placeholder)
+    // The name and at most one plain space after it (a newline or a tab is
+    // not the separator tdesktop waits for).
+    let typed = text.strip_prefix('@')?;
+    let name = typed.strip_suffix(' ').unwrap_or(typed);
+    name.eq_ignore_ascii_case(bot_username)
+        .then_some(placeholder)
 }
 
 /// Whether the field differs from the message being edited
@@ -185,6 +186,8 @@ mod tests {
         assert_eq!(hint("@GIF ", false), Some("Search GIFs"));
         // A second space, a query or an edit hide it.
         assert_eq!(hint("@gif  ", false), None);
+        assert_eq!(hint("@gif\n", false), None);
+        assert_eq!(hint("@gif\t", false), None);
         assert_eq!(hint("@gif cats", false), None);
         assert_eq!(hint("@gif ", true), None);
         // Another bot, no bot, or a bot without a hint.

@@ -716,6 +716,7 @@ impl Session {
                 can_change_info,
                 can_send_welcome_messages,
                 can_manage_video_chats,
+                is_anonymous,
                 join_by_request,
                 is_broadcast_group,
                 sign_messages,
@@ -726,6 +727,11 @@ impl Session {
                 direct_messages,
             } => {
                 self.set_direct_messages_role(supergroup_id, direct_messages);
+                // `updateSupergroup` carries the viewer's own status, so a
+                // demotion or "Remain anonymous" turned off lands here.
+                self.groups
+                    .supergroup_anonymous
+                    .insert(supergroup_id, is_anonymous);
                 self.groups
                     .supergroup_manage_video_chats_right
                     .insert(supergroup_id, can_manage_video_chats.unwrap_or(false));
@@ -789,6 +795,7 @@ impl Session {
                 can_change_info,
                 can_send_welcome_messages,
                 can_manage_video_chats,
+                is_anonymous,
                 join_by_request,
                 is_broadcast_group,
                 sign_messages,
@@ -804,6 +811,9 @@ impl Session {
                     self.groups
                         .supergroup_manage_video_chats_right
                         .insert(supergroup_id, can_manage_video_chats.unwrap_or(false));
+                    self.groups
+                        .supergroup_anonymous
+                        .insert(supergroup_id, is_anonymous);
                 }
                 self.payments
                     .paid_messages

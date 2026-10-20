@@ -198,9 +198,6 @@ pub struct ChatSummary {
     /// every other status or an absent rights block. Gates album pin /
     /// unpin (`pinChatMessage`, schema line 13559).
     pub my_admin_can_pin_messages: Option<bool>,
-    /// The viewer is an administrator or the owner who posts as the group
-    /// (`is_anonymous`). Drives the "Send anonymously" field hint.
-    pub my_is_anonymous_admin: bool,
     /// Own `chatMemberStatusRestricted` rights and end date, from
     /// `getChatMember(me)` / `updateChatMember`. `None` when the viewer is
     /// not restricted or nothing was fetched yet.
@@ -512,11 +509,6 @@ impl ChatSummary {
     ) {
         self.my_restriction = restriction;
         self.my_rights_fetched = true;
-    }
-
-    /// Record whether the viewer posts as the group.
-    pub fn set_my_is_anonymous_admin(&mut self, anonymous: bool) {
-        self.my_is_anonymous_admin = anonymous;
     }
 
     /// MED1: record `rights.can_pin_messages` (`None` for non-admin
