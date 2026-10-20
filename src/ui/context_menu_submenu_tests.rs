@@ -1,0 +1,218 @@
+//! Keyboard control of the chat menu's Mute submenu: Right and Enter open
+//! it and focus its first row, Left and Escape close only it and give the
+//! focus back to the parent row, Up and Down stay inside it.
+use super::context_menu_focus_tests::{focus_chat_list, new_app, open_chat_menu};
+use crate::ui::app::QuillApp;
+use crate::ui::menu_states::ChatMenuSubmenu;
+use gpui_kit::test::TestWindowExt;
+use gpui_kit::{Entity, TestAppContext, VisualTestContext};
+use quill::lang::{keys, tr};
+
+/// A menu row as the last paint drew it.
+struct Row {
+    label: String,
+    focused: bool,
+    top: f32,
+    left: f32,
+}
+
+fn rows(vcx: &mut VisualTestContext) -> Vec<Row> {
+    let mut rows: Vec<Row> = vcx.update(|window, _| {
+        gpui_base::test_support::snapshots(window)
+            .into_iter()
+            .filter(|row| {
+                row.role() == Some(gpui_kit::Role::MenuItem)
+                    && row.visible()
+                    && row.focused().is_some()
+            })
+            .map(|row| Row {
+                label: row.label().unwrap_or_default().to_string(),
+                focused: row.focused() == Some(true),
+                top: f32::from(row.bounds().origin.y),
+                left: f32::from(row.bounds().origin.x),
+            })
+            .collect()
+    });
+    rows.sort_by(|a, b| a.top.total_cmp(&b.top).then(a.left.total_cmp(&b.left)));
+    rows
+}
+
+/// The row holding the focus. A parent row reports itself focused while a
+/// row of its submenu is, so the innermost (rightmost) focused row wins.
+fn focused_label(vcx: &mut VisualTestContext) -> Option<String> {
+    rows(vcx)
+        .into_iter()
+        .filter(|r| r.focused)
+        .max_by(|a, b| a.left.total_cmp(&b.left))
+        .map(|r| r.label)
+}
+
+/// The labels of the rows drawn in the submenu panel, top to bottom: the
+/// panel sits to the right of the menu, so its rows start further right than
+/// any of the menu's own.
+fn submenu_labels(vcx: &mut VisualTestContext) -> Vec<String> {
+    let all = rows(vcx);
+    let menu_left = all.iter().map(|r| r.left).fold(f32::MAX, f32::min);
+    all.into_iter()
+        .filter(|r| r.left > menu_left + 100.)
+        .map(|r| r.label)
+        .collect()
+}
+
+fn menu_labels(vcx: &mut VisualTestContext) -> Vec<String> {
+    let all = rows(vcx);
+    let menu_left = all.iter().map(|r| r.left).fold(f32::MAX, f32::min);
+    all.into_iter()
+        .filter(|r| r.left <= menu_left + 100.)
+        .map(|r| r.label)
+        .collect()
+}
+
+fn mute_label() -> String {
+    tr(keys::Q_CHAT_MUTE_NOTIFICATIONS).to_string()
+}
+
+fn submenu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<ChatMenuSubmenu> {
+    app.read_with(vcx, |app, _| {
+        app.chat_list.menu.as_ref().and_then(|menu| menu.submenu)
+    })
+}
+
+fn menu_open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
+    app.read_with(vcx, |app, _| app.context_menu_open())
+}
+
+/// Down until the Mute row has the focus.
+fn focus_mute_row(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    open_chat_menu(app, vcx);
+    focus_chat_list(app, vcx);
+    let count = menu_labels(vcx).len();
+    for _ in 0..count {
+        vcx.simulate_keystrokes("down");
+        if focused_label(vcx) == Some(mute_label()) {
+            return;
+        }
+    }
+    panic!("Down never reached the Mute row in {:?}", menu_labels(vcx));
+}
+
+fn settle(vcx: &mut VisualTestContext) {
+    vcx.run_until_parked();
+    for _ in 0..4 {
+        vcx.update(|window, cx| window.render_frame(cx));
+        vcx.run_until_parked();
+    }
+}
+
+#[gpui_kit::test]
+fn right_opens_the_submenu_and_focuses_its_first_row(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    focus_mute_row(&app, vcx);
+    assert_eq!(submenu(&app, vcx), None, "folded before the key");
+    vcx.simulate_keystrokes("right");
+    settle(vcx);
+    assert_eq!(submenu(&app, vcx), Some(ChatMenuSubmenu::Mute));
+    let drawn = submenu_labels(vcx);
+    assert!(drawn.len() > 1, "the submenu draws several rows");
+    assert_eq!(
+        focused_label(vcx).as_ref(),
+        drawn.first(),
+        "the first row of the submenu has the focus"
+    );
+}
+
+#[gpui_kit::test]
+fn enter_on_the_parent_row_opens_the_submenu_too(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    focus_mute_row(&app, vcx);
+    vcx.simulate_keystrokes("enter");
+    settle(vcx);
+    assert_eq!(submenu(&app, vcx), Some(ChatMenuSubmenu::Mute));
+    let drawn = submenu_labels(vcx);
+    assert_eq!(focused_label(vcx).as_ref(), drawn.first());
+}
+
+#[gpui_kit::test]
+fn left_returns_to_the_parent_row(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    focus_mute_row(&app, vcx);
+    vcx.simulate_keystrokes("right");
+    settle(vcx);
+    vcx.simulate_keystrokes("left");
+    settle(vcx);
+    assert_eq!(submenu(&app, vcx), None, "Left closed the submenu");
+    assert!(menu_open(&app, vcx), "the menu stays open");
+    assert_eq!(focused_label(vcx), Some(mute_label()), "parent row focused");
+}
+
+#[gpui_kit::test]
+fn escape_in_the_submenu_closes_only_the_submenu(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    focus_mute_row(&app, vcx);
+    vcx.simulate_keystrokes("right down");
+    settle(vcx);
+    assert_eq!(submenu(&app, vcx), Some(ChatMenuSubmenu::Mute));
+    vcx.simulate_keystrokes("escape");
+    settle(vcx);
+    assert_eq!(submenu(&app, vcx), None);
+    assert!(menu_open(&app, vcx), "Escape left the menu open");
+    assert_eq!(focused_label(vcx), Some(mute_label()));
+    vcx.simulate_keystrokes("escape");
+    settle(vcx);
+    assert!(!menu_open(&app, vcx), "a second Escape closes the menu");
+}
+
+#[gpui_kit::test]
+fn down_and_up_wrap_inside_the_submenu(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    focus_mute_row(&app, vcx);
+    vcx.simulate_keystrokes("right");
+    settle(vcx);
+    let drawn = submenu_labels(vcx);
+    assert!(drawn.len() > 1);
+    let mut down = vec![focused_label(vcx).expect("first row")];
+    for _ in 1..drawn.len() {
+        vcx.simulate_keystrokes("down");
+        down.push(focused_label(vcx).expect("Down stays on a row"));
+    }
+    assert_eq!(down, drawn, "Down walks the rows as drawn on screen");
+    vcx.simulate_keystrokes("down");
+    assert_eq!(
+        focused_label(vcx).as_ref(),
+        drawn.first(),
+        "Down from the last submenu row wraps to its first"
+    );
+    vcx.simulate_keystrokes("up");
+    assert_eq!(
+        focused_label(vcx).as_ref(),
+        drawn.last(),
+        "Up from the first wraps to the last, never to the menu"
+    );
+    assert_eq!(submenu(&app, vcx), Some(ChatMenuSubmenu::Mute));
+}
+
+/// With the submenu open (the pointer opened it), Down from the menu's own
+/// rows visits those rows only.
+#[gpui_kit::test]
+fn the_menus_own_rows_skip_an_open_submenu(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat_menu(&app, vcx);
+    app.update_in(vcx, |app, _, cx| {
+        app.open_chat_submenu(ChatMenuSubmenu::Mute, cx);
+    });
+    settle(vcx);
+    focus_chat_list(&app, vcx);
+    let own = menu_labels(vcx);
+    let mut walked = Vec::new();
+    for _ in 0..own.len() {
+        vcx.simulate_keystrokes("down");
+        walked.push(focused_label(vcx).expect("a row"));
+    }
+    assert_eq!(walked, own, "Down visits the menu's rows in drawing order");
+}

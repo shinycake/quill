@@ -15,16 +15,24 @@
 //! no handle and are skipped. With no enabled item the menu frame keeps the
 //! focus.
 //!
+//! Submenus (popup_menu.cpp:577-590): Right, or Enter, on a row with a
+//! submenu opens it and focuses its first item; Left, or Escape, inside it
+//! closes only the submenu and gives the focus back to the parent row. Up and
+//! Down inside a submenu stay in it, and on the menu's own rows they skip the
+//! submenu's. Left stays "close" and Right stays "open" in right-to-left
+//! layouts too (owner decision, not mirrored).
+//!
 //! The arrows are not in the shortcut list and cannot be rebound: the
 //! keystroke interceptor (`app_demo.rs`, via `context_menu_key`) handles
 //! them, because they must work while the focus is still outside the menu.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::menu_states::ChatMenuSubmenu;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
 use gpui_kit::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 /// Width of the focus ring drawn inside an item's edge.
 const RING_WIDTH: f32 = 2.;
@@ -38,6 +46,10 @@ const RING_WIDTH: f32 = 2.;
 pub(super) struct ContextMenuItems {
     handles: RefCell<Vec<FocusHandle>>,
     keys: RefCell<Vec<u32>>,
+    /// Rows drawn this frame that own a submenu, with the submenu each opens.
+    parents: RefCell<Vec<(u32, ChatMenuSubmenu)>>,
+    /// Key of the item to focus once this frame has drawn it.
+    focus_pending: Cell<Option<u32>>,
 }
 
 /// Sort key of a submenu row: just after its parent row (`order`), in the
@@ -50,6 +62,17 @@ pub(super) struct ContextMenuItems {
 pub(super) fn submenu_key(order: u8, index: usize) -> u32 {
     let slot = index.min(MAX_SUBMENU_ROWS - 1) as u32;
     (u32::from(order) << 8) + 1 + slot
+}
+
+/// Whether a sort key belongs to a submenu row (top-level keys have a zero
+/// low byte).
+fn is_submenu_key(key: u32) -> bool {
+    key & 0xff != 0
+}
+
+/// The parent row's key of a submenu row key.
+fn parent_key(key: u32) -> u32 {
+    key & !0xff
 }
 
 /// Submenu rows that get a distinct sort key under one parent row.
@@ -65,6 +88,12 @@ impl ContextMenuItems {
     /// retained across frames; only the claims reset.
     pub(super) fn begin(&self) {
         self.keys.borrow_mut().clear();
+        self.parents.borrow_mut().clear();
+    }
+
+    /// The row at `row_key(order)` drawn this frame opens `submenu`.
+    pub(super) fn mark_submenu_parent(&self, order: u8, submenu: ChatMenuSubmenu) {
+        self.parents.borrow_mut().push((row_key(order), submenu));
     }
 
     /// The handle for the next enabled item drawn this frame, which sorts
@@ -92,10 +121,26 @@ impl ContextMenuItems {
         self.keys.borrow().len()
     }
 
-    /// The handle after (or before) the focused one in key order, wrapping;
-    /// with none focused, the first (or last). `None` when the menu has no
-    /// enabled item.
-    pub(super) fn step(&self, forward: bool, window: &Window) -> Option<FocusHandle> {
+    /// Asks the end of the next frame to focus the item drawn at `key`.
+    fn focus_next_frame(&self, key: u32) {
+        self.focus_pending.set(Some(key));
+    }
+
+    /// The end of a frame: focus the item asked for by `focus_next_frame`,
+    /// if this frame drew it. One attempt, so a submenu with no rows cannot
+    /// leave a stale request behind.
+    pub(super) fn apply_pending_focus(&self, window: &mut Window, cx: &mut App) {
+        let Some(key) = self.focus_pending.take() else {
+            return;
+        };
+        if let Some(handle) = self.handle_for(key) {
+            window.focus(&handle, cx);
+        }
+    }
+
+    /// This frame's items as `(key, handle)`, in key order. Guards are
+    /// dropped before the caller touches the window.
+    fn live(&self) -> Vec<(u32, FocusHandle)> {
         let mut live: Vec<(u32, FocusHandle)> = {
             let handles = self.handles.borrow();
             let keys = self.keys.borrow();
@@ -105,20 +150,67 @@ impl ContextMenuItems {
                 .collect()
         };
         live.sort_by_key(|(key, _)| *key);
-        let count = live.len();
+        live
+    }
+
+    /// The handle of the item drawn at `key`, if any.
+    fn handle_for(&self, key: u32) -> Option<FocusHandle> {
+        self.live()
+            .into_iter()
+            .find(|(candidate, _)| *candidate == key)
+            .map(|(_, handle)| handle)
+    }
+
+    /// The sort key of the focused item.
+    fn focused_key(&self, window: &Window) -> Option<u32> {
+        self.live()
+            .into_iter()
+            .find(|(_, handle)| handle.is_focused(window))
+            .map(|(key, _)| key)
+    }
+
+    /// The submenu the row at `key` opens.
+    fn submenu_of(&self, key: u32) -> Option<ChatMenuSubmenu> {
+        self.parents
+            .borrow()
+            .iter()
+            .find(|(parent, _)| *parent == key)
+            .map(|(_, submenu)| *submenu)
+    }
+
+    /// The handle after (or before) the focused one, wrapping; with none
+    /// focused, the first (or last). Inside a submenu only that submenu's
+    /// rows are walked; elsewhere only the menu's own rows. `None` when
+    /// there is no such item.
+    pub(super) fn step(&self, forward: bool, window: &Window) -> Option<FocusHandle> {
+        let live = self.live();
+        let focused = live
+            .iter()
+            .find(|(_, handle)| handle.is_focused(window))
+            .map(|(key, _)| *key);
+        let group: Vec<&(u32, FocusHandle)> = match focused.filter(|key| is_submenu_key(*key)) {
+            Some(key) => live
+                .iter()
+                .filter(|(other, _)| {
+                    is_submenu_key(*other) && parent_key(*other) == parent_key(key)
+                })
+                .collect(),
+            None => live
+                .iter()
+                .filter(|(key, _)| !is_submenu_key(*key))
+                .collect(),
+        };
+        let count = group.len();
         if count == 0 {
             return None;
         }
-        let next = match live
-            .iter()
-            .position(|(_, handle)| handle.is_focused(window))
-        {
+        let next = match group.iter().position(|(key, _)| Some(*key) == focused) {
             Some(at) if forward => (at + 1) % count,
             Some(at) => (at + count - 1) % count,
             None if forward => 0,
             None => count.saturating_sub(1),
         };
-        live.get(next).map(|(_, handle)| handle.clone())
+        group.get(next).map(|(_, handle)| handle.clone())
     }
 }
 
@@ -178,7 +270,8 @@ pub(super) fn context_menu_item(
         .child(Icon::new(icon).size(px(16.)).text_color(color))
         .child(label);
     if enabled {
-        let key = u32::try_from(items.keys.borrow().len()).unwrap_or(u32::MAX);
+        let position = items.keys.borrow().len();
+        let key = row_key(u8::try_from(position).unwrap_or(u8::MAX));
         item.cursor_pointer()
             .hover(|style| style.bg(hover))
             .menu_key_target(key, items, cx)
@@ -228,6 +321,9 @@ impl QuillApp {
         if !self.context_menu_open() {
             return false;
         }
+        if self.submenu_key_press(key, window, cx) {
+            return true;
+        }
         if key.key == "escape" {
             return self.dismiss_context_menus(cx);
         }
@@ -236,6 +332,60 @@ impl QuillApp {
             return true;
         }
         super::keybindings::context_menu_captures_key(key)
+    }
+
+    /// Left, Right, Escape and Enter on a submenu row or its parent row.
+    /// Returns whether the key was taken.
+    fn submenu_key_press(
+        &mut self,
+        key: &Keystroke,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if key.modifiers.modified() {
+            return false;
+        }
+        let (focused, submenu, parent) = {
+            let items = &self.frame.context_menu_items;
+            let Some(focused) = items.focused_key(window) else {
+                return false;
+            };
+            (
+                focused,
+                items.submenu_of(focused),
+                items.handle_for(parent_key(focused)),
+            )
+        };
+        match key.key.as_str() {
+            "right" | "enter" => {
+                let Some(submenu) = submenu else {
+                    return false;
+                };
+                self.open_submenu_and_focus_first(focused, submenu, cx);
+                true
+            }
+            "left" | "escape" if is_submenu_key(focused) => {
+                self.close_chat_submenu(cx);
+                if let Some(parent) = parent {
+                    window.focus(&parent, cx);
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Opens `submenu` and focuses its first row in the frame that draws it:
+    /// the rows only exist while it is open.
+    fn open_submenu_and_focus_first(
+        &mut self,
+        parent: u32,
+        submenu: ChatMenuSubmenu,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_chat_submenu(submenu, cx);
+        self.frame.context_menu_items.focus_next_frame(parent + 1);
+        cx.notify();
     }
 
     /// Up or Down with a menu open: focus the next (or previous) enabled item
@@ -269,3 +419,8 @@ pub(super) fn arrow_direction(key: &Keystroke) -> Option<bool> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "context_menu_submenu_tests.rs"]
+mod context_menu_submenu_tests;

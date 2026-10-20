@@ -89,11 +89,24 @@ fn submenu_panel(rows: Vec<AnyElement>) -> AnyElement {
 }
 
 impl QuillApp {
-    fn open_chat_submenu(&mut self, which: ChatMenuSubmenu, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn open_chat_submenu(
+        &mut self,
+        which: ChatMenuSubmenu,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(menu) = self.chat_list.menu.as_mut()
             && menu.submenu != Some(which)
         {
             menu.submenu = Some(which);
+            cx.notify();
+        }
+    }
+
+    /// Closes the open submenu only; the menu stays.
+    pub(in crate::ui) fn close_chat_submenu(&mut self, cx: &mut Context<Self>) {
+        if let Some(menu) = self.chat_list.menu.as_mut()
+            && menu.submenu.take().is_some()
+        {
             cx.notify();
         }
     }
@@ -170,6 +183,9 @@ impl QuillApp {
                 .into_any_element(),
             );
         }
+        self.frame
+            .context_menu_items
+            .mark_submenu_parent(30, ChatMenuSubmenu::Mute);
         let open = menu.submenu == Some(ChatMenuSubmenu::Mute);
         let parent = menu_row(
             "chat-menu-mute",
@@ -311,6 +327,9 @@ impl QuillApp {
             return None;
         }
         let chat_id = menu.chat_id;
+        self.frame
+            .context_menu_items
+            .mark_submenu_parent(45, ChatMenuSubmenu::Folders);
         let open = menu.submenu == Some(ChatMenuSubmenu::Folders);
         let parent = menu_row(
             "chat-menu-folder",

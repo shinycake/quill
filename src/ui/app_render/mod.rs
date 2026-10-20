@@ -852,6 +852,9 @@ impl Render for QuillApp {
             Some(cache) => super::image_budget::CacheScope::new(cache, root).into_any_element(),
             None => root.into_any_element(),
         };
+        self.frame
+            .context_menu_items
+            .apply_pending_focus(window, cx);
         // Back to the scope this draw interrupted; the layout and paint of
         // the root run as the main window's again.
         self.set_window_scope(outer_scope);

@@ -14,7 +14,7 @@ use gpui_kit::{
     AppContext, Entity, FocusHandle, Focusable, TestAppContext, VisualTestContext, point, px, size,
 };
 
-fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+pub(super) fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -120,7 +120,7 @@ fn in_menu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
     })
 }
 
-fn focus_chat_list(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+pub(super) fn focus_chat_list(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     app.update_in(vcx, |app, window, cx| {
         window.focus(&app.focus_sidebar.clone(), cx)
     });
@@ -196,7 +196,7 @@ fn arrows_enter_the_menu_instead_of_reaching_the_chat_list(cx: &mut TestAppConte
     );
 }
 
-fn open_chat_menu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+pub(super) fn open_chat_menu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     app.update_in(vcx, |app, _, cx| {
         app.chat_list.menu = Some(crate::ui::menu_states::ChatMenuState::at(
             quill::ids::ChatId(11),
