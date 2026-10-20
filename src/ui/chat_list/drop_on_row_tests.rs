@@ -147,10 +147,12 @@ fn resting_on_a_row_for_a_second_opens_its_chat_while_the_drag_goes_on(cx: &mut 
     entered(vcx, at, dropped_file("rest.txt"));
     assert_ne!(open_chat(&app, vcx), Some(ChatId(72)));
     // Less than a second: still the old chat.
-    vcx.executor().advance_clock(std::time::Duration::from_millis(500));
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(500));
     frames(vcx);
     assert_ne!(open_chat(&app, vcx), Some(ChatId(72)));
-    vcx.executor().advance_clock(std::time::Duration::from_millis(1500));
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(1500));
     frames(vcx);
     assert_eq!(open_chat(&app, vcx), Some(ChatId(72)));
 }
@@ -161,13 +163,20 @@ fn moving_the_pointer_restarts_the_wait(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     let at = row_centre(vcx, 72);
     entered(vcx, at, dropped_file("restart.txt"));
-    vcx.executor().advance_clock(std::time::Duration::from_millis(800));
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(800));
     frames(vcx);
     file_drop(vcx, FileDropEvent::Pending { position: at });
-    vcx.executor().advance_clock(std::time::Duration::from_millis(800));
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(800));
     frames(vcx);
-    assert_ne!(open_chat(&app, vcx), Some(ChatId(72)), "the move restarted it");
-    vcx.executor().advance_clock(std::time::Duration::from_millis(400));
+    assert_ne!(
+        open_chat(&app, vcx),
+        Some(ChatId(72)),
+        "the move restarted it"
+    );
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(400));
     frames(vcx);
     assert_eq!(open_chat(&app, vcx), Some(ChatId(72)));
 }

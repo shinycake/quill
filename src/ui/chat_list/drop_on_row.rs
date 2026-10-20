@@ -167,19 +167,17 @@ impl QuillApp {
             .test_support()
             .relative()
             .w_full()
-            .on_drag_move(
-                cx.listener(move |this, event: &DragMoveEvent<ExternalPaths>, window, cx| {
+            .on_drag_move(cx.listener(
+                move |this, event: &DragMoveEvent<ExternalPaths>, window, cx| {
                     let over = event.bounds.contains(&event.event.position);
                     let paths = event.drag(cx).paths().to_vec();
                     this.drag_over_row(chat_id, over, &paths, window, cx);
-                }),
-            )
-            .on_drop(
-                cx.listener(move |this, paths: &ExternalPaths, window, cx| {
-                    cx.stop_propagation();
-                    this.drop_on_row(chat_id, paths.paths(), window, cx);
-                }),
-            )
+                },
+            ))
+            .on_drop(cx.listener(move |this, paths: &ExternalPaths, window, cx| {
+                cx.stop_propagation();
+                this.drop_on_row(chat_id, paths.paths(), window, cx);
+            }))
             .child(row)
             .when(hot, |this| {
                 this.child(
