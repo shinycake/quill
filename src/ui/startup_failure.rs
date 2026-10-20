@@ -1,8 +1,13 @@
 //! What happens when the main window cannot open (for example no usable GPU
 //! or a remote session without one): say so in a native alert where the
 //! platform has one, write the error to stderr, and exit with a failure code
-//! instead of panicking.
+//! instead of panicking. On Linux, when nothing can draw the window, the
+//! alert says which Vulkan piece is missing and what to install.
 #![deny(clippy::indexing_slicing)]
+
+#[cfg(any(test, target_os = "linux"))]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+mod vulkan;
 
 use quill::lang::{keys, tr};
 /// Report `error` from opening the main window and end the process.
@@ -14,12 +19,28 @@ pub(crate) fn window_failed(error: &dyn std::fmt::Display) -> ! {
     let detail = error.to_string();
     eprintln!("quill: could not open a window: {detail}");
     let message = alert_detail(&detail);
+    #[cfg(target_os = "linux")]
+    eprintln!("\n{message}");
+    // A missing driver is not a crash: the next launch shows no
+    // "closed unexpectedly" notice for this run.
+    if let Some(root) = quill::settings::safe_app_root() {
+        quill::crash_log::mark_clean_exit(&root);
+    }
     show_alert(tr(keys::Q_MISC_QUILL_COULD_NOT_OPEN_A), &message);
     std::process::exit(1)
 }
 
-/// The alert's body. On Linux a missing Vulkan driver gets steps to fix it.
+/// The alert's body. On Linux a missing Vulkan loader, driver or usable
+/// device gets the package to install; other graphics errors get the general
+/// driver steps.
 fn alert_detail(detail: &str) -> String {
+    #[cfg(target_os = "linux")]
+    {
+        let setup = vulkan::probe();
+        if let Some(missing) = vulkan::diagnose(detail, &setup) {
+            return vulkan::message(&missing, setup.virtio_gpu, detail);
+        }
+    }
     #[cfg(target_os = "linux")]
     if is_vulkan_failure(detail) {
         return quill::lang::tr_with(
@@ -76,7 +97,8 @@ fn show_alert(title: &str, detail: &str) {
 }
 
 /// Linux has no system alert API without a window; use the desktop's dialog
-/// helper when one is installed. stderr already has the message otherwise.
+/// helper when one is installed, otherwise a desktop notification (which
+/// needs no GPU). stderr already has the message too.
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn show_alert(title: &str, detail: &str) {
     use std::process::{Command, Stdio};
@@ -95,12 +117,52 @@ fn show_alert(title: &str, detail: &str) {
     if zenity.is_ok() {
         return;
     }
-    let _ = Command::new("kdialog")
+    let kdialog = Command::new("kdialog")
         .args(["--title", tr(keys::Q_MISC_QUILL), "--error"])
         .arg(&text)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+    if kdialog.is_ok() {
+        return;
+    }
+    if let Err(error) = notify(title, detail) {
+        eprintln!("quill: could not show a notification either: {error}");
+    }
+}
+
+/// A critical desktop notification that stays until dismissed.
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn notify(title: &str, detail: &str) -> zbus::Result<()> {
+    use quill::notify::dbus::{APP_NAME, BUS_NAME, DESKTOP_ENTRY, INTERFACE, OBJECT_PATH};
+    use std::collections::HashMap;
+    use zbus::zvariant::Value;
+    const CRITICAL: u8 = 2;
+    let connection = zbus::blocking::Connection::session()?;
+    let proxy = zbus::blocking::Proxy::new(&connection, BUS_NAME, OBJECT_PATH, INTERFACE)?;
+    let hints: HashMap<&str, Value<'_>> = HashMap::from([
+        ("urgency", Value::from(CRITICAL)),
+        ("desktop-entry", Value::from(DESKTOP_ENTRY)),
+    ]);
+    // Daemons with body markup read `&`, `<` and `>` as markup.
+    let body = detail
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+    let _id: u32 = proxy.call(
+        tr(keys::Q_PREFS_NOTIFY),
+        &(
+            APP_NAME,
+            0_u32,
+            "dialog-error",
+            title,
+            body,
+            Vec::<&str>::new(),
+            hints,
+            0_i32,
+        ),
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]

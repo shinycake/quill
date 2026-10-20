@@ -481,6 +481,14 @@
 "qll_misc_quill_closed_unexpectedly_last_time" = "Quill closed unexpectedly last time";
 "qll_misc_quill_could_not_open_a" = "Quill could not open a window";
 "qll_misc_quill_could_not_open_a_gpu" = "Quill needs Vulkan graphics to draw its window, and none was found. Install the Vulkan driver for your graphics card, then start Quill again:\n\n- AMD or Intel: Mesa Vulkan drivers (mesa-vulkan-drivers on Debian and Ubuntu, vulkan-radeon or vulkan-intel on Arch and Fedora)\n- NVIDIA: the proprietary NVIDIA driver\n- No GPU or a virtual machine: the lavapipe software driver (mesa-vulkan-drivers, or vulkan-swrast on Arch)\n\nDetails: {detail}";
+"qll_misc_vulkan_no_loader" = "Quill draws its window with Vulkan graphics, and the Vulkan loader is not installed.";
+"qll_misc_vulkan_no_driver" = "Quill draws its window with Vulkan graphics, and no Vulkan driver is installed.";
+"qll_misc_vulkan_no_device" = "Quill draws its window with Vulkan graphics. A Vulkan driver is installed ({drivers}), but it shows no device that can draw the window.";
+"qll_misc_vulkan_install_loader" = "Install the Vulkan loader: vulkan-icd-loader on Arch, libvulkan1 on Debian and Ubuntu, vulkan-loader on Fedora. Then install a driver:";
+"qll_misc_vulkan_virtio" = "This computer has a Virtio virtual GPU. Its Vulkan driver (vulkan-virtio on Arch, part of mesa-vulkan-drivers on Debian, Ubuntu and Fedora) shows a device only when Venus is also enabled on the VM host. Without that, it still finds no device.";
+"qll_misc_vulkan_install_lavapipe" = "Install the lavapipe software driver, which works on any machine, even without a GPU: vulkan-swrast on Arch, mesa-vulkan-drivers on Debian, Ubuntu and Fedora.";
+"qll_misc_vulkan_install_hardware" = "For faster drawing, install your graphics card's driver instead: vulkan-radeon or vulkan-intel on Arch (mesa-vulkan-drivers elsewhere) for AMD and Intel, or the NVIDIA driver for NVIDIA cards.";
+"qll_misc_vulkan_start_again" = "Then start Quill again.\n\nDetails: {detail}";
 "qll_misc_quill_needs_access_to_your" = "Quill needs access to your {device} to record. Turn on \"Let desktop apps access your {device_2}\" in Settings › Privacy & security › {pane}.";
 "qll_misc_quill_needs_access_to_your_2" = "Quill needs access to your {device} to record. Allow it in System Settings → Privacy & Security → {pane}.";
 "qll_misc_quit_quill" = "Quit Quill";
