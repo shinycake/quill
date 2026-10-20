@@ -329,6 +329,10 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] "Cancel editing?" confirmation when Esc would drop a changed edit (#996) <!-- parity:composer-cancel-edit-confirm -->
 - [x] Field placeholder follows the context: editing, broadcast, silent broadcast, Stars price; in chat windows too (#996) <!-- parity:composer-context-placeholder -->
 - [ ] Field placeholder for an anonymous admin and for an inline bot's own placeholder text <!-- parity:composer-placeholder-anon-inline -->
+- [ ] Forum topic field placeholder "Message in {topic}" <!-- parity:composer-placeholder-forum-topic -->
+- [ ] "Off-thread message" placeholder when a bot chat is opened outside its thread <!-- parity:composer-placeholder-bot-offthread -->
+- [ ] A bot reply keyboard's own placeholder text shown in the field <!-- parity:composer-placeholder-bot-keyboard -->
+- [ ] Markdown markers inside a word (my_cmd_x) stay plain text, as tdesktop parses them <!-- parity:composer-markup-intraword -->
 - [x] Clickable reply and edit bars: click opens reply options or jumps to the edited message, Ctrl/Cmd or right click jumps to the replied message (#996) <!-- parity:composer-bar-clicks -->
 - [x] "@" and "/" suggestions follow the caret, with tdesktop's mention rules (#993) <!-- parity:composer-caret-triggers -->
 - [x] Greeting sticker in an empty private chat <!-- parity:composer-greeting-sticker -->
