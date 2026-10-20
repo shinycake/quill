@@ -574,7 +574,23 @@ impl HistoryState {
         self.load_failed = false;
     }
 
+    /// The message the "N Unread Messages" bar sits above: the first
+    /// incoming one after `unread_anchor` (the rule the rows are built by).
+    pub fn unread_bar_message(&self) -> Option<MessageId> {
+        let anchor = self.unread_anchor?;
+        self.messages
+            .values()
+            .find(|message| !message.is_outgoing && message.id.0 > anchor.0)
+            .map(|message| message.id)
+    }
+
+    /// Remove a message. The bar belongs to its message (tdesktop
+    /// `History::mainViewRemoved` drops `_unreadBarView`), so deleting the
+    /// message it sits above removes the bar instead of sliding it down.
     pub(crate) fn remove(&mut self, id: MessageId, permanent: bool) {
+        if self.unread_bar_message() == Some(id) {
+            self.unread_anchor = None;
+        }
         self.messages.remove(&id.0);
         if permanent {
             self.tombstones.insert(id.0);

@@ -356,6 +356,21 @@ fn unread_bar_count_is_captured_when_the_chat_opens() {
     assert_eq!(h.history().unread_at_open, 3);
 }
 
+#[test]
+fn deleting_the_message_under_the_unread_bar_removes_the_bar() {
+    let mut h = Harness::with_unread_chat();
+    let first = h.driver.select_chat(ChatId(7)).unwrap().unwrap();
+    h.answer(first, &[20, 30, 40, 50]);
+    assert!(h.history().unread_anchor.is_some());
+    let bar = h.history().unread_bar_message().expect("bar message");
+    // A later message going away leaves the bar where it is.
+    h.ingest(r#"{"@type":"updateDeleteMessages","chat_id":7,"message_ids":[50],"is_permanent":true,"from_cache":false}"#);
+    assert_eq!(h.history().unread_bar_message(), Some(bar));
+    h.ingest(&format!(r#"{{"@type":"updateDeleteMessages","chat_id":7,"message_ids":[{}],"is_permanent":true,"from_cache":false}}"#, bar.0));
+    assert_eq!(h.history().unread_anchor, None);
+    assert_eq!(h.history().unread_bar_message(), None);
+}
+
 fn sent_json(h: &Harness, ty: &str) -> Option<Value> {
     h.recorder
         .snapshot()
