@@ -372,6 +372,6 @@ impl Session {
         history.viewing.clear();
         history.visible.clear();
         history.visible_reported = true;
-        history.unread_anchor = None;
+        history.end_unread_open();
     }
 }

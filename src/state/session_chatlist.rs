@@ -208,6 +208,7 @@ impl Session {
         history.saved_open = None;
         history.saved_open_missed = false;
         history.unread_anchor = unread_anchor;
+        history.opened_with_unread = history.unread_anchor.is_some();
         history.unread_at_open = match history.unread_anchor {
             Some(_) => unread_count,
             None => 0,
@@ -240,7 +241,7 @@ impl Session {
         }
         // Opened at the first unread message: nothing is read until the
         // UI reports what is actually on screen.
-        if history.unread_anchor.is_some() {
+        if history.opened_with_unread {
             return Vec::new();
         }
         history

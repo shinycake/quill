@@ -367,7 +367,7 @@ impl Session {
         if message.is_outgoing {
             self.reset_history_window(chat_id);
             if let Some(history) = self.histories.get_mut(&chat_id.0) {
-                history.unread_anchor = None;
+                history.end_unread_open();
             }
             return true;
         }

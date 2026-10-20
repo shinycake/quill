@@ -98,7 +98,7 @@ if [[ "$OS" == linux ]] && ! command -v pkg-config >/dev/null; then
   echo "error: pkg-config is required to find libpulse/libasound (apt install pkg-config libpulse-dev libasound2-dev)" >&2
   exit 2
 fi
-if [[ "$OS" != macos ]] && ! command -v nasm >/dev/null; then
+if [[ "$OS" != macos && "$(uname -m)" == x86_64 ]] && ! command -v nasm >/dev/null; then
   echo "error: nasm is required for FFmpeg's x86 assembly (apt install nasm / pacman -S nasm)" >&2
   exit 2
 fi

@@ -5,7 +5,7 @@
 const PLATFORMS = [
   { id: "mac", label: "macOS", detail: "Apple Silicon · macOS 14+", match: /^quill-macos-aarch64\.zip$/, panel: "mac-install" },
   { id: "win", label: "Windows", detail: "x64 · Windows 10+", match: /^quill-windows-x86_64\.zip$/, panel: "windows-install" },
-  { id: "linux", label: "Linux", detail: "x86_64 · glibc", match: /^quill-linux-x86_64-bundle\.tar\.gz$/, panel: "linux-install" },
+  { id: "linux", label: "Linux", detail: "x86_64 or arm64 · glibc", match: /^quill-linux-x86_64-bundle\.tar\.gz$/, panel: "linux-install" },
 ];
 
 function el(tag, attrs = {}, ...children) {
