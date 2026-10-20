@@ -80,6 +80,8 @@ pub(crate) struct ChatListUi {
     /// still being fetched; resolved on the next render once the `story`
     /// response lands in the cache.
     pub(super) pending_story_open: Option<super::story_viewer::PendingStoryOpen>,
+    /// A file drag over the rows.
+    pub(super) drop_on_row: super::chat_list::DropOnRow,
     /// The keyboard selection in the list and in its search results.
     pub(super) keys: super::chat_list_keys::ChatListKeys,
 }
@@ -113,6 +115,7 @@ impl ChatListUi {
             forum_column_shown: false,
             pending_close_secret_chat: None,
             pending_story_open: None,
+            drop_on_row: Default::default(),
             keys: Default::default(),
         }
     }
