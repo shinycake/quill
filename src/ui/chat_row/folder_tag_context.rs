@@ -215,6 +215,7 @@ impl QuillApp {
                     .chat_list_nav_row(row, ListRow::Chat(id), selected, cx)
                     .into_any_element();
                 let row = self.chat_swipe_wrap(row, id, swipe_label, height, cx);
+                let row = self.drop_row_wrap(row, id, cx);
                 match pin_slide {
                     // A row shifted by the pinned drag: the dragged row
                     // follows the pointer above its neighbours, the
