@@ -10,7 +10,7 @@
 # src/media_tools.rs); anything else the allowlist does not name must be
 # present in the package. See docs/decisions/codex-linux-package.md.
 #
-# Usage: scripts/check-bundle-elf.sh [path/to/quill-linux-x86_64]
+# Usage: scripts/check-bundle-elf.sh [path/to/quill-linux-<arch>]
 set -euo pipefail
 
 PKG="${1:-dist/linux/quill-linux-x86_64}"

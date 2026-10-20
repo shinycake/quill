@@ -123,7 +123,9 @@ fi
 cache="$( (ldconfig -p || /sbin/ldconfig -p) 2>/dev/null || true)"
 if [ -n "$cache" ]; then
   for lib in libvulkan.so.1 libgtk-3.so.0; do
-    printf '%s\n' "$cache" | grep -qF "$lib (" || missing="$missing$lib "
+    # A here-string, not printf | grep -q: grep stops at the first match and
+    # pipefail would report the writer's SIGPIPE as a missing library.
+    grep -qF "$lib (" <<<"$cache" || missing="$missing$lib "
   done
 fi
 if [ -n "$missing" ]; then

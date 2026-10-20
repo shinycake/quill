@@ -208,7 +208,11 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: quill-linux-x86_64-bundle
-          path: in/linux
+          path: in/linux-x86_64
+      - uses: actions/download-artifact@v8
+        with:
+          name: quill-linux-aarch64-bundle
+          path: in/linux-aarch64
       - uses: actions/download-artifact@v8
         with:
           name: quill-windows-x86_64
@@ -223,13 +227,16 @@ jobs:
         run: |
           mkdir -p release-out
           # Check each package against the checksum its build job wrote.
-          for f in in/macos/quill-macos-aarch64.zip in/linux/linux/quill-linux-x86_64-bundle.tar.gz in/windows/quill-windows-x86_64.zip; do
+          for f in in/macos/quill-macos-aarch64.zip in/linux-x86_64/linux/quill-linux-x86_64-bundle.tar.gz \
+                   in/linux-aarch64/linux/quill-linux-aarch64-bundle.tar.gz in/windows/quill-windows-x86_64.zip; do
             # The Windows .sha256 file has CRLF line endings.
             (cd "$(dirname "$f")" && tr -d '\r' < "$(basename "$f").sha256" | sha256sum -c -)
             cp "$f" release-out/
           done
-          cp in/linux/update/quill-linux-x86_64 release-out/
-          chmod 755 release-out/quill-linux-x86_64
+          for arch in x86_64 aarch64; do
+            cp "in/linux-$arch/update/quill-linux-$arch" release-out/
+            chmod 755 "release-out/quill-linux-$arch"
+          done
           cp in/sources/* release-out/
           ls -l release-out
       - name: previous release tag
@@ -270,7 +277,8 @@ jobs:
       - name: check the release file list
         run: |
           expected=(LGPL-SOURCES.txt SHA256SUMS.txt latest.json quill-linux-x86_64
-                    quill-linux-x86_64-bundle.tar.gz quill-macos-aarch64.zip quill-windows-x86_64.zip)
+                    quill-linux-x86_64-bundle.tar.gz quill-linux-aarch64 quill-linux-aarch64-bundle.tar.gz
+                    quill-macos-aarch64.zip quill-windows-x86_64.zip)
           for f in "${expected[@]}"; do
             [ -f "release-out/$f" ] || { echo "::error::missing release file $f"; exit 1; }
           done

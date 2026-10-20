@@ -58,7 +58,7 @@ curl -fsSL https://raw.githubusercontent.com/shinycake/quill/main/scripts/macos-
 
 Quill has no paid Apple Developer ID, so it isn't notarized. A zip downloaded in a browser is quarantined and macOS blocks the first launch; the script downloads with `curl`, which doesn't quarantine, checks the release's SHA-256 and the app's signature, and Quill opens without a warning. If you did download the zip in a browser, run `xattr -dr com.apple.quarantine /Applications/Quill.app` once, or allow it under System Settings > Privacy & Security > Open Anyway.
 
-On Linux (x86_64, glibc), paste this into a terminal. It installs Quill for your user under `~/.local`, with a desktop entry, and needs no root:
+On Linux (x86_64 or arm64, glibc), paste this into a terminal. It installs Quill for your user under `~/.local`, with a desktop entry, and needs no root:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/shinycake/quill/main/scripts/linux-web-install.sh | bash
@@ -75,7 +75,7 @@ All three scripts check the download against the release's SHA-256 checksums and
 The packages target:
 
 - macOS 14 or later on Apple Silicon
-- Linux on x86_64 (glibc), as a relocatable tarball with an `install.sh`
+- Linux on x86_64 or arm64 (glibc), as a relocatable tarball with an `install.sh`
 - Windows 10 or later on x86_64, as a zip you unpack and run
 
 The packages do not include a Telegram API ID. To sign in you need your own, as described in the next section.
