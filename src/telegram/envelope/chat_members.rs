@@ -55,6 +55,10 @@ pub struct ParsedChatMember {
     /// status or an absent rights block. Drives the promote/edit-rights
     /// flows and the `can_promote_members` gate.
     pub admin_rights: Option<ChatAdminRights>,
+    /// The administrator (or creator) posts as the group: `rights.is_anonymous`
+    /// of an administrator, `chatMemberStatusCreator.is_anonymous` of the
+    /// owner. False for every other status.
+    pub is_anonymous: bool,
     /// Slice G1: `chatMember.tag` (schema 1.8.67, line 2526) — the
     /// admin custom title (set via `setChatMemberTag`, line 13598).
     pub tag: String,
@@ -479,12 +483,24 @@ pub(crate) fn parse_chat_member(value: Option<&Value>) -> Option<ParsedChatMembe
     } else {
         None
     };
+    let is_anonymous = match status {
+        ChannelMemberStatus::Administrator => {
+            admin_rights.is_some_and(|rights| rights.is_anonymous)
+        }
+        ChannelMemberStatus::Creator => value
+            .get("status")
+            .and_then(|status| status.get("is_anonymous"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        _ => false,
+    };
     Some(ParsedChatMember {
         member_id,
         status,
         admin_can_post_messages,
         admin_can_invite_users: parse_invite_users_right(value.get("status")),
         admin_rights,
+        is_anonymous,
         tag: value
             .get("tag")
             .and_then(Value::as_str)
@@ -586,3 +602,7 @@ pub(crate) fn parse_can_transfer_ownership_result(
         _ => None,
     }
 }
+
+#[cfg(test)]
+#[path = "composer_hint_tests.rs"]
+mod composer_hint_tests;

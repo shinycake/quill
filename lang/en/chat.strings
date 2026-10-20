@@ -92,6 +92,7 @@
 "lng_rights_chat_add_members" = "Add members";
 "lng_saved_messages" = "Saved Messages";
 "lng_saved_music_added" = "Audio added to your Profile.";
+"lng_send_anonymous_ph" = "Send anonymously…";
 "lng_search_filter_all" = "All chats";
 "lng_search_filter_from_archive" = "From archive";
 "lng_search_tab_public_posts" = "Public Posts";

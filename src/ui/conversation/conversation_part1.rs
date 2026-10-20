@@ -405,6 +405,11 @@ impl QuillApp {
                                                     }
                                                 }),
                                         )
+                                        // The inline bot's hint after `@bot `.
+                                        .when_some(
+                                            self.inline_bot_hint_overlay(cx),
+                                            |wrap, hint| wrap.child(hint),
+                                        )
                                         // Red wavy underlines over the
                                         // misspelled words.
                                         .when_some(

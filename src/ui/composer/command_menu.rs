@@ -114,46 +114,28 @@ impl QuillApp {
         Some((prefix, quill::quick_replies::with_edit_row(filtered)))
     }
 
-    /// Phase 3.3: Enter with the menu open picks the highlighted row.
+    /// Enter with the menu open sends the highlighted command at once
+    /// (tdesktop `FieldAutocomplete` `ByEnter`: `sendCommand`, then the
+    /// field keeps the text after the caret); Tab inserts it instead.
     /// Returns true when Enter was consumed.
     pub(in crate::ui) fn pick_command_menu_selection(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let items = self
+        let rows = self
             .command_menu_state(cx)
-            .map(|(_, items)| items)
-            .unwrap_or_default();
-        if !self.composer_ui.command_menu_open || items.is_empty() {
+            .map(|(_, items)| items.len())
+            .unwrap_or(0);
+        if !self.composer_ui.command_menu_open || rows == 0 {
             return false;
         }
-        let index = self.composer_ui.command_menu_selected.min(items.len() - 1);
-        self.pick_command_menu_index(index, window, cx);
+        let index = self
+            .composer_ui
+            .command_menu_selected
+            .min(rows.saturating_sub(1));
+        self.send_command_menu_index(index, window, cx);
         true
-    }
-
-    /// Phase 3.3: tap / Enter pick. The partial `/`-token is replaced via
-    /// the 3.1 insert helper, then the menu closes (the next `Change`
-    /// reopens it if a trigger token remains).
-    pub(in crate::ui) fn pick_command_menu_index(
-        &mut self,
-        index: usize,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let items = self
-            .command_menu_state(cx)
-            .map(|(_, items)| items)
-            .unwrap_or_default();
-        let Some(item) = items.get(index) else {
-            return;
-        };
-        if let Some(shortcut_id) = item.quick_reply {
-            self.send_quick_reply_row(shortcut_id, window, cx);
-            return;
-        }
-        self.insert_command_menu_index(index, window, cx);
     }
 
     /// Tab: put the highlighted command in the composer instead of sending
@@ -214,8 +196,8 @@ impl QuillApp {
         self.close_command_menu(cx);
     }
 
-    /// A clicked command is sent at once (Telegram Desktop's bot command
-    /// list): the composer's `/`-token is dropped, any other text stays.
+    /// A clicked or Entered command is sent at once (Telegram Desktop's bot
+    /// command list): the composer's `/`-token is dropped, any other text stays.
     pub(in crate::ui) fn send_command_menu_index(
         &mut self,
         index: usize,
@@ -241,9 +223,14 @@ impl QuillApp {
         // The text after the caret stays in the field (tdesktop keeps
         // `getTextWithTagsPart(cursor)`).
         self.replace_composer_text(range, "", window, cx);
+        let rest = self.composer_markup(cx);
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
         self.submit_composer(command, window, cx);
+        // Sending empties the field; what followed the caret goes back.
+        if !rest.is_empty() && self.composer.read(cx).value().is_empty() {
+            self.set_composer_markup(&rest, window, cx);
+        }
     }
 }
 

@@ -120,3 +120,36 @@ fn a_slash_after_other_text_opens_nothing(cx: &mut TestAppContext) {
     type_text(&app, vcx, "hi /st", 6);
     assert!(menu_commands(&app, vcx).is_empty());
 }
+
+#[gpui_kit::test]
+fn enter_sends_the_command_and_leaves_the_text_after_the_caret(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    type_text(&app, vcx, "/st and more", 3);
+    assert_eq!(
+        menu_commands(&app, vcx),
+        ["/start@weatherbot", "/start@pollbot"]
+    );
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            assert!(app.pick_command_menu_selection(window, cx));
+        });
+    });
+    // Tab would have put `/start@weatherbot` in the field; Enter takes the
+    // token out and keeps only what followed the caret.
+    assert_eq!(composer_text(&app, vcx).0, " and more");
+    assert!(menu_commands(&app, vcx).is_empty());
+}
+
+#[gpui_kit::test]
+fn enter_without_a_menu_is_not_consumed(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    type_text(&app, vcx, "hello", 5);
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            assert!(!app.pick_command_menu_selection(window, cx));
+        });
+    });
+    assert_eq!(composer_text(&app, vcx).0, "hello");
+}
