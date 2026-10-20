@@ -16,4 +16,7 @@ Telegram Desktop ships Linux builds for x86_64 only (tarball, Snap, Flatpak); ar
 - **musl (Alpine):** unchanged; the installer still refuses non-glibc systems.
 
 ## Verified
-See the PR: the release dry run's aarch64 job, and the arm64 package run in a Linux VM with the screenshot demos.
+Release dry run on the branch: both Linux packages, the assembled release and its file-list check passed. The arm64 package, installed with `linux-web-install.sh` (local tarball URL and SHA-256), ran the `ready-showcase` and `ready-reactions` screenshot demos in an Omarchy aarch64 VM (Hyprland, Wayland) on Mesa lavapipe; the VM has no hardware Vulkan driver, and the virtio Vulkan driver found no adapter.
+
+## Installer fix found on the way
+On Omarchy (Arch Linux ARM) the installer said `libvulkan.so.1` and `libgtk-3.so.0` were missing although both were installed. The check piped the whole `ldconfig -p` output into `grep -q`; grep exits at the first match, printf gets SIGPIPE, and `set -o pipefail` turned that into a failed lookup whenever the cache was large. It now uses a here-string, and the installer test fails if a fully provisioned runner gets that warning.

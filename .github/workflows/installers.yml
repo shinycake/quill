@@ -68,6 +68,8 @@ jobs:
         run: |
           bash < scripts/linux-web-install.sh | tee "$RUNNER_TEMP/install.log"
           grep -q '^Checksum OK$' "$RUNNER_TEMP/install.log"
+          # The runtime libraries are installed above, so none may be reported missing.
+          if grep -q "aren't installed" "$RUNNER_TEMP/install.log"; then exit 1; fi
           opt="$HOME/.local/opt/quill"
           "$HOME/.local/bin/quill" --version | grep '^Quill '
           test "$(readlink "$HOME/.local/bin/quill")" = "$opt/quill"
