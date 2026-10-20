@@ -50,6 +50,12 @@ PACKAGES = [
         "kind": "tarball",
     },
     {
+        "id": "linux-aarch64",
+        "asset": "quill-linux-aarch64-bundle.tar.gz",
+        "label": "Linux arm64 (glibc 2.35 or later)",
+        "kind": "tarball",
+    },
+    {
         "id": "windows-x86_64",
         "asset": "quill-windows-x86_64.zip",
         "label": "Windows 10 or later, x86_64",
@@ -58,7 +64,7 @@ PACKAGES = [
 ]
 # Bare executables the in-app updater swaps in place (src/updater.rs
 # binary_asset_name: quill-<os>-<arch>). Only the Linux package can self-update.
-UPDATE_BINARIES = {"linux-x86_64": "quill-linux-x86_64"}
+UPDATE_BINARIES = {"linux-x86_64": "quill-linux-x86_64", "linux-aarch64": "quill-linux-aarch64"}
 
 INSTALL = """\
 ## Installing
@@ -80,17 +86,18 @@ ad-hoc signed). Move `Quill.app` to Applications and run
 Quill once, then go to System Settings > Privacy & Security, click
 **Open Anyway** next to the Quill message, and confirm.
 
-**Linux (x86_64, glibc).** Paste this into a terminal to install or update
-Quill for your user, with no root needed:
+**Linux (x86_64 or arm64, glibc).** Paste this into a terminal to install or
+update Quill for your user, with no root needed:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/shinycake/quill/main/scripts/linux-web-install.sh | bash
 ```
 
-It downloads `quill-linux-x86_64-bundle.tar.gz`, checks its SHA-256, installs
-it under `~/.local` with a desktop entry, and names any system library that is
-missing. To do it by hand, `tar -xzf quill-linux-x86_64-bundle.tar.gz`, then run
-`quill-linux-x86_64/quill` in place or `quill-linux-x86_64/install.sh` (pass a
+It picks the package for your CPU (`quill-linux-x86_64-bundle.tar.gz` or
+`quill-linux-aarch64-bundle.tar.gz`), checks its SHA-256, installs it under
+`~/.local` with a desktop entry, and names any system library that is missing.
+To do it by hand, unpack the tarball with `tar -xzf`, then run
+`quill-linux-<arch>/quill` in place or `quill-linux-<arch>/install.sh` (pass a
 prefix to install elsewhere). Quill can update this package in place from
 Settings.
 
@@ -261,8 +268,8 @@ def build(args: argparse.Namespace) -> None:
 |---|---|---|
 {rows}
 
-`quill-linux-x86_64` is the bare executable the in-app updater installs into an
-existing Linux package. `latest.json` is a machine-readable summary of this release.
+`quill-linux-x86_64` and `quill-linux-aarch64` are the bare executables the in-app
+updater installs into an existing Linux package. `latest.json` is a machine-readable summary of this release.
 
 {INSTALL}
 ## Telegram API credentials

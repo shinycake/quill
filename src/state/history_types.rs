@@ -511,6 +511,12 @@ pub struct HistoryState {
     /// the "N Unread Messages" bar text (the live count shrinks as rows
     /// are read; the bar keeps what was unread on open).
     pub unread_at_open: i32,
+    /// The chat was opened with unread messages and the UI has not shown
+    /// anything yet. Separate from `unread_anchor` (the bar), like
+    /// tdesktop's `_firstUnreadView` versus `_unreadBarView`: deleting the
+    /// bar's message drops the bar but the chat is still not read unseen.
+    /// Cleared with the anchor by jumping to the latest or sending.
+    pub opened_with_unread: bool,
     /// Bumped whenever the window is replaced, so the UI re-anchors its
     /// scroll position (unread divider, jump target, or bottom).
     pub window_epoch: u64,
@@ -574,7 +580,42 @@ impl HistoryState {
         self.load_failed = false;
     }
 
+    /// The message the "N Unread Messages" bar sits above: the first
+    /// incoming one after `unread_anchor` (the rule the rows are built by).
+    pub fn unread_bar_message(&self) -> Option<MessageId> {
+        let anchor = self.unread_anchor?;
+        self.messages
+            .values()
+            .find(|message| !message.is_outgoing && message.id.0 > anchor.0)
+            .map(|message| message.id)
+    }
+
+    /// Drop the bar when it sits above one of `doomed` (about to be removed
+    /// by delete, window trim or prune). Call before removing them.
+    pub(crate) fn drop_unread_bar_for(&mut self, doomed: &[i64]) {
+        if self.unread_anchor.is_none() || doomed.is_empty() {
+            return;
+        }
+        if self
+            .unread_bar_message()
+            .is_some_and(|bar| doomed.contains(&bar.0))
+        {
+            self.unread_anchor = None;
+        }
+    }
+
+    /// End the opened-with-unread state: the bar goes and reads are no
+    /// longer held back.
+    pub fn end_unread_open(&mut self) {
+        self.unread_anchor = None;
+        self.opened_with_unread = false;
+    }
+
+    /// Remove a message. The bar belongs to its message (tdesktop
+    /// `History::mainViewRemoved` drops `_unreadBarView`), so deleting the
+    /// message it sits above removes the bar instead of sliding it down.
     pub(crate) fn remove(&mut self, id: MessageId, permanent: bool) {
+        self.drop_unread_bar_for(&[id.0]);
         self.messages.remove(&id.0);
         if permanent {
             self.tombstones.insert(id.0);

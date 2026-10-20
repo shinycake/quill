@@ -165,6 +165,7 @@ impl HistoryState {
     /// chat's start.
     pub(crate) fn trim_to_tail(&mut self, keep: usize) -> usize {
         let doomed = tail_excess(&self.messages, keep);
+        self.drop_unread_bar_for(&doomed);
         for id in &doomed {
             self.messages.remove(id);
             self.visible.remove(id);

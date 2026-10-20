@@ -24,6 +24,11 @@ case "$(uname -s):$(uname -m)" in
         LIB_NAME="libntgcalls.so"
         NTGCALLS_SHA256="0e579e0cae2ff7133222a67a74e15af53a6c7d6ae2655fddd75d412876ad33c4"
         ;;
+    Linux:aarch64)
+        ASSET="ntgcalls.linux-arm64-shared_libs.zip"
+        LIB_NAME="libntgcalls.so"
+        NTGCALLS_SHA256="2958e1bc0707955b1606d0fe69ea6082e7a47358b90e5cb307274d9388db0bb8"
+        ;;
     Darwin:arm64)
         ASSET="ntgcalls.macos-arm64-shared_libs.zip"
         LIB_NAME="libntgcalls.dylib"

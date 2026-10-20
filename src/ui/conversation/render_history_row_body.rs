@@ -376,7 +376,7 @@ impl QuillApp {
                 && let Some(chat) = live.driver.session.open_chat
                 && let Some(history) = live.driver.session.histories.get_mut(&chat.0)
             {
-                history.unread_anchor = None;
+                history.end_unread_open();
             }
             self.history
                 .scroller

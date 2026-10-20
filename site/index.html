@@ -345,17 +345,23 @@
           <div class="inst-card">
             <h4>Or download it yourself</h4>
             <p class="inst-lede">Get Quill as a tarball. It runs from any folder, or installs under <code>~/.local</code>.</p>
-            <a class="btn ghost" id="linux-tar" href="https://github.com/shinycake/quill/releases/latest/download/quill-linux-x86_64-bundle.tar.gz">
-              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>
-              Download for Linux (tar.gz)
-            </a>
+            <div class="inst-btns">
+              <a class="btn ghost" id="linux-tar" href="https://github.com/shinycake/quill/releases/latest/download/quill-linux-x86_64-bundle.tar.gz">
+                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>
+                Download for x86_64 (tar.gz)
+              </a>
+              <a class="btn ghost" id="linux-tar-arm64" href="https://github.com/shinycake/quill/releases/latest/download/quill-linux-aarch64-bundle.tar.gz">
+                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>
+                Download for arm64 (tar.gz)
+              </a>
+            </div>
 
             <h5>How to install it</h5>
             <ol class="inst-steps">
-              <li>Unpack it: <code class="inline">tar -xzf quill-linux-x86_64-bundle.tar.gz</code></li>
-              <li>Run <code class="inline">quill-linux-x86_64/install.sh</code> to add Quill to your applications menu, or start <code class="inline">quill-linux-x86_64/quill</code> where it is.</li>
+              <li>Unpack it: <code class="inline">tar -xzf quill-linux-*-bundle.tar.gz</code></li>
+              <li>Run <code class="inline">quill-linux-*/install.sh</code> to add Quill to your applications menu, or start <code class="inline">quill-linux-*/quill</code> where it is.</li>
             </ol>
-            <p class="why-note">Quill needs a glibc-based x86_64 distribution, a Vulkan driver, and GTK 3, which every mainstream desktop has. On a minimal Debian or Ubuntu system, install them with <code>sudo apt install libgtk-3-0 libxkbcommon-x11-0 libvulkan1 mesa-vulkan-drivers libfontconfig1 libasound2</code>.</p>
+            <p class="why-note">Quill needs a glibc-based distribution on x86_64 or 64-bit ARM (arm64), a Vulkan driver, and GTK 3, which every mainstream desktop has. On a minimal Debian or Ubuntu system, install them with <code>sudo apt install libgtk-3-0 libxkbcommon-x11-0 libvulkan1 mesa-vulkan-drivers libfontconfig1 libasound2</code>.</p>
           </div>
         </div>
       </section>
@@ -364,7 +370,7 @@
         <div class="notes" id="whatsnew-body"></div>
         <a class="more" id="whatsnew-link" href="https://github.com/shinycake/quill/releases">All releases</a>
       </div>
-      <p class="reqs">macOS 14 or later on Apple Silicon · Windows 10 or later (x64) · Linux x86_64 with glibc. Builds aren't signed with a paid developer certificate yet, so a download from the browser asks you to confirm the first launch.</p>
+      <p class="reqs">macOS 14 or later on Apple Silicon · Windows 10 or later (x64) · Linux x86_64 or arm64 with glibc. Builds aren't signed with a paid developer certificate yet, so a download from the browser asks you to confirm the first launch.</p>
     </section>
 
     <section class="faq wrap" aria-labelledby="faq-title">

@@ -302,6 +302,7 @@ section { scroll-margin-top: 72px; }
 .js-tabs .os-name { display: none; }
 .inst-card { position: relative; margin-top: 16px; padding: 26px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--line); }
 .inst-card.recommended { border-color: color-mix(in srgb, var(--accent) 60%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
+.inst-btns { display: flex; flex-wrap: wrap; gap: 12px; }
 .inst-card h4 { margin: 0; font-size: 19px; letter-spacing: -0.01em; }
 .inst-card h5 { margin: 26px 0 10px; font-size: 15px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); }
 .inst-lede { margin: 6px 0 14px; color: var(--muted); }
