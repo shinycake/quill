@@ -52,7 +52,8 @@ pub(super) struct ContextMenuItems {
     keys: RefCell<Vec<u32>>,
     /// Rows drawn this frame that own a submenu, with the submenu each opens.
     parents: RefCell<Vec<(u32, ChatMenuSubmenu)>>,
-    /// Key of the item to focus once this frame has drawn it.
+    /// Parent row of a submenu whose first drawn row takes the focus once
+    /// the frame that draws it has run.
     focus_pending: Cell<Option<u32>>,
 }
 
@@ -125,21 +126,36 @@ impl ContextMenuItems {
         self.keys.borrow().len()
     }
 
-    /// Asks the end of the next frame to focus the item drawn at `key`.
-    fn focus_next_frame(&self, key: u32) {
-        self.focus_pending.set(Some(key));
+    /// Asks the end of the next frame to focus the first row drawn for the
+    /// submenu of the row at `parent`.
+    fn focus_first_row_next_frame(&self, parent: u32) {
+        self.focus_pending.set(Some(parent));
     }
 
-    /// The end of a frame: focus the item asked for by `focus_next_frame`,
-    /// if this frame drew it. One attempt, so a submenu with no rows cannot
-    /// leave a stale request behind.
+    /// The end of a frame: focus the first live row of the submenu asked for
+    /// by `focus_first_row_next_frame`, if this frame drew one. One attempt,
+    /// so a submenu with no rows cannot leave a stale request behind.
     pub(super) fn apply_pending_focus(&self, window: &mut Window, cx: &mut App) {
-        let Some(key) = self.focus_pending.take() else {
+        let Some(parent) = self.focus_pending.take() else {
             return;
         };
-        if let Some(handle) = self.handle_for(key) {
+        if let Some(handle) = self.first_submenu_handle(parent) {
             window.focus(&handle, cx);
         }
+    }
+
+    /// The sort key of the first live (drawn and enabled) row of the submenu
+    /// of the row at `parent`.
+    pub(super) fn first_submenu_key(&self, parent: u32) -> Option<u32> {
+        self.live()
+            .into_iter()
+            .map(|(key, _)| key)
+            .find(|key| is_submenu_key(*key) && parent_key(*key) == parent)
+    }
+
+    fn first_submenu_handle(&self, parent: u32) -> Option<FocusHandle> {
+        let key = self.first_submenu_key(parent)?;
+        self.handle_for(key)
     }
 
     /// This frame's items as `(key, handle)`, in key order. Guards are
@@ -353,7 +369,10 @@ impl QuillApp {
 
     /// Up, Down, Left, Right, Escape and Enter where a submenu is involved.
     /// With one open every such key is for it, whichever row has the focus
-    /// (`PopupMenu::handleKeyPress`). Returns whether the key was taken.
+    /// (`PopupMenu::handleKeyPress`). A submenu marked open whose parent row
+    /// was not drawn this frame is stale: it is closed and the key goes on as
+    /// if none were open. A drawn submenu with no live row takes the keys and
+    /// leaves the focus on its parent row. Returns whether the key was taken.
     fn submenu_key_press(
         &mut self,
         key: &Keystroke,
@@ -374,6 +393,9 @@ impl QuillApp {
                 open_parent,
             )
         };
+        if open_parent.is_none() && self.open_submenu().is_some() {
+            self.close_chat_submenu(cx);
+        }
         if let Some(parent) = open_parent {
             match name {
                 "down" | "up" => {
@@ -396,7 +418,7 @@ impl QuillApp {
                     return true;
                 }
                 "right" | "enter" if focused == Some(parent) => {
-                    let first = self.frame.context_menu_items.handle_for(parent + 1);
+                    let first = self.frame.context_menu_items.first_submenu_handle(parent);
                     if let Some(first) = first {
                         window.focus(&first, cx);
                     }
@@ -423,7 +445,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.open_chat_submenu(submenu, cx);
-        self.frame.context_menu_items.focus_next_frame(parent + 1);
+        self.frame
+            .context_menu_items
+            .focus_first_row_next_frame(parent);
         cx.notify();
     }
 

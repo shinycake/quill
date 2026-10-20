@@ -19,12 +19,13 @@ use quill::telegram::envelope::{
 /// Width of the menu panel; a submenu opens beside it.
 pub(super) const MENU_WIDTH: f32 = 240.;
 
+const PANEL_PADDING: f32 = 4.;
+
 /// Sort order of the Mute row (and Unmute, which takes its place), shared by
 /// the row's key and its submenu-parent mark so the two cannot drift.
 const MUTE_ROW_ORDER: u8 = 30;
 /// Sort order of the Add to folder row.
 const FOLDERS_ROW_ORDER: u8 = 45;
-const PANEL_PADDING: f32 = 4.;
 
 /// "1 hour", "8 hours", "2 days": `Ui::FormatMuteFor`.
 fn period_text(seconds: i32) -> String {

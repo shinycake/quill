@@ -32,8 +32,18 @@ folder, `chat_menu_submenus.rs`). The message menu has none.
   those rows only exist while it is open.
 - Left stays "close" and Right stays "open" in right-to-left layouts.
   Mirroring them is an owner decision and is not done here.
-- Quill difference: Enter on the parent row of an open submenu moves into it
-  instead of doing nothing, since in Quill that row's click toggles it.
+- Quill difference: Enter and Right on the parent row of an open submenu move
+  into its first live row instead of doing nothing (tdesktop forwards the key
+  to the submenu, which ignores it). Enter because in Quill that row's click
+  toggles it; Right because moving in is the useful result.
+- The first row entered is the first live one (drawn and enabled), not a fixed
+  offset from the parent, so a disabled first row does not swallow the key.
+- Stale state: if `ChatMenuState::submenu` is set but its parent row was not
+  drawn this frame, the submenu is treated as closed and the state is cleared
+  by the next key, which then acts normally (Escape closes the menu).
+- A submenu that is open and drawn but has no live row takes Up, Down, Right
+  and Enter and does nothing with them (focus stays on the parent row; tdesktop
+  likewise has nothing to select). Left and Escape still close it.
 
 ## How verified
 
@@ -44,7 +54,10 @@ folder, `chat_menu_submenus.rs`). The message menu has none.
   tree), wraps to the first, and Up wraps back to the last without reaching the
   menu. With the submenu opened by the pointer and the focus on the parent
   row: Down enters at the first row, Up at the last, Left closes only the
-  submenu, Escape closes only the submenu (a second closes the menu).
+  submenu, Escape closes only the submenu (a second closes the menu), Right
+  enters it. A stale submenu (parent not drawn) is cleared by Down, and Escape
+  then closes the menu. The first live row is the first enabled drawn one, and
+  none for a submenu with no rows (unit test on the item registry).
 - `--screenshot-demo ready-chats`, right-click "Demo chat B", `k:down` to Mute
   notifications, `k:right`, and `m:` onto the Mute row then `k:down`, light
   and dark; PNGs read back, not committed.

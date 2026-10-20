@@ -145,6 +145,7 @@ fn enter_on_the_parent_row_opens_the_submenu_too(cx: &mut TestAppContext) {
     settle(vcx);
     assert_eq!(submenu(&app, vcx), Some(ChatMenuSubmenu::Mute));
     let drawn = submenu_labels(vcx);
+    assert!(drawn.len() > 1, "the submenu draws several rows");
     assert_eq!(focused_label(vcx).as_ref(), drawn.first());
 }
 
@@ -288,4 +289,92 @@ fn the_menus_own_rows_are_walked_while_the_submenu_is_closed(cx: &mut TestAppCon
         walked.push(focused_label(vcx).expect("a row"));
     }
     assert_eq!(walked, own, "Down visits the menu's rows in drawing order");
+}
+
+/// Quill moves into the submenu on Right from its parent row; tdesktop hands
+/// Right to the submenu, where it does nothing.
+#[gpui_kit::test]
+fn right_from_the_parent_row_enters_a_hover_opened_submenu(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    hover_open_with_focus_on_mute(&app, vcx);
+    let drawn = submenu_labels(vcx);
+    assert!(drawn.len() > 1, "the submenu draws several rows");
+    vcx.simulate_keystrokes("right");
+    settle(vcx);
+    assert_eq!(focused_label(vcx).as_ref(), drawn.first(), "first row");
+    assert_eq!(submenu(&app, vcx), Some(ChatMenuSubmenu::Mute));
+}
+
+/// A submenu marked open whose parent row is not drawn (here Add to folder,
+/// absent without folders) is closed by the next key, which then acts as if
+/// none were open.
+fn open_stale_folders_submenu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    focus_mute_row(app, vcx);
+    app.update_in(vcx, |app, _, cx| {
+        app.open_chat_submenu(ChatMenuSubmenu::Folders, cx);
+    });
+    settle(vcx);
+    assert_eq!(submenu(app, vcx), Some(ChatMenuSubmenu::Folders));
+}
+
+#[gpui_kit::test]
+fn down_with_a_stale_submenu_clears_it_and_walks_the_menu(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_stale_folders_submenu(&app, vcx);
+    vcx.simulate_keystrokes("down");
+    settle(vcx);
+    assert_eq!(submenu(&app, vcx), None, "the stale state is cleared");
+    assert!(menu_open(&app, vcx));
+    let own = menu_labels(vcx);
+    let at = own
+        .iter()
+        .position(|l| *l == mute_label())
+        .expect("Mute row");
+    assert_eq!(
+        focused_label(vcx).as_ref(),
+        own.get(at + 1),
+        "Down moved on the menu's own rows"
+    );
+}
+
+#[gpui_kit::test]
+fn escape_with_a_stale_submenu_closes_the_menu(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_stale_folders_submenu(&app, vcx);
+    vcx.simulate_keystrokes("escape");
+    settle(vcx);
+    assert_eq!(submenu(&app, vcx), None);
+    assert!(
+        !menu_open(&app, vcx),
+        "nothing is open, so Escape closes the menu"
+    );
+}
+
+/// The first live row of a submenu is the first one drawn and enabled, not
+/// the one at index 0; a submenu with no live row has none.
+#[gpui_kit::test]
+fn the_first_submenu_row_is_the_first_live_one(cx: &mut TestAppContext) {
+    use crate::ui::context_menu_keys::{ContextMenuItems, MenuKeyTarget, row_key, submenu_key};
+    use gpui_kit::{InteractiveElement, div};
+    let (_app, mut vcx) = new_app(cx);
+    let items = ContextMenuItems::default();
+    vcx.update(|_, cx| {
+        items.begin();
+        items.mark_submenu_parent(30, ChatMenuSubmenu::Mute);
+        assert_eq!(items.first_submenu_key(row_key(30)), None, "no rows drawn");
+        // Rows 0 and 1 are disabled, so only the rows from index 2 claim.
+        for index in [2usize, 3] {
+            let _ = div()
+                .id(("row", index))
+                .menu_key_target(submenu_key(30, index), &items, cx);
+        }
+        assert_eq!(
+            items.first_submenu_key(row_key(30)),
+            Some(submenu_key(30, 2))
+        );
+        assert_eq!(items.first_submenu_key(row_key(45)), None, "other parent");
+    });
 }
