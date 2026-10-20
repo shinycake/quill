@@ -18,7 +18,14 @@ use quill::telegram::envelope::{
 
 /// Width of the menu panel; a submenu opens beside it.
 pub(super) const MENU_WIDTH: f32 = 240.;
+
 const PANEL_PADDING: f32 = 4.;
+
+/// Sort order of the Mute row (and Unmute, which takes its place), shared by
+/// the row's key and its submenu-parent mark so the two cannot drift.
+const MUTE_ROW_ORDER: u8 = 30;
+/// Sort order of the Add to folder row.
+const FOLDERS_ROW_ORDER: u8 = 45;
 
 /// "1 hour", "8 hours", "2 days": `Ui::FormatMuteFor`.
 fn period_text(seconds: i32) -> String {
@@ -89,11 +96,24 @@ fn submenu_panel(rows: Vec<AnyElement>) -> AnyElement {
 }
 
 impl QuillApp {
-    fn open_chat_submenu(&mut self, which: ChatMenuSubmenu, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn open_chat_submenu(
+        &mut self,
+        which: ChatMenuSubmenu,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(menu) = self.chat_list.menu.as_mut()
             && menu.submenu != Some(which)
         {
             menu.submenu = Some(which);
+            cx.notify();
+        }
+    }
+
+    /// Closes the open submenu only; the menu stays.
+    pub(in crate::ui) fn close_chat_submenu(&mut self, cx: &mut Context<Self>) {
+        if let Some(menu) = self.chat_list.menu.as_mut()
+            && menu.submenu.take().is_some()
+        {
             cx.notify();
         }
     }
@@ -156,7 +176,7 @@ impl QuillApp {
                     tr(keys::MUTE_MENU_UNMUTE).to_string(),
                     false,
                     hover,
-                    row_key(30),
+                    row_key(MUTE_ROW_ORDER),
                     &self.frame.context_menu_items,
                     cx,
                 )
@@ -170,6 +190,9 @@ impl QuillApp {
                 .into_any_element(),
             );
         }
+        self.frame
+            .context_menu_items
+            .mark_submenu_parent(MUTE_ROW_ORDER, ChatMenuSubmenu::Mute);
         let open = menu.submenu == Some(ChatMenuSubmenu::Mute);
         let parent = menu_row(
             "chat-menu-mute",
@@ -177,7 +200,7 @@ impl QuillApp {
             tr(keys::Q_CHAT_MUTE_NOTIFICATIONS).to_string(),
             false,
             hover,
-            row_key(30),
+            row_key(MUTE_ROW_ORDER),
             &self.frame.context_menu_items,
             cx,
         )
@@ -311,6 +334,9 @@ impl QuillApp {
             return None;
         }
         let chat_id = menu.chat_id;
+        self.frame
+            .context_menu_items
+            .mark_submenu_parent(FOLDERS_ROW_ORDER, ChatMenuSubmenu::Folders);
         let open = menu.submenu == Some(ChatMenuSubmenu::Folders);
         let parent = menu_row(
             "chat-menu-folder",
@@ -318,7 +344,7 @@ impl QuillApp {
             tr(keys::FILTERS_MENU_ADD).to_string(),
             false,
             hover,
-            row_key(45),
+            row_key(FOLDERS_ROW_ORDER),
             &self.frame.context_menu_items,
             cx,
         )

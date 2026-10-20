@@ -14,7 +14,7 @@ use gpui_kit::{
     AppContext, Entity, FocusHandle, Focusable, TestAppContext, VisualTestContext, point, px, size,
 };
 
-fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+pub(super) fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -120,7 +120,7 @@ fn in_menu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
     })
 }
 
-fn focus_chat_list(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+pub(super) fn focus_chat_list(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     app.update_in(vcx, |app, window, cx| {
         window.focus(&app.focus_sidebar.clone(), cx)
     });
@@ -196,7 +196,7 @@ fn arrows_enter_the_menu_instead_of_reaching_the_chat_list(cx: &mut TestAppConte
     );
 }
 
-fn open_chat_menu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+pub(super) fn open_chat_menu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     app.update_in(vcx, |app, _, cx| {
         app.chat_list.menu = Some(crate::ui::menu_states::ChatMenuState::at(
             quill::ids::ChatId(11),
@@ -497,8 +497,8 @@ fn an_all_disabled_menu_has_no_target(cx: &mut TestAppContext) {
             );
         }
         assert_eq!(items.enabled_count(), 0, "no row has a handle");
-        assert!(items.step(true, window).is_none());
-        assert!(items.step(false, window).is_none());
+        assert!(items.step(true, None, window).is_none());
+        assert!(items.step(false, None, window).is_none());
     });
 }
 
@@ -568,9 +568,9 @@ fn disabled_items_are_never_focused(cx: &mut TestAppContext) {
         "only the enabled item has a handle"
     );
     vcx.update(|window, _| {
-        let only = items.step(true, window).expect("the enabled item");
+        let only = items.step(true, None, window).expect("the enabled item");
         assert_eq!(
-            items.step(false, window),
+            items.step(false, None, window),
             Some(only),
             "Up reaches the same one"
         );
@@ -579,10 +579,10 @@ fn disabled_items_are_never_focused(cx: &mut TestAppContext) {
     none.begin();
     vcx.update(|window, _| {
         assert!(
-            none.step(true, window).is_none(),
+            none.step(true, None, window).is_none(),
             "no enabled item, no target"
         );
-        assert!(none.step(false, window).is_none());
+        assert!(none.step(false, None, window).is_none());
     });
 }
 
