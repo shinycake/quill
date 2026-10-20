@@ -140,11 +140,12 @@ fn paint_inline_hint(
     let gap = if last.is_whitespace() {
         px(0.)
     } else {
-        system.shape_line(" ".into(), font_size, &[run(1)], None).width
+        system
+            .shape_line(" ".into(), font_size, &[run(1)], None)
+            .width
     };
     let origin = point(rect.right() + gap, rect.top());
     window.with_content_mask(Some(ContentMask { bounds: clip }), |window| {
         let _ = line.paint(origin, rect.size.height, TextAlign::Left, None, window, cx);
     });
 }
-

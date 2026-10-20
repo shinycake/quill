@@ -33,9 +33,7 @@ fn an_administrator_is_anonymous_by_their_rights() {
 
 #[test]
 fn the_owner_is_anonymous_by_their_status() {
-    let creator = |is_anonymous| {
-        json!({"@type": "chatMemberStatusCreator", "is_anonymous": is_anonymous, "is_member": true})
-    };
+    let creator = |is_anonymous| json!({"@type": "chatMemberStatusCreator", "is_anonymous": is_anonymous, "is_member": true});
     assert_eq!(anonymous(creator(true)), Some(true));
     assert_eq!(anonymous(creator(false)), Some(false));
 }
