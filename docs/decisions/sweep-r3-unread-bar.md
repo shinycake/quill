@@ -33,3 +33,20 @@ Unit test `deleting_the_message_under_the_unread_bar_removes_the_bar`. Demo
 capture of ready-chats with a temporary hook deleting message 101 shortly after
 open, light and dark: before, the bar sits above "Hello from injected JSON.";
 after, no bar and the other rows unchanged.
+
+## Read state stays separate from the bar
+
+tdesktop keeps `_firstUnreadView` (where the chat opened, which gates
+reading) apart from `_unreadBarView` (the divider); `mainViewRemoved` nulls
+only the latter. Quill mirrors that: `HistoryState::opened_with_unread`
+holds back the newest-row `viewMessages` fallback until the UI reports
+visibility, while `unread_anchor` only drives the bar. Deleting the bar
+message before any report therefore drops the bar and still reads nothing.
+Jumping to the latest and sending end both (`end_unread_open`).
+
+Window trim and tail prune go through the same `drop_unread_bar_for`
+rule as deletes, computed once per batch.
+
+Known gap: thread views (`ThreadState::unread_anchor`, `threads.rs`,
+`session_thread.rs`) still slide the bar to the next incoming message when
+its message is deleted.

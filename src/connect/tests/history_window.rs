@@ -371,6 +371,32 @@ fn deleting_the_message_under_the_unread_bar_removes_the_bar() {
     assert_eq!(h.history().unread_bar_message(), None);
 }
 
+#[test]
+fn deleting_the_bar_message_before_the_ui_reports_reads_nothing() {
+    let mut h = Harness::with_unread_chat();
+    let first = h.driver.select_chat(ChatId(7)).unwrap().unwrap();
+    h.answer(first, &[20, 30, 40, 50]);
+    let bar = h.history().unread_bar_message().expect("bar message");
+    h.ingest(&format!(r#"{{"@type":"updateDeleteMessages","chat_id":7,"message_ids":[{}],"is_permanent":true,"from_cache":false}}"#, bar.0));
+    assert_eq!(h.history().unread_anchor, None);
+    assert!(h.driver.session.message_ids_to_view(ChatId(7)).is_empty());
+    assert_eq!(h.history().unread_at_open, 3);
+}
+
+#[test]
+fn trimming_the_bar_message_away_removes_the_bar() {
+    let mut h = Harness::with_unread_chat();
+    let first = h.driver.select_chat(ChatId(7)).unwrap().unwrap();
+    h.answer(first, &[20, 30, 40, 50]);
+    let bar = h.history().unread_bar_message().expect("bar message");
+    let history = h.driver.session.history_entry(ChatId(7));
+    let kept = history.messages.keys().filter(|id| **id > bar.0).count();
+    assert!(history.trim_to_tail(kept) > 0);
+    assert!(!history.contains(bar));
+    assert_eq!(history.unread_bar_message(), None);
+    assert_eq!(history.unread_anchor, None);
+}
+
 fn sent_json(h: &Harness, ty: &str) -> Option<Value> {
     h.recorder
         .snapshot()
