@@ -60,6 +60,8 @@ pub(crate) struct PlaybackUi {
     pub(super) sticker_playback: super::sticker_playback::StickerPlayback,
     /// Animated custom emoji (smaller frames, more clips).
     pub(super) emoji_playback: super::sticker_playback::StickerPlayback,
+    /// Dice and slot machines in the history.
+    pub(super) dice_playback: super::sticker_playback::StickerPlayback,
     /// History row whose `image/gif` file is looping (`inline_playback`).
     pub(super) playing_animation: Option<MessageId>,
     pub(super) autoplayed_gifs: std::collections::HashSet<MessageId>,
@@ -143,6 +145,7 @@ impl PlaybackUi {
             positions: HashMap::new(),
             sticker_playback: Default::default(),
             emoji_playback: Default::default(),
+            dice_playback: Default::default(),
             playing_animation: None,
             autoplayed_gifs: Default::default(),
             gif: None,

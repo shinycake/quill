@@ -10,6 +10,7 @@ mod code_highlight;
 mod common_groups;
 mod composer;
 mod derived_state;
+mod dice;
 mod group_call_bar;
 mod groups_admin;
 mod info_actions;

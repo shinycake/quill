@@ -9,7 +9,7 @@ use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::power_saving;
 use quill::sticker_playback::Tint;
-use quill::telegram::envelope::StickerFormat;
+use quill::telegram::envelope::{DicePhase, StickerFormat};
 use smallvec::SmallVec;
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -41,11 +41,15 @@ pub(super) struct StickerJob {
 /// Which playback cache. Stickers decode at 224 px, the box Telegram
 /// Desktop draws them in (`maxStickerSize`; at most 16 clips). Custom emoji are small and many — every visible one animates,
 /// as in Telegram Desktop — so 56 px, at most 36 frames, 160 clips and
-/// 32 MB. Both play at most 30 fps (`MAX_PLAYBACK_FPS`).
+/// 32 MB. Dice draw at 112 px, so 224 px covers 2x screens, in a cache of
+/// their own: a slot machine plays five clips at once, which the sticker
+/// budget can't hold next to other stickers. All play at most 30 fps
+/// (`MAX_PLAYBACK_FPS`).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum PlaybackSize {
     Sticker,
     Emoji,
+    Dice,
 }
 
 impl PlaybackSize {
@@ -53,6 +57,7 @@ impl PlaybackSize {
         match self {
             Self::Sticker => 224,
             Self::Emoji => 56,
+            Self::Dice => 224,
         }
     }
 
@@ -60,6 +65,7 @@ impl PlaybackSize {
         match self {
             Self::Sticker => 16,
             Self::Emoji => 160,
+            Self::Dice => 16,
         }
     }
 
@@ -68,20 +74,22 @@ impl PlaybackSize {
         match self {
             Self::Sticker => 48 * 1024 * 1024,
             Self::Emoji => 32 * 1024 * 1024,
+            // A slot machine (about 60 MB) and two other dice.
+            Self::Dice => 96 * 1024 * 1024,
         }
     }
 
     /// The power-saving switch for this kind of clip shown in a chat.
     fn chat_flag(self) -> power_saving::Flag {
         match self {
-            Self::Sticker => power_saving::Flag::StickersChat,
+            Self::Sticker | Self::Dice => power_saving::Flag::StickersChat,
             Self::Emoji => power_saving::Flag::EmojiChat,
         }
     }
 
     fn max_frames(self) -> usize {
         match self {
-            Self::Sticker => quill::sticker_playback::MAX_STICKER_FRAMES,
+            Self::Sticker | Self::Dice => quill::sticker_playback::MAX_STICKER_FRAMES,
             Self::Emoji => 36,
         }
     }
@@ -89,7 +97,7 @@ impl PlaybackSize {
     /// Concurrent decodes.
     fn decoders(self) -> usize {
         match self {
-            Self::Sticker => 2,
+            Self::Sticker | Self::Dice => 2,
             Self::Emoji => 3,
         }
     }
@@ -149,7 +157,11 @@ impl Drop for StickerJob {
 }
 impl QuillApp {
     pub(super) fn stop_sticker_playback(&mut self) {
-        for size in [PlaybackSize::Sticker, PlaybackSize::Emoji] {
+        for size in [
+            PlaybackSize::Sticker,
+            PlaybackSize::Emoji,
+            PlaybackSize::Dice,
+        ] {
             let cache = self.playback_cache_mut(size);
             for (_, clip) in cache.clips.drain() {
                 super::image_budget::retire_all(clip.frames.iter().cloned());
@@ -164,6 +176,7 @@ impl QuillApp {
         match size {
             PlaybackSize::Sticker => &self.playback.sticker_playback,
             PlaybackSize::Emoji => &self.playback.emoji_playback,
+            PlaybackSize::Dice => &self.playback.dice_playback,
         }
     }
 
@@ -171,6 +184,7 @@ impl QuillApp {
         match size {
             PlaybackSize::Sticker => &mut self.playback.sticker_playback,
             PlaybackSize::Emoji => &mut self.playback.emoji_playback,
+            PlaybackSize::Dice => &mut self.playback.dice_playback,
         }
     }
 
@@ -468,7 +482,14 @@ impl QuillApp {
         if power_saving::on(power_saving::Flag::StickersPanel) {
             return None;
         }
-        self.animated_image(id, format, PlaybackSize::Sticker, false, true, cx)
+        self.animated_image(
+            id,
+            format,
+            PlaybackSize::Sticker,
+            Looping::Setting,
+            true,
+            cx,
+        )
     }
 
     /// A history row's animated sticker: for the conversation's animation
@@ -480,18 +501,20 @@ impl QuillApp {
         format: StickerFormat,
         cx: &mut Context<QuillApp>,
     ) -> Option<AnimatedVisual> {
-        self.history_animated(id, format, PlaybackSize::Sticker, false, cx)
+        self.history_animated(id, format, PlaybackSize::Sticker, None, cx)
     }
 
-    /// A dice's landing animation: plays once whatever the loop setting
-    /// says and rests on its last frame (the rolled value).
+    /// One sticker of a dice: the roll loops and the landing plays once
+    /// and rests on its last frame (the rolled value), whatever the loop
+    /// setting says.
     pub(super) fn history_dice_sticker(
         &self,
         id: FileId,
         format: StickerFormat,
+        phase: DicePhase,
         cx: &mut Context<QuillApp>,
     ) -> Option<AnimatedVisual> {
-        self.history_animated(id, format, PlaybackSize::Sticker, true, cx)
+        self.history_animated(id, format, PlaybackSize::Dice, Some(phase), cx)
     }
 
     fn history_animated(
@@ -499,24 +522,23 @@ impl QuillApp {
         id: FileId,
         format: StickerFormat,
         size: PlaybackSize,
-        once: bool,
+        dice: Option<DicePhase>,
         cx: &mut Context<QuillApp>,
     ) -> Option<AnimatedVisual> {
         // Battery and animations: stickers and emoji in messages stay
-        // still (the row shows the preview image). A dice's landing is not
-        // a sticker autoplay in tdesktop and always plays.
-        if !once && power_saving::on(size.chat_flag()) {
-            return None;
-        }
+        // still (the row shows the preview image). A dice is not a sticker
+        // autoplay in tdesktop and always plays.
+        let looping = match dice {
+            None if power_saving::on(size.chat_flag()) => return None,
+            None => Looping::Setting,
+            Some(DicePhase::Rolling) => Looping::Always,
+            Some(DicePhase::Landing) => Looping::Never,
+        };
         if self.slices.in_conversation() && super::anim_layer::current().is_some() {
-            let looping = !once
-                && self
-                    .session()
-                    .is_none_or(|s| s.settings.media_prefs.loop_animated_stickers);
-            self.layered_clip(id, format, size, looping, cx)
+            self.layered_clip(id, format, size, looping.loops(self), cx)
                 .map(AnimatedVisual::Layered)
         } else {
-            self.animated_image(id, format, size, once, true, cx)
+            self.animated_image(id, format, size, looping, true, cx)
                 .map(AnimatedVisual::Image)
         }
     }
@@ -560,7 +582,7 @@ impl QuillApp {
                 continue;
             }
             if let Some(visual) =
-                self.history_animated(file_id, format, PlaybackSize::Emoji, false, cx)
+                self.history_animated(file_id, format, PlaybackSize::Emoji, None, cx)
             {
                 out.insert(id, visual);
             }
@@ -773,7 +795,7 @@ impl QuillApp {
         format: StickerFormat,
         cx: &mut Context<QuillApp>,
     ) -> Option<Arc<RenderImage>> {
-        self.animated_image(id, format, PlaybackSize::Emoji, false, true, cx)
+        self.animated_image(id, format, PlaybackSize::Emoji, Looping::Setting, true, cx)
     }
 
     /// [`Self::custom_emoji_image`] for a cell that is built but not on
@@ -784,7 +806,7 @@ impl QuillApp {
         format: StickerFormat,
         cx: &mut Context<QuillApp>,
     ) -> Option<Arc<RenderImage>> {
-        self.animated_image(id, format, PlaybackSize::Emoji, false, false, cx)
+        self.animated_image(id, format, PlaybackSize::Emoji, Looping::Setting, false, cx)
     }
 
     fn animated_image(
@@ -792,7 +814,7 @@ impl QuillApp {
         id: FileId,
         format: StickerFormat,
         size: PlaybackSize,
-        once: bool,
+        looping: Looping,
         play: bool,
         cx: &mut Context<QuillApp>,
     ) -> Option<Arc<RenderImage>> {
@@ -804,10 +826,7 @@ impl QuillApp {
         let key = ClipKey::plain(id);
         let image = app.playback_cache(size).clips.get(&key).and_then(|clip| {
             let elapsed = clip.started.elapsed();
-            let looping = !once
-                && app
-                    .session()
-                    .is_none_or(|s| s.settings.media_prefs.loop_animated_stickers);
+            let looping = looping.loops(app);
             let count = clip.frames.len();
             let index = if !play {
                 0
@@ -823,7 +842,7 @@ impl QuillApp {
             // Clips play at their decoded rate, at most 30 fps
             // (`MAX_PLAYBACK_FPS`; Lottie files are usually 60).
             let fps = match size {
-                PlaybackSize::Sticker => 60,
+                PlaybackSize::Sticker | PlaybackSize::Dice => 60,
                 PlaybackSize::Emoji => 30,
             };
             let fps = image
@@ -834,6 +853,27 @@ impl QuillApp {
         }
         app.request_clip(key, format, size, cx);
         image
+    }
+}
+
+/// Whether a clip starts over at its end.
+#[derive(Clone, Copy)]
+enum Looping {
+    /// As Settings → Chat → "Loop animated stickers" says.
+    Setting,
+    Always,
+    Never,
+}
+
+impl Looping {
+    fn loops(self, app: &QuillApp) -> bool {
+        match self {
+            Self::Setting => app
+                .session()
+                .is_none_or(|s| s.settings.media_prefs.loop_animated_stickers),
+            Self::Always => true,
+            Self::Never => false,
+        }
     }
 }
 
