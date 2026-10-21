@@ -450,7 +450,6 @@ mod tests {
         DialogKind::FolderInvite,
         DialogKind::ChatLook,
         DialogKind::FolderNewChats,
-        DialogKind::FolderManage,
         DialogKind::CallbackPassword,
         DialogKind::LoginUrlConfirm,
         DialogKind::RequestShare,

@@ -274,6 +274,28 @@ crate::ui::screenshot_demo::register_demos![
         .setup(|app, _, _| app.demo_settings(Page::Telegram)),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-notifications")
         .setup(|app, _, _| app.demo_settings(Page::Notifications)),
+    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-folders").setup(|app, _, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            for (id, name, icon) in [
+                (1, "Work", "Work"),
+                (2, "Family", "Love"),
+                (3, "News", "Channels"),
+            ] {
+                session
+                    .chat_list
+                    .chat_folders
+                    .push(quill::telegram::envelope::ChatFolderInfo {
+                        id,
+                        name: name.into(),
+                        icon_name: icon.into(),
+                        color_id: -1,
+                        is_shareable: false,
+                        has_my_invite_links: false,
+                    });
+            }
+        }
+        app.demo_settings(Page::Folders)
+    }),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-appearance")
         .setup(|app, _, _| app.demo_settings(Page::Appearance)),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-system")

@@ -117,16 +117,7 @@ impl QuillApp {
                     ))
                     .children(cards([self.update_settings_section(cx)]))
             }
-            Page::Folders => column.child(group(
-                None,
-                [link_row(
-                    "settings-row-folders",
-                    tr(keys::Q_CHATLIST_MANAGE_CHAT_FOLDERS),
-                    None,
-                    cx.listener(|this, _, _, cx| this.open_folder_manage(cx)),
-                    cx,
-                )],
-            )),
+            Page::Folders => column.child(self.folders_page(cx)),
             Page::DataStorage => column.child(self.data_storage_page(cx)),
             Page::Connection => column.child(self.proxy_settings_body(cx)),
             Page::Calls => {
