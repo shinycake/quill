@@ -267,6 +267,7 @@ mod folder_tabs_fit;
 mod folders;
 mod forum_extras;
 mod forward;
+mod forward_drag_source;
 mod fragment_link;
 mod fragment_password;
 mod gif_clip;

@@ -32,6 +32,9 @@ pub(crate) struct DragSelect {
     /// Selection mode: a release without a drag toggles the press row
     /// (`needItemSelectionToggle`). Outside it a click does nothing.
     click_toggles: bool,
+    /// The press landed on a selected row: moving picks the selection up
+    /// for a chat row instead of selecting a range (`uponSelected`).
+    forward: bool,
     /// Set once the pointer moved onto other rows.
     range: Option<DragRange>,
 }
@@ -78,12 +81,21 @@ impl QuillApp {
             // layer does that) and is not the start of a message drag.
             return;
         }
+        // A press on a selected row never selects a range (`PrepareDrag`); when
+        // the selection cannot be forwarded the drag simply does nothing.
+        let forward = click_toggles
+            && self
+                .share
+                .pending_forward
+                .as_ref()
+                .is_some_and(|draft| draft.from_chat_id == chat && draft.contains(message_id));
         self.message_ui.selection_drag = Some(DragSelect {
             chat,
             press: message_id,
             pending,
             origin: event.position,
             click_toggles,
+            forward,
             range: None,
         });
         self.start_selection_drag_loop(window, cx);
@@ -99,6 +111,16 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<f32> {
         let drag = self.message_ui.selection_drag.as_ref()?;
+        // A message drag is under way (or this press may become one): no
+        // range selects, and no swipe replies.
+        if super::forward_drag_source::forward_lift_live(cx) {
+            self.message_ui.selection_drag = None;
+            self.message_ui.swipe_reply_start = None;
+            return None;
+        }
+        if drag.forward {
+            return None;
+        }
         let (chat, press, origin, click_toggles) =
             (drag.chat, drag.press, drag.origin, drag.click_toggles);
         let mut range = drag.range;
@@ -166,10 +188,32 @@ impl QuillApp {
 
     /// The button came up (`mouseActionFinish`): a drag applies its range;
     /// a plain click in selection mode toggles the pressed row.
-    pub(super) fn selection_release(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn selection_release(
+        &mut self,
+        pointer: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // A lifted message drag ends here wherever it was dropped.
+        super::forward_drag_source::end_forward_lift(cx);
+        self.end_forward_drag(cx);
         let Some(drag) = self.message_ui.selection_drag.take() else {
             return;
         };
+        if drag.forward {
+            let moved = moved_enough(
+                (f32::from(drag.origin.x), f32::from(drag.origin.y)),
+                (f32::from(pointer.x), f32::from(pointer.y)),
+            );
+            if moved {
+                // The messages were picked up (or carried out of the
+                // window): this release ends that drag, not a click.
+                return;
+            }
+            // A wiggle shorter than the start distance is still a click;
+            // the lifted picture goes back.
+            cx.stop_active_drag(window);
+        }
         match drag.range {
             Some(range) => {
                 let ids = self.loaded_selectable_ids(drag.chat);
@@ -543,14 +587,17 @@ mod tests {
         release(vcx, near);
         assert_eq!(selected(&app, vcx), vec![a.id, c.id]);
 
-        // Pressing a selected row and dragging deselects the covered rows.
+        // Pressing a selected row and dragging picks the selection up for a
+        // chat row instead of deselecting the covered rows (tdesktop
+        // `PrepareDrag` when the press is over a selected item).
         drag(vcx, blank_point(c), blank_point(a));
-        let range = app.read_with(vcx, |app, _| app.selection_drag_in(chat));
-        assert_eq!(range.map(|r| r.selecting), Some(false));
-        assert!(!app.read_with(vcx, |app, _| app.selection_shown(chat, a.id)));
+        assert_eq!(
+            app.read_with(vcx, |app, _| app.selection_drag_in(chat)),
+            None
+        );
         release(vcx, blank_point(a));
-        assert!(selected(&app, vcx).is_empty());
-        assert!(!app.read_with(vcx, |app, _| app.selecting_in(chat)));
+        assert_eq!(selected(&app, vcx), vec![a.id, c.id]);
+        assert!(app.read_with(vcx, |app, _| app.selecting_in(chat)));
     }
 
     #[gpui_kit::test]

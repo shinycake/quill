@@ -83,6 +83,7 @@ impl QuillApp {
         let interactive = self.selecting_in(chat_id);
         let focused = interactive && self.message_ui.selection_focus == Some(message_id);
         let ring_color = cx.theme().ring;
+        let forward = self.selection_forward_drag(chat_id, message_id);
         let overlay = (mode > 0.).then(|| {
             let ring = cx.theme().background;
             let (fill, tick) = motion::check_frame(checked);
@@ -114,6 +115,14 @@ impl QuillApp {
                                 );
                             }),
                         )
+                })
+                // A press on a selected row, moved, lifts the whole selection
+                // for a chat row (`uponSelected`).
+                .map(|this| {
+                    super::forward_drag_source::draggable(
+                        this,
+                        interactive.then_some(forward).flatten(),
+                    )
                 })
                 .child(super::anim_layer::occluder(
                     div()
