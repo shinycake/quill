@@ -38,6 +38,7 @@ impl QuillApp {
         }
         if mode == "times-menu" {
             // The menu of a sent message in a private chat with a read time.
+            // window-scope: demo setup in the one demo window.
             cx.defer_in(window, |this, window, cx| {
                 this.open_message_menu(
                     crate::ui::menu_states::MessageMenuState {
