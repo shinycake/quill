@@ -1,5 +1,3 @@
-// Modified by the Quill project (2026) from gpui-base 0.7.3 (Apache-2.0):
-// bidirectional text support in the input engine. See third_party/gpui-base/QUILL-CHANGES.md.
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -356,58 +354,6 @@ impl TextSelectionRegistration {
     }
 }
 
-/// Glyph geometry of laid-out text, as the selection machinery reads it. `TextLayout`
-/// implements it; text that does its own layout (bidirectional paragraphs, whose rows
-/// are not a left-to-right sequence of glyphs) supplies another implementation through
-/// [`TextSelectionRun::with_geometry`].
-pub trait RunGeometry {
-    /// Byte length of the laid-out text.
-    fn len(&self) -> usize;
-    /// Height of one row.
-    fn line_height(&self) -> Pixels;
-    /// Window-coordinate bounds of the text.
-    fn bounds(&self) -> Bounds<Pixels>;
-    /// Window position of the caret at byte offset `index`.
-    fn position_for_index(&self, index: usize) -> Option<Point<Pixels>>;
-    /// The byte offset under `position` (`Ok`), or the nearest one (`Err`).
-    fn index_for_position(&self, position: Point<Pixels>) -> Result<usize, usize>;
-    /// The top of the first row and the bottom of the last, in window coordinates.
-    fn rows_extent(&self, line_height: Pixels) -> (Pixels, Pixels);
-    /// What a drag from `start` to `end` selects, when the geometry decides it itself
-    /// instead of leaving it to the left-to-right reading-order walk (text whose rows read
-    /// right to left selects the logical range between the two endpoints): `None` leaves
-    /// it to the walk, `Some(range)` is the answer (`Some(None)` selects nothing).
-    #[allow(clippy::option_option)]
-    fn selected_range(
-        &self,
-        _start: Point<Pixels>,
-        _end: Point<Pixels>,
-    ) -> Option<Option<Range<usize>>> {
-        None
-    }
-}
-
-impl RunGeometry for TextLayout {
-    fn len(&self) -> usize {
-        TextLayout::len(self)
-    }
-    fn line_height(&self) -> Pixels {
-        TextLayout::line_height(self)
-    }
-    fn bounds(&self) -> Bounds<Pixels> {
-        TextLayout::bounds(self)
-    }
-    fn position_for_index(&self, index: usize) -> Option<Point<Pixels>> {
-        TextLayout::position_for_index(self, index)
-    }
-    fn index_for_position(&self, position: Point<Pixels>) -> Result<usize, usize> {
-        TextLayout::index_for_position(self, position)
-    }
-    fn rows_extent(&self, line_height: Pixels) -> (Pixels, Pixels) {
-        text_rows_extent(self, line_height)
-    }
-}
-
 /// Laid-out text reported by a plain selection participant during paint.
 #[derive(Clone)]
 pub struct TextSelectionRun {
@@ -417,8 +363,6 @@ pub struct TextSelectionRun {
     text: SharedString,
     /// Laid-out glyph geometry in window coordinates.
     layout: TextLayout,
-    /// Geometry of text that lays itself out; replaces `layout` when set.
-    geometry: Option<Rc<dyn RunGeometry>>,
     /// The run's window-coordinate paint bounds.
     bounds: Bounds<Pixels>,
 }
@@ -430,31 +374,7 @@ impl TextSelectionRun {
             document_order: 0,
             text: text.into(),
             layout,
-            geometry: None,
             bounds,
-        }
-    }
-
-    /// Creates a run whose geometry comes from `geometry` instead of a `TextLayout`.
-    pub fn with_geometry(
-        text: impl Into<SharedString>,
-        geometry: Rc<dyn RunGeometry>,
-        bounds: Bounds<Pixels>,
-    ) -> Self {
-        Self {
-            document_order: 0,
-            text: text.into(),
-            layout: TextLayout::default(),
-            geometry: Some(geometry),
-            bounds,
-        }
-    }
-
-    /// The geometry the selection reads: the custom one, else the `TextLayout`.
-    fn geo(&self) -> &dyn RunGeometry {
-        match &self.geometry {
-            Some(geometry) => geometry.as_ref(),
-            None => &self.layout,
         }
     }
 
@@ -542,7 +462,7 @@ fn selection_range_for_run(
     selection_start: Point<Pixels>,
     selection_end: Point<Pixels>,
 ) -> Option<Range<usize>> {
-    if run.text.len() != run.geo().len() {
+    if run.text.len() != run.layout.len() {
         return None;
     }
 
@@ -550,16 +470,12 @@ fn selection_range_for_run(
         return None;
     }
 
-    if let Some(decided) = run.geo().selected_range(selection_start, selection_end) {
-        return decided;
-    }
-
-    let line_height = run.geo().line_height();
+    let line_height = run.layout.line_height();
     // Each character is tested with its row's top and height, so a run whose
     // rows all miss the band, or all lie strictly inside it with no endpoint
     // on any row, has the same answer for every character. Decide those
     // without the walk below, which scans the layout twice per character.
-    let (rows_top, rows_bottom) = run.geo().rows_extent(line_height);
+    let (rows_top, rows_bottom) = text_rows_extent(&run.layout, line_height);
     let band_top = selection_start.y.min(selection_end.y);
     let band_bottom = selection_start.y.max(selection_end.y);
     if rows_bottom <= band_top || rows_top > band_bottom {
@@ -572,12 +488,12 @@ fn selection_range_for_run(
     let mut range = None;
     for (offset, character) in run.text.char_indices() {
         let next_offset = offset + character.len_utf8();
-        let Some(position) = run.geo().position_for_index(offset) else {
+        let Some(position) = run.layout.position_for_index(offset) else {
             continue;
         };
 
         let char_width = run
-            .geo()
+            .layout
             .position_for_index(next_offset)
             .filter(|next| next.y == position.y)
             .map_or_else(|| line_height.half(), |next| next.x - position.x);
@@ -623,10 +539,10 @@ fn points_for_multi_click(
     click_count: usize,
 ) -> Option<(Point<Pixels>, Point<Pixels>)> {
     let run = runs.iter().find(|run| run.bounds.contains(&position))?;
-    if run.text.len() != run.geo().len() {
+    if run.text.len() != run.layout.len() {
         return None;
     }
-    let offset = run.geo().index_for_position(position).ok()?;
+    let offset = run.layout.index_for_position(position).ok()?;
     let range = match click_count {
         2 => word_range_at(&run.text, offset)?,
         3.. => line_range_at(&run.text, offset),
@@ -636,8 +552,8 @@ fn points_for_multi_click(
         return None;
     }
     Some((
-        run.geo().position_for_index(range.start)?,
-        run.geo().position_for_index(range.end)?,
+        run.layout.position_for_index(range.start)?,
+        run.layout.position_for_index(range.end)?,
     ))
 }
 
@@ -1374,6 +1290,10 @@ impl WindowSelectionState {
     /// same place without running any of its elements. Such a participant keeps
     /// the registration it last reported, which still describes what is on
     /// screen; only one whose element GPUI has dropped is swept.
+    ///
+    /// Removing an endpoint also retires the window's gesture. Clearing only
+    /// the participant snapshot would restore that selection if its retained
+    /// entity were registered again.
     pub fn finish_frame(&mut self, cx: &mut App) -> Vec<ClearHandler> {
         self.finish_frame_scheduled.set(false);
         let generation = self.frame_generation.get();
@@ -1386,7 +1306,21 @@ impl WindowSelectionState {
                     .then(|| (*id, registration.participant.clone()))
             })
             .collect::<Vec<_>>();
-        let mut handlers = Vec::new();
+        let endpoint_departed = stale.iter().any(|(id, _)| {
+            [
+                self.anchor.as_ref(),
+                self.cursor.as_ref(),
+                self.pending_extension_anchor.as_ref(),
+            ]
+            .into_iter()
+            .flatten()
+            .any(|endpoint| endpoint.entity_id() == Some(*id))
+        });
+        let mut handlers = if endpoint_departed {
+            self.clear_state(cx)
+        } else {
+            Vec::new()
+        };
         for (id, participant) in stale {
             self.participants.get_mut().remove(&id);
             if let Some(participant) = participant.upgrade()
@@ -1867,8 +1801,8 @@ impl WindowSelectionState {
                 return;
             };
             let (Some(start), Some(end)) = (
-                first.geo().position_for_index(0),
-                last.geo().position_for_index(last.text.len()),
+                first.layout.position_for_index(0),
+                last.layout.position_for_index(last.text.len()),
             ) else {
                 return;
             };
@@ -1876,8 +1810,8 @@ impl WindowSelectionState {
             // land on text.
             let inset = px(1.);
             (
-                point(start.x + inset, start.y + first.geo().line_height() / 2.),
-                point(end.x - inset, end.y + last.geo().line_height() / 2.),
+                point(start.x + inset, start.y + first.layout.line_height() / 2.),
+                point(end.x - inset, end.y + last.layout.line_height() / 2.),
             )
         };
         let content_key_resolver = participant.read(cx).content_key_resolver.clone();
@@ -4233,7 +4167,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn stale_live_participants_are_removed_when_the_next_frame_begins(cx: &mut TestAppContext) {
+    fn unmounted_selection_does_not_revive_when_the_participant_returns(cx: &mut TestAppContext) {
         cx.update(|cx| {
             let mut selection_state = WindowSelectionState::default();
             let participant = FakeParticipant::new("stale", cx);
@@ -4247,36 +4181,12 @@ mod tests {
             selection_state.begin(point(px(1.), px(1.)), false, cx);
             selection_state.update(point(px(8.), px(1.)), cx);
             selection_state.end(cx);
+            assert_eq!(selection_state.selected_text(cx), "stale");
 
             selection_state.finish_frame(cx);
             selection_state.finish_frame(cx);
             assert_eq!(selection_state.selected_text(cx), "");
             assert!(participant.selection.snapshot(cx).is_none());
-        });
-    }
-
-    #[gpui::test]
-    fn clear_stops_anchor_auto_scroll_before_discarding_the_anchor(cx: &mut TestAppContext) {
-        let commands = Rc::new(RefCell::new(Vec::new()));
-        let observed = commands.clone();
-        let (mut selection_state, participant) = cx.update(|cx| {
-            let selection_state = WindowSelectionState::default();
-            let participant = FakeParticipant::new("scroll", cx);
-            participant
-                .selection
-                .subscribe(
-                    move |event, _| {
-                        if let TextSelectionEvent::AutoScroll(delta) = event {
-                            observed.borrow_mut().push(*delta);
-                        }
-                    },
-                    cx,
-                )
-                .detach();
-            (selection_state, participant)
-        });
-        cx.run_until_parked();
-        cx.update(|cx| {
             participant.register(
                 &mut selection_state,
                 0.,
@@ -4284,14 +4194,113 @@ mod tests {
                 0,
                 cx,
             );
+            assert_eq!(selection_state.selected_text(cx), "");
+            assert!(participant.selection.snapshot(cx).is_none());
 
             selection_state.begin(point(px(1.), px(1.)), false, cx);
-            selection_state.update(point(px(1.), px(25.)), cx);
-            selection_state.clear(cx);
+            selection_state.update(point(px(8.), px(1.)), cx);
+            selection_state.end(cx);
+            assert_eq!(selection_state.selected_text(cx), "stale");
         });
-        cx.run_until_parked();
-        assert!(commands.borrow().iter().any(Option::is_some));
-        assert_eq!(commands.borrow().last(), Some(&None));
+    }
+
+    #[gpui::test]
+    fn removing_an_unselected_participant_preserves_the_current_selection(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let mut selection_state = WindowSelectionState::default();
+            let selected = FakeParticipant::new("selected", cx);
+            let unrelated = FakeParticipant::new("unrelated", cx);
+            let scope = TextSelectionScopeId::default();
+            selected.register(&mut selection_state, 0., scope, 0, cx);
+            unrelated.register(&mut selection_state, 20., scope, 1, cx);
+            selection_state.begin(point(px(1.), px(1.)), false, cx);
+            selection_state.update(point(px(8.), px(1.)), cx);
+            selection_state.end(cx);
+            assert_eq!(selection_state.selected_text(cx), "selected");
+
+            selection_state.finish_frame(cx);
+            selected.register(&mut selection_state, 0., scope, 0, cx);
+            selection_state.finish_frame(cx);
+            assert_eq!(selection_state.selected_text(cx), "selected");
+            unrelated.register(&mut selection_state, 20., scope, 1, cx);
+            assert_eq!(selection_state.selected_text(cx), "selected");
+        });
+    }
+
+    #[gpui::test]
+    fn removing_either_range_endpoint_discards_the_shared_selection(cx: &mut TestAppContext) {
+        for remove_anchor in [true, false] {
+            cx.update(|cx| {
+                let mut selection_state = WindowSelectionState::default();
+                let anchor = FakeParticipant::new("anchor", cx);
+                let cursor = FakeParticipant::new("cursor", cx);
+                let scope = TextSelectionScopeId::default();
+                anchor.register(&mut selection_state, 0., scope, 0, cx);
+                cursor.register(&mut selection_state, 20., scope, 1, cx);
+                selection_state.begin(point(px(1.), px(1.)), false, cx);
+                selection_state.update(point(px(8.), px(21.)), cx);
+                selection_state.end(cx);
+                assert_eq!(selection_state.selected_text(cx), "anchor\ncursor");
+                selection_state.finish_frame(cx);
+
+                if remove_anchor {
+                    cursor.register(&mut selection_state, 20., scope, 1, cx);
+                } else {
+                    anchor.register(&mut selection_state, 0., scope, 0, cx);
+                }
+                selection_state.finish_frame(cx);
+                assert_eq!(selection_state.selected_text(cx), "");
+                anchor.register(&mut selection_state, 0., scope, 0, cx);
+                cursor.register(&mut selection_state, 20., scope, 1, cx);
+                assert_eq!(selection_state.selected_text(cx), "");
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn clear_or_unmount_stops_auto_scroll_before_discarding_the_anchor(cx: &mut TestAppContext) {
+        for unmount in [false, true] {
+            let commands = Rc::new(RefCell::new(Vec::new()));
+            let observed = commands.clone();
+            let (mut selection_state, participant) = cx.update(|cx| {
+                let selection_state = WindowSelectionState::default();
+                let participant = FakeParticipant::new("scroll", cx);
+                participant
+                    .selection
+                    .subscribe(
+                        move |event, _| {
+                            if let TextSelectionEvent::AutoScroll(delta) = event {
+                                observed.borrow_mut().push(*delta);
+                            }
+                        },
+                        cx,
+                    )
+                    .detach();
+                (selection_state, participant)
+            });
+            cx.run_until_parked();
+            cx.update(|cx| {
+                participant.register(
+                    &mut selection_state,
+                    0.,
+                    TextSelectionScopeId::default(),
+                    0,
+                    cx,
+                );
+
+                selection_state.begin(point(px(1.), px(1.)), false, cx);
+                selection_state.update(point(px(1.), px(25.)), cx);
+                if unmount {
+                    selection_state.finish_frame(cx);
+                    selection_state.finish_frame(cx);
+                } else {
+                    selection_state.clear(cx);
+                }
+            });
+            cx.run_until_parked();
+            assert!(commands.borrow().iter().any(Option::is_some));
+            assert_eq!(commands.borrow().last(), Some(&None));
+        }
     }
 
     #[gpui::test]
@@ -4600,7 +4609,6 @@ mod tests {
             assert!(!TextSelection::has_selection(window, cx));
             assert_eq!(TextSelection::selected_text(window, cx), "");
             assert!(!selection.has_local_selection(cx));
-            TextSelection::clear(window, cx);
         });
 
         view.update(cx, |view, cx| {

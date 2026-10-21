@@ -1,5 +1,3 @@
-// Modified by the Quill project (2026) from gpui-base 0.7.3 (Apache-2.0):
-// formatting spans in the input engine. See third_party/gpui-base/QUILL-CHANGES.md.
 /// DisplayMap: Public facade for Editor/Input display mapping.
 ///
 /// This combines WrapMap and FoldMap to provide a unified API:
@@ -227,26 +225,6 @@ impl DisplayMap {
         self.rebuild_fold_projection();
     }
 
-    /// Install span fonts without wrapping anything: the edit that changed
-    /// them wraps its own rows next (Quill patch).
-    pub(crate) fn stage_span_fonts(&mut self, fonts: crate::input::text_spans::SpanFonts) {
-        self.wrap_map.stage_span_fonts(fonts);
-    }
-
-    /// Install the font changes of formatting spans, wrapping the rows
-    /// `rewrap` asks for again (Quill patch).
-    pub(crate) fn set_span_fonts(
-        &mut self,
-        fonts: crate::input::text_spans::SpanFonts,
-        rewrap: crate::input::text_spans::SpanRewrap,
-        cx: &mut App,
-    ) {
-        self.wrap_map.set_span_fonts(fonts, rewrap, cx);
-        if rewrap != crate::input::text_spans::SpanRewrap::None {
-            self.rebuild_fold_projection();
-        }
-    }
-
     /// Update layout parameters (wrap width or font)
     pub(crate) fn set_inline_metrics(
         &mut self,
@@ -266,11 +244,6 @@ impl DisplayMap {
     pub fn set_wrapping_indent(&mut self, wrapping_indent: WrappingIndent, cx: &mut App) {
         self.wrap_map.set_wrapping_indent(wrapping_indent, cx);
         self.rebuild_fold_projection();
-    }
-
-    /// The font and size the input lays its text out with.
-    pub fn text_style(&self) -> (&Font, Pixels) {
-        self.wrap_map.text_style()
     }
 
     /// Set font parameters
@@ -327,6 +300,13 @@ impl DisplayMap {
         self.wrap_map
             .wrapper()
             .offset_to_display_point_with_affinity(offset, line_end_affinity)
+    }
+
+    /// Resolve the caret's visual row through both wrapping and folded regions.
+    pub(crate) fn offset_to_display_row(&self, offset: usize, line_end_affinity: bool) -> usize {
+        let point = self.offset_to_wrap_display_point_with_affinity(offset, line_end_affinity);
+        self.wrap_row_to_display_row(point.row)
+            .unwrap_or_else(|| self.nearest_visible_display_row(point.row))
     }
 
     /// Convert wrap display point to byte offset.
