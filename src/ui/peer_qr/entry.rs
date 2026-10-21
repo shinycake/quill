@@ -14,7 +14,8 @@ use quill::peer_qr::state::{CustomQr, QrPeer, QrSubject};
 use quill::telegram::envelope::ChatKind;
 
 /// The small QR button at the end of a profile row (tdesktop
-/// `AddQrButton`).
+/// `AddQrButton`). The row under it copies on click, so the click stops
+/// here.
 pub(in crate::ui) fn qr_row_button(
     id: impl Into<ElementId>,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -26,7 +27,10 @@ pub(in crate::ui) fn qr_row_button(
         .small()
         .tooltip(label)
         .accessibility_label(label)
-        .on_click(on_click)
+        .on_click(move |event, window, cx| {
+            cx.stop_propagation();
+            on_click(event, window, cx);
+        })
 }
 
 impl QuillApp {

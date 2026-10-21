@@ -1,7 +1,8 @@
 //! The box's pictures, made off the UI thread and kept while it is open:
 //! the backdrop gradient, the code in its ink and a still of each picked
 //! emoji. Each is derived from the box state; the cache only saves making
-//! it again.
+//! it again. [`QuillApp::qr_prepare_art`] starts the work when the box or
+//! what it shows changes; drawing only looks pictures up.
 #![deny(clippy::indexing_slicing)]
 
 use super::super::app::QuillApp;
@@ -9,7 +10,7 @@ use super::qr_path::{QrGrid, qr_svg};
 use gpui_kit::*;
 use quill::peer_qr::appearance::{GRADIENT_RADIUS_TO_CARD, GRADIENT_STEPS, gradient_stops};
 use quill::peer_qr::color::Rgb;
-use quill::peer_qr::layout::CARD_WIDTH;
+use quill::peer_qr::layout::{CARD_WIDTH, card_layout};
 use smallvec::SmallVec;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -163,125 +164,98 @@ fn rasterize(
 }
 
 impl QuillApp {
-    /// The backdrop layers to draw, bottom first, each with its opacity:
-    /// the previous backdrop under a new one while it fades in.
-    pub(super) fn qr_backdrops(
-        &mut self,
-        center: Rgb,
-        edge: Rgb,
-        cx: &mut Context<Self>,
-    ) -> Vec<(Arc<RenderImage>, f32)> {
+    /// Start making what the open box draws and has not got yet: its
+    /// backdrop, its code and the stills of the picked emoji.
+    pub(super) fn qr_prepare_art(&mut self, cx: &mut Context<Self>) {
+        let Some(view) = self.qr_view() else {
+            return;
+        };
+        self.ensure_qr_backdrop(view.appearance.center, view.appearance.edge, cx);
+        if let Some(shown) = &view.shown {
+            let side = card_layout(CARD_WIDTH, view.peer_box()).qr.width;
+            self.ensure_qr_code(&shown.link, view.colors.ink, side, cx);
+        }
+        let emoji: Vec<String> = self
+            .peer_qr
+            .open
+            .as_ref()
+            .map(|open| {
+                let previous = open.swap.iter().flat_map(|swap| swap.previous.iter());
+                open.state.emoji.iter().chain(previous).cloned().collect()
+            })
+            .unwrap_or_default();
+        for emoji in emoji {
+            self.ensure_qr_still(&emoji, cx);
+        }
+    }
+
+    fn ensure_qr_backdrop(&mut self, center: Rgb, edge: Rgb, cx: &mut Context<Self>) {
         let key = (center, edge);
         let art = &mut self.peer_qr.art;
-        if !art.backdrops.iter().any(|(k, _)| *k == key) {
-            art.backdrops.push((key, Slot::Loading));
-            self.run_off_ui_then(
-                move || render_image(backdrop_pixels(center, edge)),
-                move |this, image, cx| {
-                    let art = &mut this.peer_qr.art;
-                    if let Some((_, slot)) = art.backdrops.iter_mut().find(|(k, _)| *k == key) {
-                        *slot = Slot::Ready {
-                            image,
-                            at: Instant::now(),
-                        };
-                        trim(&mut art.backdrops);
-                    }
-                    cx.notify();
-                },
-                cx,
-            );
+        if art.backdrops.iter().any(|(k, _)| *k == key) {
+            return;
         }
-        let now = Instant::now();
-        let mut layers = Vec::new();
-        let ready: Vec<_> = self
-            .peer_qr
-            .art
-            .backdrops
-            .iter()
-            .filter_map(|(k, slot)| slot.ready().map(|ready| (*k == key, ready)))
-            .collect();
-        let wanted = ready.iter().find(|(current, _)| *current);
-        let older = ready.iter().rev().find(|(current, _)| !*current);
-        match (wanted, older) {
-            (Some((_, (image, at))), Some((_, (old, _)))) => {
-                let shown = now.duration_since(*at).as_secs_f32() / BACKDROP_FADE.as_secs_f32();
-                if shown < 1. {
-                    layers.push((old.clone(), 1.));
+        art.backdrops.push((key, Slot::Loading));
+        self.run_off_ui_then(
+            move || render_image(backdrop_pixels(center, edge)),
+            move |this, image, cx| {
+                let art = &mut this.peer_qr.art;
+                if let Some((_, slot)) = art.backdrops.iter_mut().find(|(k, _)| *k == key) {
+                    *slot = Slot::Ready {
+                        image,
+                        at: Instant::now(),
+                    };
+                    trim(&mut art.backdrops);
                 }
-                layers.push((image.clone(), shown.clamp(0., 1.)));
-            }
-            (Some((_, (image, _))), None) => layers.push((image.clone(), 1.)),
-            (None, Some((_, (old, _)))) => layers.push((old.clone(), 1.)),
-            (None, None) => {}
-        }
-        layers
+                cx.notify();
+            },
+            cx,
+        );
     }
 
-    /// The code for `link` in `ink`, or the one it replaces while the new
-    /// one is made.
-    pub(super) fn qr_code_image(
-        &mut self,
-        link: &str,
-        ink: Rgb,
-        side: f64,
-        cx: &mut Context<Self>,
-    ) -> Option<Arc<RenderImage>> {
+    fn ensure_qr_code(&mut self, link: &str, ink: Rgb, side: f64, cx: &mut Context<Self>) {
         let key = (link.to_string(), ink);
         let art = &mut self.peer_qr.art;
-        if !art.codes.iter().any(|(k, _)| *k == key) {
-            art.codes.push((key.clone(), Slot::Loading));
-            let renderer = cx.svg_renderer();
-            let link = link.to_string();
-            let pixels = (side * CODE_SCALE).round().max(1.) as u32;
-            let wanted = key.clone();
-            self.run_off_ui_then(
-                move || {
-                    let grid = QrGrid::encode(&link)?;
-                    rasterize(
-                        &renderer,
-                        &qr_svg(&grid, side, ink.to_hex()),
-                        pixels,
-                        pixels,
-                    )
-                },
-                move |this, image, cx| {
-                    let art = &mut this.peer_qr.art;
-                    if let Some((_, slot)) = art.codes.iter_mut().find(|(k, _)| *k == wanted) {
-                        *slot = match image {
-                            Some(image) => Slot::Ready {
-                                image,
-                                at: Instant::now(),
-                            },
-                            None => Slot::Failed,
-                        };
-                        trim(&mut art.codes);
-                    }
-                    cx.notify();
-                },
-                cx,
-            );
+        if art.codes.iter().any(|(k, _)| *k == key) {
+            return;
         }
-        let codes = &self.peer_qr.art.codes;
-        codes
-            .iter()
-            .find(|(k, _)| *k == key)
-            .and_then(|(_, slot)| slot.ready())
-            .or_else(|| codes.iter().rev().find_map(|(_, slot)| slot.ready()))
-            .map(|(image, _)| image)
+        art.codes.push((key.clone(), Slot::Loading));
+        let renderer = cx.svg_renderer();
+        let link = link.to_string();
+        let pixels = (side * CODE_SCALE).round().max(1.) as u32;
+        self.run_off_ui_then(
+            move || {
+                let grid = QrGrid::encode(&link)?;
+                rasterize(
+                    &renderer,
+                    &qr_svg(&grid, side, ink.to_hex()),
+                    pixels,
+                    pixels,
+                )
+            },
+            move |this, image, cx| {
+                let art = &mut this.peer_qr.art;
+                if let Some((_, slot)) = art.codes.iter_mut().find(|(k, _)| *k == key) {
+                    *slot = match image {
+                        Some(image) => Slot::Ready {
+                            image,
+                            at: Instant::now(),
+                        },
+                        None => Slot::Failed,
+                    };
+                    trim(&mut art.codes);
+                }
+                cx.notify();
+            },
+            cx,
+        );
     }
 
-    /// The picture of `emoji` in the pattern: the emoji set's sprite, or
-    /// the system glyph drawn once.
-    pub(super) fn qr_emoji_still(
-        &mut self,
-        emoji: &str,
-        cx: &mut Context<Self>,
-    ) -> Option<Arc<RenderImage>> {
-        if let Some(sprite) = super::super::emoji_sprites::sprite(emoji) {
-            return Some(sprite);
-        }
-        if let Some(slot) = self.peer_qr.art.stills.get(emoji) {
-            return slot.ready().map(|(image, _)| image);
+    fn ensure_qr_still(&mut self, emoji: &str, cx: &mut Context<Self>) {
+        if super::super::emoji_sprites::sprite(emoji).is_some()
+            || self.peer_qr.art.stills.contains_key(emoji)
+        {
+            return;
         }
         self.peer_qr
             .art
@@ -306,7 +280,58 @@ impl QuillApp {
             },
             cx,
         );
-        None
+    }
+
+    /// The backdrop layers to draw, bottom first, each with its opacity:
+    /// the previous backdrop under a new one while it fades in.
+    pub(super) fn qr_backdrops(
+        &self,
+        center: Rgb,
+        edge: Rgb,
+        now: Instant,
+    ) -> Vec<(Arc<RenderImage>, f32)> {
+        let key = (center, edge);
+        let ready: Vec<_> = self
+            .peer_qr
+            .art
+            .backdrops
+            .iter()
+            .filter_map(|(k, slot)| slot.ready().map(|ready| (*k == key, ready)))
+            .collect();
+        let wanted = ready.iter().find(|(current, _)| *current);
+        let older = ready.iter().rev().find(|(current, _)| !*current);
+        let mut layers = Vec::new();
+        match (wanted, older) {
+            (Some((_, (image, at))), Some((_, (old, _)))) => {
+                let shown = now.duration_since(*at).as_secs_f32() / BACKDROP_FADE.as_secs_f32();
+                if shown < 1. {
+                    layers.push((old.clone(), 1.));
+                }
+                layers.push((image.clone(), shown.clamp(0., 1.)));
+            }
+            (Some((_, (image, _))), None) => layers.push((image.clone(), 1.)),
+            (None, Some((_, (old, _)))) => layers.push((old.clone(), 1.)),
+            (None, None) => {}
+        }
+        layers
+    }
+
+    /// The code for `link` in `ink`, or the one it replaces while the new
+    /// one is made.
+    pub(super) fn qr_code_image(&self, link: &str, ink: Rgb) -> Option<Arc<RenderImage>> {
+        let codes = &self.peer_qr.art.codes;
+        codes
+            .iter()
+            .find(|(k, _)| k.0 == link && k.1 == ink)
+            .and_then(|(_, slot)| slot.ready())
+            .or_else(|| codes.iter().rev().find_map(|(_, slot)| slot.ready()))
+            .map(|(image, _)| image)
+    }
+
+    /// The picture of `emoji` in the pattern: the emoji set's sprite, or
+    /// the system glyph once drawn.
+    pub(super) fn qr_emoji_still(&self, emoji: &str) -> Option<Arc<RenderImage>> {
+        super::super::emoji_sprites::sprite(emoji).or_else(|| self.peer_qr.art.still(emoji))
     }
 }
 

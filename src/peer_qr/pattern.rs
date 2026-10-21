@@ -12,7 +12,6 @@ const NODE_SCALE_MIN: f64 = 0.92;
 const NODE_SCALE_MAX: f64 = 1.08;
 const BOB_SPEED: f64 = 0.45;
 const SCALE_CUTOFF: f64 = 0.05;
-const CARD_SHRINK: f64 = 0.03;
 const FALLOFF_MIN: f64 = 0.15;
 const TABLE_SIZE: usize = 64;
 const HEADING_DEGREES: f64 = 225.;
@@ -362,29 +361,14 @@ pub fn tiles(
     out
 }
 
-/// The card, dipped a little, for [`covered`] (tdesktop `PeerQrCardCull`).
-pub fn card_cull(card: Rect) -> Rect {
-    let x = card.width * CARD_SHRINK / 2.;
-    let y = card.height * CARD_SHRINK / 2.;
-    Rect::new(
-        card.x + x,
-        card.y + y,
-        card.width - 2. * x,
-        card.height - 2. * y,
-    )
-}
-
-/// A tile wholly under the card is not drawn: one inside the ellipse
-/// inscribed in the dipped card is covered for any corner radius.
-pub fn covered(cull: &Rect, x: f64, y: f64, size: f64) -> bool {
-    if cull.width <= 0. || cull.height <= 0. {
-        return false;
-    }
-    let radius = size / SQRT_2;
-    let (cx, cy) = cull.center();
-    let dx = ((x - cx).abs() + radius) / (cull.width / 2.);
-    let dy = ((y - cy).abs() + radius) / (cull.height / 2.);
-    dx * dx + dy * dy <= 1.
+/// A tile of `size` centered on `(x, y)` touches `rect`: the card or a
+/// glass surface over the pattern, where Quill leaves tiles out.
+pub fn overlaps(rect: &Rect, x: f64, y: f64, size: f64) -> bool {
+    let half = size / 2.;
+    x + half > rect.x
+        && x - half < rect.x + rect.width
+        && y + half > rect.y
+        && y - half < rect.y + rect.height
 }
 
 /// The layer's slow drift after `elapsed_ms` (tdesktop

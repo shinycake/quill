@@ -14,10 +14,11 @@ use gpui_kit::gpui::Size as ItemSize;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with, trn};
+use quill::peer_qr::color::{Rgb, contrast};
 use quill::peer_qr::free::{FreeMenuItem, FreeMode};
 use quill::peer_qr::layout::{
     BOX_WIDTH, BUTTON, BUTTON_SKIP, PANEL_MARGIN, PANEL_PADDING, PANEL_RADIUS, PILL_HEIGHT,
-    SWATCH_COLUMNS, SWATCH_SKIP, content_in, panel_height, swatch_size,
+    SWATCH_SKIP, content_in, panel_height, swatch_size,
 };
 use quill::peer_qr::link::countdown_text;
 use quill::peer_qr::pattern::Rect;
@@ -31,6 +32,13 @@ fn at(value: f64) -> Pixels {
 
 /// Emoji per row of the emoji panel.
 const EMOJI_COLUMNS: usize = 8;
+/// tdesktop `peerQrSwatchRing` and `peerQrSwatchRingInset`.
+const RING: f64 = 2.;
+const RING_INSET: f64 = 6.;
+/// tdesktop `kHairlineContrast`, `kHairlineAlpha`: a light circle's ring
+/// gets a faint dark line under it.
+const HAIRLINE_CONTRAST: f64 = 1.5;
+const HAIRLINE_ALPHA: f32 = 0.15;
 
 /// Every plain emoji, in catalog order.
 fn emoji_list() -> &'static [&'static str] {
@@ -52,11 +60,11 @@ fn duration_text(seconds: i64) -> String {
 }
 
 /// The toast's text.
-pub(super) fn toast_text(toast: QrToast) -> String {
+pub(super) fn toast_text(toast: &QrToast) -> String {
     match toast {
         QrToast::CodeExpires(seconds) => tr_with(
             keys::NO_PAID_TOKEN_TOAST_EXPIRES,
-            &[("duration", &duration_text(seconds))],
+            &[("duration", &duration_text(*seconds))],
         ),
         QrToast::CodePermanent => tr(keys::NO_PAID_TOKEN_TOAST_PERMANENT).into(),
         QrToast::CodeReset => tr(keys::NO_PAID_TOKEN_TOAST_RESET).into(),
@@ -65,7 +73,9 @@ pub(super) fn toast_text(toast: QrToast) -> String {
         QrToast::Expiring { free_code: true } => tr(keys::NO_PAID_TOKEN_TOAST_EXPIRING).into(),
         QrToast::Expiring { free_code: false } => tr(keys::PEER_QR_LINK_EXPIRING).into(),
         QrToast::Unavailable => tr(keys::PEER_QR_LINK_UNAVAILABLE).into(),
+        QrToast::Failed(reason) => reason.clone(),
         QrToast::Copied => tr(keys::GROUP_INVITE_QR_COPIED).into(),
+        QrToast::LinkCopied => tr(keys::USERNAME_COPIED).into(),
     }
 }
 
@@ -108,7 +118,9 @@ impl QuillApp {
             )
     }
 
-    /// The color circles, six to a row; the chosen one is ringed.
+    /// The color circles, six to a row from the top left (tdesktop
+    /// `PeerQrColorsPanel::Inner`): each a diagonal gradient from its
+    /// center color to its edge color, the chosen one ringed in white.
     fn qr_colors_panel(
         &mut self,
         view: &QrView,
@@ -117,7 +129,16 @@ impl QuillApp {
     ) -> Stateful<Div> {
         let circle = swatch_size(width);
         let chosen = self.peer_qr.open.as_ref().map(|open| open.state.color);
-        let ring = hsla(view.colors.foreground);
+        let ring = |inset: f64, width: f64, color: Hsla| {
+            div()
+                .absolute()
+                .top(at(inset))
+                .left(at(inset))
+                .size(at(circle - 2. * inset))
+                .rounded_full()
+                .border(at(width))
+                .border_color(color)
+        };
         div()
             .id("peer-qr-colors-grid")
             .size_full()
@@ -125,6 +146,7 @@ impl QuillApp {
             .p(at(PANEL_PADDING))
             .flex()
             .flex_wrap()
+            .content_start()
             .gap(at(SWATCH_SKIP))
             .children(view.swatches.iter().map(|swatch| {
                 let key = swatch.key;
@@ -133,34 +155,44 @@ impl QuillApp {
                     quill::peer_qr::appearance::SwatchKey::Backdrop(id) => i64::from(id),
                 };
                 let selected = chosen == Some(key);
-                div()
-                    .id(("peer-qr-swatch", id as u64))
-                    .debug_selector(move || format!("peer-qr-swatch-{id}"))
+                let hairline = [swatch.center, swatch.edge]
+                    .into_iter()
+                    .any(|color| contrast(Rgb::WHITE, color) < HAIRLINE_CONTRAST);
+                let fill = linear_gradient(
+                    135.,
+                    linear_color_stop(hsla(swatch.center), 0.),
+                    linear_color_stop(hsla(swatch.edge), 1.),
+                );
+                let face = div()
+                    .relative()
                     .size(at(circle))
                     .rounded_full()
-                    .p(px(3.))
-                    .border_2()
-                    .border_color(if selected {
-                        ring
-                    } else {
-                        gpui_kit::transparent_black()
+                    .bg(fill)
+                    .when(selected && hairline, |face| {
+                        face.child(ring(
+                            RING_INSET - RING / 2.,
+                            2. * RING,
+                            gpui_kit::black().opacity(HAIRLINE_ALPHA),
+                        ))
                     })
-                    .cursor_pointer()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.qr_act(QrAction::PickColor(key), cx);
-                    }))
+                    .when(selected, |face| {
+                        face.child(ring(RING_INSET, RING, gpui_kit::white()))
+                    });
+                div()
+                    .debug_selector(move || format!("peer-qr-swatch-{id}"))
                     .child(
-                        div()
-                            .size_full()
+                        Button::new(("peer-qr-swatch", id as u64))
+                            .ghost()
                             .rounded_full()
-                            .bg(hsla(swatch.edge))
-                            .p(at(circle / 6.))
-                            .child(div().size_full().rounded_full().bg(hsla(swatch.center))),
+                            .p_0()
+                            .size(at(circle))
+                            .selected(selected)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.qr_act(QrAction::PickColor(key), cx);
+                            }))
+                            .child(face),
                     )
             }))
-            .when(view.swatches.len() < SWATCH_COLUMNS, |grid| {
-                grid.justify_center()
-            })
     }
 
     /// Every emoji, picked ones highlighted; up to six make the pattern.
@@ -205,21 +237,31 @@ impl QuillApp {
                                                 .child(emoji)
                                                 .into_any_element()
                                         });
-                                div()
-                                    .id(("peer-qr-emoji", index))
-                                    .debug_selector(move || format!("peer-qr-emoji-{index}"))
+                                let face = div()
                                     .size(at(cell))
                                     .flex()
                                     .items_center()
                                     .justify_center()
                                     .rounded_lg()
-                                    .cursor_pointer()
-                                    .when(selected, |cell| cell.bg(highlight))
-                                    .hover(move |cell| cell.bg(highlight.opacity(0.6)))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.qr_act(QrAction::ToggleEmoji(emoji.to_string()), cx);
-                                    }))
-                                    .child(glyph)
+                                    .when(selected, |face| face.bg(highlight))
+                                    .child(glyph);
+                                div()
+                                    .debug_selector(move || format!("peer-qr-emoji-{index}"))
+                                    .child(
+                                        Button::new(("peer-qr-emoji", index))
+                                            .ghost()
+                                            .p_0()
+                                            .size(at(cell))
+                                            .selected(selected)
+                                            .accessibility_label(emoji)
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.qr_act(
+                                                    QrAction::ToggleEmoji(emoji.to_string()),
+                                                    cx,
+                                                );
+                                            }))
+                                            .child(face),
+                                    )
                             });
                         div().px(at(PANEL_PADDING)).flex().children(cells)
                     })
@@ -269,28 +311,33 @@ impl QuillApp {
         };
         let busy = open.state.free.requesting.is_some();
         let control = rgba(view.colors.control);
-        let pill = div()
-            .id("peer-qr-pill")
+        let pill = Button::new("peer-qr-pill")
+            .rounded_full()
+            .custom(
+                ButtonCustomVariant::new(cx)
+                    .color(control)
+                    .foreground(foreground)
+                    .hover(control.opacity(0.8))
+                    .active(control.opacity(0.6)),
+            )
             .h(at(PILL_HEIGHT))
             .px_3()
-            .flex()
-            .items_center()
-            .gap_1()
-            .rounded_full()
-            .bg(control)
-            .hover(move |pill| pill.bg(control.opacity(0.8)))
-            .text_sm()
-            .font_weight(FontWeight::MEDIUM)
-            .text_color(foreground)
-            .cursor_pointer()
-            .when(busy, |pill| {
-                pill.child(
-                    gpui_kit::component::spinner::Spinner::new()
-                        .xsmall()
-                        .color(foreground),
-                )
-            })
-            .children(content)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .text_sm()
+                    .font_weight(FontWeight::MEDIUM)
+                    .when(busy, |row| {
+                        row.child(
+                            gpui_kit::component::spinner::Spinner::new()
+                                .xsmall()
+                                .color(foreground),
+                        )
+                    })
+                    .children(content),
+            )
             .on_click(cx.listener(|this, _, _, cx| this.qr_act(QrAction::PillClicked, cx)));
         Some(
             div()
@@ -300,17 +347,16 @@ impl QuillApp {
                 .w_full()
                 .flex()
                 .justify_center()
-                .child(pill),
+                .child(div().debug_selector(|| "peer-qr-pill".into()).child(pill)),
         )
     }
 
-    /// The pill's menu over it (the box clips anything below), and a
-    /// cover that closes it.
+    /// The pill's menu, dropping from the pill's top edge past the box
+    /// (tdesktop shows it as its own popup), and a cover that closes it.
     pub(super) fn qr_free_menu(
         &mut self,
         view: &QrView,
         pill_top: f64,
-        box_height: f64,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let Some(open) = self
@@ -384,34 +430,35 @@ impl QuillApp {
             )
             .into_any_element();
         let menu = div()
-            .absolute()
-            .bottom(at(box_height - pill_top + 6.))
-            .left_0()
-            .w_full()
+            .id("peer-qr-menu")
+            .debug_selector(|| "peer-qr-menu".into())
+            .min_w(px(220.))
+            .p_1()
             .flex()
-            .justify_center()
-            .child(
-                div()
-                    .id("peer-qr-menu")
-                    .min_w(px(220.))
-                    .p_1()
-                    .flex()
-                    .flex_col()
-                    .rounded_lg()
-                    .border_1()
-                    .border_color(border)
-                    .bg(popover)
-                    .shadow_lg()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .children(entries),
-            )
-            .into_any_element();
-        vec![cover, menu]
+            .flex_col()
+            .rounded_lg()
+            .border_1()
+            .border_color(border)
+            .bg(popover)
+            .shadow_lg()
+            .occlude()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .children(entries);
+        let popup = deferred(
+            anchored()
+                .position_mode(AnchoredPositionMode::Local)
+                .position(point(px(0.), at(pill_top)))
+                .snap_to_window_with_margin(px(8.))
+                .child(div().w(at(BOX_WIDTH)).flex().justify_center().child(menu)),
+        )
+        .with_priority(gpui_base::POPUP_PRIORITY)
+        .into_any_element();
+        vec![cover, popup]
     }
 
     /// The box's toast, over its bottom edge.
     pub(super) fn qr_toast_element(&self) -> Option<Div> {
-        let (toast, _) = self.peer_qr.open.as_ref()?.toast?;
+        let (toast, _) = self.peer_qr.open.as_ref()?.toast.as_ref()?;
         Some(
             div()
                 .absolute()

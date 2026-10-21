@@ -39,7 +39,7 @@ impl Session {
                     crate::peer_qr::session::BackdropsFetch::Failed;
             }
             Some(RequestPurpose::Users(UsersPurpose::GetUserLink { free })) => {
-                self.users_state.peer_qr.fail_link(free);
+                self.users_state.peer_qr.fail_link(free, error_reason(err));
             }
             Some(RequestPurpose::GetBackgroundEmojiIcons) => {
                 self.users_state.background_emoji_icons_failed = true;

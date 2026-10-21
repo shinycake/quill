@@ -29,6 +29,19 @@ impl FreeRequest {
     }
 }
 
+/// A sent free-code request: which box sent it and which of its requests
+/// it was, so an answer meant for an earlier box or a dropped request is
+/// ignored (tdesktop `generation`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FreeTicket {
+    pub request: FreeRequest,
+    pub box_id: u64,
+    pub serial: u64,
+}
+
+/// A free-code `getUserLink` result: the code, or the server's reason.
+pub type FreeResult = Result<FreeCode, String>;
+
 /// A `getUserLink` answer for a free code.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FreeCode {
@@ -75,6 +88,8 @@ pub enum FreeMenuItem {
 pub struct FreeState {
     pub mode: FreeMode,
     pub requesting: Option<FreeRequest>,
+    /// Bumped by every request and every dropped one.
+    pub serial: u64,
     pub menu_open: bool,
 }
 

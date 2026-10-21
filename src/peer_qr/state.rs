@@ -4,7 +4,7 @@
 //! [`PeerQrBox::apply`] returns.
 
 use super::appearance::{Appearance, Swatch, SwatchKey};
-use super::free::{FreeCode, FreeMenuItem, FreeMode, FreeRequest, FreeState};
+use super::free::{FreeMenuItem, FreeMode, FreeRequest, FreeResult, FreeState, FreeTicket};
 use super::link::SHARE_CUTOFF_SECS;
 use crate::lang::Key;
 
@@ -57,13 +57,16 @@ pub enum QrAction {
     PillClicked,
     MenuDismissed,
     MenuChose(FreeMenuItem),
-    /// A free-code `getUserLink` came back; `None` when it failed.
+    /// A free-code `getUserLink` came back.
     FreeAnswer {
-        request: FreeRequest,
-        code: Option<FreeCode>,
+        ticket: FreeTicket,
+        result: FreeResult,
     },
     /// The clock moved: a temporary code may have run out.
     Tick,
+    /// The account's price or its own link changed (tdesktop's price and
+    /// `temporaryOnly` watchers).
+    Sync,
 }
 
 /// What the reducer needs from outside for the free-code actions.
@@ -78,7 +81,7 @@ pub struct QrEnv {
 }
 
 /// A toast the box shows over itself.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QrToast {
     /// `lng_no_paid_token_toast_expires`, with the seconds left.
     CodeExpires(i64),
@@ -92,13 +95,18 @@ pub enum QrToast {
         free_code: bool,
     },
     Unavailable,
+    /// The server's reason a request failed.
+    Failed(String),
+    /// The card image is on the clipboard.
     Copied,
+    /// Only the link is on the clipboard (`lng_username_copied`).
+    LinkCopied,
 }
 
 /// Work the UI does after an action.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QrEffect {
-    RequestFreeCode(FreeRequest),
+    RequestFreeCode(FreeTicket),
     Toast(QrToast),
 }
 
@@ -114,6 +122,8 @@ pub struct ShownLink {
 /// The open box.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PeerQrBox {
+    /// Tells this box's free-code answers from an earlier box's.
+    pub id: u64,
     pub subject: QrSubject,
     pub color: SwatchKey,
     pub emoji: Vec<String>,
@@ -122,8 +132,9 @@ pub struct PeerQrBox {
 }
 
 impl PeerQrBox {
-    pub fn new(subject: QrSubject) -> Self {
+    pub fn new(subject: QrSubject, id: u64) -> Self {
         Self {
+            id,
             subject,
             color: SwatchKey::Default,
             emoji: Vec::new(),
@@ -159,8 +170,11 @@ impl PeerQrBox {
             QrAction::PillClicked => return self.pill_clicked(env),
             QrAction::MenuDismissed => self.free.menu_open = false,
             QrAction::MenuChose(item) => return self.menu_chose(item, env),
-            QrAction::FreeAnswer { request, code } => return self.free_answer(request, code, env),
+            QrAction::FreeAnswer { ticket, result } => {
+                return self.free_answer(ticket, result, env);
+            }
             QrAction::Tick => return self.tick(env),
+            QrAction::Sync => self.sync(env),
         }
         Vec::new()
     }
@@ -185,7 +199,19 @@ impl PeerQrBox {
         }
         self.free.menu_open = false;
         self.free.requesting = Some(what);
-        vec![QrEffect::RequestFreeCode(what)]
+        self.free.serial += 1;
+        vec![QrEffect::RequestFreeCode(FreeTicket {
+            request: what,
+            box_id: self.id,
+            serial: self.free.serial,
+        })]
+    }
+
+    /// tdesktop `dropPending`.
+    fn drop_pending(&mut self) {
+        self.free.requesting = None;
+        self.free.serial += 1;
+        self.free.menu_open = false;
     }
 
     fn pill_clicked(&mut self, env: QrEnv) -> Vec<QrEffect> {
@@ -216,30 +242,34 @@ impl PeerQrBox {
         }
     }
 
-    /// tdesktop `applyCode`.
-    fn free_answer(
-        &mut self,
-        request: FreeRequest,
-        code: Option<FreeCode>,
-        env: QrEnv,
-    ) -> Vec<QrEffect> {
-        if self.free.requesting != Some(request) {
+    /// tdesktop `applyCode`, and its request's fail handler: a server
+    /// error is only toasted; an empty or expired code is unavailable, and
+    /// after a reset the fee is back.
+    fn free_answer(&mut self, ticket: FreeTicket, result: FreeResult, env: QrEnv) -> Vec<QrEffect> {
+        if ticket.box_id != self.id
+            || ticket.serial != self.free.serial
+            || self.free.requesting != Some(ticket.request)
+        {
             return Vec::new();
         }
         self.free.requesting = None;
+        let request = ticket.request;
         if request.permanent() && env.temporary_only {
             return Vec::new();
         }
+        let code = match result {
+            Ok(code) => code,
+            Err(reason) if reason.is_empty() => return vec![QrEffect::Toast(QrToast::Unavailable)],
+            Err(reason) => return vec![QrEffect::Toast(QrToast::Failed(reason))],
+        };
         let temporary = !request.permanent();
-        let code = code.filter(|code| {
-            !code.link.url.is_empty() && !(temporary && code.link.expires_at <= env.now)
-        });
-        let Some(code) = code else {
+        if code.link.url.is_empty() || (temporary && code.link.expires_at <= env.now) {
             if request.revoke() {
+                self.drop_pending();
                 self.free.mode = FreeMode::Fee;
             }
             return vec![QrEffect::Toast(QrToast::Unavailable)];
-        };
+        }
         if temporary {
             let left = code.link.expires_at - env.now;
             self.free.mode = FreeMode::Temporary { code };
@@ -254,10 +284,6 @@ impl PeerQrBox {
     }
 
     fn tick(&mut self, env: QrEnv) -> Vec<QrEffect> {
-        if env.price <= 0 {
-            self.free = FreeState::default();
-            return Vec::new();
-        }
         match &self.free.mode {
             FreeMode::Temporary { code } if code.link.expires_at <= env.now => {
                 self.free.mode = FreeMode::Fee;
@@ -265,6 +291,27 @@ impl PeerQrBox {
                 vec![QrEffect::Toast(QrToast::CodeExpired)]
             }
             _ => Vec::new(),
+        }
+    }
+
+    /// Free messages turn the codes off; a temporary own link drops a
+    /// permanent code and a permanent request.
+    fn sync(&mut self, env: QrEnv) {
+        if env.price <= 0 {
+            if self.free.requesting.is_some() || self.free.menu_open {
+                self.drop_pending();
+            }
+            self.free.mode = FreeMode::Fee;
+            return;
+        }
+        if !env.temporary_only {
+            return;
+        }
+        if self.free.requesting.is_some_and(FreeRequest::permanent) {
+            self.drop_pending();
+        }
+        if matches!(self.free.mode, FreeMode::Permanent { .. }) {
+            self.free.mode = FreeMode::Fee;
         }
     }
 

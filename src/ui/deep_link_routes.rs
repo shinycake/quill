@@ -114,7 +114,7 @@ impl QuillApp {
 
     fn cancel_share_link(&mut self, cx: &mut Context<Self>) {
         self.share.link_text = None;
-        self.qr_share_cancelled();
+        self.qr_share_cancelled(cx);
         cx.notify();
     }
 

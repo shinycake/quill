@@ -1,7 +1,7 @@
 //! Connect driver: the QR box's requests (`getProfileShareThemeBackdrops`
 //! and `getUserLink`).
 use super::*;
-use crate::peer_qr::free::FreeRequest;
+use crate::peer_qr::free::{FreeRequest, FreeTicket};
 use crate::peer_qr::link::UserLinkFetch;
 use crate::peer_qr::session::BackdropsFetch;
 use crate::state::{RequestPurpose, UsersPurpose};
@@ -42,7 +42,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// asked for twice.
     pub fn fetch_own_user_link(
         &mut self,
-        free: Option<FreeRequest>,
+        free: Option<FreeTicket>,
     ) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -58,16 +58,20 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Users(UsersPurpose::GetUserLink { free }),
             None,
         );
+        let what = free.map(|ticket| ticket.request);
         let request = json!({
             "@type": "getUserLink",
             "@extra": extra.as_extra(),
             "remove_messages_fee": free.is_some(),
-            "return_permanent_link": free.is_some_and(FreeRequest::permanent),
-            "revoke_previous_links": free.is_some_and(FreeRequest::revoke),
+            "return_permanent_link": what.is_some_and(FreeRequest::permanent),
+            "revoke_previous_links": what.is_some_and(FreeRequest::revoke),
         });
         if let Err(err) = self.sender.send_json(&request.to_string()) {
             self.session.requests.take(extra);
-            self.session.users_state.peer_qr.fail_link(free);
+            self.session
+                .users_state
+                .peer_qr
+                .fail_link(free, String::new());
             return Err(err);
         }
         Ok(())

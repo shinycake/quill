@@ -3,14 +3,14 @@ use crate::peer_qr::appearance::{
     gradient_stops, swatches,
 };
 use crate::peer_qr::color::{Rgb, contrast, mix_lab, to_lab};
-use crate::peer_qr::free::{FreeCode, FreeMenuItem, FreeMode, FreeRequest};
+use crate::peer_qr::free::{FreeCode, FreeMenuItem, FreeMode, FreeRequest, FreeResult, FreeTicket};
 use crate::peer_qr::link::{
     OwnLinkInputs, OwnLinkKind, OwnLinkState, UserLinkData, UserLinkFetch, countdown_text,
     eligible, own_link, username_label,
 };
 use crate::peer_qr::pattern::{
-    Falloff, LAYER_BAND, Metrics, POP_MS, Rect, card_cull, covered, drift_offset, pick_index,
-    pop_scale, shrink_scale, tiles,
+    Falloff, LAYER_BAND, Metrics, POP_MS, Rect, drift_offset, overlaps, pick_index, pop_scale,
+    shrink_scale, tiles,
 };
 use crate::peer_qr::state::{
     CustomQr, MAX_EMOJI, PeerQrBox, QrAction, QrEffect, QrEnv, QrPanel, QrPeer, QrSubject, QrToast,
@@ -19,15 +19,18 @@ use crate::peer_qr::state::{
 use crate::telegram::requests::PrivacyWho;
 
 fn own_box() -> PeerQrBox {
-    PeerQrBox::new(QrSubject::Peer(QrPeer::User(1)))
+    PeerQrBox::new(QrSubject::Peer(QrPeer::User(1)), 7)
 }
 
 fn custom_box() -> PeerQrBox {
-    PeerQrBox::new(QrSubject::Custom(CustomQr {
-        link: "https://t.me/+invite".into(),
-        title: None,
-        about: None,
-    }))
+    PeerQrBox::new(
+        QrSubject::Custom(CustomQr {
+            link: "https://t.me/+invite".into(),
+            title: None,
+            about: None,
+        }),
+        8,
+    )
 }
 
 fn env(now: i64) -> QrEnv {
@@ -45,6 +48,22 @@ fn code(url: &str, expires_at: i64) -> FreeCode {
             expires_at,
         },
         can_permanent: true,
+    }
+}
+
+/// The ticket of `qr`'s request in flight.
+fn ticket(qr: &PeerQrBox, request: FreeRequest) -> FreeTicket {
+    FreeTicket {
+        request,
+        box_id: qr.id,
+        serial: qr.free.serial,
+    }
+}
+
+fn answer(qr: &PeerQrBox, request: FreeRequest, result: FreeResult) -> QrAction {
+    QrAction::FreeAnswer {
+        ticket: ticket(qr, request),
+        result,
     }
 }
 
@@ -263,14 +282,18 @@ fn pill_requests_a_temporary_code_then_shows_it() {
     let effects = qr.apply(QrAction::PillClicked, env(100));
     assert_eq!(
         effects,
-        vec![QrEffect::RequestFreeCode(FreeRequest::Temporary)]
+        vec![QrEffect::RequestFreeCode(ticket(
+            &qr,
+            FreeRequest::Temporary
+        ))]
     );
     assert!(qr.apply(QrAction::PillClicked, env(100)).is_empty());
     let effects = qr.apply(
-        QrAction::FreeAnswer {
-            request: FreeRequest::Temporary,
-            code: Some(code("https://t.me/free", 160)),
-        },
+        answer(
+            &qr,
+            FreeRequest::Temporary,
+            Ok(code("https://t.me/free", 160)),
+        ),
         env(100),
     );
     assert_eq!(effects, vec![QrEffect::Toast(QrToast::CodeExpires(60))]);
@@ -298,29 +321,109 @@ fn pill_requests_a_temporary_code_then_shows_it() {
 }
 
 #[test]
-fn stale_and_failed_answers() {
+fn unasked_and_empty_answers() {
     let mut qr = own_box();
-    let stale = qr.apply(
-        QrAction::FreeAnswer {
-            request: FreeRequest::Temporary,
-            code: Some(code("https://t.me/free", 160)),
-        },
+    let unasked = qr.apply(
+        answer(
+            &qr,
+            FreeRequest::Temporary,
+            Ok(code("https://t.me/free", 160)),
+        ),
         env(100),
     );
-    assert!(stale.is_empty());
+    assert!(unasked.is_empty());
     assert_eq!(qr.free.mode, FreeMode::Fee);
     qr.apply(QrAction::PillClicked, env(100));
     assert_eq!(qr.check_share(None, 100), Err(None));
-    let failed = qr.apply(
-        QrAction::FreeAnswer {
-            request: FreeRequest::Temporary,
-            code: None,
-        },
+    let empty = qr.apply(
+        answer(&qr, FreeRequest::Temporary, Ok(code("", 160))),
         env(100),
     );
-    assert_eq!(failed, vec![QrEffect::Toast(QrToast::Unavailable)]);
+    assert_eq!(empty, vec![QrEffect::Toast(QrToast::Unavailable)]);
     assert_eq!(qr.free.requesting, None);
     assert_eq!(qr.check_share(None, 100), Err(Some(QrToast::Unavailable)));
+}
+
+#[test]
+fn a_server_error_is_shown_and_keeps_the_code() {
+    let mut qr = own_box();
+    qr.apply(QrAction::PillClicked, env(100));
+    qr.apply(
+        answer(
+            &qr,
+            FreeRequest::Temporary,
+            Ok(code("https://t.me/free", 160)),
+        ),
+        env(100),
+    );
+    qr.apply(QrAction::PillClicked, env(101));
+    qr.apply(QrAction::MenuChose(FreeMenuItem::Reset), env(101));
+    let effects = qr.apply(
+        answer(
+            &qr,
+            FreeRequest::ResetTemporary,
+            Err("Too many tries".into()),
+        ),
+        env(102),
+    );
+    assert_eq!(
+        effects,
+        vec![QrEffect::Toast(QrToast::Failed("Too many tries".into()))]
+    );
+    assert!(matches!(qr.free.mode, FreeMode::Temporary { .. }));
+    assert_eq!(qr.free.requesting, None);
+}
+
+#[test]
+fn an_empty_reset_answer_restores_the_fee() {
+    let mut qr = own_box();
+    qr.apply(QrAction::PillClicked, env(100));
+    qr.apply(
+        answer(
+            &qr,
+            FreeRequest::Temporary,
+            Ok(code("https://t.me/free", 160)),
+        ),
+        env(100),
+    );
+    qr.apply(QrAction::MenuChose(FreeMenuItem::Reset), env(101));
+    let effects = qr.apply(
+        answer(&qr, FreeRequest::ResetTemporary, Ok(code("", 0))),
+        env(101),
+    );
+    assert_eq!(effects, vec![QrEffect::Toast(QrToast::Unavailable)]);
+    assert_eq!(qr.free.mode, FreeMode::Fee);
+}
+
+#[test]
+fn answers_for_another_box_or_a_dropped_request_are_ignored() {
+    let mut qr = own_box();
+    qr.apply(QrAction::PillClicked, env(100));
+    let other_box = QrAction::FreeAnswer {
+        ticket: FreeTicket {
+            box_id: qr.id + 1,
+            ..ticket(&qr, FreeRequest::Temporary)
+        },
+        result: Ok(code("https://t.me/old", 160)),
+    };
+    assert!(qr.apply(other_box, env(100)).is_empty());
+    assert_eq!(qr.free.requesting, Some(FreeRequest::Temporary));
+    let dropped = ticket(&qr, FreeRequest::Temporary);
+    qr.apply(
+        QrAction::Sync,
+        QrEnv {
+            price: 0,
+            ..env(100)
+        },
+    );
+    assert_eq!(qr.free.requesting, None);
+    qr.apply(QrAction::PillClicked, env(101));
+    let late = QrAction::FreeAnswer {
+        ticket: dropped,
+        result: Ok(code("https://t.me/late", 160)),
+    };
+    assert!(qr.apply(late, env(101)).is_empty());
+    assert_eq!(qr.free.mode, FreeMode::Fee);
 }
 
 #[test]
@@ -328,10 +431,11 @@ fn menu_switches_timer_resets_and_restores() {
     let mut qr = own_box();
     qr.apply(QrAction::PillClicked, env(100));
     qr.apply(
-        QrAction::FreeAnswer {
-            request: FreeRequest::Temporary,
-            code: Some(code("https://t.me/free", 160)),
-        },
+        answer(
+            &qr,
+            FreeRequest::Temporary,
+            Ok(code("https://t.me/free", 160)),
+        ),
         env(100),
     );
     qr.apply(QrAction::PillClicked, env(101));
@@ -351,27 +455,35 @@ fn menu_switches_timer_resets_and_restores() {
     let effects = qr.apply(QrAction::MenuChose(FreeMenuItem::ToggleTimer), env(101));
     assert_eq!(
         effects,
-        vec![QrEffect::RequestFreeCode(FreeRequest::Permanent)]
+        vec![QrEffect::RequestFreeCode(ticket(
+            &qr,
+            FreeRequest::Permanent
+        ))]
     );
     assert!(!qr.free.menu_open);
     let effects = qr.apply(
-        QrAction::FreeAnswer {
-            request: FreeRequest::Permanent,
-            code: Some(code("https://t.me/forever", 0)),
-        },
+        answer(
+            &qr,
+            FreeRequest::Permanent,
+            Ok(code("https://t.me/forever", 0)),
+        ),
         env(102),
     );
     assert_eq!(effects, vec![QrEffect::Toast(QrToast::CodePermanent)]);
     let effects = qr.apply(QrAction::MenuChose(FreeMenuItem::Reset), env(103));
     assert_eq!(
         effects,
-        vec![QrEffect::RequestFreeCode(FreeRequest::ResetPermanent)]
+        vec![QrEffect::RequestFreeCode(ticket(
+            &qr,
+            FreeRequest::ResetPermanent
+        ))]
     );
     let effects = qr.apply(
-        QrAction::FreeAnswer {
-            request: FreeRequest::ResetPermanent,
-            code: Some(code("https://t.me/forever2", 0)),
-        },
+        answer(
+            &qr,
+            FreeRequest::ResetPermanent,
+            Ok(code("https://t.me/forever2", 0)),
+        ),
         env(103),
     );
     assert_eq!(effects, vec![QrEffect::Toast(QrToast::CodeReset)]);
@@ -390,13 +502,14 @@ fn free_messages_turn_codes_off() {
     assert!(qr.apply(QrAction::PillClicked, free).is_empty());
     qr.apply(QrAction::PillClicked, env(100));
     qr.apply(
-        QrAction::FreeAnswer {
-            request: FreeRequest::Temporary,
-            code: Some(code("https://t.me/free", 160)),
-        },
+        answer(
+            &qr,
+            FreeRequest::Temporary,
+            Ok(code("https://t.me/free", 160)),
+        ),
         env(100),
     );
-    qr.apply(QrAction::Tick, free);
+    qr.apply(QrAction::Sync, free);
     assert_eq!(qr.free.mode, FreeMode::Fee);
 }
 
@@ -409,16 +522,47 @@ fn temporary_only_accounts_cannot_ask_for_permanent_codes() {
     };
     qr.apply(QrAction::PillClicked, only);
     qr.apply(
-        QrAction::FreeAnswer {
-            request: FreeRequest::Temporary,
-            code: Some(code("https://t.me/free", 160)),
-        },
+        answer(
+            &qr,
+            FreeRequest::Temporary,
+            Ok(code("https://t.me/free", 160)),
+        ),
         only,
     );
     assert!(
         qr.apply(QrAction::MenuChose(FreeMenuItem::ToggleTimer), only)
             .is_empty()
     );
+}
+
+#[test]
+fn a_link_turning_temporary_drops_the_permanent_code() {
+    let mut qr = own_box();
+    qr.apply(QrAction::PillClicked, env(100));
+    qr.apply(
+        answer(
+            &qr,
+            FreeRequest::Temporary,
+            Ok(code("https://t.me/free", 160)),
+        ),
+        env(100),
+    );
+    qr.apply(QrAction::MenuChose(FreeMenuItem::ToggleTimer), env(101));
+    qr.apply(
+        answer(
+            &qr,
+            FreeRequest::Permanent,
+            Ok(code("https://t.me/forever", 0)),
+        ),
+        env(101),
+    );
+    assert!(matches!(qr.free.mode, FreeMode::Permanent { .. }));
+    let only = QrEnv {
+        temporary_only: true,
+        ..env(102)
+    };
+    qr.apply(QrAction::Sync, only);
+    assert_eq!(qr.free.mode, FreeMode::Fee);
 }
 
 #[test]
@@ -461,11 +605,13 @@ fn tiles_shrink_towards_the_edges() {
 }
 
 #[test]
-fn tiles_under_the_card_are_covered() {
-    let cull = card_cull(Rect::new(51., 76., 288., 308.));
-    let (cx, cy) = cull.center();
-    assert!(covered(&cull, cx, cy, 30.));
-    assert!(!covered(&cull, 10., 10., 30.));
+fn tiles_touching_the_card_are_left_out() {
+    let card = Rect::new(51., 76., 288., 308.);
+    let (cx, cy) = card.center();
+    assert!(overlaps(&card, cx, cy, 30.));
+    assert!(overlaps(&card, 40., 100., 30.));
+    assert!(!overlaps(&card, 30., 100., 30.));
+    assert!(!overlaps(&card, 10., 10., 30.));
 }
 
 #[test]

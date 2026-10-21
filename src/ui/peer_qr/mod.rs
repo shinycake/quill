@@ -26,6 +26,9 @@ mod demo;
 use super::app::QuillApp;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::peer_qr::free::FreeMode;
+use quill::peer_qr::link::OwnLinkState;
+use quill::peer_qr::session::PeerQrData;
 use quill::peer_qr::state::{PeerQrBox, QrAction, QrEffect, QrPanel, QrSubject, QrToast};
 use quill::telegram::requests_privacy::PrivacySettingKey;
 use std::path::PathBuf;
@@ -33,7 +36,7 @@ use std::time::{Duration, Instant};
 
 /// tdesktop `kToastDuration`.
 const TOAST: Duration = Duration::from_millis(2800);
-/// How often the open box checks its clock (code expiry, countdowns).
+/// How often a countdown on the box moves.
 const CLOCK: Duration = Duration::from_secs(1);
 
 /// The panel's open or close motion, for drawing only: the reducer's
@@ -109,14 +112,16 @@ pub(super) struct OpenQr {
     pub(super) share_image: Option<PathBuf>,
     /// A card image is being made for copy or share.
     pub(super) exporting: bool,
-    _clock: Task<()>,
+    /// The countdown clock is ticking.
+    clock_running: bool,
 }
 
 /// The QR box's part of the app.
 pub(crate) struct PeerQrUi {
     pub(super) open: Option<OpenQr>,
     art: art::Art,
-    pub(super) focus: FocusHandle,
+    /// The last box's id; each box gets the next one.
+    last_box: u64,
     /// A shared card waiting for its chat's composer.
     pub(super) pending_attach: Option<(ChatId, PathBuf)>,
     /// The name's measured fit, kept until the name changes.
@@ -124,11 +129,11 @@ pub(crate) struct PeerQrUi {
 }
 
 impl PeerQrUi {
-    pub(crate) fn new(cx: &mut App) -> Self {
+    pub(crate) fn new(_cx: &mut App) -> Self {
         Self {
             open: None,
             art: art::Art::default(),
-            focus: cx.focus_handle(),
+            last_box: 0,
             pending_attach: None,
             fit: None,
         }
@@ -136,6 +141,17 @@ impl PeerQrUi {
 }
 
 impl QuillApp {
+    /// The session's part for the box, live or demo.
+    fn qr_data_mut(&mut self) -> Option<&mut PeerQrData> {
+        match self.live.as_mut() {
+            Some(live) => Some(&mut live.driver.session.users_state.peer_qr),
+            None => self
+                .demo_session
+                .as_mut()
+                .map(|session| &mut session.users_state.peer_qr),
+        }
+    }
+
     /// Open the box for `subject`, replacing any open one, and ask the
     /// session for what it shows: the colors, and for your own code the
     /// phone privacy rules and the message price.
@@ -145,27 +161,21 @@ impl QuillApp {
             QrSubject::Peer(peer) if self.qr_is_self(peer)
         );
         let styled = matches!(subject, QrSubject::Peer(_));
-        let clock = Self::spawn_main(cx, async move |this, cx| {
-            loop {
-                cx.background_executor().timer(CLOCK).await;
-                let Ok(open) = this.update(cx, |this, cx| this.qr_clock(cx)) else {
-                    return;
-                };
-                if !open {
-                    return;
-                }
-            }
-        });
+        self.drop_shared_card(cx);
+        self.peer_qr.last_box += 1;
         self.peer_qr.open = Some(OpenQr {
-            state: PeerQrBox::new(subject),
+            state: PeerQrBox::new(subject, self.peer_qr.last_box),
             opened: Instant::now(),
             motion: PanelMotion::IDLE,
             toast: None,
             swap: None,
             share_image: None,
             exporting: false,
-            _clock: clock,
+            clock_running: false,
         });
+        if own && let Some(data) = self.qr_data_mut() {
+            data.retry_contact_link();
+        }
         if let Some(live) = self.live.as_mut() {
             if styled {
                 let _ = live.driver.fetch_share_theme_backdrops();
@@ -181,11 +191,14 @@ impl QuillApp {
             }
         }
         self.ensure_qr_contact_link();
+        self.qr_refresh(cx);
         cx.notify();
     }
 
     pub(super) fn close_qr_box(&mut self, cx: &mut Context<Self>) {
-        self.peer_qr.open = None;
+        if let Some(path) = self.peer_qr.open.take().and_then(|open| open.share_image) {
+            remove_card_file(path, cx);
+        }
         self.peer_qr.art.clear();
         cx.notify();
     }
@@ -197,16 +210,16 @@ impl QuillApp {
         let Some(open) = self.peer_qr.open.as_mut() else {
             return;
         };
-        let picks_before = open.state.emoji.clone();
-        let panel_before = open.state.panel;
+        let before = open.state.clone();
         let effects = open.state.apply(action, env);
-        if open.state.emoji != picks_before {
+        let changed = open.state != before;
+        if open.state.emoji != before.emoji {
             open.swap = Some(PatternSwap {
-                previous: picks_before,
+                previous: before.emoji.clone(),
                 started: now,
             });
         }
-        if open.state.panel != panel_before {
+        if open.state.panel != before.panel {
             open.motion = match open.state.panel {
                 Some(panel) => PanelMotion {
                     shown: Some(panel),
@@ -220,23 +233,27 @@ impl QuillApp {
                 },
             };
         }
+        if !changed && effects.is_empty() {
+            return;
+        }
         self.run_qr_effects(effects, cx);
+        self.qr_refresh(cx);
         cx.notify();
     }
 
     fn run_qr_effects(&mut self, effects: Vec<QrEffect>, cx: &mut Context<Self>) {
         for effect in effects {
             match effect {
-                QrEffect::RequestFreeCode(request) => {
+                QrEffect::RequestFreeCode(ticket) => {
                     let sent = self
                         .live
                         .as_mut()
-                        .is_some_and(|live| live.driver.fetch_own_user_link(Some(request)).is_ok());
+                        .is_some_and(|live| live.driver.fetch_own_user_link(Some(ticket)).is_ok());
                     if !sent {
                         self.qr_act(
                             QrAction::FreeAnswer {
-                                request,
-                                code: None,
+                                ticket,
+                                result: Err(String::new()),
                             },
                             cx,
                         );
@@ -245,6 +262,13 @@ impl QuillApp {
                 QrEffect::Toast(toast) => self.show_qr_toast(toast, cx),
             }
         }
+    }
+
+    /// After the box or what it shows changed: make the pictures it needs
+    /// and run the clock while a countdown shows.
+    fn qr_refresh(&mut self, cx: &mut Context<Self>) {
+        self.qr_prepare_art(cx);
+        self.sync_qr_clock(cx);
     }
 
     /// A toast over the box's bottom (tdesktop `ShowFreeToast`).
@@ -258,7 +282,7 @@ impl QuillApp {
             cx.background_executor().timer(TOAST).await;
             let _ = this.update(cx, |this, cx| {
                 if let Some(open) = this.peer_qr.open.as_mut()
-                    && open.toast.is_some_and(|(_, at)| at == shown)
+                    && open.toast.as_ref().is_some_and(|(_, at)| *at == shown)
                 {
                     open.toast = None;
                     cx.notify();
@@ -269,30 +293,95 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Once a second while the box is open: a temporary code may have
-    /// run out, a countdown moved. `false` once the box is closed.
-    fn qr_clock(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.peer_qr.open.is_none() {
+    /// A free code or your temporary contact link counts down.
+    fn qr_counts_down(&self) -> bool {
+        let Some(open) = self.peer_qr.open.as_ref() else {
+            return false;
+        };
+        matches!(open.state.free.mode, FreeMode::Temporary { .. })
+            || matches!(
+                self.qr_own_link(&open.state.subject),
+                Some(OwnLinkState::Ready(link)) if link.expires_at != 0
+            )
+    }
+
+    /// Start the once-a-second clock when a countdown shows; it stops
+    /// itself when none does or the box closes.
+    fn sync_qr_clock(&mut self, cx: &mut Context<Self>) {
+        if !self.qr_counts_down() {
+            return;
+        }
+        let Some(open) = self.peer_qr.open.as_mut() else {
+            return;
+        };
+        if open.clock_running {
+            return;
+        }
+        open.clock_running = true;
+        let id = open.state.id;
+        Self::spawn_main(cx, async move |this, cx| {
+            loop {
+                cx.background_executor().timer(CLOCK).await;
+                let Ok(going) = this.update(cx, |this, cx| this.qr_clock(id, cx)) else {
+                    return;
+                };
+                if !going {
+                    return;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// One clock tick for box `id`: a code may have run out, a countdown
+    /// moved. `false` once nothing counts down or the box is gone.
+    fn qr_clock(&mut self, id: u64, cx: &mut Context<Self>) -> bool {
+        if self.peer_qr.open.as_ref().map(|open| open.state.id) != Some(id) {
             return false;
         }
         self.ensure_qr_contact_link();
         self.qr_act(QrAction::Tick, cx);
-        true
+        cx.notify();
+        let going = self.qr_counts_down();
+        if !going && let Some(open) = self.peer_qr.open.as_mut() {
+            open.clock_running = false;
+        }
+        going
     }
 
-    /// Poll step: hand the box the free-code answers that came in.
+    /// Poll step: hand the box the free-code answers and a failed contact
+    /// link's reason, and follow account changes.
     pub(super) fn drain_peer_qr(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(live) = self.live.as_mut() else {
+        let open = self.peer_qr.open.is_some();
+        let own = self
+            .peer_qr
+            .open
+            .as_ref()
+            .and_then(|open| self.qr_own_link(&open.state.subject))
+            .is_some();
+        let Some(data) = self.qr_data_mut() else {
             return false;
         };
-        let answers = live.driver.session.users_state.peer_qr.take_free_answers();
-        if answers.is_empty() {
+        let answers = data.take_free_answers();
+        let failed = if own { data.contact_error.take() } else { None };
+        if !open {
             return false;
         }
-        for (request, code) in answers {
-            self.qr_act(QrAction::FreeAnswer { request, code }, cx);
+        let progressed = !answers.is_empty() || failed.is_some();
+        for (ticket, result) in answers {
+            self.qr_act(QrAction::FreeAnswer { ticket, result }, cx);
         }
-        true
+        if let Some(reason) = failed {
+            let toast = if reason.is_empty() {
+                QrToast::Unavailable
+            } else {
+                QrToast::Failed(reason)
+            };
+            self.show_qr_toast(toast, cx);
+        }
+        self.qr_act(QrAction::Sync, cx);
+        self.qr_refresh(cx);
+        progressed
     }
 
     /// Your own box with no username and a hidden number shows a
@@ -304,17 +393,22 @@ impl QuillApp {
             .open
             .as_ref()
             .and_then(|open| self.qr_own_link(&open.state.subject))
-            .is_some_and(|state| state == quill::peer_qr::link::OwnLinkState::NeedsContactLink);
+            .is_some_and(|state| state == OwnLinkState::NeedsContactLink);
         if needs && let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_own_user_link(None);
         }
     }
 
     /// The box hides under the share chooser; a cancelled share brings it
-    /// back as it was.
-    pub(super) fn qr_share_cancelled(&mut self) {
-        if let Some(open) = self.peer_qr.open.as_mut() {
-            open.share_image = None;
+    /// back as it was, and its card file goes.
+    pub(super) fn qr_share_cancelled(&mut self, cx: &mut Context<Self>) {
+        if let Some(path) = self
+            .peer_qr
+            .open
+            .as_mut()
+            .and_then(|open| open.share_image.take())
+        {
+            remove_card_file(path, cx);
         }
     }
 
@@ -324,7 +418,9 @@ impl QuillApp {
         let Some(open) = self.peer_qr.open.as_mut() else {
             return;
         };
-        self.peer_qr.pending_attach = open.share_image.take().map(|path| (chat_id, path));
+        let card = open.share_image.take();
+        self.drop_shared_card(cx);
+        self.peer_qr.pending_attach = card.map(|path| (chat_id, path));
         self.close_qr_box(cx);
     }
 
@@ -332,9 +428,25 @@ impl QuillApp {
     pub(super) fn attach_shared_qr_card(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         match self.peer_qr.pending_attach.take() {
             Some((chat, path)) if chat == chat_id => self.attach_dropped_files(&[path], cx),
-            _ => {}
+            Some(other) => self.peer_qr.pending_attach = Some(other),
+            None => {}
         }
     }
+
+    /// A card shared earlier that no chat took.
+    fn drop_shared_card(&mut self, cx: &mut Context<Self>) {
+        if let Some((_, path)) = self.peer_qr.pending_attach.take() {
+            remove_card_file(path, cx);
+        }
+    }
+}
+
+/// Remove a card image nothing will attach, off the UI thread.
+fn remove_card_file(path: PathBuf, cx: &mut Context<QuillApp>) {
+    cx.background_spawn(async move {
+        let _ = std::fs::remove_file(path);
+    })
+    .detach();
 }
 
 crate::ui::shell::register_dialogs! {

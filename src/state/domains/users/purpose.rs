@@ -126,7 +126,7 @@ pub enum UsersPurpose {
     /// `getUserLink` for the QR box: the contact link (`free` is `None`)
     /// or a free-message code. Response is `userLink`.
     GetUserLink {
-        free: Option<crate::peer_qr::free::FreeRequest>,
+        free: Option<crate::peer_qr::free::FreeTicket>,
     },
 }
 

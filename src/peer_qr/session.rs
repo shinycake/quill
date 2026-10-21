@@ -3,7 +3,7 @@
 //! answers the open box has not taken yet.
 
 use super::appearance::ShareThemeBackdrop;
-use super::free::{FreeCode, FreeRequest};
+use super::free::{FreeCode, FreeResult, FreeTicket};
 use super::link::{UserLinkData, UserLinkFetch};
 
 /// `getProfileShareThemeBackdrops`.
@@ -54,18 +54,20 @@ pub struct PeerQrData {
     /// The plain `getUserLink`, for an account with no username and a
     /// hidden number.
     pub contact_link: UserLinkFetch,
-    /// Free-code answers in arrival order; `None` when the request failed.
-    pub free_answers: Vec<(FreeRequest, Option<FreeCode>)>,
+    /// Why the last contact link failed, until the box has shown it.
+    pub contact_error: Option<String>,
+    /// Free-code answers in arrival order.
+    pub free_answers: Vec<(FreeTicket, FreeResult)>,
 }
 
 impl PeerQrData {
-    pub fn accept_link(&mut self, free: Option<FreeRequest>, answer: UserLinkAnswer, now: i64) {
+    pub fn accept_link(&mut self, free: Option<FreeTicket>, answer: UserLinkAnswer, now: i64) {
         let link = answer.at(now);
         match free {
             None => self.contact_link = UserLinkFetch::Ready(link),
-            Some(request) => self.free_answers.push((
-                request,
-                Some(FreeCode {
+            Some(ticket) => self.free_answers.push((
+                ticket,
+                Ok(FreeCode {
                     link,
                     can_permanent: answer.can_get_permanent_link,
                 }),
@@ -73,14 +75,27 @@ impl PeerQrData {
         }
     }
 
-    pub fn fail_link(&mut self, free: Option<FreeRequest>) {
+    /// `reason` is the error to show; empty when there is none to tell.
+    pub fn fail_link(&mut self, free: Option<FreeTicket>, reason: String) {
         match free {
-            None => self.contact_link = UserLinkFetch::Failed,
-            Some(request) => self.free_answers.push((request, None)),
+            None => {
+                self.contact_link = UserLinkFetch::Failed;
+                self.contact_error = Some(reason);
+            }
+            Some(ticket) => self.free_answers.push((ticket, Err(reason))),
         }
     }
 
-    pub fn take_free_answers(&mut self) -> Vec<(FreeRequest, Option<FreeCode>)> {
+    /// A new box asks again after a failure (tdesktop makes a new
+    /// `OwnQrLinkState` for each box).
+    pub fn retry_contact_link(&mut self) {
+        if self.contact_link == UserLinkFetch::Failed {
+            self.contact_link = UserLinkFetch::Idle;
+        }
+        self.contact_error = None;
+    }
+
+    pub fn take_free_answers(&mut self) -> Vec<(FreeTicket, FreeResult)> {
         std::mem::take(&mut self.free_answers)
     }
 }

@@ -9,16 +9,15 @@ use base64::Engine as _;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::local_time::now_unix;
+use quill::peer_qr::appearance::Appearance;
 use quill::peer_qr::appearance::{GRADIENT_STEPS, gradient_stops};
 use quill::peer_qr::color::Rgb;
 use quill::peer_qr::layout::{
     BOX_WIDTH, CARD_WIDTH, CardLayout, SHADOW_ALPHA, SHADOW_RADIUS, SHADOW_SHIFT, UsernameFit,
     card_layout,
 };
-use quill::peer_qr::pattern::{
-    Falloff, LAYER_BAND, Metrics, Rect, card_cull, covered, pick_index, tiles,
-};
-use quill::peer_qr::state::ShownLink;
+use quill::peer_qr::pattern::{Falloff, LAYER_BAND, Metrics, Rect, overlaps, pick_index, tiles};
+use quill::peer_qr::state::{QrToast, ShownLink};
 use std::fmt::Write as _;
 use std::sync::Arc;
 
@@ -36,6 +35,8 @@ struct Picture {
     ink: Rgb,
     center: Rgb,
     edge: Rgb,
+    /// The card as the box shows it: with the name band for a peer.
+    card: CardLayout,
     name: Option<UsernameFit>,
     font: String,
     /// Each name line's width in the box, so the saved line matches it
@@ -43,6 +44,8 @@ struct Picture {
     name_widths: Vec<f64>,
     stills: Vec<Arc<RenderImage>>,
     tiles: Vec<(f64, f64, f64, usize)>,
+    /// What the box showed, to check the image against when it is done.
+    appearance: Appearance,
 }
 
 fn hex(color: Rgb) -> String {
@@ -164,9 +167,9 @@ fn picture_svg(picture: &Picture, card: &CardLayout, width: f64, height: f64) ->
 
 /// The picture as PNG bytes.
 fn render_png(renderer: &SvgRenderer, picture: &Picture) -> Option<Vec<u8>> {
-    let card = card_layout(CARD_WIDTH, picture.name.is_some());
+    let card = &picture.card;
     let (width, height) = (BOX_WIDTH, card.height + 2. * MARGIN);
-    let svg = picture_svg(picture, &card, width, height)?;
+    let svg = picture_svg(picture, card, width, height)?;
     let parsed = renderer.parse_svg(svg.as_bytes()).ok()?;
     let pixels = size(
         DevicePixels((width * EXPORT_SCALE).round() as i32),
@@ -190,7 +193,8 @@ fn render_png(renderer: &SvgRenderer, picture: &Picture) -> Option<Vec<u8>> {
     Some(png.into_inner())
 }
 
-/// Where the pattern's emoji go in the saved image: its first frame.
+/// Where the pattern's emoji go in the saved image: its first frame, none
+/// touching the card.
 fn picture_tiles(count: usize, card: &CardLayout) -> Vec<(f64, f64, f64, usize)> {
     if count == 0 {
         return Vec::new();
@@ -201,10 +205,9 @@ fn picture_tiles(count: usize, card: &CardLayout) -> Vec<(f64, f64, f64, usize)>
         area: Rect::new(0., 0., width, height),
         band: LAYER_BAND,
     };
-    let cull = card_cull(card_rect);
     tiles(&falloff, card_rect.center(), &Metrics::LIVE, count, 0.)
         .into_iter()
-        .filter(|tile| !covered(&cull, tile.x, tile.y, tile.size))
+        .filter(|tile| !overlaps(&card_rect, tile.x, tile.y, tile.size))
         .map(|tile| {
             (
                 tile.x,
@@ -214,6 +217,36 @@ fn picture_tiles(count: usize, card: &CardLayout) -> Vec<(f64, f64, f64, usize)>
             )
         })
         .collect()
+}
+
+/// What Copy puts on the clipboard on this platform. macOS writes only
+/// the strings of an item with more than one entry, so it gets the image
+/// alone, as tdesktop copies it; the X11 and Wayland clipboards take text
+/// only, so they get the link.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CopyKind {
+    Image,
+    ImageAndLink,
+    Link,
+}
+
+const COPY_KIND: CopyKind = if cfg!(target_os = "macos") {
+    CopyKind::Image
+} else if cfg!(target_os = "windows") {
+    CopyKind::ImageAndLink
+} else {
+    CopyKind::Link
+};
+
+/// The clipboard item for `kind` and the toast saying what it holds.
+fn copy_item(kind: CopyKind, png: Vec<u8>, link: String) -> (ClipboardItem, QrToast) {
+    let image = ClipboardEntry::Image(gpui_kit::Image::from_bytes(ImageFormat::Png, png));
+    let entries = match kind {
+        CopyKind::Image => vec![image],
+        CopyKind::ImageAndLink => vec![image, ClipboardEntry::String(ClipboardString::new(link))],
+        CopyKind::Link => return (ClipboardItem::new_string(link), QrToast::LinkCopied),
+    };
+    (ClipboardItem { entries }, QrToast::Copied)
 }
 
 impl QuillApp {
@@ -241,9 +274,7 @@ impl QuillApp {
         let picks = open.state.emoji.clone();
         let stills = picks
             .iter()
-            .filter_map(|emoji| {
-                super::super::emoji_sprites::sprite(emoji).or_else(|| self.peer_qr.art.still(emoji))
-            })
+            .filter_map(|emoji| self.qr_emoji_still(emoji))
             .collect::<Vec<_>>();
         let card = card_layout(CARD_WIDTH, view.peer_box());
         let picture = Picture {
@@ -251,21 +282,52 @@ impl QuillApp {
             ink: view.colors.ink,
             center: view.appearance.center,
             edge: view.appearance.edge,
+            card,
             name,
             font: String::new(),
             name_widths: Vec::new(),
             tiles: picture_tiles(stills.len(), &card),
             stills,
+            appearance: view.appearance,
         };
         Some((shown, picture))
     }
 
-    /// Render `picture` off the UI thread, then hand its PNG to `done`.
-    fn qr_export(
+    /// The box still shows what was drawn: the same link in the same
+    /// colors, not about to run out (tdesktop `ImageIsCurrent`,
+    /// `RefuseImage`).
+    fn qr_image_current(
+        &mut self,
+        link: &str,
+        appearance: &Appearance,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(view) = self.qr_view() else {
+            return false;
+        };
+        let Some(open) = self.peer_qr.open.as_ref() else {
+            return false;
+        };
+        match open.state.check_share(view.shown, now_unix()) {
+            Ok(shown) => shown.link == link && view.appearance == *appearance,
+            Err(toast) => {
+                if let Some(toast) = toast {
+                    self.show_qr_toast(toast, cx);
+                }
+                false
+            }
+        }
+    }
+
+    /// Render `picture` and pass its PNG through `finish` off the UI
+    /// thread, then hand the result to `done`, with whether the box still
+    /// shows what was drawn.
+    fn qr_export<T: Send + 'static>(
         &mut self,
         mut picture: Picture,
         window: &mut Window,
-        done: impl FnOnce(&mut Self, Option<Vec<u8>>, &mut Context<Self>) + 'static,
+        finish: impl FnOnce(Vec<u8>) -> Option<T> + Send + 'static,
+        done: impl FnOnce(&mut Self, Option<T>, bool, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) {
         if let Some(name) = &picture.name {
@@ -285,13 +347,16 @@ impl QuillApp {
             open.exporting = true;
         }
         let renderer = cx.svg_renderer();
+        let link = picture.link.clone();
+        let appearance = picture.appearance.clone();
         self.run_off_ui_then(
-            move || render_png(&renderer, &picture),
-            move |this, png, cx| {
+            move || render_png(&renderer, &picture).and_then(finish),
+            move |this, result, cx| {
                 if let Some(open) = this.peer_qr.open.as_mut() {
                     open.exporting = false;
                 }
-                done(this, png, cx);
+                let current = this.qr_image_current(&link, &appearance, cx);
+                done(this, result, current, cx);
                 cx.notify();
             },
             cx,
@@ -299,23 +364,29 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Copy: the card image on the clipboard (tdesktop copies the image).
+    /// Copy: the card image, and the link where the clipboard takes both;
+    /// on X11 and Wayland, the link.
     pub(super) fn qr_copy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((_, picture)) = self.qr_shareable(cx) else {
+        let Some((shown, picture)) = self.qr_shareable(cx) else {
             return;
         };
+        if COPY_KIND == CopyKind::Link {
+            cx.write_to_clipboard(ClipboardItem::new_string(shown.link));
+            self.show_qr_toast(QrToast::LinkCopied, cx);
+            return;
+        }
         self.qr_export(
             picture,
             window,
-            |this, png, cx| match png {
-                Some(png) => {
-                    cx.write_to_clipboard(ClipboardItem::new_image(&gpui_kit::Image::from_bytes(
-                        ImageFormat::Png,
-                        png,
-                    )));
-                    this.show_qr_toast(quill::peer_qr::state::QrToast::Copied, cx);
+            Some,
+            move |this, png, current, cx| match png {
+                Some(png) if current => {
+                    let (item, toast) = copy_item(COPY_KIND, png, shown.link);
+                    cx.write_to_clipboard(item);
+                    this.show_qr_toast(toast, cx);
                 }
-                None => this.show_qr_toast(quill::peer_qr::state::QrToast::Unavailable, cx),
+                Some(_) => {}
+                None => this.show_qr_toast(QrToast::Unavailable, cx),
             },
             cx,
         );
@@ -330,11 +401,13 @@ impl QuillApp {
         self.qr_export(
             picture,
             window,
-            move |this, png, _| {
-                let image = png
-                    .and_then(|png| quill::composer::clipboard_image_attachment(&png, "png"))
-                    .map(|attachment| attachment.path);
-                let Some(open) = this.peer_qr.open.as_mut() else {
+            |png| quill::composer::clipboard_image_attachment(&png, "png").map(|file| file.path),
+            move |this, image, current, cx| {
+                let open = this.peer_qr.open.as_mut().filter(|_| current);
+                let Some(open) = open else {
+                    if let Some(path) = image {
+                        super::remove_card_file(path, cx);
+                    }
                     return;
                 };
                 open.share_image = image;
@@ -352,9 +425,11 @@ impl QuillApp {
 #[cfg(test)]
 mod tests {
     use super::{
-        BOX_WIDTH, CARD_WIDTH, FONT_FALLBACK, MARGIN, Picture, Rgb, UsernameFit, card_layout,
-        picture_svg, picture_tiles,
+        BOX_WIDTH, CARD_WIDTH, CopyKind, FONT_FALLBACK, MARGIN, Picture, QrToast, Rgb, UsernameFit,
+        card_layout, copy_item, picture_svg, picture_tiles,
     };
+    use gpui_kit::ClipboardEntry;
+    use quill::peer_qr::appearance::Appearance;
 
     #[test]
     fn the_picture_holds_the_code_the_name_and_the_pattern() {
@@ -364,6 +439,7 @@ mod tests {
             ink: Rgb::hex(0x22_3344),
             center: Rgb::hex(0x44_5566),
             edge: Rgb::hex(0x11_2233),
+            card,
             name: Some(UsernameFit {
                 size: 30.,
                 lines: vec!["@QUILL".into()],
@@ -372,6 +448,11 @@ mod tests {
             name_widths: vec![120.],
             stills: Vec::new(),
             tiles: picture_tiles(1, &card),
+            appearance: Appearance {
+                center: Rgb::hex(0x44_5566),
+                edge: Rgb::hex(0x11_2233),
+                emoji: Vec::new(),
+            },
         };
         let svg = picture_svg(&picture, &card, BOX_WIDTH, card.height + 2. * MARGIN).expect("svg");
         assert!(svg.contains("@QUILL"));
@@ -379,5 +460,26 @@ mod tests {
         assert!(svg.contains("fill=\"#223344\""));
         assert!(svg.contains("radialGradient"));
         assert!(!picture.tiles.is_empty());
+    }
+
+    #[test]
+    fn copy_holds_what_the_platform_clipboard_can_take() {
+        let png = b"\x89PNG".to_vec();
+        let link = "https://t.me/quill".to_string();
+        let (item, toast) = copy_item(CopyKind::Image, png.clone(), link.clone());
+        assert_eq!(toast, QrToast::Copied);
+        assert!(matches!(
+            item.entries.as_slice(),
+            [ClipboardEntry::Image(_)]
+        ));
+        let (item, toast) = copy_item(CopyKind::ImageAndLink, png.clone(), link.clone());
+        assert_eq!(toast, QrToast::Copied);
+        assert!(matches!(
+            item.entries.as_slice(),
+            [ClipboardEntry::Image(_), ClipboardEntry::String(text)] if text.text == link
+        ));
+        let (item, toast) = copy_item(CopyKind::Link, png, link.clone());
+        assert_eq!(toast, QrToast::LinkCopied);
+        assert_eq!(item.text(), Some(link));
     }
 }

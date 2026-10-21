@@ -10,7 +10,7 @@ use super::PatternSwap;
 use gpui_kit::*;
 use quill::peer_qr::pattern::{
     ENTRY_STAGGER_MS, Falloff, LAYER_BAND, Metrics, POP_DELAY_MS, Rect, SWAP_MS, SWAP_STAGGER_MS,
-    card_cull, covered, drift_offset, pick_index, pop_scale, shrink_scale, tiles,
+    drift_offset, overlaps, pick_index, pop_scale, shrink_scale, tiles,
 };
 use std::sync::Arc;
 use std::time::Instant;
@@ -50,11 +50,7 @@ fn ms(from: Instant, till: Instant) -> i64 {
 
 impl QuillApp {
     /// The tiles of one frame (tdesktop `PeerQrEmojiField::paint`).
-    pub(super) fn qr_pattern_frame(
-        &mut self,
-        args: PatternArgs<'_>,
-        cx: &mut Context<Self>,
-    ) -> PatternFrame {
+    pub(super) fn qr_pattern_frame(&self, args: PatternArgs<'_>) -> PatternFrame {
         let previous: &[String] = args.swap.map_or(&[], |swap| &swap.previous);
         let count = args.picks.len().max(previous.len());
         if count == 0 {
@@ -79,7 +75,6 @@ impl QuillApp {
             area: Rect::new(0., 0., args.width, args.height),
             band: LAYER_BAND,
         };
-        let cull = card_cull(args.card);
         let layout = tiles(
             &falloff,
             (cx0 + dx, cy0 + dy),
@@ -89,14 +84,10 @@ impl QuillApp {
         );
         let mut out = Vec::new();
         for tile in layout {
-            let half = tile.size / 2.;
-            let under_glass = args.glass.iter().any(|glass| {
-                tile.x + half > glass.x
-                    && tile.x - half < glass.x + glass.width
-                    && tile.y + half > glass.y
-                    && tile.y - half < glass.y + glass.height
-            });
-            if under_glass || covered(&cull, tile.x, tile.y, tile.size) {
+            let blocked = std::iter::once(&args.card)
+                .chain(args.glass)
+                .any(|rect| overlaps(rect, tile.x, tile.y, tile.size));
+            if blocked {
                 continue;
             }
             let shown = |list: &[String]| {
@@ -107,11 +98,11 @@ impl QuillApp {
             };
             let new = shown(args.picks);
             let old = swap_elapsed.and_then(|_| shown(previous));
-            let mut draw = |emoji: &str, scale: f64, out: &mut Vec<DrawnTile>| {
+            let draw = |emoji: &str, scale: f64, out: &mut Vec<DrawnTile>| {
                 if scale <= 0. {
                     return;
                 }
-                if let Some(still) = self.qr_emoji_still(emoji, cx) {
+                if let Some(still) = self.qr_emoji_still(emoji) {
                     out.push(DrawnTile {
                         x: tile.x,
                         y: tile.y,

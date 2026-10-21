@@ -70,22 +70,13 @@ impl QuillApp {
         let on_close = QuillShell::on_close_kind(app, shell, DialogKind::PeerQr, |this, _, cx| {
             this.close_qr_box(cx);
         });
-        let (edge, panel_open) = {
-            let this = app.read(cx);
-            let edge = this.qr_view().map(|view| view.appearance.edge);
-            let panel_open = this
-                .peer_qr
-                .open
-                .as_ref()
-                .is_some_and(|open| open.state.panel.is_some());
-            (edge, panel_open)
-        };
+        let edge = app.read(cx).qr_view().map(|view| view.appearance.edge);
         let edge = hsla(edge.unwrap_or(quill::peer_qr::appearance::DEFAULT_EDGE));
+        let cancel_app = app.clone();
         let app = app.clone();
         dialog
             .overlay(true)
             .close_button(false)
-            .keyboard(!panel_open)
             .w(px(BOX_WIDTH as f32))
             .p_0()
             .bg(edge)
@@ -95,37 +86,37 @@ impl QuillApp {
                 let body = app.update(cx, |this, cx| this.qr_surface(window, cx));
                 content.child(body)
             })
+            .on_ok(|_, _, _| false)
+            .on_cancel(move |_, _, cx| {
+                cancel_app.update(cx, |this, cx| {
+                    let panel_open = this
+                        .peer_qr
+                        .open
+                        .as_ref()
+                        .is_some_and(|open| open.state.panel.is_some());
+                    if panel_open {
+                        this.qr_act(QrAction::ClosePanel, cx);
+                    }
+                    !panel_open
+                })
+            })
             .on_close(on_close)
     }
 
-    /// The box for this frame.
+    /// The box for this frame. Esc reaches it as the dialog's cancel, and
+    /// closes an open panel before the box.
     fn qr_surface(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let Some(view) = self.qr_view() else {
             return div().into_any_element();
         };
-        if !self.peer_qr.focus.contains_focused(window, cx) {
-            window.focus(&self.peer_qr.focus, cx);
-        }
         let body = if view.peer_box() {
             self.qr_peer_surface(&view, window, cx)
         } else {
-            self.qr_custom_surface(&view, window, cx)
+            self.qr_custom_surface(&view, cx)
         };
-        let panel_open = self
-            .peer_qr
-            .open
-            .as_ref()
-            .is_some_and(|open| open.state.panel.is_some());
         div()
             .id("peer-qr-box")
             .debug_selector(|| "peer-qr-box".into())
-            .track_focus(&self.peer_qr.focus)
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                if panel_open && event.keystroke.key == "escape" {
-                    cx.stop_propagation();
-                    this.qr_act(QrAction::ClosePanel, cx);
-                }
-            }))
             .child(body)
             .into_any_element()
     }
@@ -136,7 +127,8 @@ impl QuillApp {
     fn qr_backdrop(&mut self, view: &QrView, card: Rect, cx: &mut Context<Self>) -> Div {
         let radius = super::art::backdrop_radius();
         let (cx0, cy0) = card.center();
-        let layers = self.qr_backdrops(view.appearance.center, view.appearance.edge, cx);
+        let layers =
+            self.qr_backdrops(view.appearance.center, view.appearance.edge, Instant::now());
         let fading = layers.iter().any(|(_, opacity)| *opacity < 1.);
         if fading {
             self.request_animation_tick(FPS, cx);
@@ -187,38 +179,31 @@ impl QuillApp {
         let place = placement(&layout, progress);
         if motion.running(now, animate) {
             self.request_animation_tick(FPS, cx);
-        } else if !motion.opening
-            && motion.shown.is_some()
-            && let Some(open) = self.peer_qr.open.as_mut()
-        {
-            open.motion.shown = None;
         }
         let card_rest = card_layout(CARD_WIDTH, true);
         let name = view
             .label
             .as_ref()
             .and_then(|label| self.qr_name_fit(label, &card_rest, window));
-        let code = view.shown.as_ref().and_then(|shown| {
-            self.qr_code_image(&shown.link, view.colors.ink, card_rest.qr.width, cx)
-        });
+        let code = view
+            .shown
+            .as_ref()
+            .and_then(|shown| self.qr_code_image(&shown.link, view.colors.ink));
         let mut glass = vec![layout.close, layout.copy, layout.island, layout.share];
         if progress > 0. {
             glass.push(place.panel);
         }
-        let frame = self.qr_pattern_frame(
-            PatternArgs {
-                picks: &picks,
-                swap: swap.as_ref(),
-                opened,
-                now,
-                animate,
-                width: layout.width,
-                height: layout.height,
-                card: place.card,
-                glass: &glass,
-            },
-            cx,
-        );
+        let frame = self.qr_pattern_frame(PatternArgs {
+            picks: &picks,
+            swap: swap.as_ref(),
+            opened,
+            now,
+            animate,
+            width: layout.width,
+            height: layout.height,
+            card: place.card,
+            glass: &glass,
+        });
         if frame.moving {
             self.request_animation_tick(FPS, cx);
         }
@@ -301,26 +286,22 @@ impl QuillApp {
                     cx,
                 ));
         }
-        root.children(self.qr_free_menu(view, place.pill_top, layout.height, cx))
+        root.children(self.qr_free_menu(view, place.pill_top, cx))
             .children(self.qr_toast_element())
             .into_any_element()
     }
 
     /// An invite, chat or proxy link: a title by the close button, the
     /// square card, the about line, then copy and share.
-    fn qr_custom_surface(
-        &mut self,
-        view: &QrView,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn qr_custom_surface(&mut self, view: &QrView, cx: &mut Context<Self>) -> AnyElement {
         let card_rest = card_layout(CARD_WIDTH, false);
         let card_left = ((BOX_WIDTH - CARD_WIDTH) / 2.).floor();
         let card_top = BUTTON_SKIP + BUTTON + CARD_SKIP;
         let card_rect = Rect::new(card_left, card_top, card_rest.width, card_rest.height);
-        let code = view.shown.as_ref().and_then(|shown| {
-            self.qr_code_image(&shown.link, view.colors.ink, card_rest.qr.width, cx)
-        });
+        let code = view
+            .shown
+            .as_ref()
+            .and_then(|shown| self.qr_code_image(&shown.link, view.colors.ink));
         let foreground = hsla(view.colors.foreground);
         let header = div()
             .h(at(BUTTON_SKIP * 2. + BUTTON))

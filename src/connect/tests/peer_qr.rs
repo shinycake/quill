@@ -5,7 +5,7 @@ use super::*;
 use crate::diagnostics::DiagnosticSink;
 use crate::diagnostics::MemorySink;
 use crate::peer_qr::color::Rgb;
-use crate::peer_qr::free::FreeRequest;
+use crate::peer_qr::free::{FreeRequest, FreeTicket};
 use crate::peer_qr::link::{UserLinkData, UserLinkFetch};
 use crate::peer_qr::session::BackdropsFetch;
 use crate::platform::MemorySecretStore;
@@ -133,8 +133,17 @@ fn contact_link_expires_relative_to_now() {
 #[test]
 fn free_codes_are_queued_for_the_box() {
     let mut f = fixture();
-    f.1.fetch_own_user_link(Some(FreeRequest::ResetPermanent))
-        .unwrap();
+    let reset = FreeTicket {
+        request: FreeRequest::ResetPermanent,
+        box_id: 1,
+        serial: 1,
+    };
+    let temporary = FreeTicket {
+        request: FreeRequest::Temporary,
+        box_id: 1,
+        serial: 2,
+    };
+    f.1.fetch_own_user_link(Some(reset)).unwrap();
     let request = last_request(&f);
     assert_eq!(request["remove_messages_fee"], true);
     assert_eq!(request["return_permanent_link"], true);
@@ -147,8 +156,7 @@ fn free_codes_are_queued_for_the_box() {
             extra_of(&request)
         ),
     );
-    f.1.fetch_own_user_link(Some(FreeRequest::Temporary))
-        .unwrap();
+    f.1.fetch_own_user_link(Some(temporary)).unwrap();
     let failed = last_request(&f);
     ingest(
         &mut f,
@@ -159,13 +167,15 @@ fn free_codes_are_queued_for_the_box() {
     );
     let answers = f.1.session.users_state.peer_qr.take_free_answers();
     assert_eq!(answers.len(), 2);
-    let (request, code) = &answers[0];
-    assert_eq!(*request, FreeRequest::ResetPermanent);
+    let (ticket, code) = &answers[0];
+    assert_eq!(*ticket, reset);
     let code = code.as_ref().unwrap();
     assert_eq!(code.link.url, "https://t.me/free");
     assert_eq!(code.link.expires_at, 0);
     assert!(code.can_permanent);
-    assert_eq!(answers[1], (FreeRequest::Temporary, None));
+    let (ticket, failed) = &answers[1];
+    assert_eq!(*ticket, temporary);
+    assert!(failed.as_ref().is_err_and(|reason| !reason.is_empty()));
     assert!(
         f.1.session
             .users_state
@@ -177,5 +187,33 @@ fn free_codes_are_queued_for_the_box() {
         f.1.session.users_state.peer_qr.contact_link,
         UserLinkFetch::Idle
     );
+    cleanup(f);
+}
+
+#[test]
+fn a_failed_contact_link_keeps_its_reason_and_is_asked_again() {
+    let mut f = fixture();
+    f.1.fetch_own_user_link(None).unwrap();
+    let request = last_request(&f);
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":429,"message":"Too Many Requests: retry after 30"}}"#,
+            extra_of(&request)
+        ),
+    );
+    let qr = &mut f.1.session.users_state.peer_qr;
+    assert_eq!(qr.contact_link, UserLinkFetch::Failed);
+    assert!(
+        qr.contact_error
+            .as_ref()
+            .is_some_and(|reason| !reason.is_empty())
+    );
+    qr.retry_contact_link();
+    assert_eq!(qr.contact_link, UserLinkFetch::Idle);
+    assert_eq!(qr.contact_error, None);
+    let sent = f.2.snapshot().len();
+    f.1.fetch_own_user_link(None).unwrap();
+    assert_eq!(f.2.snapshot().len(), sent + 1);
     cleanup(f);
 }
