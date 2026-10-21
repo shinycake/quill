@@ -56,7 +56,7 @@ impl QuillApp {
         let mut body = Vec::new();
         if options.tray_icon {
             body.push(
-                self.appearance_section(
+                self.appearance_toggle_section(
                     cx,
                     tr(keys::SETTINGS_WORKMODE_TRAY),
                     tr(keys::Q_MISC_KEEP_QUILL_IN_THE_SYSTEM),
@@ -78,7 +78,7 @@ impl QuillApp {
         }
         if options.taskbar_icon {
             body.push(
-                self.appearance_section(
+                self.appearance_toggle_section(
                     cx,
                     tr(keys::Q_MISC_SHOW_TASKBAR_ICON),
                     tr(keys::Q_MISC_OFF_KEEPS_QUILL_OUT_OF),
@@ -100,7 +100,7 @@ impl QuillApp {
         }
         if options.monochrome_icon {
             body.push(
-                self.appearance_section(
+                self.appearance_toggle_section(
                     cx,
                     tr(keys::Q_MISC_USE_MONOCHROME_ICON),
                     tr(keys::Q_MISC_DRAW_THE_TRAY_ICON_IN),

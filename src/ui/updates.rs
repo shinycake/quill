@@ -164,17 +164,18 @@ impl QuillApp {
                     .child(tr(keys::Q_OPS_QUILL_UPDATES)),
             )
             .child(
-                Switch::new("check-updates-on-launch")
-                    .checked(self.appearance.check_updates_on_launch)
-                    .accessibility_label(tr(keys::Q_OPS_CHECK_FOR_UPDATES_ON_LAUNCH))
-                    .on_click(cx.listener(|this, &on, _, cx| {
-                        this.set_appearance(cx, |a| a.check_updates_on_launch = on)
-                    })),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .child(tr(keys::Q_OPS_CHECK_GITHUB_RELEASES_AUTOMATICALLY_ON)),
+                self.appearance_toggle_section(
+                    cx,
+                    tr(keys::Q_OPS_CHECK_FOR_UPDATES_ON_LAUNCH),
+                    tr(keys::Q_OPS_CHECK_GITHUB_RELEASES_AUTOMATICALLY_ON),
+                    Switch::new("check-updates-on-launch")
+                        .checked(self.appearance.check_updates_on_launch)
+                        .accessibility_label(tr(keys::Q_OPS_CHECK_FOR_UPDATES_ON_LAUNCH))
+                        .on_click(cx.listener(|this, &on, _, cx| {
+                            this.set_appearance(cx, |a| a.check_updates_on_launch = on)
+                        }))
+                        .into_any_element(),
+                ),
             )
             .child(
                 div()
@@ -187,16 +188,18 @@ impl QuillApp {
             .children(self.auto_update_row(cx))
             .children(self.install_beta_row(cx))
             .child(
-                Button::new("check-for-updates")
-                    .label(tr(keys::Q_OPS_CHECK_FOR_UPDATES))
-                    .disabled(matches!(
-                        self.settings.update_state,
-                        UpdateState::Checking
-                            | UpdateState::Downloading(_)
-                            | UpdateState::Installing(_)
-                            | UpdateState::Staged(..)
-                    ))
-                    .on_click(cx.listener(|this, _, _, cx| this.check_for_updates(cx))),
+                div().flex().child(
+                    Button::new("check-for-updates")
+                        .label(tr(keys::Q_OPS_CHECK_FOR_UPDATES))
+                        .disabled(matches!(
+                            self.settings.update_state,
+                            UpdateState::Checking
+                                | UpdateState::Downloading(_)
+                                | UpdateState::Installing(_)
+                                | UpdateState::Staged(..)
+                        ))
+                        .on_click(cx.listener(|this, _, _, cx| this.check_for_updates(cx))),
+                ),
             );
         if let UpdateState::Available(release)
         | UpdateState::DownloadFailed(release, _)

@@ -351,6 +351,40 @@ impl QuillApp {
             .into_any_element()
     }
 
+    /// A setting with a small control (a switch, a button): title and hint
+    /// on the left, the control on the right, like the newer settings rows.
+    pub(crate) fn appearance_toggle_section(
+        &self,
+        cx: &mut Context<Self>,
+        title: &str,
+        hint: &str,
+        control: AnyElement,
+    ) -> AnyElement {
+        div()
+            .flex()
+            .items_center()
+            .gap_4()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_0p5()
+                    .child(div().text_sm().child(title.to_string()))
+                    .when(!hint.is_empty(), |this| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(hint.to_string()),
+                        )
+                    }),
+            )
+            .child(div().flex_none().child(control))
+            .into_any_element()
+    }
+
     /// A selectable chip; the selected one gets the accent border.
     pub(crate) fn appearance_chip(
         &self,
@@ -480,7 +514,7 @@ impl QuillApp {
         body.extend(this.tray_icon_sections(tray_available, cx));
         if tray.start_in_tray {
             body.push(
-                this.appearance_section(
+                this.appearance_toggle_section(
                     cx,
                     tr(keys::Q_PREFS_START_IN_TRAY),
                     tr(keys::Q_PREFS_OPEN_QUILL_FROM_ITS_TRAY),
@@ -509,7 +543,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         supported.then(|| {
-            self.appearance_section(
+            self.appearance_toggle_section(
                 cx,
                 tr(keys::SETTINGS_NATIVE_FRAME),
                 tr(keys::Q_PREFS_THE_SYSTEM_DRAWS_THE_TITLE),

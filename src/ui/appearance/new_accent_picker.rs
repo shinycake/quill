@@ -306,7 +306,7 @@ impl QuillApp {
                 }
                 cx.notify();
             }));
-        self.appearance_section(
+        self.appearance_toggle_section(
             cx,
             tr(keys::Q_PREFS_LAUNCH_AT_LOGIN),
             tr(keys::Q_PREFS_START_QUILL_AUTOMATICALLY_WHEN_YOU),
@@ -401,7 +401,7 @@ impl QuillApp {
                 }))
                 .into_any_element(),
         };
-        self.appearance_section(
+        self.appearance_toggle_section(
             cx,
             tr(keys::Q_PREFS_OPEN_TELEGRAM_LINKS_WITH_QUILL),
             &hint,
