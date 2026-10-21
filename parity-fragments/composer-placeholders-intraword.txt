@@ -1,4 +1,0 @@
-parity:composer-placeholder-forum-topic
-parity:composer-placeholder-bot-offthread
-parity:composer-placeholder-bot-keyboard
-parity:composer-markup-intraword
