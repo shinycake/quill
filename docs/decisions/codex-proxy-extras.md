@@ -12,7 +12,7 @@ Disable / custom radios, calls toggle, auto-switch with timeout (`proxy.rs` `rot
 
 ## What changed
 
-- Per-row "Show QR code" button and a QR box (`src/ui/proxy_qr.rs`) that reuses `render_qr_image`; it encodes the `tg://` link; "Copy link" button.
+- Per-row "Show QR code" button. It opens the shared QR code box (`src/ui/peer_qr`, see `docs/decisions/peer-qr-box.md`) with the `tg://` link, tdesktop's title, Copy, and Share when signed in. The proxy row keeps its own Copy Link.
 - Shield icon in the connection strip while a proxy is enabled.
 - Settings row "Proxy" is now "Connection type: <value>" (`proxy_extras::connection_type_label`). TDLib does not expose the transport (TCP/HTTP), so the value is Default, or the proxy kind and endpoint.
 - Pure helpers and tests in `src/proxy_extras.rs` (label, QR link, prefs persistence round trip).
