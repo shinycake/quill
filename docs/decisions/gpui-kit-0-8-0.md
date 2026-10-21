@@ -149,3 +149,21 @@ Not verified:
   `folder_tabs_tests.rs` covers the jump through the real app.
 - Linux and Windows at runtime. The bounce is off there, and the gpui-pre
   fix only widens a scrollbar range.
+
+## For follow-up work
+
+Use these 0.8 additions before writing Quill-side code for the same thing:
+
+- `syntect` feature: code block syntax highlighting (README `render-code-syntax-highlight`).
+- The shared bounce engine (`ScrollBounce`): the elastic chat list and pull-to-expand
+  story tray (README `chatlist-elastic-overscroll`).
+- `SelectionFormat::SourceAcrossStyles`: copy that keeps formatting across styles.
+- `MessageScrollerState::logical_scroll_top` and its append, prepend and splice
+  operations, for history scroll memory.
+- `Slider::accessibility_label` and disabled-state reporting, for accessibility work.
+- `resize_handle` and `ResizablePanel::fixed`, for resizable panes.
+- `ScrollableMask::vertical_wheel`, for horizontal strips.
+- `gpui_kit::base::text::editor_host`, for a rich composer.
+- `gpui-webview` (macOS, Windows, Linux X11) as an alternative to the `quill-webview`
+  helper process.
+- Keep the gpui-pre list padding patch on every re-vendor.
