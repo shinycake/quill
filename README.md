@@ -283,7 +283,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] In a private chat the message menu's Sent or Edited date line sits above the read time, as tdesktop orders it <!-- parity:menu-date-row-private-order -->
 - [x] "Send Another Gift" on gift service messages <!-- parity:menu-send-another-gift -->
 - [x] Block sender from the Replies chat menu <!-- parity:menu-replies-block-sender -->
-- [ ] Save selected rich messages as HTML <!-- parity:menu-save-selection-html -->
+- [x] Save selected rich messages as HTML <!-- parity:menu-save-selection-html -->
 - [x] Reply in Another Chat <!-- parity:menu-reply-another-chat -->
 - [x] Reply options popover: Update Quote, Do Not Reply, Show in Chat <!-- parity:menu-reply-options -->
 - [x] Reply with a timecode on videos and voice messages <!-- parity:menu-reply-timecode -->
