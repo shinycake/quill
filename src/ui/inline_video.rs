@@ -108,6 +108,15 @@ impl InlineTile {
         }
     }
 
+    /// A clip of `width` x `height` pixels in a panel's grid cell of
+    /// `cell` points (the GIF panel, the inline results).
+    pub(super) fn cell(width: i32, height: i32, cell: (f32, f32)) -> Self {
+        Self {
+            media: (width, height),
+            tile: cell,
+        }
+    }
+
     /// A round video message: a square clip in a fixed circle.
     pub(super) fn round(length: i32) -> Self {
         let diameter = super::message_media::VIDEO_NOTE_DIAMETER;

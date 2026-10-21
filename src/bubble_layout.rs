@@ -32,6 +32,8 @@ pub const MAX_GIF_SIZE: i32 = 320;
 pub const MAX_VIDEO_MESSAGE_SIZE: i32 = 240;
 /// `maxStickerSize`.
 pub const MAX_STICKER_SIZE: i32 = 224;
+/// `maxAnimatedEmojiSize`: dice and slot machines (`Sticker::EmojiSize`).
+pub const DICE_SIZE: i32 = 112;
 /// `largeEmojiSize` and `largeEmojiSkip`: emoji-only messages.
 pub const LARGE_EMOJI_SIZE: i32 = 36;
 pub const LARGE_EMOJI_SKIP: i32 = 4;

@@ -20,6 +20,7 @@ impl FooterMeta {
             imported: message.extras.import_info.is_some(),
             tooltip: quill::state::footer_tooltip(message, format_unix_date_time),
             effect: None,
+            forward_drag: None,
         }
     }
 
@@ -29,6 +30,15 @@ impl FooterMeta {
         effect: Option<crate::ui::message_effect_badge::FooterEffect>,
     ) -> Self {
         self.effect = effect;
+        self
+    }
+
+    /// The footer's time starts a forward drag of the message.
+    pub(in crate::ui) fn with_forward_drag(
+        mut self,
+        drag: Option<quill::forward_drag::ForwardDrag>,
+    ) -> Self {
+        self.forward_drag = drag;
         self
     }
 

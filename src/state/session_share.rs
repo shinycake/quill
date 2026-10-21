@@ -52,7 +52,7 @@ impl ShareSearch {
 impl Session {
     /// A chat the share box can send to: supported, and not a channel where
     /// the user is known to be unable to post.
-    fn can_share_to(chat: &ChatSummary) -> bool {
+    pub fn can_share_to(chat: &ChatSummary) -> bool {
         chat.supported()
             && (!chat.is_channel()
                 || chat.my_member_status.is_none()

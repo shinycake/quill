@@ -40,8 +40,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
-    /// `peer`'s full info, which carries its saved theme, unless it is
-    /// already known (tdesktop `requestFullPeer` when nothing is kept).
+    /// `peer`'s full info, which carries its saved theme. Asked for each
+    /// time a box opens, so the box shows the theme as saved now.
     pub fn ensure_share_theme(&mut self, peer: QrPeer) -> Result<(), ConnectSendError> {
         match self.session.qr_theme_owner(peer) {
             Some(ThemeOwner::User(user_id)) => self.fetch_user_full_info(user_id).map(|_| ()),
@@ -60,6 +60,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         peer: QrPeer,
         more: bool,
+        now: i64,
     ) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() || !can_save(self.session.qr_save_rights(peer)) {
             return Err(ConnectSendError::InvalidRequest);
@@ -72,37 +73,26 @@ impl<S: JsonSender> ConnectDriver<S> {
             QrPeer::User(user_id) => GiftsOwner::User(user_id),
             QrPeer::Chat(chat_id) => GiftsOwner::Chat(chat_id),
         };
-        let gifts = &mut self.session.users_state.peer_qr.gifts;
-        if gifts.owner != Some(owner) {
-            *gifts = Default::default();
-            gifts.owner = Some(owner);
-        }
-        if more && (!gifts.loaded || gifts.complete || gifts.loading) {
+        let Some(request) = self
+            .session
+            .users_state
+            .peer_qr
+            .gifts
+            .start(owner, more, now)
+        else {
             return Ok(());
-        }
-        let offset = if more {
-            gifts.offset.clone()
-        } else {
-            String::new()
         };
-        gifts.serial += 1;
-        gifts.loading = true;
-        let serial = gifts.serial;
         let extra = self.session.request(
             RequestPurpose::Users(UsersPurpose::GetShareThemeGifts {
                 owner,
-                serial,
+                serial: request.serial,
                 first: !more,
             }),
             None,
         );
-        let json = get_share_theme_gifts(extra, gifts_owner, &offset);
+        let json = get_share_theme_gifts(extra, gifts_owner, &request.offset);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session
-                .users_state
-                .peer_qr
-                .gifts
-                .accept(Vec::new(), String::new(), !more);
+            self.session.users_state.peer_qr.gifts.fail();
             return Err(err);
         }
         Ok(())

@@ -131,7 +131,11 @@ impl QuillApp {
     }
 
     /// Why the draft cannot go to `dest` right now, if it cannot.
-    fn share_dest_refusal(&mut self, dest: ChatId, cx: &mut Context<Self>) -> Option<String> {
+    pub(in crate::ui) fn share_dest_refusal(
+        &mut self,
+        dest: ChatId,
+        cx: &mut Context<Self>,
+    ) -> Option<String> {
         // Phase S1: messages cannot be forwarded to secret chats (TGX
         // `SecretChatForwardError`, verbatim).
         let dest_is_secret = self

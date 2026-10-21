@@ -18,6 +18,7 @@ use super::actions::{
 };
 use super::app::QuillApp;
 use super::command_shortcuts::CommandActions;
+use super::inline_players::Panel;
 use super::shell::title_bar;
 use super::shortcut_pack::HistoryKey;
 use gpui_kit::component::alert::Alert;
@@ -75,15 +76,22 @@ impl Render for QuillApp {
             .inline_videos
             .frame_start(history_drawn, window.scale_factor());
         // A viewer covers the chat: its clips stop even if a cached
-        // conversation replays its animation layer; a closed GIF panel
-        // stops the panel's.
+        // conversation replays its animation layer; a closed panel stops
+        // its own.
         // Picture-in-Picture outlives neither its message, the account
         // nor an unlocked app.
         self.check_video_pip(cx);
         if self.viewer.state.is_open() || self.stories.viewer.is_open() {
             self.playback.inline_videos.clear();
-        } else if !self.composer_ui.inline_results_open {
-            self.playback.inline_videos.clear_panel();
+        } else {
+            if !self.composer_ui.inline_results_open {
+                self.playback
+                    .inline_videos
+                    .clear_panel(Panel::InlineResults);
+            }
+            if !self.gif_panel_open() {
+                self.playback.inline_videos.clear_panel(Panel::Gifs);
+            }
         }
         // Animations run while any Quill window is in front, a chat
         // window's included.

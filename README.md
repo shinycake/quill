@@ -435,7 +435,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Main menu: My Profile, Contacts, Calls, Night Mode, account list, Set Emoji Status, My Stories, My Groups and Channels <!-- parity:chatlist-main-menu -->
 - [x] "This is your Archive" explainer <!-- parity:chatlist-archive-hint -->
 - [x] Chat row menu: Mute submenu with durations, direct Unmute, "Add to folder" submenu, Delete chat / Delete and leave / Leave group / Leave channel by chat kind (#1013) <!-- parity:chatlist-row-menu-submenus -->
-- [ ] Drop files, or dragged selected messages and message times, on a chat row to send them there <!-- parity:chatlist-drop-on-row -->
+- [x] Drop files, or dragged selected messages and message times, on a chat row to send them there <!-- parity:chatlist-drop-on-row -->
 - [ ] Drag a photo, video, sticker or album part out of a message to forward it to a chat row <!-- parity:chatlist-drag-media-forward -->
 - [ ] Dropping files or messages on a forum (or direct messages) row asks which topic to send to <!-- parity:chatlist-drop-forum-topic -->
 - [x] Top-people strip in the empty search state (`getTopChats`) <!-- parity:chatlist-top-people -->

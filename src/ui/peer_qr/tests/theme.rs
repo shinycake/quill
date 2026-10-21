@@ -3,7 +3,9 @@
 //! their saved theme and takes no picks, and the gifts panel lists your
 //! gifts, saves the one picked and offers Browse Gifts when there are
 //! none.
-use super::super::demo::{BACKDROPS, FRIEND, GROUP_CHAT, ME, demo_gift};
+use super::super::demo::{
+    BACKDROPS, DEMO_GIFTS_PAGE, FRIEND, GROUP_CHAT, ME, demo_gift, demo_gifts_page,
+};
 use super::*;
 use quill::peer_qr::gift_tiles::gifts_panel_height;
 use quill::peer_qr::layout::panel_height;
@@ -238,4 +240,80 @@ fn with_no_gifts_the_panel_offers_browse_gifts_in_your_own_box(cx: &mut TestAppC
         shell.read_with(vcx, |shell, _| shell.open_dialog),
         Some(DialogKind::PeerQr)
     );
+}
+
+fn gifts_listed(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> (usize, String) {
+    app.read_with(vcx, |app, _| {
+        app.session()
+            .map(|session| {
+                let gifts = &session.users_state.peer_qr.gifts;
+                (gifts.list.len(), gifts.offset.clone())
+            })
+            .unwrap_or_default()
+    })
+}
+
+fn wheel(vcx: &mut VisualTestContext, at: gpui_kit::Point<gpui_kit::Pixels>, dy: f32) {
+    for (phase, dy) in [
+        (gpui_kit::TouchPhase::Started, dy),
+        (gpui_kit::TouchPhase::Moved, dy),
+        (gpui_kit::TouchPhase::Ended, 0.),
+    ] {
+        vcx.simulate_event(gpui_kit::ScrollWheelEvent {
+            position: at,
+            delta: gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), px(dy))),
+            modifiers: Modifiers::default(),
+            touch_phase: phase,
+        });
+    }
+}
+
+#[gpui_kit::test]
+fn scrolling_the_gifts_grid_to_its_end_brings_the_next_page(cx: &mut TestAppContext) {
+    let (app, _, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            let gifts = &mut session.users_state.peer_qr.gifts;
+            let (list, offset) = demo_gifts_page(0, 30);
+            gifts.list = list;
+            gifts.complete = false;
+            gifts.offset = offset;
+        }
+    });
+    click(vcx, "peer-qr-gifts");
+    assert_eq!(
+        gifts_listed(&app, vcx),
+        (DEMO_GIFTS_PAGE, format!("demo-{DEMO_GIFTS_PAGE}-30")),
+        "the first rows fill the panel: no page asked for yet"
+    );
+    let before = vcx.debug_bounds("peer-qr-gift-3").expect("the second row");
+    let at = vcx
+        .debug_bounds("peer-qr-gift-1")
+        .expect("the first row")
+        .center();
+    wheel(vcx, at, -40.);
+    frames(vcx);
+    let after = vcx.debug_bounds("peer-qr-gift-3").expect("still in view");
+    assert!(after.origin.y < before.origin.y, "the grid scrolls");
+    for _ in 0..12 {
+        wheel(vcx, at, -200.);
+        frames(vcx);
+    }
+    // Each end reached asks for the next page, until the last.
+    assert_eq!(gifts_listed(&app, vcx), (30, String::new()));
+    assert!(
+        shown(vcx, "peer-qr-gift-29"),
+        "the last page's tiles are drawn"
+    );
+    assert!(!shown(vcx, "peer-qr-gift-0"), "scrolled past the first row");
+    click(vcx, "peer-qr-gift-29");
+    app.read_with(vcx, |app, _| {
+        let open = app.peer_qr.open.as_ref().expect("open");
+        assert_eq!(
+            open.state.gift.as_ref().map(|gift| gift.id),
+            Some(demo_gift(29).id)
+        );
+    });
 }
