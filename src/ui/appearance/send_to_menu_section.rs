@@ -8,7 +8,10 @@ use quill::lang::{keys, tr, tr_with};
 impl QuillApp {
     /// The switch that puts Quill in Explorer's "Send to" menu; none where
     /// there is no such menu (tdesktop shows the row on Windows only).
-    pub(super) fn general_send_to_section(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(in crate::ui) fn general_send_to_section(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         if !quill::send_to_menu::supported() {
             return None;
         }

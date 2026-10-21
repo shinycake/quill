@@ -49,7 +49,10 @@ impl QuillApp {
     }
 
     /// Appearance settings entry (tdesktop `settings_chat.cpp` "Your color").
-    pub(super) fn appearance_peer_color_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::ui) fn appearance_peer_color_section(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         self.appearance_section(
             cx,
             tr(keys::Q_MISC_YOUR_COLOR),
