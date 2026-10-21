@@ -219,6 +219,12 @@ fn reserve(len: usize) -> Option<usize> {
 /// the caller, with fresh zero pages of `prot`. The pages it held are
 /// dropped. Never unmaps: the range stays reserved, so no other mapping
 /// can land in the arena.
+///
+/// On failure the range keeps its old mapping: XNU's `vm_map_enter` with
+/// `VM_FLAGS_OVERWRITE` (what `MAP_FIXED` becomes) restores the entries it
+/// removed when the new mapping cannot be made. The callers rely on that.
+/// Linux does not promise it (a failed `MAP_FIXED` may leave the range
+/// unmapped), which is one reason this module is macOS only.
 fn remap(addr: usize, len: usize, prot: libc::c_int) -> bool {
     // SAFETY: `MAP_FIXED` replaces whatever is mapped at `addr..addr+len`.
     // That range is inside the arena reservation and owned by the caller
@@ -289,7 +295,8 @@ fn arena_alloc(class: usize) -> Option<*mut u8> {
     if remap(addr, slot.len(), libc::PROT_READ | libc::PROT_WRITE) {
         Some(addr as *mut u8)
     } else {
-        // The slot is still inaccessible; nothing to undo but the bit.
+        // The slot is still inaccessible (XNU restored its old mapping,
+        // see `remap`); nothing to undo but the bit.
         release(slot);
         None
     }
@@ -301,13 +308,15 @@ fn arena_free(slot: Slot, addr: usize) {
     if remap(addr, slot.len(), libc::PROT_NONE) {
         release(slot);
     }
-    // Else the pages stay mapped and the slot stays claimed: a leak, never
-    // a slot handed out twice.
+    // Else the pages stay mapped (XNU restored the old mapping, see
+    // `remap`) and the slot stays claimed: a leak, never a slot handed out
+    // twice.
 }
 
 /// The arena slot holding `ptr`, if `ptr` is an arena block. `Err(())`
-/// when `ptr` is inside the arena but not at a slot's start: a caller bug,
-/// which is leaked rather than acted on.
+/// when `ptr` is inside the arena but not at a slot's start: a caller bug.
+/// `dealloc` leaks it; `realloc` returns null, which the caller treats as
+/// allocation failure (Rust's collections abort).
 fn owner(ptr: *mut u8) -> Option<Result<Slot, ()>> {
     let base = arena_if_reserved()?;
     let (slot, at_start) = Slot::containing(base, ptr as usize)?;
@@ -376,7 +385,9 @@ unsafe impl GlobalAlloc for LargeAlloc {
         };
         if new_class == Some(old.class) {
             // Same slot. Growing needs nothing (the slot is mapped
-            // whole); shrinking drops the pages past the new end.
+            // whole); shrinking drops the pages past the new end. If that
+            // remap fails, XNU keeps the old tail mapped (see `remap`) and
+            // the pages simply stay.
             let keep = new_size.next_multiple_of(PAGE);
             if let Some(tail) = old.len().checked_sub(keep).filter(|t| *t > 0) {
                 remap(

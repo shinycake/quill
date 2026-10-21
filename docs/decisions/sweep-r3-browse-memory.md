@@ -101,11 +101,15 @@ about 12):
 | 19.7 MB photo | fill | 1348.5 | 319.9 |
 | 19.7 MB photo | touch pages | 999.9 | 7.6 |
 
-None of these sit on a per-frame path on macOS: sticker and emoji clips
+Browsing puts none of these on a per-frame path: sticker and emoji clips
 decode all their frames once into the playback cache and replay them,
 inline video and round notes play CoreVideo buffers that Rust never
 allocates, and photos decode on background threads, where a few
-milliseconds sit next to tens of milliseconds of JPEG decoding.
+milliseconds sit next to tens of milliseconds of JPEG decoding. One path
+does allocate per frame: screen sharing in a call converts each captured
+frame with `nv12_to_i420` (`src/calls/capture/screen.rs`, called from
+`screen_mac.rs` for every frame), about 3.5 MB per 1080p frame, which now
+pays the fault cost above each time. Reusing that buffer is a follow-up.
 
 CPU with the animated history open was measured for the first design
 (which kept up to six freed blocks for reuse): base 1.97, 2.63, 2.70 s;
@@ -202,7 +206,9 @@ The design now (`src/large_alloc.rs`):
 
 - **An arena of address space.** At the first large allocation Quill
   reserves 120 GiB of inaccessible address space (one `mmap` with
-  `PROT_NONE`; it costs no memory). It is split into 15 size classes,
+  `PROT_NONE`; it costs no memory, but the process's virtual size, VSZ in
+  `ps` and Activity Monitor, grows by those 120 GiB, which bug reports
+  should not read as a leak). It is split into 15 size classes,
   64 KiB to 1 GiB in powers of two, each with 8 GiB cut into slots of its
   size (131072 slots of 64 KiB, eight of 1 GiB).
 - **A block is a slot.** Allocating claims a free slot and replaces it with
@@ -217,7 +223,9 @@ The design now (`src/large_alloc.rs`):
   and length from the address; the caller's `Layout` is never used for
   that. A wrong size frees the right slot, and a `malloc` block handed to
   Rust's `dealloc` still goes to `free`. An address inside the arena that
-  is not a slot's start (a caller bug) is left alone rather than acted on.
+  is not a slot's start is a caller bug either way: `dealloc` leaks it,
+  and `realloc` returns null, which Rust's collections treat as
+  allocation failure and abort on.
 - **No locks.** Slots are claimed with `fetch_or` and released with
   `fetch_and` on static bitmaps (32 KiB). Nothing allocates, nothing waits,
   so `fork` or a signal at any point cannot leave anything held. A slot's
@@ -278,9 +286,9 @@ Rejected alternatives for the allocator itself:
     with a large layout goes to `free`; an arena block freed with a 100
     byte layout (the coreaudio-rs case) still drops all its pages. The
     first version sent that block to `free`.
-  - An interior pointer is left alone; a full size class falls back to
-    `System`; an impossible reservation and a 64 TiB request return
-    `None` and null without panicking.
+  - Freeing an interior pointer leaks it and keeps the block; a full size
+    class falls back to `System`; an impossible reservation and a 64 TiB
+    request return `None` and null without panicking.
   - Eight threads allocating, filling, growing and checking blocks at
     once never see each other's bytes.
 - `image_budget::tests::leaving_a_chat_of_photos_schedules_the_idle_trim`.
@@ -330,3 +338,10 @@ is left as a placeholder.
   their frames in one allocation per clip so they cross the 64 KiB line.
 - The animated-history CPU A/B for the arena (`cpu-final.sh`), once a
   display is free for the demo window.
+- Reuse the screen-share conversion buffer (`nv12_to_i420`) and measure
+  CPU in a call.
+- Rate-limit `release_free_heap` on idle trim to at most once per 10 s, as
+  tdesktop does with `malloc_trim`.
+- A macOS CI job that runs `cargo test --lib large_alloc` and clippy.
+- `src/ui/image_budget.rs` has 12 lines of headroom under the file-size
+  limit; split it before its next change.

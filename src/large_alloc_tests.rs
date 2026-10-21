@@ -213,8 +213,15 @@ fn failures_return_none_or_null_without_panicking() {
     assert_eq!(reserve(usize::MAX / 2), None);
     let a = LargeAlloc;
     // 64 TiB: past the arena, and more than `System` will hand out.
+    // `black_box` keeps LLVM from folding the doomed `malloc` away in
+    // release builds.
+    let big = layout(std::hint::black_box(1 << 46), 1);
     // SAFETY: a valid, non-zero layout.
-    let ptr = unsafe { a.alloc(layout(1 << 46, 1)) };
+    let ptr = std::hint::black_box(unsafe { a.alloc(big) });
+    if !ptr.is_null() {
+        // SAFETY: allocated just above with `big`.
+        unsafe { a.dealloc(ptr, big) };
+    }
     assert!(ptr.is_null());
     assert!(arena().is_some(), "the arena reserved its address space");
 }
