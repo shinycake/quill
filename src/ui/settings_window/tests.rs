@@ -367,7 +367,7 @@ fn data_storage_editor_opens_in_the_page_and_leaving_drops_it(cx: &mut TestAppCo
         "back returns to the overview"
     );
 
-    app.update(vcx, |app, cx| {
+    app.update(vcx, |app, _| {
         let network = quill::data_settings::NetworkKind::WiFi;
         let draft = app
             .session()
