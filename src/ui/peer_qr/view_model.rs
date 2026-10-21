@@ -9,6 +9,7 @@ use quill::local_time::now_unix;
 use quill::peer_qr::appearance::{Appearance, PeerQrColors, Swatch, swatches};
 use quill::peer_qr::link::{OwnLinkKind, OwnLinkState, username_label};
 use quill::peer_qr::state::{QrEnv, QrPeer, QrSubject, ShownLink};
+use quill::peer_qr::theme::can_save;
 use quill::privacy::NewChatPrivacyState;
 use quill::profile_forms::profile_link;
 use quill::telegram::envelope::ChatKind;
@@ -24,7 +25,8 @@ pub(super) struct QrView {
     pub(super) about: Option<Key>,
     /// Your own box (the free-message pill).
     pub(super) own: bool,
-    /// The colors and emoji buttons show.
+    /// The colors, emoji and gifts buttons show, and picks are saved
+    /// (tdesktop `ShareThemes::CanSave`).
     pub(super) can_style: bool,
     /// Share needs a signed-in session (tdesktop hides it without one).
     pub(super) can_share: bool,
@@ -90,17 +92,27 @@ impl QuillApp {
             .open
             .as_ref()
             .and_then(|open| self.qr_own_link(&open.state.subject));
+        let can_save = self
+            .peer_qr
+            .open
+            .as_ref()
+            .is_some_and(|open| match &open.state.subject {
+                QrSubject::Peer(peer) => self.qr_can_style(*peer),
+                QrSubject::Custom(_) => false,
+            });
         let Some(own) = own else {
             return QrEnv {
                 now: now_unix(),
                 price: 0,
                 temporary_only: false,
+                can_save,
             };
         };
         QrEnv {
             now: now_unix(),
             price: self.qr_message_price(),
             temporary_only: matches!(own, OwnLinkState::Ready(link) if link.kind == OwnLinkKind::Contact),
+            can_save,
         }
     }
 
@@ -121,18 +133,9 @@ impl QuillApp {
 
     /// tdesktop `ShareThemes::CanSave`: your own box, or a public channel
     /// or group whose info you may change.
-    fn qr_can_style(&self, peer: QrPeer) -> bool {
-        match peer {
-            QrPeer::User(_) => self.qr_is_self(peer),
-            QrPeer::Chat(chat_id) => {
-                self.session().is_some_and(|session| {
-                    session
-                        .chats
-                        .get(&chat_id)
-                        .is_some_and(|chat| chat.can_change_info())
-                }) && self.qr_peer_link(peer).is_some()
-            }
-        }
+    pub(super) fn qr_can_style(&self, peer: QrPeer) -> bool {
+        self.session()
+            .is_some_and(|session| can_save(session.qr_save_rights(peer)))
     }
 
     /// The open box's frame, or `None` when no box is open.
@@ -141,7 +144,7 @@ impl QuillApp {
         let env = self.qr_env();
         let swatches = swatches(
             self.session()
-                .map(|session| session.users_state.peer_qr.backdrops.backdrops())
+                .map(|session| session.users_state.peer_qr.backdrops.list.as_slice())
                 .unwrap_or_default(),
         );
         let appearance = open.state.appearance(&swatches);
@@ -176,7 +179,7 @@ impl QuillApp {
                         None,
                         None,
                         true,
-                        true,
+                        env.can_save,
                     )
                 }
                 None => {
@@ -187,7 +190,7 @@ impl QuillApp {
                         None,
                         None,
                         false,
-                        self.qr_can_style(*peer),
+                        env.can_save,
                     )
                 }
             },

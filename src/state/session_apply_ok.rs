@@ -33,6 +33,7 @@ impl Session {
         self.apply_suggested_post_ok(pending);
         self.apply_gift_market_ok(pending);
         self.apply_stories_ok(pending);
+        self.apply_share_theme_ok(pending);
         match pending.map(|p| p.purpose) {
             Some(
                 RequestPurpose::SetChatTheme

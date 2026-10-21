@@ -7,7 +7,6 @@ use crate::diagnostics::MemorySink;
 use crate::peer_qr::color::Rgb;
 use crate::peer_qr::free::{FreeRequest, FreeTicket};
 use crate::peer_qr::link::{UserLinkData, UserLinkFetch};
-use crate::peer_qr::session::BackdropsFetch;
 use crate::platform::MemorySecretStore;
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::requests_privacy::PrivacySettingKey;
@@ -52,39 +51,55 @@ fn extra_of(request: &Value) -> String {
     request["@extra"].as_str().unwrap().to_string()
 }
 
+const NOW: i64 = 1_000_000;
+
+fn answer_backdrops(f: &mut Fixture, request: &Value, id: i32) {
+    ingest(
+        f,
+        &format!(
+            r#"{{"@type":"profileShareThemeBackdrops","@extra":"{}","backdrops":[
+                {{"@type":"profileShareThemeBackdrop","id":{id},"name":"Ocean",
+                  "colors":{{"@type":"upgradedGiftBackdropColors","center_color":5934320,
+                  "edge_color":2838453,"symbol_color":0,"text_color":16777215}}}}]}}"#,
+            extra_of(request)
+        ),
+    );
+}
+
 #[test]
-fn backdrops_load_once() {
+fn backdrops_are_asked_for_again_an_hour_later() {
     let mut f = fixture();
-    f.1.fetch_share_theme_backdrops().unwrap();
+    f.1.fetch_share_theme_backdrops(NOW).unwrap();
     let request = last_request(&f);
     assert_eq!(request["@type"], "getProfileShareThemeBackdrops");
     let sent = f.2.snapshot().len();
-    f.1.fetch_share_theme_backdrops().unwrap();
-    assert_eq!(f.2.snapshot().len(), sent);
-    ingest(
-        &mut f,
-        &format!(
-            r#"{{"@type":"profileShareThemeBackdrops","@extra":"{}","backdrops":[
-                {{"@type":"profileShareThemeBackdrop","id":7,"name":"Ocean",
-                  "colors":{{"@type":"upgradedGiftBackdropColors","center_color":5934320,
-                  "edge_color":2838453,"symbol_color":0,"text_color":16777215}}}}]}}"#,
-            extra_of(&request)
-        ),
-    );
-    let BackdropsFetch::Ready(list) = &f.1.session.users_state.peer_qr.backdrops else {
-        panic!("backdrops not stored");
-    };
+    f.1.fetch_share_theme_backdrops(NOW).unwrap();
+    assert_eq!(f.2.snapshot().len(), sent, "one request at a time");
+    answer_backdrops(&mut f, &request, 7);
+    let list = &f.1.session.users_state.peer_qr.backdrops.list;
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].id, 7);
     assert_eq!(list[0].center, Rgb::hex(0x5A_8CF0));
     assert_eq!(list[0].edge, Rgb::hex(0x2B_4FB5));
+    f.1.fetch_share_theme_backdrops(NOW + 3599).unwrap();
+    assert_eq!(f.2.snapshot().len(), sent, "fresh for an hour");
+    f.1.fetch_share_theme_backdrops(NOW + 3600).unwrap();
+    assert_eq!(f.2.snapshot().len(), sent + 1);
+    assert_eq!(
+        f.1.session.users_state.peer_qr.backdrops.list.len(),
+        1,
+        "the old list stays while the refresh is on its way"
+    );
+    let refresh = last_request(&f);
+    answer_backdrops(&mut f, &refresh, 9);
+    assert_eq!(f.1.session.users_state.peer_qr.backdrops.list[0].id, 9);
     cleanup(f);
 }
 
 #[test]
 fn failed_backdrops_can_be_asked_again() {
     let mut f = fixture();
-    f.1.fetch_share_theme_backdrops().unwrap();
+    f.1.fetch_share_theme_backdrops(NOW).unwrap();
     let request = last_request(&f);
     ingest(
         &mut f,
@@ -93,12 +108,11 @@ fn failed_backdrops_can_be_asked_again() {
             extra_of(&request)
         ),
     );
-    assert_eq!(
-        f.1.session.users_state.peer_qr.backdrops,
-        BackdropsFetch::Failed
-    );
+    let backdrops = &f.1.session.users_state.peer_qr.backdrops;
+    assert!(!backdrops.loading);
+    assert_eq!(backdrops.requested_at, None);
     let sent = f.2.snapshot().len();
-    f.1.fetch_share_theme_backdrops().unwrap();
+    f.1.fetch_share_theme_backdrops(NOW + 1).unwrap();
     assert_eq!(f.2.snapshot().len(), sent + 1);
     cleanup(f);
 }

@@ -28,6 +28,7 @@ fn supergroup_full_info_parsed() {
             custom_emoji_sticker_set_id,
             admin: _,
             bot_commands: _,
+            share_theme: _,
         }) => {
             assert_eq!(description, "CANARY group description");
             assert_eq!(member_count, 1234);

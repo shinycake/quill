@@ -180,8 +180,14 @@ impl QuillApp {
             .open
             .as_ref()
             .map(|open| {
-                let previous = open.swap.iter().flat_map(|swap| swap.previous.iter());
-                open.state.emoji.iter().chain(previous).cloned().collect()
+                let previous = open
+                    .swap
+                    .iter()
+                    .flat_map(|swap| swap.previous.iter().cloned());
+                super::plain_picks(&open.state.emoji)
+                    .into_iter()
+                    .chain(previous)
+                    .collect()
             })
             .unwrap_or_default();
         for emoji in emoji {

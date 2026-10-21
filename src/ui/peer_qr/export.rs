@@ -12,6 +12,7 @@ use quill::local_time::now_unix;
 use quill::peer_qr::appearance::Appearance;
 use quill::peer_qr::appearance::{GRADIENT_STEPS, gradient_stops};
 use quill::peer_qr::color::Rgb;
+use quill::peer_qr::gift_pattern::{GiftMetrics, SYMBOL_ALPHA, gift_models, gift_symbols};
 use quill::peer_qr::layout::{
     BOX_WIDTH, CARD_WIDTH, CardLayout, SHADOW_ALPHA, SHADOW_RADIUS, SHADOW_SHIFT, UsernameFit,
     card_layout,
@@ -43,9 +44,20 @@ struct Picture {
     /// whichever font the renderer finds.
     name_widths: Vec<f64>,
     stills: Vec<Arc<RenderImage>>,
-    tiles: Vec<(f64, f64, f64, usize)>,
+    tiles: Vec<PictureTile>,
     /// What the box showed, to check the image against when it is done.
     appearance: Appearance,
+}
+
+/// One emoji, model or symbol of the pattern, centered on `(x, y)`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PictureTile {
+    x: f64,
+    y: f64,
+    size: f64,
+    /// Which of the picture's stills.
+    still: usize,
+    opacity: f64,
 }
 
 fn hex(color: Rgb) -> String {
@@ -109,14 +121,20 @@ fn picture_svg(picture: &Picture, card: &CardLayout, width: f64, height: f64) ->
         .iter()
         .map(|still| still_uri(still))
         .collect();
-    for (x, y, size, pick) in &picture.tiles {
-        if let Some(Some(uri)) = uris.get(*pick) {
-            let half = size / 2.;
+    for tile in &picture.tiles {
+        if let Some(Some(uri)) = uris.get(tile.still) {
+            let half = tile.size / 2.;
+            let opacity = if tile.opacity < 1. {
+                format!(r#" opacity="{}""#, tile.opacity)
+            } else {
+                String::new()
+            };
             let _ = write!(
                 svg,
-                r#"<image x="{}" y="{}" width="{size}" height="{size}" xlink:href="{uri}"/>"#,
-                x - half,
-                y - half
+                r#"<image x="{}" y="{}" width="{size}" height="{size}"{opacity} xlink:href="{uri}"/>"#,
+                tile.x - half,
+                tile.y - half,
+                size = tile.size,
             );
         }
     }
@@ -193,30 +211,76 @@ fn render_png(renderer: &SvgRenderer, picture: &Picture) -> Option<Vec<u8>> {
     Some(png.into_inner())
 }
 
-/// Where the pattern's emoji go in the saved image: its first frame, none
-/// touching the card.
-fn picture_tiles(count: usize, card: &CardLayout) -> Vec<(f64, f64, f64, usize)> {
-    if count == 0 {
-        return Vec::new();
-    }
+/// The saved image's area and its card.
+fn picture_area(card: &CardLayout) -> (Falloff, Rect) {
     let (width, height) = (BOX_WIDTH, card.height + 2. * MARGIN);
-    let card_rect = Rect::new(MARGIN, MARGIN, card.width, card.height);
     let falloff = Falloff {
         area: Rect::new(0., 0., width, height),
         band: LAYER_BAND,
     };
+    (falloff, Rect::new(MARGIN, MARGIN, card.width, card.height))
+}
+
+/// Where the pattern's emoji go in the saved image: its first frame, none
+/// touching the card.
+fn picture_tiles(count: usize, card: &CardLayout) -> Vec<PictureTile> {
+    if count == 0 {
+        return Vec::new();
+    }
+    let (falloff, card_rect) = picture_area(card);
     tiles(&falloff, card_rect.center(), &Metrics::LIVE, count, 0.)
         .into_iter()
         .filter(|tile| !overlaps(&card_rect, tile.x, tile.y, tile.size))
-        .map(|tile| {
-            (
-                tile.x,
-                tile.y,
-                tile.size,
-                pick_index(tile.row, tile.column, count),
-            )
+        .map(|tile| PictureTile {
+            x: tile.x,
+            y: tile.y,
+            size: tile.size,
+            still: pick_index(tile.row, tile.column, count),
+            opacity: 1.,
         })
         .collect()
+}
+
+/// A gift's pattern in the saved image, settled: the faint symbols, then
+/// the models over them, none touching the card. Each layer only when its
+/// still is made.
+fn gift_picture(
+    model: Option<Arc<RenderImage>>,
+    symbol: Option<Arc<RenderImage>>,
+    card: &CardLayout,
+) -> (Vec<Arc<RenderImage>>, Vec<PictureTile>) {
+    let (falloff, card_rect) = picture_area(card);
+    let origin = card_rect.center();
+    let mut stills = Vec::new();
+    let mut out = Vec::new();
+    let layers = [
+        (
+            symbol,
+            gift_symbols(&falloff, origin, &GiftMetrics::LIVE),
+            SYMBOL_ALPHA,
+        ),
+        (model, gift_models(&falloff, origin, &GiftMetrics::LIVE), 1.),
+    ];
+    for (still, items, opacity) in layers {
+        let Some(still) = still else {
+            continue;
+        };
+        let index = stills.len();
+        stills.push(still);
+        out.extend(
+            items
+                .into_iter()
+                .filter(|item| !overlaps(&card_rect, item.x, item.y, item.size))
+                .map(|item| PictureTile {
+                    x: item.x,
+                    y: item.y,
+                    size: item.size,
+                    still: index,
+                    opacity,
+                }),
+        );
+    }
+    (stills, out)
 }
 
 /// What Copy puts on the clipboard on this platform. macOS writes only
@@ -270,12 +334,22 @@ impl QuillApp {
                 return None;
             }
         };
-        let picks = open.state.emoji.clone();
-        let stills = picks
-            .iter()
-            .filter_map(|emoji| self.qr_emoji_still(emoji))
-            .collect::<Vec<_>>();
         let card = card_layout(CARD_WIDTH, view.peer_box());
+        let (stills, tiles) = match &open.state.gift {
+            Some(gift) => gift_picture(
+                self.qr_gift_model(gift).map(|(image, _)| image),
+                self.qr_gift_symbol(gift).map(|(image, _)| image),
+                &card,
+            ),
+            None => {
+                let stills = super::plain_picks(&open.state.emoji)
+                    .iter()
+                    .filter_map(|emoji| self.qr_emoji_still(emoji))
+                    .collect::<Vec<_>>();
+                let tiles = picture_tiles(stills.len(), &card);
+                (stills, tiles)
+            }
+        };
         let name = view
             .label
             .as_ref()
@@ -290,7 +364,7 @@ impl QuillApp {
             name,
             font: String::new(),
             name_widths: Vec::new(),
-            tiles: picture_tiles(stills.len(), &card),
+            tiles,
             stills,
             appearance: view.appearance,
         };
@@ -440,7 +514,7 @@ impl QuillApp {
 mod tests {
     use super::{
         BOX_WIDTH, CARD_WIDTH, CopyKind, FONT_FALLBACK, MARGIN, Picture, QrToast, Rgb, UsernameFit,
-        card_layout, copy_item, picture_svg, picture_tiles,
+        card_layout, copy_item, gift_picture, picture_svg, picture_tiles,
     };
     use gpui_kit::ClipboardEntry;
     use quill::peer_qr::appearance::Appearance;
@@ -466,6 +540,7 @@ mod tests {
                 center: Rgb::hex(0x44_5566),
                 edge: Rgb::hex(0x11_2233),
                 emoji: Vec::new(),
+                gift: None,
             },
         };
         let svg = picture_svg(&picture, &card, BOX_WIDTH, card.height + 2. * MARGIN).expect("svg");
@@ -474,6 +549,34 @@ mod tests {
         assert!(svg.contains("fill=\"#223344\""));
         assert!(svg.contains("radialGradient"));
         assert!(!picture.tiles.is_empty());
+    }
+
+    #[test]
+    fn a_gift_picture_puts_faint_symbols_under_the_models_off_the_card() {
+        let card = card_layout(CARD_WIDTH, true);
+        let still = || {
+            std::sync::Arc::new(gpui_kit::RenderImage::new(smallvec::SmallVec::from_buf([
+                image::Frame::new(image::RgbaImage::new(1, 1)),
+            ])))
+        };
+        let (stills, tiles) = gift_picture(Some(still()), Some(still()), &card);
+        assert_eq!(stills.len(), 2);
+        let symbols: Vec<_> = tiles.iter().filter(|tile| tile.still == 0).collect();
+        let models: Vec<_> = tiles.iter().filter(|tile| tile.still == 1).collect();
+        assert!(!symbols.is_empty() && !models.is_empty());
+        assert!(symbols.iter().all(|tile| tile.opacity < 1.));
+        assert!(models.iter().all(|tile| tile.opacity == 1.));
+        let first_model = tiles.iter().position(|tile| tile.still == 1);
+        assert!(first_model.is_some_and(|at| tiles.iter().skip(at).all(|tile| tile.still == 1)));
+        let card_rect = super::Rect::new(MARGIN, MARGIN, card.width, card.height);
+        assert!(
+            tiles
+                .iter()
+                .all(|tile| !super::overlaps(&card_rect, tile.x, tile.y, tile.size))
+        );
+        let (stills, tiles) = gift_picture(None, Some(still()), &card);
+        assert_eq!(stills.len(), 1);
+        assert!(tiles.iter().all(|tile| tile.still == 0));
     }
 
     #[test]

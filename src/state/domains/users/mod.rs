@@ -3,6 +3,7 @@ mod apply;
 mod error;
 mod purpose;
 mod qr_link;
+mod share_theme;
 mod state;
 
 pub use purpose::*;

@@ -1,12 +1,13 @@
 //! The box itself (tdesktop `FillPeerQrBox` `relayout` and
-//! `PeerQrSurface::paintEvent`): the backdrop, the emoji pattern, the
-//! card, the round buttons, the pill, the open panel and the toast,
+//! `PeerQrSurface::paintEvent`): the backdrop, the emoji or gift
+//! pattern, the card, the round buttons, the pill, the open panel and the toast,
 //! laid out from [`quill::peer_qr::layout`] for the panel's progress.
 #![deny(clippy::indexing_slicing)]
 
 use super::super::app::QuillApp;
 use super::super::shell::{DialogKind, QuillShell};
 use super::card::{card, fit, hsla};
+use super::gift_view::{GiftArgs, gift_canvas};
 use super::pattern_view::{PatternArgs, pattern_canvas};
 use super::view_model::QrView;
 use gpui_kit::assets::IconName;
@@ -17,8 +18,8 @@ use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::peer_qr::color::Rgba;
 use quill::peer_qr::layout::{
-    BOX_WIDTH, BUTTON, BUTTON_SKIP, CARD_SKIP, CARD_WIDTH, ISLAND_BUTTON, PILL_SKIP, box_layout,
-    card_layout, placement,
+    BOX_WIDTH, BUTTON, BUTTON_SKIP, CARD_SKIP, CARD_WIDTH, ISLAND_BUTTON, PANEL_MARGIN, PILL_SKIP,
+    box_layout, card_layout, placement_with,
 };
 use quill::peer_qr::pattern::Rect;
 use quill::peer_qr::state::{QrAction, QrPanel};
@@ -172,11 +173,16 @@ impl QuillApp {
         };
         let motion = open.motion;
         let opened = open.opened;
-        let picks = open.state.emoji.clone();
+        let picks = super::plain_picks(&open.state.emoji);
         let swap = open.swap.clone();
+        let gift = open.state.gift.clone();
+        let gift_entry = open.gift_entry;
         let progress = motion.progress(now, animate);
-        let layout = box_layout(true, if view.can_style { 2 } else { 0 });
-        let place = placement(&layout, progress);
+        let layout = box_layout(true, if view.can_style { 3 } else { 0 });
+        let panel_height = motion.shown.map_or(0., |panel| {
+            self.qr_panel_height(panel, layout.width - 2. * PANEL_MARGIN)
+        });
+        let place = placement_with(&layout, progress, panel_height);
         if motion.running(now, animate) {
             self.request_animation_tick(FPS, cx);
         }
@@ -193,20 +199,42 @@ impl QuillApp {
         if progress > 0. {
             glass.push(place.panel);
         }
-        let frame = self.qr_pattern_frame(PatternArgs {
-            picks: &picks,
-            swap: swap.as_ref(),
-            opened,
-            now,
-            animate,
-            width: layout.width,
-            height: layout.height,
-            card: place.card,
-            glass: &glass,
-        });
-        if frame.moving {
-            self.request_animation_tick(FPS, cx);
-        }
+        let pattern = match &gift {
+            Some(gift) => {
+                let frame = self.qr_gift_frame(GiftArgs {
+                    gift,
+                    entry: gift_entry,
+                    opened,
+                    now,
+                    animate,
+                    width: layout.width,
+                    height: layout.height,
+                    card: place.card,
+                    glass: &glass,
+                });
+                if frame.moving {
+                    self.request_animation_tick(FPS, cx);
+                }
+                gift_canvas(frame).into_any_element()
+            }
+            None => {
+                let frame = self.qr_pattern_frame(PatternArgs {
+                    picks: &picks,
+                    swap: swap.as_ref(),
+                    opened,
+                    now,
+                    animate,
+                    width: layout.width,
+                    height: layout.height,
+                    card: place.card,
+                    glass: &glass,
+                });
+                if frame.moving {
+                    self.request_animation_tick(FPS, cx);
+                }
+                pattern_canvas(frame).into_any_element()
+            }
+        };
         let controls = (1. - progress).clamp(0., 1.) as f32;
         let mut root = div()
             .relative()
@@ -214,7 +242,7 @@ impl QuillApp {
             .h(at(layout.height))
             .overflow_hidden()
             .child(self.qr_backdrop(view, place.card, cx))
-            .child(pattern_canvas(frame))
+            .child(pattern)
             .child(
                 div()
                     .absolute()
@@ -363,7 +391,7 @@ impl QuillApp {
             .into_any_element()
     }
 
-    /// Colors and Emoji, one pill between copy and share.
+    /// Colors, Emoji and Gifts, one pill between copy and share.
     fn qr_island(&mut self, view: &QrView, cx: &mut Context<Self>) -> Div {
         let control = rgba(view.colors.control);
         let button = |id: &'static str,
@@ -403,6 +431,13 @@ impl QuillApp {
                 IconName::FaceSlightlySmiling,
                 tr(keys::QR_BOX_EMOJI),
                 QrPanel::Emoji,
+                cx,
+            ))
+            .child(button(
+                "peer-qr-gifts",
+                IconName::Gift,
+                tr(keys::QR_BOX_GIFTS),
+                QrPanel::Gifts,
                 cx,
             ))
     }

@@ -262,6 +262,8 @@ pub enum GroupsPayload {
         admin: SupergroupFullAdmin,
         /// `bot_commands`: the commands of the bots in the group.
         bot_commands: Vec<GroupBotCommands>,
+        /// `share_theme`: the QR box's saved theme.
+        share_theme: crate::peer_qr::theme::ShareTheme,
     },
     /// Slice (communities backend core): `updateCommunity` (schema 1.8.67,
     /// line 10726) — the update carries the full `community` object and is
@@ -481,6 +483,8 @@ pub enum GroupsPayload {
         admin: SupergroupFullAdmin,
         /// `bot_commands`: the commands of the bots in the group.
         bot_commands: Vec<GroupBotCommands>,
+        /// `share_theme`: the QR box's saved theme.
+        share_theme: crate::peer_qr::theme::ShareTheme,
     },
     /// `updateBasicGroupFullInfo` (schema 1.8.67): only the commands of the
     /// group's bots are kept.
