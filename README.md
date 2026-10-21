@@ -253,8 +253,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Sender avatar sticks to the bottom of a group of messages while scrolling <!-- parity:render-sticky-avatar -->
 - [x] Code blocks show a language header with a Copy button <!-- parity:render-code-block-header -->
 - [x] Syntax highlighting in code blocks, from the block's language (tdesktop libprisma; GPUI Kit 0.8 `syntect` feature) <!-- parity:render-code-syntax-highlight -->
-- [ ] Diff code blocks show added lines in green, as tdesktop's "inserted" color <!-- parity:render-code-diff-inserted -->
-- [ ] Syntax highlighting in Instant View code blocks <!-- parity:iv-code-highlight -->
+- [x] Diff code blocks show added lines in green, as tdesktop's "inserted" color <!-- parity:render-code-diff-inserted -->
+- [x] Syntax highlighting in Instant View code blocks <!-- parity:iv-code-highlight -->
 - [x] "Photo has expired" style placeholders for expired media (partial: generic unsupported card for some) <!-- parity:render-expired-media -->
 - [x] Fact-check block under messages <!-- parity:render-fact-check -->
 - [x] "About sponsored messages" info box from the Ad menu <!-- parity:render-sponsored-info -->

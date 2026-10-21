@@ -1,3 +1,0 @@
-# Instant View code blocks highlight by language; diff blocks color added and removed lines
-parity:iv-code-highlight
-parity:render-code-diff-inserted
