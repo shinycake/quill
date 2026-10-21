@@ -61,10 +61,7 @@ impl QuillApp {
             Page::Account => self.account_page(cx),
             Page::Notifications => column.child(self.notifications_page(cx)),
             Page::Privacy => column.child(self.privacy_page(cx)),
-            Page::Devices => column.child(group(
-                None,
-                [self.nav_row(Nav::Sessions, tr(keys::Q_NAVIGATION_DEVICES), None, cx)],
-            )),
+            Page::Devices => column.child(self.sessions_page(cx)),
             Page::Chats => column
                 .children(cards([self.media_settings_section(cx).into_any_element()]))
                 .children(cards([

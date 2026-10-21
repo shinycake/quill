@@ -73,7 +73,7 @@ impl QuillApp {
         self.payments.marketplace_open = true;
     }
 
-    fn demo_ready_sessions(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+    pub(crate) fn demo_ready_sessions(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         // Slice A3: Active Sessions fixture — fixture sessions (current
         // device, two other sessions, one incomplete login attempt) with
         // the overlay open (injected, no live Telegram).
@@ -83,7 +83,7 @@ impl QuillApp {
             session.settings.sessions_loading = false;
             session.settings.sessions_error = None;
         }
-        self.privacy.sessions_open = true;
+        self.open_sessions(cx);
         if std::env::var_os("QUILL_DEMO_DEVICE_LINK").is_some() {
             self.privacy.device_login_qr =
                 Some(zeroize::Zeroizing::new("tg://login?token=AQID".into()));

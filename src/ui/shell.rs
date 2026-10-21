@@ -437,7 +437,6 @@ mod tests {
         DialogKind::GroupCallStart,
         DialogKind::ArchiveSettings,
         DialogKind::Websites,
-        DialogKind::Sessions,
         DialogKind::TwoFa,
         DialogKind::CallConfirm,
         DialogKind::CallSwap,

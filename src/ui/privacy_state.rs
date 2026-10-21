@@ -17,9 +17,6 @@ pub(crate) struct PrivacyState {
     pub(super) block_picker_open: bool,
     /// Slice S3: two-step Unblock confirm on the Privacy screen.
     pub(super) unblock_confirm: Option<i64>,
-    /// Slice A3: Active Sessions overlay (TGX Settings → Devices /
-    /// `SettingsSessionsController`).
-    pub(super) sessions_open: bool,
     pub(super) device_qr_scanner: Option<super::device_qr::DeviceQrScanner>,
     pub(super) device_login_qr: Option<zeroize::Zeroizing<String>>,
     pub(super) device_link_notice: Option<&'static str>,
@@ -46,7 +43,6 @@ impl PrivacyState {
             exception_picker_open: false,
             block_picker_open: false,
             unblock_confirm: None,
-            sessions_open: false,
             device_qr_scanner: None,
             device_login_qr: None,
             device_link_notice: None,

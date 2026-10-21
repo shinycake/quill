@@ -72,6 +72,12 @@ impl QuillApp {
         if self.settings.page == Some(Page::Language) && page != Page::Language {
             self.close_language_settings(cx);
         }
+        if self.settings.page == Some(Page::Devices) && page != Page::Devices {
+            self.leave_devices();
+        }
+        if page == Page::Devices {
+            self.fetch_sessions();
+        }
         if self.settings.page == Some(Page::DataStorage) && page != Page::DataStorage {
             self.leave_data_storage();
         }

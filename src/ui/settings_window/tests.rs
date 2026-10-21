@@ -380,3 +380,27 @@ fn data_storage_editor_opens_in_the_page_and_leaving_drops_it(cx: &mut TestAppCo
     assert!(app.read_with(vcx, |app, _| app.settings.data_storage_editor.is_none()));
     assert!(shown(vcx, "settings-page-connection"));
 }
+
+#[gpui_kit::test]
+fn devices_page_esc_leaves_session_details_before_the_page(cx: &mut TestAppContext) {
+    let (app, _, mut vcx) = new_app_sized(cx, 1100., 2400.);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| app.demo_ready_sessions(window, cx));
+    frames(vcx);
+    assert!(shown(vcx, "settings-page-devices"));
+    app.update(vcx, |app, cx| {
+        let first = app
+            .session()
+            .and_then(|s| s.settings.sessions.as_ref())
+            .and_then(|list| list.first().map(|s| s.id));
+        app.privacy.extra.session_details = first;
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.privacy.extra.session_details.is_some()));
+
+    vcx.simulate_keystrokes("escape");
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.privacy.extra.session_details.is_none()));
+    assert!(shown(vcx, "settings-page-devices"), "the page stays");
+}
