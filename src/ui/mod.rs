@@ -36,6 +36,7 @@ mod chat_palette;
 mod chat_theme;
 mod chat_window;
 mod clipboard_files;
+mod code_highlight;
 mod composer_events;
 mod composer_rtl;
 mod composer_sends;
