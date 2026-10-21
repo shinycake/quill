@@ -98,6 +98,7 @@ mod story_insights;
 mod subsection_tabs;
 mod suggested_posts;
 mod threads;
+mod ticks;
 mod ton_wallet;
 mod translate;
 mod types;
@@ -112,6 +113,7 @@ pub use group_calls::SelfMuteError;
 pub use live::*;
 pub use message_menu::{ADDED_REACTIONS_PAGE, ModerationChoice};
 pub use sender::*;
+pub use ticks::{TickOutcome, TickScope};
 pub use types::*;
 
 pub(crate) use connect_flow::group_video_sources;
