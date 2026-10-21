@@ -283,11 +283,14 @@ impl QuillApp {
     }
 
     fn enable_proxy_entry(&mut self, id: i32, cx: &mut Context<Self>) {
-        let web = self
-            .session()
-            .and_then(|s| s.settings.proxy.find(id))
-            .is_some_and(|p| !p.proxy.kind.can_be_enabled());
-        if web {
+        // Only a build without a carrier host refuses a web proxy.
+        let unhostable = self.session().is_some_and(|s| {
+            s.settings
+                .proxy
+                .find(id)
+                .is_some_and(|p| !s.settings.proxy.can_enable(p.proxy.kind))
+        });
+        if unhostable {
             self.settings.proxy.notice =
                 Some(tr(keys::Q_PREFS_WEB_PROXIES_ARENT_SUPPORTED_YET).into());
             cx.notify();
@@ -400,7 +403,7 @@ impl QuillApp {
                 .proxy
                 .entries()
                 .iter()
-                .filter(|p| p.proxy.kind.can_be_enabled())
+                .filter(|p| s.settings.proxy.can_enable(p.proxy.kind))
                 .max_by_key(|p| p.last_used_date)
                 .map(|p| p.id)
         });
@@ -475,7 +478,10 @@ impl QuillApp {
                 .find(|p| p.proxy.same_endpoint(&link.draft))
                 .map(|p| p.id)
         });
-        if existing.is_some() && !link.draft.kind.can_be_enabled() {
+        let switchable = self
+            .session()
+            .is_none_or(|s| s.settings.proxy.can_enable(link.draft.kind));
+        if existing.is_some() && !switchable {
             // Nothing to add and nothing to switch to: say so.
             self.settings.proxy.notice =
                 Some(tr(keys::PROXY_ADD_FROM_CLIPBOARD_EXISTING_TOAST).into());

@@ -79,6 +79,7 @@ mod profile_photo_sources;
 mod profile_tabs;
 mod promotion;
 mod proxy;
+mod proxy_carrier;
 mod pull_next;
 mod search;
 mod secret_chats;

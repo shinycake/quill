@@ -20,6 +20,9 @@
 //! - downloads (reported, never saved);
 //! - every permission request (camera, microphone, location, ...).
 //!
+//! With `--carrier` the same binary hosts a web proxy's relay page in a
+//! hidden window instead (`carrier` module).
+//!
 //! Exit: when Quill closes its end of the pipe, when Quill sends `close`,
 //! or when the web view cannot be created (an `error` event explains).
 
@@ -40,6 +43,7 @@ use wry::http::{Request, Response, StatusCode};
 use wry::{NewWindowResponse, PermissionResponse, WebContext, WebViewBuilder};
 
 mod capture;
+mod carrier;
 mod shell;
 
 /// Telegram Desktop's panel: `botWebViewPanelSize` 384x694 plus its 60 px
@@ -232,6 +236,12 @@ fn read_commands(proxy: EventLoopProxy<Message>) {
 }
 
 fn main() {
+    // `--carrier`: a hidden web view for a web proxy's relay page instead
+    // of a mini-app window (`carrier` module).
+    if std::env::args().skip(1).any(|arg| arg == "--carrier") {
+        carrier::run();
+        return;
+    }
     let options = parse_args(std::env::args().skip(1));
     let out = Output::new();
 

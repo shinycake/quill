@@ -252,14 +252,7 @@ pub(super) struct MiniApps {
 /// `Contents/MacOS`, the Linux and Windows package directories, and
 /// `target/<profile>` for developer runs).
 pub(super) fn helper_path() -> Option<std::path::PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let name = if cfg!(windows) {
-        "quill-webview.exe"
-    } else {
-        "quill-webview"
-    };
-    let sibling = exe.with_file_name(name);
-    sibling.is_file().then_some(sibling)
+    quill::proxy_carrier::helper::helper_program()
 }
 
 /// The web view's storage for one bot of one account: cookies and local

@@ -20,6 +20,7 @@
 use serde::{Deserialize, Serialize};
 
 pub mod carrier;
+pub mod lines;
 
 /// Longest `data` payload of one mini-app event the helper forwards. The
 /// Telegram bridge's biggest legitimate payloads (a `web_app_data_send`

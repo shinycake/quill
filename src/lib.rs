@@ -155,6 +155,7 @@ pub mod profile_photo_video;
 pub mod profile_tab;
 pub mod promotion;
 pub mod proxy;
+pub mod proxy_carrier;
 pub mod proxy_extras;
 pub mod proxy_sync;
 pub mod proxy_web;

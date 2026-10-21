@@ -400,6 +400,11 @@ impl QuillApp {
             progressed = true;
             need = RedrawNeed::Now;
         }
+        // `parity:data-proxy-web`: what the web proxy carriers reported.
+        if live.driver.carrier_tick() {
+            progressed = true;
+            need = RedrawNeed::Now;
+        }
         // `parity:data-proxy-extras`: "Use system proxy settings".
         let proxy = &live.driver.session.settings.proxy;
         let wanted = proxy.prefs.use_system && proxy.enabled().is_none();

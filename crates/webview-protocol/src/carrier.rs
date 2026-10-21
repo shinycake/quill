@@ -200,7 +200,9 @@ impl CarrierScope {
         // No dot segments or encoded slashes that could step out of the
         // prefix once the engine normalizes the path.
         let lower = path.to_ascii_lowercase();
-        if path.split('/').any(|segment| segment == "." || segment == "..")
+        if path
+            .split('/')
+            .any(|segment| segment == "." || segment == "..")
             || lower.contains("%2f")
             || lower.contains("%5c")
             || lower.contains("%2e")

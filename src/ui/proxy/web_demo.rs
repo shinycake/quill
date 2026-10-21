@@ -9,7 +9,7 @@ use quill::proxy::ProxyState;
 register_demos![
     DemoSpec::chats(
         "ready-proxy-web-list",
-        "screenshot demo — the proxy list with a web proxy that cannot be enabled yet"
+        "screenshot demo — the proxy list with a web proxy in use"
     )
     .setup(QuillApp::demo_proxy_web_list),
     DemoSpec::chats(
@@ -49,10 +49,15 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             session.settings.proxy = ProxyState {
                 list: Some(vec![
-                    entry(1, true, socks),
+                    entry(1, false, socks),
                     entry(2, false, mtproto),
-                    entry(3, false, web),
+                    entry(3, true, web),
                 ]),
+                // The live client gets this from its carrier host.
+                carriers: quill::proxy_carrier::Carriers {
+                    hosting: true,
+                    ..Default::default()
+                },
                 ..ProxyState::default()
             };
         }

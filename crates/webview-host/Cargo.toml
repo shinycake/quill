@@ -19,6 +19,8 @@ path = "src/main.rs"
 quill-webview-protocol = { path = "../webview-protocol" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The web proxy carrier's per-page bridge token (`--carrier`).
+getrandom = "0.4"
 # Windowing for the helper only. tao runs a GTK main loop on Linux, which
 # is exactly why the web view cannot live in the GPUI process
 # (docs/decisions/codex-miniapp-webview.md). `dbus` (Linux taskbar progress)

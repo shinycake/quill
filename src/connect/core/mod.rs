@@ -27,6 +27,10 @@ use std::sync::{Arc, Mutex};
 
 impl<S: JsonSender> ConnectDriver<S> {
     pub fn ingest(&mut self, owned: OwnedEnvelope) -> Result<(), ConnectSendError> {
+        // `parity:data-proxy-web`: a carrier's bytes go to its page.
+        let Some(owned) = self.absorb_carrier_data(owned) else {
+            return Ok(());
+        };
         // Q1: a rate-limited read is re-sent later; the reducer never sees
         // the 429 and the request stays pending.
         // Stream segments: the feeder answers ntgcalls before the reducer

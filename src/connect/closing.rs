@@ -66,6 +66,8 @@ pub trait Closable {
 /// Like tdesktop on quit: announce going offline, then `close` on the same
 /// ordered queue. A client that is Closed already gets nothing.
 pub(crate) fn begin_close<S: JsonSender>(driver: &mut ConnectDriver<S>) {
+    // `parity:data-proxy-web`: no hidden web view outlives its client.
+    driver.shut_down_carriers();
     if matches!(driver.session.auth, AuthorizationState::Closed) {
         return;
     }

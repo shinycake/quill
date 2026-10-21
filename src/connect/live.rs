@@ -244,7 +244,14 @@ fn open_prepared_client(
     // way (seeded from `getAutoDownloadSettingsPresets` on first open
     // when no file exists).
     session.settings.data_storage = load_data_storage_prefs(&prepared.paths);
-    let driver = ConnectDriver::new(session, sender, credentials, prepared);
+    let mut driver = ConnectDriver::new(session, sender, credentials, prepared);
+    // `parity:data-proxy-web`: web proxy carriers run in the web view
+    // helper next to Quill's executable.
+    driver.set_carrier_host(Box::new(
+        crate::proxy_carrier::helper::HelperCarrierHost::new(
+            crate::proxy_carrier::helper::helper_program(),
+        ),
+    ));
     Ok(LiveConnect {
         driver,
         bridge,

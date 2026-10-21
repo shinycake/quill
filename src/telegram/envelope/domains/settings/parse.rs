@@ -67,26 +67,26 @@ pub(crate) fn parse_settings_payload(
         "addedProxy" => Ok(EnvelopePayload::Settings(SettingsPayload::AddedProxy {
             proxy: crate::proxy::parse_added_proxy(value),
         })),
-        "updateWebProxyCarrierOpened" => {
-            let carrier = value.get("carrier");
-            let int = |name: &str| {
-                carrier
-                    .and_then(|c| c.get(name))
-                    .and_then(Value::as_i64)
-                    .and_then(|v| i32::try_from(v).ok())
-                    .unwrap_or(0)
-            };
-            Ok(EnvelopePayload::Settings(
-                SettingsPayload::WebProxyCarrierOpened {
-                    carrier_id: int("id"),
-                    proxy_id: int("proxy_id"),
-                    temporary: carrier
-                        .and_then(|c| c.get("is_temporary"))
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false),
-                },
-            ))
-        }
+        "updateWebProxyCarrierOpened" => Ok(EnvelopePayload::Settings(
+            SettingsPayload::WebProxyCarrierOpened {
+                carrier: parse_web_proxy_carrier(value.get("carrier")),
+            },
+        )),
+        "updateWebProxyCarrierData" => Ok(EnvelopePayload::Settings(
+            SettingsPayload::WebProxyCarrierData {
+                carrier_id: carrier_id(value),
+                data: value
+                    .get("data")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            },
+        )),
+        "updateWebProxyCarrierClosed" => Ok(EnvelopePayload::Settings(
+            SettingsPayload::WebProxyCarrierClosed {
+                carrier_id: carrier_id(value),
+            },
+        )),
         // Phase C2i: `userPrivacySettingRules` (schema 1.8.67, :8976)
         // answers `getUserPrivacySettingRules` (:15620). Only the rule
         // constructor names are kept — enough to map Everybody /
@@ -514,4 +514,39 @@ pub(crate) fn parse_settings_payload(
         _ => return Ok(None),
     };
     payload.map(Some)
+}
+
+fn int32(value: Option<&Value>, name: &str) -> i32 {
+    value
+        .and_then(|v| v.get(name))
+        .and_then(Value::as_i64)
+        .and_then(|v| i32::try_from(v).ok())
+        .unwrap_or(0)
+}
+
+fn carrier_id(value: &Value) -> i32 {
+    int32(Some(value), "carrier_id")
+}
+
+/// `webProxyCarrier` (TDLib 1.8.69).
+fn parse_web_proxy_carrier(carrier: Option<&Value>) -> crate::proxy_carrier::CarrierRequest {
+    let text = |name: &str| {
+        carrier
+            .and_then(|c| c.get(name))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    crate::proxy_carrier::CarrierRequest {
+        id: int32(carrier, "id"),
+        proxy_id: int32(carrier, "proxy_id"),
+        url: crate::proxy_carrier::CarrierUrl::new(text("url")),
+        origin: text("origin"),
+        path_prefix: text("path_prefix"),
+        bridge_object_name: text("bridge_object_name"),
+        temporary: carrier
+            .and_then(|c| c.get("is_temporary"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    }
 }

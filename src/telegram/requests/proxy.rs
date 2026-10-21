@@ -63,22 +63,41 @@ pub fn ping_proxy(extra: RequestId, proxy: &ProxyDraft) -> String {
 }
 
 /// `reportWebProxyCarrierError carrier_id:int32 error:WebProxyCarrierError =
-/// Ok`: Quill cannot host the relay page (`webProxyCarrierErrorUnsupported`),
-/// and refuses temporary carriers outright (`webProxyCarrierErrorRefused`).
+/// Ok`.
 pub fn report_web_proxy_carrier_error(
     extra: RequestId,
     carrier_id: i32,
-    temporary: bool,
+    error: &crate::proxy_carrier::CarrierError,
 ) -> String {
     json!({
         "@type": "reportWebProxyCarrierError",
         "@extra": extra.as_extra(),
         "carrier_id": carrier_id,
-        "error": {"@type": if temporary {
-            "webProxyCarrierErrorRefused"
-        } else {
-            "webProxyCarrierErrorUnsupported"
-        }},
+        "error": error.to_json(),
+    })
+    .to_string()
+}
+
+/// `processWebProxyCarrierMessage carrier_id:int32
+/// message:WebProxyCarrierMessage = Ok`: what the page posted to its bridge
+/// object, binary data as base64 (`bytes`).
+pub fn process_web_proxy_carrier_message(
+    extra: RequestId,
+    carrier_id: i32,
+    message: &crate::proxy_carrier::CarrierMessage,
+) -> String {
+    use crate::proxy_carrier::CarrierMessage;
+    let message = match message {
+        CarrierMessage::Binary(data) => {
+            json!({"@type": "webProxyCarrierMessageBinary", "data": data})
+        }
+        CarrierMessage::Text(text) => json!({"@type": "webProxyCarrierMessageText", "text": text}),
+    };
+    json!({
+        "@type": "processWebProxyCarrierMessage",
+        "@extra": extra.as_extra(),
+        "carrier_id": carrier_id,
+        "message": message,
     })
     .to_string()
 }

@@ -77,6 +77,10 @@ pub enum SettingsPurpose {
     /// `parity:data-proxy-web`: `reportWebProxyCarrierError`. Response is
     /// `ok`, which needs no handling.
     ReportWebProxyCarrier,
+    /// `parity:data-proxy-web`: `processWebProxyCarrierMessage`. Response
+    /// is `ok`, which needs no handling (an error only means TDLib closed
+    /// the carrier already).
+    ProcessWebProxyCarrierMessage,
     /// `parity:proxy-settings`: `pingProxy`. Response is `seconds`; an
     /// error means the proxy is not available.
     PingProxy {
@@ -307,6 +311,7 @@ flat_purposes!(Settings(SettingsPurpose) {
     GetProxies,
     MutateProxy,
     ReportWebProxyCarrier,
+    ProcessWebProxyCarrierMessage,
     DisconnectAllWebsites,
     AddSavedNotificationSound,
     GetSupportUser,
