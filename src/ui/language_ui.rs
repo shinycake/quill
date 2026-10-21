@@ -133,13 +133,14 @@ impl QuillApp {
         cx.notify();
     }
 
-    pub(crate) fn close_language_settings(&mut self, cx: &mut Context<Self>) {
+    /// Leaving the page: drop the search field and forget the recent
+    /// languages removed while it was open.
+    pub(crate) fn leave_language_settings(&mut self) {
         if let Some(open) = self.language.open.take() {
             self.language
                 .recent
                 .retain(|choice| !open.removed.contains(&choice.pack_id));
         }
-        cx.notify();
     }
 
     /// The official packs: TDLib's list, or the demo fixture.
