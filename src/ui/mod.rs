@@ -123,11 +123,6 @@ mod user_error;
 mod vanish;
 mod viewer_state;
 mod whats_new;
-#[cfg(feature = "demo-capture")]
-mod whats_new_demo;
-#[cfg(test)]
-#[cfg(feature = "demo-capture")]
-mod whats_new_tests;
 
 pub(crate) use account_lifecycle::*;
 pub(crate) use accounts::*;

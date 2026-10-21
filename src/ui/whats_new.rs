@@ -16,6 +16,14 @@ use quill::lang::{keys, tr, tr_with};
 use quill::release_notes::{ReleaseNote, Standing};
 use std::rc::Rc;
 
+#[cfg(feature = "demo-capture")]
+#[path = "whats_new_demo.rs"]
+mod demo;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "whats_new_tests.rs"]
+mod tests;
+
 #[derive(Default)]
 pub(crate) enum Notes {
     #[default]
