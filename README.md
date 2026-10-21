@@ -280,7 +280,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Copy Phone Number on a contact message (#1001) <!-- parity:menu-copy-contact-phone -->
 - [x] "Original date" row for forwarded messages, as tdesktop's context menu shows it <!-- parity:menu-forward-original-date -->
 - [x] "Edited" row in the message menu is an icon plus a bare date, as tdesktop shows it <!-- parity:menu-edited-date-row -->
-- [ ] In a private chat the message menu's Sent or Edited date line sits above the read time, as tdesktop orders it <!-- parity:menu-date-row-private-order -->
+- [x] In a private chat the message menu's Sent or Edited date line sits above the read time, as tdesktop orders it <!-- parity:menu-date-row-private-order -->
 - [x] "Send Another Gift" on gift service messages <!-- parity:menu-send-another-gift -->
 - [x] Block sender from the Replies chat menu <!-- parity:menu-replies-block-sender -->
 - [ ] Save selected rich messages as HTML <!-- parity:menu-save-selection-html -->
@@ -979,7 +979,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Buy Premium inside the app (blocked: store purchase and app verification tokens are only available to official mobile apps) <!-- parity:premium-in-app-purchase -->
 - [x] Fragment and TON wallet flows: sign-in codes, collectible info, phone and username Fragment links, low-TON top-up (#799), the Gram Balance screen with top-up and Collect via Fragment (#818, #827), the gift value box (#824) and gift transfer or export via Fragment (#819) <!-- parity:premium-fragment-ton -->
 - [x] Delete a received gift (TDLib 1.8.69 `deleteGift`, `can_be_deleted`) <!-- parity:gifts-delete -->
-- [ ] Delete a channel's received gifts, for admins who manage its gifts (tdesktop `canTransferGifts`) <!-- parity:gifts-delete-channel -->
+- [x] Delete a channel's received gifts, for admins who manage its gifts (tdesktop `canTransferGifts`) <!-- parity:gifts-delete-channel -->
 
 ### TON wallet (low priority)
 
