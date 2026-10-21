@@ -6,6 +6,7 @@
 
 use super::QuillApp;
 use super::inline_mode::{InlineView, inline_view};
+use super::inline_players::Panel;
 use super::pressable::PressableDiv;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::theme::ActiveTheme;
@@ -23,9 +24,6 @@ use quill::local_path::sandboxed_display_path;
 use quill::state::{DeepLinkAction, InlineBotResolve, InlineQueryFetch};
 use quill::telegram::envelope::{InlineQueryResultSummary, InlineQueryResultsButton};
 use std::path::PathBuf;
-
-/// Chat id of the panel's players in the history's player table.
-const INLINE_PANEL_PLAYER_CHAT: i64 = super::inline_players::PANEL_CHAT;
 
 /// Row title: the result title, falling back to a capitalized kind label
 /// (`sticker` results carry no title).
@@ -54,8 +52,12 @@ fn initial(title: &str) -> String {
 }
 
 impl QuillApp {
-    /// Path of a downloaded result image the display roots allow.
-    fn inline_image_path(&self, file_id: quill::ids::FileId, roots: &[PathBuf]) -> Option<PathBuf> {
+    /// Path of a downloaded panel file the display roots allow.
+    pub(super) fn inline_image_path(
+        &self,
+        file_id: quill::ids::FileId,
+        roots: &[PathBuf],
+    ) -> Option<PathBuf> {
         if file_id.0 == 0 {
             return None;
         }
@@ -70,9 +72,7 @@ impl QuillApp {
     /// The player of an animation result's clip: it plays muted and looped
     /// on an inline player, like a GIF in a chat, while the panel shows it
     /// (its `video_frame` asks for its own frames). Until the full clip is
-    /// downloaded, the result's MP4 thumbnail loop plays in its place. The
-    /// player slots live in the history's table under a key no chat uses,
-    /// so a panel that closes stops them.
+    /// downloaded, the result's MP4 thumbnail loop plays in its place.
     fn inline_clip_picture(
         &self,
         result: &InlineQueryResultSummary,
@@ -80,6 +80,31 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<super::video_player::VideoPlayer> {
         let media = result.media?;
+        let clip = [result.clip, result.preview_clip]
+            .into_iter()
+            .flatten()
+            .find(|clip| self.inline_image_path(*clip, roots).is_some())?;
+        let tile = super::inline_video::InlineTile::media(
+            super::message_media::MediaFrameKind::Gif,
+            media.width,
+            media.height,
+            0,
+        );
+        self.panel_clip_player(Panel::InlineResults, clip, tile, roots, cx)
+    }
+
+    /// The player of a downloaded clip in `panel`'s grid, muted and looped
+    /// while the panel shows it, when GIFs autoplay. The player slots live
+    /// in the history's table under the panel's own key, so a panel that
+    /// closes stops them.
+    pub(super) fn panel_clip_player(
+        &self,
+        panel: Panel,
+        clip: quill::ids::FileId,
+        tile: super::inline_video::InlineTile,
+        roots: &[PathBuf],
+        cx: &mut Context<Self>,
+    ) -> Option<super::video_player::VideoPlayer> {
         if !super::video_player::supported()
             || self.viewer.state.is_open()
             || self.stories.viewer.is_open()
@@ -90,21 +115,12 @@ impl QuillApp {
         if !prefs.autoplay_gifs || prefs.data_saver {
             return None;
         }
-        let (clip, path) = [result.clip, result.preview_clip]
-            .into_iter()
-            .flatten()
-            .find_map(|clip| Some((clip, self.inline_image_path(clip, roots)?)))?;
-        let tile = super::inline_video::InlineTile::media(
-            super::message_media::MediaFrameKind::Gif,
-            media.width,
-            media.height,
-            0,
-        );
+        let path = self.inline_image_path(clip, roots)?;
         if super::video_player::decodes_in_process() && !tile.within_inline_area() {
             return None;
         }
         let frame = self.playback.inline_videos.frame(
-            (INLINE_PANEL_PLAYER_CHAT, i64::from(clip.0)),
+            (panel.chat(), i64::from(clip.0)),
             tile,
             None,
             || Some(path),
@@ -122,7 +138,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         // Clips whose cells do not render in this pass stop.
-        self.playback.inline_videos.begin_panel_render();
+        self.playback
+            .inline_videos
+            .begin_panel_render(Panel::InlineResults);
         let mut panel = div()
             .id("inline-results")
             .flex()

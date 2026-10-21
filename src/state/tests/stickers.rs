@@ -242,3 +242,39 @@ fn message_emoji_packs_are_distinct_and_skip_unresolved_emoji() {
             .is_empty()
     );
 }
+
+#[test]
+fn gif_panel_downloads_stills_then_preview_loops_then_unpreviewed_clips() {
+    let (mut session, _sink) = session();
+    let gif = |file: i32, thumb: Option<i32>, still: bool| AnimationItem {
+        duration: 2,
+        width: 320,
+        height: 180,
+        file_name: "clip.mp4".into(),
+        mime_type: "video/mp4".into(),
+        file_id: FileId(file),
+        thumb_file_id: thumb.map(FileId),
+        thumb_width: 160,
+        thumb_height: 90,
+        minithumbnail: None,
+        thumb_still: still,
+    };
+    session.stickers.gifs.animations = vec![
+        // An MP4 preview loop: the loop plays, the GIF itself waits.
+        gif(1, Some(11), false),
+        // A still JPEG and no loop: the GIF itself plays.
+        gif(2, Some(12), true),
+        // Nothing but the GIF.
+        gif(3, None, true),
+    ];
+    // A closed panel fetches nothing.
+    assert!(session.gif_panel_file_ids_to_download().is_empty());
+    session.stickers.gifs.open = true;
+    assert_eq!(
+        session.gif_panel_file_ids_to_download(),
+        vec![FileId(12), FileId(11), FileId(2), FileId(3)]
+    );
+    // Without autoplay only the stills.
+    session.settings.media_prefs.autoplay_gifs = false;
+    assert_eq!(session.gif_panel_file_ids_to_download(), vec![FileId(12)]);
+}

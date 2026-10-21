@@ -248,6 +248,21 @@ pub struct AnimationItem {
     pub thumb_still: bool,
 }
 
+impl AnimationItem {
+    /// The thumbnail, when it is a still picture.
+    pub fn still_thumb(&self) -> Option<FileId> {
+        self.thumb_file_id
+            .filter(|id| id.0 != 0 && self.thumb_still)
+    }
+
+    /// The thumbnail, when it is a short clip (the MP4 preview loop
+    /// Telegram sends with most GIFs).
+    pub fn preview_clip(&self) -> Option<FileId> {
+        self.thumb_file_id
+            .filter(|id| id.0 != 0 && !self.thumb_still)
+    }
+}
+
 /// Whether a `thumbnail` object holds a still picture a tile can draw
 /// (absent format counts as one).
 fn is_still_thumbnail(thumb: &Value) -> bool {

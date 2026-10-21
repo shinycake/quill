@@ -85,19 +85,7 @@ pub fn mosaic_item(result: usize, summary: &InlineQueryResultSummary) -> Option<
             if animation && (media.width <= 0 || media.height <= 0) {
                 return None;
             }
-            // tdesktop photos with an unknown size count as 1x1.
-            let (w, h) = if media.width <= 0 || media.height <= 0 {
-                (1, 1)
-            } else {
-                (media.width, media.height)
-            };
-            let width = (i64::from(w) * i64::from(MEDIA_HEIGHT) / i64::from(h))
-                .clamp(0, i64::from(i32::MAX / 4)) as i32;
-            (
-                CellKind::Media,
-                width.max(MIN_CELL_WIDTH),
-                MEDIA_HEIGHT + SKIP,
-            )
+            return Some(media_item(result, media.width, media.height));
         }
         "sticker" => (CellKind::Sticker, STICKER_SIZE, STICKER_SIZE),
         "audio" | "voice_note" | "document" => {
@@ -111,6 +99,24 @@ pub fn mosaic_item(result: usize, summary: &InlineQueryResultSummary) -> Option<
         max_width,
         height,
     })
+}
+
+/// A photo or GIF of `width` x `height` pixels: as wide as that shape is at
+/// the row height (tdesktop photos with an unknown size count as 1x1).
+pub fn media_item(result: usize, width: i32, height: i32) -> MosaicItem {
+    let (w, h) = if width <= 0 || height <= 0 {
+        (1, 1)
+    } else {
+        (width, height)
+    };
+    let max_width = (i64::from(w) * i64::from(MEDIA_HEIGHT) / i64::from(h))
+        .clamp(0, i64::from(i32::MAX / 4)) as i32;
+    MosaicItem {
+        result,
+        kind: CellKind::Media,
+        max_width: max_width.max(MIN_CELL_WIDTH),
+        height: MEDIA_HEIGHT + SKIP,
+    }
 }
 
 /// Width a list row asks for: the whole grid.
