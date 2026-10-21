@@ -193,6 +193,7 @@ impl TdHub {
         // Fail closed: no client until the native log stream is emptied.
         // install_redacted_log alone does not stop TDLib writing to stderr.
         api.secure_native_logging()?;
+        api.check_pinned_version()?;
         api.install_redacted_log(MAX_NATIVE_LOG_VERBOSITY);
         // Debug mode (`advanced::debug_mode`) opens the native log file only
         // after the stream above is closed, so a failure leaves it closed.

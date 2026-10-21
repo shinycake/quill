@@ -128,6 +128,8 @@ pub enum ConnectBlocker {
     LockedStore,
     StoreError,
     TdjsonLoad,
+    /// The loaded tdjson is not the TDLib version this build pins.
+    TdjsonVersion,
     /// The OS refused to start the TDLib receive thread.
     ReceiveThread,
 }
@@ -152,6 +154,9 @@ impl ConnectBlocker {
             ConnectBlocker::TdjsonLoad => {
                 "tdjson library found but failed to load (missing symbols or wrong arch)"
             }
+            ConnectBlocker::TdjsonVersion => {
+                "tdjson is a different TDLib version than this build of Quill needs — rebuild it with scripts/build-tdlib.sh"
+            }
         }
     }
 
@@ -164,6 +169,7 @@ impl ConnectBlocker {
             ConnectBlocker::LockedStore => "locked-store",
             ConnectBlocker::StoreError => "store-error",
             ConnectBlocker::TdjsonLoad => "tdjson-load",
+            ConnectBlocker::TdjsonVersion => "tdjson-version",
             ConnectBlocker::ReceiveThread => "receive-thread",
         }
     }

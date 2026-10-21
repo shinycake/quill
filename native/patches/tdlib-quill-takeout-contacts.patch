@@ -43,6 +43,53 @@ index 1806be569..892874c63 100644
  invokeWithBusinessConnectionPrefix#dd289f8e connection_id:string = Error;
  invokeWithGooglePlayIntegrityPrefix#1df92984 nonce:string token:string = Error;
  invokeWithApnsSecretPrefix#0dae54f8 nonce:string secret:string = Error;
+diff --git a/td/telegram/OptionManager.cpp b/td/telegram/OptionManager.cpp
+index 1f7f8aff9..8e26e3b7b 100644
+--- a/td/telegram/OptionManager.cpp
++++ b/td/telegram/OptionManager.cpp
+@@ -44,6 +44,7 @@
+ #include "td/utils/misc.h"
+ #include "td/utils/port/Clocks.h"
+ #include "td/utils/SliceBuilder.h"
++#include "td/utils/utf8.h"
+ 
+ #include <cmath>
+ #include <functional>
+@@ -1135,10 +1136,19 @@ td_api::object_ptr<td_api::OptionValue> OptionManager::get_option_value_object(S
+     case 'I':
+       return td_api::make_object<td_api::optionValueInteger>(to_integer<int64>(value.substr(1)));
+     case 'S':
+-      return td_api::make_object<td_api::optionValueString>(value.substr(1).str());
++      return get_option_value_string_object(value.substr(1).str());
+   }
+ 
+-  return td_api::make_object<td_api::optionValueString>(value.str());
++  return get_option_value_string_object(value.str());
++}
++
++td_api::object_ptr<td_api::OptionValue> OptionManager::get_option_value_string_object(string value) {
++  // Internal list options join their items with '\xFF'. An older TDLib that loads them from a database written by a
++  // newer one doesn't know they are internal, and invalid UTF-8 would abort the JSON interface.
++  if (!check_utf8(value)) {
++    return td_api::make_object<td_api::optionValueEmpty>();
++  }
++  return td_api::make_object<td_api::optionValueString>(std::move(value));
+ }
+ 
+ void OptionManager::get_common_state(vector<td_api::object_ptr<td_api::Update>> &updates) {
+diff --git a/td/telegram/OptionManager.h b/td/telegram/OptionManager.h
+index 0338ab53d..4654fa914 100644
+--- a/td/telegram/OptionManager.h
++++ b/td/telegram/OptionManager.h
+@@ -82,6 +82,8 @@ class OptionManager {
+ 
+   static td_api::object_ptr<td_api::OptionValue> get_option_value_object(Slice value);
+ 
++  static td_api::object_ptr<td_api::OptionValue> get_option_value_string_object(string value);
++
+   void send_unix_time_update();
+ 
+   Td *td_;
 diff --git a/td/telegram/Requests.cpp b/td/telegram/Requests.cpp
 index 3737a7708..021600428 100644
 --- a/td/telegram/Requests.cpp
