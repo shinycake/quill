@@ -69,9 +69,7 @@ impl QuillApp {
                             .label(tr(keys::Q_PREFS_WHATS_NEW))
                             .small()
                             .ghost()
-                            .on_click(cx.listener(|_, _, _, cx| {
-                                cx.open_url(quill::settings_account::CHANGELOG_URL)
-                            })),
+                            .on_click(cx.listener(|this, _, _, cx| this.open_whats_new(cx))),
                     ),
             )
             .into_any_element()

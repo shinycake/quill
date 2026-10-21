@@ -79,6 +79,8 @@ pub(crate) struct SettingsUi {
     pub(super) translate: super::translate_ui::TranslateUi,
     pub(super) update_state: quill::updater::UpdateState,
     pub(super) update_banner_dismissed: bool,
+    /// The What's New window and the release notes it shows.
+    pub(super) whats_new: super::whats_new::WhatsNewUi,
     /// The "No" answer of the phone-number prompt was chosen: show the note.
     pub(super) phone_change_note: bool,
     /// Advanced and experimental settings, the secret codes, the test
@@ -130,6 +132,7 @@ impl SettingsUi {
                 quill::updater::UpdateState::Idle
             },
             update_banner_dismissed: false,
+            whats_new: Default::default(),
             phone_change_note: false,
             advanced: super::advanced_state::AdvancedUi::new(cx, demo.is_none()),
             emoji_style: Default::default(),
