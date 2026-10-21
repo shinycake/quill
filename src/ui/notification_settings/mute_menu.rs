@@ -489,15 +489,7 @@ impl QuillApp {
                 .label(tr(keys::Q_PREFS_DEFAULTS_FOR_ALL_CHATS))
                 .ghost()
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.notify.notification_defaults_open = true;
-                    if let Some(live) = this.live.as_mut() {
-                        let _ = live.driver.maybe_fetch_scope_notification_settings();
-                        let _ = live.driver.maybe_fetch_notification_sounds();
-                        for scope in NotificationSettingsScope::ALL {
-                            let _ = live.driver.maybe_fetch_notification_exceptions(scope);
-                        }
-                    }
-                    cx.notify();
+                    this.open_notification_settings(cx);
                 })),
         )
     }

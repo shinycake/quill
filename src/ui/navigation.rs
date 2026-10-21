@@ -302,7 +302,7 @@ impl QuillApp {
                 self.open_accounts(cx);
             }
             NavigationAction::Settings => self.open_settings(None),
-            NavigationAction::Notifications => self.notify.notification_defaults_open = true,
+            NavigationAction::Notifications => self.open_notification_settings(cx),
             NavigationAction::Profile => self.open_edit_profile_dialog(window, cx),
             NavigationAction::ContactsSettings => self.open_settings(Some(Page::Account)),
             NavigationAction::CallSettings => self.open_settings(Some(Page::Calls)),

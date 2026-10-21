@@ -235,16 +235,6 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app| app.sticker_panel_open(),
         |app, _, cx| app.close_sticker_panel(cx)
     ),
-    layer!(
-        "notification-defaults",
-        |app| app.notify.notification_defaults_open,
-        |app, _, cx| {
-            app.notify.notification_defaults_open = false;
-            app.notify.defaults_sound_picker = None;
-            app.notify.defaults_exceptions_scope = None;
-            cx.notify();
-        }
-    ),
     // Slice A3: Esc on the sessions overlay cancels a pending terminate
     // confirmation first, then closes the overlay.
     layer!("sessions", |app| app.privacy.sessions_open, |app, _, cx| {

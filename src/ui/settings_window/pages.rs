@@ -59,15 +59,7 @@ impl QuillApp {
         let column = div().flex().flex_col().gap_6().w_full();
         match page {
             Page::Account => self.account_page(cx),
-            Page::Notifications => column.child(group(
-                None,
-                [self.nav_row(
-                    Nav::Notifications,
-                    tr(keys::SETTINGS_SECTION_NOTIFY),
-                    None,
-                    cx,
-                )],
-            )),
+            Page::Notifications => column.child(self.notifications_page(cx)),
             Page::Privacy => column.child(group(
                 None,
                 [
