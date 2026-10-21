@@ -490,10 +490,30 @@ fn media_items(value: &Value) -> Vec<MediaItem<'_>> {
         .unwrap_or_default()
 }
 
+/// The most tiles one mosaic lays out: an album's limit. The album layout
+/// gives nothing past 12, so a bigger collage is split into several boxes
+/// instead of vanishing.
+const COLLAGE_TILES: usize = 10;
+
 /// tdesktop `SerializeCollage`: the album mosaic laid out as in a chat
 /// bubble, its tiles placed by percentages so it scales with the page.
 fn collage(out: &mut String, value: &Value, ctx: &mut Ctx<'_>) {
     let items = media_items(value);
+    let mut boxes = String::new();
+    for tiles in items.chunks(COLLAGE_TILES) {
+        collage_box(&mut boxes, tiles, ctx);
+    }
+    if boxes.is_empty() {
+        return;
+    }
+    out.push_str("<tg-collage>");
+    out.push_str(&boxes);
+    caption(out, value.at("caption"), ctx);
+    out.push_str("</tg-collage>\n");
+}
+
+/// One mosaic of up to [`COLLAGE_TILES`] tiles.
+fn collage_box(out: &mut String, items: &[MediaItem<'_>], ctx: &mut Ctx<'_>) {
     let sizes: Vec<(i32, i32)> = items
         .iter()
         .map(|item| {
@@ -521,9 +541,9 @@ fn collage(out: &mut String, value: &Value, ctx: &mut Ctx<'_>) {
     let percent =
         |part: i32, total: i32| format!("{:.3}", f64::from(part) * 100. / f64::from(total));
     out.push_str(&format!(
-        "<tg-collage><div class=\"collage-box\" style=\"aspect-ratio:{width}/{height}\">"
+        "<div class=\"collage-box\" style=\"aspect-ratio:{width}/{height}\">"
     ));
-    for (rect, item) in layout.iter().zip(&items) {
+    for (rect, item) in layout.iter().zip(items) {
         out.push_str(&format!(
             "<div class=\"collage-item\" style=\"left:{}%;top:{}%;width:{}%;height:{}%\">",
             percent(rect.x.saturating_sub(left), width),
@@ -535,8 +555,6 @@ fn collage(out: &mut String, value: &Value, ctx: &mut Ctx<'_>) {
         out.push_str("</div>");
     }
     out.push_str("</div>");
-    caption(out, value.at("caption"), ctx);
-    out.push_str("</tg-collage>\n");
 }
 
 /// tdesktop `SerializeSlideshow`: one slide per item in a box shaped like

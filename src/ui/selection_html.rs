@@ -38,8 +38,9 @@ impl QuillApp {
 
     /// Save the selected rich message under the download folder, or under
     /// a folder the user picks when "Ask where to save each file" is on
-    /// (tdesktop `Instance::exportRichMessageHtml`). The selection ends,
-    /// as tdesktop cancels it after the action.
+    /// (tdesktop `Instance::exportRichMessageHtml`). The selection ends
+    /// once the export starts, as tdesktop cancels it after the action; a
+    /// picker that is dismissed or fails leaves it, so the user can retry.
     fn save_selection_html(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(chat_id) = self.forward_draft().map(|draft| draft.from_chat_id) else {
             return;
@@ -50,9 +51,9 @@ impl QuillApp {
         let Some(message_id) = self.selection_html_target(chat_id) else {
             return;
         };
-        self.clear_forward(window, cx);
         if !quill::file_prefs::current().ask_download_path {
-            let base = quill::media_viewer::downloads_dir().unwrap_or_else(std::env::temp_dir);
+            self.clear_forward(window, cx);
+            let base = quill::media_viewer::downloads_dir();
             self.start_rich_html(chat_id, message_id, base, cx);
             return;
         }
@@ -62,17 +63,24 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::DOWNLOAD_PATH_CHOOSE).into()),
         });
-        // window-scope: the export names its own chat and message and
-        // reports through the app-wide toast.
-        cx.spawn(async move |this, cx| {
-            let Ok(Ok(Some(dirs))) = picker.await else {
-                return;
-            };
-            let Some(base) = dirs.into_iter().next() else {
-                return;
-            };
-            let _ = this.update(cx, |this, cx| {
-                this.start_rich_html(chat_id, message_id, base, cx);
+        self.spawn_scoped_in(window, cx, async move |this, cx| {
+            let picked = picker.await;
+            let _ = this.update_in(cx, |this, window, cx| match picked {
+                Ok(Ok(Some(dirs))) => {
+                    if let Some(base) = dirs.into_iter().next() {
+                        this.clear_forward(window, cx);
+                        this.start_rich_html(chat_id, message_id, Some(base), cx);
+                    }
+                }
+                // Dismissed: nothing to say, and the selection stays.
+                Ok(Ok(None)) => {}
+                // The dialog could not open (no desktop portal on Linux,
+                // say): the selection stays for another try.
+                Ok(Err(_)) | Err(_) => {
+                    this.connection
+                        .set_note(StatusNote::error(tr(keys::EXPORT_HTML_FAILED)));
+                    cx.notify();
+                }
             });
         })
         .detach();
@@ -82,7 +90,7 @@ impl QuillApp {
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
-        base: PathBuf,
+        base: Option<PathBuf>,
         cx: &mut Context<Self>,
     ) {
         let started = self.live.as_mut().map(|live| {
@@ -97,27 +105,34 @@ impl QuillApp {
     }
 
     /// Forward the exports' TDLib requests and toast the ones that ended.
-    /// Returns whether one is still running, so the poll loop keeps going.
+    /// Returns whether one ended, so the app redraws for its toast. A
+    /// running export needs no busy polling: its worker wakes the loop
+    /// whenever it has a request or is done.
     pub(super) fn poll_rich_html_exports(&mut self) -> bool {
         let Some(live) = self.live.as_mut() else {
             return false;
         };
         live.driver.pump_rich_html_exports();
         let finished = live.driver.take_finished_rich_html_exports();
-        let running = live.driver.rich_html_exports_running();
-        for outcome in finished {
-            match outcome {
-                RichHtmlOutcome::Saved(html) => {
-                    let note = StatusNote::info(saved_text(&html));
-                    self.connection.set_note(note.with_reveal(html));
-                }
-                RichHtmlOutcome::Failed => self
-                    .connection
-                    .set_note(StatusNote::error(tr(keys::EXPORT_HTML_FAILED))),
-                RichHtmlOutcome::Cancelled => {}
-            }
+        for outcome in &finished {
+            self.toast_rich_html(outcome);
         }
-        running
+        !finished.is_empty()
+    }
+
+    /// The toast for how an export ended (tdesktop `showSavedToast` /
+    /// `showFailToast`); logout and quit end one silently.
+    pub(super) fn toast_rich_html(&mut self, outcome: &RichHtmlOutcome) {
+        match outcome {
+            RichHtmlOutcome::Saved(html) => {
+                let note = StatusNote::info(saved_text(html));
+                self.connection.set_note(note.with_reveal(html.clone()));
+            }
+            RichHtmlOutcome::Failed => self
+                .connection
+                .set_note(StatusNote::error(tr(keys::EXPORT_HTML_FAILED))),
+            RichHtmlOutcome::Cancelled => {}
+        }
     }
 }
 

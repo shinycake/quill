@@ -16,15 +16,29 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The `richMessage` of a message: its content, or the ephemeral content
-/// the chat shows in its place.
-fn rich_of(message: &Value) -> Option<&Value> {
-    [
-        message.at("content"),
-        message.at("ephemeral_content").at("content"),
-    ]
-    .into_iter()
-    .find(|content| content.at("@type") == "messageRichMessage")
-    .map(|content| content.at("message"))
+/// the chat shows in its place. Refused when it is not a rich message, or
+/// when its content may not be saved: TDLib's `can_be_saved` (per message,
+/// so a bot's `protect_content` in an open chat counts too) and
+/// self-destructing messages, as the chat export refuses them
+/// (`export::model::parse_message`).
+fn saveable_rich(message: &Value) -> Result<&Value, ExportError> {
+    let refuse = |why: &str| Err(ExportError::Tdlib(why.into()));
+    if !message.at("self_destruct_type").is_null() {
+        return refuse("the message self-destructs");
+    }
+    let ephemeral = message.at("ephemeral_content");
+    let (content, can_be_saved) = if message.at("content").at("@type") == "messageRichMessage" {
+        (message.at("content"), message.at("can_be_saved"))
+    } else {
+        (ephemeral.at("content"), ephemeral.at("can_be_saved"))
+    };
+    if content.at("@type") != "messageRichMessage" {
+        return refuse("not a rich message");
+    }
+    if can_be_saved != true {
+        return refuse("the message's content can't be saved");
+    }
+    Ok(content.at("message"))
 }
 
 /// The message's page, complete: a partial page is completed with
@@ -36,9 +50,7 @@ fn load_page<T: Tdlib>(tdlib: &mut T, request: &RichHtmlRequest) -> Result<Value
         json!({"@type": "getMessage", "chat_id": request.chat_id.0,
             "message_id": request.message_id.0}),
     )?;
-    let Some(rich) = rich_of(&message) else {
-        return Err(ExportError::Tdlib("not a rich message".into()));
-    };
+    let rich = saveable_rich(&message)?;
     if rich.at("is_full") != false {
         return Ok(rich.clone());
     }
@@ -80,17 +92,37 @@ pub fn run<T: Tdlib>(
     let page = load_page(tdlib, request)?;
     let title = title_from_page(&page).unwrap_or_else(|| request.fallback_title.clone());
     let (folder, html) = make_folder(&request.base_dir, &title)?;
+    // Until the page is written, an error or a panic removes the folder
+    // (it is this export's own: `create_named_folder` made it).
+    let guard = FolderGuard(Some(folder.clone()));
     let env = Env {
         request,
         files_root,
         date,
     };
-    let written = write_page(&env, tdlib, &page, &title, &folder, &html);
-    if written.is_err() {
-        // The folder is this export's own (`create_named_folder` made it).
-        let _ = fs::remove_dir_all(&folder);
+    write_page(&env, tdlib, &page, &title, &folder, &html)?;
+    guard.keep();
+    Ok(html)
+}
+
+/// Removes a half-written export folder when dropped before [`keep`],
+/// which covers both an early return and unwinding from a panic.
+///
+/// [`keep`]: FolderGuard::keep
+struct FolderGuard(Option<PathBuf>);
+
+impl FolderGuard {
+    fn keep(mut self) {
+        self.0 = None;
     }
-    written.map(|()| html)
+}
+
+impl Drop for FolderGuard {
+    fn drop(&mut self) {
+        if let Some(folder) = self.0.take() {
+            let _ = fs::remove_dir_all(folder);
+        }
+    }
 }
 
 /// What [`write_page`] needs besides the page and where it goes.

@@ -398,7 +398,7 @@ fn request(base: &Path) -> RichHtmlRequest {
 }
 
 fn message_with(rich: Value) -> Value {
-    json!({"@type": "message", "id": 5, "chat_id": 77,
+    json!({"@type": "message", "id": 5, "chat_id": 77, "can_be_saved": true,
         "content": {"@type": "messageRichMessage", "message": rich}})
 }
 
@@ -559,4 +559,209 @@ fn only_a_single_sent_rich_message_in_an_unprotected_chat_qualifies() {
         r#"{"@type":"updateChatHasProtectedContent","chat_id":77,"has_protected_content":true}"#,
     );
     assert_eq!(selection_target(&session, chat, &[MessageId(5)]), None);
+}
+
+/// A session with chat 77 open and these messages in it.
+fn session_with(messages: &[Value]) -> crate::state::Session {
+    use crate::diagnostics::{DiagnosticSink, MemorySink};
+    use crate::ids::{AccountKey, ChatId};
+    use std::sync::Arc;
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let mut session = crate::state::Session::new(AccountKey::primary(), sink.clone());
+    let seq = AtomicU64::new(0);
+    let chat = json!({"@type": "updateNewChat", "chat": {"id": 77, "title": "Chat",
+        "type": {"@type": "chatTypePrivate", "user_id": 77}, "unread_count": 0}});
+    let updates = std::iter::once(chat).chain(
+        messages
+            .iter()
+            .map(|message| json!({"@type": "updateNewMessage", "message": message})),
+    );
+    for (index, update) in updates.enumerate() {
+        let owned =
+            crate::telegram::client::copy_and_parse(&update.to_string(), &seq, &sink).unwrap();
+        session.apply(owned);
+        if index == 0 {
+            session.open_chat(ChatId(77));
+        }
+    }
+    session
+}
+
+fn rich_message(id: i64, extra: Value) -> Value {
+    let mut message = message_with(rich(vec![paragraph(plain("hi"))]));
+    message["id"] = json!(id);
+    if let (Some(fields), Some(extra)) = (message.as_object_mut(), extra.as_object()) {
+        fields.extend(extra.clone());
+    }
+    message
+}
+
+#[test]
+fn unsent_self_destructing_and_unsaveable_messages_never_qualify() {
+    use crate::ids::{ChatId, MessageId};
+    let mut session = session_with(&[
+        rich_message(5, json!({})),
+        rich_message(6, json!({})),
+        rich_message(7, json!({})),
+        rich_message(
+            8,
+            json!({"self_destruct_type": {"@type": "messageSelfDestructTypeTimer",
+                "self_destruct_time": 30}, "self_destruct_in": 30.0}),
+        ),
+    ]);
+    // The send path marks its own rows as still sending or failed.
+    if let Some(history) = session.histories.get_mut(&77) {
+        if let Some(row) = history.messages.get_mut(&6) {
+            row.pending = true;
+        }
+        if let Some(row) = history.messages.get_mut(&7) {
+            row.failed = true;
+        }
+    }
+    let chat = ChatId(77);
+    let target = |session: &crate::state::Session, id: i64| {
+        selection_target(session, chat, &[MessageId(id)])
+    };
+    assert_eq!(target(&session, 5), Some(MessageId(5)));
+    assert_eq!(target(&session, 6), None, "pending");
+    assert_eq!(target(&session, 7), None, "failed");
+    assert_eq!(target(&session, 8), None, "self-destructing");
+
+    // The message's menu learned it may not be saved (a bot's
+    // `protect_content`): the action goes away for that message only.
+    let actions = crate::telegram::envelope::MessageActions {
+        can_be_saved: false,
+        ..Default::default()
+    };
+    session.messages.message_menu_actions = Some((chat, MessageId(5), actions));
+    assert_eq!(target(&session, 5), None);
+    session.messages.message_menu_actions = Some((chat, MessageId(9), actions));
+    assert_eq!(target(&session, 5), Some(MessageId(5)));
+}
+
+fn worker_with(message: Value) -> FakeTdlib {
+    FakeTdlib {
+        answers: Box::new(move |request| match request["@type"].as_str().unwrap() {
+            "getMessage" => message.clone(),
+            _ => json!({"@type": "error", "code": 400, "message": "nope"}),
+        }),
+        seen: Vec::new(),
+    }
+}
+
+#[test]
+fn messages_whose_content_cant_be_saved_are_refused() {
+    let dir = Scratch::new("unsaveable");
+    let base = dir.path().join("out");
+    let page = rich(vec![paragraph(plain("Secret"))]);
+    let run = |message: Value| {
+        let mut tdlib = worker_with(message);
+        worker::run(&request(&base), &mut tdlib, dir.path(), &date)
+    };
+
+    let mut protected = message_with(page.clone());
+    protected["can_be_saved"] = json!(false);
+    assert!(run(protected).is_err());
+    let mut unknown = message_with(page.clone());
+    unknown.as_object_mut().unwrap().remove("can_be_saved");
+    assert!(run(unknown).is_err());
+    let mut timed = message_with(page.clone());
+    timed["self_destruct_type"] =
+        json!({"@type": "messageSelfDestructTypeTimer", "self_destruct_time": 30});
+    assert!(run(timed).is_err());
+    assert!(!base.exists());
+
+    // Ephemeral content answers for itself, whatever the message says.
+    let ephemeral = |can_be_saved: bool| {
+        json!({"@type": "message", "id": 5, "chat_id": 77, "can_be_saved": true,
+            "content": {"@type": "messageText"},
+            "ephemeral_content": {"@type": "ephemeralMessageContent",
+                "can_be_saved": can_be_saved, "has_timestamped_media": false,
+                "content": {"@type": "messageRichMessage", "message": page.clone()}}})
+    };
+    assert!(run(ephemeral(false)).is_err());
+    assert!(!base.exists());
+    let html = run(ephemeral(true)).unwrap();
+    assert_eq!(html, base.join("Secret").join("Secret.html"));
+}
+
+#[test]
+fn a_panic_while_writing_removes_the_folder() {
+    let dir = Scratch::new("panic");
+    let base = dir.path().join("out");
+    let message = message_with(rich(vec![paragraph(plain("Boom")), photo_block(5)]));
+    let mut tdlib = FakeTdlib {
+        answers: Box::new(move |request| match request["@type"].as_str().unwrap() {
+            "getMessage" => message.clone(),
+            _ => panic!("worker panic (expected by this test)"),
+        }),
+        seen: Vec::new(),
+    };
+    let files_root = dir.path().to_path_buf();
+    let request = request(&base);
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        worker::run(&request, &mut tdlib, &files_root, &date)
+    }));
+    assert!(unwound.is_err());
+    assert!(base.exists());
+    assert!(!base.join("Boom").exists());
+}
+
+#[test]
+fn fragment_links_and_anchors_meet_on_one_name() {
+    let page = html(vec![
+        json!({"@type": "pageBlockAnchor", "name": " Plan B "}),
+        paragraph(texts(vec![
+            json!({"@type": "richTextAnchorLink", "text": plain("go"),
+                "anchor_name": "Plan%20B", "url": ""}),
+            json!({"@type": "richTextUrl", "text": plain("top"), "url": "##Top%2", "is_cached": false}),
+        ])),
+    ]);
+    let body_html = body(&page);
+    assert!(body_html.contains("<a name=\"plan b\"></a>"));
+    assert!(body_html.contains("<a href=\"#plan b\">go</a>"));
+    // A broken escape stays as written.
+    assert!(body_html.contains("<a href=\"#top%2\">top</a>"));
+}
+
+#[test]
+fn file_name_extensions_survive_windows() {
+    let mut collector = Collector::default();
+    let names: Vec<String> = ["clip. ", "notes.mp4 ", "..", "a.m4a"]
+        .iter()
+        .zip(1..)
+        .map(|(name, id)| {
+            let meta = json!({"file_name": name, "mime_type": "video/mp4"});
+            collector.path(MediaKind::Video, &meta, &file(id));
+            collector.jobs.last().unwrap().relative.clone()
+        })
+        .collect();
+    for name in &names {
+        assert!(!name.ends_with(['.', ' ']), "{name:?}");
+    }
+    assert!(names.iter().any(|name| name.ends_with(".m4a")));
+}
+
+#[test]
+fn big_collages_are_split_instead_of_vanishing() {
+    let photos: Vec<Value> = (1..=14).map(photo_block).collect();
+    let collage = json!({"@type": "pageBlockCollage", "blocks": photos,
+        "caption": {"@type": "pageBlockCaption", "text": plain("Album"), "credit": plain("")}});
+    let page = html(vec![collage]);
+    let body_html = body(&page);
+    assert_eq!(body_html.matches("<div class=\"collage-box\"").count(), 2);
+    assert_eq!(body_html.matches("<div class=\"collage-item\"").count(), 14);
+    assert_eq!(
+        body_html.matches("<figcaption>Album</figcaption>").count(),
+        1
+    );
+
+    // One very tall photo: the album layout no longer overflows.
+    let tall = json!({"@type": "pageBlockCollage", "blocks": [{"@type": "pageBlockPhoto",
+        "photo": {"@type": "photo", "has_stickers": false, "sizes": [
+            {"@type": "photoSize", "type": "y", "photo": file(1), "width": 1, "height": 2_000_000_000}]},
+        "caption": {"@type": "pageBlockCaption", "text": plain(""), "credit": plain("")},
+        "url": "", "has_spoiler": false}],
+        "caption": {"@type": "pageBlockCaption", "text": plain(""), "credit": plain("")}});
+    assert!(body(&html(vec![tall])).contains("collage-box"));
 }

@@ -144,6 +144,9 @@ fn extension(kind: MediaKind, meta: &Value) -> String {
         && dot + 1 < name.len()
         && name.len() - dot <= 8
         && let Some(ext) = name.get(dot..)
+        // Letters and digits only: Windows drops a trailing space or dot
+        // when it creates the file, and the page's `src` would then miss.
+        && ext.chars().skip(1).all(|c| c.is_ascii_alphanumeric())
     {
         return ext.to_string();
     }

@@ -37,11 +37,11 @@ fn rich_html_export_requests_flow_through_the_driver() {
     let base = dir.join("Downloads");
 
     driver
-        .start_rich_html_export(ChatId(16), MessageId(5), base.clone())
+        .start_rich_html_export(ChatId(16), MessageId(5), Some(base.clone()))
         .unwrap();
     // Saving the same message again while it runs starts nothing new.
     driver
-        .start_rich_html_export(ChatId(16), MessageId(5), base.clone())
+        .start_rich_html_export(ChatId(16), MessageId(5), Some(base.clone()))
         .unwrap();
     assert_eq!(driver.session.settings.rich_html_exports.len(), 1);
 
@@ -53,7 +53,7 @@ fn rich_html_export_requests_flow_through_the_driver() {
         if let Some(outcome) = driver.take_finished_rich_html_exports().pop() {
             break outcome;
         }
-        assert!(driver.rich_html_exports_running());
+        assert_eq!(driver.session.settings.rich_html_exports.len(), 1);
         if !answered
             && let Some(request) = recorder
                 .snapshot()
@@ -65,7 +65,7 @@ fn rich_html_export_requests_flow_through_the_driver() {
             assert_eq!(value["message_id"], 5);
             let extra = value["@extra"]["quill_account_export"].clone();
             let reply = format!(
-                r#"{{"@type":"message","@extra":{{"quill_account_export":{extra}}},"id":5,"chat_id":16,"content":{{"@type":"messageRichMessage","message":{{"@type":"richMessage","is_rtl":false,"is_full":true,"blocks":[{{"@type":"pageBlockTitle","title":{{"@type":"richTextPlain","text":"Notes"}}}}]}}}}}}"#
+                r#"{{"@type":"message","@extra":{{"quill_account_export":{extra}}},"id":5,"chat_id":16,"can_be_saved":true,"content":{{"@type":"messageRichMessage","message":{{"@type":"richMessage","is_rtl":false,"is_full":true,"blocks":[{{"@type":"pageBlockTitle","title":{{"@type":"richTextPlain","text":"Notes"}}}}]}}}}}}"#
             );
             driver
                 .ingest(copy_and_parse(&reply, &seq, &dyn_sink).unwrap())
@@ -82,7 +82,11 @@ fn rich_html_export_requests_flow_through_the_driver() {
             .contains("<h1>Notes</h1>")
     );
     assert!(driver.session.settings.rich_html_exports.is_empty());
-    assert!(!driver.rich_html_exports_running());
+    // A finished export no longer blocks saving the same message again.
+    driver
+        .start_rich_html_export(ChatId(16), MessageId(5), Some(base.clone()))
+        .unwrap();
+    assert_eq!(driver.session.settings.rich_html_exports.len(), 1);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -101,7 +105,7 @@ fn rich_html_export_refuses_protected_chats() {
     );
     assert!(
         driver
-            .start_rich_html_export(ChatId(16), MessageId(5), dir.join("out"))
+            .start_rich_html_export(ChatId(16), MessageId(5), Some(dir.join("out")))
             .is_err()
     );
     assert!(driver.session.settings.rich_html_exports.is_empty());
@@ -112,5 +116,52 @@ fn rich_html_export_refuses_protected_chats() {
             .iter()
             .any(|j| j.contains("\"@type\":\"getMessage\""))
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn logging_out_stops_rich_html_exports() {
+    // Dropping the export cancels its worker: nothing is sent after logout
+    // and no "could not save" toast follows it.
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let mut driver = driver_with(&recorder, &dyn_sink, prepared, &[]);
+    driver
+        .start_rich_html_export(ChatId(16), MessageId(5), Some(dir.join("out")))
+        .unwrap();
+    assert_eq!(driver.session.settings.rich_html_exports.len(), 1);
+    let seq = AtomicU64::new(100);
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateLoggingOut"}}"#,
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(driver.session.settings.rich_html_exports.is_empty());
+    assert!(driver.take_finished_rich_html_exports().is_empty());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn starting_a_logout_stops_rich_html_exports() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let mut driver = driver_with(&recorder, &dyn_sink, prepared, &[]);
+    driver
+        .start_rich_html_export(ChatId(16), MessageId(5), Some(dir.join("out")))
+        .unwrap();
+    driver.session.begin_logout();
+    assert!(driver.session.settings.rich_html_exports.is_empty());
     let _ = std::fs::remove_dir_all(&dir);
 }

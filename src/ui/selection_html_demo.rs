@@ -194,6 +194,35 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn each_ending_gets_its_toast_and_only_an_ending_redraws(cx: &mut TestAppContext) {
+        use quill::rich_html::RichHtmlOutcome;
+        let (app, mut cx) = new_app(cx);
+        app.update(&mut cx, |app, _| {
+            // Nothing ended (the demo has no live session): no redraw asked.
+            assert!(!app.poll_rich_html_exports());
+
+            // A picked folder is named as it is, never called "Downloads".
+            let html = std::path::PathBuf::from("/Archive/Trip/Trip.html");
+            app.toast_rich_html(&RichHtmlOutcome::Saved(html.clone()));
+            let note = app.connection.note();
+            assert_eq!(note.text(), "Message was saved to your Archive folder");
+            assert_eq!(note.reveal(), Some(html.as_path()));
+
+            app.toast_rich_html(&RichHtmlOutcome::Failed);
+            let note = app.connection.note();
+            assert_eq!(note.text(), "Could not save the message as HTML.");
+            assert_eq!(note.reveal(), None);
+
+            // Logout or quit ends it silently.
+            app.toast_rich_html(&RichHtmlOutcome::Cancelled);
+            assert_eq!(
+                app.connection.note().text(),
+                "Could not save the message as HTML."
+            );
+        });
+    }
+
+    #[gpui_kit::test]
     fn protected_chats_never_offer_it(cx: &mut TestAppContext) {
         let (app, mut cx) = new_app(cx);
         app.update(&mut cx, |app, cx| {

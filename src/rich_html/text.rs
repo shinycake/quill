@@ -38,8 +38,8 @@ pub(super) fn escaped(value: &str) -> String {
 /// in the saved page.
 pub(super) fn safe_url(url: &str) -> Option<String> {
     let trimmed = url.trim();
-    if trimmed.starts_with('#') {
-        return Some(trimmed.to_string());
+    if let Some(fragment) = trimmed.strip_prefix('#') {
+        return Some(format!("#{}", fragment_id(fragment)));
     }
     const ALLOWED: [&str; 6] = ["http://", "https://", "tg://", "mailto:", "tel:", "ftp://"];
     let lower = trimmed.to_ascii_lowercase();
@@ -56,12 +56,44 @@ pub(super) fn href(url: &str) -> String {
         .unwrap_or_default()
 }
 
+/// An anchor name as links and anchors both use it, so `#Plan%20B` finds
+/// `plan b` (tdesktop `Markdown::NormalizeFragmentId`): percent-decoded,
+/// trimmed, lowercased, without leading `#`.
+pub(super) fn fragment_id(fragment: &str) -> String {
+    let bytes = fragment.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while let Some(&byte) = bytes.get(index) {
+        let hex = bytes
+            .get(index + 1..index + 3)
+            .filter(|pair| pair.iter().all(u8::is_ascii_hexdigit))
+            .and_then(|pair| std::str::from_utf8(pair).ok())
+            .and_then(|pair| u8::from_str_radix(pair, 16).ok());
+        match hex {
+            Some(value) if byte == b'%' => {
+                decoded.push(value);
+                index += 3;
+            }
+            _ => {
+                decoded.push(byte);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&decoded)
+        .trim()
+        .to_lowercase()
+        .trim_start_matches('#')
+        .to_string()
+}
+
 /// `<a name="…"></a>` for a non-empty anchor name.
 pub(super) fn anchor(name: &str) -> String {
+    let name = fragment_id(name);
     if name.is_empty() {
         String::new()
     } else {
-        format!("<a name=\"{}\"></a>", escaped(name))
+        format!("<a name=\"{}\"></a>", escaped(&name))
     }
 }
 

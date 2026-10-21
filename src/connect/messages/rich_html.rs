@@ -7,15 +7,18 @@ use crate::rich_html::{PageLabels, RichHtmlExport, RichHtmlOutcome, RichHtmlRequ
 use std::path::PathBuf;
 
 impl<S: JsonSender> ConnectDriver<S> {
-    /// Start saving `message_id` of `chat_id` under `base_dir`. Saving the
-    /// same message again while it is still being saved does nothing
-    /// (tdesktop `Instance::exportRichMessageHtml`). Protected chats are
-    /// refused: their messages may not be saved.
+    /// Start saving `message_id` of `chat_id` under `base_dir`; without
+    /// one (no download folder), under the account's own `exports` folder,
+    /// as tdesktop falls back to the session's temp folder
+    /// (`File::DefaultDownloadPath`). Saving the same message again while
+    /// it is still being saved does nothing (tdesktop
+    /// `Instance::exportRichMessageHtml`). Protected chats are refused:
+    /// their messages may not be saved.
     pub fn start_rich_html_export(
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
-        base_dir: PathBuf,
+        base_dir: Option<PathBuf>,
     ) -> std::io::Result<()> {
         if !self.chats_path_active() {
             return Err(std::io::Error::other("not signed in"));
@@ -36,6 +39,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .get(&chat_id.0)
             .map(|chat| chat.title.clone())
             .unwrap_or_default();
+        let base_dir = base_dir.unwrap_or_else(|| self.paths.exports.clone());
         let export = RichHtmlExport::start(
             RichHtmlRequest {
                 chat_id,
@@ -53,42 +57,14 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Send each export's waiting TDLib request. Called from the poll loop.
     pub fn pump_rich_html_exports(&mut self) {
         for index in 0..self.session.settings.rich_html_exports.len() {
-            let Some(mut request) = self
-                .session
-                .settings
-                .rich_html_exports
-                .get(index)
-                .filter(|export| export.link.pending.is_none())
-                .and_then(|export| export.link.next_request())
-            else {
-                continue;
-            };
-            let extra = self.session.request(RequestPurpose::ExportRichHtml, None);
-            crate::json_access::set(
-                &mut request,
-                "@extra",
-                serde_json::json!({"quill_account_export": extra.as_extra()}),
-            );
-            let sent = self.sender.send_json(&request.to_string()).is_ok();
-            if !sent {
-                self.session.requests.take(extra);
-            }
-            if let Some(export) = self.session.settings.rich_html_exports.get_mut(index) {
-                export.link.pending = Some(extra);
-                if !sent {
-                    export.link.fail_send(extra);
-                }
-            }
+            self.pump_export(RequestPurpose::ExportRichHtml, |session| {
+                session
+                    .settings
+                    .rich_html_exports
+                    .get_mut(index)
+                    .map(|export| &mut export.link)
+            });
         }
-    }
-
-    /// Whether an export is still running.
-    pub fn rich_html_exports_running(&self) -> bool {
-        self.session
-            .settings
-            .rich_html_exports
-            .iter()
-            .any(|export| export.outcome().is_none())
     }
 
     /// The exports that ended since the last call, removed from the

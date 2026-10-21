@@ -520,8 +520,7 @@ impl QuillApp {
                 progressed = true;
             }
         }
-        // `|`, not `||`: both polls run (the second is "Save as HTML").
-        if self.poll_chat_export_progress() | self.poll_rich_html_exports() {
+        if self.poll_chat_export_progress() {
             progressed = true;
         }
         // M1: a `messageLink` response lands here (`getMessageLink`) —
