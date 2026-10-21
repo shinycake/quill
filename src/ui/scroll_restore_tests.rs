@@ -8,7 +8,10 @@ use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
-use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
+use gpui_kit::{
+    AppContext, Entity, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase,
+    VisualTestContext, px, size,
+};
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
 use quill::state::SavedScroll;
@@ -174,4 +177,61 @@ fn a_saved_row_that_is_gone_opens_the_default_and_is_forgotten(cx: &mut TestAppC
         saved(&app, vcx, A).map(|s| s.anchor),
         Some(MessageId(999_999))
     );
+}
+
+fn swipe(
+    vcx: &mut VisualTestContext,
+    at: gpui_kit::Point<gpui_kit::Pixels>,
+    dy: f32,
+    moves: usize,
+) {
+    let mut send = |phase, dy| {
+        vcx.simulate_event(ScrollWheelEvent {
+            position: at,
+            delta: ScrollDelta::Pixels(gpui_kit::point(px(0.), px(dy))),
+            modifiers: Modifiers::default(),
+            touch_phase: phase,
+        });
+    };
+    send(TouchPhase::Started, dy);
+    for _ in 0..moves {
+        send(TouchPhase::Moved, dy);
+    }
+    send(TouchPhase::Ended, 0.);
+}
+
+/// A trackpad swipe down to the newest message reaches the end, even
+/// through the kit's scroll bounce: the list follows its tail again and the
+/// jump-to-latest button goes away (`docs/decisions/gpui-kit-0-8-0.md`).
+#[gpui_kit::test]
+fn swiping_back_to_the_newest_message_resumes_following(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx, 40);
+    select(&app, &mut vcx, A);
+    let at = app.read_with(&vcx, |app, _| {
+        app.history
+            .viewport
+            .get()
+            .expect("history painted")
+            .center()
+    });
+    swipe(&mut vcx, at, 300., 4);
+    frames(&mut vcx);
+    let scrolled_up = app.read_with(&vcx, |app, cx| {
+        app.history.scroller.read(cx).is_scrolled_up()
+    });
+    assert!(scrolled_up, "the swipe up left the newest message");
+
+    swipe(&mut vcx, at, -300., 12);
+    for _ in 0..30 {
+        frames(&mut vcx);
+    }
+    let (scrolled_up, following) = app.read_with(&vcx, |app, cx| {
+        let scroller = app.history.scroller.read(cx);
+        (scroller.is_scrolled_up(), scroller.is_following_tail())
+    });
+    assert!(
+        !scrolled_up,
+        "the jump-to-latest button must go away at the end"
+    );
+    assert!(following, "the list follows new messages again");
 }

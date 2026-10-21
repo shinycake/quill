@@ -1,3 +1,5 @@
+// Changed by the Quill project (2026): `max_scroll_offset` counts the list's
+// padding; see QUILL-CHANGES.md.
 //! A list element that can be used to render a large number of differently sized elements
 //! efficiently. Clients of this API need to ensure that elements outside of the scrolled
 //! area do not change their height for this element to function correctly. If your elements
@@ -880,7 +882,10 @@ impl StateInner {
         let height = self
             .scrollbar_drag_start_height
             .unwrap_or_else(|| self.items.summary().height);
-        (height - bounds.size.height).max(px(0.))
+        // Quill: the list's padding is part of the scroll range, as in
+        // `scroll` and `set_offset_from_scrollbar`.
+        let padding = self.last_padding.unwrap_or_default();
+        (height + padding.top + padding.bottom - bounds.size.height).max(px(0.))
     }
 
     fn visible_range(

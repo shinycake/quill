@@ -1438,8 +1438,8 @@ Apache License
 
 Used by:
 - [dunce 1.0.5](https://gitlab.com/kornelski/dunce)
-- [gpui-kit-assets 0.7.3](https://github.com/longbridge/gpui-kit)
-- [gpui-kit 0.7.3](https://github.com/longbridge/gpui-kit)
+- [gpui-kit-assets 0.8.0](https://github.com/longbridge/gpui-kit)
+- [gpui-kit 0.8.0](https://github.com/longbridge/gpui-kit)
 - [interprocess 2.4.6](https://github.com/kotauskas/interprocess)
 - [ryu 1.0.23](https://github.com/dtolnay/ryu)
 - [spirv 0.4.0+sdk-1.4.341.0](https://github.com/gfx-rs/rspirv)
@@ -1772,9 +1772,9 @@ Apache License
 ### Apache License 2.0
 
 Used by:
-- [gpui-base 0.7.3](https://github.com/longbridge/gpui-kit)
-- [gpui-component 0.7.3](https://github.com/longbridge/gpui-kit)
-- [gpui-component-macros 0.7.3](https://crates.io/crates/gpui-component-macros)
+- [gpui-base 0.8.0](https://github.com/longbridge/gpui-kit)
+- [gpui-component 0.8.0](https://github.com/longbridge/gpui-kit)
+- [gpui-component-macros 0.8.0](https://crates.io/crates/gpui-component-macros)
 
 ````text
 Copyright 2024 - 2026 Longbridge <https://longbridge.com>

@@ -1,11 +1,12 @@
 # Changes made by the Quill project
 
-This directory is gpui-base 0.7.3 from crates.io (Apache-2.0, `LICENSE-APACHE`),
-used through `[patch.crates-io]` in Quill's `Cargo.toml`. Commit `1fdaf93c`
-added the unmodified registry copy, so `git diff 1fdaf93c -- third_party/gpui-base`
+This directory is gpui-base 0.8.0 from crates.io (Apache-2.0, `LICENSE-APACHE`),
+used through `[patch.crates-io]` in Quill's `Cargo.toml`. Commit `6d03a41e`
+added the unmodified registry copy, so `git diff 6d03a41e -- third_party/gpui-base`
 shows every change. (The patch was first made on 0.7.0, vendored in `eb465597`,
-carried to 0.7.1 in `docs/decisions/codex-gpui-kit-0.7.1.md` and to 0.7.3 in
-`docs/decisions/gpui-kit-0-7-3.md`.)
+carried to 0.7.1 in `docs/decisions/codex-gpui-kit-0.7.1.md`, to 0.7.3 in
+`docs/decisions/gpui-kit-0-7-3.md` and to 0.8.0 in
+`docs/decisions/gpui-kit-0-8-0.md`.)
 
 The Quill project changed it in 2026 to add bidirectional text support to the
 input engine:
@@ -16,7 +17,7 @@ input engine:
   `src/input/base/{element,movement,state}.rs` and
   `src/input/editor/display_map/{inline_line,mod,text_wrapper}.rs`.
 
-In `src/input/base/element.rs`, 0.7.1 applies the horizontal scroll offset to
+In `src/input/base/element.rs`, upstream applies the horizontal scroll offset to
 every caret after layout and clamps carets of right-aligned text to the right
 edge; the patch adds a per-caret `rtl` flag (`CursorRenderInfo::rtl`) so a
 caret on a right-to-left paragraph gets the same clamp.
@@ -82,6 +83,9 @@ sets it as the root's `aria_label`. The kit `Slider` and composed sliders
 both render through the base `Slider` from the same state, so a label set
 where the state is built names either one. Quill uses it for the video
 player's "Seek" and "Volume" sliders (`docs/decisions/video-player-controls.md`).
+0.8.0 adds `Slider::accessibility_label` on the element (#3494). That label
+wins when both are set; the state's label is the fallback, so a slider
+drawn in several places keeps its name without repeating it at each one.
 
 ## Text style accessor
 

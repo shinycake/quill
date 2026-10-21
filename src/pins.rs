@@ -1,12 +1,12 @@
 //! Exact pins for this checkout. Recheck together; never refresh one layer alone.
 #![deny(clippy::indexing_slicing)]
 
-/// crates.io `gpui-kit` version (`=0.7.3` in Cargo.toml, 2026-10-15). The
+/// crates.io `gpui-kit` version (`=0.8.0` in Cargo.toml, 2026-10-20). The
 /// whole UI family is this Kit release, with GPUI from the `gpui-pre` 0.3.9
-/// snapshot crates; `gpui-base`, `gpui-pre` and
-/// `gpui-pre-{apple,macos,linux,windows}` are patched copies in
-/// `third_party/` (docs/decisions/gpui-kit-0-7-3.md).
-pub const GPUI_KIT_VERSION: &str = "0.7.3";
+/// snapshot crates; `gpui-base`, `gpui-component`, `gpui-pre` and
+/// `gpui-pre-{apple,macos,linux,windows,wgpu}` are patched copies in
+/// `third_party/` (docs/decisions/gpui-kit-0-8-0.md).
+pub const GPUI_KIT_VERSION: &str = "0.8.0";
 
 /// Official TDLib git commit used as the schema/runtime baseline.
 pub const TDLIB_GIT_COMMIT: &str = "0e88653dcbf4e44c73cb655a05b58cd749a91169";
