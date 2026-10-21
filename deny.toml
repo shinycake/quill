@@ -28,6 +28,8 @@ ignore = [
   # Through resvg/usvg 0.45 and cosmic-text (GPUI's text and SVG stack).
   { id = "RUSTSEC-2026-0206", reason = "rustybuzz: only via GPUI's usvg and cosmic-text" },
   { id = "RUSTSEC-2026-0192", reason = "ttf-parser: only via GPUI's fontdb and usvg" },
+  # Through syntect 5.3 (GPUI Kit's `syntect` feature, which reads its syntax set with bincode 1).
+  { id = "RUSTSEC-2025-0141", reason = "bincode: only via syntect" },
   # Folded into zbus 6; held at zbus 5 with ashpd, ksni and GPUI (docs/dependency-updates.md).
   { id = "RUSTSEC-2026-0371", reason = "zbus_names: zbus 5, held" },
   { id = "RUSTSEC-2026-0370", reason = "zvariant: zbus 5, held" },
