@@ -27,6 +27,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// current language, once per type and language. Called from the app's
     /// poll loop; a no-op otherwise.
     pub fn pump_psa_labels(&mut self) {
+        self.sync_psa_about();
         if !self.chats_path_active() {
             return;
         }
@@ -55,6 +56,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.session.request(purpose, None);
         // A failed send leaves the generic "PSA" badge, which is fine.
         let _ = self.send_json_request(extra, &get_language_pack_keys(extra, &pack, &keys));
+    }
+
+    /// Read the saved "box was shown" flags (in the background, once),
+    /// show the box of a chat that waited for them, and save new flags.
+    pub(crate) fn sync_psa_about(&mut self) {
+        self.session.chat_list.psa_about.start_load();
+        self.session.poll_psa_about(std::time::Instant::now());
+        self.session.chat_list.psa_about.save_unsaved();
     }
 
     /// "Hide this announcement": only where tdesktop offers it, a promoted

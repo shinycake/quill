@@ -173,6 +173,7 @@ impl Session {
     /// with it; the history itself stays loaded.
     pub fn leave_open_chat(&mut self) -> Option<ChatId> {
         let prev = self.open_chat.take()?;
+        self.chat_list.psa_about.hide();
         self.search.chat_search.close();
         self.media.shared_media.close();
         self.open_topic = None;
