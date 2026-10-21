@@ -19,13 +19,15 @@ could wrap.
 
 ## What changed
 
-- Every `MediaAction` has one fixed `slot()` (an exhaustive match, so a new
-  action cannot be added without choosing its place), and `sort_key()` adds it
-  to `order::MEDIA` with a saturating add.
-- `MediaAction::ALL` lists the variants; `MEDIA_SLOTS` is its length, so the
-  block width follows that list (a variant left out of it is caught by a test
-  that walks an exhaustive match, not by the length). A `const` assertion fails the build if
-  `MEDIA + MEDIA_SLOTS` passes `COPY_TEXT`. The orders from `COPY_TEXT` on moved
+- Every `MediaAction` has one fixed `slot()`, and `sort_key()` adds it to
+  `order::MEDIA` with a saturating add. A `media_actions!` macro declares the
+  enum, `MediaAction::ALL` and `canonical()` from one list (now in
+  `src/message_menu/media_actions.rs`), so no variant can be missing from
+  `ALL`. A test checks each entry's `canonical()` sits at its own index in
+  `ALL`, which is what `slot()` relies on.
+- `MEDIA_SLOTS` is the length of `ALL`, so the block width follows that list.
+  A `const` assertion fails the build if `MEDIA + MEDIA_SLOTS` passes
+  `COPY_TEXT`. The orders from `COPY_TEXT` on moved
   up by 5 to make room for all 13 actions; only their relative order matters.
 - A unit test iterates `MediaAction::ALL` and checks each slot equals its index
   and the keys are increasing and inside the block. It guards the slot order;

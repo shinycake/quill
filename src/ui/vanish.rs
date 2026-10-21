@@ -270,7 +270,8 @@ fn conflict_keeps_running(conflicts: &std::cell::Cell<u16>) -> bool {
     let frames = conflicts.get().saturating_add(1);
     conflicts.set(frames);
     if frames == MAX_CONFLICT_FRAMES + 1 {
-        eprintln!("vanish: dissolve list stayed borrowed; the tick is stopped");
+        // Once per conflict streak: the count is only reset by a clean borrow.
+        eprintln!("quill: vanish: dissolve list stayed borrowed; the tick is stopped");
     }
     frames <= MAX_CONFLICT_FRAMES
 }
@@ -637,6 +638,10 @@ impl QuillApp {
         };
         if running {
             self.request_animation_tick(60, cx);
+        } else if self.history.vanish_conflicts.get() == MAX_CONFLICT_FRAMES + 1 {
+            // The bound just stopped the tick: paint once more so the next
+            // render prunes the finished ghosts.
+            cx.notify();
         }
         let now = self.vanish_now();
         let Ok(vanishing) = self.history.vanishing.try_borrow() else {
@@ -840,6 +845,20 @@ mod tests {
             assert!(conflict_keeps_running(&conflicts));
         }
         assert!(!conflict_keeps_running(&conflicts));
+        assert!(!conflict_keeps_running(&conflicts));
+    }
+
+    #[test]
+    fn a_clean_borrow_gives_the_next_streak_the_full_bound() {
+        let conflicts = std::cell::Cell::new(0);
+        for _ in 0..MAX_CONFLICT_FRAMES - 1 {
+            assert!(conflict_keeps_running(&conflicts));
+        }
+        // The overlay resets the count on a clean borrow.
+        conflicts.set(0);
+        for _ in 0..MAX_CONFLICT_FRAMES {
+            assert!(conflict_keeps_running(&conflicts));
+        }
         assert!(!conflict_keeps_running(&conflicts));
     }
 
