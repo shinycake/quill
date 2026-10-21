@@ -72,7 +72,7 @@ impl QuillApp {
             .unwrap_or_default()
             .as_str()
         {
-            "settings" => self.settings.open = true,
+            "settings" => self.open_settings(Some(quill::settings_catalog::Page::Telegram)),
             "withdraw" => {
                 self.open_grams(cx);
                 self.start_grams_withdraw(cx);

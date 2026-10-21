@@ -2,10 +2,10 @@
 //! the Experimental settings page and the update channel switch (needs the
 //! `demo-capture` feature for gpui-kit's test support). Nothing leaves the
 //! app: no connection, and the app data root is a temp directory.
-use crate::ui::advanced_ui::{ADVANCED_PAGE, EXPERIMENTAL_PAGE, parent_page};
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
+use crate::ui::settings_window::SubPage;
 use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
@@ -13,6 +13,7 @@ use gpui_kit::{
     AppContext, Entity, Keystroke, Modifiers, TestAppContext, VisualTestContext, px, size,
 };
 use quill::advanced::experimental::{self, Imported, Values};
+use quill::settings_catalog::Page;
 
 /// The experimental options are process-wide; the tests that set them take
 /// this lock so parallel tests don't flip them under each other.
@@ -107,17 +108,19 @@ fn codes_do_nothing_where_no_screen_takes_them(cx: &mut TestAppContext) {
     app.read_with(vcx, |app, _| {
         assert_eq!(app.settings.advanced.debug_confirm, None);
     });
-    // A Settings subpage does not read them either (tdesktop reads the list).
+    // A Settings subpage does not read them either (tdesktop reads them on
+    // the settings pages, not on boxes and subpages opened from them).
     app.update_in(vcx, |app, _, _| {
         app.settings.open = true;
-        app.settings.page = Some(ADVANCED_PAGE);
+        app.settings.page = Some(Page::Advanced);
+        app.settings.sub = Some(SubPage::Experimental);
     });
     type_into(&app, vcx, "debugmode");
     app.read_with(vcx, |app, _| {
         assert_eq!(app.settings.advanced.debug_confirm, None);
     });
     // Ctrl-chords are not typed text.
-    app.update_in(vcx, |app, _, _| app.settings.page = None);
+    app.update_in(vcx, |app, _, _| app.settings.sub = None);
     let chord = Keystroke {
         modifiers: Modifiers {
             control: true,
@@ -180,12 +183,11 @@ fn the_experimental_row_on_the_advanced_page_opens_the_experimental_page(cx: &mu
         std::thread::sleep(std::time::Duration::from_millis(300));
         vcx.update(|window, cx| window.render_frame(cx));
     }
-    let open = _shell.read_with(vcx, |shell, _| shell.open_dialog);
-    assert_eq!(open, Some(DialogKind::Settings));
     vcx.update(|window, cx| window.click("settings-experimental", cx));
     vcx.run_until_parked();
     app.update(vcx, |app, _| {
-        assert_eq!(app.settings.page, Some(EXPERIMENTAL_PAGE));
+        assert_eq!(app.settings.page, Some(Page::Advanced));
+        assert_eq!(app.settings.sub, Some(SubPage::Experimental));
     });
 }
 
@@ -199,9 +201,8 @@ fn the_experimental_page_changes_restores_exports_and_imports(cx: &mut TestAppCo
     experimental::set_fast_buttons_mode(false);
     app.update_in(vcx, |app, _, cx| {
         app.settings.open = true;
-        app.settings.page = Some(EXPERIMENTAL_PAGE);
-        assert_eq!(parent_page(EXPERIMENTAL_PAGE), Some(ADVANCED_PAGE));
-        assert_eq!(parent_page(ADVANCED_PAGE), None);
+        app.settings.page = Some(Page::Advanced);
+        app.settings.sub = Some(SubPage::Experimental);
         assert!(!app.experimental_values().changed());
         app.set_experimental_option(experimental::SPLIT_MEDIA_ID, true, cx);
         assert!(app.chat_prefs.profile_media_tabs_expanded);

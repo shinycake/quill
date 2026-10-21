@@ -8,8 +8,17 @@ use quill::data_settings::AutoDownloadNetSettings;
 use quill::data_settings::NetworkKind;
 
 pub(crate) struct SettingsUi {
+    /// The settings window covers the chat list and the chat.
     pub(super) open: bool,
-    pub(super) page: Option<&'static str>,
+    /// The page on screen. `None`: none chosen yet, so a wide window shows
+    /// Account and a narrow one the page list.
+    pub(super) page: Option<quill::settings_catalog::Page>,
+    /// A page reached from a row of `page`, with a back arrow.
+    pub(super) sub: Option<super::settings_window::SubPage>,
+    /// The Log out confirmation is on screen.
+    pub(super) log_out_confirm: bool,
+    /// Holds focus inside the settings window, so Esc steps back.
+    pub(super) focus: FocusHandle,
     /// Settings → Appearance slice: the dialog is on screen.
     pub(super) appearance_open: bool,
     /// Parity slice (platform-custom-keybindings): the rebindable action id
@@ -101,6 +110,9 @@ impl SettingsUi {
         Self {
             open: false,
             page: None,
+            sub: None,
+            log_out_confirm: false,
+            focus: cx.focus_handle(),
             appearance_open: false,
             keybinding_capture: None,
             keybinding_error: None,

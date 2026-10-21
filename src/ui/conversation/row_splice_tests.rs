@@ -564,9 +564,6 @@ fn a_dissolve_keeps_the_rows_key_until_it_moves_on(cx: &mut TestAppContext) {
     app.update(vcx, |app, _| {
         app.begin_vanish(ChatId(GROUP), &[MessageId(id(5))]);
         app.paint_vanishing_for_test();
-        // Hold the clock at the start: a slow runner must not let the row
-        // phase run out between here and the check's rebuild.
-        app.set_vanishing_clock(0.);
     });
     check(
         &app,
@@ -575,8 +572,8 @@ fn a_dissolve_keeps_the_rows_key_until_it_moves_on(cx: &mut TestAppContext) {
         &[&delete(&[5])],
         Expect::Build,
     );
-    // Frames take a good tenth of a second here: pin the animation's clock
-    // to the phase under test before each stretch of them.
+    // Put the animation at the moment under test before each stretch of
+    // frames.
     let frames_at = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, secs: f32| {
         app.update(vcx, |app, _| app.set_vanishing_clock(secs));
         let builds = stats(app, vcx).rebuilds;
@@ -625,9 +622,6 @@ fn only_the_closing_gap_is_remeasured_by_list_index(cx: &mut TestAppContext) {
     app.update(vcx, |app, _| {
         app.begin_vanish(ChatId(GROUP), &[MessageId(id(5))]);
         app.paint_vanishing_for_test();
-        // Hold the clock at the start: a slow runner must not let the row
-        // phase run out between here and the check's rebuild.
-        app.set_vanishing_clock(0.);
     });
     check(
         &app,
@@ -672,9 +666,6 @@ fn two_reads_in_one_round_see_the_same_phase(cx: &mut TestAppContext) {
     app.update(vcx, |app, _| {
         app.begin_vanish(ChatId(GROUP), &[MessageId(id(5))]);
         app.paint_vanishing_for_test();
-        // Hold the clock at the start: a slow runner must not let the row
-        // phase run out between here and the check's rebuild.
-        app.set_vanishing_clock(0.);
     });
     check(
         &app,
@@ -684,16 +675,13 @@ fn two_reads_in_one_round_see_the_same_phase(cx: &mut TestAppContext) {
         Expect::Build,
     );
     // Shortly before the end of the row phase (1.05s: wipe plus a 0.6s
-    // collapse). The clock set also pins its instant, and the hold is
-    // lifted so the pin alone keeps the phase: how long the runner takes
-    // to get from here to the first read cannot move it.
+    // collapse). The clock set also pins its instant.
     let (first, second, later) = app.update(vcx, |app, _| {
         app.set_vanishing_clock(1.00);
-        app.history.vanish_held.set(false);
         let first = app.vanish_rows_hash();
         // Time passes inside the round and crosses the boundary: the
         // pinned instant holds.
-        std::thread::sleep(std::time::Duration::from_millis(60));
+        app.advance_vanish_clock(0.06);
         let second = app.vanish_rows_hash();
         // The next round pins again and sees the later phase.
         app.pin_vanish_now();

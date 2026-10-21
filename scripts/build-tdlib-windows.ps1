@@ -23,14 +23,24 @@ if (-not (Test-Path (Join-Path $src '.git'))) {
 $head = (& git -C $src rev-parse HEAD).Trim()
 if ($head -ne $pin) { throw "$src is $head, expected $pin" }
 $patch = Join-Path $root 'native/patches/tdlib-quill-takeout-contacts.patch'
+# A work tree restored from the CI cache can carry more than the patch (for
+# example from a run stopped mid-build), and CI saves it again even when this
+# script fails, so throwing would fail every later run. Reset tracked files to
+# the pin and apply the patch again; native/build stays, so the build is
+# still incremental.
+& git -C $src diff --quiet
+if ($LASTEXITCODE -ne 0) {
+    $applied = ((& git -C $src diff) -join "`n") -replace "`r`n", "`n"
+    $expected = (Get-Content -Raw $patch) -replace "`r`n", "`n"
+    if ($applied.TrimEnd() -ne $expected.TrimEnd()) {
+        Write-Host "$src has changes other than the pinned Quill export patch; resetting it to $pin"
+        Invoke-Native git @('-C', $src, 'checkout', '--', '.')
+    }
+}
 & git -C $src diff --quiet
 if ($LASTEXITCODE -eq 0) {
     Invoke-Native git @('-C', $src, 'apply', '--check', $patch)
     Invoke-Native git @('-C', $src, 'apply', $patch)
-} else {
-    $applied = ((& git -C $src diff) -join "`n") -replace "`r`n", "`n"
-    $expected = (Get-Content -Raw $patch) -replace "`r`n", "`n"
-    if ($applied.TrimEnd() -ne $expected.TrimEnd()) { throw "$src has changes other than the pinned Quill export patch" }
 }
 
 $vcpkg = Join-Path $vcpkgRoot 'vcpkg.exe'

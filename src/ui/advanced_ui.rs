@@ -15,15 +15,6 @@ use quill::advanced::{auto_update, hardware_video, update_channel};
 use quill::lang::{keys, tr};
 use quill::updater::UpdateState;
 
-pub(super) const ADVANCED_PAGE: &str = "Advanced";
-pub(super) const EXPERIMENTAL_PAGE: &str = "Experimental settings";
-
-/// The page the Back button of `page` returns to (tdesktop opens Experimental
-/// settings from Advanced).
-pub(super) fn parent_page(page: &'static str) -> Option<&'static str> {
-    (page == EXPERIMENTAL_PAGE).then_some(ADVANCED_PAGE)
-}
-
 impl QuillApp {
     /// The Advanced page. tdesktop's holds the update switches, Performance,
     /// the export and the Experimental settings entry; Quill's update
@@ -36,11 +27,10 @@ impl QuillApp {
             .child(self.performance_section(cx))
             .child(super::nav_row::nav_row(
                 "settings-experimental",
-                EXPERIMENTAL_PAGE,
+                tr(keys::SETTINGS_EXPERIMENTAL),
                 cx,
                 |this, _, cx| {
-                    this.settings.page = Some(EXPERIMENTAL_PAGE);
-                    cx.notify();
+                    this.show_settings_sub(super::settings_window::SubPage::Experimental, cx);
                 },
             ))
             .child(super::nav_row::nav_row(
@@ -362,18 +352,15 @@ impl QuillApp {
 
 crate::ui::screenshot_demo::register_demos![
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-advanced")
-        .setup(|app, _, _| app.demo_settings_page(ADVANCED_PAGE)),
-    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-experimental")
-        .setup(|app, _, _| app.demo_settings_page(EXPERIMENTAL_PAGE)),
+        .setup(|app, _, _| app.open_settings(Some(quill::settings_catalog::Page::Advanced))),
+    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-experimental").setup(
+        |app, _, _| {
+            app.open_settings(None);
+            app.settings.page = Some(quill::settings_catalog::Page::Advanced);
+            app.settings.sub = Some(super::settings_window::SubPage::Experimental);
+        }
+    ),
 ];
-
-impl QuillApp {
-    /// Settings open on one page (screenshot demos; nothing is saved).
-    fn demo_settings_page(&mut self, page: &'static str) {
-        self.settings.open = true;
-        self.settings.page = Some(page);
-    }
-}
 
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]

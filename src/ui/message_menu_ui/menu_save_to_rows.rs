@@ -277,21 +277,26 @@ impl QuillApp {
                 ));
             }
         }
-        if message.date > 0 && message_id.0 > 0 && !message.pending {
-            let sent = quill::local_time::civil_local(i64::from(message.date));
-            rows.push(info_row(
-                order::SENT,
-                "menu-sent",
-                None,
-                quill::message_menu::sent_label(&sent, &now),
-            ));
+        // One date line, as tdesktop's AddWhenEditedForwardedAuthorActionHelper:
+        // a forward shows its original date (add_origin_rows), an edited
+        // message its edit date, and only a plain message the sent date.
+        let forwarded = message.forward_info.is_some() || message.extras.import_info.is_some();
+        if message.date > 0 && message_id.0 > 0 && !message.pending && !forwarded {
             if message.extras.edit_date > 0 {
                 let edited = quill::local_time::civil_local(i64::from(message.extras.edit_date));
                 rows.push(info_row(
-                    order::SENT + 1,
+                    order::SENT,
                     "menu-edited",
                     Some(IconName::Pencil),
                     quill::message_menu::edited_label(&edited, &now),
+                ));
+            } else {
+                let sent = quill::local_time::civil_local(i64::from(message.date));
+                rows.push(info_row(
+                    order::SENT,
+                    "menu-sent",
+                    None,
+                    quill::message_menu::sent_label(&sent, &now),
                 ));
             }
         }
