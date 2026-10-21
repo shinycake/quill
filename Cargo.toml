@@ -85,7 +85,7 @@ demo-capture = ["ui", "gpui-kit/test-support"]
 frame-profiler = ["ui", "gpui-kit/profiler"]
 
 [dependencies]
-base64 = "0.22"
+base64 = { version = "0.23", default-features = false, features = ["std"] }
 directories = "6"
 flate2 = "1"
 # Image files sent as documents: the formats tdesktop previews in-app
@@ -101,7 +101,7 @@ libloading = "0.9"
 libc = "0.2"
 ntgcalls-sys = { path = "crates/ntgcalls-sys" }
 qrcode = { version = "0.14", optional = true, default-features = false, features = ["image"] }
-rand = "0.8"
+rand = "0.10"
 # Window handles: macOS sharing type, Windows display affinity (capture blocking).
 raw-window-handle = { version = "0.6.2", optional = true }
 serde = { version = "1", features = ["derive"] }

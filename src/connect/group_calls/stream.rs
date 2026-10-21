@@ -226,7 +226,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// The stream tile's width in logical pixels. The quality bucket goes
-    /// to the engine only when it changes. ntgcalls 3.0.3 has no API to
+    /// to the engine only when it changes. ntgcalls 3.0.5 has no API to
     /// pick a stream's quality (it asks Full for RTMP and chooses per
     /// endpoint for MTProto streams), so the engine records it for the
     /// window and for a later ntgcalls that has one; segment requests keep

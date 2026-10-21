@@ -166,7 +166,7 @@ impl FakeKey {
                     return self.cbor_reply(code, None);
                 }
                 drop(script);
-                let mut rng = rand::rngs::OsRng;
+                let mut rng = rand::rng();
                 let token = shared.encrypt(&TOKEN, &mut rng).unwrap();
                 self.shared = Some(shared);
                 self.cbor_reply(

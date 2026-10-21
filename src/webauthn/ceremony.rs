@@ -338,7 +338,7 @@ fn token_for(
     let Some(pin) = pin else {
         return Ok(None);
     };
-    pin_token(key, pin, permission, rp_id, &mut rand::rngs::OsRng, control).map(Some)
+    pin_token(key, pin, permission, rp_id, &mut rand::rng(), control).map(Some)
 }
 
 /// tdesktop `RunRegisterCeremony`: the first key that opens gets

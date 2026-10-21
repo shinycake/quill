@@ -151,7 +151,7 @@ fn make_credential_without_a_pin() {
 
 #[test]
 fn pin_protocols_round_trip() {
-    let mut rng = rand::rngs::OsRng;
+    let mut rng = rand::rng();
     for protocol in [Protocol::One, Protocol::Two] {
         let secret = SharedSecret::derive(protocol, &[0x42; 32]);
         let plain = [0x11u8; 32];
@@ -193,7 +193,7 @@ fn a_pin_becomes_a_token_with_permissions() {
             deadline: Instant::now() + Duration::from_secs(5),
             on_keepalive: &mut ignore,
         };
-        let mut rng = rand::rngs::OsRng;
+        let mut rng = rand::rng();
         let token = pin_token(
             &mut key,
             "4321",

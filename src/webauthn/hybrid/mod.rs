@@ -39,7 +39,7 @@ mod tests;
 use super::ceremony::{self, Ceremony, CeremonyEvent, DeviceSource, UsbKeys};
 use super::{CreationOptions, RequestOptions};
 use ble::ScannerFactory;
-use rand::RngCore;
+use rand::Rng;
 use std::time::Duration;
 use tunnel::Connector;
 
@@ -59,7 +59,7 @@ pub struct Environment {
     pub connector: Box<dyn Connector>,
     /// The USB keys, for "Use a security key".
     pub keys: Box<dyn DeviceSource>,
-    pub rng: Box<dyn RngCore + Send>,
+    pub rng: Box<dyn Rng + Send>,
     /// The QR code's timestamp.
     pub now_unix: i64,
     pub bluetooth_probe: Duration,
@@ -77,7 +77,7 @@ impl Environment {
             scanner: Some(Box::new(ble::platform_scanner)),
             connector: Box::new(tunnel::TlsConnector),
             keys: Box::new(UsbKeys),
-            rng: Box::new(rand::rngs::OsRng),
+            rng: Box::new(rand::rand_core::UnwrapErr(rand::rngs::SysRng)),
             now_unix,
             bluetooth_probe: BLUETOOTH_PROBE,
         }

@@ -10,7 +10,7 @@ use crate::webauthn::ctap2::cbor::{bytes, encode, int, int_entry, text};
 use crate::webauthn::ctap2::pin::random_secret;
 use ciborium::Value;
 use p256::SecretKey;
-use rand::RngCore;
+use rand::Rng;
 use zeroize::Zeroizing;
 
 /// The QR secret's length.
@@ -32,7 +32,7 @@ pub struct QrKey {
 
 impl QrKey {
     /// A new identity and secret (tdesktop `MakeQRKey`).
-    pub fn generate(rng: &mut dyn RngCore) -> Option<Self> {
+    pub fn generate(rng: &mut dyn Rng) -> Option<Self> {
         let identity = random_secret(rng)?;
         let mut secret = Zeroizing::new([0u8; SECRET_LEN]);
         rng.fill_bytes(secret.as_mut());

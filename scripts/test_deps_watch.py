@@ -42,25 +42,35 @@ class Cargo(unittest.TestCase):
         self.assertEqual(dw.kit_pin(toml), "0.7.0")
 
     def test_direct_deps_and_majors(self):
+        reg = "registry+x"
         meta = {
-            "resolve": {"root": "root"},
+            "workspace_members": ["root", "member"],
+            "resolve": {"root": "root", "nodes": [
+                {"id": "root", "deps": [{"pkg": "serde1"}, {"pkg": "local"}, {"pkg": "kit"}, {"pkg": "rand08"}]},
+                {"id": "member", "deps": [{"pkg": "wry"}]},
+                {"id": "tungstenite", "deps": [{"pkg": "rand010"}]},
+            ]},
             "packages": [
-                {"id": "root", "name": "quill", "version": "0.1.0", "source": None, "dependencies": [
-                    {"name": "serde", "source": "registry+x"},
-                    {"name": "local", "source": None},
-                    {"name": "gpui-kit", "source": "registry+x"},
-                ]},
-                {"id": "a", "name": "serde", "version": "1.0.1", "source": "registry+x"},
-                {"id": "b", "name": "gpui-kit", "version": "0.7.0", "source": "registry+x"},
+                {"id": "root", "name": "quill", "version": "0.1.0", "source": None},
+                {"id": "member", "name": "webview-host", "version": "0.1.0", "source": None},
+                {"id": "local", "name": "local", "version": "0.1.0", "source": None},
+                {"id": "serde1", "name": "serde", "version": "1.0.1", "source": reg},
+                {"id": "kit", "name": "gpui-kit", "version": "0.7.0", "source": reg},
+                {"id": "rand08", "name": "rand", "version": "0.8.5", "source": reg},
+                {"id": "rand010", "name": "rand", "version": "0.10.3", "source": reg},
+                {"id": "wry", "name": "wry", "version": "0.57.0", "source": reg},
+                {"id": "tungstenite", "name": "tungstenite", "version": "0.30.0", "source": reg},
             ],
         }
         deps = dw.direct_registry_deps(meta)
-        self.assertEqual(deps, {"serde": "1.0.1", "gpui-kit": "0.7.0"})
-        self.assertEqual(dw.find_majors(deps, lambda n: "2.0.0"), [("serde", "1.0.1", "2.0.0")])
-        self.assertEqual(dw.find_majors(deps, lambda n: "1.5.0"), [])
+        # rand is the member's own 0.8, not the 0.10 another crate locks.
+        self.assertEqual(deps, {"serde": "1.0.1", "gpui-kit": "0.7.0", "rand": "0.8.5", "wry": "0.57.0"})
+        latest = {"serde": "2.0.0", "rand": "0.10.3", "wry": "0.57.0"}
+        self.assertEqual(
+            dw.find_majors(deps, lambda n: latest.get(n, "1.5.0")),
+            [("rand", "0.8.5", "0.10.3"), ("serde", "1.0.1", "2.0.0")],
+        )
 
-
-class Actions(unittest.TestCase):
     def test_parse_uses(self):
         text = (
             "      - uses: actions/checkout@v4\n"
