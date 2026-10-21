@@ -72,7 +72,7 @@ impl QuillApp {
     /// newest-wins selector alone would point at a message the composer
     /// is not replying to (and the bar would vanish). Falling back to the
     /// selector covers a draft armed before this slice's logic existed.
-    fn open_chat_force_reply(&self) -> Option<(ChatId, MessageId, String)> {
+    pub(in crate::ui) fn open_chat_force_reply(&self) -> Option<(ChatId, MessageId, String)> {
         let session = self.session()?;
         let chat_id = session.open_chat?;
         let history = session.histories.get(&chat_id.0)?;

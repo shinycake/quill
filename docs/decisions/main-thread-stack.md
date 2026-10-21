@@ -30,6 +30,22 @@ Measured on macOS, debug `demo-capture` build. macOS sets the main thread's stac
 
 On macOS, main itself overflows with a 1000 KB stack, so it only fits Windows' 1 MB because MSVC frames are smaller.
 
+## Session's domains (follow-up)
+
+A screenshot demo launched with a 1 MB stack on macOS crashed in `new_composer_field` on 2026-10-21, inside `new_with_demo`. `Session` was still 36 KB, and every copy of `live` carries one through its driver. `Session` now boxes its twelve largest domains (`payments`, `groups`, `settings`, `messages`, `media`, `stickers`, `stories`, `bots`, `calls`, `threads`, `chats_state`, `chat_list`). Field access derefs through the box, so no caller changed.
+
+| | after #1082 | Session boxed |
+|---|---|---|
+| `Session` | 35,800 B | about 3.6 KB |
+| `QuillApp` | 73,128 B | about 40 KB |
+| Stack to build the app in a debug test thread | 640 to 768 KB | 384 to 448 KB |
+
+The size bounds are now 48 KB for `QuillApp` and 8 KB for `Session`. `app_builds_within_the_stack_budget` builds the app on a 576 KB thread; main before this change overflowed it.
+
+## Windows main stack
+
+`build.rs` links `quill.exe` with an 8 MB main stack (`/STACK` on MSVC, `--stack` on GNU), the size macOS and Linux give the main thread. The launch fits in 1 MB again, but the first frame does not have much room: in a debug build `folder_tabs` takes 323 KB and `sidebar` 192 KB, and GPUI draws the whole tree on the main thread. The size bounds above still fail on the next large field, so the rule stays: box the value, don't count on the larger stack.
+
 ## What is left
 
-The deepest point is now the first render, not the launch: `folder_tabs` takes 323 KB and `sidebar` 192 KB in a debug build. Boxing `live` would take another 38 KB off each `QuillApp` copy. Neither is needed to pass today. They are the next places to look if the stack gets tight again.
+The deepest point is the first render: `folder_tabs` (323 KB) and `sidebar` (192 KB) in a debug build. Those frames come from GPUI's by-value builders (`TabBar`, `Tab`, `Div`), not from Quill's state.

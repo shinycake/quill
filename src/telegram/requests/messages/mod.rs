@@ -358,16 +358,23 @@ pub fn get_full_rich_message(extra: RequestId, chat_id: ChatId, message_id: Mess
     .to_string()
 }
 
+/// Composer markup as a `formattedText`: the clean text and its entities,
+/// never the markers.
+fn markup_formatted_text(markup: &str) -> Value {
+    let (text, entities) = parse_format_markup(markup);
+    let entities: Vec<Value> = entities.iter().map(format_entity_json).collect();
+    json!({ "@type": "formattedText", "text": text, "entities": entities })
+}
+
 /// Slice msg-richtext-ai-tools: `fixTextWithAi` (TDLib 1.8.67,
 /// `schema/td_api.tl:12172`):
 /// `fixTextWithAi text:formattedText = FixedText;`
-/// The composer draft is plain text, so it rides as a `formattedText`
-/// with no entities.
+/// The composer draft is markup; it goes out as text with its entities.
 pub fn fix_text_with_ai(extra: RequestId, text: &str) -> String {
     json!({
         "@type": "fixTextWithAi",
         "@extra": extra.as_extra(),
-        "text": { "@type": "formattedText", "text": text, "entities": [] },
+        "text": markup_formatted_text(text),
     })
     .to_string()
 }
@@ -386,7 +393,7 @@ pub fn compose_text_with_ai(
     json!({
         "@type": "composeTextWithAi",
         "@extra": extra.as_extra(),
-        "text": { "@type": "formattedText", "text": text, "entities": [] },
+        "text": markup_formatted_text(text),
         "translate_to_language_code": translate_to_language_code,
         "style_name": style_name,
         "add_emojis": add_emojis,
@@ -434,7 +441,7 @@ pub fn create_rich_message_with_ai(
     json!({
         "@type": "createRichMessageWithAi",
         "@extra": extra.as_extra(),
-        "prompt": prompt,
+        "prompt": parse_format_markup(prompt).0,
         "language_code": language_code,
         "add_emojis": add_emojis,
     })

@@ -256,6 +256,9 @@ impl QuillApp {
                         })),
                 )
             })
+            .when(self.selection_html_target(chat_id).is_some(), |bar| {
+                bar.child(self.selection_html_button(cx))
+            })
             .when(self.selection_unpinnable(chat_id), |bar| {
                 bar.child(
                     Button::new("selection-unpin")

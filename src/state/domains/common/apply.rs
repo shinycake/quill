@@ -24,6 +24,15 @@ impl Session {
                     && let Some(export) = self.settings.chat_export.as_mut()
                 {
                     export.link.reply(pending.id, value);
+                } else if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::ExportRichHtml
+                    && let Some(export) = self
+                        .settings
+                        .rich_html_exports
+                        .iter_mut()
+                        .find(|export| export.link.pending == Some(pending.id))
+                {
+                    export.link.reply(pending.id, value);
                 }
             }
             // MED4: `updateOption` (schema:10926). Only

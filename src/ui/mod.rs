@@ -103,6 +103,8 @@ mod search_state;
 mod secret_codes_ui;
 mod selectable_text;
 mod selection_drag;
+mod selection_html;
+mod selection_html_demo;
 mod selection_live;
 mod selection_mode;
 mod sessions_extra;

@@ -71,6 +71,9 @@ pub struct MessageExtras {
     /// `messageTopicDirectMessages` (schema line 3317); 0 otherwise. A
     /// reply to a suggestion goes to the same topic.
     pub direct_messages_topic_id: i64,
+    /// `forum_topic_id` when `message.topic_id` is `messageTopicForum`: the
+    /// topic a reply to this message goes to.
+    pub forum_topic_id: Option<i32>,
 }
 
 /// The currency a published suggested post was paid in.
@@ -610,6 +613,7 @@ pub(crate) fn parse_message_extras(value: &Value) -> MessageExtras {
             .unwrap_or(0)
             .sat_i32(),
         via_bot_user_id: int53_or_zero(value.get("via_bot_user_id")),
+        forum_topic_id: parse_message_topic(value.get("topic_id")),
         effect_id: int64(value.get("effect_id")).unwrap_or(0).max(0),
         fact_check: parse_fact_check(value.get("fact_check")),
         suggested_post: crate::suggested_posts::SuggestedPostInfo::parse(

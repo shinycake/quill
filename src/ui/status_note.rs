@@ -3,6 +3,7 @@
 //! a toast, and for how long, follows the kind, never the words, so every
 //! interface language behaves like English.
 
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// How a note is presented.
@@ -24,6 +25,9 @@ pub(crate) enum NoteKind {
 pub(crate) struct StatusNote {
     text: String,
     kind: NoteKind,
+    /// A saved file a click on the toast shows in the file manager
+    /// (tdesktop's "saved to your Downloads folder" link).
+    reveal: Option<PathBuf>,
 }
 
 impl StatusNote {
@@ -31,7 +35,18 @@ impl StatusNote {
         Self {
             text: text.into(),
             kind,
+            reveal: None,
         }
+    }
+
+    /// The same note, and a click on its toast reveals `path`.
+    pub(crate) fn with_reveal(mut self, path: PathBuf) -> Self {
+        self.reveal = Some(path);
+        self
+    }
+
+    pub(crate) fn reveal(&self) -> Option<&Path> {
+        self.reveal.as_deref()
     }
 
     pub(crate) fn info(text: impl Into<String>) -> Self {

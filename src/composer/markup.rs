@@ -338,30 +338,33 @@ impl<'a> MarkupParser<'a> {
                 {
                     continue;
                 }
+                // A marker inside a word is plain text.
+                if !super::markup_boundary::opener_ok(self.text, i, open) {
+                    return None;
+                }
                 // Inline spans stay on one line (Telegram entities do).
+                let inner_start = i + open.len();
                 let line_end = after_open.find('\n').unwrap_or(after_open.len());
-                let searchable = after_open.get(..line_end).unwrap_or_default();
-                if let Some(close_rel) = searchable.find(open) {
-                    let inner_start = i + open.len();
-                    let inner_end = inner_start + close_rel;
-                    if inner_end > inner_start {
-                        let entity_start = self.out16;
-                        if kind == FormatKind::Code {
-                            self.push_str(
-                                self.text.get(inner_start..inner_end).unwrap_or_default(),
-                            );
-                        } else {
-                            self.parse_span(inner_start, inner_end, false);
-                        }
-                        self.entities.push(ComposerEntity {
-                            offset: entity_start,
-                            length: self.out16 - entity_start,
-                            kind,
-                            url: String::new(),
-                            language: String::new(),
-                        });
-                        return Some(inner_end + open.len());
+                if let Some(inner_end) = super::markup_boundary::find_closer(
+                    self.text,
+                    inner_start,
+                    inner_start + line_end,
+                    open,
+                ) {
+                    let entity_start = self.out16;
+                    if kind == FormatKind::Code {
+                        self.push_str(self.text.get(inner_start..inner_end).unwrap_or_default());
+                    } else {
+                        self.parse_span(inner_start, inner_end, false);
                     }
+                    self.entities.push(ComposerEntity {
+                        offset: entity_start,
+                        length: self.out16 - entity_start,
+                        kind,
+                        url: String::new(),
+                        language: String::new(),
+                    });
+                    return Some(inner_end + open.len());
                 }
                 return None;
             }
@@ -465,6 +468,9 @@ impl<'a> MarkupParser<'a> {
     }
 
     fn push_char(&mut self, ch: char) {
+        if ch == super::markup_boundary::BARRIER {
+            return;
+        }
         self.out.push(ch);
         self.out16 += ch.len_utf16() as i32;
     }
@@ -507,41 +513,53 @@ pub fn date_link_time(url: &str) -> Option<i32> {
 /// M1: strip markup without producing entities (clear-formatting).
 fn strip_markup(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
-    let mut i = 0;
-    let bytes = text.as_bytes();
-    while i < bytes.len() {
-        let line_start = i == 0 || bytes.get(i - 1) == Some(&b'\n');
-        if line_start && text.get(i..).unwrap_or_default().starts_with("> ") {
+    strip_range(text, 0, text.len(), &mut out);
+    out
+}
+
+/// [`strip_markup`] for `text[from..to]`; markers are judged against the
+/// whole `text`, so a span's neighbours count at every depth.
+fn strip_range(text: &str, from: usize, to: usize, out: &mut String) {
+    let mut i = from;
+    while i < to {
+        let rest = text.get(i..to).unwrap_or_default();
+        let line_start = i == 0 || text.as_bytes().get(i - 1) == Some(&b'\n');
+        if line_start && rest.starts_with("> ") {
             i += 2;
             continue;
         }
-        let rest = text.get(i..).unwrap_or_default();
         if let Some(after) = rest.strip_prefix("```")
             && let Some(first_nl) = after.find('\n')
         {
             let body_start = first_nl + 1;
             if let Some(close_rel) = after.get(body_start..).unwrap_or_default().find("```") {
-                out.push_str(&strip_markup(
-                    after
-                        .get(body_start..body_start + close_rel)
-                        .unwrap_or_default(),
-                ));
-                i += 3 + body_start + close_rel + 3;
+                let body = i + 3 + body_start;
+                strip_range(text, body, body + close_rel, out);
+                i = body + close_rel + 3;
                 continue;
             }
         }
         let mut stripped = false;
         for open in ["**", "__", "~~", "||", "`", "*", "_"] {
-            if let Some(after_open) = rest.strip_prefix(open) {
-                let line_end = after_open.find('\n').unwrap_or(after_open.len());
-                if let Some(close_rel) = after_open.get(..line_end).unwrap_or_default().find(open) {
-                    out.push_str(&strip_markup(
-                        after_open.get(..close_rel).unwrap_or_default(),
-                    ));
-                    i += open.len() + close_rel + open.len();
-                    stripped = true;
-                    break;
-                }
+            let Some(after_open) = rest.strip_prefix(open) else {
+                continue;
+            };
+            // The second `*` of an unmatched `**` never opens italic.
+            let continues_marker = open.len() == 1
+                && i > from
+                && text.as_bytes().get(i - 1) == open.as_bytes().first();
+            if continues_marker || !super::markup_boundary::opener_ok(text, i, open) {
+                continue;
+            }
+            let inner_start = i + open.len();
+            let line_end = after_open.find('\n').unwrap_or(after_open.len());
+            if let Some(close) =
+                super::markup_boundary::find_closer(text, inner_start, inner_start + line_end, open)
+            {
+                strip_range(text, inner_start, close, out);
+                i = close + open.len();
+                stripped = true;
+                break;
             }
         }
         if stripped {
@@ -554,9 +572,7 @@ fn strip_markup(text: &str) -> String {
             let after_paren = after_bracket.get(close_bracket + 2..).unwrap_or_default();
             let line_end = after_paren.find('\n').unwrap_or(after_paren.len());
             if let Some(close_paren) = after_paren.get(..line_end).unwrap_or_default().find(')') {
-                out.push_str(&strip_markup(
-                    after_bracket.get(..close_bracket).unwrap_or_default(),
-                ));
+                strip_range(text, i + 1, i + 1 + close_bracket, out);
                 i += 1 + close_bracket + 2 + close_paren + 1;
                 continue;
             }
@@ -564,10 +580,11 @@ fn strip_markup(text: &str) -> String {
         let Some(ch) = text.get(i..).and_then(|rest| rest.chars().next()) else {
             break;
         };
-        out.push(ch);
+        if ch != super::markup_boundary::BARRIER {
+            out.push(ch);
+        }
         i += ch.len_utf8();
     }
-    out
 }
 
 /// MED4: find `http(s)://` URLs in composer text (TDLib's `getLinkPreview`

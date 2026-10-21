@@ -98,11 +98,16 @@
 "lng_create_group_description" = "Description (optional)";
 "lng_create_group_next" = "Next";
 "lng_create_group_title" = "New Group";
+"lng_download_path_choose" = "Choose download path";
 "lng_export_done" = "Show my data";
 "lng_export_header_chats" = "Chat export settings";
 "lng_export_header_format" = "Location and format";
 "lng_export_header_media" = "Media export settings";
 "lng_export_header_other" = "Other";
+"lng_export_html_embed" = "Embedded content";
+"lng_export_html_failed" = "Could not save the message as HTML.";
+"lng_export_html_media_missing" = "Media unavailable";
+"lng_export_html_saved_to" = "Message was saved to your {downloads} folder";
 "lng_export_option_html" = "Human-readable HTML";
 "lng_export_option_html_and_json" = "Both";
 "lng_export_option_json" = "Machine-readable JSON";

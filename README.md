@@ -283,7 +283,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] In a private chat the message menu's Sent or Edited date line sits above the read time, as tdesktop orders it <!-- parity:menu-date-row-private-order -->
 - [x] "Send Another Gift" on gift service messages <!-- parity:menu-send-another-gift -->
 - [x] Block sender from the Replies chat menu <!-- parity:menu-replies-block-sender -->
-- [ ] Save selected rich messages as HTML <!-- parity:menu-save-selection-html -->
+- [x] Save selected rich messages as HTML <!-- parity:menu-save-selection-html -->
 - [x] Reply in Another Chat <!-- parity:menu-reply-another-chat -->
 - [x] Reply options popover: Update Quote, Do Not Reply, Show in Chat <!-- parity:menu-reply-options -->
 - [x] Reply with a timecode on videos and voice messages <!-- parity:menu-reply-timecode -->
@@ -334,10 +334,10 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] "Cancel editing?" confirmation when Esc would drop a changed edit (#996) <!-- parity:composer-cancel-edit-confirm -->
 - [x] Field placeholder follows the context: editing, broadcast, silent broadcast, Stars price; in chat windows too (#996) <!-- parity:composer-context-placeholder -->
 - [x] Field placeholder for an anonymous admin and for an inline bot's own placeholder text <!-- parity:composer-placeholder-anon-inline -->
-- [ ] Forum topic field placeholder "Message in {topic}" <!-- parity:composer-placeholder-forum-topic -->
-- [ ] "Off-thread message" placeholder when a bot chat is opened outside its thread <!-- parity:composer-placeholder-bot-offthread -->
-- [ ] A bot reply keyboard's own placeholder text shown in the field <!-- parity:composer-placeholder-bot-keyboard -->
-- [ ] Markdown markers inside a word (my_cmd_x) stay plain text, as tdesktop parses them <!-- parity:composer-markup-intraword -->
+- [x] Forum topic field placeholder "Message in {topic}" <!-- parity:composer-placeholder-forum-topic -->
+- [x] "Off-thread message" placeholder when a bot chat is opened outside its thread <!-- parity:composer-placeholder-bot-offthread -->
+- [x] A bot reply keyboard's own placeholder text shown in the field <!-- parity:composer-placeholder-bot-keyboard -->
+- [x] Markdown markers inside a word (my_cmd_x) stay plain text, as tdesktop parses them <!-- parity:composer-markup-intraword -->
 - [x] Clickable reply and edit bars: click opens reply options or jumps to the edited message, Ctrl/Cmd or right click jumps to the replied message (#996) <!-- parity:composer-bar-clicks -->
 - [x] "@" and "/" suggestions follow the caret, with tdesktop's mention rules (#993) <!-- parity:composer-caret-triggers -->
 - [x] Greeting sticker in an empty private chat <!-- parity:composer-greeting-sticker -->
@@ -979,7 +979,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Buy Premium inside the app (blocked: store purchase and app verification tokens are only available to official mobile apps) <!-- parity:premium-in-app-purchase -->
 - [x] Fragment and TON wallet flows: sign-in codes, collectible info, phone and username Fragment links, low-TON top-up (#799), the Gram Balance screen with top-up and Collect via Fragment (#818, #827), the gift value box (#824) and gift transfer or export via Fragment (#819) <!-- parity:premium-fragment-ton -->
 - [x] Delete a received gift (TDLib 1.8.69 `deleteGift`, `can_be_deleted`) <!-- parity:gifts-delete -->
-- [x] Delete a channel's received gifts, for admins who manage its gifts (tdesktop `canTransferGifts`) <!-- parity:gifts-delete-channel -->
+- [x] Delete a channel's received gifts, for the channel's creator (tdesktop `canTransferGifts`) <!-- parity:gifts-delete-channel -->
 
 ### TON wallet (low priority)
 
