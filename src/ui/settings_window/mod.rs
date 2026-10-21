@@ -8,12 +8,14 @@ mod account;
 mod log_out;
 mod notifications;
 mod pages;
+mod privacy;
 mod rows;
 mod search;
 mod sidebar;
 
 pub(in crate::ui) use search::SettingsSearch;
 
+use super::actions::{CancelSearch, OpenChatSearch, OpenSearch};
 use super::app::QuillApp;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -75,6 +77,7 @@ impl QuillApp {
         if page == Page::Privacy {
             // tdesktop asks for the passkeys whenever the screen opens.
             self.request_passkeys();
+            self.fetch_privacy();
         }
         cx.notify();
     }
@@ -87,6 +90,12 @@ impl QuillApp {
 
     /// One step back: a subpage to its page, a page to the list on a narrow
     /// window, else out of Settings.
+    /// Escape with nothing open over Settings, wherever the focus is.
+    pub(in crate::ui) fn settings_escape(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let narrow = f32::from(window.viewport_size().width) < NARROW;
+        self.settings_back(narrow, cx);
+    }
+
     fn settings_back(&mut self, narrow: bool, cx: &mut Context<Self>) {
         if self.settings.sub.take().is_none() {
             if narrow && self.settings.page.is_some() {
@@ -133,14 +142,23 @@ impl QuillApp {
                     cx.stop_propagation();
                 }
             }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if event.keystroke.key == "escape"
-                    && this.settings.keybinding_capture.is_none()
-                    && !window.has_active_dialog(cx)
-                {
-                    this.settings_back(narrow, cx);
-                    cx.stop_propagation();
+            // Escape and Find are app-wide bindings: answered here first,
+            // so they act on Settings rather than on the chats behind it.
+            .on_action(cx.listener(|this, _: &CancelSearch, window, cx| {
+                if this.settings.keybinding_capture.is_some() {
+                    return;
                 }
+                if this.search_field_focused(window, cx) {
+                    this.clear_settings_search(window, cx);
+                } else if !this.dismiss_topmost_layer(window, cx) {
+                    this.settings_escape(window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &OpenChatSearch, window, cx| {
+                this.focus_settings_search(None, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenSearch, window, cx| {
+                this.focus_settings_search(None, window, cx);
             }))
             .when(list, |this| {
                 this.child(

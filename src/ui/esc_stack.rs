@@ -241,10 +241,12 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         app.close_sessions(cx)
     }),
     // Slice S3: privacy peels one level per press (picker, exceptions,
-    // editor, then the main overlay), like TGX's back stack.
+    // then the editor), like TGX's back stack.
     layer!(
         "privacy",
-        |app| app.privacy.open || app.privacy.editor.is_some() || app.privacy.exceptions.is_some(),
+        |app| app.privacy.editor.is_some()
+            || app.privacy.exceptions.is_some()
+            || app.privacy.block_picker_open,
         |app, _, cx| app.close_privacy_top(cx)
     ),
     layer!(
@@ -541,14 +543,20 @@ mod dispatch_tests {
         app.read_with(cx, |app, _| app.topmost_esc_layer().map(|l| l.name))
     }
 
+    fn any_rule() -> crate::ui::privacy::PrivacyEditorTarget {
+        crate::ui::privacy::PrivacyEditorTarget::Rule(
+            quill::telegram::requests_privacy::PrivacySettingKey::ShowStatus,
+        )
+    }
+
     type Opener = fn(&mut QuillApp, &mut gpui_kit::Window, &mut gpui_kit::Context<QuillApp>);
 
     /// One opener per hand-drawn overlay, with the layer name it must show.
     fn openers() -> Vec<(&'static str, Opener)> {
         vec![
-            ("privacy", |app, _, _| app.privacy.open = true),
+            ("privacy", |app, _, _| app.privacy.editor = Some(any_rule())),
             ("privacy", |app, _, _| {
-                app.privacy.open = true;
+                app.privacy.editor = Some(any_rule());
                 app.privacy.exception_picker_open = true;
             }),
             ("story-page", |app, window, cx| {
@@ -598,7 +606,7 @@ mod dispatch_tests {
         let (app, mut vcx) = new_app(cx);
         let vcx = &mut vcx;
         app.update_in(vcx, |app, window, cx| {
-            app.privacy.open = true;
+            app.privacy.editor = Some(any_rule());
             app.stories.page = Some(crate::ui::story_page::StoryPage::new(ChatId(1), window, cx));
             app.message_ui.link_popup = Some(crate::ui::entity_links::LinkPopup {
                 position: point(px(10.), px(10.)),
@@ -608,7 +616,7 @@ mod dispatch_tests {
         assert_eq!(top(&app, vcx), Some("link-popup"));
         vcx.simulate_keystrokes("escape");
         assert_eq!(top(&app, vcx), Some("story-page"));
-        assert!(app.read_with(vcx, |app, _| app.privacy.open));
+        assert!(app.read_with(vcx, |app, _| app.privacy.editor.is_some()));
         vcx.simulate_keystrokes("escape");
         assert_eq!(top(&app, vcx), Some("privacy"));
         vcx.simulate_keystrokes("escape");
@@ -620,12 +628,12 @@ mod dispatch_tests {
         let (app, mut vcx) = new_app(cx);
         let vcx = &mut vcx;
         app.update_in(vcx, |app, _, _| {
-            app.privacy.open = true;
+            app.privacy.editor = Some(any_rule());
             app.account.passcode.locked = true;
         });
         vcx.simulate_keystrokes("escape");
         let (still_open, still_locked) = app.read_with(vcx, |app, _| {
-            (app.privacy.open, app.account.passcode.locked)
+            (app.privacy.editor.is_some(), app.account.passcode.locked)
         });
         assert!(still_open, "Escape must not touch layers under the lock");
         assert!(still_locked, "Escape must never unlock");

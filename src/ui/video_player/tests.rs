@@ -456,7 +456,9 @@ mod viewer {
             Root::new(shell, window, cx)
         });
         let app = slot.borrow().clone().unwrap();
-        let vcx = VisualTestContext::from_window(handle.into(), cx);
+        let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+        // The demo opens Settings on Privacy; the viewer opens over the chats.
+        app.update(&mut vcx, |app, _| app.close_settings());
         (app, vcx)
     }
 

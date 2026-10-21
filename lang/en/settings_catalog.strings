@@ -115,3 +115,4 @@
 "qll_whats_new_failed" = "Couldn't load the release notes. Check your connection and try again.";
 "qll_whats_new_retry" = "Try again";
 "qll_whats_new_all_releases" = "All releases on GitHub";
+"qll_settings_privacy_security" = "Security";

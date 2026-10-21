@@ -193,7 +193,6 @@
 "lng_settings_passkeys_none_title" = "Protect your account";
 "lng_settings_passkeys_title" = "Passkeys";
 "lng_settings_performance" = "Performance";
-"lng_settings_privacy_title" = "Privacy";
 "lng_settings_quick_dialog_action_delete" = "Delete";
 "lng_settings_quick_dialog_action_title" = "Chat list quick action";
 "lng_settings_quick_dialog_action_unmute" = "Unmute";
@@ -518,7 +517,6 @@
 "qll_prefs_message_reactions" = "Message reactions";
 "qll_prefs_message_text_size" = "Message text size";
 "qll_prefs_messages" = "Messages";
-"qll_prefs_messages_2" = "Messages · {value}";
 "qll_prefs_messages_auto_delete_after_the" = "Messages auto-delete after the timer; in secret chats the countdown starts once the message is viewed.";
 "qll_prefs_middle_click_a_chat_or" = "Middle-click a chat, or swipe it left with two fingers on a trackpad, to run this action. A swipe runs it once you pass the threshold and lift your fingers.";
 "qll_prefs_minimize" = "Minimize";

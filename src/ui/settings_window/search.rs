@@ -95,7 +95,7 @@ impl QuillApp {
         !self.settings.search.query.trim().is_empty() || self.search_field_focused(window, cx)
     }
 
-    fn search_field_focused(&self, window: &Window, cx: &App) -> bool {
+    pub(super) fn search_field_focused(&self, window: &Window, cx: &App) -> bool {
         self.settings
             .search
             .input
@@ -232,7 +232,10 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if window.has_active_dialog(cx) || self.settings.keybinding_capture.is_some() {
+        if window.has_active_dialog(cx)
+            || self.settings.keybinding_capture.is_some()
+            || self.topmost_esc_layer().is_some()
+        {
             return false;
         }
         let keystroke = &event.keystroke;

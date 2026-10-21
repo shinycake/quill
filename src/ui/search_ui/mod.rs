@@ -344,10 +344,15 @@ impl QuillApp {
     }
 
     /// Escape: closes the topmost open layer (see `esc_stack`); with none
-    /// open, moves between the chat and the chat list
+    /// open, steps back in Settings when it is open, else moves between the chat and the chat list
     /// (`chat_list_keys::escape_to_chat_list`). The lock screen ignores it.
     pub(super) fn cancel_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.dismiss_topmost_layer(window, cx) {
+        if self.dismiss_topmost_layer(window, cx) {
+            return;
+        }
+        if self.settings.open && self.settings.keybinding_capture.is_none() {
+            self.settings_escape(window, cx);
+        } else {
             self.escape_to_chat_list(window, cx);
         }
     }
@@ -402,7 +407,7 @@ impl QuillApp {
     }
 
     /// "Suggest frequent contacts" (Privacy) and "Remove all & Disable".
-    pub(super) fn set_top_chats_disabled(&mut self, disabled: bool, cx: &mut Context<Self>) {
+    pub(crate) fn set_top_chats_disabled(&mut self, disabled: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_top_chats_disabled(disabled) {
                 self.connection.set_note(StatusNote::error(user_error_for(

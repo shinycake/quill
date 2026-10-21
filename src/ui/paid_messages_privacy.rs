@@ -62,7 +62,7 @@ pub(super) fn price_slider(
 
 impl QuillApp {
     /// The Messages row of the Privacy screen was pressed.
-    pub(super) fn open_new_chat_editor(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn open_new_chat_editor(&mut self, cx: &mut Context<Self>) {
         self.privacy.editor = Some(PrivacyEditorTarget::NewChat);
         self.privacy.exception_picker_open = false;
         self.paid_messages.charge = None;

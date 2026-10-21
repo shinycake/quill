@@ -5,8 +5,6 @@ use super::*;
 use gpui_kit::*;
 
 pub(crate) struct PrivacyState {
-    /// Slice S3: Privacy settings overlay (TGX Settings → Privacy).
-    pub(super) open: bool,
     /// B13: transient state of the privacy / security extras.
     pub(super) extra: super::privacy_extra::PrivacyUi,
     /// Slice S3: per-rule editor overlay target (Privacy screen).
@@ -42,8 +40,6 @@ pub(crate) struct PrivacyState {
 impl PrivacyState {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         Self {
-            // Slice S3: privacy screen state.
-            open: false,
             extra: super::privacy_extra::PrivacyUi::new(window, cx),
             editor: None,
             exceptions: None,
