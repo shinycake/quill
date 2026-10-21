@@ -51,7 +51,8 @@ register_demos![
     .setup(QuillApp::demo_group_commands),
     // The reply and edit bars, the "Cancel editing?" box and the field's
     // placeholders. `QUILL_DEMO_BARS` is `reply`, `edit`, `confirm`,
-    // `stars`, `broadcast`, `silent`, `anonymous` or `inline`.
+    // `stars`, `broadcast`, `silent`, `anonymous`, `inline`, `topic`,
+    // `topic-reply`, `keyboard` or `offthread`.
     DemoSpec::chats(
         "ready-composer-bars",
         "screenshot demo — reply and edit bars, placeholders (injected, no live Telegram)"
@@ -120,9 +121,15 @@ impl QuillApp {
                 "broadcast" | "silent" => ChatId(-1002000000001),
                 "anonymous" => ChatId(-1002000000002),
                 "inline" => ChatId(51),
+                "topic" | "topic-reply" => FORUM_CHAT,
+                "keyboard" => KEYBOARD_BOT_CHAT,
+                "offthread" => TOPIC_BOT_CHAT,
                 _ => ChatId(-2002),
             };
             session.open_chat(chat);
+            if matches!(mode.as_str(), "topic" | "topic-reply") {
+                session.select_topic(chat, RELEASES_TOPIC);
+            }
         }
         match mode.as_str() {
             "reply" => {
@@ -147,6 +154,13 @@ impl QuillApp {
                 }
             }
             "silent" => self.toggle_composer_silent(),
+            "topic-reply" => {
+                self.composer_ui
+                    .set_reply(Some(quill::composer::ComposerReplyTo::new(
+                        FORUM_CHAT,
+                        quill::ids::MessageId(20),
+                    )));
+            }
             "inline" => {
                 self.composer.update(cx, |input, cx| {
                     input.set_value("@gifbot ", window, cx);
@@ -256,6 +270,14 @@ fn apply_group_commands(
     }
 }
 
+/// The forum supergroup, the bot with a keyboard that has its own
+/// placeholder and the bot that makes its own topics, in the composer demo.
+pub(crate) const FORUM_CHAT: ChatId = ChatId(-1002000000003);
+pub(crate) const KEYBOARD_BOT_CHAT: ChatId = ChatId(71);
+pub(crate) const TOPIC_BOT_CHAT: ChatId = ChatId(72);
+/// The forum's "Releases" topic.
+pub(crate) const RELEASES_TOPIC: i32 = 5;
+
 /// Three chats for the composer bars demo: a group with an incoming and an
 /// own message, a private chat whose user charges 25 Stars per message and
 /// a channel the account owns.
@@ -296,6 +318,7 @@ fn apply_composer_bars(
             session.apply(owned);
         }
     }
+    apply_placeholder_chats(session, &dyn_sink, seq);
     if let Some(chat) = session.chats.get_mut(&-1002000000001) {
         chat.set_member_status(
             quill::telegram::envelope::ChannelMemberStatus::Creator,
@@ -311,5 +334,74 @@ fn apply_composer_bars(
         51,
         quill::paid_messages::CanSend::HasPaidMessages { stars: 25 },
         1,
+    );
+}
+
+/// A forum supergroup with General and Releases topics, a bot whose keyboard
+/// carries its own placeholder, and a bot that makes its own topics.
+fn apply_placeholder_chats(
+    session: &mut quill::state::Session,
+    sink: &std::sync::Arc<dyn quill::diagnostics::DiagnosticSink>,
+    seq: &std::sync::atomic::AtomicU64,
+) {
+    use quill::telegram::client::copy_and_parse;
+    let bot = |id: i64, name: &str, topics: bool| {
+        format!(
+            r#"{{"@type":"updateUser","user":{{"id":{id},"first_name":"{name}","type":{{"@type":"userTypeBot","has_topics":{topics},"allows_users_to_create_topics":false,"is_inline":false}},"status":{{"@type":"userStatusOffline","was_online":1}}}}}}"#
+        )
+    };
+    let chat = |id: i64, title: &str, order: u32| {
+        [
+            format!(
+                r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"{title}","type":{{"@type":"chatTypePrivate","user_id":{id}}},"unread_count":0}}}}"#
+            ),
+            format!(
+                r#"{{"@type":"updateChatPosition","chat_id":{id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"{order}","is_pinned":false}}}}"#
+            ),
+        ]
+    };
+    let forum = FORUM_CHAT.0;
+    let mut jsons = vec![bot(71, "Sizer", false), bot(72, "Storyteller", true)];
+    jsons.extend(chat(71, "Sizer", 48));
+    jsons.extend(chat(72, "Storyteller", 47));
+    jsons.extend([
+        format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":{forum},"title":"Quill releases","type":{{"@type":"chatTypeSupergroup","supergroup_id":2000000003,"is_channel":false}},"unread_count":0}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateChatPosition","chat_id":{forum},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"49","is_pinned":false}}}}"#
+        ),
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":2000000003,"is_forum":true}}"#.to_string(),
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":20,"chat_id":{forum},"sender_id":{{"@type":"messageSenderUser","user_id":31}},"is_outgoing":false,"date":1700000020,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Release candidate is out","entities":[]}}}}}}}}"#
+        ),
+        r#"{"@type":"updateNewMessage","message":{"id":21,"chat_id":71,"sender_id":{"@type":"messageSenderUser","user_id":71},"is_outgoing":false,"date":1700000021,"reply_markup":{"@type":"replyMarkupShowKeyboard","rows":[[{"@type":"keyboardButton","text":"Small","type":{"@type":"keyboardButtonTypeText"}},{"@type":"keyboardButton","text":"Medium","type":{"@type":"keyboardButtonTypeText"}},{"@type":"keyboardButton","text":"Large","type":{"@type":"keyboardButtonTypeText"}}]],"is_persistent":false,"resize_keyboard":true,"one_time":false,"is_personal":false,"force_reply":false,"input_field_placeholder":"Choose a size"},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Which size do you need?","entities":[]}}}}"#.to_string(),
+        r#"{"@type":"updateNewMessage","message":{"id":22,"chat_id":72,"sender_id":{"@type":"messageSenderUser","user_id":72},"is_outgoing":false,"date":1700000022,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Pick a story from the topics above.","entities":[]}}}}"#.to_string(),
+    ]);
+    let topic = |id: i32, name: &str, general: bool| {
+        format!(
+            r#"{{"info":{{"@type":"forumTopicInfo","chat_id":{forum},"forum_topic_id":{id},"name":"{name}","icon":{{"@type":"forumTopicIcon","color":16766590,"custom_emoji_id":"0"}},"is_general":{general},"is_closed":false,"is_hidden":false}},"order":"{id}","is_pinned":false,"unread_count":0,"last_read_inbox_message_id":0,"notification_settings":{{"@type":"chatNotificationSettings","use_default_mute_for":true,"mute_for":0}}}}"#
+        )
+    };
+    let apply = |session: &mut quill::state::Session, json: &str| {
+        if let Some(owned) = copy_and_parse(json, seq, sink) {
+            session.apply(owned);
+        }
+    };
+    for json in &jsons {
+        apply(session, json);
+    }
+    let extra = session.request(
+        quill::state::RequestPurpose::GetForumTopics,
+        Some(FORUM_CHAT),
+    );
+    apply(
+        session,
+        &format!(
+            r#"{{"@type":"forumTopics","@extra":"{}","total_count":2,"topics":[{},{}],"next_offset_date":0,"next_offset_message_id":0,"next_offset_forum_topic_id":0}}"#,
+            extra.0,
+            topic(1, "General", true),
+            topic(RELEASES_TOPIC, "Releases", false),
+        ),
     );
 }

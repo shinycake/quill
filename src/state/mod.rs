@@ -99,6 +99,7 @@ mod session_chat_caps;
 mod session_chat_look;
 mod session_chat_search;
 mod session_chatlist;
+mod session_composer_topic;
 mod session_connection;
 mod session_date_jump;
 mod session_drafts;

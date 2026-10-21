@@ -77,7 +77,8 @@ fn nested_and_overlapping_spans_round_trip() {
     // and formatting per character are kept.
     let crossing = doc("abcdef", &[("abcd", T::Bold), ("cdef", T::Strikethrough)]);
     let markup = crossing.to_markup();
-    assert_eq!(markup, "**ab~~cd~~**~~ef~~");
+    // The strike starts inside the word `abcdef`, so a barrier keeps it.
+    assert_eq!(markup, "**ab\u{10}~~cd~~**~~ef~~");
     assert_eq!(ComposerDoc::from_markup(&markup), crossing);
 }
 
