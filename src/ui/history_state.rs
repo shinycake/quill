@@ -113,9 +113,9 @@ pub(crate) struct HistoryUi {
     /// The instant the rows being worked out are judged at, so the rows key
     /// and the build agree on how far each dissolve has got.
     pub(super) vanish_now: std::cell::Cell<Option<std::time::Instant>>,
-    /// Test-only, never cleared: holds `vanish_now` still so frames cannot
-    /// cross a phase. Production leaves it false and repins every round.
-    pub(super) vanish_held: std::cell::Cell<bool>,
+    /// Where the dissolves read the time: the wall clock in the app, a
+    /// clock that only moves when told to in tests.
+    pub(super) vanish_clock: std::cell::Cell<super::vanish::VanishClock>,
     /// Phase B3: the open chat whose self-destruct countdown badges are
     /// ticking (`Some` exactly while the 1s tick task runs). Mirrors
     /// `slow_mode_tick_chat`.
@@ -183,7 +183,7 @@ impl HistoryUi {
             stream_reveal: Default::default(),
             vanishing: Default::default(),
             vanish_now: Default::default(),
-            vanish_held: Default::default(),
+            vanish_clock: Default::default(),
             self_destruct_tick_chat: None,
             live_location_tick_chat: None,
             topic_info_open: false,

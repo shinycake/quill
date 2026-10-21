@@ -256,6 +256,31 @@ fn grains(seed: u64, area: Bounds<Pixels>, palette: &Palette) -> Vec<Grain> {
     grains
 }
 
+/// Where the dissolves read the time. Every instant they judge comes from
+/// here: when a delete was asked for, the frame's pin, and a read before
+/// any pin.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) enum VanishClock {
+    #[default]
+    Wall,
+    /// Tests: time stands at this instant until the test moves it, so no
+    /// phase depends on how fast the runner is.
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
+    Manual(Instant),
+}
+
+impl VanishClock {
+    fn now(self) -> Instant {
+        match self {
+            Self::Wall => Instant::now(),
+            #[cfg(test)]
+            #[cfg(feature = "demo-capture")]
+            Self::Manual(at) => at,
+        }
+    }
+}
+
 pub(super) struct Vanishing {
     message: HistoryMessage,
     requested: Instant,
@@ -338,7 +363,7 @@ impl QuillApp {
         let Some(history) = self.session().and_then(|s| s.histories.get(&chat_id.0)) else {
             return;
         };
-        let now = Instant::now();
+        let now = self.vanish_clock_now();
         let mut vanishing = self.history.vanishing.borrow_mut();
         for id in ids {
             let Some(message) = history.messages.get(&id.0) else {
@@ -419,13 +444,18 @@ impl QuillApp {
     /// Judge the dissolves at one instant for this frame: taken once at the
     /// top of `conversation`, read by the rows work and the dust alike.
     pub(super) fn pin_vanish_now(&self) {
-        if !self.history.vanish_held.get() {
-            self.history.vanish_now.set(Some(Instant::now()));
-        }
+        self.history.vanish_now.set(Some(self.vanish_clock_now()));
     }
 
     fn vanish_now(&self) -> Instant {
-        self.history.vanish_now.get().unwrap_or_else(Instant::now)
+        self.history
+            .vanish_now
+            .get()
+            .unwrap_or_else(|| self.vanish_clock_now())
+    }
+
+    fn vanish_clock_now(&self) -> Instant {
+        self.history.vanish_clock.get().now()
     }
 
     /// Seconds since a crumbling message left the history. `None` on a
@@ -490,7 +520,7 @@ impl QuillApp {
     /// rows whose gap is closing: only those are measured again each frame.
     ///
     /// This reads the same instant as paint and the rows hash
-    /// (`vanish_now`: the pinned or held one, else the current one), so the
+    /// (`vanish_now`: the frame's pin, else the clock's time), so the
     /// remeasure and the drawn gap agree however long a frame takes.
     pub(super) fn closing_rows(&self) -> Vec<usize> {
         let now = self.vanish_now();
@@ -586,13 +616,21 @@ impl QuillApp {
         }
     }
 
-    /// Let `secs` pass for every dissolve, started or not, without waiting.
-    pub(super) fn age_vanishing_for_test(&self, secs: f32) {
-        let back = Duration::from_secs_f32(secs);
-        for ghost in self.history.vanishing.borrow_mut().iter_mut() {
-            ghost.requested = ghost.requested.checked_sub(back).unwrap_or(ghost.requested);
-            ghost.started = ghost.started.and_then(|at| at.checked_sub(back));
-        }
+    /// Stop the dissolves' clock: from now on it moves only by
+    /// `advance_vanish_clock` (and `set_vanishing_clock` pins its instant).
+    pub(super) fn freeze_vanish_clock(&self) {
+        let now = self.vanish_clock_now();
+        self.history.vanish_clock.set(VanishClock::Manual(now));
+    }
+
+    /// Move the stopped clock `secs` on. The frame pin is left alone: the
+    /// next frame (or `pin_vanish_now`) takes the new instant.
+    pub(super) fn advance_vanish_clock(&self, secs: f32) {
+        let now = self.vanish_clock_now();
+        let later = now
+            .checked_add(Duration::from_secs_f32(secs))
+            .unwrap_or(now);
+        self.history.vanish_clock.set(VanishClock::Manual(later));
     }
 
     /// The dissolves still held, and the clock the frame last pinned.
@@ -603,12 +641,13 @@ impl QuillApp {
         )
     }
 
-    /// Put every started dissolve `secs` into its animation.
+    /// Stop the clock and put every started dissolve `secs` into its
+    /// animation at the pinned instant.
     pub(super) fn set_vanishing_clock(&self, secs: f32) {
+        self.freeze_vanish_clock();
+        self.pin_vanish_now();
         let back = Duration::from_secs_f32(secs);
-        let now = Instant::now();
-        self.history.vanish_now.set(Some(now));
-        self.history.vanish_held.set(true);
+        let now = self.vanish_now();
         for ghost in self.history.vanishing.borrow_mut().iter_mut() {
             if ghost.started.is_some() {
                 ghost.started = now.checked_sub(back);
