@@ -87,3 +87,31 @@ fn confirming_removes_the_gift_from_the_grid_and_the_box(cx: &mut TestAppContext
         assert_eq!(hub.map(|h| h.gifts_total), Some(1));
     });
 }
+
+fn new_with_owner(cx: &mut TestAppContext, owner: i64) -> (Entity<QuillApp>, VisualTestContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.payments.hub.gifts_owner =
+                Some(quill::telegram::envelope::MessageSender::Chat { chat_id: owner });
+        }
+        cx.notify();
+    });
+    vcx.run_until_parked();
+    (app, vcx)
+}
+
+#[gpui_kit::test]
+fn a_channel_you_created_offers_delete_but_no_other_owner_actions(cx: &mut TestAppContext) {
+    let (_app, mut vcx) = new_with_owner(cx, super::CHANNEL);
+    let vcx = &mut vcx;
+    assert!(vcx.debug_bounds("gift-delete").is_some());
+    assert!(vcx.debug_bounds("gift-pin").is_none());
+}
+
+#[gpui_kit::test]
+fn a_channel_you_only_administer_offers_no_delete(cx: &mut TestAppContext) {
+    let (_app, mut vcx) = new_with_owner(cx, super::ADMIN_CHANNEL);
+    let vcx = &mut vcx;
+    assert!(vcx.debug_bounds("gift-delete").is_none());
+}

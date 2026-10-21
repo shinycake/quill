@@ -299,6 +299,10 @@ fn delete_is_offered_only_when_tdlib_allows_it_to_the_owner() {
     assert!(!gift.can_delete(false));
     assert!(!regular(json!({"can_be_deleted": true, "was_refunded": true})).can_delete(true));
     assert!(!regular(json!({})).can_delete(true));
+    // A limited-supply gift stays (tdesktop `limitedCount`).
+    let mut limited = regular(json!({"can_be_deleted": true}));
+    limited.gift.limited = true;
+    assert!(!limited.can_delete(true));
     // tdesktop never offers it for a collectible, whatever the flag says.
     assert!(!unique(json!({"can_be_deleted": true})).can_delete(true));
 }

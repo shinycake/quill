@@ -176,6 +176,19 @@ impl QuillApp {
             return rows;
         };
         let message_id = message.id;
+        // tdesktop's AddWhoReactedAction puts a private chat's date line
+        // above the read time; a group's reactors row comes first.
+        let private = session.chats.get(&chat_id.0).is_some_and(|chat| {
+            matches!(
+                chat.kind,
+                quill::telegram::envelope::ChatKind::Private { .. }
+            )
+        });
+        let (date_order, audience_order) = if private {
+            (order::AUDIENCE, order::PRIVATE_READ)
+        } else {
+            (order::SENT, order::AUDIENCE)
+        };
         let kind = seen_kind(quill::telegram::envelope::effective_content(
             &message.content,
             message.ephemeral.as_ref(),
@@ -191,14 +204,14 @@ impl QuillApp {
             if let Audience::Ready(read) = &audience.read_date {
                 let label = read_status_label(*read, &now);
                 rows.push(info_row(
-                    order::AUDIENCE,
+                    audience_order,
                     "menu-read-date",
                     Some(IconName::Eye),
                     label,
                 ));
             } else if audience.viewers.is_loading() || audience.reactions.is_loading() {
                 rows.push(info_row(
-                    order::AUDIENCE,
+                    audience_order,
                     "menu-seen-loading",
                     Some(IconName::Eye),
                     tr(keys::Q_CHAT_LOADING),
@@ -232,7 +245,7 @@ impl QuillApp {
                     .collect();
                 let row_hover = cx.theme().accent;
                 rows.push((
-                    order::AUDIENCE,
+                    audience_order,
                     div()
                         .id("menu-audience")
                         .flex()
@@ -246,7 +259,7 @@ impl QuillApp {
                         .text_color(text_menu())
                         .hover(|style| style.bg(row_hover))
                         .menu_key_target(
-                            row_key(order::AUDIENCE),
+                            row_key(audience_order),
                             &self.frame.context_menu_items,
                             cx,
                         )
@@ -285,7 +298,7 @@ impl QuillApp {
             if message.extras.edit_date > 0 {
                 let edited = quill::local_time::civil_local(i64::from(message.extras.edit_date));
                 rows.push(info_row(
-                    order::SENT,
+                    date_order,
                     "menu-edited",
                     Some(IconName::Pencil),
                     quill::message_menu::edited_label(&edited, &now),
@@ -293,7 +306,7 @@ impl QuillApp {
             } else {
                 let sent = quill::local_time::civil_local(i64::from(message.date));
                 rows.push(info_row(
-                    order::SENT,
+                    date_order,
                     "menu-sent",
                     None,
                     quill::message_menu::sent_label(&sent, &now),

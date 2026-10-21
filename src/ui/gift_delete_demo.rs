@@ -36,11 +36,24 @@ fn regular_gift(id: &str, stars: i64, can_be_deleted: bool) -> Value {
             "@type": "gift", "id": "9", "star_count": stars}}})
 }
 
+/// The channel of `QUILL_DEMO_GIFT_DELETE=channel`, created by the user.
+pub(super) const CHANNEL: i64 = -1_002_000_000_777;
+/// A second channel where the user is only an admin.
+pub(super) const ADMIN_CHANNEL: i64 = -1_002_000_000_778;
+
 pub(super) fn seed_gift_delete_session(sink: Arc<MemorySink>) -> Session {
-    let mut session = seed_gift_market_session(sink);
+    let mut session = seed_gift_market_session(sink.clone());
+    seed_channels(&mut session, &sink);
+    let channel = std::env::var("QUILL_DEMO_GIFT_DELETE").ok();
     let hub = &mut session.payments.hub;
     hub.gifts_open = true;
-    hub.gifts_owner = Some(MessageSender::User { user_id: ME });
+    hub.gifts_owner = Some(match channel.as_deref() {
+        Some("channel") => MessageSender::Chat { chat_id: CHANNEL },
+        Some("admin") => MessageSender::Chat {
+            chat_id: ADMIN_CHANNEL,
+        },
+        _ => MessageSender::User { user_id: ME },
+    });
     hub.gifts = [
         regular_gift(DELETABLE, 100, true),
         regular_gift(KEPT, 250, false),
@@ -52,6 +65,31 @@ pub(super) fn seed_gift_delete_session(sink: Arc<MemorySink>) -> Session {
     hub.gifts_loaded = true;
     hub.gift_selected = Some(DELETABLE.into());
     session
+}
+
+fn seed_channels(session: &mut Session, sink: &Arc<MemorySink>) {
+    use quill::diagnostics::DiagnosticSink;
+    use quill::telegram::client::copy_and_parse;
+    use quill::telegram::envelope::ChannelMemberStatus;
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let seq = std::sync::atomic::AtomicU64::new(session.last_seq);
+    for (id, title) in [(CHANNEL, "Quill news"), (ADMIN_CHANNEL, "Quill makers")] {
+        let json = format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"{title}","type":{{"@type":"chatTypeSupergroup","supergroup_id":{},"is_channel":true}},"unread_count":0}}}}"#,
+            -id - 1_000_000_000_000
+        );
+        if let Some(owned) = copy_and_parse(&json, &seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    for (id, status) in [
+        (CHANNEL, ChannelMemberStatus::Creator),
+        (ADMIN_CHANNEL, ChannelMemberStatus::Administrator),
+    ] {
+        if let Some(chat) = session.chats.get_mut(&id) {
+            chat.my_member_status = Some(status);
+        }
+    }
 }
 
 impl QuillApp {

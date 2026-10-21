@@ -24,6 +24,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         hub.gifts_owner.ok_or(ConnectSendError::InvalidRequest)
     }
 
+    /// Like [`Self::gifts_owner_if_mine`], but a channel the user created
+    /// qualifies too (`Session::gifts_deletable`).
+    fn gifts_owner_if_deletable(&self) -> Result<MessageSender, ConnectSendError> {
+        let hub = &self.session.payments.hub;
+        if !self.chats_path_active() || hub.gift_mutating || !self.session.gifts_deletable() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        hub.gifts_owner.ok_or(ConnectSendError::InvalidRequest)
+    }
+
     /// Lock the list, build the request with the owner and send it; the
     /// reducer unlocks on the answer.
     fn mutate_own_gifts(
@@ -32,6 +42,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         build: impl FnOnce(RequestId, MessageSender) -> String,
     ) -> Result<RequestId, ConnectSendError> {
         let owner = self.gifts_owner_if_mine()?;
+        self.send_gift_mutation(owner, purpose, build)
+    }
+
+    fn send_gift_mutation(
+        &mut self,
+        owner: MessageSender,
+        purpose: PaymentsPurpose,
+        build: impl FnOnce(RequestId, MessageSender) -> String,
+    ) -> Result<RequestId, ConnectSendError> {
         let extra = self
             .session
             .request(RequestPurpose::Payments(purpose), None);
@@ -441,10 +460,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// of the signed-in user that TDLib marks `can_be_deleted`.
     pub fn delete_received_gift(&mut self, id: &str) -> Result<RequestId, ConnectSendError> {
         let gift = self.own_gift(id)?;
-        if !gift.can_delete(true) || self.session.payments.hub.gift_mutating {
+        let owner = self.gifts_owner_if_deletable()?;
+        if !gift.can_delete(true) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self.mutate_own_gifts(PaymentsPurpose::DeleteGift, |extra, _| {
+        let extra = self.send_gift_mutation(owner, PaymentsPurpose::DeleteGift, |extra, _| {
             rq::delete_gift(extra, id)
         })?;
         self.session.payments.gifts_manage.deleting = Some(id.to_string());

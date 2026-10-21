@@ -195,3 +195,28 @@ fn other_chats_offer_no_block(cx: &mut TestAppContext) {
     open_menu_on(&app, vcx, FORWARD_CHAT, MessageId(40));
     assert!(!has(vcx, "menu-block-sender"));
 }
+
+#[gpui_kit::test]
+fn a_private_chat_lists_the_date_above_the_read_time(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_menu_on(&app, vcx, TIMES_CHAT, MessageId(71));
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            let mut audience = quill::state::MessageAudience::new(TIMES_CHAT, MessageId(71));
+            audience.read_date = quill::state::Audience::Ready(
+                quill::telegram::envelope::MessageReadDate::Read(1_773_504_420),
+            );
+            session.messages.message_audience = Some(audience);
+        }
+        cx.notify();
+    });
+    frames(vcx);
+    let (date, read) = vcx.update(|window, _| {
+        (
+            window.find("menu-sent").bounds().origin.y,
+            window.find("menu-read-date").bounds().origin.y,
+        )
+    });
+    assert!(date < read, "the sent line sits above the read time");
+}
