@@ -77,8 +77,8 @@ thread_local! {
     /// were retired in.
     static RETIRED: RefCell<Vec<(Arc<RenderImage>, u64)>> = const { RefCell::new(Vec::new()) };
     /// When the cache last started showing an image it didn't show just
-    /// before (scrolling, new content), and the activity the last idle
-    /// trim covered.
+    /// before (scrolling, new content) or stopped showing one (another
+    /// chat), and the activity the last idle trim covered.
     static ACTIVITY: Cell<Option<Instant>> = const { Cell::new(None) };
     static IDLE_TRIMMED: Cell<Option<Instant>> = const { Cell::new(None) };
     /// The slice being drawn (`app_slice`), for paint stamps.
@@ -214,6 +214,18 @@ fn note_activity() {
     ACTIVITY.with(|activity| activity.set(Some(Instant::now())));
 }
 
+/// Images leaving the screen (another chat opened, a panel closed) change
+/// it as much as new ones arriving, so fewer cached images that may be on
+/// screen than at the last frame is activity too. Before this, leaving a
+/// chat full of photos for one without kept the cache at its scrolling
+/// budget for as long as no new picture showed.
+/// `shown` holds the count from the last call.
+fn note_departures(shown: &mut usize, now: usize) {
+    if now < std::mem::replace(shown, now) {
+        note_activity();
+    }
+}
+
 /// When the idle trim is due: `IDLE_AFTER` past the last change of what
 /// is on screen, unless the last idle trim already covered it.
 pub(super) fn idle_trim_due() -> Option<Instant> {
@@ -284,10 +296,12 @@ pub(super) fn sweep(window: &mut Window, cx: &mut App) {
     }
 }
 
-/// Hand the allocator's free pages back to the system once a trim freed a
-/// lot (decoded images are large, short-lived blocks; without this the
-/// freed space stays resident as allocator free lists).
-/// - macOS: `malloc_zone_pressure_relief` on every zone.
+/// Hand the allocator's free pages back to the system once Quill goes
+/// idle (decoded images and their decode buffers are large, short-lived
+/// blocks; without this the freed space stays resident as allocator free
+/// lists).
+/// - macOS: `malloc_zone_pressure_relief` on every zone. Blocks of 64 KiB
+///   and up already went back when freed (`quill::large_alloc`).
 /// - Linux (glibc): `malloc_trim`.
 /// - Windows and other libcs: nothing; the Windows heap decommits large
 ///   free ranges on its own.
@@ -676,6 +690,8 @@ pub(super) struct BoundedImageCache {
     /// entry key). May list evicted entries; checked against `entries`.
     variants: HashMap<u64, SmallVec<[(u32, u64); 2]>>,
     bytes: usize,
+    /// How many entries may have been on screen at the last `trim`.
+    shown: usize,
     /// The slice being drawn (shared with `app_slice`).
     scope: Rc<Cell<Option<EntityId>>>,
 }
@@ -687,6 +703,7 @@ impl BoundedImageCache {
             entries: HashMap::new(),
             variants: HashMap::new(),
             bytes: 0,
+            shown: 0,
             scope,
         }
     }
@@ -694,6 +711,8 @@ impl BoundedImageCache {
     /// Evict down to the scrolling budget. Call at the start of a frame,
     /// before anything renders, so last frame's loads are all counted.
     pub(super) fn trim(&mut self, window: &mut Window, cx: &mut App) {
+        let shown = self.entries.values().filter(|e| e.may_be_visible()).count();
+        note_departures(&mut self.shown, shown);
         for image in self.evict(ACTIVE_BUDGET) {
             cx.drop_image(image, Some(&mut *window));
         }
@@ -706,7 +725,6 @@ impl BoundedImageCache {
         IDLE_TRIMMED.with(|trimmed| trimmed.set(ACTIVITY.with(Cell::get)));
         let before = (self.bytes, self.entries.len());
         let images = self.evict(IDLE_BUDGET);
-        let evicted = !images.is_empty();
         if super::frame_clock::trace_ticks() {
             eprintln!(
                 "image idle trim: {} images, {:.1} MB -> {} images, {:.1} MB",
@@ -719,9 +737,10 @@ impl BoundedImageCache {
         for image in images {
             cx.drop_image(image, None);
         }
-        if evicted {
-            release_free_heap();
-        }
+        // Even with nothing evicted here: what left the screen (a closed
+        // viewer's full-size photo, a chat's sticker frames) was freed
+        // meanwhile.
+        release_free_heap();
     }
 
     /// Remove entries past `budget`; their loaded images, for the caller
@@ -974,7 +993,7 @@ mod tests {
         plan_eviction, slice_rendered, slice_shown,
     };
     use super::{Fit, VariantPick, atlas_cost, bucket_edge, pick_variant, shorter_side_in_frame};
-    use super::{next_image_id, replayable_slices, retired_may_show};
+    use super::{next_image_id, note_departures, replayable_slices, retired_may_show};
     use gpui_kit::EntityId;
 
     /// The F1 leak: an inline video retires a picture every frame while
@@ -1096,6 +1115,47 @@ mod tests {
         let now = begin_frame();
         assert!(!newly_shown(None, Some(now - 1)));
         assert!(newly_shown(None, Some(now - 2)));
+    }
+
+    /// The browse finding: photos of a chat left for one without stayed at
+    /// the scrolling budget, because only newly shown images counted as
+    /// activity and no idle trim was ever scheduled.
+    #[test]
+    fn leaving_a_chat_of_photos_schedules_the_idle_trim() {
+        let chat = EntityId::from((1_u64 << 32) | 17);
+        let photos = begin_frame();
+        slice_rendered(chat);
+        begin_frame();
+        slice_shown(chat);
+        let on_screen = |used: &[u64]| {
+            used.iter()
+                .filter(|u| may_be_visible(Some(chat), **u))
+                .count()
+        };
+        let used = [photos; 3];
+        let mut shown = 0;
+        note_departures(&mut shown, on_screen(&used));
+        assert_eq!(shown, 3);
+        assert_eq!(
+            idle_trim_due(),
+            None,
+            "arriving photos note activity elsewhere"
+        );
+        // Replayed for a while: nothing changed.
+        begin_frame();
+        slice_shown(chat);
+        note_departures(&mut shown, on_screen(&used));
+        assert_eq!(idle_trim_due(), None);
+        // Another chat opens: the slice renders without the photos.
+        slice_rendered(chat);
+        begin_frame();
+        slice_shown(chat);
+        note_departures(&mut shown, on_screen(&used));
+        assert_eq!(shown, 0);
+        assert!(
+            idle_trim_due().is_some(),
+            "no idle trim after the photos left"
+        );
     }
 
     #[test]

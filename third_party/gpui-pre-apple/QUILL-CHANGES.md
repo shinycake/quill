@@ -52,3 +52,12 @@ The Quill project also changed it in 2026 to give back idle window memory
   layer's drawable size to 1×1 and back, which empties the drawable pool
   (up to three window-sized surfaces). The surface on screen stays as the
   layer's contents until the next present.
+
+The Quill project also changed it in 2026 to give back memory after
+browsing (`docs/decisions/sweep-r3-browse-memory.md`):
+
+- `src/metal_atlas.rs`: implements `AtlasBackend::insert_image` (see
+  gpui-pre's `QUILL-CHANGES.md`). Each `MetalAtlasTexture` records whether
+  it holds images, and `allocate` only places a tile in a texture holding
+  the same kind, so an image texture is freed once its images leave.
+  Test: `test_glyphs_never_keep_an_image_texture_alive`.

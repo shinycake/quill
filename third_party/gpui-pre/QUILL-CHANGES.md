@@ -70,3 +70,15 @@ that advanced the executor's clock never moved them and a loaded machine let
 real time decide whether a kit dialog or alert had finished entering. They
 now read `cx.background_executor().now()`, which is the wall clock in a
 running app and the simulated clock under `TestAppContext`.
+
+## Images get atlas textures of their own
+
+Added in 2026 to give back memory after browsing
+(`docs/decisions/sweep-r3-browse-memory.md`). `src/platform.rs`:
+`AtlasBackend::insert_image`, which `AtlasState::get_or_insert_with` calls
+for `AtlasKey::Image` tiles (glyphs and SVGs still go through `insert`).
+Its default forwards to `insert`, so backends without the split (the
+headless atlas) behave as before. A texture is freed only once its last
+tile goes, and glyph and SVG tiles are never removed, so a colour emoji
+placed in the space a photo left in its texture kept that texture (4 MB
+and up) alive for good.
