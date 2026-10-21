@@ -4,7 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::{CtapError, status};
-use rand::RngCore;
+use rand::Rng;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -173,7 +173,7 @@ impl Channel {
         control: &mut Control<'_>,
     ) -> Result<Self, HidError> {
         let mut nonce = [0u8; 8];
-        rand::rngs::OsRng.fill_bytes(&mut nonce);
+        rand::rng().fill_bytes(&mut nonce);
         let report_len = device.report_len();
         for report in frame(BROADCAST_CID, CMD_INIT, &nonce, report_len)? {
             device.write_report(&report)?;

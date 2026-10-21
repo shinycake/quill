@@ -9,7 +9,7 @@
 use crate::ids::AccountKey;
 use crate::locks::LockExt;
 use crate::settings::AccountPaths;
-use rand::RngCore;
+use rand::Rng;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -24,7 +24,7 @@ pub struct DatabaseKey(Vec<u8>);
 impl DatabaseKey {
     pub fn generate() -> Self {
         let mut bytes = vec![0u8; 32];
-        rand::thread_rng().fill_bytes(&mut bytes);
+        rand::rng().fill_bytes(&mut bytes);
         Self(bytes)
     }
 

@@ -25,7 +25,7 @@ use crate::settings::AccountPaths;
 use base64::Engine;
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
-use rand::RngCore;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -87,7 +87,7 @@ pub struct MasterKey([u8; 32]);
 impl MasterKey {
     fn generate() -> Self {
         let mut bytes = [0u8; 32];
-        rand::thread_rng().fill_bytes(&mut bytes);
+        rand::rng().fill_bytes(&mut bytes);
         Self(bytes)
     }
 
@@ -218,7 +218,7 @@ fn derive_kek(passcode: &str, salt: &[u8], iterations: u32) -> MasterKey {
 fn seal(key: &MasterKey, aad: &[u8], plain: &[u8]) -> Result<Vec<u8>, PasscodeError> {
     let cipher = XChaCha20Poly1305::new(<&Key>::from(key.as_bytes()));
     let mut nonce = [0u8; NONCE_LEN];
-    rand::thread_rng().fill_bytes(&mut nonce);
+    rand::rng().fill_bytes(&mut nonce);
     let body = cipher
         .encrypt(<&XNonce>::from(&nonce), Payload { msg: plain, aad })
         .map_err(|_| PasscodeError::Corrupt)?;
@@ -302,7 +302,7 @@ fn build_config(
     previous: Option<&PasscodeConfig>,
 ) -> Result<PasscodeConfig, PasscodeError> {
     let mut salt = [0u8; SALT_LEN];
-    rand::thread_rng().fill_bytes(&mut salt);
+    rand::rng().fill_bytes(&mut salt);
     let kek = derive_kek(passcode, &salt, iterations);
     let wrapped = seal(&kek, MASTER_AAD, master.as_bytes())?;
     Ok(PasscodeConfig {

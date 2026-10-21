@@ -11,7 +11,7 @@ ntgcalls, rlottie, the Visual C++ runtime) and bundled data files are listed in
 
 ## Overview
 
-- MIT License: 667
+- MIT License: 664
 - Apache License 2.0: 42
 - Unicode License v3: 24
 - ISC License: 22
@@ -9178,11 +9178,8 @@ DEALINGS IN THE SOFTWARE.
 
 Used by:
 - [rand 0.10.3](https://github.com/rust-random/rand)
-- [rand 0.8.8](https://github.com/rust-random/rand)
 - [rand 0.9.5](https://github.com/rust-random/rand)
-- [rand_chacha 0.3.1](https://github.com/rust-random/rand)
 - [rand_chacha 0.9.0](https://github.com/rust-random/rand)
-- [rand_core 0.6.4](https://github.com/rust-random/rand)
 - [rand_core 0.9.5](https://github.com/rust-random/rand)
 
 ````text

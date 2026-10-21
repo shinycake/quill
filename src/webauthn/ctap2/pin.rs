@@ -16,7 +16,7 @@ use hkdf::Hkdf;
 use hmac::{Hmac, KeyInit, Mac};
 use p256::elliptic_curve::sec1::ToSec1Point;
 use p256::{PublicKey, SecretKey};
-use rand::RngCore;
+use rand::Rng;
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
@@ -119,7 +119,7 @@ impl SharedSecret {
 
     /// AES-256-CBC without padding: a zero IV in protocol one, a random IV
     /// sent in front of the ciphertext in protocol two.
-    pub fn encrypt(&self, plain: &[u8], rng: &mut dyn RngCore) -> Option<Vec<u8>> {
+    pub fn encrypt(&self, plain: &[u8], rng: &mut dyn Rng) -> Option<Vec<u8>> {
         if !plain.len().is_multiple_of(16) {
             return None;
         }
@@ -163,7 +163,7 @@ impl SharedSecret {
 }
 
 /// A random P-256 key (retrying the vanishingly rare invalid scalar).
-pub fn random_secret(rng: &mut dyn RngCore) -> Option<SecretKey> {
+pub fn random_secret(rng: &mut dyn Rng) -> Option<SecretKey> {
     for _ in 0..8 {
         let mut bytes = Zeroizing::new([0u8; 32]);
         rng.fill_bytes(bytes.as_mut());
@@ -244,7 +244,7 @@ pub fn pin_token(
     pin: &str,
     permission: u8,
     rp_id: &str,
-    rng: &mut dyn RngCore,
+    rng: &mut dyn Rng,
     control: &mut Control<'_>,
 ) -> Result<PinToken, CtapError> {
     let protocol = Protocol::choose(&key.info().pin_protocols);
