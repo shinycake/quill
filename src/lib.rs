@@ -77,6 +77,7 @@ pub mod folders;
 pub mod font_choice;
 pub mod force_reply;
 pub mod game_share;
+pub mod gif_grid;
 pub mod gift_colors;
 pub mod gift_manage;
 pub mod gift_market;

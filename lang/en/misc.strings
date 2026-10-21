@@ -308,7 +308,6 @@
 "qll_misc_game" = "Game";
 "qll_misc_get_boosts" = "Get boosts";
 "qll_misc_getting_the_recording_ready" = "getting the recording ready…";
-"qll_misc_gif_search" = "GIF search: {search_provider}";
 "qll_misc_gif_search_is_not_available" = "GIF search is not available yet. Try again after connecting.";
 "qll_misc_go_to_replied_message" = "Go to replied message: {preview}";
 "qll_misc_good_morning" = "Good morning";
@@ -363,11 +362,9 @@
 "qll_misc_loading" = "Loading…";
 "qll_misc_loading_days" = "Loading days…";
 "qll_misc_loading_full_message" = "loading full message…";
-"qll_misc_loading_gifs" = "Loading GIFs…";
 "qll_misc_loading_icons" = "Loading icons";
 "qll_misc_loading_image" = "loading image";
 "qll_misc_loading_masks" = "Loading masks…";
-"qll_misc_loading_more_gifs" = "loading more GIFs…";
 "qll_misc_loading_scores" = "Loading scores…";
 "qll_misc_loading_statuses" = "Loading statuses";
 "qll_misc_loading_the_day" = "Loading the day…";
@@ -391,7 +388,6 @@
 "qll_misc_microphone" = "Microphone";
 "qll_misc_monospace" = "Monospace";
 "qll_misc_more_archived_masks" = "More archived masks";
-"qll_misc_more_gifs" = "More GIFs";
 "qll_misc_move_down" = "Move Down";
 "qll_misc_move_up" = "Move Up";
 "qll_misc_mute" = "Mute";
@@ -559,7 +555,6 @@
 "qll_misc_search_languages" = "Search languages";
 "qll_misc_search_results" = "Search results";
 "qll_misc_search_stickers_and_sets" = "Search stickers and sets";
-"qll_misc_searching_gifs" = "searching GIFs…";
 "qll_misc_seek_bar" = "Seek Bar";
 "qll_misc_selected" = ", selected";
 "qll_misc_selection_cleared" = "selection cleared";

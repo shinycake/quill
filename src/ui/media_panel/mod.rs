@@ -348,6 +348,14 @@ impl QuillApp {
 
     fn set_media_panel_tab(&mut self, tab: PanelTab, cx: &mut Context<Self>) {
         if self.pickers.media_panel.tab != tab {
+            // GIFs download and play only while their tab shows.
+            if self.pickers.media_panel.tab == PanelTab::Gifs {
+                if let Some(live) = self.live.as_mut() {
+                    live.driver.close_gif_panel();
+                } else if let Some(session) = self.demo_session.as_mut() {
+                    session.stickers.gifs.close();
+                }
+            }
             self.pickers.media_panel.tab = tab;
             self.pickers.media_panel.category = None;
             self.pickers.media_panel.key = None;
@@ -979,6 +987,7 @@ fn placeholder_cell(size: f32, cx: &App) -> AnyElement {
 
 mod categories;
 mod custom_emoji_cell;
+pub(in crate::ui) use custom_emoji_cell::section_chip;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod panel_tests;

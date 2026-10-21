@@ -43,9 +43,34 @@ use std::time::{Duration, Instant};
 /// `(chat id, message id)`.
 pub(super) type Key = (i64, i64);
 
-/// The GIF panel's players live under this chat id, which no chat uses;
-/// the off-screen sweep leaves them alone (the panel is not the history).
-pub(super) const PANEL_CHAT: i64 = i64::MIN;
+/// A panel over the composer whose clips play while it shows: the inline
+/// results or the media panel's GIFs. Its players live under a chat id no
+/// chat uses; the history's off-screen sweep leaves them alone, and each
+/// panel's render passes reap only its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Panel {
+    InlineResults,
+    Gifs,
+}
+
+impl Panel {
+    pub(super) const fn chat(self) -> i64 {
+        match self {
+            Self::InlineResults => i64::MIN,
+            Self::Gifs => i64::MIN + 1,
+        }
+    }
+
+    fn of(chat: i64) -> Option<Self> {
+        [Self::InlineResults, Self::Gifs]
+            .into_iter()
+            .find(|panel| panel.chat() == chat)
+    }
+}
+
+fn is_panel(chat: i64) -> bool {
+    Panel::of(chat).is_some()
+}
 
 /// Decoded picture memory (queued pictures plus the one shown) all inline
 /// players together may hold. Past it a further tile keeps its still until
@@ -210,8 +235,8 @@ struct Slot {
     /// Off screen for [`RELEASE_AFTER`]: the player has no backend
     /// (`VideoPlayer::hibernate`) until a sweep sees it painted in view.
     asleep: bool,
-    /// The pass its row last rendered in: the history's, or the GIF
-    /// panel's for [`PANEL_CHAT`] keys.
+    /// The pass its row last rendered in: the history's, or its panel's
+    /// for a [`Panel`] key.
     seen: u64,
     /// The player's paint count when the current pass began
     /// (`VideoPlayer::shown_count`): more since means it was in view.
@@ -294,7 +319,7 @@ impl Slot {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Pass {
     History(u64),
-    Panel(u64),
+    Panel(Panel, u64),
 }
 
 /// Whether the slot for `key`, whose row last rendered in pass `seen`,
@@ -302,8 +327,8 @@ enum Pass {
 /// or it belongs to the other kind.
 fn survives(key: Key, seen: u64, pass: Pass) -> bool {
     match pass {
-        Pass::History(render) => key.0 == PANEL_CHAT || seen.saturating_add(1) >= render,
-        Pass::Panel(render) => key.0 != PANEL_CHAT || seen.saturating_add(1) >= render,
+        Pass::History(render) => is_panel(key.0) || seen.saturating_add(1) >= render,
+        Pass::Panel(panel, render) => key.0 != panel.chat() || seen.saturating_add(1) >= render,
     }
 }
 
@@ -314,8 +339,9 @@ struct State {
     /// The view the history renders in (`begin_render`): redrawn once a
     /// sleeping slot gets a new player, so its tile picks it up.
     history_view: Option<EntityId>,
-    /// The GIF panel's pass count ([`InlineVideos::begin_panel_render`]).
-    panel_render: u64,
+    /// The panels' pass counts ([`InlineVideos::begin_panel_render`]).
+    inline_results_render: u64,
+    gifs_render: u64,
     /// The history rendered (and swept the players) this frame.
     swept: bool,
     /// The window is in the background: muted loops hold still.
@@ -328,6 +354,15 @@ struct State {
     /// Clips asked for by a click (autoplay off, data saver, or not
     /// downloaded yet).
     on_demand: HashMap<Key, demand::OnDemand>,
+}
+
+impl State {
+    fn panel_render(&mut self, panel: Panel) -> &mut u64 {
+        match panel {
+            Panel::InlineResults => &mut self.inline_results_render,
+            Panel::Gifs => &mut self.gifs_render,
+        }
+    }
 }
 
 /// The players (see the module docs). Shared (`Rc`) with the history's
@@ -357,20 +392,21 @@ impl InlineVideos {
 
     /// The pass number `key`'s row renders in now.
     fn pass_of(state: &State, key: Key) -> u64 {
-        if key.0 == PANEL_CHAT {
-            state.panel_render
-        } else {
-            state.render
+        match Panel::of(key.0) {
+            Some(Panel::InlineResults) => state.inline_results_render,
+            Some(Panel::Gifs) => state.gifs_render,
+            None => state.render,
         }
     }
 
-    /// Start a GIF panel render pass: panel players whose cells did not
+    /// Start a render pass of `panel`: its players whose cells did not
     /// render in the last one (results that left the panel) stop. Called
     /// at the top of the panel's render.
-    pub(super) fn begin_panel_render(&self) {
+    pub(super) fn begin_panel_render(&self, panel: Panel) {
         let dropped = self.with(|state| {
-            state.panel_render += 1;
-            let pass = Pass::Panel(state.panel_render);
+            let render = state.panel_render(panel);
+            *render += 1;
+            let pass = Pass::Panel(panel, *render);
             let (keep, drop): (HashMap<Key, Slot>, HashMap<Key, Slot>) =
                 std::mem::take(&mut state.players)
                     .into_iter()
@@ -382,16 +418,17 @@ impl InlineVideos {
         drop(dropped);
     }
 
-    /// The GIF panel closed: its players stop.
-    pub(super) fn clear_panel(&self) {
+    /// `panel` closed: its players stop.
+    pub(super) fn clear_panel(&self, panel: Panel) {
+        let chat = panel.chat();
         let dropped = self.with(|state| {
-            if !state.players.keys().any(|(chat, _)| *chat == PANEL_CHAT) {
+            if !state.players.keys().any(|(key_chat, _)| *key_chat == chat) {
                 return HashMap::new();
             }
             let (drop, keep): (HashMap<Key, Slot>, HashMap<Key, Slot>) =
                 std::mem::take(&mut state.players)
                     .into_iter()
-                    .partition(|((chat, _), _)| *chat == PANEL_CHAT);
+                    .partition(|((key_chat, _), _)| *key_chat == chat);
             state.players = keep;
             state.forget(&drop);
             drop
@@ -455,7 +492,7 @@ impl InlineVideos {
                 state
                     .players
                     .iter()
-                    .filter(|((chat, _), _)| *chat != PANEL_CHAT)
+                    .filter(|((chat, _), _)| !is_panel(*chat))
                     .map(|(key, slot)| (*key, slot.player.clone(), slot.shown_mark))
                     .collect()
             })
@@ -599,11 +636,11 @@ impl InlineVideos {
         let dropped = self.with(|state| {
             let mut dropped = HashMap::new();
             if history_drawn && !state.swept {
-                // The GIF panel's players have their own passes.
+                // The panels' players have their own passes.
                 let (panel, history): (HashMap<Key, Slot>, HashMap<Key, Slot>) =
                     std::mem::take(&mut state.players)
                         .into_iter()
-                        .partition(|((chat, _), _)| *chat == PANEL_CHAT);
+                        .partition(|((chat, _), _)| is_panel(*chat));
                 state.players = panel;
                 dropped = history;
             }
@@ -860,7 +897,7 @@ impl InlineVideos {
         // so a row rendered only in the list's overdraw never plays (and
         // one released off screen comes back paused). The GIF panel has no
         // sweep; behind another app a new muted loop waits for activation.
-        let in_history = key.0 != PANEL_CHAT;
+        let in_history = !is_panel(key.0);
         if !inactive && !in_history {
             player.play();
         }
@@ -939,8 +976,8 @@ impl InlineVideos {
 #[cfg(test)]
 mod tests {
     use super::{
-        INLINE_DECODE_BUDGET, OffScreenStep, PANEL_CHAT, Pass, RELEASE_AFTER, admits,
-        off_screen_step, survives,
+        INLINE_DECODE_BUDGET, OffScreenStep, Panel, Pass, RELEASE_AFTER, admits, off_screen_step,
+        survives,
     };
     use crate::ui::inline_video::InlineTile;
     use std::time::{Duration, Instant};
@@ -987,16 +1024,22 @@ mod tests {
     #[test]
     fn history_and_panel_passes_each_reap_only_their_own_players() {
         let row = (11, 204);
-        let cell = (PANEL_CHAT, 7);
+        let cell = (Panel::InlineResults.chat(), 7);
+        let gif = (Panel::Gifs.chat(), 7);
         // A history pass keeps rows seen in the previous one, and every
         // panel cell however old.
         assert!(survives(row, 4, Pass::History(5)));
         assert!(!survives(row, 3, Pass::History(5)));
         assert!(survives(cell, 0, Pass::History(500)));
-        // A panel pass reaps cells that left the panel, never history rows.
-        assert!(survives(cell, 2, Pass::Panel(3)));
-        assert!(!survives(cell, 1, Pass::Panel(3)));
-        assert!(survives(row, 0, Pass::Panel(500)));
+        assert!(survives(gif, 0, Pass::History(500)));
+        // A panel pass reaps its cells that left the panel, never history
+        // rows or the other panel's cells.
+        let inline = |render| Pass::Panel(Panel::InlineResults, render);
+        assert!(survives(cell, 2, inline(3)));
+        assert!(!survives(cell, 1, inline(3)));
+        assert!(survives(row, 0, inline(500)));
+        assert!(survives(gif, 0, inline(500)));
+        assert!(!survives(gif, 1, Pass::Panel(Panel::Gifs, 3)));
     }
 
     #[test]
