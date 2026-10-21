@@ -11,7 +11,7 @@ ntgcalls, rlottie, the Visual C++ runtime) and bundled data files are listed in
 
 ## Overview
 
-- MIT License: 666
+- MIT License: 667
 - Apache License 2.0: 42
 - Unicode License v3: 24
 - ISC License: 22
@@ -1440,7 +1440,7 @@ Used by:
 - [dunce 1.0.5](https://gitlab.com/kornelski/dunce)
 - [gpui-kit-assets 0.7.3](https://github.com/longbridge/gpui-kit)
 - [gpui-kit 0.7.3](https://github.com/longbridge/gpui-kit)
-- [interprocess 2.4.5](https://github.com/kotauskas/interprocess)
+- [interprocess 2.4.6](https://github.com/kotauskas/interprocess)
 - [ryu 1.0.23](https://github.com/dtolnay/ryu)
 - [spirv 0.4.0+sdk-1.4.341.0](https://github.com/gfx-rs/rspirv)
 
@@ -2009,7 +2009,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### BSD 3-Clause "New" or "Revised" License
 
 Used by:
-- [rusty-opus 1.0.1](https://github.com/Remade-With-Rust/rusty-opus)
+- [rusty-opus 1.0.2](https://github.com/Remade-With-Rust/rusty-opus)
 
 ````text
 
@@ -2622,7 +2622,7 @@ express Statement of Purpose.
 ### Community Data License Agreement Permissive 2.0
 
 Used by:
-- [webpki-roots 1.0.9](https://github.com/rustls/webpki-roots)
+- [webpki-roots 1.0.10](https://github.com/rustls/webpki-roots)
 
 ````text
 # Community Data License Agreement - Permissive - Version 2.0
@@ -3315,7 +3315,7 @@ THIS SOFTWARE.
 ### ISC License
 
 Used by:
-- [rustls-webpki 0.103.15](https://github.com/rustls/webpki)
+- [rustls-webpki 0.103.16](https://github.com/rustls/webpki)
 
 ````text
 Except as otherwise noted, this project is licensed under the following
@@ -6293,7 +6293,7 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [arc-swap 1.9.2](https://github.com/vorner/arc-swap)
+- [arc-swap 1.9.3](https://github.com/vorner/arc-swap)
 
 ````text
 Copyright (c) 2017 arc-swap developers
@@ -8359,7 +8359,7 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [inout 0.2.3](https://github.com/RustCrypto/utils)
+- [inout 0.2.5](https://github.com/RustCrypto/utils)
 
 ````text
 Copyright (c) 2022-2025 The RustCrypto Project Developers
@@ -8650,10 +8650,10 @@ SOFTWARE.
 Used by:
 - [zbus 5.19.0](https://github.com/z-galaxy/zbus/)
 - [zbus_macros 5.19.0](https://github.com/z-galaxy/zbus/)
-- [zbus_names 4.3.4](https://github.com/z-galaxy/zbus/)
+- [zbus_names 4.3.5](https://github.com/z-galaxy/zbus/)
 - [zbus_xml 5.2.1](https://github.com/z-galaxy/zbus/)
-- [zvariant 5.15.0](https://github.com/z-galaxy/zbus/)
-- [zvariant_derive 5.15.0](https://github.com/z-galaxy/zbus/)
+- [zvariant 5.15.1](https://github.com/z-galaxy/zbus/)
+- [zvariant_derive 5.15.1](https://github.com/z-galaxy/zbus/)
 
 ````text
 Copyright (c) 2024 Zeeshan Ali Khan & zbus contributors
@@ -8858,7 +8858,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [annotate-snippets 0.12.16](https://github.com/rust-lang/annotate-snippets-rs)
+- [annotate-snippets 0.12.17](https://github.com/rust-lang/annotate-snippets-rs)
 - [anstyle 1.0.14](https://github.com/rust-cli/anstyle.git)
 - [serde_spanned 0.6.9](https://github.com/toml-rs/toml)
 - [toml 0.8.23](https://github.com/toml-rs/toml)
@@ -8986,7 +8986,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [libc 0.2.190](https://github.com/rust-lang/libc)
+- [libc 0.2.191](https://github.com/rust-lang/libc)
 
 ````text
 Copyright (c) The Rust Project Developers
@@ -9374,7 +9374,7 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [ureq-proto 0.6.4](https://github.com/algesten/ureq-proto)
+- [ureq-proto 0.6.5](https://github.com/algesten/ureq-proto)
 
 ````text
 Copyright 2022 Martin Algesten
@@ -9727,7 +9727,7 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [crc32fast 1.5.2](https://github.com/srijs/rust-crc32fast)
+- [crc32fast 1.5.3](https://github.com/srijs/rust-crc32fast)
 
 ````text
 MIT License
@@ -10655,10 +10655,10 @@ Used by:
 - [harfrust 0.5.2](https://github.com/harfbuzz/harfrust)
 - [libm 0.2.16](https://github.com/rust-lang/compiler-builtins)
 - [lyon 1.0.19](https://github.com/nical/lyon)
-- [lyon_algorithms 1.0.21](https://github.com/nical/lyon)
-- [lyon_geom 1.0.19](https://github.com/nical/lyon)
+- [lyon_algorithms 1.0.22](https://github.com/nical/lyon)
+- [lyon_geom 1.0.20](https://github.com/nical/lyon)
 - [lyon_path 1.0.19](https://github.com/nical/lyon)
-- [lyon_tessellation 1.0.22](https://github.com/nical/lyon)
+- [lyon_tessellation 1.0.23](https://github.com/nical/lyon)
 - [mac-notification-sys 0.6.15](https://github.com/h4llow3En/mac-notification-sys)
 - [mac 0.1.1](https://github.com/reem/rust-mac.git)
 - [malloc_buf 0.0.6](https://github.com/SSheldon/malloc_buf)
@@ -11276,14 +11276,14 @@ Used by:
 - [serde_json 1.0.154](https://github.com/serde-rs/json)
 - [serde_repr 0.1.21](https://github.com/dtolnay/serde-repr)
 - [smol 2.0.2](https://github.com/smol-rs/smol)
-- [smol_str 0.3.6](https://github.com/rust-lang/rust-analyzer/tree/master/lib/smol_str)
+- [smol_str 0.3.7](https://github.com/rust-lang/rust-analyzer/tree/master/lib/smol_str)
 - [syn 2.0.119](https://github.com/dtolnay/syn)
 - [syn 3.0.9](https://github.com/dtolnay/syn)
 - [thiserror-impl 1.0.69](https://github.com/dtolnay/thiserror)
 - [thiserror-impl 2.0.21](https://github.com/dtolnay/thiserror)
 - [thiserror 1.0.69](https://github.com/dtolnay/thiserror)
 - [thiserror 2.0.21](https://github.com/dtolnay/thiserror)
-- [typed-path 0.12.3](https://github.com/chipsenkbeil/typed-path)
+- [typed-path 0.12.4](https://github.com/chipsenkbeil/typed-path)
 - [unicode-ident 1.0.27](https://github.com/dtolnay/unicode-ident)
 - [utf-8 0.7.6](https://github.com/SimonSapin/rust-utf8)
 - [utf8-zero 0.8.1](https://github.com/algesten/utf8-zero)
@@ -11503,7 +11503,7 @@ SOFTWARE.
 
 Used by:
 - [tracing-core 0.1.36](https://github.com/tokio-rs/tracing)
-- [zip 9.0.3](https://github.com/zip-rs/zip2)
+- [zip 9.0.5](https://github.com/zip-rs/zip2)
 
 ````text
 The MIT License (MIT)
@@ -12278,6 +12278,7 @@ Used by:
 - [crossbeam-channel 0.5.17](https://github.com/crossbeam-rs/crossbeam)
 - [crossbeam-deque 0.8.8](https://github.com/crossbeam-rs/crossbeam)
 - [crossbeam-epoch 0.9.21](https://github.com/crossbeam-rs/crossbeam)
+- [crossbeam-queue 0.3.14](https://github.com/crossbeam-rs/crossbeam)
 - [crossbeam-utils 0.8.23](https://github.com/crossbeam-rs/crossbeam)
 
 ````text
@@ -13620,7 +13621,7 @@ ICU 1.8.1 to ICU 57.1 © 1995-2016 International Business Machines Corporation a
 ### The Unlicense
 
 Used by:
-- [ksni 0.3.6](https://github.com/iovxw/ksni)
+- [ksni 0.3.7](https://github.com/iovxw/ksni)
 
 ````text
 This is free and unencumbered software released into the public domain.
