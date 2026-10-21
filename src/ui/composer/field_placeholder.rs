@@ -29,7 +29,8 @@ impl QuillApp {
             .composer_ui
             .reply()
             .filter(|reply| reply.chat_id == chat && reply.target_chat.is_none())
-            .map(|reply| reply.message_id);
+            .map(|reply| reply.message_id)
+            .or_else(|| self.keyboard_reply_target());
         PlaceholderFacts {
             editing: self.composer_ui.pending_edit.is_some(),
             keyboard: self.keyboard_placeholder(),
@@ -40,6 +41,18 @@ impl QuillApp {
             anonymous_admin: !broadcast && session.chat_posts_anonymously(chat),
             bot_off_thread: session.bot_chat_off_thread(chat),
         }
+    }
+
+    /// The message of the bot keyboard that is on screen or asks for a reply:
+    /// tdesktop counts it as the reply the next message goes to
+    /// (`_kbReplyTo`).
+    fn keyboard_reply_target(&self) -> Option<MessageId> {
+        let (chat, message, keyboard) = self.open_chat_custom_keyboard()?;
+        let hidden = self
+            .message_ui
+            .collapsed_keyboards
+            .contains(&(chat.0, message.0));
+        (!hidden || keyboard.force_reply).then_some(message)
     }
 
     /// The placeholder of the bot keyboard on screen, or of a force-reply

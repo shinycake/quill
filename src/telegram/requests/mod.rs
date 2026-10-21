@@ -62,6 +62,8 @@ mod tests_group_admin;
 #[cfg(test)]
 mod tests_groups;
 #[cfg(test)]
+mod tests_markup_barrier;
+#[cfg(test)]
 mod tests_media;
 #[cfg(test)]
 mod tests_message_menu;

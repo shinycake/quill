@@ -16,7 +16,8 @@ impl QuillApp {
             return;
         };
         let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
-        let caption = text.trim();
+        let caption = quill::composer::strip_barrier(text.trim());
+        let caption = caption.as_str();
         let album_id = "88001";
         let reply_json = reply
             .filter(|r| r.chat_id == chat_id)

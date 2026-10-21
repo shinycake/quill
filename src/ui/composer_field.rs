@@ -185,7 +185,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let content = if self.composer_ui.rich_editor_open {
-            InputContent::new(markup.to_string())
+            InputContent::new(quill::composer::strip_barrier(markup))
         } else {
             doc_content(&ComposerDoc::from_markup(markup))
         };

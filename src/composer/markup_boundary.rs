@@ -16,6 +16,11 @@
 /// dropped when the markup is parsed.
 pub(crate) const BARRIER: char = '\u{10}';
 
+/// `markup` without barriers, for a field that shows raw markup.
+pub fn strip_barrier(markup: &str) -> String {
+    markup.chars().filter(|&ch| ch != BARRIER).collect()
+}
+
 /// The characters markers are made of.
 pub(crate) fn is_marker_char(ch: char) -> bool {
     matches!(ch, '*' | '_' | '~' | '|' | '`')
@@ -87,7 +92,8 @@ pub(crate) fn closer_ok(text: &str, at: usize, marker: &str) -> bool {
     let own = marker.chars().next();
     let before = char_before(text, at);
     before.is_none_or(|ch| Some(ch) != own && !(marker == "`" && matches!(ch, '\n' | '\r')))
-        && char_at(text, at + marker.len()).is_none_or(is_separator)
+        // lib_ui gives `~~` no "good after" characters: it may touch a word.
+        && (marker == "~~" || char_at(text, at + marker.len()).is_none_or(is_separator))
 }
 
 /// The byte offset of the first closing `marker` in `text[from..to]` that

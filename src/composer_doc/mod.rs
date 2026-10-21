@@ -13,7 +13,9 @@
 
 use std::ops::Range;
 
-use crate::composer::markup_boundary::{BARRIER, is_marker_char, needs_barrier};
+use crate::composer::markup_boundary::{
+    BARRIER, closer_ok, is_marker_char, needs_barrier, opener_ok,
+};
 use crate::composer::{FormatKind, parse_format_markup};
 use crate::text::{TextEntity, TextEntityKind, utf16_to_utf8_offset};
 
@@ -488,10 +490,12 @@ pub fn markdown_replacement(
             {
                 continue;
             }
-            // The opener starts a word: nothing or a non-word character
-            // before it, and not another marker character.
-            let prev = text.get(..open).unwrap_or_default().chars().next_back();
-            if prev.is_some_and(|c| c.is_alphanumeric() || c as u32 == marker_char as u32) {
+            // The same boundary rule the send path reads markup with.
+            // A half-typed `**hi*` is not italic: its opener touches the
+            // marker before it.
+            let touches_own =
+                text.get(..open).and_then(|before| before.as_bytes().last()) == Some(&marker_char);
+            if touches_own || !opener_ok(text, open, marker) || !closer_ok(text, close, marker) {
                 continue;
             }
             // `scheme://host/__path__` is a link, not formatting.

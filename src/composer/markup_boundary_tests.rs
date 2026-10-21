@@ -21,7 +21,7 @@ fn markers_inside_a_word_stay_plain_text() {
         "**x**y",
         "a**x**",
         "snake_case_name",
-        "x~~y~~z",
+        "x~~y~~ z",
         "a||b||c",
         "a`b`c",
         "_a_b_c",
@@ -49,6 +49,15 @@ fn markers_at_word_edges_still_format() {
             vec![(FormatKind::Bold, 0, 1), (FormatKind::Code, 2, 1)]
         )
     );
+}
+
+#[test]
+fn a_closing_strike_may_touch_a_word() {
+    assert_eq!(
+        kinds("~~a~~b"),
+        ("ab".into(), vec![(FormatKind::Strikethrough, 0, 1)])
+    );
+    assert_eq!(kinds("a~~b~~"), ("a~~b~~".into(), Vec::new()));
 }
 
 #[test]
@@ -118,4 +127,16 @@ fn plain_text_with_marker_characters_is_not_formatted_on_send() {
     let (text, entities) = parse_format_markup(&doc.to_markup());
     assert_eq!(text, "run my_cmd_x now");
     assert!(entities.is_empty());
+}
+
+#[test]
+fn a_barrier_never_reaches_the_parsed_text() {
+    let (text, entities) = parse_format_markup("`a\u{10}b` [la\u{10}bel](https://x.org)");
+    assert_eq!(text, "ab label");
+    assert_eq!(entities.len(), 2);
+}
+
+#[test]
+fn clearing_formatting_drops_barriers() {
+    assert_eq!(clear_format_markup("h\u{10}**ell**\u{10}o", 0..0), "hello");
 }

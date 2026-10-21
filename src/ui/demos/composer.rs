@@ -127,9 +127,6 @@ impl QuillApp {
                 _ => ChatId(-2002),
             };
             session.open_chat(chat);
-            if matches!(mode.as_str(), "topic" | "topic-reply") {
-                session.select_topic(chat, RELEASES_TOPIC);
-            }
         }
         match mode.as_str() {
             "reply" => {
@@ -373,7 +370,7 @@ fn apply_placeholder_chats(
         ),
         r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":2000000003,"is_forum":true}}"#.to_string(),
         format!(
-            r#"{{"@type":"updateNewMessage","message":{{"id":20,"chat_id":{forum},"sender_id":{{"@type":"messageSenderUser","user_id":31}},"is_outgoing":false,"date":1700000020,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Release candidate is out","entities":[]}}}}}}}}"#
+            r#"{{"@type":"updateNewMessage","message":{{"id":20,"chat_id":{forum},"sender_id":{{"@type":"messageSenderUser","user_id":31}},"topic_id":{{"@type":"messageTopicForum","forum_topic_id":{RELEASES_TOPIC}}},"is_outgoing":false,"date":1700000020,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Release candidate is out","entities":[]}}}}}}}}"#
         ),
         r#"{"@type":"updateNewMessage","message":{"id":21,"chat_id":71,"sender_id":{"@type":"messageSenderUser","user_id":71},"is_outgoing":false,"date":1700000021,"reply_markup":{"@type":"replyMarkupShowKeyboard","rows":[[{"@type":"keyboardButton","text":"Small","type":{"@type":"keyboardButtonTypeText"}},{"@type":"keyboardButton","text":"Medium","type":{"@type":"keyboardButtonTypeText"}},{"@type":"keyboardButton","text":"Large","type":{"@type":"keyboardButtonTypeText"}}]],"is_persistent":false,"resize_keyboard":true,"one_time":false,"is_personal":false,"force_reply":false,"input_field_placeholder":"Choose a size"},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Which size do you need?","entities":[]}}}}"#.to_string(),
         r#"{"@type":"updateNewMessage","message":{"id":22,"chat_id":72,"sender_id":{"@type":"messageSenderUser","user_id":72},"is_outgoing":false,"date":1700000022,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Pick a story from the topics above.","entities":[]}}}}"#.to_string(),

@@ -580,7 +580,9 @@ fn strip_range(text: &str, from: usize, to: usize, out: &mut String) {
         let Some(ch) = text.get(i..).and_then(|rest| rest.chars().next()) else {
             break;
         };
-        out.push(ch);
+        if ch != super::markup_boundary::BARRIER {
+            out.push(ch);
+        }
         i += ch.len_utf8();
     }
 }

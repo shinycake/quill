@@ -63,7 +63,10 @@ impl QuillApp {
         });
         let name = cx.new(|cx| InputState::new(window, cx).placeholder(tr(keys::CHAT_LINK_NAME)));
         if let Some(link) = &link {
-            let (markup, title) = (link.markup.clone(), link.title.clone());
+            let (markup, title) = (
+                quill::composer::strip_barrier(&link.markup),
+                link.title.clone(),
+            );
             text.update(cx, |input, cx| input.set_value(markup, window, cx));
             name.update(cx, |input, cx| input.set_value(title, window, cx));
         }

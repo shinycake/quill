@@ -75,17 +75,14 @@ fn bot_session(has_topics: bool, allows: bool) -> Session {
 }
 
 #[test]
-fn a_forum_names_the_open_topic() {
+fn an_open_topic_keeps_the_plain_placeholder() {
     let mut session = forum_session(&[(1, "General", true), (5, "Releases", false)]);
     session.open_chat(ChatId(FORUM));
     session.open_topic = Some(5);
-    assert_eq!(
-        session.composer_topic(ChatId(FORUM), None),
-        placeholder("Releases", false)
-    );
+    assert_eq!(session.composer_topic(ChatId(FORUM), None), None);
     assert_eq!(
         session.composer_topic(ChatId(FORUM), Some(MessageId(90))),
-        placeholder("Releases", true)
+        None
     );
 }
 
@@ -106,41 +103,74 @@ fn a_forum_without_a_topic_open_names_general() {
     );
 }
 
+fn parsed_message(id: i64, topic: Option<i32>) -> crate::telegram::envelope::ParsedMessage {
+    let topic_id = topic.map_or(String::new(), |topic| {
+        format!(r#""topic_id":{{"@type":"messageTopicForum","forum_topic_id":{topic}}},"#)
+    });
+    let json = format!(
+        r#"{{"id":{id},"chat_id":{FORUM},{topic_id}"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"x","entities":[]}}}}}}"#
+    );
+    crate::telegram::envelope::parse_message(&serde_json::from_str(&json).unwrap()).unwrap()
+}
+
+/// Puts a message of the forum's main history in the session, in `topic` when given.
+fn main_history_message(session: &mut Session, id: i64, topic: Option<i32>) -> MessageId {
+    let history = session.histories.entry(FORUM).or_default();
+    history
+        .messages
+        .insert(id, history_message(parsed_message(id, topic), false));
+    MessageId(id)
+}
+
 #[test]
-fn an_unknown_or_unnamed_topic_is_called_topic() {
+fn an_unnamed_topic_is_called_topic() {
     let mut session = forum_session(&[(7, "  ", false)]);
     session.open_chat(ChatId(FORUM));
-    session.open_topic = Some(7);
+    let named_blank = main_history_message(&mut session, 91, Some(7));
     assert_eq!(
-        session.composer_topic(ChatId(FORUM), None),
-        placeholder("Topic", false)
+        session.composer_topic(ChatId(FORUM), Some(named_blank)),
+        placeholder("Topic", true)
     );
-    session.open_topic = Some(9);
+    let unknown = main_history_message(&mut session, 92, Some(9));
     assert_eq!(
-        session.composer_topic(ChatId(FORUM), None),
-        placeholder("Topic", false)
+        session.composer_topic(ChatId(FORUM), Some(unknown)),
+        placeholder("Topic", true)
     );
 }
 
 #[test]
-fn a_reply_names_the_topic_of_the_message() {
+fn a_reply_names_the_topic_of_the_message_itself() {
     let mut session = forum_session(&[(1, "General", true), (5, "Releases", false)]);
     session.open_chat(ChatId(FORUM));
-    let json = format!(
-        r#"{{"id":90,"chat_id":{FORUM},"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"x","entities":[]}}}}}}"#
-    );
-    let parsed =
-        crate::telegram::envelope::parse_message(&serde_json::from_str(&json).unwrap()).unwrap();
-    let mut topic = TopicHistory::default();
-    topic.messages.insert(90, history_message(parsed, false));
-    session.threads.topic_histories.insert((FORUM, 5), topic);
+    let in_topic = main_history_message(&mut session, 90, Some(5));
     assert_eq!(
-        session.composer_topic(ChatId(FORUM), Some(MessageId(90))),
+        session.composer_topic(ChatId(FORUM), Some(in_topic)),
         placeholder("Releases", true)
     );
-    // A message found nowhere is sent where the field is.
+    // A message with no topic of its own is in General.
+    let plain = main_history_message(&mut session, 93, None);
     assert_eq!(
-        session.composer_topic(ChatId(FORUM), Some(MessageId(91))),
+        session.composer_topic(ChatId(FORUM), Some(plain)),
+        placeholder("General", true)
+    );
+}
+
+#[test]
+fn a_loaded_topic_history_names_a_reply_target_without_a_topic() {
+    let mut session = forum_session(&[(1, "General", true), (5, "Releases", false)]);
+    session.open_chat(ChatId(FORUM));
+    let mut topic = TopicHistory::default();
+    topic
+        .messages
+        .insert(94, history_message(parsed_message(94, None), false));
+    session.threads.topic_histories.insert((FORUM, 5), topic);
+    assert_eq!(
+        session.composer_topic(ChatId(FORUM), Some(MessageId(94))),
+        placeholder("Releases", true)
+    );
+    // A message found nowhere is sent to General.
+    assert_eq!(
+        session.composer_topic(ChatId(FORUM), Some(MessageId(95))),
         placeholder("General", true)
     );
 }

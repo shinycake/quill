@@ -428,18 +428,19 @@ fn a_forum_field_names_the_topic_it_sends_to(cx: &mut TestAppContext) {
     // Without a topic open a message lands in General.
     open_chat(&app, vcx, FORUM);
     assert_eq!(placeholder(&app, vcx), "Message in General");
-    select_topic(&app, vcx, FORUM, 5);
-    assert_eq!(placeholder(&app, vcx), "Message in Releases");
+    // A reply is sent to the topic its message is in, which no topic history
+    // has to be loaded for.
     reply_to(&app, vcx, FORUM, 20);
     assert_eq!(placeholder(&app, vcx), "Reply in Releases");
-    // Cancelling the reply brings the plain topic back.
+    // Cancelling the reply brings General back.
     app.update(vcx, |app, cx| {
         app.composer_ui.set_reply(None);
         cx.notify();
     });
     frames(vcx);
-    assert_eq!(placeholder(&app, vcx), "Message in Releases");
+    assert_eq!(placeholder(&app, vcx), "Message in General");
     // A topic that was renamed is read again.
+    reply_to(&app, vcx, FORUM, 20);
     app.update(vcx, |app, cx| {
         if let Some(topics) = app
             .demo_session
@@ -452,7 +453,10 @@ fn a_forum_field_names_the_topic_it_sends_to(cx: &mut TestAppContext) {
         cx.notify();
     });
     frames(vcx);
-    assert_eq!(placeholder(&app, vcx), "Message in Changelog");
+    assert_eq!(placeholder(&app, vcx), "Reply in Changelog");
+    // Inside an open topic the field is plain, as in tdesktop's topic view.
+    select_topic(&app, vcx, FORUM, 5);
+    assert_eq!(placeholder(&app, vcx), "Write a message…");
     open_chat(&app, vcx, GROUP);
     assert_eq!(placeholder(&app, vcx), "Write a message…");
 }

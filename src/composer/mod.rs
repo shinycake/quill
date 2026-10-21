@@ -18,6 +18,7 @@ mod edit;
 mod edit_media_tools;
 mod markup;
 pub(crate) mod markup_boundary;
+pub use markup_boundary::strip_barrier;
 #[cfg(test)]
 mod markup_boundary_tests;
 mod media_options;

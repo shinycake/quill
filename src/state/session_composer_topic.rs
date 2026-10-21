@@ -9,21 +9,24 @@ const GENERAL_TOPIC_ID: i32 = 1;
 
 impl Session {
     /// The topic a message sent from the compose field of `chat_id` goes to,
-    /// in a forum supergroup: the topic of the message being replied to, else
-    /// the open topic, else General (where a send without either lands).
-    /// `None` outside a forum supergroup, and in a reply thread, which the
-    /// message goes to instead of a topic.
+    /// for a forum supergroup viewed as messages (no topic open): the topic
+    /// of the message being replied to, else General.
+    ///
+    /// `None` outside a forum supergroup, inside an open topic and in a reply
+    /// thread: tdesktop opens those as `ChatWidget`, whose compose controls
+    /// already know their topic and keep the plain placeholder.
     pub fn composer_topic(
         &self,
         chat_id: ChatId,
         reply_to: Option<MessageId>,
     ) -> Option<TopicPlaceholder> {
-        if !self.chats.get(&chat_id.0)?.is_forum_chat() || self.thread_for_chat(chat_id).is_some() {
+        if !self.chats.get(&chat_id.0)?.is_forum_chat()
+            || self.open_topic.is_some()
+            || self.thread_for_chat(chat_id).is_some()
+        {
             return None;
         }
-        let topic_id = reply_to
-            .and_then(|message| self.topic_of_message(chat_id, message))
-            .or(self.open_topic);
+        let topic_id = reply_to.and_then(|message| self.topic_of_message(chat_id, message));
         let topics = self.threads.forum_topics.get(&chat_id.0);
         let known = topics.and_then(|topics| {
             topics.iter().find(|topic| match topic_id {
@@ -46,17 +49,14 @@ impl Session {
         })
     }
 
-    /// The loaded topic whose history holds `message_id`: the open topic's
-    /// first, then the others.
+    /// The topic of `message_id`: the message's own `topic_id`, else the
+    /// loaded topic whose history holds it.
     fn topic_of_message(&self, chat_id: ChatId, message_id: MessageId) -> Option<i32> {
-        let holds = |topic: i32| {
-            self.threads
-                .topic_histories
-                .get(&(chat_id.0, topic))
-                .is_some_and(|history| history.messages.get(&message_id.0).is_some())
-        };
-        if let Some(open) = self.open_topic.filter(|&open| holds(open)) {
-            return Some(open);
+        if let Some(topic) = self
+            .reply_target(chat_id, message_id)
+            .and_then(|message| message.extras.forum_topic_id)
+        {
+            return Some(topic);
         }
         self.threads
             .topic_histories
