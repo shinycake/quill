@@ -307,8 +307,8 @@ impl QuillApp {
         let message_id = message.id;
         let finder = cfg!(target_os = "macos");
         let mut rows = Vec::new();
-        for (index, action) in media_actions(&target, &facts).into_iter().enumerate() {
-            let sort = order::MEDIA + index as u8;
+        for action in media_actions(&target, &facts) {
+            let sort = action.sort_key();
             let icon = media_action_icon(action);
             let label = action.label(finder);
             let target = target.clone();
@@ -633,6 +633,9 @@ crate::ui::shell::register_dialogs! {
 
 mod delete_member_reaction;
 pub(in crate::ui) mod item_rows;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod media_order_tests;
 mod menu_add_to_set_rows;
 mod menu_save_to_rows;
 pub(in crate::ui) mod origin_rows;

@@ -34,35 +34,41 @@ pub mod order {
     pub const PIN: u8 = 30;
     /// "Statistics" of a channel post follows Pin (tdesktop).
     pub const STATISTICS: u8 = 31;
-    /// First slot of the media block; each action adds its index.
+    /// First slot of the media block; each action adds its own
+    /// [`MediaAction::slot`](super::MediaAction::slot), `MEDIA_SLOTS` wide.
     pub const MEDIA: u8 = 32;
-    pub const COPY_TEXT: u8 = 40;
-    pub const COPY_LINK: u8 = 41;
+    pub const COPY_TEXT: u8 = 45;
+    pub const COPY_LINK: u8 = 46;
     /// "Translate" (`ui/translate_ui.rs`).
-    pub const TRANSLATE: u8 = 42;
+    pub const TRANSLATE: u8 = 47;
     /// "View in Explorer" of a TON address sits right after Translate.
-    pub const TON_EXPLORER: u8 = 43;
-    pub const COPY_POST_LINK: u8 = 45;
-    pub const FORWARD: u8 = 50;
+    pub const TON_EXPLORER: u8 = 48;
+    pub const COPY_POST_LINK: u8 = 50;
+    pub const FORWARD: u8 = 55;
     /// "Add Offer" follows Forward (tdesktop `AddOfferAction`).
-    pub const ADD_OFFER: u8 = 51;
+    pub const ADD_OFFER: u8 = 56;
     /// "Poll Stats" (`getPollVoteStatistics`).
-    pub const POLL_STATS: u8 = 53;
+    pub const POLL_STATS: u8 = 58;
     /// "Retract vote" sits above "Stop Poll" (`AddPollActions`).
-    pub const RETRACT_VOTE: u8 = 54;
-    pub const STOP_POLL: u8 = 55;
-    pub const SEND_NOW: u8 = 56;
-    pub const RETRY: u8 = 58;
-    pub const DELETE: u8 = 60;
-    pub const REPORT: u8 = 65;
-    pub const SELECT: u8 = 70;
-    pub const RESCHEDULE: u8 = 72;
+    pub const RETRACT_VOTE: u8 = 59;
+    pub const STOP_POLL: u8 = 60;
+    pub const SEND_NOW: u8 = 61;
+    pub const RETRY: u8 = 63;
+    pub const DELETE: u8 = 65;
+    pub const REPORT: u8 = 70;
+    pub const SELECT: u8 = 75;
+    pub const RESCHEDULE: u8 = 77;
     /// The "N Seen" / "N Reacted" row and the date line follow a separator.
-    pub const AUDIENCE: u8 = 90;
-    pub const SENT: u8 = 92;
+    pub const AUDIENCE: u8 = 95;
+    pub const SENT: u8 = 97;
     /// "This message contains emoji from X pack" closes the menu.
-    pub const EMOJI_PACKS: u8 = 94;
+    pub const EMOJI_PACKS: u8 = 99;
 }
+
+/// Width of the media block in sort keys: one fixed slot per [`MediaAction`].
+pub const MEDIA_SLOTS: u8 = 13;
+
+const _: () = assert!(order::MEDIA as usize + MEDIA_SLOTS as usize <= order::COPY_TEXT as usize);
 
 /// The kinds of message content that carry a file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -251,6 +257,34 @@ pub enum MediaAction {
     SaveAs,
     CopyImage,
     CopyFilename,
+}
+
+impl MediaAction {
+    /// Fixed place in the media block, in tdesktop's `AddPhotoActions` /
+    /// `AddDocumentActions` order. Every action has its own slot, so rows
+    /// never tie and never reach the Copy Text section.
+    pub const fn slot(self) -> u8 {
+        match self {
+            Self::CancelDownload => 0,
+            Self::OpenGif => 1,
+            Self::SaveGif => 2,
+            Self::ViewStickerSet { .. } => 3,
+            Self::AddToSet { emoji: false } => 4,
+            Self::AddToSet { emoji: true } => 5,
+            Self::ToggleFavorite { .. } => 6,
+            Self::ShowInFolder => 7,
+            Self::SaveForNotifications => 8,
+            Self::SaveTo => 9,
+            Self::SaveAs => 10,
+            Self::CopyImage => 11,
+            Self::CopyFilename => 12,
+        }
+    }
+
+    /// Sort key of this action's menu row.
+    pub fn sort_key(self) -> u8 {
+        order::MEDIA.saturating_add(self.slot().min(MEDIA_SLOTS - 1))
+    }
 }
 
 impl MediaAction {
@@ -566,6 +600,36 @@ pub fn noforwards_text(
 
 #[cfg(test)]
 mod tests {
+    /// Every media action has its own sort key inside the media block, so
+    /// the rows never tie with each other or reach Copy Text.
+    #[test]
+    fn media_actions_have_distinct_keys_inside_their_block() {
+        use super::{MEDIA_SLOTS, MediaAction, order};
+        let all = [
+            MediaAction::CancelDownload,
+            MediaAction::OpenGif,
+            MediaAction::SaveGif,
+            MediaAction::ViewStickerSet { installed: true },
+            MediaAction::AddToSet { emoji: false },
+            MediaAction::AddToSet { emoji: true },
+            MediaAction::ToggleFavorite { remove: false },
+            MediaAction::ShowInFolder,
+            MediaAction::SaveForNotifications,
+            MediaAction::SaveTo,
+            MediaAction::SaveAs,
+            MediaAction::CopyImage,
+            MediaAction::CopyFilename,
+        ];
+        assert_eq!(all.len(), usize::from(MEDIA_SLOTS), "one slot per action");
+        let keys: Vec<u8> = all.iter().map(|action| action.sort_key()).collect();
+        assert!(
+            keys.iter().zip(keys.iter().skip(1)).all(|(a, b)| a < b),
+            "{keys:?}"
+        );
+        assert!(keys.iter().all(|key| *key >= order::MEDIA));
+        assert!(keys.iter().all(|key| *key < order::COPY_TEXT));
+    }
+
     #[test]
     fn emoji_pack_footer_names_one_pack_or_counts_them() {
         use super::emoji_pack_footer;
