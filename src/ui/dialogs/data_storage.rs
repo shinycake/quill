@@ -13,11 +13,9 @@
 //! roaming ← low).
 
 use super::super::app::QuillApp;
-use super::super::shell::{DialogKind, QuillShell};
 use super::super::*;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
-use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -25,8 +23,6 @@ use quill::data_settings::{
     AutoDownloadNetSettings, DataStoragePrefs, NetworkKind, size_cap_label,
 };
 use quill::lang::{keys, tr, tr_with};
-use std::cell::RefCell;
-use std::rc::Rc;
 /// Slice S4: bytes formatter that handles 0 and GB — the shared
 /// `format_bytes` returns "" for 0 and tops out at MB.
 pub(crate) fn format_storage_bytes(n: i64) -> String {
@@ -58,7 +54,7 @@ impl QuillApp {
     /// view state, clear the last "Cache cleared" note, and fire the
     /// storage + presets fetches (both guarded: once per session).
     pub(crate) fn open_data_storage(&mut self, cx: &mut Context<Self>) {
-        self.settings.storage_usage_open = true;
+        self.open_settings(Some(quill::settings_catalog::Page::DataStorage));
         self.settings.data_storage_editor = None;
         self.settings.storage_confirm = None;
         if let Some(live) = self.live.as_mut() {
@@ -78,37 +74,41 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Slice S4: the Data & Storage dialog — the per-network editor when
-    /// one is open, otherwise the overview (auto-download networks,
-    /// less-data-for-calls, the storage breakdown, clear cache).
-    pub(crate) fn build_storage_usage_dialog(
-        app: &Entity<QuillApp>,
-        shell: &Entity<QuillShell>,
-        dialog: Dialog,
-        cx: &mut App,
-    ) -> Dialog {
-        let on_close =
-            QuillShell::on_close_kind(app, shell, DialogKind::StorageUsage, |this, _, cx| {
-                this.settings.storage_usage_open = false;
-                this.settings.data_storage_editor = None;
-                this.settings.storage_confirm = None;
-                cx.notify();
-            });
-        app.update(cx, |this, cx| {
-            let editing = this.settings.data_storage_editor;
-            let (title, body) = match &editing {
-                Some((network, draft)) => (
-                    format!("{} downloads", network.label()),
-                    this.data_storage_editor_body(cx, *network, draft),
-                ),
-                None => (
-                    tr(keys::Q_OPS_DATA_STORAGE).to_string(),
-                    this.data_storage_body(cx),
-                ),
-            };
-            let mut footer = div().flex().justify_end().gap_2();
-            if editing.is_some() {
-                footer = footer
+    /// The Data & Storage settings page: the per-network editor when one
+    /// is open, otherwise the overview with a refresh button.
+    pub(crate) fn data_storage_page(&mut self, cx: &mut Context<Self>) -> Div {
+        let Some((network, draft)) = self.settings.data_storage_editor else {
+            return div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(self.data_storage_body(cx))
+                .child(
+                    div().flex().child(
+                        Button::new("storage-refresh")
+                            .label(tr(keys::Q_OPS_REFRESH))
+                            .outline()
+                            .small()
+                            .on_click(cx.listener(|this, _, _, cx| this.refresh_storage_usage(cx))),
+                    ),
+                );
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(
+                div()
+                    .text_lg()
+                    .font_semibold()
+                    .child(format!("{} downloads", network.label())),
+            )
+            .child(self.data_storage_editor_body(cx, network, &draft))
+            .child(
+                div()
+                    .flex()
+                    .justify_end()
+                    .gap_2()
                     .child(
                         Button::new("data-storage-back")
                             .label(tr(keys::Q_OPS_BACK))
@@ -122,81 +122,44 @@ impl QuillApp {
                         Button::new("data-storage-save")
                             .label(tr(keys::SETTINGS_SAVE))
                             .primary()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                if let Some((network, draft)) =
-                                    this.settings.data_storage_editor.take()
-                                {
-                                    if let Some(live) = this.live.as_mut() {
-                                        // Applied on the confirmed `ok`
-                                        // (never optimistically); a failed
-                                        // send restores the draft so
-                                        // nothing is lost.
-                                        if live
-                                            .driver
-                                            .set_auto_download_settings(network, draft)
-                                            .is_err()
-                                        {
-                                            this.settings.data_storage_editor =
-                                                Some((network, draft));
-                                        }
-                                    } else {
-                                        // Demo mode: apply locally.
-                                        if let Some(demo) = this.demo_session.as_mut() {
-                                            *demo.settings.data_storage.for_network_mut(network) =
-                                                draft;
-                                            demo.settings.data_storage.seeded = true;
-                                        }
-                                    }
-                                    cx.notify();
-                                }
-                            })),
-                    );
-            } else {
-                footer = footer
-                    .child(
-                        Button::new("storage-refresh")
-                            .label(tr(keys::Q_OPS_REFRESH))
-                            .outline()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.refresh_storage_usage(cx);
-                                this.close_kit_dialog_if_done(DialogKind::StorageUsage, window, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("close-storage-usage")
-                            .label(tr(keys::BOX_DONE))
-                            .primary()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.settings.storage_usage_open = false;
-                                cx.notify();
-                                this.close_kit_dialog_if_done(DialogKind::StorageUsage, window, cx);
-                            })),
-                    );
+                            .on_click(
+                                cx.listener(|this, _, _, cx| this.save_data_storage_editor(cx)),
+                            ),
+                    ),
+            )
+    }
+
+    fn save_data_storage_editor(&mut self, cx: &mut Context<Self>) {
+        let Some((network, draft)) = self.settings.data_storage_editor.take() else {
+            return;
+        };
+        if let Some(live) = self.live.as_mut() {
+            // Applied on the confirmed `ok`, never optimistically; a failed
+            // send restores the draft so nothing is lost.
+            if live
+                .driver
+                .set_auto_download_settings(network, draft)
+                .is_err()
+            {
+                self.settings.data_storage_editor = Some((network, draft));
             }
-            dialog
-                .overlay(true)
-                .title(crate::ui::shell::dialog_title(title))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
-                .footer(footer)
-                .on_close(on_close)
-        })
+        } else if let Some(demo) = self.demo_session.as_mut() {
+            *demo.settings.data_storage.for_network_mut(network) = draft;
+            demo.settings.data_storage.seeded = true;
+        }
+        cx.notify();
+    }
+
+    /// Leaving the page drops an unsaved editor and any pending confirm.
+    pub(crate) fn leave_data_storage(&mut self) {
+        self.settings.data_storage_editor = None;
+        self.settings.storage_confirm = None;
     }
 
     /// Slice S4: the overview — error line, the three auto-download
     /// network rows, the less-data-for-calls toggle, the storage
     /// breakdown (totals, per-type, per-chat), and clear cache.
-    fn data_storage_body(&self, cx: &mut Context<Self>) -> Div {
+    pub(crate) fn data_storage_body(&self, cx: &mut Context<Self>) -> Div {
         let session = self.session();
         let mut body = div().flex().flex_col().gap_3();
         // Failures surface here, never as toasts (the S3 pattern).
@@ -244,10 +207,7 @@ impl QuillApp {
                     .outline()
                     .small()
                     .disabled(self.live.is_none())
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.open_account_export(cx);
-                        this.close_kit_dialog_if_done(DialogKind::StorageUsage, window, cx);
-                    })),
+                    .on_click(cx.listener(|this, _, _, cx| this.open_account_export(cx))),
             ),
         );
         // --- Automatic downloads ---
@@ -564,12 +524,4 @@ pub(crate) fn demo_data_storage_prefs() -> DataStoragePrefs {
         },
     );
     prefs
-}
-
-crate::ui::shell::register_dialogs! {
-    StorageUsage => DialogSpec::new(
-        900,
-        |app| app.settings.storage_usage_open,
-        QuillApp::build_storage_usage_dialog,
-    ),
 }

@@ -38,7 +38,6 @@ fn the_box_opens_with_tdesktops_defaults_and_edits_its_draft(cx: &mut TestAppCon
     let (app, shell, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| {
-        app.settings.storage_usage_open = true;
         app.open_account_export(cx);
     });
     vcx.run_until_parked();
@@ -46,7 +45,6 @@ fn the_box_opens_with_tdesktops_defaults_and_edits_its_draft(cx: &mut TestAppCon
         assert_eq!(shell.open_dialog, Some(DialogKind::AccountExport));
     });
     app.read_with(vcx, |app, _| {
-        assert!(!app.settings.storage_usage_open, "one surface at a time");
         let draft = app
             .dialogs
             .account_export_dialog

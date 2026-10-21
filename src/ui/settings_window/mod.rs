@@ -69,6 +69,12 @@ impl QuillApp {
         if self.settings.page == Some(Page::Notifications) && page != Page::Notifications {
             self.leave_notification_settings();
         }
+        if self.settings.page == Some(Page::DataStorage) && page != Page::DataStorage {
+            self.leave_data_storage();
+        }
+        if page == Page::Connection {
+            self.fetch_proxy_list();
+        }
         if page == Page::Notifications {
             self.fetch_notification_settings();
         }

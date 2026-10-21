@@ -515,7 +515,6 @@
 "qll_ops_creating_secret_chat" = "creating secret chat…";
 "qll_ops_custom_notification_settings_for_the" = "Custom notification settings for the Secret Chat with {name}.";
 "qll_ops_custom_schedule" = "Custom Schedule";
-"qll_ops_data_storage" = "Data & Storage";
 "qll_ops_day" = "Day";
 "qll_ops_debug_logs" = "Debug logs";
 "qll_ops_debug_logs_started" = "Debug logs started.";

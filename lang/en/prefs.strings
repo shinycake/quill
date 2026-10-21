@@ -293,7 +293,6 @@
 "qll_prefs_confirm_new_passcode" = "Confirm new passcode";
 "qll_prefs_confirm_passcode" = "Confirm passcode";
 "qll_prefs_connection_to_telegram_was_closed" = "Connection to Telegram was closed";
-"qll_prefs_connection_type" = "Connection type: {value}";
 "qll_prefs_connection_type_2" = "Connection type";
 "qll_prefs_copy_photo" = "Copy photo";
 "qll_prefs_could_not_change_default_mention" = "could not change default mention notifications";

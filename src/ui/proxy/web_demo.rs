@@ -56,7 +56,7 @@ impl QuillApp {
                 ..ProxyState::default()
             };
         }
-        self.settings.proxy.list_open = true;
+        self.open_settings(Some(quill::settings_catalog::Page::Connection));
         cx.notify();
     }
 

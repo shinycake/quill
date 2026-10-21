@@ -32,7 +32,6 @@ use std::rc::Rc;
 /// All proxy-related UI state, in one field of [`QuillApp`].
 #[derive(Default)]
 pub(crate) struct ProxyUi {
-    pub(crate) list_open: bool,
     pub(crate) editor: Option<ProxyEditor>,
     pub(crate) link: Option<ProxyLinkBox>,
     /// One-line result of the last list action ("Proxy List copied…").
@@ -97,19 +96,18 @@ fn input(
 }
 
 impl QuillApp {
-    pub(super) fn open_proxy_list(&mut self, cx: &mut Context<Self>) {
-        self.settings.proxy.list_open = true;
+    /// Settings → Connection, with the proxy list freshly fetched.
+    pub(crate) fn open_proxy_list(&mut self, cx: &mut Context<Self>) {
+        self.open_settings(Some(quill::settings_catalog::Page::Connection));
+        self.fetch_proxy_list();
+        cx.notify();
+    }
+
+    pub(crate) fn fetch_proxy_list(&mut self) {
         self.settings.proxy.notice = None;
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_proxies();
         }
-        cx.notify();
-    }
-
-    fn close_proxy_list(&mut self, cx: &mut Context<Self>) {
-        self.settings.proxy.list_open = false;
-        self.settings.proxy.notice = None;
-        cx.notify();
     }
 
     /// Run a driver call; demo sessions have no driver, so say so.
@@ -542,25 +540,6 @@ impl QuillApp {
         )
     }
 
-    /// Settings row that opens the proxy list: tdesktop's "Connection
-    /// type" button with its current value (Settings > Advanced).
-    pub(super) fn connection_type_row(&self) -> String {
-        let value = self.session().map(|s| {
-            let connected = matches!(
-                s.connection,
-                ConnectionState::Ready | ConnectionState::Updating
-            );
-            quill::proxy_extras::connection_type_label(&s.settings.proxy, connected)
-        });
-        match value {
-            Some(value) => tr_with(
-                keys::Q_PREFS_CONNECTION_TYPE,
-                &[("value", &value.to_string())],
-            ),
-            None => tr(keys::Q_PREFS_CONNECTION_TYPE_2).into(),
-        }
-    }
-
     /// "Proxy settings" link for the connection strip while connecting,
     /// with tdesktop's proxy shield (`ProxyIcon` in
     /// `window_connecting_widget.cpp`) in front while a proxy is enabled.
@@ -625,212 +604,177 @@ impl QuillApp {
             )
     }
 
-    pub(super) fn build_proxy_list_dialog(
-        app: &Entity<QuillApp>,
-        shell: &Entity<QuillShell>,
-        dialog: Dialog,
-        cx: &mut App,
-    ) -> Dialog {
-        let on_close =
-            QuillShell::on_close_kind(app, shell, DialogKind::ProxyList, |this, _, cx| {
-                this.close_proxy_list(cx);
-            });
-        app.update(cx, |this, cx| {
-            let state = this
-                .session()
-                .map(|s| s.settings.proxy.clone())
-                .unwrap_or_default();
-            let use_for_calls = this
-                .session()
-                .is_some_and(|s| s.calls.prefs.use_proxy_for_calls);
-            let enabled = state.enabled().is_some();
-            let mode = match state.mode() {
-                ProxyMode::Disabled => 0,
-                ProxyMode::System => 1,
-                ProxyMode::Custom => 2,
-            };
-            let mut body = div().flex().flex_col().gap_2();
-            if let Some(error) = state.error.clone() {
-                body = body.child(div().text_xs().text_color(danger()).child(tr_with(
-                    keys::Q_PREFS_ERROR_2,
-                    &[("error", &error.to_string())],
-                )));
+    /// Settings → Connection: the proxy mode, IPv6, calls through the
+    /// proxy, auto-switch, and the proxy list with add and share.
+    pub(crate) fn proxy_settings_body(&mut self, cx: &mut Context<Self>) -> Div {
+        let this = self;
+        let state = this
+            .session()
+            .map(|s| s.settings.proxy.clone())
+            .unwrap_or_default();
+        let use_for_calls = this
+            .session()
+            .is_some_and(|s| s.calls.prefs.use_proxy_for_calls);
+        let enabled = state.enabled().is_some();
+        let mode = match state.mode() {
+            ProxyMode::Disabled => 0,
+            ProxyMode::System => 1,
+            ProxyMode::Custom => 2,
+        };
+        let mut body = div().flex().flex_col().gap_2();
+        if let Some(error) = state.error.clone() {
+            body = body.child(div().text_xs().text_color(danger()).child(tr_with(
+                keys::Q_PREFS_ERROR_2,
+                &[("error", &error.to_string())],
+            )));
+        }
+        body = body
+            .child(
+                RadioGroup::vertical("proxy-mode")
+                    .selected_index(Some(mode))
+                    .children([
+                        Radio::new("proxy-mode-off").label(tr(keys::PROXY_DISABLE)),
+                        Radio::new("proxy-mode-system").label(tr(keys::PROXY_USE_SYSTEM_SETTINGS)),
+                        Radio::new("proxy-mode-custom").label(tr(keys::PROXY_USE_CUSTOM)),
+                    ])
+                    .on_click(cx.listener(|this, &ix, window, cx| match ix {
+                        0 => this.set_proxy_mode(false, cx),
+                        1 => this.set_proxy_mode(true, cx),
+                        _ => this.use_custom_proxy(window, cx),
+                    })),
+            )
+            .child(Self::switch_row(
+                "proxy-ipv6",
+                state.prefer_ipv6,
+                tr(keys::CONNECTION_TRY_IPV6),
+                None,
+                cx,
+                |this, on, cx| {
+                    let _ = this.proxy_driver(|driver| driver.set_prefer_ipv6(on));
+                    cx.notify();
+                },
+            ));
+        if state.enabled_supports_calls() {
+            body = body.child(Self::switch_row(
+                "proxy-calls",
+                use_for_calls,
+                tr(keys::PROXY_USE_FOR_CALLS),
+                Some(tr(keys::Q_PREFS_ONLY_SOCKS5_PROXIES_CAN_CARRY)),
+                cx,
+                |this, on, cx| this.set_call_pref(|prefs| prefs.use_proxy_for_calls = on, cx),
+            ));
+        }
+        if enabled && state.entries().len() > 1 {
+            body = body.child(Self::switch_row(
+                "proxy-auto-switch",
+                state.prefs.auto_switch,
+                tr(keys::PROXY_AUTO_SWITCH),
+                None,
+                cx,
+                |this, on, cx| this.set_proxy_auto_switch(Some(on), None, cx),
+            ));
+            if state.prefs.auto_switch {
+                let current = state.prefs.timeout_secs();
+                body = body
+                    .child(
+                        RadioGroup::horizontal("proxy-auto-switch-timeout")
+                            .selected_index(AUTO_SWITCH_TIMEOUTS.iter().position(|t| *t == current))
+                            .children(AUTO_SWITCH_TIMEOUTS.iter().map(|secs| {
+                                Radio::new(format!("proxy-auto-switch-{secs}"))
+                                    .label(format!("{secs} s"))
+                            }))
+                            .on_click(cx.listener(|this, &ix, _, cx| {
+                                if let Some(&timeout) = AUTO_SWITCH_TIMEOUTS.get(ix) {
+                                    this.set_proxy_auto_switch(None, Some(timeout), cx);
+                                }
+                            })),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(text_muted())
+                            .child(tr(keys::PROXY_AUTO_SWITCH_ABOUT)),
+                    );
             }
-            body = body
-                .child(
-                    RadioGroup::vertical("proxy-mode")
-                        .selected_index(Some(mode))
-                        .children([
-                            Radio::new("proxy-mode-off").label(tr(keys::PROXY_DISABLE)),
-                            Radio::new("proxy-mode-system")
-                                .label(tr(keys::PROXY_USE_SYSTEM_SETTINGS)),
-                            Radio::new("proxy-mode-custom").label(tr(keys::PROXY_USE_CUSTOM)),
-                        ])
-                        .on_click(cx.listener(|this, &ix, window, cx| match ix {
-                            0 => this.set_proxy_mode(false, cx),
-                            1 => this.set_proxy_mode(true, cx),
-                            _ => this.use_custom_proxy(window, cx),
-                        })),
+        }
+        body = body.child(
+            div()
+                .text_xs()
+                .text_color(text_muted())
+                .child(tr(keys::PROXY_ABOUT)),
+        );
+        if state.entries().is_empty() {
+            body = body.child(div().py_3().text_sm().text_color(text_muted()).child(
+                if state.loading {
+                    tr(keys::Q_PREFS_LOADING)
+                } else {
+                    tr(keys::PROXY_DESCRIPTION)
+                },
+            ));
+        } else {
+            let mut rows = div().flex().flex_col().gap_1();
+            let connected = this.session().is_some_and(|s| {
+                matches!(
+                    s.connection,
+                    ConnectionState::Ready | ConnectionState::Updating
                 )
-                .child(Self::switch_row(
-                    "proxy-ipv6",
-                    state.prefer_ipv6,
-                    tr(keys::CONNECTION_TRY_IPV6),
-                    None,
-                    cx,
-                    |this, on, cx| {
-                        let _ = this.proxy_driver(|driver| driver.set_prefer_ipv6(on));
-                        cx.notify();
-                    },
-                ));
-            if state.enabled_supports_calls() {
-                body = body.child(Self::switch_row(
-                    "proxy-calls",
-                    use_for_calls,
-                    tr(keys::PROXY_USE_FOR_CALLS),
-                    Some(tr(keys::Q_PREFS_ONLY_SOCKS5_PROXIES_CAN_CARRY)),
-                    cx,
-                    |this, on, cx| this.set_call_pref(|prefs| prefs.use_proxy_for_calls = on, cx),
-                ));
-            }
-            if enabled && state.entries().len() > 1 {
-                body = body.child(Self::switch_row(
-                    "proxy-auto-switch",
-                    state.prefs.auto_switch,
-                    tr(keys::PROXY_AUTO_SWITCH),
-                    None,
-                    cx,
-                    |this, on, cx| this.set_proxy_auto_switch(Some(on), None, cx),
-                ));
-                if state.prefs.auto_switch {
-                    let current = state.prefs.timeout_secs();
-                    body = body
-                        .child(
-                            RadioGroup::horizontal("proxy-auto-switch-timeout")
-                                .selected_index(
-                                    AUTO_SWITCH_TIMEOUTS.iter().position(|t| *t == current),
-                                )
-                                .children(AUTO_SWITCH_TIMEOUTS.iter().map(|secs| {
-                                    Radio::new(format!("proxy-auto-switch-{secs}"))
-                                        .label(format!("{secs} s"))
-                                }))
-                                .on_click(cx.listener(|this, &ix, _, cx| {
-                                    if let Some(&timeout) = AUTO_SWITCH_TIMEOUTS.get(ix) {
-                                        this.set_proxy_auto_switch(None, Some(timeout), cx);
-                                    }
-                                })),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(text_muted())
-                                .child(tr(keys::PROXY_AUTO_SWITCH_ABOUT)),
-                        );
-                }
-            }
-            body = body.child(
-                div()
-                    .text_xs()
-                    .text_color(text_muted())
-                    .child(tr(keys::PROXY_ABOUT)),
-            );
-            if state.entries().is_empty() {
-                body = body.child(div().py_3().text_sm().text_color(text_muted()).child(
-                    if state.loading {
-                        tr(keys::Q_PREFS_LOADING)
-                    } else {
-                        tr(keys::PROXY_DESCRIPTION)
-                    },
-                ));
-            } else {
-                let mut rows = div().flex().flex_col().gap_1();
-                let connected = this.session().is_some_and(|s| {
-                    matches!(
-                        s.connection,
-                        ConnectionState::Ready | ConnectionState::Updating
+            });
+            for entry in state.entries() {
+                let ping = state.pings.get(&entry.id).copied();
+                let web = (entry.proxy.kind == ProxyKind::Web).then(|| {
+                    quill::proxy_web::WebRowState::for_entry(
+                        entry.is_enabled,
+                        connected,
+                        state.carrier_failed == Some(entry.id),
                     )
                 });
-                for entry in state.entries() {
-                    let ping = state.pings.get(&entry.id).copied();
-                    let web = (entry.proxy.kind == ProxyKind::Web).then(|| {
-                        quill::proxy_web::WebRowState::for_entry(
-                            entry.is_enabled,
-                            connected,
-                            state.carrier_failed == Some(entry.id),
-                        )
-                    });
-                    rows = rows.child(this.proxy_row(entry, ping, web, cx));
-                }
-                body = body.child(rows);
+                rows = rows.child(this.proxy_row(entry, ping, web, cx));
             }
-            body = body.child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap_2()
-                    .child(
-                        Button::new("proxy-add")
-                            .icon(gpui_kit::assets::IconName::Plus)
-                            .label(tr(keys::PROXY_ADD))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_proxy_editor(None, false, window, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("proxy-add-clipboard")
-                            .label(tr(keys::PROXY_ADD_FROM_CLIPBOARD))
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.add_proxy_from_clipboard(cx);
-                            })),
-                    )
-                    .when(
-                        state
-                            .entries()
-                            .iter()
-                            .any(|p| p.proxy.share_link(false).is_some()),
-                        |this| {
-                            this.child(
-                                Button::new("proxy-share-list")
-                                    .icon(gpui_kit::assets::IconName::Copy)
-                                    .label(tr(keys::PROXY_EDIT_SHARE_LIST_BUTTON))
-                                    .ghost()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.share_proxy_list(cx);
-                                    })),
-                            )
-                        },
-                    ),
-            );
-            if let Some(notice) = this.settings.proxy.notice.clone() {
-                body = body.child(div().text_xs().text_color(text_muted()).child(notice));
-            }
-            let footer = div().flex().justify_end().child(
-                Button::new("proxy-close")
-                    .label(tr(keys::CLOSE))
-                    .ghost()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.close_proxy_list(cx);
-                        this.close_kit_dialog_if_done(DialogKind::ProxyList, window, cx);
-                    })),
-            );
-            dialog
-                .overlay(true)
-                .width(px(520.))
-                .title(crate::ui::shell::dialog_title(tr(keys::PROXY_SETTINGS)))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        content.child(
-                            body.borrow_mut()
-                                .take()
-                                .unwrap_or_else(|| div().into_any_element()),
+            body = body.child(rows);
+        }
+        body = body.child(
+            div()
+                .flex()
+                .flex_wrap()
+                .gap_2()
+                .child(
+                    Button::new("proxy-add")
+                        .icon(gpui_kit::assets::IconName::Plus)
+                        .label(tr(keys::PROXY_ADD))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.open_proxy_editor(None, false, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("proxy-add-clipboard")
+                        .label(tr(keys::PROXY_ADD_FROM_CLIPBOARD))
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.add_proxy_from_clipboard(cx);
+                        })),
+                )
+                .when(
+                    state
+                        .entries()
+                        .iter()
+                        .any(|p| p.proxy.share_link(false).is_some()),
+                    |this| {
+                        this.child(
+                            Button::new("proxy-share-list")
+                                .icon(gpui_kit::assets::IconName::Copy)
+                                .label(tr(keys::PROXY_EDIT_SHARE_LIST_BUTTON))
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.share_proxy_list(cx);
+                                })),
                         )
-                    }
-                }))
-                .footer(footer)
-                .on_close(on_close)
-        })
+                    },
+                ),
+        );
+        if let Some(notice) = this.settings.proxy.notice.clone() {
+            body = body.child(div().text_xs().text_color(text_muted()).child(notice));
+        }
+        body
     }
 
     fn editor_field(cx: &mut Context<Self>, label: &'static str, field: impl IntoElement) -> Div {
@@ -860,14 +804,6 @@ crate::ui::shell::register_dialogs! {
         3100,
         |app| app.settings.proxy.link.is_some(),
         QuillApp::build_proxy_link_dialog,
-    ),
-
-    /// `parity:proxy-settings`: proxy list, add / edit box, and the
-    /// `tg://proxy` link confirmation.
-    ProxyList => DialogSpec::new(
-        3200,
-        |app| app.settings.proxy.list_open,
-        QuillApp::build_proxy_list_dialog,
     ),
 }
 

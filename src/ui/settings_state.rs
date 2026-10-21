@@ -61,8 +61,6 @@ pub(crate) struct SettingsUi {
     /// `ColorSelect`), tdesktop's "custom" accent circle. Holds the last
     /// custom color; choosing one sets `appearance.accent_rgb`.
     pub(super) accent_picker: Entity<gpui_kit::component::color_picker::ColorPickerState>,
-    /// Phase S2: storage-usage overlay (TGX Settings → Data and Storage).
-    pub(super) storage_usage_open: bool,
     /// Slice S4: the Data & Storage per-network editor — the network
     /// being edited plus its draft settings (saved or discarded
     /// explicitly, never applied optimistically).
@@ -120,7 +118,6 @@ impl SettingsUi {
             system_accent_probed: false,
             font_picker,
             accent_picker,
-            storage_usage_open: false,
             data_storage_editor: None,
             storage_confirm: None,
             storage_selected: Default::default(),

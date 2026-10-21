@@ -130,22 +130,8 @@ impl QuillApp {
                     cx,
                 )],
             )),
-            Page::DataStorage => column.child(group(
-                None,
-                [self.nav_row(Nav::Storage, tr(keys::SETTINGS_DATA_STORAGE), None, cx)],
-            )),
-            Page::Connection => {
-                let kind = self.connection_type_row();
-                column.child(group(
-                    None,
-                    [self.nav_row(
-                        Nav::Proxy,
-                        tr(keys::Q_SETTINGS_PAGE_CONNECTION),
-                        Some(kind.into()),
-                        cx,
-                    )],
-                ))
-            }
+            Page::DataStorage => column.child(self.data_storage_page(cx)),
+            Page::Connection => column.child(self.proxy_settings_body(cx)),
             Page::Calls => {
                 self.ensure_ptt_delay_slider(cx);
                 column.child(self.call_settings_section(cx))

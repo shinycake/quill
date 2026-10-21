@@ -33,7 +33,6 @@ pub(super) enum NavigationAction {
     Communities,
     ArchivedStickers,
     Storage,
-    Proxy,
     Business,
     Subscriptions,
     Stars,
@@ -78,7 +77,6 @@ impl NavigationAction {
             self,
             Self::ArchivedStickers
                 | Self::Storage
-                | Self::Proxy
                 | Self::Business
                 | Self::Subscriptions
                 | Self::Stars
@@ -218,7 +216,6 @@ impl QuillApp {
             NavigationAction::Storage => {
                 self.open_data_storage(cx);
             }
-            NavigationAction::Proxy => self.open_proxy_list(cx),
             NavigationAction::Business => self.open_business(window, cx),
             NavigationAction::Subscriptions => {
                 self.open_subscriptions(cx);

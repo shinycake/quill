@@ -661,12 +661,7 @@ mod dispatch_tests {
             Root::new(shell, window, cx)
         });
         let app: Entity<QuillApp> = slot.borrow().clone().unwrap();
-        let flags: [(&str, fn(&mut QuillApp), fn(&QuillApp) -> bool); 4] = [
-            (
-                "proxy list",
-                |a| a.settings.proxy.list_open = true,
-                |a| a.settings.proxy.list_open,
-            ),
+        let flags: [(&str, fn(&mut QuillApp), fn(&QuillApp) -> bool); 3] = [
             (
                 "marketplace",
                 |a| a.payments.marketplace_open = true,
