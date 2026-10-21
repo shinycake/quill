@@ -13,6 +13,9 @@ pub(crate) mod call_chrome;
 mod chooser;
 mod editor;
 pub(crate) mod kit_colors;
+mod omarchy;
+#[cfg(feature = "demo-capture")]
+mod omarchy_demo;
 
 use super::QuillApp;
 use crate::ui::status_note::StatusNote;
@@ -163,6 +166,10 @@ pub(crate) struct AppThemeUi {
     pub(super) chat_defaults: Option<ChatDefaults>,
     /// The palette editor, while it is open.
     pub(super) editor: Option<editor::ThemeEditor>,
+    /// Omarchy's current theme, once looked for (`omarchy.rs`).
+    pub(super) omarchy: Option<omarchy::OmarchyState>,
+    omarchy_probed: bool,
+    omarchy_watched: bool,
 }
 
 /// The colour standing for a theme image: the 1x1 PNG's, else the mean of
@@ -244,14 +251,21 @@ impl QuillApp {
         if let Some(editor) = &self.settings.app_theme.editor {
             return (editor.preview_id(), editor.palette.clone());
         }
+        if self.appearance.follow_omarchy
+            && let Some(palette) = self.omarchy_palette()
+        {
+            return (ThemeId::Omarchy, palette);
+        }
         let id = self.appearance.theme_for(night).clone();
         match &id {
             ThemeId::Builtin(theme) => {
                 let accent = self.theme_accent(*theme);
                 (id.clone(), theme.palette_with_accent(accent))
             }
-            ThemeId::Custom(name) => {
-                if let Some(palette) = self.custom_theme_palette(name) {
+            ThemeId::Custom(_) | ThemeId::Omarchy => {
+                if let ThemeId::Custom(name) = &id
+                    && let Some(palette) = self.custom_theme_palette(name)
+                {
                     return (id, palette);
                 }
                 let fallback = if night {
@@ -349,6 +363,7 @@ impl QuillApp {
                 .set_note(StatusNote::silent(tr(keys::Q_MISC_AUTO_NIGHT_MODE_IS_OFF)));
         }
         self.set_appearance(cx, |a| {
+            a.follow_omarchy = false;
             if night {
                 a.night_theme = id;
                 a.theme = ThemeChoice::Dark;

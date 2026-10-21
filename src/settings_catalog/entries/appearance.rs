@@ -1,12 +1,15 @@
 //! Appearance page entries.
 
 use crate::lang::keys;
-use crate::settings_catalog::{Entry, Page};
+use crate::settings_catalog::{Entry, Page, Platforms};
 
 const P: Page = Page::Appearance;
 
 pub(super) const ENTRIES: &[Entry] = &[
     Entry::new("appearance.themes", P, keys::Q_MISC_THEMES).keywords(&["color scheme", "skin"]),
+    Entry::new("appearance.omarchy", P, keys::Q_SETTINGS_OMARCHY)
+        .keywords(&["omarchy theme", "hyprland", "desktop theme"])
+        .only(Platforms::LINUX),
     Entry::new("appearance.night_mode", P, keys::MENU_NIGHT_MODE)
         .keywords(&["dark", "theme", "light"]),
     Entry::new("appearance.auto_night", P, keys::Q_PREFS_AUTO_NIGHT).keywords(&[
