@@ -473,10 +473,6 @@ impl Session {
         // would sit right after that page across a gap: open at the latest.
         let around_in_flight = message.is_outgoing
             && self
-                .histories
-                .get(&chat_id.0)
-                .is_none_or(|history| history.newest_id().is_none())
-            && self
                 .requests
                 .ids_for_chat(&[RequestPurpose::GetHistoryAround], chat_id)
                 .into_iter()

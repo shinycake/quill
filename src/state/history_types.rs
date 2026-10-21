@@ -573,7 +573,12 @@ impl HistoryState {
             .messages
             .values()
             .rev()
-            .find(|message| !message.is_outgoing && !message.pending && !message.failed)
+            .find(|message| {
+                !message.is_outgoing
+                    && !message.pending
+                    && !message.failed
+                    && !deleted.contains(&message.id)
+            })
             .map_or(0, |message| message.id.0);
     }
 

@@ -617,3 +617,17 @@ fn jumping_to_the_latest_while_an_older_page_is_on_the_way_still_loads_it() {
         Some(MessageId(2700))
     );
 }
+
+#[test]
+fn deleting_the_latest_message_leaves_the_window_at_the_latest() {
+    let mut sim = Sim::scripted();
+    sim.driver.select_chat(ChatId(7)).unwrap();
+    let (first, ..) = sim.pending(7)[0];
+    sim.answer_full(first);
+    sim.ingest(r#"{"@type":"updateDeleteMessages","chat_id":7,"message_ids":[2000],"is_permanent":true,"from_cache":false}"#);
+    sim.ingest(&format!(
+        r#"{{"@type":"updateChatLastMessage","chat_id":7,"last_message":{},"positions":[]}}"#,
+        message_json(7, 1990)
+    ));
+    assert!(!sim.driver.session.history_has_newer(ChatId(7)));
+}
