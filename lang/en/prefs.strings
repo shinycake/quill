@@ -403,6 +403,7 @@
 "qll_prefs_enter_a_server_a_port" = "Enter a server, a port (1–65535) and a valid secret.";
 "qll_prefs_enter_a_server_and_a" = "Enter a server and a port (1–65535).";
 "qll_prefs_enter_a_time_as_hours" = "Enter a time as hours:minutes, like 0:30";
+"qll_prefs_enter_a_web_proxy_address" = "Enter a valid web proxy address and a secret.";
 "qll_prefs_enter_full_screen" = "Enter Full Screen";
 "qll_prefs_enter_sends_or_enter_inserts" = "Enter sends, or Enter inserts a newline and Ctrl/Cmd+Enter sends.";
 "qll_prefs_enter_the_code_from_the" = "enter the code from the email";
@@ -453,8 +454,6 @@
 "qll_prefs_hide" = "Hide";
 "qll_prefs_hint" = "Hint: {password_hint}";
 "qll_prefs_hint_optional" = "Hint (optional)";
-"qll_prefs_enter_a_web_proxy_address" = "Enter a valid web proxy address and a secret.";
-"qll_prefs_web_proxies_arent_supported_yet" = "Web proxies aren't supported in this version yet.";
 "qll_prefs_hostname" = "Hostname";
 "qll_prefs_hour" = "− hour";
 "qll_prefs_hour_2" = "+ hour";
@@ -737,6 +736,7 @@
 "qll_prefs_strikethrough" = "Strikethrough";
 "qll_prefs_suggest_emoji_replacements" = "Suggest emoji replacements";
 "qll_prefs_suggest_frequent_contacts" = "Suggest frequent contacts";
+"qll_prefs_switch_the_proxy_off_before_web" = "Switch this proxy off before changing it to WEB.";
 "qll_prefs_sync_contacts" = "Sync contacts";
 "qll_prefs_tap_to_disconnect_from_your" = "Tap to disconnect from your Telegram account.";
 "qll_prefs_telegram_links" = "Telegram links";
@@ -791,6 +791,7 @@
 "qll_prefs_videos" = "Videos";
 "qll_prefs_view" = "View";
 "qll_prefs_voice_messages" = "Voice messages";
+"qll_prefs_web_proxies_arent_supported_yet" = "Web proxies aren't supported in this version yet.";
 "qll_prefs_well_send_a_code_to" = "We'll send a code to your recovery email. It is the only way to recover a forgotten password.";
 "qll_prefs_whats_new" = "What's new";
 "qll_prefs_when_a_local_passcode_is" = "When a local passcode is set, a lock icon appears at the top of your chat list. Click it to lock Quill.";

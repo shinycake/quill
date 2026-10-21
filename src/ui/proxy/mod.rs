@@ -267,6 +267,14 @@ impl QuillApp {
                 .and_then(|s| s.settings.proxy.find(id))
                 .is_some_and(|p| p.is_enabled)
         });
+        if was_enabled && kind == ProxyKind::Web {
+            fail(
+                self,
+                tr(keys::Q_PREFS_SWITCH_THE_PROXY_OFF_BEFORE_WEB).into(),
+            );
+            cx.notify();
+            return;
+        }
         let sent = self.proxy_driver(|driver| match id {
             Some(id) => driver.edit_proxy(id, &draft, was_enabled, &comment),
             None => driver.add_proxy(&draft, enable_on_save, &comment),
@@ -471,9 +479,15 @@ impl QuillApp {
                 .find(|p| p.proxy.same_endpoint(&link.draft))
                 .map(|p| p.id)
         });
+        if existing.is_some() && !link.draft.kind.can_be_enabled() {
+            // Nothing to add and nothing to switch to: say so.
+            self.settings.proxy.notice =
+                Some(tr(keys::PROXY_ADD_FROM_CLIPBOARD_EXISTING_TOAST).into());
+            cx.notify();
+            return;
+        }
         let _ = self.proxy_driver(|driver| match existing {
-            Some(id) if link.draft.kind.can_be_enabled() => driver.enable_proxy(id),
-            Some(_) => Err(quill::connect::ConnectSendError::InvalidRequest),
+            Some(id) => driver.enable_proxy(id),
             None => driver.add_proxy(&link.draft, true, ""),
         });
         cx.notify();

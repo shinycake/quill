@@ -714,8 +714,11 @@ impl ProxyState {
         let entries = self.entries();
         let current = entries.iter().position(|p| p.is_enabled).unwrap_or(0);
         // Candidates in list order, starting after the current proxy.
+        // Web proxies are skipped: they can't be pinged or switched to
+        // (tdesktop `ProxyRotationManager` leaves `Type::Web` out too).
         let order: Vec<&ProxyEntry> = (1..entries.len())
             .filter_map(|step| entries.get((current + step) % entries.len()))
+            .filter(|p| p.proxy.kind.can_be_enabled())
             .collect();
         if let Some(found) = order
             .iter()
@@ -932,6 +935,19 @@ mod tests {
         let mut single = state(vec![entry(1, true)], true);
         single.rotation_step(0, false);
         assert_eq!(single.rotation_step(99_000, false), RotationAction::None);
+    }
+
+    #[test]
+    fn rotation_skips_web_proxies() {
+        let mut web = entry(2, false);
+        web.proxy.kind = ProxyKind::Web;
+        let mut s = state(vec![entry(1, true), web, entry(3, false)], true);
+        s.rotation_step(0, false);
+        // The web proxy is neither pinged nor switched to.
+        assert_eq!(s.rotation_step(10_000, false), RotationAction::Ping(3));
+        s.pings.insert(3, PingStatus::Unavailable);
+        assert_eq!(s.rotation_step(10_500, false), RotationAction::None);
+        assert!(!s.pings.contains_key(&2));
     }
 
     #[test]

@@ -133,6 +133,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.settings.proxy.find(proxy_id).is_none() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // TDLib turns the edited proxy back on when it is the active one
+        // (`ConnectionCreator::add_proxy`), which would leave the user
+        // offline behind a web proxy Quill cannot carry: refuse it.
+        let edits_enabled = self
+            .session
+            .settings
+            .proxy
+            .find(proxy_id)
+            .is_some_and(|p| p.is_enabled);
+        if draft.kind == ProxyKind::Web && edits_enabled {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let enable = enable && draft.kind != ProxyKind::Web;
         self.session.settings.proxy.pings.remove(&proxy_id);
         self.send_proxy_mutation(|extra| edit_proxy(extra, proxy_id, draft, enable, comment))

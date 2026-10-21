@@ -427,3 +427,19 @@ fn a_web_proxy_is_saved_but_never_switched_to() {
     rig.driver.edit_proxy(2, &web, true, "").unwrap();
     assert_eq!(sent_request(&rig.recorder, "editProxy")["enable"], false);
 }
+
+#[test]
+fn the_enabled_proxy_cannot_be_edited_into_a_web_proxy() {
+    let mut rig = Rig::new();
+    rig.load_list(&[(1, true), (2, false)]);
+    let web =
+        crate::proxy::ProxyDraft::web("relay.example.com/app", "8561944064fc730cbfa4473562d8ec59")
+            .validated()
+            .unwrap();
+    // TDLib would re-enable the edited active proxy, so nothing is sent.
+    assert!(rig.driver.edit_proxy(1, &web, true, "").is_err());
+    assert_eq!(rig.count("editProxy"), 0);
+    // A proxy that is off can still be edited into one.
+    assert!(rig.driver.edit_proxy(2, &web, false, "").is_ok());
+    assert_eq!(rig.count("editProxy"), 1);
+}

@@ -75,9 +75,7 @@ impl QuillApp {
                     .min_w_0()
                     .items_center()
                     .gap_2()
-                    .when(entry.proxy.kind.can_be_enabled(), |this| {
-                        this.cursor_pointer()
-                    })
+                    .cursor_pointer()
                     // The proxy in use stays on (tdesktop `applyItem`); the
                     // radios above switch it off.
                     .on_click(cx.listener(move |this, _, _, cx| {
