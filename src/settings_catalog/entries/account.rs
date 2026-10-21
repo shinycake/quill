@@ -30,6 +30,13 @@ pub(super) const ENTRIES: &[Entry] = &[
         keys::Q_SETTINGS_ACCOUNT_PHONE_SUGGESTION,
     )
     .keywords(&["confirm phone"]),
+    Entry::new("account.birthday", P, keys::SETTINGS_BIRTHDAY_LABEL).keywords(&[
+        "birthday",
+        "birthdate",
+        "age",
+    ]),
+    Entry::new("account.personal_channel", P, keys::SETTINGS_CHANNEL_LABEL)
+        .keywords(&["my channel", "profile channel"]),
     Entry::new(
         "account.name_color",
         P,

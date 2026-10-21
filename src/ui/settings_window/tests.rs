@@ -17,13 +17,21 @@ fn new_app(
     cx: &mut TestAppContext,
     width: f32,
 ) -> (Entity<QuillApp>, Entity<QuillShell>, VisualTestContext) {
+    new_app_sized(cx, width, 800.)
+}
+
+fn new_app_sized(
+    cx: &mut TestAppContext,
+    width: f32,
+    height: f32,
+) -> (Entity<QuillApp>, Entity<QuillShell>, VisualTestContext) {
     let root = quill::scratch::process_dir("quill-settings-window");
     let _ = std::fs::create_dir_all(&root);
     quill::settings::use_isolated_app_root(root);
     cx.update(gpui_kit::init);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
-    let handle = cx.open_window(size(px(width), px(800.)), move |window, cx| {
+    let handle = cx.open_window(size(px(width), px(height)), move |window, cx| {
         let view = cx.new(|cx| {
             QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named("ready-chats")))
         });
@@ -122,10 +130,10 @@ fn a_box_opens_over_settings_and_closing_it_comes_back(cx: &mut TestAppContext) 
 
 #[gpui_kit::test]
 fn log_out_asks_before_signing_out(cx: &mut TestAppContext) {
-    let (app, shell, mut vcx) = new_app(cx, 1100.);
+    let (app, shell, mut vcx) = new_app_sized(cx, 1100., 1600.);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.open_settings(Some(Page::Account));
+        app.demo_settings(Page::Account);
         cx.notify();
     });
     frames(vcx);
@@ -266,4 +274,22 @@ fn a_narrow_window_shows_results_in_place_of_the_list(cx: &mut TestAppContext) {
     vcx.simulate_keystrokes("enter");
     frames(vcx);
     assert!(shown(vcx, "settings-page-language"));
+}
+
+#[gpui_kit::test]
+fn account_rows_open_their_editors(cx: &mut TestAppContext) {
+    let (app, shell, mut vcx) = new_app_sized(cx, 1100., 1600.);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.demo_settings(Page::Account);
+        cx.notify();
+    });
+    frames(vcx);
+    vcx.update(|window, cx| window.click("settings-row-name", cx));
+    assert_eq!(open_dialog(&shell, vcx), Some(DialogKind::EditProfile));
+    app.update(vcx, |app, cx| app.close_edit_profile_dialog(cx));
+    assert_eq!(open_dialog(&shell, vcx), None);
+    vcx.update(|window, cx| window.click("settings-row-name-color", cx));
+    assert!(open_dialog(&shell, vcx).is_some());
+    app.read_with(vcx, |app, _| assert!(app.settings.open));
 }
