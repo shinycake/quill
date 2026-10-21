@@ -738,12 +738,28 @@ fn pre_block(run: &TextRun, id: &str, font: Pixels, cx: &mut Context<QuillApp>) 
         .language
         .clone()
         .filter(|language| !language.trim().is_empty());
+    // Highlighted by language off the main thread; plain until ready.
+    let background = bg_code();
+    let body: AnyElement = match super::code_highlight::lookup(
+        run.style.language.as_deref().unwrap_or_default(),
+        &code,
+    ) {
+        (super::code_highlight::Lookup::Ready(spans), _) => {
+            super::code_highlight::styled(&code, &spans, background).into_any_element()
+        }
+        (_, job) => {
+            if let Some(job) = job {
+                super::code_highlight::start(job, cx);
+            }
+            code.clone().into_any_element()
+        }
+    };
     div()
         .id(id.to_string())
         .group(group.clone())
         .relative()
         .w_full()
-        .bg(bg_code())
+        .bg(background)
         .rounded_md()
         .px_2()
         .py_1()
@@ -757,7 +773,7 @@ fn pre_block(run: &TextRun, id: &str, font: Pixels, cx: &mut Context<QuillApp>) 
                     .child(language),
             )
         })
-        .child(div().pr_6().child(code))
+        .child(div().pr_6().child(body))
         .child(
             div()
                 .absolute()

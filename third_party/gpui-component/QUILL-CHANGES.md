@@ -42,3 +42,9 @@ background task. Quill starts the prefetch when the platform exists, so theme
 init finds the list ready and the font picker reads the same list instead of
 listing the fonts a second time on the main thread (commit `cfdb6d7e`,
 `docs/decisions/launch-time-fonts.md`).
+
+`src/highlighter/{mod,syntect_backend}.rs`: `highlighter::capture_names` is
+public with the `syntect` feature (without `tree-sitter`). It returns the
+highlight names of a text for a language, so Quill colors message code blocks
+from its own theme tokens and runs the parse on a background thread
+(`docs/decisions/code-syntax-highlight.md`). Re-apply when re-vendoring.

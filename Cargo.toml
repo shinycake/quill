@@ -189,7 +189,7 @@ gpui_shared_string = { package = "gpui-pre-shared-string", version = "=0.3.9" }
 version = "=0.8.0"
 optional = true
 default-features = false
-features = ["component", "assets"]
+features = ["component", "assets", "syntect"]
 
 # The input engine under gpui-kit (patched below), named directly for the
 # composer's formatting spans (docs/decisions/codex-composer-input.md).
