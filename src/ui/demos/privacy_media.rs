@@ -131,24 +131,11 @@ impl QuillApp {
         match view.as_str() {
             "reactions" => {
                 if let Some(session) = self.demo_session.as_mut() {
-                    use quill::state::{MessageReactionOptions, ReactionChoice};
-                    let emoji = |e: &str| ReactionChoice::Emoji(e.to_string());
-                    session.stickers.message_reaction_options = Some(MessageReactionOptions {
-                        chat_id: ChatId(sc::HIKERS),
-                        message_id: MessageId(sc::HIKERS_FIRST_MESSAGE),
-                        top: ["❤", "👍", "🔥", "😂", "😮", "😢", "🎉"]
-                            .into_iter()
-                            .map(emoji)
-                            .collect(),
-                        recent: vec![emoji("👏")],
-                        popular: [
-                            "🤔", "🙏", "👌", "😍", "🤯", "😱", "🥰", "🤩", "💯", "⚡", "🏆", "🤝",
-                        ]
-                        .into_iter()
-                        .map(emoji)
-                        .collect(),
-                        allow_custom_emoji: false,
-                    });
+                    super::seed_reaction_options(
+                        session,
+                        ChatId(sc::HIKERS),
+                        MessageId(sc::HIKERS_FIRST_MESSAGE),
+                    );
                 }
                 self.message_ui.menu = Some(MessageMenuState {
                     chat_id: ChatId(sc::HIKERS),

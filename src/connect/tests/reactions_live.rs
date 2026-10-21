@@ -152,14 +152,15 @@ fn picker_options_are_refetched_when_reactions_change() {
     let (mut driver, recorder, sink, seq) = driver();
     let chat = ChatId(11);
     let message = MessageId(101);
-    driver.session.stickers.message_reaction_options = Some(crate::state::MessageReactionOptions {
-        chat_id: chat,
-        message_id: message,
-        top: vec![ReactionChoice::Emoji("👍".into())],
-        recent: Vec::new(),
-        popular: Vec::new(),
-        allow_custom_emoji: false,
-    });
+    driver.session.stickers.message_reaction_options =
+        crate::state::MessageReactionsState::Ready(crate::state::MessageReactionOptions {
+            chat_id: chat,
+            message_id: message,
+            top: vec![ReactionChoice::Emoji("👍".into())],
+            recent: Vec::new(),
+            popular: Vec::new(),
+            allow_custom_emoji: false,
+        });
     // Another chat's change leaves the options alone.
     feed(
         &mut driver,
@@ -176,7 +177,13 @@ fn picker_options_are_refetched_when_reactions_change() {
     );
     let sent = sent_request(&recorder, "getMessageAvailableReactions");
     assert_eq!(sent["message_id"], 101);
-    assert!(driver.session.stickers.message_reaction_options.is_none());
+    assert!(
+        driver
+            .session
+            .stickers
+            .message_reaction_options
+            .is_loading_for(chat, message)
+    );
 }
 
 #[test]

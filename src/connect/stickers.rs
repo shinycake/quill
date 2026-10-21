@@ -742,8 +742,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if emoji_trending {
             self.select_emoji_set_tab(crate::emoji::EmojiSetTab::Trending)?;
         }
-        if reactions && let Some(options) = self.session.stickers.message_reaction_options.take() {
-            self.fetch_message_reactions(options.chat_id, options.message_id)?;
+        if reactions
+            && let Some((chat_id, message_id)) =
+                self.session.stickers.message_reaction_options.target()
+        {
+            self.session.stickers.message_reaction_options =
+                crate::state::MessageReactionsState::Idle;
+            self.fetch_message_reactions(chat_id, message_id)?;
         }
         Ok(())
     }

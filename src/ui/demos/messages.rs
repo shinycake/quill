@@ -143,24 +143,7 @@ impl QuillApp {
         }
         // The message menu with its reaction strip, expanded.
         if let Some(session) = self.demo_session.as_mut() {
-            use quill::state::{MessageReactionOptions, ReactionChoice};
-            let emoji = |e: &str| ReactionChoice::Emoji(e.to_string());
-            session.stickers.message_reaction_options = Some(MessageReactionOptions {
-                chat_id: ChatId(11),
-                message_id: MessageId(101),
-                top: ["❤", "👍", "🔥", "😂", "😮", "😢", "🎉"]
-                    .into_iter()
-                    .map(emoji)
-                    .collect(),
-                recent: vec![emoji("👏")],
-                popular: [
-                    "🤔", "🙏", "👌", "😍", "🤯", "😱", "🥰", "🤩", "💯", "⚡", "🏆", "🤝",
-                ]
-                .into_iter()
-                .map(emoji)
-                .collect(),
-                allow_custom_emoji: false,
-            });
+            super::seed_reaction_options(session, ChatId(11), MessageId(101));
         }
         self.message_ui.menu = Some(MessageMenuState {
             chat_id: ChatId(11),

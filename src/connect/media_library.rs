@@ -121,12 +121,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .stickers
             .message_reaction_options
-            .as_ref()
-            .is_some_and(|o| o.chat_id == chat_id && o.message_id == message_id)
+            .covers(chat_id, message_id)
         {
             return Ok(None);
         }
-        self.session.stickers.message_reaction_options = None;
+        self.session.stickers.message_reaction_options =
+            crate::state::MessageReactionsState::Loading {
+                chat_id,
+                message_id,
+            };
         let purpose = RequestPurpose::Messages(MessagesPurpose::GetMessageAvailableReactions {
             message_id: message_id.0,
         });
@@ -143,6 +146,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
+                self.session
+                    .fail_message_reaction_options(chat_id, message_id);
                 Err(err)
             }
         }

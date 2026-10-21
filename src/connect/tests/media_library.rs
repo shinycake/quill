@@ -146,7 +146,8 @@ fn message_reaction_options_parse_and_custom_emoji_reactions_toggle() {
         .session
         .stickers
         .message_reaction_options
-        .clone()
+        .ready()
+        .cloned()
         .unwrap();
     assert_eq!(options.message_id, MessageId(50));
     assert!(options.allow_custom_emoji);
@@ -221,4 +222,80 @@ fn custom_emoji_packs_survive_the_installed_sets_update() {
     let sets = &h.driver.session.stickers.emoji.installed_sets;
     assert_eq!(sets.len(), 1);
     assert_eq!(sets[0].title, "Retro Font");
+}
+
+fn menu_harness() -> Harness {
+    let mut h = Harness::ready();
+    h.ingest(r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#);
+    h.ingest(r#"{"@type":"updateChatPosition","chat_id":7,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"9","is_pinned":false}}"#);
+    h
+}
+
+#[test]
+fn message_reaction_options_wait_while_the_request_is_in_flight() {
+    let mut h = menu_harness();
+    h.driver
+        .fetch_message_reactions(ChatId(7), MessageId(50))
+        .unwrap();
+    let state = &h.driver.session.stickers.message_reaction_options;
+    assert!(state.is_loading_for(ChatId(7), MessageId(50)));
+    assert!(state.ready().is_none());
+}
+
+#[test]
+fn failed_message_reaction_request_marks_the_options_unavailable() {
+    let mut h = menu_harness();
+    let extra = h
+        .driver
+        .fetch_message_reactions(ChatId(7), MessageId(50))
+        .unwrap()
+        .expect("request");
+    h.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":400,"message":"Message not found"}}"#,
+        extra.0
+    ));
+    let state = &h.driver.session.stickers.message_reaction_options;
+    assert!(state.is_unavailable_for(ChatId(7), MessageId(50)));
+    assert!(!state.is_loading_for(ChatId(7), MessageId(50)));
+}
+
+#[test]
+fn empty_message_reaction_answer_marks_the_options_unavailable() {
+    let mut h = menu_harness();
+    let extra = h
+        .driver
+        .fetch_message_reactions(ChatId(7), MessageId(50))
+        .unwrap()
+        .expect("request");
+    h.ingest(&format!(
+        r#"{{"@type":"availableReactions","@extra":"{}","top_reactions":[],"recent_reactions":[],"popular_reactions":[],"allow_custom_emoji":false,"are_tags":false,"unavailability_reason":null}}"#,
+        extra.0
+    ));
+    let state = &h.driver.session.stickers.message_reaction_options;
+    assert!(state.is_unavailable_for(ChatId(7), MessageId(50)));
+    assert!(state.ready().is_none());
+}
+
+#[test]
+fn late_error_for_an_earlier_message_keeps_the_new_menu_loading() {
+    let mut h = menu_harness();
+    let first = h
+        .driver
+        .fetch_message_reactions(ChatId(7), MessageId(50))
+        .unwrap()
+        .expect("request");
+    h.driver
+        .fetch_message_reactions(ChatId(7), MessageId(51))
+        .unwrap();
+    h.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":400,"message":"Message not found"}}"#,
+        first.0
+    ));
+    assert!(
+        h.driver
+            .session
+            .stickers
+            .message_reaction_options
+            .is_loading_for(ChatId(7), MessageId(51))
+    );
 }

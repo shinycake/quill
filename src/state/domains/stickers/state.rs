@@ -5,7 +5,7 @@ use crate::state::*;
 
 pub struct StickersState {
     /// Reaction options for the message whose reaction picker is open.
-    pub message_reaction_options: Option<MessageReactionOptions>,
+    pub message_reaction_options: MessageReactionsState,
     /// `updateActiveEmojiReactions`: the emoji reactions Telegram offers.
     pub active_reactions: Vec<String>,
     /// `updateDefaultReactionType`: the quick reaction (double-click).
@@ -44,7 +44,7 @@ pub struct StickersState {
 impl StickersState {
     pub(crate) fn new() -> Self {
         Self {
-            message_reaction_options: None,
+            message_reaction_options: MessageReactionsState::Idle,
             active_reactions: Vec::new(),
             default_reaction: None,
             reaction_options_stale: false,
