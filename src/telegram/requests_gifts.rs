@@ -150,6 +150,17 @@ pub fn set_gift_resale_price(
     .to_string()
 }
 
+/// `deleteGift`: removes a regular received gift for good. Response is
+/// `ok`.
+pub fn delete_gift(extra: RequestId, received_gift_id: &str) -> String {
+    json!({
+        "@type": "deleteGift",
+        "@extra": extra.as_extra(),
+        "received_gift_id": received_gift_id,
+    })
+    .to_string()
+}
+
 pub fn get_gift_collections(extra: RequestId, owner: MessageSender) -> String {
     json!({"@type":"getGiftCollections","@extra":extra.as_extra(),"owner_id":sender(owner)})
         .to_string()
@@ -301,6 +312,13 @@ mod tests {
         assert_eq!(on["price"]["star_count"], 500);
         let off = v(&set_gift_resale_price(RequestId(5), "g", None));
         assert!(off["price"].is_null());
+    }
+
+    #[test]
+    fn delete_gift_names_the_received_gift() {
+        let d = v(&delete_gift(RequestId(8), "rg-1"));
+        assert_eq!(d["@type"], "deleteGift");
+        assert_eq!(d["received_gift_id"], "rg-1");
     }
 
     #[test]

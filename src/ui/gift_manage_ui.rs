@@ -183,6 +183,43 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// "Delete Gift": tdesktop's confirm box (`AddDeleteGiftMenuButton`).
+    pub(super) fn ask_delete_gift(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let app = cx.entity().downgrade();
+        let id = id.to_string();
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let (app, id) = (app.clone(), id.clone());
+            alert
+                .title(tr(keys::GIFT_MENU_DELETE))
+                .description(tr(keys::GIFT_DELETE_SURE_TEXT))
+                .ok_text(tr(keys::BOX_DELETE))
+                .cancel_text(tr(keys::CANCEL))
+                .show_cancel(true)
+                .on_ok(move |_, _, cx| {
+                    let _ = app.update(cx, |this, cx| this.confirm_delete_gift(&id, cx));
+                    true
+                })
+        });
+    }
+
+    pub(super) fn confirm_delete_gift(&mut self, id: &str, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            if live.driver.delete_received_gift(id).is_err() {
+                self.note_gift_refused(tr(keys::Q_MONEY_DELETE_GIFT_NOT_SENT));
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            // The demo has no connection: answer as the server would.
+            session.payments.gifts_manage.deleting = Some(id.to_string());
+            session.finish_gift_delete();
+        }
+        cx.notify();
+    }
+
     fn confirm_delete_collection(&mut self, id: i32, cx: &mut Context<Self>) {
         let sent = self
             .live

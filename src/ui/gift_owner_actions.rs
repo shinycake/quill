@@ -114,6 +114,22 @@ pub(super) fn gift_owner_actions(
                 })),
         );
     }
+    if gift.can_delete(true) {
+        let id = gift.id.clone();
+        col = col.child(
+            div().debug_selector(|| "gift-delete".into()).child(
+                Button::new("gift-delete")
+                    .label(tr(keys::GIFT_MENU_DELETE))
+                    .small()
+                    .danger()
+                    .ghost()
+                    .disabled(busy)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.ask_delete_gift(&id, window, cx)
+                    })),
+            ),
+        );
+    }
     if !manage.collections.is_empty() {
         let mut chips = div().flex().flex_wrap().gap_1();
         for collection in &manage.collections {

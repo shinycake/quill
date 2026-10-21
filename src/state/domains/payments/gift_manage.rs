@@ -6,6 +6,7 @@ use crate::gift_manage::{
     ExportError, GiftManagePayload, GiftManageState, GiftTransferred, ProbeOutcome, TransferPicker,
     TransferStage,
 };
+use crate::lang::{keys, tr, tr_with};
 use crate::state::*;
 use crate::telegram::envelope::ParsedFile;
 
@@ -142,6 +143,7 @@ impl Session {
                 manage.collections_stale = true;
                 manage.note = Some("Collection deleted.".into());
             }
+            PaymentsPurpose::DeleteGift => self.finish_gift_delete(),
             PaymentsPurpose::SendStarGift => {
                 hub.tx_loaded = false;
                 manage.send.sending = false;
@@ -151,6 +153,29 @@ impl Session {
             }
             _ => {}
         }
+    }
+
+    /// `deleteGift` succeeded. tdesktop `DeleteStarGift`:
+    /// `notifyGiftUpdate(Delete)` drops the gift from the grid and the
+    /// box, then the toast.
+    pub fn finish_gift_delete(&mut self) {
+        let hub = &mut self.payments.hub;
+        let manage = &mut self.payments.gifts_manage;
+        hub.gift_mutating = false;
+        hub.gifts_error = None;
+        if let Some(id) = manage.deleting.take() {
+            let before = hub.gifts.len();
+            hub.gifts.retain(|g| g.id != id);
+            if hub.gifts.len() < before {
+                hub.gifts_total = hub.gifts_total.saturating_sub(1);
+            }
+            if hub.gift_selected.as_deref() == Some(id.as_str()) {
+                hub.gift_selected = None;
+            }
+        }
+        manage.flow = None;
+        manage.collections_stale = true;
+        manage.note = Some(tr(keys::GIFT_DELETED).to_string());
     }
 
     /// The `httpUrl` of `getUpgradedGiftWithdrawalUrl`: tdesktop opens it
@@ -258,6 +283,14 @@ impl Session {
                 manage.send.error = Some(format!("Couldn't load the gifts: {reason}"));
             }
             PaymentsPurpose::GetPremiumGiftOptions => manage.send.premium_loaded = true,
+            PaymentsPurpose::DeleteGift => {
+                manage.deleting = None;
+                self.payments.hub.gift_mutating = false;
+                manage.note = Some(tr_with(
+                    keys::Q_MONEY_COULD_NOT_DELETE_THE_GIFT,
+                    &[("reason", &reason)],
+                ));
+            }
             PaymentsPurpose::GiftExportTempPassword | PaymentsPurpose::GiftExportUrl => {
                 Self::apply_gift_export_error(manage, err, &reason)
             }

@@ -58,6 +58,8 @@ pub struct GiftManageState {
     /// The collection tab that is open; 0 = all gifts.
     pub active_collection: i32,
     pub flow: Option<GiftFlow>,
+    /// The gift whose `deleteGift` is in flight; the answer removes it.
+    pub deleting: Option<String>,
     /// A one-line result of the last action ("Pinned", "Upgraded to ...").
     pub note: Option<String>,
     pub send: SendGiftState,
@@ -107,6 +109,7 @@ impl GiftManageState {
         self.collections_stale = false;
         self.active_collection = 0;
         self.flow = None;
+        self.deleting = None;
         self.note = None;
     }
 }
