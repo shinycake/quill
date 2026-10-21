@@ -17,6 +17,10 @@ mod draft_topic;
 mod edit;
 mod edit_media_tools;
 mod markup;
+pub(crate) mod markup_boundary;
+pub use markup_boundary::strip_barrier;
+#[cfg(test)]
+mod markup_boundary_tests;
 mod media_options;
 mod media_prep;
 mod placeholder;
@@ -64,7 +68,9 @@ pub use media_prep::{
     AnimationSize, PREP_BUDGET, PrepareError, PreparedFile, PreparedMedia, PreparedNote,
     send_path_for,
 };
-pub use placeholder::{ComposerPlaceholder, PlaceholderFacts, edit_text_changed, inline_bot_hint};
+pub use placeholder::{
+    ComposerPlaceholder, PlaceholderFacts, TopicPlaceholder, edit_text_changed, inline_bot_hint,
+};
 pub use reply::ReplyItem;
 pub use reply::{ComposerReplyTo, QuoteSelection, cancel_reply_draft, quote_position};
 pub use send::{

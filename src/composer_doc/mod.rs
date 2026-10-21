@@ -13,6 +13,9 @@
 
 use std::ops::Range;
 
+use crate::composer::markup_boundary::{
+    BARRIER, closer_ok, is_marker_char, needs_barrier, opener_ok,
+};
 use crate::composer::{FormatKind, parse_format_markup};
 use crate::text::{TextEntity, TextEntityKind, utf16_to_utf8_offset};
 
@@ -487,10 +490,12 @@ pub fn markdown_replacement(
             {
                 continue;
             }
-            // The opener starts a word: nothing or a non-word character
-            // before it, and not another marker character.
-            let prev = text.get(..open).unwrap_or_default().chars().next_back();
-            if prev.is_some_and(|c| c.is_alphanumeric() || c as u32 == marker_char as u32) {
+            // The same boundary rule the send path reads markup with.
+            // A half-typed `**hi*` is not italic: its opener touches the
+            // marker before it.
+            let touches_own =
+                text.get(..open).and_then(|before| before.as_bytes().last()) == Some(&marker_char);
+            if touches_own || !opener_ok(text, open, marker) || !closer_ok(text, close, marker) {
                 continue;
             }
             // `scheme://host/__path__` is a link, not formatting.
@@ -694,10 +699,12 @@ impl<'a> Markup<'a> {
                 .map(|(ix, _)| ix)
                 .collect();
             // Close from the first open span that is no longer active.
+            let mut closed_marker = false;
             if let Some(k) = stack.iter().position(|ix| !active.contains(ix)) {
                 for ix in stack.drain(k..).rev() {
                     out.push_str(&self.closer(ix));
                 }
+                closed_marker = out.chars().next_back().is_some_and(is_marker_char);
             }
             self.quote_prefix(a, &mut out);
             let mut opening: Vec<usize> = active
@@ -709,20 +716,35 @@ impl<'a> Markup<'a> {
                     .get(ix)
                     .map(|span| (std::cmp::Reverse(span.range.end), span.tag.nesting()))
             });
+            // A marker next to a word character would read as plain text
+            // (`composer::markup_boundary`); a barrier keeps a span that
+            // starts or ends inside a word.
+            if let Some(&first) = opening.first()
+                && self
+                    .opener(first)
+                    .chars()
+                    .next()
+                    .is_some_and(is_marker_char)
+                && needs_barrier(out.chars().next_back())
+            {
+                out.push(BARRIER);
+            }
+            let opens = !opening.is_empty();
             for ix in opening {
                 out.push_str(&self.opener(ix));
                 stack.push(ix);
             }
             let piece = text.get(a..b).unwrap_or_default();
-            match self.doc.emoji.iter().find(|e| e.range.start == a) {
+            let written = match self.doc.emoji.iter().find(|e| e.range.start == a) {
                 Some(emoji) if emoji.range.end == b => {
-                    out.push_str(&crate::composer::custom_emoji_markup(
-                        piece,
-                        emoji.custom_emoji_id,
-                    ));
+                    crate::composer::custom_emoji_markup(piece, emoji.custom_emoji_id)
                 }
-                _ => out.push_str(piece),
+                _ => piece.to_string(),
+            };
+            if closed_marker && !opens && needs_barrier(written.chars().next()) {
+                out.push(BARRIER);
             }
+            out.push_str(&written);
         }
         self.close_all(&mut stack, &mut out);
         out

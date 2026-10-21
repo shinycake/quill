@@ -397,3 +397,93 @@ fn an_inline_bots_hint_follows_the_typed_name(cx: &mut TestAppContext) {
     set_field(&app, vcx, "");
     assert_eq!(hint(&app, vcx), None);
 }
+
+const FORUM: ChatId = ChatId(-1002000000003);
+const KEYBOARD_BOT: ChatId = ChatId(71);
+const TOPIC_BOT: ChatId = ChatId(72);
+
+fn select_topic(app: &Entity<QuillApp>, cx: &mut VisualTestContext, chat: ChatId, topic: i32) {
+    app.update(cx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.select_topic(chat, topic);
+        }
+        cx.notify();
+    });
+    frames(cx);
+}
+
+fn reply_to(app: &Entity<QuillApp>, cx: &mut VisualTestContext, chat: ChatId, message: i64) {
+    app.update(cx, |app, cx| {
+        app.composer_ui
+            .set_reply(Some(ComposerReplyTo::new(chat, MessageId(message))));
+        cx.notify();
+    });
+    frames(cx);
+}
+
+#[gpui_kit::test]
+fn a_forum_field_names_the_topic_it_sends_to(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    // Without a topic open a message lands in General.
+    open_chat(&app, vcx, FORUM);
+    assert_eq!(placeholder(&app, vcx), "Message in General");
+    // A reply is sent to the topic its message is in, which no topic history
+    // has to be loaded for.
+    reply_to(&app, vcx, FORUM, 20);
+    assert_eq!(placeholder(&app, vcx), "Reply in Releases");
+    // Cancelling the reply brings General back.
+    app.update(vcx, |app, cx| {
+        app.composer_ui.set_reply(None);
+        cx.notify();
+    });
+    frames(vcx);
+    assert_eq!(placeholder(&app, vcx), "Message in General");
+    // A topic that was renamed is read again.
+    reply_to(&app, vcx, FORUM, 20);
+    app.update(vcx, |app, cx| {
+        if let Some(topics) = app
+            .demo_session
+            .as_mut()
+            .and_then(|session| session.threads.forum_topics.get_mut(&FORUM.0))
+            && let Some(topic) = topics.iter_mut().find(|topic| topic.forum_topic_id == 5)
+        {
+            topic.name = "Changelog".into();
+        }
+        cx.notify();
+    });
+    frames(vcx);
+    assert_eq!(placeholder(&app, vcx), "Reply in Changelog");
+    // Inside an open topic the field is plain, as in tdesktop's topic view.
+    select_topic(&app, vcx, FORUM, 5);
+    assert_eq!(placeholder(&app, vcx), "Write a message…");
+    open_chat(&app, vcx, GROUP);
+    assert_eq!(placeholder(&app, vcx), "Write a message…");
+}
+
+#[gpui_kit::test]
+fn a_bot_keyboards_placeholder_shows_while_the_keyboard_does(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat(&app, vcx, KEYBOARD_BOT);
+    assert_eq!(placeholder(&app, vcx), "Choose a size");
+    // Hiding the keyboard takes its text with it.
+    click(vcx, "composer-keyboard-toggle");
+    assert_eq!(placeholder(&app, vcx), "Write a message…");
+    click(vcx, "composer-keyboard-toggle");
+    assert_eq!(placeholder(&app, vcx), "Choose a size");
+    open_chat(&app, vcx, GROUP);
+    assert_eq!(placeholder(&app, vcx), "Write a message…");
+}
+
+#[gpui_kit::test]
+fn a_bot_that_makes_its_own_topics_is_off_thread_until_one_opens(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat(&app, vcx, TOPIC_BOT);
+    assert_eq!(placeholder(&app, vcx), "Off-thread message");
+    select_topic(&app, vcx, TOPIC_BOT, 2);
+    assert_eq!(placeholder(&app, vcx), "Write a message…");
+    open_chat(&app, vcx, KEYBOARD_BOT);
+    assert_eq!(placeholder(&app, vcx), "Choose a size");
+}

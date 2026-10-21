@@ -596,7 +596,11 @@ impl ChatSummary {
         if self.unread_count > 0 || self.is_marked_as_unread || self.is_forum_chat() {
             return None;
         }
-        let text = draft.text.replace('\n', " ").trim().to_string();
+        let text = crate::composer::parse_format_markup(&draft.text)
+            .0
+            .replace('\n', " ")
+            .trim()
+            .to_string();
         let reply = draft.reply_to_message_id.is_some();
         (!text.is_empty() || reply).then_some(DraftPreview { text, reply })
     }

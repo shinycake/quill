@@ -1,8 +1,10 @@
 //! The compose field's placeholder follows the chat (tdesktop
-//! `updateFieldPlaceholder`): "New message…" while editing, "Message for N
-//! Stars" in paid chats, "Broadcast a message…" in channels, "Send
-//! anonymously…" for an anonymous admin. An inline bot's own hint is drawn
-//! after `@bot ` while that is all that is typed.
+//! `updateFieldPlaceholder`): "New message…" while editing, the bot
+//! keyboard's own text, "Message for N Stars" in paid chats, "Message in
+//! {topic}" in a forum, "Broadcast a message…" in channels, "Send
+//! anonymously…" for an anonymous admin, "Off-thread message" in a bot that
+//! makes its own topics. An inline bot's own hint is drawn after `@bot `
+//! while that is all that is typed.
 
 use super::*;
 use gpui_kit::component::input::TextareaState;
@@ -23,13 +25,54 @@ impl QuillApp {
             .chats
             .get(&chat.0)
             .is_some_and(|chat| chat.is_channel());
+        let reply = self
+            .composer_ui
+            .reply()
+            .filter(|reply| reply.chat_id == chat && reply.target_chat.is_none())
+            .map(|reply| reply.message_id)
+            .or_else(|| self.keyboard_reply_target());
         PlaceholderFacts {
             editing: self.composer_ui.pending_edit.is_some(),
+            keyboard: self.keyboard_placeholder(),
             stars_per_message: session.paid_send_price(chat),
+            topic: session.composer_topic(chat, reply),
             broadcast,
             silent: broadcast && self.composer_effective_silent(),
             anonymous_admin: !broadcast && session.chat_posts_anonymously(chat),
+            bot_off_thread: session.bot_chat_off_thread(chat),
         }
+    }
+
+    /// The message of the bot keyboard that is on screen or asks for a reply:
+    /// tdesktop counts it as the reply the next message goes to
+    /// (`_kbReplyTo`).
+    fn keyboard_reply_target(&self) -> Option<MessageId> {
+        let (chat, message, keyboard) = self.open_chat_custom_keyboard()?;
+        let hidden = self
+            .message_ui
+            .collapsed_keyboards
+            .contains(&(chat.0, message.0));
+        (!hidden || keyboard.force_reply).then_some(message)
+    }
+
+    /// The placeholder of the bot keyboard on screen, or of a force-reply
+    /// request, which tdesktop shows even when the keyboard is hidden
+    /// (`_kbShown || _keyboard->forceReply()`).
+    fn keyboard_placeholder(&self) -> String {
+        if let Some((chat, message, keyboard)) = self.open_chat_custom_keyboard() {
+            let hidden = self
+                .message_ui
+                .collapsed_keyboards
+                .contains(&(chat.0, message.0));
+            return if hidden && !keyboard.force_reply {
+                String::new()
+            } else {
+                keyboard.placeholder
+            };
+        }
+        self.open_chat_force_reply()
+            .map(|(_, _, placeholder)| placeholder)
+            .unwrap_or_default()
     }
 
     /// Frame upkeep: put the placeholder the state asks for in the field.
@@ -45,11 +88,13 @@ impl QuillApp {
         // A new language pack hands out new strings, so the address of any
         // one of them tells the language changed.
         let language = tr(keys::MESSAGE_PH).as_ptr() as usize;
-        if self.composer_ui.placeholder_shown == Some((facts, language)) {
+        let shown = (facts, language);
+        if self.composer_ui.placeholder_shown.as_ref() == Some(&shown) {
             return;
         }
-        self.composer_ui.placeholder_shown = Some((facts, language));
-        let text = ComposerPlaceholder::for_facts(facts).text();
+        let (facts, _) = shown.clone();
+        self.composer_ui.placeholder_shown = Some(shown);
+        let text = ComposerPlaceholder::for_facts(&facts).text();
         self.composer
             .update(cx, |input, cx| input.set_placeholder(text, window, cx));
     }
