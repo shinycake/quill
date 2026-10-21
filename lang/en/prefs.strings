@@ -98,6 +98,7 @@
 "lng_proxy_box_username" = "Username";
 "lng_proxy_check_ip_proceed" = "Proceed";
 "lng_proxy_check_ip_warning" = "This will expose your IP address to the admin of the proxy server.";
+"lng_proxy_connecting" = "connecting…";
 "lng_proxy_description" = "Your saved proxy list will be here.";
 "lng_proxy_disable" = "Disable proxy";
 "lng_proxy_edit" = "Edit proxy";
@@ -105,8 +106,10 @@
 "lng_proxy_edit_share_list_toast" = "Proxy List copied to clipboard.";
 "lng_proxy_menu_delete" = "Delete";
 "lng_proxy_menu_edit" = "Edit";
+"lng_proxy_online" = "online";
 "lng_proxy_settings" = "Proxy settings";
 "lng_proxy_sponsor_warning" = "This proxy may display a sponsored channel in your chat list. This doesn't reveal any of your Telegram traffic.";
+"lng_proxy_unavailable" = "not available";
 "lng_proxy_use_custom" = "Use custom proxy";
 "lng_proxy_use_for_calls" = "Use proxy for calls";
 "lng_proxy_use_system_settings" = "Use system proxy settings";
@@ -400,6 +403,7 @@
 "qll_prefs_enter_a_server_a_port" = "Enter a server, a port (1–65535) and a valid secret.";
 "qll_prefs_enter_a_server_and_a" = "Enter a server and a port (1–65535).";
 "qll_prefs_enter_a_time_as_hours" = "Enter a time as hours:minutes, like 0:30";
+"qll_prefs_enter_a_web_proxy_address" = "Enter a valid web proxy address and a secret.";
 "qll_prefs_enter_full_screen" = "Enter Full Screen";
 "qll_prefs_enter_sends_or_enter_inserts" = "Enter sends, or Enter inserts a newline and Ctrl/Cmd+Enter sends.";
 "qll_prefs_enter_the_code_from_the" = "enter the code from the email";
@@ -732,6 +736,7 @@
 "qll_prefs_strikethrough" = "Strikethrough";
 "qll_prefs_suggest_emoji_replacements" = "Suggest emoji replacements";
 "qll_prefs_suggest_frequent_contacts" = "Suggest frequent contacts";
+"qll_prefs_switch_the_proxy_off_before_web" = "Switch this proxy off before changing it to WEB.";
 "qll_prefs_sync_contacts" = "Sync contacts";
 "qll_prefs_tap_to_disconnect_from_your" = "Tap to disconnect from your Telegram account.";
 "qll_prefs_telegram_links" = "Telegram links";
@@ -786,6 +791,7 @@
 "qll_prefs_videos" = "Videos";
 "qll_prefs_view" = "View";
 "qll_prefs_voice_messages" = "Voice messages";
+"qll_prefs_web_proxies_arent_supported_yet" = "Web proxies aren't supported in this version yet.";
 "qll_prefs_well_send_a_code_to" = "We'll send a code to your recovery email. It is the only way to recover a forgotten password.";
 "qll_prefs_whats_new" = "What's new";
 "qll_prefs_when_a_local_passcode_is" = "When a local passcode is set, a lock icon appears at the top of your chat list. Click it to lock Quill.";
@@ -825,3 +831,6 @@
 "qll_prefs_default_app_could_not_find_quill" = "Quill could not find its own program.";
 "qll_prefs_default_app_could_not_write_entry" = "The desktop entry could not be written.";
 "qll_prefs_default_app_could_not_remove" = "Quill's registration could not be removed.";
+"lng_proxy_web_host_ph" = "proxy.example.com";
+"lng_proxy_web_server_label" = "Web proxy server";
+"lng_proxy_web_warning" = "This WEB proxy runs a web page from its provider in the background while you're connected. Only use it if you trust the provider. It may also display a sponsored channel in your chat list. This doesn't reveal any of your Telegram traffic.";

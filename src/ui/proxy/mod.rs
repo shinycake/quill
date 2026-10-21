@@ -52,6 +52,8 @@ pub(crate) struct ProxyEditor {
     http_only: bool,
     comment: String,
     server: Entity<InputState>,
+    /// The web proxy's address (host and optional base path).
+    web_host: Entity<InputState>,
     port: Entity<InputState>,
     username: Entity<InputState>,
     password: Entity<InputState>,
@@ -66,24 +68,11 @@ pub(crate) struct ProxyLinkBox {
     warn: bool,
 }
 
-/// What the list row shows under the title: `SOCKS5 · available (ping:
-/// 42 ms)`; untested proxies show only their type.
-pub(crate) fn row_subtitle(entry: &ProxyEntry, ping: Option<PingStatus>) -> String {
-    let kind = kind_label(entry.proxy.kind);
-    match ping {
-        Some(status) => format!("{kind} · {}", status.label()),
-        None => tr_with(keys::Q_PREFS_NOT_TESTED, &[("kind", kind)]),
-    }
-}
-
-pub(crate) fn row_title(entry: &ProxyEntry) -> String {
-    format!("{}:{}", entry.proxy.server, entry.proxy.port)
-}
-
 /// Editor validation message (tdesktop highlights the bad field; Quill
 /// says what is wrong in one line).
 pub(crate) fn editor_issue_message(kind: ProxyKind, issue: ProxyIssue) -> String {
     match (issue, kind) {
+        (ProxyIssue::Invalid, ProxyKind::Web) => tr(keys::Q_PREFS_ENTER_A_WEB_PROXY_ADDRESS).into(),
         (ProxyIssue::Invalid, ProxyKind::Mtproto) => tr(keys::Q_PREFS_ENTER_A_SERVER_A_PORT).into(),
         (ProxyIssue::Invalid, _) => tr(keys::Q_PREFS_ENTER_A_SERVER_AND_A).into(),
         (other, _) => other.message().into(),
@@ -170,6 +159,17 @@ impl QuillApp {
             http_only: draft.http_only,
             comment,
             server: input(window, cx, tr(keys::Q_PREFS_HOSTNAME), &draft.server, false),
+            web_host: input(
+                window,
+                cx,
+                tr(keys::PROXY_WEB_HOST_PH),
+                &if kind == ProxyKind::Web {
+                    draft.display_address()
+                } else {
+                    String::new()
+                },
+                false,
+            ),
             port: input(window, cx, tr(keys::PROXY_BOX_PORT), &port, false),
             username: input(
                 window,
@@ -189,9 +189,12 @@ impl QuillApp {
             error: None,
         });
         if let Some(editor) = &self.settings.proxy.editor {
-            editor
-                .server
-                .update(cx, |input, cx| input.focus(window, cx));
+            let first = if kind == ProxyKind::Web {
+                &editor.web_host
+            } else {
+                &editor.server
+            };
+            first.update(cx, |input, cx| input.focus(window, cx));
         }
         cx.notify();
     }
@@ -206,13 +209,22 @@ impl QuillApp {
         let Some(editor) = self.settings.proxy.editor.as_ref() else {
             return;
         };
-        let mut draft = ProxyDraft::empty(editor.kind);
-        draft.server = editor.server.read(cx).value().to_string();
-        draft.port = editor.port.read(cx).value().trim().parse().unwrap_or(0);
+        let mut draft = if editor.kind == ProxyKind::Web {
+            ProxyDraft::web(
+                editor.web_host.read(cx).value().as_ref(),
+                editor.secret.read(cx).value().as_ref(),
+            )
+        } else {
+            ProxyDraft::empty(editor.kind)
+        };
+        if editor.kind != ProxyKind::Web {
+            draft.server = editor.server.read(cx).value().to_string();
+            draft.port = editor.port.read(cx).value().trim().parse().unwrap_or(0);
+        }
         draft.http_only = editor.http_only;
         if editor.kind == ProxyKind::Mtproto {
             draft.secret = editor.secret.read(cx).value().to_string();
-        } else {
+        } else if editor.kind != ProxyKind::Web {
             draft.username = editor.username.read(cx).value().to_string();
             draft.password = editor.password.read(cx).value().to_string();
         }
@@ -255,6 +267,14 @@ impl QuillApp {
                 .and_then(|s| s.settings.proxy.find(id))
                 .is_some_and(|p| p.is_enabled)
         });
+        if was_enabled && kind == ProxyKind::Web {
+            fail(
+                self,
+                tr(keys::Q_PREFS_SWITCH_THE_PROXY_OFF_BEFORE_WEB).into(),
+            );
+            cx.notify();
+            return;
+        }
         let sent = self.proxy_driver(|driver| match id {
             Some(id) => driver.edit_proxy(id, &draft, was_enabled, &comment),
             None => driver.add_proxy(&draft, enable_on_save, &comment),
@@ -267,6 +287,16 @@ impl QuillApp {
     }
 
     fn enable_proxy_entry(&mut self, id: i32, cx: &mut Context<Self>) {
+        let web = self
+            .session()
+            .and_then(|s| s.settings.proxy.find(id))
+            .is_some_and(|p| !p.proxy.kind.can_be_enabled());
+        if web {
+            self.settings.proxy.notice =
+                Some(tr(keys::Q_PREFS_WEB_PROXIES_ARENT_SUPPORTED_YET).into());
+            cx.notify();
+            return;
+        }
         let _ = self.proxy_driver(|driver| driver.enable_proxy(id));
         cx.notify();
     }
@@ -374,6 +404,7 @@ impl QuillApp {
                 .proxy
                 .entries()
                 .iter()
+                .filter(|p| p.proxy.kind.can_be_enabled())
                 .max_by_key(|p| p.last_used_date)
                 .map(|p| p.id)
         });
@@ -448,6 +479,13 @@ impl QuillApp {
                 .find(|p| p.proxy.same_endpoint(&link.draft))
                 .map(|p| p.id)
         });
+        if existing.is_some() && !link.draft.kind.can_be_enabled() {
+            // Nothing to add and nothing to switch to: say so.
+            self.settings.proxy.notice =
+                Some(tr(keys::PROXY_ADD_FROM_CLIPBOARD_EXISTING_TOAST).into());
+            cx.notify();
+            return;
+        }
         let _ = self.proxy_driver(|driver| match existing {
             Some(id) => driver.enable_proxy(id),
             None => driver.add_proxy(&link.draft, true, ""),
@@ -587,129 +625,6 @@ impl QuillApp {
             )
     }
 
-    fn proxy_row(
-        &self,
-        entry: &ProxyEntry,
-        ping: Option<PingStatus>,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        let id = entry.id;
-        let status_color = match ping {
-            Some(PingStatus::Available(_)) => success(),
-            Some(PingStatus::Unavailable) => danger(),
-            _ => text_muted(),
-        };
-        let shareable = entry.proxy.share_link(false).is_some();
-        let icon_button = |name: &'static str, icon, tip: &'static str| {
-            Button::new(SharedString::from(format!("proxy-{name}-{id}")))
-                .icon(icon)
-                .ghost()
-                .xsmall()
-                .tooltip(tip)
-                .accessibility_label(tip)
-        };
-        div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .px_2()
-            .py_1()
-            .rounded_md()
-            .when(entry.is_enabled, |this| this.bg(cx.theme().accent))
-            .child(
-                div()
-                    .id(SharedString::from(format!("proxy-use-{id}")))
-                    .flex()
-                    .flex_1()
-                    .min_w_0()
-                    .items_center()
-                    .gap_2()
-                    .cursor_pointer()
-                    // The proxy in use stays on (tdesktop `applyItem`); the
-                    // radios above switch it off.
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        let enabled = this
-                            .session()
-                            .and_then(|s| s.settings.proxy.find(id))
-                            .is_some_and(|p| p.is_enabled);
-                        if !enabled {
-                            this.enable_proxy_entry(id, cx);
-                        }
-                    }))
-                    .child(div().w(px(16.)).flex_none().when(entry.is_enabled, |this| {
-                        this.child(Icon::new(gpui_kit::assets::IconName::Check).small())
-                    }))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_semibold()
-                                    .truncate()
-                                    .child(row_title(entry)),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(status_color)
-                                    .child(row_subtitle(entry, ping)),
-                            ),
-                    ),
-            )
-            .child(
-                icon_button(
-                    "ping",
-                    gpui_kit::assets::IconName::RotateCw,
-                    tr(keys::PROXY_BOX_CHECK_STATUS),
-                )
-                .on_click(cx.listener(move |this, _, _, cx| this.ping_proxy_entry(id, cx))),
-            )
-            // Unshareable (HTTP) rows keep an invisible slot so the icons align.
-            .child(
-                div().when(!shareable, |this| this.invisible()).child(
-                    icon_button(
-                        "copy",
-                        gpui_kit::assets::IconName::Copy,
-                        tr(keys::CONTEXT_COPY_LINK),
-                    )
-                    .disabled(!shareable)
-                    .on_click(cx.listener(move |this, _, _, cx| this.copy_proxy_link(id, cx))),
-                ),
-            )
-            .child(
-                div().when(!shareable, |this| this.invisible()).child(
-                    icon_button(
-                        "qr",
-                        gpui_kit::assets::IconName::QrCode,
-                        tr(keys::Q_PREFS_SHOW_QR_CODE),
-                    )
-                    .disabled(!shareable)
-                    .on_click(cx.listener(move |this, _, _, cx| this.open_proxy_qr(id, cx))),
-                ),
-            )
-            .child(
-                icon_button(
-                    "edit",
-                    gpui_kit::assets::IconName::Pencil,
-                    tr(keys::PROXY_MENU_EDIT),
-                )
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.open_proxy_editor(Some(id), false, window, cx)
-                })),
-            )
-            .child(
-                icon_button(
-                    "delete",
-                    gpui_kit::assets::IconName::Trash,
-                    tr(keys::PROXY_MENU_DELETE),
-                )
-                .on_click(cx.listener(move |this, _, _, cx| this.delete_proxy_entry(id, cx))),
-            )
-    }
-
     pub(super) fn build_proxy_list_dialog(
         app: &Entity<QuillApp>,
         shell: &Entity<QuillShell>,
@@ -829,9 +744,22 @@ impl QuillApp {
                 ));
             } else {
                 let mut rows = div().flex().flex_col().gap_1();
+                let connected = this.session().is_some_and(|s| {
+                    matches!(
+                        s.connection,
+                        ConnectionState::Ready | ConnectionState::Updating
+                    )
+                });
                 for entry in state.entries() {
                     let ping = state.pings.get(&entry.id).copied();
-                    rows = rows.child(this.proxy_row(entry, ping, cx));
+                    let web = (entry.proxy.kind == ProxyKind::Web).then(|| {
+                        quill::proxy_web::WebRowState::for_entry(
+                            entry.is_enabled,
+                            connected,
+                            state.carrier_failed == Some(entry.id),
+                        )
+                    });
+                    rows = rows.child(this.proxy_row(entry, ping, web, cx));
                 }
                 body = body.child(rows);
             }
@@ -944,10 +872,16 @@ crate::ui::shell::register_dialogs! {
 }
 
 mod build_proxy_edit_dialog;
+mod proxy_row;
+mod web_demo;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod web_ui_tests;
 
 #[cfg(test)]
 mod tests {
-    use super::{editor_issue_message, row_subtitle, row_title};
+    use super::editor_issue_message;
+    use super::proxy_row::{row_subtitle, row_title};
     use quill::calls::proxy::ProxyKind;
     use quill::proxy::{PingStatus, ProxyDraft, ProxyEntry, ProxyIssue};
 
@@ -968,17 +902,17 @@ mod tests {
     fn rows_show_endpoint_type_and_status() {
         let e = entry();
         assert_eq!(row_title(&e), "mt.example:443");
-        assert_eq!(row_subtitle(&e, None), "MTPROTO · not tested");
+        assert_eq!(row_subtitle(&e, None, None), "MTPROTO · not tested");
         assert_eq!(
-            row_subtitle(&e, Some(PingStatus::Available(42))),
+            row_subtitle(&e, Some(PingStatus::Available(42)), None),
             "MTPROTO · available (ping: 42 ms)"
         );
         assert_eq!(
-            row_subtitle(&e, Some(PingStatus::Checking)),
+            row_subtitle(&e, Some(PingStatus::Checking), None),
             "MTPROTO · checking…"
         );
         assert_eq!(
-            row_subtitle(&e, Some(PingStatus::Unavailable)),
+            row_subtitle(&e, Some(PingStatus::Unavailable), None),
             "MTPROTO · not available"
         );
     }

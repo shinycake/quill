@@ -25,6 +25,16 @@ pub enum ProxyKind {
     Socks5,
     Http,
     Mtproto,
+    /// `proxyTypeWeb` (TDLib 1.8.69).
+    Web,
+}
+
+impl ProxyKind {
+    /// Quill cannot host the carrier of a web proxy yet, so switching to
+    /// one would cut the connection (`parity:data-proxy-web`).
+    pub fn can_be_enabled(self) -> bool {
+        self != ProxyKind::Web
+    }
 }
 
 /// The proxy TDLib reports as enabled, in the shape the future

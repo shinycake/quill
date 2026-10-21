@@ -372,3 +372,74 @@ fn a_refused_system_proxy_waits_and_stays_out_of_the_box() {
     assert!(rig.driver.system_proxy_tick(&detected("good.lan")));
     assert_eq!(rig.count("addProxy"), 2);
 }
+
+#[test]
+fn a_web_proxy_carrier_is_refused_and_the_row_says_not_available() {
+    let mut rig = Rig::new();
+    rig.load_list(&[(1, true)]);
+    rig.feed(json!({"@type": "updateWebProxyCarrierOpened", "carrier": {
+        "@type": "webProxyCarrier", "id": 9, "proxy_id": 1, "url": "https://x.example/",
+        "origin": "https://x.example", "path_prefix": "/",
+        "bridge_object_name": "TelegramWebProxy", "is_temporary": false}}));
+    let report = sent_request(&rig.recorder, "reportWebProxyCarrierError");
+    assert_eq!(report["carrier_id"], 9);
+    assert_eq!(report["error"]["@type"], "webProxyCarrierErrorUnsupported");
+    assert_eq!(rig.driver.session.settings.proxy.carrier_failed, Some(1));
+
+    // A temporary carrier (a ping or test) is refused without marking the proxy.
+    rig.driver.session.settings.proxy.carrier_failed = None;
+    rig.feed(json!({"@type": "updateWebProxyCarrierOpened", "carrier": {
+        "@type": "webProxyCarrier", "id": 10, "proxy_id": 0, "url": "https://x.example/",
+        "origin": "https://x.example", "path_prefix": "/",
+        "bridge_object_name": "TelegramWebProxy", "is_temporary": true}}));
+    let report = sent_request(&rig.recorder, "reportWebProxyCarrierError");
+    assert_eq!(report["error"]["@type"], "webProxyCarrierErrorRefused");
+    assert_eq!(rig.driver.session.settings.proxy.carrier_failed, None);
+    assert_eq!(rig.count("reportWebProxyCarrierError"), 2);
+}
+
+#[test]
+fn a_web_proxy_is_saved_but_never_switched_to() {
+    let mut rig = Rig::new();
+    rig.load_list(&[(1, false)]);
+    let web =
+        crate::proxy::ProxyDraft::web("relay.example.com/app", "8561944064fc730cbfa4473562d8ec59")
+            .validated()
+            .unwrap();
+    // Adding with "enable" saves the proxy without enabling it.
+    rig.driver.add_proxy(&web, true, "").unwrap();
+    assert_eq!(sent_request(&rig.recorder, "addProxy")["enable"], false);
+    rig.answer(
+        "addProxy",
+        json!({"@type": "addedProxy", "id": 2, "last_used_date": 0, "is_enabled": false,
+            "comment": "", "proxy": web.to_json()}),
+    );
+    rig.answer(
+        "getProxies",
+        json!({"@type": "addedProxies", "proxies": [
+            {"@type": "addedProxy", "id": 2, "last_used_date": 0, "is_enabled": false,
+             "comment": "", "proxy": web.to_json()}]}),
+    );
+    // Enabling it is refused and nothing is sent.
+    assert!(rig.driver.enable_proxy(2).is_err());
+    assert_eq!(rig.count("enableProxy"), 0);
+    // Editing it keeps it off too.
+    rig.driver.edit_proxy(2, &web, true, "").unwrap();
+    assert_eq!(sent_request(&rig.recorder, "editProxy")["enable"], false);
+}
+
+#[test]
+fn the_enabled_proxy_cannot_be_edited_into_a_web_proxy() {
+    let mut rig = Rig::new();
+    rig.load_list(&[(1, true), (2, false)]);
+    let web =
+        crate::proxy::ProxyDraft::web("relay.example.com/app", "8561944064fc730cbfa4473562d8ec59")
+            .validated()
+            .unwrap();
+    // TDLib would re-enable the edited active proxy, so nothing is sent.
+    assert!(rig.driver.edit_proxy(1, &web, true, "").is_err());
+    assert_eq!(rig.count("editProxy"), 0);
+    // A proxy that is off can still be edited into one.
+    assert!(rig.driver.edit_proxy(2, &web, false, "").is_ok());
+    assert_eq!(rig.count("editProxy"), 1);
+}

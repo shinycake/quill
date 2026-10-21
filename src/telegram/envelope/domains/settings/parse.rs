@@ -67,6 +67,26 @@ pub(crate) fn parse_settings_payload(
         "addedProxy" => Ok(EnvelopePayload::Settings(SettingsPayload::AddedProxy {
             proxy: crate::proxy::parse_added_proxy(value),
         })),
+        "updateWebProxyCarrierOpened" => {
+            let carrier = value.get("carrier");
+            let int = |name: &str| {
+                carrier
+                    .and_then(|c| c.get(name))
+                    .and_then(Value::as_i64)
+                    .and_then(|v| i32::try_from(v).ok())
+                    .unwrap_or(0)
+            };
+            Ok(EnvelopePayload::Settings(
+                SettingsPayload::WebProxyCarrierOpened {
+                    carrier_id: int("id"),
+                    proxy_id: int("proxy_id"),
+                    temporary: carrier
+                        .and_then(|c| c.get("is_temporary"))
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                },
+            ))
+        }
         // Phase C2i: `userPrivacySettingRules` (schema 1.8.67, :8976)
         // answers `getUserPrivacySettingRules` (:15620). Only the rule
         // constructor names are kept — enough to map Everybody /

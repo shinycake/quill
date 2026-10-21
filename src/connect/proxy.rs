@@ -2,6 +2,7 @@
 //! request may be sent before authorization (schema 1.8.67 :16202), so
 //! the gate is "not shutting down", not "auth Ready".
 use super::*;
+use crate::calls::proxy::ProxyKind;
 use crate::ids::RequestId;
 use crate::proxy::{PingStatus, ProxyDraft, ProxyEntry, RotationAction};
 use crate::proxy_sync::{ProxySyncStep, plan_proxy_sync};
@@ -12,7 +13,7 @@ use crate::system_proxy::{Detected, SYSTEM_PROXY_COMMENT, SystemProxyStep, plan_
 use crate::telegram::envelope::ConnectionState;
 use crate::telegram::requests::{
     add_proxy, disable_proxy, edit_proxy, enable_proxy, get_proxies, ping_proxy, remove_proxy,
-    set_prefer_ipv6,
+    report_web_proxy_carrier_error, set_prefer_ipv6,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -62,10 +63,29 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Refetch after a mutation marked the list stale (called from
     /// `ingest`, the `refresh_*_if_stale` pattern).
     pub fn refresh_proxies_if_stale(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        self.refuse_web_proxy_carriers();
         if !self.session.settings.proxy.stale {
             return Ok(None);
         }
         self.maybe_fetch_proxies()
+    }
+
+    /// Answer every pending `updateWebProxyCarrierOpened`: Quill cannot
+    /// host the relay page, so TDLib is told to stop asking.
+    fn refuse_web_proxy_carriers(&mut self) {
+        let reports = std::mem::take(&mut self.session.settings.proxy.carrier_reports);
+        for (carrier_id, temporary) in reports {
+            let extra = self.session.request(
+                RequestPurpose::Settings(SettingsPurpose::ReportWebProxyCarrier),
+                None,
+            );
+            let sent = self.sender.send_json(&report_web_proxy_carrier_error(
+                extra, carrier_id, temporary,
+            ));
+            if sent.is_err() {
+                self.session.requests.take(extra);
+            }
+        }
     }
 
     fn send_proxy_mutation(
@@ -96,6 +116,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         enable: bool,
         comment: &str,
     ) -> Result<RequestId, ConnectSendError> {
+        // Quill cannot host a web proxy's carrier yet: it is saved, never
+        // switched to (`crate::proxy_web`).
+        let enable = enable && draft.kind != ProxyKind::Web;
         self.send_proxy_mutation(|extra| add_proxy(extra, draft, enable, comment))
     }
 
@@ -110,13 +133,32 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.settings.proxy.find(proxy_id).is_none() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // TDLib turns the edited proxy back on when it is the active one
+        // (`ConnectionCreator::add_proxy`), which would leave the user
+        // offline behind a web proxy Quill cannot carry: refuse it.
+        let edits_enabled = self
+            .session
+            .settings
+            .proxy
+            .find(proxy_id)
+            .is_some_and(|p| p.is_enabled);
+        if draft.kind == ProxyKind::Web && edits_enabled {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let enable = enable && draft.kind != ProxyKind::Web;
         self.session.settings.proxy.pings.remove(&proxy_id);
         self.send_proxy_mutation(|extra| edit_proxy(extra, proxy_id, draft, enable, comment))
     }
 
     /// `enableProxy` (TDLib keeps one enabled at a time).
     pub fn enable_proxy(&mut self, proxy_id: i32) -> Result<RequestId, ConnectSendError> {
-        if self.session.settings.proxy.find(proxy_id).is_none() {
+        let enableable = self
+            .session
+            .settings
+            .proxy
+            .find(proxy_id)
+            .is_some_and(|p| p.proxy.kind.can_be_enabled());
+        if !enableable {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.send_proxy_mutation(|extra| enable_proxy(extra, proxy_id))
