@@ -150,6 +150,7 @@ impl QuillApp {
         if self.demo_session.is_none() {
             super::battery_watch::watch(cx);
         }
+        self.start_omarchy_watch(cx);
         cx.set_reduce_motion(quill::power_saving::reduce_motion_now());
         // Quill's themes and high contrast take the single accent of old.
         let accent = quill::system_accent::effective(
