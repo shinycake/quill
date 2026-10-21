@@ -564,6 +564,9 @@ fn a_dissolve_keeps_the_rows_key_until_it_moves_on(cx: &mut TestAppContext) {
     app.update(vcx, |app, _| {
         app.begin_vanish(ChatId(GROUP), &[MessageId(id(5))]);
         app.paint_vanishing_for_test();
+        // Hold the clock at the start: a slow runner must not let the row
+        // phase run out between here and the check's rebuild.
+        app.set_vanishing_clock(0.);
     });
     check(
         &app,
@@ -622,6 +625,9 @@ fn only_the_closing_gap_is_remeasured_by_list_index(cx: &mut TestAppContext) {
     app.update(vcx, |app, _| {
         app.begin_vanish(ChatId(GROUP), &[MessageId(id(5))]);
         app.paint_vanishing_for_test();
+        // Hold the clock at the start: a slow runner must not let the row
+        // phase run out between here and the check's rebuild.
+        app.set_vanishing_clock(0.);
     });
     check(
         &app,
@@ -666,6 +672,9 @@ fn two_reads_in_one_round_see_the_same_phase(cx: &mut TestAppContext) {
     app.update(vcx, |app, _| {
         app.begin_vanish(ChatId(GROUP), &[MessageId(id(5))]);
         app.paint_vanishing_for_test();
+        // Hold the clock at the start: a slow runner must not let the row
+        // phase run out between here and the check's rebuild.
+        app.set_vanishing_clock(0.);
     });
     check(
         &app,

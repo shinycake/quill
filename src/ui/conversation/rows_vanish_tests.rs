@@ -32,6 +32,12 @@ fn a_dissolve_runs_and_ends_in_a_pane_without_rows(cx: &mut TestAppContext) {
     });
     frames(vcx);
     let (_, first) = app.read_with(vcx, |app, _| app.vanishing_state_for_test());
+    // Restart the dissolve so a slow runner cannot use up its dust life
+    // before the next read; the clock keeps running from here.
+    app.update(vcx, |app, _| {
+        app.set_vanishing_clock(0.);
+        app.history.vanish_held.set(false);
+    });
     std::thread::sleep(std::time::Duration::from_millis(30));
     app.update(vcx, |_, cx| cx.notify());
     frames(vcx);
