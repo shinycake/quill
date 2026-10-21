@@ -900,7 +900,7 @@ impl QuillApp {
                     .right_0()
                     .bottom_0()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.message_ui.menu = None;
+                        this.close_message_menu();
                         cx.notify();
                     })),
             )
