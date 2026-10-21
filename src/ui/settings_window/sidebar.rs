@@ -36,9 +36,15 @@ fn page_icon(page: Page) -> IconName {
 }
 
 impl QuillApp {
-    pub(super) fn settings_sidebar(&self, narrow: bool, cx: &mut Context<Self>) -> AnyElement {
-        // On a narrow window no page is beside the list, so none is current.
-        let current = (!narrow).then(|| self.settings_page_shown());
+    pub(super) fn settings_sidebar(
+        &self,
+        narrow: bool,
+        searching: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        // No page is beside the list on a narrow window, or while results
+        // stand in for it, so none is current.
+        let current = (!narrow && !searching).then(|| self.settings_page_shown());
         let owner = cx.entity().downgrade();
         let items = Page::ALL.into_iter().map(|page| {
             let owner = owner.clone();
@@ -90,6 +96,7 @@ impl QuillApp {
                             .child(tr(keys::MENU_SETTINGS)),
                     ),
             )
+            .children(self.settings_search_field(cx))
             .children(self.settings_profile_card(cx))
     }
 

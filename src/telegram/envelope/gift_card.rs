@@ -34,6 +34,8 @@ pub struct GiftCard {
     pub facts: Vec<(String, String)>,
     /// `received_gift_id` of a received gift (empty otherwise).
     pub received_gift_id: String,
+    /// `messageGift.can_be_deleted`: the receiver may `deleteGift` it.
+    pub can_be_deleted: bool,
     /// What the "Learn more" box of a giveaway card needs.
     pub giveaway: Option<GiveawaySummary>,
     /// The code of a Premium gift code card; the card opens its box.
@@ -106,6 +108,7 @@ pub(crate) fn build_gift_card(
         backdrop: None,
         facts: Vec::new(),
         received_gift_id: String::new(),
+        can_be_deleted: false,
         giveaway: None,
         gift_code: SecretCode::default(),
     };
@@ -126,6 +129,10 @@ pub(crate) fn build_gift_card(
             card.text = text_field(value);
             card.sticker = sticker_of(gift.get("sticker"), files);
             card.received_gift_id = str_of(value, "received_gift_id");
+            card.can_be_deleted = value
+                .get("can_be_deleted")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             let sell = int_of(value, "sell_star_count");
             if sell > 0
                 && !value
@@ -297,6 +304,17 @@ mod tests {
             card.facts,
             vec![("Converts to".to_string(), "80 Stars".to_string())]
         );
+    }
+
+    #[test]
+    fn regular_gift_card_reads_can_be_deleted() {
+        let (card, _) = build("messageGift", json!({"gift": {"star_count": 1}}));
+        assert!(!card.unwrap().can_be_deleted);
+        let (card, _) = build(
+            "messageGift",
+            json!({"gift": {"star_count": 1}, "can_be_deleted": true}),
+        );
+        assert!(card.unwrap().can_be_deleted);
     }
 
     #[test]

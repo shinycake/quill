@@ -47,7 +47,10 @@ pub(super) fn link_row(
                 .when_some(value, |this, value| {
                     this.child(
                         div()
-                            .flex_none()
+                            .flex_shrink(1.)
+                            .min_w_0()
+                            .max_w(relative(0.6))
+                            .truncate()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
                             .child(value),
@@ -89,5 +92,47 @@ pub(super) fn danger_row(
                 .child(title),
         )
         .on_click(on_click)
+        .into_any_element()
+}
+
+/// A row with a switch on the right, and an optional line under the title.
+pub(super) fn switch_row(
+    id: impl Into<ElementId>,
+    title: &'static str,
+    caption: Option<&'static str>,
+    checked: bool,
+    on_change: impl Fn(&bool, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> AnyElement {
+    div()
+        .flex()
+        .items_center()
+        .gap_3()
+        .w_full()
+        .min_h(px(40.))
+        .px_3()
+        .py_2()
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_w_0()
+                .child(div().text_sm().child(title))
+                .when_some(caption, |this, caption| {
+                    this.child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(caption),
+                    )
+                }),
+        )
+        .child(
+            gpui_kit::component::switch::Switch::new(id)
+                .checked(checked)
+                .accessibility_label(title)
+                .on_click(on_change),
+        )
         .into_any_element()
 }

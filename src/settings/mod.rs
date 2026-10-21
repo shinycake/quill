@@ -14,6 +14,7 @@ mod chat_windows;
 mod deferred;
 mod first_run;
 mod media;
+mod settings_search;
 mod video_pip;
 mod window_save;
 pub use accounts::*;
@@ -25,6 +26,7 @@ pub use deferred::flush_deferred_writes;
 pub(crate) use deferred::{read_with_pending, write_json_deferred};
 pub use first_run::*;
 pub use media::*;
+pub use settings_search::*;
 pub use video_pip::*;
 pub use window_save::*;
 

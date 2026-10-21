@@ -273,6 +273,7 @@ mod gift_auction_ui;
 mod gift_craft_demo;
 mod gift_craft_select;
 mod gift_craft_ui;
+mod gift_delete_demo;
 mod gift_manage_ui;
 mod gift_market_demo;
 mod gift_market_state;

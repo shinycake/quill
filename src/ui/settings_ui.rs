@@ -4,7 +4,6 @@
 use super::app::QuillApp;
 use super::privacy::PrivacyEditorTarget;
 use super::shell::{DialogKind, QuillShell};
-use super::*;
 use crate::ui::{status_note::StatusNote, user_error::user_error_for};
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -15,7 +14,6 @@ use gpui_kit::component::table::TableCell;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::data_settings::NetworkKind;
-use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::privacy::PrivacyKeyState;
 use quill::settings::{
@@ -253,97 +251,6 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.chat_list.archive_settings_open = open;
         }
-    }
-
-    /// Slice A6: the Contacts tab settings section — "Sync contacts"
-    /// toggle, "Import contacts…" (vCard paste → `importContacts`) and
-    /// "Delete synced contacts…" (`clearImportedContacts` +
-    /// `removeContacts`). Mirrors TGX's `SettingsPrivacyController`
-    /// strings ("Sync Contacts", "Delete Synced Contacts"). Lives at the
-    /// foot of the tab (Quill has no settings screen; the Calls tab does
-    /// the same with call settings).
-    pub(super) fn contacts_settings_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        let sync_on = self
-            .session()
-            .map(|s| s.settings.contact_prefs.sync_enabled)
-            .unwrap_or(true);
-        let notice: Option<String> = self
-            .session()
-            .and_then(|s| s.users_state.contacts_notice.clone());
-        let mut section = div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .mt_3()
-            .pt_2()
-            .border_t_1()
-            .border_color(cx.theme().border)
-            .child(
-                div()
-                    .text_xs()
-                    .font_semibold()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("CONTACTS"),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        Switch::new("contacts-sync-toggle")
-                            .checked(sync_on)
-                            .label(tr(keys::Q_PREFS_SYNC_CONTACTS))
-                            .on_click(cx.listener(|this, &on, _, cx| {
-                                this.set_contact_sync(on, cx);
-                            })),
-                    )
-                    .child(
-                        // Slice A6: honest caption — on desktop there is
-                        // no OS address book to sync; the switch gates
-                        // the Contacts tab's refresh from the servers.
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(tr(keys::Q_PREFS_KEEPS_THE_CONTACTS_TAB_UP)),
-                    ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(
-                        Button::new("contacts-import-open")
-                            .label(tr(keys::Q_PREFS_IMPORT_CONTACTS))
-                            .ghost()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_import_contacts_dialog(window, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("contacts-delete-synced")
-                            .label(tr(keys::Q_PREFS_DELETE_SYNCED_CONTACTS))
-                            .ghost()
-                            .danger()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_group_confirm(
-                                    ChatId(0),
-                                    GroupConfirmAction::DeleteSyncedContacts,
-                                    cx,
-                                );
-                            })),
-                    ),
-            );
-        section = section.children(self.birthday_contacts_block(cx));
-        if let Some(notice) = notice {
-            section = section.child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(notice),
-            );
-        }
-        section.into_any_element()
     }
 
     /// Phase C2i: call settings — confirm-before-calling (real +

@@ -152,6 +152,8 @@ pub enum PaymentsPurpose {
     /// `giftCollection`; `deleteGiftCollection` with `ok`.
     ChangeGiftCollection,
     DeleteGiftCollection,
+    /// `deleteGift`. Response is `ok`.
+    DeleteGift,
     /// `getAvailableGifts` for the send-gift dialog.
     GetAvailableGifts,
     /// `getPremiumGiftPaymentOptions` for the send-gift dialog.
@@ -189,6 +191,7 @@ impl PaymentsPurpose {
                 | Self::GetGiftCollections
                 | Self::ChangeGiftCollection
                 | Self::DeleteGiftCollection
+                | Self::DeleteGift
                 | Self::GetAvailableGifts
                 | Self::GetPremiumGiftOptions
                 | Self::SendStarGift
@@ -235,6 +238,7 @@ flat_purposes!(Payments(PaymentsPurpose) {
     GetGiftCollections,
     ChangeGiftCollection,
     DeleteGiftCollection,
+    DeleteGift,
     GetAvailableGifts,
     GetPremiumGiftOptions,
     SendStarGift,

@@ -4,10 +4,14 @@
 //! its own and a page opens over it with a back arrow.
 #![deny(clippy::indexing_slicing)]
 
+mod account;
 mod log_out;
 mod pages;
 mod rows;
+mod search;
 mod sidebar;
+
+pub(in crate::ui) use search::SettingsSearch;
 
 use super::app::QuillApp;
 use gpui_kit::assets::IconName;
@@ -51,6 +55,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_settings(&mut self) {
+        self.settings.search.close();
         self.settings.open = false;
         self.settings.page = None;
         self.settings.sub = None;
@@ -97,10 +102,14 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let narrow = f32::from(window.viewport_size().width) < NARROW;
+        self.settle_settings_search(window, cx);
+        self.settings_search_input(window, cx);
         if !window.has_active_dialog(cx) && window.focused(cx).is_none() {
             window.focus(&self.settings.focus, cx);
         }
-        let list = !narrow || self.settings.page.is_none();
+        let searching = self.settings_searching(window, cx);
+        // A narrow window shows the results in the list's place.
+        let list = !narrow || (self.settings.page.is_none() && !searching);
         let page = (!narrow || self.settings.page.is_some()).then(|| self.settings_page_shown());
         div()
             .id("settings-window")
@@ -111,6 +120,11 @@ impl QuillApp {
             .min_h_0()
             .min_w_0()
             .bg(cx.theme().background)
+            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if this.settings_search_key(event, window, cx) {
+                    cx.stop_propagation();
+                }
+            }))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 if event.keystroke.key == "escape"
                     && this.settings.keybinding_capture.is_none()
@@ -126,11 +140,27 @@ impl QuillApp {
                         .debug_selector(|| "settings-sidebar".into())
                         .h_full()
                         .when(narrow, |this| this.flex_1())
-                        .child(self.settings_sidebar(narrow, cx)),
+                        .child(self.settings_sidebar(narrow, searching, cx)),
                 )
             })
-            .when_some(page, |this, page| {
-                this.child(self.settings_page_view(page, narrow, cx))
+            .when(searching, |this| {
+                this.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_w_0()
+                        .h_full()
+                        .when(narrow, |this| {
+                            this.child(div().px_4().pt_4().children(self.settings_search_field(cx)))
+                        })
+                        .child(self.settings_search_view(cx)),
+                )
+            })
+            .when(!searching, |this| {
+                this.when_some(page, |this, page| {
+                    this.child(self.settings_page_view(page, narrow, cx))
+                })
             })
             .into_any_element()
     }
@@ -204,6 +234,12 @@ crate::ui::screenshot_demo::register_demos![
         app.demo_settings(Page::Account);
         app.settings.log_out_confirm = true;
     }),
+    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-search").setup(
+        |app, window, cx| {
+            app.demo_settings(Page::Account);
+            app.focus_settings_search(Some("notif"), window, cx);
+        }
+    ),
 ];
 
 impl QuillApp {

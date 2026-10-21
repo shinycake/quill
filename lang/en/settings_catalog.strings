@@ -91,3 +91,16 @@
 "qll_settings_log_out_warning" = "Logging out ends all your secret chats, and media downloaded on this device is erased.";
 "lng_settings_logout" = "Log out";
 "lng_sure_logout" = "Are you sure you want to log out?";
+"qll_settings_search" = "Search settings";
+"qll_settings_search_nothing" = "Nothing matches “{query}”";
+"qll_settings_search_recent" = "Recent";
+"qll_settings_search_hint" = "Type to find any setting";
+"qll_settings_search_forget" = "Remove from recent";
+"lng_settings_name_label" = "Name";
+"lng_settings_phone_label" = "Phone number";
+"lng_settings_username_label" = "Username";
+"lng_settings_birthday_label" = "Date of Birth";
+"lng_settings_channel_label" = "Personal channel";
+"lng_settings_theme_name_color" = "Your name color";
+"lng_bio_placeholder" = "Bio";
+"lng_settings_username_add" = "Add username";

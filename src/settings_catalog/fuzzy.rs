@@ -30,6 +30,9 @@ const RUN: i32 = 50;
 const GAP_STEP: i32 = 6;
 const GAP_MAX: i32 = 80;
 const FIRST_CHAR: i32 = 30;
+/// Leaving a word half-matched for a later one: "notif" bolds the start of
+/// "notifications", not "noti…" plus the f of "from".
+const ABANDON: i32 = 40;
 /// The query covers every letter of the text: "sign out" is the keyword, not
 /// the start of "sign out all".
 const WHOLE: i32 = 60;
@@ -122,8 +125,10 @@ pub fn subsequence(query: &str, text: &str) -> Option<Match> {
                         let (score, _) = (*prev_row.get(p)?)?;
                         let gap = (j - p - 1) as i32;
                         let bonus = if gap == 0 { RUN } else { 0 };
+                        let left_mid_word =
+                            gap > 0 && t.get(p + 1).is_some_and(|f| is_word_char(f.ch));
                         let penalty = if start {
-                            0
+                            if left_mid_word { ABANDON } else { 0 }
                         } else {
                             (gap * GAP_STEP).min(GAP_MAX)
                         };

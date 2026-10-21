@@ -17,13 +17,21 @@ fn new_app(
     cx: &mut TestAppContext,
     width: f32,
 ) -> (Entity<QuillApp>, Entity<QuillShell>, VisualTestContext) {
+    new_app_sized(cx, width, 800.)
+}
+
+fn new_app_sized(
+    cx: &mut TestAppContext,
+    width: f32,
+    height: f32,
+) -> (Entity<QuillApp>, Entity<QuillShell>, VisualTestContext) {
     let root = quill::scratch::process_dir("quill-settings-window");
     let _ = std::fs::create_dir_all(&root);
     quill::settings::use_isolated_app_root(root);
     cx.update(gpui_kit::init);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
-    let handle = cx.open_window(size(px(width), px(800.)), move |window, cx| {
+    let handle = cx.open_window(size(px(width), px(height)), move |window, cx| {
         let view = cx.new(|cx| {
             QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named("ready-chats")))
         });
@@ -122,10 +130,10 @@ fn a_box_opens_over_settings_and_closing_it_comes_back(cx: &mut TestAppContext) 
 
 #[gpui_kit::test]
 fn log_out_asks_before_signing_out(cx: &mut TestAppContext) {
-    let (app, shell, mut vcx) = new_app(cx, 1100.);
+    let (app, shell, mut vcx) = new_app_sized(cx, 1100., 1600.);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.open_settings(Some(Page::Account));
+        app.demo_settings(Page::Account);
         cx.notify();
     });
     frames(vcx);
@@ -184,4 +192,104 @@ fn a_narrow_window_shows_the_list_then_a_page_with_a_way_back(cx: &mut TestAppCo
         assert!(app.settings.open);
         assert_eq!(app.settings.page, None);
     });
+}
+
+fn query(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> String {
+    app.read_with(vcx, |app, _| app.settings.search.query.clone())
+}
+
+#[gpui_kit::test]
+fn typing_searches_and_enter_opens_the_best_match(cx: &mut TestAppContext) {
+    let (app, _, mut vcx) = new_app(cx, 1100.);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.open_settings(None);
+        cx.notify();
+    });
+    frames(vcx);
+    vcx.update(|window, cx| {
+        let focus = app.read(cx).settings.focus.clone();
+        window.focus(&focus, cx);
+    });
+    vcx.simulate_keystrokes("p");
+    vcx.simulate_input("roxy");
+    frames(vcx);
+    assert_eq!(query(&app, vcx), "proxy");
+    assert!(shown(vcx, "settings-search-results"));
+    assert!(!shown(vcx, "settings-page-account"));
+    vcx.simulate_keystrokes("enter");
+    frames(vcx);
+    assert_eq!(query(&app, vcx), "");
+    assert!(shown(vcx, "settings-page-connection"));
+    app.read_with(vcx, |app, _| {
+        let recent = app.settings.search.recent_ids();
+        assert!(
+            recent
+                .first()
+                .is_some_and(|id| id.starts_with("connection")),
+            "{recent:?}"
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn esc_clears_the_search_before_leaving_settings(cx: &mut TestAppContext) {
+    let (app, _, mut vcx) = new_app(cx, 1100.);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.open_settings(Some(Page::Calls));
+        cx.notify();
+    });
+    frames(vcx);
+    vcx.simulate_keystrokes("cmd-f");
+    vcx.simulate_input("notif");
+    frames(vcx);
+    assert!(shown(vcx, "settings-search-results"));
+    vcx.simulate_keystrokes("down up down");
+    app.read_with(vcx, |app, _| assert_eq!(app.settings.search.selected(), 1));
+    vcx.simulate_keystrokes("escape");
+    frames(vcx);
+    assert_eq!(query(&app, vcx), "");
+    assert!(shown(vcx, "settings-page-calls"));
+    app.read_with(vcx, |app, _| assert!(app.settings.open));
+    vcx.simulate_keystrokes("escape");
+    frames(vcx);
+    app.read_with(vcx, |app, _| assert!(!app.settings.open));
+}
+
+#[gpui_kit::test]
+fn a_narrow_window_shows_results_in_place_of_the_list(cx: &mut TestAppContext) {
+    let (app, _, mut vcx) = new_app(cx, 600.);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.open_settings(None);
+        cx.notify();
+    });
+    frames(vcx);
+    vcx.simulate_keystrokes("cmd-f");
+    vcx.simulate_input("language");
+    frames(vcx);
+    assert!(shown(vcx, "settings-search-results"));
+    assert!(!shown(vcx, "settings-sidebar"));
+    vcx.simulate_keystrokes("enter");
+    frames(vcx);
+    assert!(shown(vcx, "settings-page-language"));
+}
+
+#[gpui_kit::test]
+fn account_rows_open_their_editors(cx: &mut TestAppContext) {
+    let (app, shell, mut vcx) = new_app_sized(cx, 1100., 1600.);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.demo_settings(Page::Account);
+        cx.notify();
+    });
+    frames(vcx);
+    vcx.update(|window, cx| window.click("settings-row-name", cx));
+    assert_eq!(open_dialog(&shell, vcx), Some(DialogKind::EditProfile));
+    app.update(vcx, |app, cx| app.close_edit_profile_dialog(cx));
+    assert_eq!(open_dialog(&shell, vcx), None);
+    vcx.update(|window, cx| window.click("settings-row-name-color", cx));
+    assert!(open_dialog(&shell, vcx).is_some());
+    app.read_with(vcx, |app, _| assert!(app.settings.open));
 }
