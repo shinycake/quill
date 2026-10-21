@@ -58,15 +58,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let _ = self.send_json_request(extra, &get_language_pack_keys(extra, &pack, &keys));
     }
 
-    /// Merge the saved "box was shown" flags once, and save new ones.
-    fn sync_psa_about(&mut self) {
-        let about = &mut self.session.chat_list.psa_about;
-        if about.needs_load() {
-            about.restore(crate::psa_about::load_seen());
-        }
-        if let Some(seen) = about.take_unsaved() {
-            crate::psa_about::save_seen(&seen);
-        }
+    /// Read the saved "box was shown" flags (in the background, once),
+    /// show the box of a chat that waited for them, and save new flags.
+    pub(crate) fn sync_psa_about(&mut self) {
+        self.session.chat_list.psa_about.start_load();
+        self.session.poll_psa_about(std::time::Instant::now());
+        self.session.chat_list.psa_about.save_unsaved();
     }
 
     /// "Hide this announcement": only where tdesktop offers it, a promoted

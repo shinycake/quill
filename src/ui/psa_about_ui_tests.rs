@@ -34,6 +34,7 @@ fn open(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
         let Some(session) = app.demo_session.as_mut() else {
             return;
         };
+        session.chat_list.psa_about.restore(Default::default());
         let seq = std::sync::atomic::AtomicU64::new(session.last_seq);
         let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> = app.demo_ui.sink.clone();
         let source = r#"{"@type":"chatSourcePublicServiceAnnouncement","type":"covid","text":""}"#;
@@ -87,13 +88,17 @@ fn the_box_shows_for_a_promoted_chat_once_and_goes_with_the_chat(cx: &mut TestAp
 }
 
 #[gpui_kit::test]
-fn the_box_goes_when_its_time_is_up(cx: &mut TestAppContext) {
+fn the_box_goes_when_the_chat_leaves_the_window(cx: &mut TestAppContext) {
     let (app, mut vcx) = open(cx);
     let vcx = &mut vcx;
     open_chat(&app, vcx, 91);
     assert!(shown(vcx));
-    vcx.executor()
-        .advance_clock(std::time::Duration::from_secs(9));
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.leave_open_chat();
+        }
+        cx.notify();
+    });
     frames(vcx);
-    assert!(!shown(vcx));
+    assert!(!shown(vcx), "popped out: no box over the empty window");
 }

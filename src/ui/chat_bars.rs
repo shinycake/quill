@@ -92,6 +92,9 @@ impl QuillApp {
         bars.extend(self.translate_bar_views(chat_id, cx));
         // The Star reaction's "sent" toast with Undo.
         bars.extend(self.paid_toast_view(chat_id, cx));
+        // The one-time "about this announcement" box floats over the top
+        // of the history from here.
+        bars.extend(self.psa_about_view(chat_id, cx));
         bars
     }
 

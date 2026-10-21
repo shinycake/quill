@@ -403,3 +403,62 @@ fn announcement_labels_are_fetched_once_and_hide_deletes_the_history() {
         "the English text is dropped until the new pack answers"
     );
 }
+
+#[test]
+fn the_about_box_waits_for_the_saved_flags_and_saves_without_overwriting() {
+    use crate::psa_about::{load_seen_from, merge_save};
+    use std::collections::BTreeSet;
+    use std::time::{Duration, Instant};
+
+    let dir = std::env::temp_dir().join(format!("quill-psa-driver-{}", std::process::id()));
+    let file = dir.join("psa_about_seen.json");
+    // Another session already saved chat 9.
+    merge_save(&file, &BTreeSet::from([9]));
+
+    let mut f = Fixture::new();
+    f.feed(position(
+        7,
+        json!({"@type":"chatSourcePublicServiceAnnouncement","type":"covid","text":"Hi"}),
+    ));
+    if let Some(chat) = f.driver.session.chats.get_mut(&7) {
+        chat.kind = crate::telegram::envelope::ChatKind::Supergroup {
+            supergroup_id: 7,
+            is_channel: true,
+        };
+    }
+    f.driver.session.chat_list.psa_about.use_file(file.clone());
+    f.driver.session.open_chat(ChatId(7));
+    let shown = |f: &Fixture| {
+        f.driver
+            .session
+            .chat_list
+            .psa_about
+            .visible(f.driver.session.open_chat, Instant::now())
+            .is_some()
+    };
+    assert!(!shown(&f), "the saved flags are not in yet");
+
+    let mut tries = 0;
+    while !shown(&f) && tries < 200 {
+        f.driver.sync_psa_about();
+        std::thread::sleep(Duration::from_millis(10));
+        tries += 1;
+    }
+    assert!(
+        shown(&f),
+        "unseen chat: the box shows once the flags are in"
+    );
+
+    let mut tries = 0;
+    while !load_seen_from(&file).contains(&7) && tries < 200 {
+        f.driver.sync_psa_about();
+        std::thread::sleep(Duration::from_millis(10));
+        tries += 1;
+    }
+    assert_eq!(
+        load_seen_from(&file),
+        BTreeSet::from([7, 9]),
+        "saved once, merged with the other session's flag"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

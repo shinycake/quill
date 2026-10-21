@@ -691,7 +691,6 @@ impl Render for QuillApp {
                 let insets = self.toast_insets(window, cx);
                 this.child(self.status_toast_layer(&note, insets, cx))
             })
-            .children(self.psa_about_layer(cx))
             .children(self.custom_emoji_card(cx))
             .children(self.photo_editor_overlay(cx))
             // Phase 9.1: story viewer overlay above the media viewer.

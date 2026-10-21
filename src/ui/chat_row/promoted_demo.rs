@@ -44,6 +44,7 @@ impl QuillApp {
     fn demo_promoted_chat_about(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.demo_promoted_chats(window, cx);
         if let Some(session) = self.demo_session.as_mut() {
+            session.chat_list.psa_about.restore(Default::default());
             session.open_chat(quill::ids::ChatId(91));
         }
     }
