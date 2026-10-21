@@ -17,7 +17,8 @@ Parity item `profile-qr-code-box`, PR 1 of 2. PR 2 adds the upgraded-gift themes
 ## What Quill does
 
 - `quill::peer_qr` owns the state: `PeerQrBox::apply(action, env) -> effects` for the panels, colors, emoji and the free-code flow, plus the layout, colors, pattern and link math as pure functions with unit tests. Free-code requests carry a ticket (the box's id and a serial bumped by every request and every dropped one), so a late answer for an earlier box or request is ignored. `ui/peer_qr` keeps the open box, runs the effects and draws the box from that state and the session each frame.
-- Drawing only reads. The pictures (backdrop, code, emoji stills) start off the UI thread when the box opens, after every action and on the poll step when the session changed what the box shows. Esc reaches the box as the dialog's cancel, which closes an open panel first.
+- Drawing only reads. The name is measured each frame (GPUI caches shaped lines). The pictures (backdrop, code, emoji stills) start off the UI thread when the box opens, after every action and on every poll step. The same steps ask the driver for your contact link (`ensure_own_contact_link`). It sends `getUserLink` once the phone privacy rules have come back and call for one, and never while one is on its way. Esc reaches the box as the dialog's cancel, which closes an open panel first.
+- The pill menu paints at the kit's popup priority, above the box. A cover over the whole window, one priority lower, takes any press off the menu and closes only the menu.
 - The once-a-second clock runs only while something counts down: a temporary free code or a temporary contact link. It stops itself when nothing does or the box closes. The pattern, the panels and the backdrop fade use the frame clock and stop when settled.
 - Entry points:
   - your own box from the Account settings page ("Get QR Code", one row) and from `settingsSectionQrCode`;
@@ -26,7 +27,7 @@ Parity item `profile-qr-code-box`, PR 1 of 2. PR 2 adds the upgraded-gift themes
   - the proxy list's QR button, an invite link's "Get QR Code", and a business chat link's "Get QR Code".
   The old QR spots (the proxy QR dialog, the inline invite-link QR, the business link QR page) are gone.
 - Copy depends on what the platform clipboard takes. macOS gets the card image alone, as tdesktop copies it (GPUI writes only the strings of an item with more than one entry). Windows gets the image and the link. The X11 and Wayland clipboards take text only, so Linux gets the link and the "Link copied" toast instead of "QR Code copied".
-- Share opens Quill's share-to-chat chooser with the link. The card image is written to a temporary file off the UI thread and attached, unsent, in the chosen chat's composer. While the chooser is up the box hides under it. A cancelled share brings the box back unchanged and removes the file.
+- Share opens Quill's share-to-chat chooser with the link. The card image is written to a temporary file off the UI thread and attached, unsent, in the chosen chat's composer. While the chooser is up the box hides under it. A cancelled share brings the box back unchanged and removes the file. If the next chat a link opens is not the chosen one, the file is removed too. A copy or share whose image comes back after its box closed does nothing, even when a new box shows the same link.
 - The image is one SVG: the radial gradient, the pattern, the card shadow, the card, the code and the name. It is rendered at four pixels per point off the UI thread and encoded as PNG.
 - The color circles, the emoji cells, the pill and the menu items are buttons, so Tab reaches them and Space presses them.
 
