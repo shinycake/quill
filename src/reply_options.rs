@@ -5,8 +5,6 @@
 //! wording of a reply that comes from another chat.
 #![deny(clippy::indexing_slicing)]
 
-use crate::composer::QuoteSelection;
-
 /// Longest quote Telegram accepts by default (`quote_length_max`).
 pub const QUOTE_MAX_CHARS: usize = 1024;
 
@@ -70,18 +68,15 @@ pub fn reply_bar_title(sender: Option<&str>, from_chat: Option<&str>) -> String 
     }
 }
 
-/// Split message text into parts to quote: one per line, and inside a
-/// line one per sentence. Positions are UTF-16 code-unit offsets into
-/// `text`, as `inputTextQuote.position` needs. Parts longer than
-/// [`QUOTE_MAX_CHARS`] are left out.
-pub fn quote_segments(text: &str) -> Vec<QuoteSelection> {
-    crate::quote_source::QuotableText::plain(text).segments()
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::composer::quote_position;
-    use crate::reply_options::{ReplyOption, quote_segments, reply_bar_title, reply_options};
+    use crate::composer::{QuoteSelection, quote_position};
+    use crate::quote_source::QuotableText;
+    use crate::reply_options::{ReplyOption, reply_bar_title, reply_options};
+
+    fn quote_segments(text: &str) -> Vec<QuoteSelection> {
+        QuotableText::plain(text).segments()
+    }
 
     #[test]
     fn options_follow_the_message() {

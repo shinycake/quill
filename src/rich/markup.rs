@@ -441,7 +441,7 @@ mod tests {
         let flat = crate::telegram::envelope::RichMessageContent {
             blocks: blocks.clone(),
             is_full: true,
-            quote_texts: Vec::new(),
+            quote_texts: Default::default(),
         }
         .copy_text();
         let flat_blocks = markup_to_blocks(&flat);
