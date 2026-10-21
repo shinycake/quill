@@ -74,7 +74,8 @@ fn confirming_removes_the_gift_from_the_grid_and_the_box(cx: &mut TestAppContext
     // The confirmation is up and nothing is gone yet.
     assert_eq!(ids(&app, vcx), [DELETABLE, KEPT]);
     // Let the alert finish sliding in and take focus.
-    vcx.executor().advance_clock(std::time::Duration::from_millis(600));
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(600));
     vcx.run_until_parked();
     // Enter presses the alert's OK button, so this goes through `on_ok`.
     vcx.simulate_keystrokes("enter");
