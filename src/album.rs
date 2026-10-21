@@ -128,7 +128,9 @@ pub fn layout_media_group(
     if count == 1 {
         let width = max_width;
         let (size_w, size_h) = sizes.first().copied().unwrap_or((1, 1));
-        let height = (size_h.max(1) * width) / size_w.max(1);
+        // In i64: a tall item's height times the width overflows i32.
+        let height = i64::from(size_h.max(1)) * i64::from(width) / i64::from(size_w.max(1));
+        let height = i32::try_from(height).unwrap_or(i32::MAX);
         return vec![rect(0, 0, width, height.max(1))];
     }
     if count >= 5 || ratios.iter().any(|ratio| *ratio > 2.0) {

@@ -29,6 +29,7 @@ mod edit;
 mod export;
 mod media_options;
 mod media_send;
+mod rich_html;
 mod saved_open;
 
 impl<S: JsonSender> ConnectDriver<S> {

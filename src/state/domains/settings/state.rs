@@ -206,6 +206,10 @@ pub struct SettingsState {
     /// The running or just-finished chat export; the UI shows its progress
     /// and clears it.
     pub chat_export: Option<crate::export::ChatExport>,
+    /// Running "Save as HTML" exports of rich messages
+    /// (`parity:menu-save-selection-html`); the driver removes each one
+    /// when the UI takes its outcome.
+    pub rich_html_exports: Vec<crate::rich_html::RichHtmlExport>,
     /// The `setlanguage` link whose box is open.
     pub language_link: Option<LanguageLinkLookup>,
     /// Settings → Language: packs, the switch in flight, strings to install.
@@ -289,6 +293,7 @@ impl SettingsState {
             proxy: Default::default(),
             account_export: None,
             chat_export: None,
+            rich_html_exports: Vec::new(),
             language_link: None,
             language: LanguageState::default(),
         }

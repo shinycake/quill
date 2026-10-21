@@ -17,6 +17,7 @@ impl Session {
         ) {
             self.settings.account_export = None;
             self.settings.chat_export = None;
+            self.settings.rich_html_exports.clear();
         }
         // List paging belongs to one authorization. TDLib only leaves Ready
         // through LoggingOut / Closing / Closed, so a later Ready (another

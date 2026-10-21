@@ -65,6 +65,7 @@
 "lng_manage_peer_permissions" = "Permissions";
 "lng_media_type_groups" = "Groups";
 "lng_mediaview_date_time" = "{date} at {time}";
+"lng_mediaview_downloads" = "Downloads";
 "lng_mediaview_hours_ago#one" = "{count} hour ago";
 "lng_mediaview_hours_ago#other" = "{count} hours ago";
 "lng_mediaview_just_now" = "just now";
