@@ -21,8 +21,8 @@ const TAB_CHAR_WIDTH: f32 = 7.;
 /// Horizontal padding and segmented-bar share of one labelled tab.
 const TAB_PADDING: f32 = 34.;
 
-/// Width the labelled tab strip needs for these (translated) labels. Tabs keep
-/// their natural width, so the estimate is the sum over all of them; language
+/// Width the labelled tab strip needs for these (translated) labels. Tabs grow
+/// from their natural width, so the estimate is the sum over all of them; language
 /// packs with longer words push the icon-only breakpoint up.
 pub(super) fn labelled_tabs_width(labels: &[&str]) -> f32 {
     labels
@@ -100,10 +100,13 @@ impl QuillApp {
                     .aria_label(label)
                     .tooltip(move |window, cx| Tooltip::new(label).build(window, cx))
             } else {
-                Tab::new().label(label)
+                // Each label keeps its natural width and the tabs share the
+                // rest of the bar, so it never ends in empty space.
+                Tab::new().flex_grow(1.).label(label)
             }
         };
         TabBar::new("list-tabs")
+            .w_full()
             .segmented()
             .selected_index(selected)
             .child(tab(IconName::MessageCircle, tr(keys::RECENT_CHATS)))
