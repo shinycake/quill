@@ -82,7 +82,7 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: vendor/rlottie/prefix
-          key: rlottie-linux-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie.sh') }}
+          key: rlottie-linux-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie.sh', 'native/patches/rlottie-animated-shape-budget.patch') }}
       - name: build rlottie
         if: steps.rlottie-cache.outputs.cache-hit != 'true'
         run: bash scripts/build-rlottie.sh
@@ -91,7 +91,7 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: vendor/rlottie/prefix
-          key: rlottie-linux-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie.sh') }}
+          key: rlottie-linux-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie.sh', 'native/patches/rlottie-animated-shape-budget.patch') }}
       # In-process video (docs/decisions/codex-video-cross-platform.md):
       # FFmpeg (LGPL, shared) with the ffmpeg/ffprobe programs + the quillvideo shim.
       - name: restore FFmpeg build
