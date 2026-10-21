@@ -113,7 +113,59 @@ pub(crate) fn parse_users_payload(
                     .and_then(|info| info.get("block_list")),
             ),
         })),
+        "profileShareThemeBackdrops" => Ok(EnvelopePayload::Users(
+            UsersPayload::ProfileShareThemeBackdrops(parse_share_theme_backdrops(value)),
+        )),
+        "userLink" => Ok(EnvelopePayload::Users(UsersPayload::UserLink(
+            crate::peer_qr::session::UserLinkAnswer {
+                url: value
+                    .get("url")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+                expires_in: value.get("expires_in").and_then(Value::as_i64).unwrap_or(0),
+                can_get_permanent_link: value
+                    .get("can_get_permanent_link")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            },
+        ))),
         _ => return Ok(None),
     };
     payload.map(Some)
+}
+
+/// `profileShareThemeBackdrops.backdrops`; colors are `0xRRGGBB`.
+fn parse_share_theme_backdrops(
+    value: &Value,
+) -> Vec<crate::peer_qr::appearance::ShareThemeBackdrop> {
+    use crate::peer_qr::color::Rgb;
+    let color = |colors: &Value, key: &str| {
+        colors
+            .get(key)
+            .and_then(Value::as_i64)
+            .and_then(|c| u32::try_from(c & 0xFF_FFFF).ok())
+            .map(Rgb::hex)
+    };
+    value
+        .get("backdrops")
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter_map(|backdrop| {
+                    let colors = backdrop.get("colors")?;
+                    Some(crate::peer_qr::appearance::ShareThemeBackdrop {
+                        id: i32::try_from(backdrop.get("id")?.as_i64()?).ok()?,
+                        name: backdrop
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_owned(),
+                        center: color(colors, "center_color")?,
+                        edge: color(colors, "edge_color")?,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }

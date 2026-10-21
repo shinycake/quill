@@ -83,4 +83,9 @@ pub enum UsersPayload {
         /// `UserFullInfo::blocked`.
         blocked: bool,
     },
+    /// `profileShareThemeBackdrops`: the `getProfileShareThemeBackdrops`
+    /// answer.
+    ProfileShareThemeBackdrops(Vec<crate::peer_qr::appearance::ShareThemeBackdrop>),
+    /// `userLink`: the `getUserLink` answer.
+    UserLink(crate::peer_qr::session::UserLinkAnswer),
 }

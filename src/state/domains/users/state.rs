@@ -89,6 +89,8 @@ pub struct UsersState {
     pub new_contact_outcome: Option<NewContactOutcome>,
     /// Phase 6: the open user / supergroup info panel, if any.
     pub open_info_panel: Option<InfoPanelTarget>,
+    /// The QR box's backdrops, contact link and free-code answers.
+    pub peer_qr: crate::peer_qr::session::PeerQrData,
 }
 
 /// How the New Contact box's import ended.
@@ -151,6 +153,7 @@ impl UsersState {
             user_chat_to_open: None,
             new_contact_outcome: None,
             open_info_panel: None,
+            peer_qr: crate::peer_qr::session::PeerQrData::default(),
         }
     }
 }
