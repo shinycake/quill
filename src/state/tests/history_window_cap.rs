@@ -70,11 +70,11 @@ fn opened_at_tail() -> (Session, AtomicU64, Arc<MemorySink>) {
 #[test]
 fn paging_back_far_trims_the_newest_end_and_marks_has_newer() {
     let (mut session, seq, sink) = opened_at_tail();
-    assert!(!session.histories[&CHAT].has_newer);
+    assert!(!session.history_has_newer(ChatId(CHAT)));
     let epoch = session.histories[&CHAT].window_epoch;
 
     // Page back until the cap is crossed.
-    while !session.histories[&CHAT].has_newer {
+    while !session.history_has_newer(ChatId(CHAT)) {
         assert!(
             session.histories[&CHAT].messages.len() <= HISTORY_WINDOW_CAP,
             "the cap must trim as soon as it is crossed"
@@ -83,7 +83,10 @@ fn paging_back_far_trims_the_newest_end_and_marks_has_newer() {
     }
     let history = &session.histories[&CHAT];
     assert_eq!(history.messages.len(), HISTORY_WINDOW_TRIM_TO);
-    assert!(history.has_newer, "newest end trimmed => newer pages exist");
+    assert!(
+        session.history_has_newer(ChatId(CHAT)),
+        "newest end trimmed => newer pages exist"
+    );
     assert!(!history.loaded_complete);
     // The reader's end (oldest) is intact; the window is contiguous.
     let oldest = history.oldest_id().unwrap().0;
@@ -99,13 +102,13 @@ fn paging_back_far_trims_the_newest_end_and_marks_has_newer() {
     land_older(&mut session, &seq, &sink, 50);
     let history = &session.histories[&CHAT];
     assert_eq!(history.messages.len(), HISTORY_WINDOW_TRIM_TO + 50);
-    assert!(history.has_newer);
+    assert!(session.history_has_newer(ChatId(CHAT)));
 }
 
 #[test]
 fn paging_forward_after_a_trim_pages_the_tail_back_in_and_trims_the_old_end() {
     let (mut session, seq, sink) = opened_at_tail();
-    while !session.histories[&CHAT].has_newer {
+    while !session.history_has_newer(ChatId(CHAT)) {
         land_older(&mut session, &seq, &sink, 50);
     }
     let trimmed_newest = session.histories[&CHAT].newest_id().unwrap().0;
@@ -114,7 +117,10 @@ fn paging_forward_after_a_trim_pages_the_tail_back_in_and_trims_the_old_end() {
     land_newer(&mut session, &seq, &sink, 50);
     let history = &session.histories[&CHAT];
     assert_eq!(history.newest_id().unwrap().0, trimmed_newest + 50);
-    assert!(history.has_newer, "still short of message 5000");
+    assert!(
+        session.history_has_newer(ChatId(CHAT)),
+        "still short of message 5000"
+    );
 
     // Read forward until the cap is crossed again: the oldest end goes.
     let oldest_before = history.oldest_id().unwrap().0;
@@ -130,23 +136,23 @@ fn paging_forward_after_a_trim_pages_the_tail_back_in_and_trims_the_old_end() {
 #[test]
 fn reaching_the_latest_message_clears_has_newer_and_stays_bounded() {
     let (mut session, seq, sink) = opened_at_tail();
-    while !session.histories[&CHAT].has_newer {
+    while !session.history_has_newer(ChatId(CHAT)) {
         land_older(&mut session, &seq, &sink, 50);
     }
     // Page forward until the window reaches message 5000 again.
-    while session.histories[&CHAT].has_newer {
+    while session.history_has_newer(ChatId(CHAT)) {
         land_newer(&mut session, &seq, &sink, 50);
         assert!(session.histories[&CHAT].messages.len() <= HISTORY_WINDOW_CAP + 50);
     }
     let history = &session.histories[&CHAT];
     assert_eq!(history.newest_id(), Some(MessageId(5000)));
-    assert!(!history.has_newer);
+    assert!(!session.history_has_newer(ChatId(CHAT)));
 }
 
 #[test]
 fn jumping_back_to_latest_refetches_after_a_trim() {
     let (mut session, seq, sink) = opened_at_tail();
-    while !session.histories[&CHAT].has_newer {
+    while !session.history_has_newer(ChatId(CHAT)) {
         land_older(&mut session, &seq, &sink, 50);
     }
     let epoch = session.histories[&CHAT].window_epoch;
@@ -154,7 +160,7 @@ fn jumping_back_to_latest_refetches_after_a_trim() {
     session.reset_history_window(ChatId(CHAT));
     let history = &session.histories[&CHAT];
     assert!(history.messages.is_empty());
-    assert!(!history.has_newer);
+    assert!(!session.history_has_newer(ChatId(CHAT)));
     assert_eq!(history.window_epoch, epoch + 1);
     // The refetched latest page lands as a normal tail window.
     let extra = session.request_for_message(RequestPurpose::GetHistory, ChatId(CHAT), MessageId(0));
@@ -166,7 +172,7 @@ fn jumping_back_to_latest_refetches_after_a_trim() {
     );
     let history = &session.histories[&CHAT];
     assert_eq!(history.newest_id(), Some(MessageId(5000)));
-    assert!(!history.has_newer);
+    assert!(!session.history_has_newer(ChatId(CHAT)));
 }
 
 #[test]

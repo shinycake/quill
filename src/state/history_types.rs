@@ -488,12 +488,12 @@ pub struct HistoryState {
     /// The UI has reported visible rows this open generation; from then on
     /// only reported rows are viewed (before that, only the newest row).
     pub visible_reported: bool,
-    /// The loaded window is one contiguous run of the chat's history. When
-    /// it does not reach the chat's latest message (opened at the first
-    /// unread, or jumped back to an old message), newer pages load on
-    /// demand and live `updateNewMessage`s stay out of it — inserting them
-    /// would show a gapless timeline that is missing messages.
-    pub has_newer: bool,
+    /// TDLib answered a newer page from the window's newest message with
+    /// nothing newer while the chat's latest known message was newer (it
+    /// is not visible to us): `(latest, newest)`. While no newer message is
+    /// known and the window still reaches `newest`, it counts as reaching
+    /// the latest, so the pane does not ask for the same page again.
+    pub newer_exhausted: Option<(i64, i64)>,
     /// A newer-page request failed; stop auto-loading until the window is
     /// reset, so a persistent error can't re-send on every render.
     pub newer_failed: bool,
@@ -540,6 +540,43 @@ impl HistoryState {
         self.messages.values().collect()
     }
 
+    /// The loaded window is one contiguous run of the chat's history; it
+    /// stops short of the chat's latest message (`chat_latest`, the chat
+    /// summary's last message id, or 0) when it was opened at the first
+    /// unread message, jumped back, trimmed, or the chat moved on without
+    /// an `updateNewMessage` for every message (TDLib after a long gap).
+    /// Newer pages then load on demand and live messages stay out of the
+    /// window: inserting them would show a gapless timeline that is
+    /// missing messages. Derived from what the window holds and what the
+    /// chat is known to have, never stored, so no update can leave it stale.
+    pub fn stops_short_of(&self, chat_latest: i64) -> bool {
+        let latest = chat_latest.max(self.latest_seen);
+        let Some(newest) = self.newest_id().map(|id| id.0) else {
+            return false;
+        };
+        let exhausted = self
+            .newer_exhausted
+            .is_some_and(|(at_latest, at_newest)| latest <= at_latest && newest >= at_newest);
+        !exhausted && newest < latest && !self.contains(MessageId(latest))
+    }
+
+    /// Messages were deleted from the chat: when the newest incoming one
+    /// ever seen is among them, `latest_seen` falls back to the newest
+    /// incoming message still loaded, so a deleted message is not taken
+    /// for one the window still has to reach (the chat summary carries the
+    /// real latest).
+    pub(crate) fn forget_deleted_latest(&mut self, deleted: &[MessageId]) {
+        if !deleted.iter().any(|id| id.0 == self.latest_seen) {
+            return;
+        }
+        self.latest_seen = self
+            .messages
+            .values()
+            .rev()
+            .find(|message| !message.is_outgoing && !message.pending && !message.failed)
+            .map_or(0, |message| message.id.0);
+    }
+
     pub fn oldest_id(&self) -> Option<MessageId> {
         self.messages.keys().next().copied().map(MessageId)
     }
@@ -559,7 +596,6 @@ impl HistoryState {
     pub(crate) fn reset_window(&mut self) {
         self.messages.clear();
         self.loaded_complete = false;
-        self.has_newer = false;
         self.newer_failed = false;
         self.load_failed = false;
         self.saved_open = None;

@@ -7,7 +7,7 @@ use crate::composer::{
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::rich::RichBlock;
 use crate::state::MessagesPurpose;
-use crate::state::{ForwardFlight, RequestPurpose};
+use crate::state::{ForwardFlight, RequestPurpose, WindowEdge};
 use crate::telegram::envelope::ChatKind;
 use crate::telegram::requests::{
     AnimationSend, SendReply, StickerSend, VideoNoteSend, VideoNoteThumbnailSend, VideoSend,
@@ -68,14 +68,26 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        if self
+        let empty = self
             .session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::GetHistory, chat_id)
+            .histories
+            .get(&chat_id.0)
+            .is_none_or(|h| h.messages.is_empty());
+        let edge = match self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|h| h.oldest_id())
+        {
+            Some(oldest) if !empty => WindowEdge::Older(oldest.0),
+            _ => WindowEdge::First,
+        };
+        // A first page on the way replaces or extends the window from its
+        // newest end, so an older page waits for it.
+        if self.session.history_page_in_flight(chat_id, edge)
             || self
                 .session
-                .requests
-                .has_purpose_for_chat(RequestPurpose::GetHistoryAround, chat_id)
+                .history_page_in_flight(chat_id, WindowEdge::First)
         {
             return Ok(None);
         }
@@ -111,19 +123,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request_for_message(RequestPurpose::GetHistory, chat_id, from);
-        self.sender.send_json(&get_chat_history(
+        if let Err(err) = self.sender.send_json(&get_chat_history(
             extra,
             chat_id,
             from,
             0,
             HISTORY_PAGE_SIZE,
             false,
-        ))?;
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
         Ok(Some(extra))
     }
 
     /// Load the page after the window's newest message while the window
-    /// stops short of the chat's latest message (`HistoryState::has_newer`).
+    /// stops short of the chat's latest message (`Session::history_has_newer`).
     pub fn fetch_history_newer(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         let Some(chat_id) = self.session.open_chat else {
             return Err(ConnectSendError::InvalidRequest);
@@ -140,19 +155,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || !self.session.chat_is_shown(chat_id) {
             return Err(ConnectSendError::InvalidRequest);
         }
+        if !self.session.history_has_newer(chat_id) {
+            return Ok(None);
+        }
         let Some(from) = self
             .session
             .histories
             .get(&chat_id.0)
-            .filter(|h| h.has_newer && !h.newer_failed)
+            .filter(|h| !h.newer_failed)
             .and_then(|h| h.newest_id())
         else {
             return Ok(None);
         };
         if self
             .session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::GetHistoryNewer, chat_id)
+            .history_page_in_flight(chat_id, WindowEdge::Newer(from.0))
         {
             return Ok(None);
         }
@@ -182,9 +199,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(chat_id) = self.session.open_chat else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        let history = self.session.history_entry(chat_id);
-        history.end_unread_open();
-        if !history.has_newer {
+        self.session.history_entry(chat_id).end_unread_open();
+        if !self.session.history_has_newer(chat_id) {
             return Ok(None);
         }
         self.session.reset_history_window(chat_id);

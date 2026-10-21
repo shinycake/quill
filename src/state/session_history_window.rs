@@ -3,6 +3,18 @@
 //! directions, and replaced (never patched) when a jump lands outside it.
 use super::*;
 
+/// The edge of the history window a page request extends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WindowEdge {
+    /// The page that starts the window: the latest messages, or the run
+    /// around a message.
+    First,
+    /// The page below the oldest loaded message, asked from it.
+    Older(i64),
+    /// The page from the newest loaded message on, asked from it.
+    Newer(i64),
+}
+
 /// Every request that fills the main history window.
 const WINDOW_PURPOSES: [RequestPurpose; 3] = [
     RequestPurpose::GetHistory,
@@ -81,10 +93,7 @@ impl Session {
             Some(history) => {
                 history.messages.is_empty()
                     && !history.load_failed
-                    && !self
-                        .requests
-                        .ids_for_chat(&WINDOW_PURPOSES, chat_id)
-                        .is_empty()
+                    && self.history_page_in_flight(chat_id, WindowEdge::First)
             }
         }
     }
@@ -97,10 +106,10 @@ impl Session {
     /// `None` when the loaded window doesn't reach the latest messages: its
     /// newest own message might not be the last one.
     pub fn last_editable_message(&self, chat_id: ChatId) -> Option<crate::composer::ComposerEdit> {
-        let history = self.histories.get(&chat_id.0)?;
-        if history.has_newer {
+        if self.history_has_newer(chat_id) {
             return None;
         }
+        let history = self.histories.get(&chat_id.0)?;
         if let Some(last) = history.messages.values().next_back()
             && last.pending
             && !last.failed
@@ -182,14 +191,147 @@ impl Session {
         self.stale_history_requests.remove(&pending.id.0)
     }
 
+    /// The newest message `chat_id` is known to have, from its summary
+    /// (0 when unknown).
+    fn chat_latest_id(&self, chat_id: ChatId) -> i64 {
+        self.chats
+            .get(&chat_id.0)
+            .and_then(|chat| chat.last_message.as_ref())
+            .map_or(0, |last| last.id.0)
+    }
+
+    /// The loaded window of `chat_id` stops short of the chat's latest
+    /// message ([`HistoryState::stops_short_of`]).
+    pub fn history_has_newer(&self, chat_id: ChatId) -> bool {
+        // A session without a server (the screenshot demos) seeds the whole
+        // history: there is nothing newer to load.
+        if self.history_pruning.is_offline_copy() {
+            return false;
+        }
+        let latest = self.chat_latest_id(chat_id);
+        self.histories
+            .get(&chat_id.0)
+            .is_some_and(|history| history.stops_short_of(latest))
+    }
+
+    /// Which edge of the window a history page request extends.
+    fn window_edge(pending: &PendingRequest) -> WindowEdge {
+        let from = pending.around_message_id.map_or(0, |id| id.0);
+        match pending.purpose {
+            RequestPurpose::GetHistory if from != 0 => WindowEdge::Older(from),
+            RequestPurpose::GetHistoryNewer => WindowEdge::Newer(from),
+            _ => WindowEdge::First,
+        }
+    }
+
+    /// Whether a page answering `pending` still extends the window as it
+    /// is now. A first page fills an empty window; an older page continues
+    /// below the message it was asked from, which must still be the oldest;
+    /// a newer page starts with the message it was asked from, which must
+    /// still be loaded. Anything else was asked for a window that has since
+    /// been trimmed, released or replaced: storing it would leave a gap.
+    fn page_attaches(&self, chat_id: ChatId, edge: WindowEdge) -> bool {
+        let history = self.histories.get(&chat_id.0);
+        match edge {
+            WindowEdge::First => true,
+            WindowEdge::Older(from) => {
+                history.and_then(HistoryState::oldest_id) == Some(MessageId(from))
+            }
+            WindowEdge::Newer(from) => history.is_some_and(|h| h.contains(MessageId(from))),
+        }
+    }
+
+    /// A page request for `edge` of `chat_id`'s window is on the way and
+    /// will still extend the window when it answers. Requests for a window
+    /// that was replaced, or that no longer attach, do not count: they
+    /// must not hold back the page the window needs now.
+    pub(crate) fn history_page_in_flight(&self, chat_id: ChatId, edge: WindowEdge) -> bool {
+        self.requests
+            .ids_for_chat(&WINDOW_PURPOSES, chat_id)
+            .into_iter()
+            .filter(|id| !self.stale_history_requests.contains(&id.0))
+            .filter_map(|id| self.requests.get(id))
+            .map(Self::window_edge)
+            .any(|pending_edge| {
+                std::mem::discriminant(&pending_edge) == std::mem::discriminant(&edge)
+                    && self.page_attaches(chat_id, pending_edge)
+            })
+    }
+
+    /// Whether a window page answer must be dropped: the window it was
+    /// asked for was replaced, the chat is no longer shown, or the page no
+    /// longer attaches. Records why.
+    pub(crate) fn history_page_detached(&mut self, pending: &PendingRequest, seq: u64) -> bool {
+        let note = if self.take_stale_history_request(pending) {
+            "stale-history-window"
+        } else if pending.chat_id.is_none_or(|chat| !self.chat_is_shown(chat)) {
+            "stale-chat-history"
+        } else if pending
+            .chat_id
+            .is_some_and(|chat| !self.page_attaches(chat, Self::window_edge(pending)))
+        {
+            "detached-history-page"
+        } else {
+            return false;
+        };
+        if pending.purpose == RequestPurpose::GetHistoryAround {
+            self.drop_saved_open(pending.chat_id);
+        }
+        self.diagnostics.record(Diagnostic {
+            category: "reducer",
+            type_name: Some("messages".into()),
+            extra: Some(pending.id.0),
+            seq: Some(seq),
+            note,
+        });
+        true
+    }
+
+    /// Store a page that starts the window (the latest messages, or the
+    /// run around a message). A window that is not empty holds live
+    /// messages that arrived meanwhile, or the tail kept from an earlier
+    /// visit: the page joins them when the two overlap, and replaces them
+    /// otherwise (they are not adjacent to it).
+    pub(crate) fn store_first_page(&mut self, chat_id: ChatId, messages: &[ParsedMessage]) {
+        let (Some(low), Some(high)) = (
+            messages.iter().map(|m| m.id.0).min(),
+            messages.iter().map(|m| m.id.0).max(),
+        ) else {
+            return;
+        };
+        let history = self.history_entry(chat_id);
+        let overlaps = match (history.oldest_id(), history.newest_id()) {
+            (Some(oldest), Some(newest)) => low <= newest.0 && oldest.0 <= high,
+            _ => true,
+        };
+        if !overlaps {
+            let doomed: Vec<MessageId> = history
+                .messages
+                .values()
+                .filter(|message| !message.pending && !message.failed)
+                .map(|message| message.id)
+                .collect();
+            for id in doomed {
+                history.remove(id, false);
+            }
+            history.loaded_complete = false;
+            history.window_epoch = history.window_epoch.wrapping_add(1);
+        }
+        for message in messages {
+            self.upsert_message(message.clone(), false);
+        }
+    }
+
     /// Prepare the window when the driver opens `chat_id` (after
     /// `open_chat` recorded the unread anchor): with unread messages it must
     /// cover the read boundary (otherwise it is replaced and loads around
     /// it); a window left behind by an earlier jump is replaced so the chat
     /// opens at its latest messages.
     pub fn prepare_history_window(&mut self, chat_id: ChatId) {
+        let has_newer = self.history_has_newer(chat_id);
         let history = self.histories.entry(chat_id.0).or_default();
-        let keep = !history.has_newer
+        history.newer_failed = false;
+        let keep = !has_newer
             && match history.unread_anchor {
                 // A tail window that reaches back to the boundary shows the
                 // unread run as is.
@@ -277,23 +419,6 @@ impl Session {
             .is_some_and(|history| history.saved_open.is_some())
     }
 
-    /// Recompute whether the window stops short of the chat's latest
-    /// message after a page landed.
-    pub(crate) fn refresh_history_has_newer(&mut self, chat_id: ChatId) {
-        let summary_last = self
-            .chats
-            .get(&chat_id.0)
-            .and_then(|chat| chat.last_message.as_ref())
-            .map_or(0, |last| last.id.0);
-        let Some(history) = self.histories.get_mut(&chat_id.0) else {
-            return;
-        };
-        let latest = summary_last.max(history.latest_seen);
-        history.has_newer = latest > 0
-            && !history.contains(MessageId(latest))
-            && history.newest_id().is_some_and(|newest| newest.0 < latest);
-    }
-
     /// Apply a `GetHistoryNewer` page: everything at or after the request's
     /// `from_message_id` joins the window. A page with nothing newer than
     /// the boundary means the window now reaches the latest message.
@@ -303,14 +428,7 @@ impl Session {
         messages: Vec<ParsedMessage>,
         seq: u64,
     ) {
-        if self.take_stale_history_request(pending) || self.history_view_stale(pending) {
-            self.diagnostics.record(Diagnostic {
-                category: "reducer",
-                type_name: Some("messages".into()),
-                extra: Some(pending.id.0),
-                seq: Some(seq),
-                note: "stale-history-newer",
-            });
+        if self.history_page_detached(pending, seq) {
             return;
         }
         let Some(chat_id) = pending.chat_id else {
@@ -321,10 +439,11 @@ impl Session {
         for message in messages {
             self.upsert_message(message, false);
         }
-        if any_newer {
-            self.refresh_history_has_newer(chat_id);
-        } else if let Some(history) = self.histories.get_mut(&chat_id.0) {
-            history.has_newer = false;
+        if !any_newer {
+            let latest = self.chat_latest_id(chat_id);
+            if let Some(history) = self.histories.get_mut(&chat_id.0) {
+                history.newer_exhausted = Some((latest.max(history.latest_seen), from));
+            }
         }
         // R6: reading forward through a long window — drop the oldest end.
         self.trim_history_window(chat_id, WindowEnd::Oldest);
@@ -350,11 +469,19 @@ impl Session {
     /// the normal upsert.
     pub(crate) fn route_new_message_into_window(&mut self, message: &ParsedMessage) -> bool {
         let chat_id = message.chat_id;
-        if !self
-            .histories
-            .get(&chat_id.0)
-            .is_some_and(|history| history.has_newer)
-        {
+        // A send while the window waits for a page around an older message
+        // would sit right after that page across a gap: open at the latest.
+        let around_in_flight = message.is_outgoing
+            && self
+                .histories
+                .get(&chat_id.0)
+                .is_none_or(|history| history.newest_id().is_none())
+            && self
+                .requests
+                .ids_for_chat(&[RequestPurpose::GetHistoryAround], chat_id)
+                .into_iter()
+                .any(|id| !self.stale_history_requests.contains(&id.0));
+        if !around_in_flight && !self.history_has_newer(chat_id) {
             return true;
         }
         // Incoming messages are always server messages; an outgoing one

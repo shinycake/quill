@@ -103,7 +103,10 @@ fn unread_chat_opens_around_the_read_boundary_without_marking_read() {
     h.answer(extra, &[20, 30, 40]);
     let history = h.history();
     assert!(history.contains(MessageId(40)));
-    assert!(history.has_newer, "60 is newer than the window");
+    assert!(
+        h.driver.session.history_has_newer(ChatId(7)),
+        "60 is newer than the window"
+    );
     // Nothing is viewed until the UI reports on-screen rows.
     assert!(h.driver.session.message_ids_to_view(ChatId(7)).is_empty());
 }
@@ -123,7 +126,7 @@ fn newer_pages_extend_the_window_until_the_latest_message() {
 
     h.answer(newer, &[40, 50, 60]);
     assert!(h.history().contains(MessageId(60)));
-    assert!(!h.history().has_newer);
+    assert!(!h.driver.session.history_has_newer(ChatId(7)));
     assert_eq!(h.driver.fetch_history_newer().unwrap(), None);
 }
 
@@ -141,7 +144,7 @@ fn live_messages_stay_out_of_a_window_that_stops_short() {
         !h.history().contains(MessageId(70)),
         "would fake contiguity"
     );
-    assert!(h.history().has_newer);
+    assert!(h.driver.session.history_has_newer(ChatId(7)));
     assert_eq!(h.history().latest_seen, 70);
 }
 
@@ -159,7 +162,7 @@ fn sending_from_the_middle_moves_the_window_to_the_latest_run() {
     let history = h.history();
     assert!(history.contains(MessageId(80)));
     assert!(!history.contains(MessageId(40)));
-    assert!(!history.has_newer);
+    assert!(!h.driver.session.history_has_newer(ChatId(7)));
     assert_eq!(history.unread_anchor, None);
     assert_ne!(history.window_epoch, epoch);
 }
@@ -183,7 +186,7 @@ fn jump_to_latest_replaces_the_window_and_drops_its_stale_pages() {
 
     h.answer(latest, &[50, 60]);
     assert!(h.history().contains(MessageId(60)));
-    assert!(!h.history().has_newer);
+    assert!(!h.driver.session.history_has_newer(ChatId(7)));
 }
 
 #[test]
@@ -210,7 +213,7 @@ fn a_failed_send_does_not_make_the_window_look_short() {
         r#"{{"@type":"updateMessageSendFailed","old_message_id":61,"error":{{"@type":"error","code":400,"message":"FAIL"}},"message":{}}}"#,
         message_json(62, true)
     ));
-    assert!(!h.history().has_newer);
+    assert!(!h.driver.session.history_has_newer(ChatId(7)));
     // A later incoming message still joins the window.
     h.ingest(&format!(
         r#"{{"@type":"updateNewMessage","message":{}}}"#,
@@ -239,7 +242,7 @@ fn last_editable_message_is_the_newest_own_message_of_a_tail_window() {
         .expect("own text message");
     assert_eq!(edit.message_id, MessageId(55));
     // A window that stops short of the latest has no reliable "last".
-    h.driver.session.histories.get_mut(&7).unwrap().has_newer = true;
+    h.driver.session.histories.get_mut(&7).unwrap().latest_seen = 70;
     assert!(h.driver.session.last_editable_message(ChatId(7)).is_none());
 }
 
@@ -504,7 +507,10 @@ fn a_saved_position_opens_around_its_message_without_a_highlight() {
     h.answer(extra, &[40, 45, 50]);
     assert!(!h.driver.session.saved_open_pending(ChatId(7)));
     assert!(h.history().contains(MessageId(45)));
-    assert!(h.history().has_newer, "60 is newer than the window");
+    assert!(
+        h.driver.session.history_has_newer(ChatId(7)),
+        "60 is newer than the window"
+    );
     assert_eq!(history_requests(&h), 1, "no fallback load");
     assert_eq!(
         h.driver.session.search.chat_search.jump,
@@ -617,7 +623,10 @@ fn a_chat_trimmed_below_its_saved_row_reopens_around_it() {
     h.answer(extra, &[5, 10, 15]);
     assert!(!h.driver.session.saved_open_pending(ChatId(7)));
     assert!(h.history().contains(MessageId(10)));
-    assert!(h.history().has_newer, "the latest rows are newer");
+    assert!(
+        h.driver.session.history_has_newer(ChatId(7)),
+        "the latest rows are newer"
+    );
     assert_eq!(history_requests(&h), before, "no fallback load");
 }
 
@@ -727,7 +736,10 @@ fn a_live_message_in_the_empty_window_does_not_end_the_saved_open() {
     h.answer(around, &[40, 45, 50]);
     assert!(!h.driver.session.saved_open_pending(ChatId(7)));
     assert!(h.history().contains(MessageId(45)));
-    assert!(h.history().contains(MessageId(61)));
+    // 61 is not adjacent to the page: it stays out, and newer pages lead
+    // to it.
+    assert!(!h.history().contains(MessageId(61)));
+    assert!(h.driver.session.history_has_newer(ChatId(7)));
     assert_eq!(history_requests(&h), 1, "no fallback");
 }
 

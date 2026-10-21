@@ -720,6 +720,16 @@ impl QuillApp {
                     // instead of an endless skeleton or a false "No messages".
                     let history_failed =
                         open.is_some_and(|id| session.is_some_and(|s| s.history_load_failed(id)));
+                    // Nothing to show and no page on the way (an answer for
+                    // a window that was replaced, or none asked yet): ask
+                    // for the first page. The driver sends nothing for a
+                    // chat known to be empty, so this cannot loop.
+                    if open.is_some() && !history_loading && !history_failed {
+                        let weak = cx.weak_entity();
+                        cx.defer(move |cx| {
+                            let _ = weak.update(cx, |this, cx| this.maybe_auto_load_older(cx));
+                        });
+                    }
                     if history_failed {
                         div()
                             .id("history-load-failed")

@@ -24,20 +24,6 @@ impl Session {
         self.open_chat == Some(chat_id) || self.window_chats.contains(&chat_id)
     }
 
-    /// Whether a history page answers a view that is gone. The main
-    /// window's pages die with its `view_generation` (bumped on every chat
-    /// switch); a window chat's pages outlive those switches, only a
-    /// replaced window (`reset_history_window`) drops them.
-    pub(crate) fn history_view_stale(&self, pending: &PendingRequest) -> bool {
-        if pending
-            .chat_id
-            .is_some_and(|chat_id| self.window_chats.contains(&chat_id))
-        {
-            return false;
-        }
-        pending.view_generation != Some(self.view_generation)
-    }
-
     /// Record that `chat_id` is shown in its own window and start a fresh
     /// view of its history (unread anchor, nothing viewed yet). Returns
     /// whether the chat was not a window chat before.

@@ -40,7 +40,7 @@ pub enum MessagesPurpose {
     GetHistoryAround,
     /// `getChatHistory` with a negative offset: the page newer than the
     /// loaded window's newest message, while the window does not reach the
-    /// chat's latest message (`HistoryState::has_newer`).
+    /// chat's latest message (`Session::history_has_newer`).
     GetHistoryNewer,
     /// `getChatHistory` around the read position of the next unread
     /// channel while the user pulls toward it (tdesktop
