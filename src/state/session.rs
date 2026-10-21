@@ -44,10 +44,10 @@ pub struct Session {
     pub(crate) chat_order_sync: super::session_chatlist::ChatOrderSync,
     /// The chat list: folders, archive, unread counts, limits, suggestions and previews.
     /// Declared in `src/state/domains/chat_list/state.rs`.
-    pub chat_list: ChatListState,
+    pub chat_list: Box<ChatListState>,
     /// Chat-level look and actions: backgrounds, themes, accents, action bars, deep links, reactions, send-as.
     /// Declared in `src/state/domains/chats/state.rs`.
-    pub chats_state: ChatsState,
+    pub chats_state: Box<ChatsState>,
     pub histories: HashMap<i64, HistoryState>,
     /// Which closed chats and topics keep a history tail (`history_prune.rs`).
     pub history_pruning: HistoryPruning,
@@ -60,16 +60,16 @@ pub struct Session {
     pub revision: u64,
     /// Messages: the menu, reports, links, AI drafts, limits, link previews, scheduling, forwarding, polls, drafts, sponsored rows, translation, export.
     /// Declared in `src/state/domains/messages/state.rs`.
-    pub messages: MessagesState,
+    pub messages: Box<MessagesState>,
     /// Files, downloads, the shared-media gallery, the media library and map thumbnails.
     /// Declared in `src/state/domains/media/state.rs`.
-    pub media: MediaState,
+    pub media: Box<MediaState>,
     /// Stickers, custom emoji, GIFs and reactions.
     /// Declared in `src/state/domains/stickers/state.rs`.
-    pub stickers: StickersState,
+    pub stickers: Box<StickersState>,
     /// Groups and channels: members, admins, rights, invite links, join requests, boosts, communities, event logs.
     /// Declared in `src/state/domains/groups/state.rs`.
-    pub groups: GroupsState,
+    pub groups: Box<GroupsState>,
     pub open_chat: Option<ChatId>,
     /// Chats shown in a window of their own (`parity:platform-new-window`), with each window's view; they stay open in TDLib and page their history while `open_chat` changes.
     pub window_chats: WindowViews,
@@ -81,7 +81,7 @@ pub struct Session {
     pub app_active: bool,
     /// Notifications, storage, privacy, sessions, websites, the account and preferences.
     /// Declared in `src/state/domains/settings/state.rs`.
-    pub settings: SettingsState,
+    pub settings: Box<SettingsState>,
     /// Account-level sync updates: silent default, downloads, dice,
     /// freeze, speech quota, live shares, age verification.
     pub sync: UpdatesSync,
@@ -93,23 +93,23 @@ pub struct Session {
     pub users_state: UsersState,
     /// One-to-one calls, group calls, recent calls and call privacy.
     /// Declared in `src/state/domains/calls/state.rs`.
-    pub calls: CallsState,
+    pub calls: Box<CallsState>,
     /// Phase 5.1: selected forum topic (`forum_topic_id`) of the open chat.
     /// `None` = topic list (or a non-forum chat). Reset by `open_chat`.
     pub open_topic: Option<i32>,
     /// Forum topics, comment threads and Saved Messages.
     /// Declared in `src/state/domains/threads/state.rs`.
-    pub threads: ThreadsState,
+    pub threads: Box<ThreadsState>,
     pub view_generation: ViewGeneration,
     pub requests: RequestRegistry,
     pub shutdown: ShutdownPhase,
     pub last_seq: u64,
     /// Bots: info, commands, games, inline queries, callback answers, login URLs, mini apps, reply keyboards.
     /// Declared in `src/state/domains/bots/state.rs`.
-    pub bots: BotsState,
+    pub bots: Box<BotsState>,
     /// Payments, receipts, Stars subscriptions, Premium and gifts.
     /// Declared in `src/state/domains/payments/state.rs`.
-    pub payments: PaymentsState,
+    pub payments: Box<PaymentsState>,
     /// Read-only TON wallet state (`crate::ton_wallet`).
     pub ton_wallet: crate::ton_wallet::TonWalletState,
     /// Global search, search in chat and date jumps.
@@ -123,6 +123,6 @@ pub struct Session {
     pub users: HashMap<i64, ParsedUser>,
     /// Stories, the story tray, albums, archive, posting, viewers and close friends.
     /// Declared in `src/state/domains/stories/state.rs`.
-    pub stories: StoriesState,
+    pub stories: Box<StoriesState>,
     pub(crate) diagnostics: Arc<dyn DiagnosticSink>,
 }

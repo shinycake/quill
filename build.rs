@@ -2,7 +2,7 @@
 //! - turns `lang/en/*.strings` into the interface string keys
 //!   (`OUT_DIR/lang_keys.rs`, included by `src/lang/keys.rs`);
 //! - on Windows, embeds `assets/icons/Quill.ico` as the application icon of
-//!   `quill.exe`.
+//!   `quill.exe`, and gives its main thread an 8 MB stack.
 
 #[path = "src/lang/parse.rs"]
 #[allow(dead_code)]
@@ -19,7 +19,21 @@ fn main() -> Result<(), String> {
     lang_keys(&manifest, &out)?;
     #[cfg(windows)]
     windows_icon(&manifest, &out)?;
+    windows_main_stack();
     Ok(())
+}
+
+/// Windows gives the main thread a 1 MB stack, macOS and Linux 8 MB. GPUI
+/// runs the whole UI on the main thread, so give `quill.exe` the same 8 MB.
+fn windows_main_stack() {
+    const MAIN_STACK: u32 = 8 * 1024 * 1024;
+    if std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os == "windows") {
+        match std::env::var("CARGO_CFG_TARGET_ENV").as_deref() {
+            Ok("msvc") => println!("cargo:rustc-link-arg-bins=/STACK:{MAIN_STACK}"),
+            Ok("gnu") => println!("cargo:rustc-link-arg-bins=-Wl,--stack,{MAIN_STACK}"),
+            _ => {}
+        }
+    }
 }
 
 fn env(name: &str) -> Result<String, String> {
