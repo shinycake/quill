@@ -400,7 +400,8 @@ fn deleting_a_gift_sends_delete_gift_and_removes_it_on_ok() {
     assert_eq!(hub.gift_selected, None);
     // The toast is a one-shot, and the server's list is refetched.
     assert!(p.0.session.payments.gifts_manage.deleted);
-    assert!(hub.gifts_stale);
+    // ...so the driver asked for the list again, right after the answer.
+    assert_eq!(count(&p.1, "getReceivedGifts"), 2);
 }
 
 #[test]

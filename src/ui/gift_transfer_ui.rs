@@ -273,10 +273,7 @@ impl QuillApp {
         {
             // tdesktop `DeleteStarGift`: the `lng_gift_deleted` toast.
             cx.defer_in(window, |_, window, cx| {
-                window.push_notification(
-                    Notification::new().message(tr(keys::GIFT_DELETED)),
-                    cx,
-                );
+                window.push_notification(Notification::new().message(tr(keys::GIFT_DELETED)), cx);
             });
             cx.notify();
         }
