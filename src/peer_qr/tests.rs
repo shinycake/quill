@@ -169,8 +169,8 @@ fn default_backdrop_has_white_glyphs_and_dark_ink() {
 
 #[test]
 fn light_backdrop_ink_keeps_contrast_on_the_white_card() {
-    let center = Rgb::hex(0xFFE7_A0);
-    let edge = Rgb::hex(0xF5C4_5C);
+    let center = Rgb::hex(0xFFE7A0);
+    let edge = Rgb::hex(0xF5C45C);
     let colors = PeerQrColors::compute(center, edge);
     assert!(contrast(colors.ink, Rgb::WHITE) >= 4.3);
     assert_ne!(colors.foreground, Rgb::WHITE);
@@ -483,4 +483,58 @@ fn tiles_pop_with_overshoot_and_shrink_away() {
     assert!(pop_scale(10 + POP_MS / 2, 10) > 1.);
     assert_eq!(shrink_scale(0, 10), 1.);
     assert_eq!(shrink_scale(1_000, 10), 0.);
+}
+
+#[test]
+fn card_matches_tdesktop_metrics() {
+    use crate::peer_qr::layout::card_layout;
+    let card = card_layout(288., true);
+    assert_eq!((card.width, card.height, card.radius), (288., 308., 36.));
+    assert_eq!(card.qr, Rect::new(43., 35., 202., 202.));
+    assert_eq!(card.logo, Rect::new(126., 118., 35., 35.));
+    assert_eq!(card.band, Rect::new(0., 237., 288., 71.));
+    let square = card_layout(288., false);
+    assert_eq!(square.height, 288.);
+    assert_eq!(square.qr.y, 43.);
+}
+
+#[test]
+fn opening_a_panel_shrinks_the_card_above_it() {
+    use crate::peer_qr::layout::{box_layout, panel_height, placement};
+    let layout = box_layout(true, 2);
+    assert_eq!(layout.height, 499.);
+    assert_eq!(layout.island, Rect::new(147., 443., 96., 40.));
+    assert_eq!(panel_height(370.), 210.);
+    let closed = placement(&layout, 0.);
+    assert_eq!(closed.card, layout.card);
+    assert_eq!(closed.panel, layout.island);
+    let open = placement(&layout, 1.);
+    assert_eq!(open.panel, Rect::new(10., 279., 370., 210.));
+    assert_eq!(open.pill_top, 241.);
+    assert!((open.scale - 212. / 308.).abs() < 1e-9);
+    assert!((open.card.y + open.card.height - 228.).abs() < 1e-9);
+}
+
+#[test]
+fn panel_easing_runs_from_zero_to_one_fast_first() {
+    use crate::peer_qr::layout::{content_in, panel_ease};
+    assert!(panel_ease(0.).abs() < 1e-6);
+    assert!((panel_ease(1.) - 1.).abs() < 1e-6);
+    assert!(panel_ease(0.25) > 0.6);
+    assert_eq!(content_in(0.), 0.);
+    assert_eq!(content_in(400.), 1.);
+}
+
+#[test]
+fn a_long_name_goes_on_two_lines_in_a_smaller_font() {
+    use crate::peer_qr::layout::fit_username;
+    let measure = |text: &str, size: f64| text.chars().count() as f64 * size * 0.6;
+    let line = |size: f64| size * 1.2;
+    let short = fit_username("@QUILL", 252., 71., &measure, &line).unwrap();
+    assert_eq!((short.size, short.lines.len()), (36., 1));
+    let long = fit_username("@AVERYLONGUSERNAMEHERE", 252., 71., &measure, &line).unwrap();
+    assert_eq!(long.lines.concat(), "@AVERYLONGUSERNAMEHERE");
+    assert_eq!(long.lines.len(), 2);
+    assert!(long.size <= 23.);
+    assert!(fit_username("", 252., 71., &measure, &line).is_none());
 }

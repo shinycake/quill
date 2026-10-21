@@ -5,6 +5,7 @@
 pub mod appearance;
 pub mod color;
 pub mod free;
+pub mod layout;
 pub mod link;
 pub mod pattern;
 pub mod session;
