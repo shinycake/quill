@@ -398,6 +398,49 @@ fn reopening_the_menu_after_an_error_asks_again() {
 }
 
 #[test]
+fn reopening_while_the_request_is_pending_sends_nothing() {
+    let mut h = menu_harness();
+    h.driver
+        .fetch_message_reactions(ChatId(7), MessageId(50))
+        .unwrap()
+        .expect("request");
+    let again = h
+        .driver
+        .fetch_message_reactions(ChatId(7), MessageId(50))
+        .unwrap();
+    assert!(again.is_none());
+    assert_eq!(h.sent("getMessageAvailableReactions").len(), 1);
+}
+
+#[test]
+fn reopening_after_a_lost_reply_asks_again() {
+    let mut h = menu_harness();
+    let lost = h
+        .driver
+        .fetch_message_reactions(ChatId(7), MessageId(50))
+        .unwrap()
+        .expect("request");
+    // The menu closed without a reset and the reply never came.
+    h.driver.session.requests.take(lost);
+    let again = h
+        .driver
+        .fetch_message_reactions(ChatId(7), MessageId(50))
+        .unwrap()
+        .expect("a new request");
+    assert_ne!(again, lost);
+    assert_eq!(h.sent("getMessageAvailableReactions").len(), 2);
+    h.ingest(&reactions_answer(&again.0.to_string(), THUMB));
+    assert!(
+        h.driver
+            .session
+            .stickers
+            .message_reaction_options
+            .ready_for(ChatId(7), MessageId(50))
+            .is_some()
+    );
+}
+
+#[test]
 fn an_answer_offering_only_stars_still_shows_the_strip() {
     let mut h = menu_harness();
     let extra = h

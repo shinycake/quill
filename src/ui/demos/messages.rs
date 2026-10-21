@@ -143,7 +143,7 @@ impl QuillApp {
         }
         // The message menu with its reaction strip, expanded.
         if let Some(session) = self.demo_session.as_mut() {
-            super::seed_reaction_options(session, ChatId(11), MessageId(101));
+            super::reaction_fixtures::seed_reaction_options(session, ChatId(11), MessageId(101));
         }
         self.message_ui.menu = Some(MessageMenuState {
             chat_id: ChatId(11),

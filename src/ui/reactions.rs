@@ -121,9 +121,6 @@ impl QuillApp {
                 }
                 _ => {}
             }
-        } else if let Some(session) = self.demo_session.as_mut() {
-            // Screenshot demos have no driver: answer as TDLib would.
-            super::demos::seed_reaction_options(session, menu.chat_id, menu.message_id);
         }
         cx.notify();
     }

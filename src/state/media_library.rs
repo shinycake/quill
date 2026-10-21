@@ -127,11 +127,11 @@ impl MessageReactionsState {
         }
     }
 
-    /// The state already answers (or awaits) this message. A failed or
-    /// empty answer does not count: reopening the menu asks again.
+    /// The state already holds the answer for this message. A wait does not
+    /// count (its request may be gone), nor does a failed or empty answer:
+    /// reopening the menu asks again unless a request is really pending.
     pub fn covers(&self, chat_id: ChatId, message_id: MessageId) -> bool {
-        matches!(self, Self::Loading { .. } | Self::Ready(_))
-            && self.target() == Some((chat_id, message_id))
+        self.ready_for(chat_id, message_id).is_some()
     }
 }
 

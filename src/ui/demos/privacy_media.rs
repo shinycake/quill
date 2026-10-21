@@ -131,7 +131,7 @@ impl QuillApp {
         match view.as_str() {
             "reactions" => {
                 if let Some(session) = self.demo_session.as_mut() {
-                    super::seed_reaction_options(
+                    super::reaction_fixtures::seed_reaction_options(
                         session,
                         ChatId(sc::HIKERS),
                         MessageId(sc::HIKERS_FIRST_MESSAGE),
