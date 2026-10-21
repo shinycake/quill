@@ -91,7 +91,6 @@ fn title_of(view: View, include: bool, link_edit_is_new: bool) -> String {
         View::ChatLinks => tr(keys::BUSINESS_SUBTITLE_CHAT_LINKS).into(),
         View::LinkEdit if link_edit_is_new => tr(keys::Q_OPS_NEW_LINK).into(),
         View::LinkEdit => tr(keys::Q_OPS_EDIT_LINK).into(),
-        View::LinkQr => tr(keys::CHAT_LINK_QR_TITLE).into(),
         View::Chatbots => tr(keys::Q_OPS_CHAT_AUTOMATION).into(),
     }
 }
@@ -312,7 +311,6 @@ impl QuillApp {
                 View::StickerPick => this.business_sticker_pick_body(cx),
                 View::ChatLinks => this.business_chat_links_body(cx),
                 View::LinkEdit => this.business_link_edit_body(cx),
-                View::LinkQr => this.business_link_qr_body(cx),
                 View::Chatbots => this.business_chatbots_body(cx),
             };
             if let Some(note) = note {

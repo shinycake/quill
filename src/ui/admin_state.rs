@@ -5,7 +5,6 @@ use super::*;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use std::sync::Arc;
 
 pub(crate) struct AdminUi {
     /// Phase D3a: invite-link create dialog state.
@@ -14,8 +13,6 @@ pub(crate) struct AdminUi {
     pub(super) invite_link_details: Option<(ChatId, String)>,
     /// B8: whether the revoked-links list is expanded.
     pub(super) revoked_links_open: bool,
-    /// The invite link whose QR code is showing.
-    pub(super) invite_link_qr: Option<(ChatId, String, Arc<RenderImage>)>,
     /// Phase D3b: admin-management dialog state (promote picker /
     /// rights editor / demote confirm).
     pub(super) admin_dialog: Option<AdminDialog>,
@@ -54,7 +51,6 @@ impl AdminUi {
             invite_link_dialog: None,
             invite_link_details: None,
             revoked_links_open: false,
-            invite_link_qr: None,
             admin_dialog: None,
             create_chat_dialog: None,
             community: CommunityUi::default(),

@@ -42,6 +42,7 @@ fn settings_action(target: SettingsTarget) -> Option<NavigationAction> {
         SettingsTarget::SavedMessages => Some(NavigationAction::Saved),
         SettingsTarget::Premium => Some(NavigationAction::Premium),
         SettingsTarget::PeerColor(_)
+        | SettingsTarget::QrCode
         | SettingsTarget::ChangePhone
         | SettingsTarget::Root
         | SettingsTarget::Unsupported
@@ -81,6 +82,7 @@ impl QuillApp {
             DeepLinkUi::LanguagePack { id } => self.open_language_pack_link(id, cx),
             DeepLinkUi::Invoice { name } => self.open_invoice_link(&name, window, cx),
             DeepLinkUi::Settings(SettingsTarget::ChangePhone) => self.open_change_phone_dialog(cx),
+            DeepLinkUi::Settings(SettingsTarget::QrCode) => self.open_own_qr_box(cx),
             DeepLinkUi::Settings(SettingsTarget::PeerColor(tab)) => {
                 self.open_peer_color_dialog(tab, cx);
             }
@@ -106,11 +108,13 @@ impl QuillApp {
             self.links.pending_deep_link_open =
                 Some((chat_id, DeepLinkAction::ShareDraft { text }));
         }
+        self.qr_share_chosen(chat_id, cx);
         cx.notify();
     }
 
     fn cancel_share_link(&mut self, cx: &mut Context<Self>) {
         self.share.link_text = None;
+        self.qr_share_cancelled();
         cx.notify();
     }
 
@@ -169,7 +173,10 @@ impl QuillApp {
             | DeepLinkAction::OpenUserDraft { draft, .. } => {
                 self.prefill_link_draft(draft, window, cx);
             }
-            DeepLinkAction::ShareDraft { text } => self.prefill_link_draft(text, window, cx),
+            DeepLinkAction::ShareDraft { text } => {
+                self.prefill_link_draft(text, window, cx);
+                self.attach_shared_qr_card(chat_id, cx);
+            }
             DeepLinkAction::OpenVideoChat {
                 invite_hash,
                 live_stream,

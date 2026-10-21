@@ -108,7 +108,6 @@ impl QuillApp {
             picker: None,
             start_page: None,
             link_edit: None,
-            link_qr: None,
             confirm_delete: None,
             chatbot: None,
             zone_search,
@@ -251,9 +250,6 @@ impl QuillApp {
             }
             if !matches!(view, View::LinkEdit) {
                 d.link_edit = None;
-            }
-            if !matches!(view, View::LinkQr) {
-                d.link_qr = None;
             }
             d.confirm_delete = None;
             d.view = view;

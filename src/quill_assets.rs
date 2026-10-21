@@ -148,7 +148,10 @@ gpui_kit::assets::icon_assets!(
         ScanFace,
         // First-run highlights (`ui::first_run_ui`).
         CodeXml,
-        Monitor
+        Monitor,
+        // The QR code box (`ui::peer_qr`).
+        QrCode,
+        TimerOff
     ]
 );
 

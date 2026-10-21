@@ -759,6 +759,7 @@ impl QuillApp {
             | self.drain_wallpaper_preview(cx)
             | self.drain_earn(cx)
             | self.drain_language(cx)
+            | self.drain_peer_qr(cx)
         {
             progressed = true;
         }

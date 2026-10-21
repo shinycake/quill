@@ -142,6 +142,8 @@ pub struct QuillApp {
     pub(super) folders: super::folders_state::FolderUi,
     /// Chats open in windows of their own and the frame scope that names the one being drawn (`ui/chat_window`).
     pub(super) windows: super::chat_window::ChatWindows,
+    /// The QR code box (`ui/peer_qr`).
+    pub(super) peer_qr: super::peer_qr::PeerQrUi,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

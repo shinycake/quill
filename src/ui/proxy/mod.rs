@@ -39,8 +39,6 @@ pub(crate) struct ProxyUi {
     pub(crate) notice: Option<String>,
     /// The "this exposes your IP" warning was confirmed for this run.
     pub(crate) ip_warning_acked: bool,
-    /// The "Share proxy with QR code" box.
-    pub(crate) qr: Option<super::proxy_qr::ProxyQr>,
 }
 
 /// The add / edit box.

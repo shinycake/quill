@@ -156,6 +156,8 @@ pub enum SettingsTarget {
     PeerColor(crate::peer_color::PeerColorTab),
     /// The Telegram Premium page (`internalLinkTypePremiumFeaturesPage`).
     Premium,
+    /// Your own QR code box (`settingsSectionQrCode`, any subsection).
+    QrCode,
     /// "Privacy Policy": a web page, so Quill says where it is.
     PrivacyPolicy,
     /// The language page: Quill ships English only.
@@ -269,6 +271,7 @@ fn settings_target(section: Option<&str>, subsection: &str) -> SettingsTarget {
         "settingsSectionNotifications" => SettingsTarget::Notifications,
         "settingsSectionPrivacyAndSecurity" => SettingsTarget::PrivacyAndSecurity,
         "settingsSectionPremium" => SettingsTarget::Premium,
+        "settingsSectionQrCode" => SettingsTarget::QrCode,
         "settingsSectionPrivacyPolicy" => SettingsTarget::PrivacyPolicy,
         "settingsSectionLanguage" => SettingsTarget::Language,
         _ => SettingsTarget::Unsupported,

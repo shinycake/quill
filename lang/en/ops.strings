@@ -631,7 +631,6 @@
 "qll_ops_france" = "France";
 "qll_ops_from" = "From";
 "qll_ops_germany" = "Germany";
-"qll_ops_get_qr_code" = "Get QR Code";
 "qll_ops_give_the_new_account_a" = "Give the new account a name first.";
 "qll_ops_go_to_message" = "Go To Message";
 "qll_ops_go_to_the_original_post" = "Go to the original post";
@@ -893,7 +892,6 @@
 "qll_ops_saved_on_this_device_applies" = "Saved on this device; applies to new downloads.";
 "qll_ops_saved_phone_contacts_werent_available" = "Saved phone contacts weren't available, so the contacts list has your Telegram contacts instead.";
 "qll_ops_saving" = "Saving…";
-"qll_ops_scan_to_join" = "Scan to join";
 "qll_ops_schedule" = "Schedule";
 "qll_ops_scheduled_for" = "scheduled for {format_unix_date_time}";
 "qll_ops_screen" = "Screen";

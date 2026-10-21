@@ -581,7 +581,6 @@
 "qll_people_public_username" = "Public username (@{username})";
 "qll_people_public_username_2" = "Public username";
 "qll_people_public_username_empty_remove" = "Public username (empty = remove)";
-"qll_people_qr_code" = "QR code";
 "qll_people_react_to_messages" = "React to messages";
 "qll_people_reactions" = "Reactions";
 "qll_people_refresh" = "Refresh";

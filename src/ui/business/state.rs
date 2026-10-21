@@ -8,7 +8,6 @@ use quill::business_bots::BotRights;
 use quill::business_hours_edit::Interval;
 use quill::business_settings::{BusinessChats, BusinessRecipients};
 use quill::telegram::envelope::StickerItem;
-use std::sync::Arc;
 
 /// Which screen of the dialog is showing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,8 +28,6 @@ pub(crate) enum View {
     ChatLinks,
     /// The new / edit link box.
     LinkEdit,
-    /// The QR code of one link.
-    LinkQr,
     Chatbots,
 }
 
@@ -45,7 +42,7 @@ impl View {
                 _ => View::Greeting,
             },
             View::StickerPick => View::StartPage,
-            View::LinkEdit | View::LinkQr => View::ChatLinks,
+            View::LinkEdit => View::ChatLinks,
             _ => View::Hub,
         }
     }
@@ -195,8 +192,6 @@ pub(crate) struct BusinessDialog {
     pub(super) picker: Option<PickerDraft>,
     pub(super) start_page: Option<StartPageDraft>,
     pub(super) link_edit: Option<LinkEditDraft>,
-    /// The link whose QR code is showing, with the rendered code.
-    pub(super) link_qr: Option<(String, Arc<RenderImage>)>,
     /// The link waiting for "Delete" to be confirmed.
     pub(super) confirm_delete: Option<String>,
     pub(super) chatbot: Option<ChatbotDraft>,
