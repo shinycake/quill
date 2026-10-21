@@ -157,6 +157,36 @@ impl MessageScrollerState {
         true
     }
 
+    /// The row at the top of the viewport and how many pixels of it are
+    /// scrolled above the viewport. `None` while the list follows its
+    /// tail, so callers keep a position only for a reader who moved away.
+    pub fn top_anchor(&self) -> Option<(usize, f32)> {
+        // Not `is_scrolled_up`: that reads the previous layout's extent, which
+        // right after a reset or a scroll_to still describes the old content.
+        // The follow state is set by the scroll itself and re-engaged by the
+        // layout when the list rests at its end.
+        if self.list_state.is_following_tail() {
+            return None;
+        }
+        let top = self.list_state.logical_scroll_top();
+        (top.item_ix < self.list_state.item_count())
+            .then(|| (top.item_ix, f32::from(top.offset_in_item)))
+    }
+
+    /// Scroll so row `index` starts `offset` pixels above the viewport top.
+    pub fn scroll_to_item_offset(&mut self, index: usize, offset: f32, cx: &mut Context<Self>) -> bool {
+        if index >= self.list_state.item_count() {
+            return false;
+        }
+
+        self.list_state.scroll_to(ListOffset {
+            item_ix: index,
+            offset_in_item: px(offset.max(0.)),
+        });
+        cx.notify();
+        true
+    }
+
     /// Resume tail following and scroll to the latest row.
     pub fn scroll_to_end(&mut self, cx: &mut Context<Self>) {
         self.list_state.set_follow_mode(FollowMode::Tail);
@@ -474,6 +504,7 @@ mod tests {
             assert_eq!(state.read(cx).item_count(), 3);
             assert!(!state.read(cx).is_scrolled_up());
             assert!(state.read(cx).is_following_tail());
+            assert_eq!(state.read(cx).top_anchor(), None);
 
             state.update(cx, |state, cx| {
                 assert!(!state.scroll_to_item(3, cx));
@@ -551,6 +582,23 @@ mod tests {
             (after_wheel.item_ix, after_wheel.offset_in_item),
             (11, px(0.))
         );
+    }
+
+    #[gpui::test]
+    fn top_anchor_reads_a_restored_position_before_any_layout(cx: &mut gpui::TestAppContext) {
+        let state = cx.new(|cx| MessageScrollerState::new(6, cx));
+        cx.update(|cx| {
+            state.update(cx, |state, cx| {
+                state.reset(6, cx);
+                assert!(state.scroll_to_item_offset(2, 12., cx));
+                // No layout ran: `is_scrolled_up` still reads the old extent,
+                // the restored position must not look like the tail.
+                assert!(!state.is_scrolled_up());
+                assert_eq!(state.top_anchor(), Some((2, 12.)));
+                state.scroll_to_end(cx);
+                assert_eq!(state.top_anchor(), None);
+            });
+        });
     }
 
     #[gpui::test]
