@@ -232,124 +232,8 @@ pub fn tone_offered(
         && saved_count < limits.max_count
 }
 
-/// One media action. Telegram Desktop's labels are in [`MediaAction::label`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MediaAction {
-    CancelDownload,
-    OpenGif,
-    SaveGif,
-    ViewStickerSet {
-        installed: bool,
-    },
-    /// "Add to Sticker Set" / "Add to Emoji Set" for a sticker that
-    /// belongs to no set (tdesktop `AddAddToOwnedSetAction`): a page
-    /// listing the sets the user created.
-    AddToSet {
-        emoji: bool,
-    },
-    ToggleFavorite {
-        remove: bool,
-    },
-    ShowInFolder,
-    /// "Save for Notifications" (`addSavedNotificationSound`).
-    SaveForNotifications,
-    /// A song: "Save to..." with Profile, Saved Messages and Downloads.
-    SaveTo,
-    SaveAs,
-    CopyImage,
-    CopyFilename,
-}
-
-impl MediaAction {
-    /// Every variant, in slot order. The source of truth for the block width;
-    /// the slot test fails if a variant is missing here.
-    pub const ALL: [Self; 13] = [
-        Self::CancelDownload,
-        Self::OpenGif,
-        Self::SaveGif,
-        Self::ViewStickerSet { installed: true },
-        Self::AddToSet { emoji: false },
-        Self::AddToSet { emoji: true },
-        Self::ToggleFavorite { remove: false },
-        Self::ShowInFolder,
-        Self::SaveForNotifications,
-        Self::SaveTo,
-        Self::SaveAs,
-        Self::CopyImage,
-        Self::CopyFilename,
-    ];
-
-    /// Fixed place in the media block, in tdesktop's `AddPhotoActions` /
-    /// `AddDocumentActions` order. Every action has its own slot, so rows
-    /// never tie and never reach the Copy Text section.
-    pub const fn slot(self) -> u8 {
-        match self {
-            Self::CancelDownload => 0,
-            Self::OpenGif => 1,
-            Self::SaveGif => 2,
-            Self::ViewStickerSet { .. } => 3,
-            Self::AddToSet { emoji: false } => 4,
-            Self::AddToSet { emoji: true } => 5,
-            Self::ToggleFavorite { .. } => 6,
-            Self::ShowInFolder => 7,
-            Self::SaveForNotifications => 8,
-            Self::SaveTo => 9,
-            Self::SaveAs => 10,
-            Self::CopyImage => 11,
-            Self::CopyFilename => 12,
-        }
-    }
-
-    /// Sort key of this action's menu row.
-    pub fn sort_key(self) -> u8 {
-        // `MEDIA + MEDIA_SLOTS <= COPY_TEXT` is asserted above, and every slot
-        // is below `MEDIA_SLOTS` (tested), so this stays inside the block.
-        order::MEDIA.saturating_add(self.slot())
-    }
-}
-
-impl MediaAction {
-    pub fn label(self, finder: bool) -> &'static str {
-        match self {
-            Self::CancelDownload => "Cancel Download",
-            Self::OpenGif => "Open GIF",
-            Self::SaveGif => "Add to GIFs",
-            Self::ViewStickerSet { installed: true } => "View Sticker Set",
-            Self::ViewStickerSet { installed: false } => "Add Stickers",
-            Self::AddToSet { emoji } => {
-                crate::sticker_set_box::SetKind::of(emoji).add_to_set_label()
-            }
-            Self::ToggleFavorite { remove: false } => "Add to Favorites",
-            Self::ToggleFavorite { remove: true } => "Remove from Favorites",
-            Self::ShowInFolder if finder => "Show in Finder",
-            Self::ShowInFolder => "Show in Folder",
-            Self::SaveForNotifications => "Save for Notifications",
-            Self::SaveTo => "Save to...",
-            Self::SaveAs => "Save As...",
-            Self::CopyImage => "Copy Image",
-            Self::CopyFilename => "Copy Filename",
-        }
-    }
-
-    /// Stable element id for the row.
-    pub fn id(self) -> &'static str {
-        match self {
-            Self::CancelDownload => "menu-cancel-download",
-            Self::OpenGif => "menu-open-gif",
-            Self::SaveGif => "menu-save-gif",
-            Self::ViewStickerSet { .. } => "menu-sticker-set",
-            Self::AddToSet { emoji: false } => "menu-add-to-sticker-set",
-            Self::AddToSet { emoji: true } => "menu-add-to-emoji-set",
-            Self::ToggleFavorite { .. } => "menu-favorite-sticker",
-            Self::ShowInFolder => "menu-show-in-folder",
-            Self::SaveForNotifications => "menu-save-notification-tone",
-            Self::SaveTo => "menu-save-to",
-            Self::SaveAs => "menu-save-as",
-            Self::CopyImage => "menu-copy-image",
-            Self::CopyFilename => "menu-copy-filename",
-        }
-    }
-}
+mod media_actions;
+pub use media_actions::MediaAction;
 
 /// The media actions for a message, in Telegram Desktop's order
 /// (`AddPhotoActions`, `AddDocumentActions`).
@@ -621,28 +505,6 @@ pub fn noforwards_text(
 
 #[cfg(test)]
 mod tests {
-    /// Every media action has its own sort key inside the media block, so
-    /// the rows never tie with each other or reach Copy Text.
-    #[test]
-    fn media_actions_have_distinct_keys_inside_their_block() {
-        use super::{MEDIA_SLOTS, MediaAction, order};
-        let all = MediaAction::ALL;
-        assert!(
-            all.iter()
-                .enumerate()
-                .all(|(index, action)| usize::from(action.slot()) == index),
-            "ALL lists every variant once, in slot order"
-        );
-        assert_eq!(all.len(), MEDIA_SLOTS, "one slot per action");
-        let keys: Vec<u8> = all.iter().map(|action| action.sort_key()).collect();
-        assert!(
-            keys.iter().zip(keys.iter().skip(1)).all(|(a, b)| a < b),
-            "{keys:?}"
-        );
-        assert!(keys.iter().all(|key| *key >= order::MEDIA));
-        assert!(keys.iter().all(|key| *key < order::COPY_TEXT));
-    }
-
     #[test]
     fn emoji_pack_footer_names_one_pack_or_counts_them() {
         use super::emoji_pack_footer;

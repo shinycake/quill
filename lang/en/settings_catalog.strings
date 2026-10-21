@@ -104,3 +104,5 @@
 "lng_settings_theme_name_color" = "Your name color";
 "lng_bio_placeholder" = "Bio";
 "lng_settings_username_add" = "Add username";
+"qll_settings_omarchy" = "Omarchy";
+"qll_settings_omarchy_following" = "Quill follows your Omarchy theme and changes with it. Choose another theme to stop.";

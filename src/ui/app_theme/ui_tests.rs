@@ -153,3 +153,50 @@ fn the_editor_previews_live_and_cancel_reverts(cx: &mut TestAppContext) {
         assert!(!cx.theme().is_dark());
     });
 }
+
+#[gpui_kit::test]
+fn omarchy_theme_is_followed_until_another_is_chosen(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let root = quill::scratch::process_dir("quill-omarchy-ui");
+    app.update(vcx, |app, cx| {
+        app.demo_omarchy(&root);
+        app.appearance.follow_omarchy = true;
+        reapply(app, cx);
+    });
+    app.read_with(vcx, |app, _| {
+        let (id, palette) = app.settings.app_theme.applied.clone().expect("applied");
+        assert_eq!(id, ThemeId::Omarchy);
+        assert_eq!(palette.rgb(PaletteKey::WindowBg), 0x1a1b26);
+        assert_eq!(installed(PaletteKey::WindowBgActive), Some(0x7aa2f7ff));
+    });
+    app.update(vcx, |app, cx| {
+        app.choose_app_theme(ThemeId::Builtin(BuiltinTheme::Day), false, cx);
+        reapply(app, cx);
+    });
+    app.read_with(vcx, |app, _| {
+        assert!(!app.appearance.follow_omarchy);
+        assert_eq!(
+            app.settings
+                .app_theme
+                .applied
+                .as_ref()
+                .map(|(id, _)| id.clone()),
+            Some(ThemeId::Builtin(BuiltinTheme::Day))
+        );
+    });
+    app.update(vcx, |app, cx| {
+        app.follow_omarchy(cx);
+        reapply(app, cx);
+    });
+    app.read_with(vcx, |app, _| {
+        assert_eq!(
+            app.settings
+                .app_theme
+                .applied
+                .as_ref()
+                .map(|(id, _)| id.clone()),
+            Some(ThemeId::Omarchy)
+        );
+    });
+}

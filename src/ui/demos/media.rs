@@ -129,6 +129,8 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_audio(session, &self.demo_ui.sink, &self.demo_ui.seq);
+            // The song's right-click menu leads with the reaction strip.
+            super::reaction_fixtures::seed_reaction_options(session, ChatId(11), MessageId(801));
         }
         // The demo has no audio device: the engine's explicit simulation plays
         // the track (`QUILL_DEMO_AUDIO_FAIL=1` shows a failed start instead,
