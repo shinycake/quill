@@ -63,40 +63,15 @@ impl Session {
         messages: &[ParsedMessage],
         seq: u64,
     ) {
-        if self.take_stale_history_request(pending) || self.history_view_stale(pending) {
-            self.drop_saved_open(pending.chat_id);
-            self.diagnostics.record(Diagnostic {
-                category: "reducer",
-                type_name: Some("messages".into()),
-                extra: Some(pending.id.0),
-                seq: Some(seq),
-                note: "stale-view-generation",
-            });
+        if self.history_page_detached(pending, seq) {
             return;
         }
         let Some(chat_id) = pending.chat_id else {
             return;
         };
-        if !self.chat_is_shown(chat_id) {
-            self.drop_saved_open(Some(chat_id));
-            self.diagnostics.record(Diagnostic {
-                category: "reducer",
-                type_name: Some("messages".into()),
-                extra: Some(pending.id.0),
-                seq: Some(seq),
-                note: "stale-chat-history",
-            });
-            return;
-        }
-        let from = pending.around_message_id.map_or(0, |id| id.0);
-        let reached_start = from > 0 && !messages.iter().any(|m| m.id.0 < from);
-        for message in messages {
-            self.upsert_message(message.clone(), false);
-        }
-        if reached_start && let Some(history) = self.histories.get_mut(&chat_id.0) {
-            history.loaded_complete = true;
-        }
-        self.refresh_history_has_newer(chat_id);
+        // Nothing older in an around page means only that TDLib's run in
+        // memory ends there: older pages still ask the server.
+        self.store_first_page(chat_id, messages);
         if let Some(message_id) = pending.around_message_id {
             if self.settle_saved_open(chat_id, message_id) {
                 return;

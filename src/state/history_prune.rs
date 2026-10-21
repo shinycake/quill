@@ -72,6 +72,12 @@ pub struct HistoryPruning {
 }
 
 impl HistoryPruning {
+    /// The histories are the only copy of the rows: no server can load
+    /// more ([`Session::keep_all_histories`]).
+    pub fn is_offline_copy(&self) -> bool {
+        self.keep_all
+    }
+
     /// Closed chats with a kept tail, most recently used first.
     pub fn closed_chats(&self) -> impl Iterator<Item = ChatId> + '_ {
         self.closed_chats.iter().copied().map(ChatId)

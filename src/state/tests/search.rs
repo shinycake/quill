@@ -485,7 +485,9 @@ fn chat_search_happy_empty_stale_and_jump() {
     );
     assert!(session.histories.get(&11).unwrap().contains(MessageId(90)));
     assert!(session.histories.get(&11).unwrap().contains(MessageId(89)));
-    assert!(session.histories.get(&11).unwrap().contains(MessageId(101)));
+    // 90 is not adjacent to 101: the page replaced the window instead of
+    // joining it across a gap.
+    assert!(!session.histories.get(&11).unwrap().contains(MessageId(101)));
 
     let empty_gen = session.search.chat_search.begin_query("zzz");
     let empty_extra =
@@ -530,7 +532,7 @@ fn chat_search_happy_empty_stale_and_jump() {
     assert_eq!(session.search.chat_search.status, SearchStatus::Failed);
     session.close_chat_search();
     assert_eq!(session.search.chat_search.status, SearchStatus::Closed);
-    assert!(session.histories.get(&11).unwrap().contains(MessageId(101)));
+    assert!(session.histories.get(&11).unwrap().contains(MessageId(90)));
     assert!(!sink.rendered().contains("CANARY_CHAT"));
 }
 
@@ -632,7 +634,7 @@ fn chat_search_jump_missing_deleted_and_inaccessible() {
     let stale_around = session.request_history_around(ChatId(11), MessageId(80));
     session.search.chat_search.generation = session.search.chat_search.generation.saturating_add(1);
     assert_eq!(
-        session.begin_chat_search_jump(MessageId(101)),
+        session.begin_chat_search_jump(MessageId(79)),
         ChatSearchJumpNeed::AlreadyReady
     );
     apply_json(
@@ -647,7 +649,7 @@ fn chat_search_jump_missing_deleted_and_inaccessible() {
     assert_eq!(
         session.search.chat_search.jump,
         ChatSearchJump::Ready {
-            message_id: MessageId(101)
+            message_id: MessageId(79)
         }
     );
     assert!(!sink.rendered().contains("CANARY"));

@@ -949,10 +949,10 @@ impl Session {
     /// inline keyboard. `None` for other chats.
     pub fn fast_button_target(&self, chat_id: ChatId) -> Option<FastButtonTarget> {
         let bot_id = self.bot_user_id_for_chat(chat_id)?;
-        let history = self.histories.get(&chat_id.0)?;
-        if history.has_newer {
+        if self.history_has_newer(chat_id) {
             return None;
         }
+        let history = self.histories.get(&chat_id.0)?;
         let message = history.messages.values().next_back()?;
         let markup = message
             .ephemeral

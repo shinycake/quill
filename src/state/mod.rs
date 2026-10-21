@@ -197,6 +197,7 @@ pub(crate) use session_chat_search::history_message;
 pub use session_connection::*;
 pub use session_group_admin::*;
 pub use session_history_window::MentionSearch;
+pub(crate) use session_history_window::WindowEdge;
 pub use session_links_boosts::*;
 pub use session_message_menu::{
     Audience, CustomEmojiPreview, MessageAudience, MessageReportFlow, MessageReportStage,

@@ -90,27 +90,10 @@ impl Session {
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::GetHistory
         {
-            if self.take_stale_history_request(pending) || self.history_view_stale(pending) {
-                self.diagnostics.record(Diagnostic {
-                    category: "reducer",
-                    type_name: Some("messages".into()),
-                    extra: Some(pending.id.0),
-                    seq: Some(seq),
-                    note: "stale-view-generation",
-                });
+            if self.history_page_detached(pending, seq) {
                 return;
             }
             if let Some(chat_id) = pending.chat_id {
-                if !self.chat_is_shown(chat_id) {
-                    self.diagnostics.record(Diagnostic {
-                        category: "reducer",
-                        type_name: Some("messages".into()),
-                        extra: Some(pending.id.0),
-                        seq: Some(seq),
-                        note: "stale-chat-history",
-                    });
-                    return;
-                }
                 // TDLib may answer with fewer messages than asked ("the
                 // number of returned messages is chosen by TDLib", schema
                 // 1.8.67, line 11822) — that is not the end; the UI keeps
@@ -120,13 +103,17 @@ impl Session {
                 // boundary message itself, which the identical next request
                 // would return again forever.
                 let from = pending.around_message_id.map_or(0, |id| id.0);
-                if !messages.iter().any(|m| from == 0 || m.id.0 < from) {
+                let reached_start = !messages.iter().any(|m| from == 0 || m.id.0 < from);
+                if from == 0 {
+                    self.store_first_page(chat_id, &messages);
+                } else {
+                    for message in messages {
+                        self.upsert_message(message, false);
+                    }
+                }
+                if reached_start {
                     self.history_entry(chat_id).loaded_complete = true;
                 }
-                for message in messages {
-                    self.upsert_message(message, false);
-                }
-                self.refresh_history_has_newer(chat_id);
                 // R6: scrolling far back — drop the newest end of the
                 // window instead of growing it without bound.
                 self.trim_history_window(chat_id, WindowEnd::Newest);

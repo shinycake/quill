@@ -494,7 +494,7 @@ fn driver_chat_search_debounce_jump_empty_and_close() {
     // the loaded page): it now knows it stops short of the latest message.
     let history = driver.session.histories.get(&7).unwrap();
     assert!(!history.contains(MessageId(50)));
-    assert!(history.has_newer);
+    assert!(driver.session.history_has_newer(ChatId(7)));
     driver.close_chat_search();
     assert_eq!(
         driver.session.search.chat_search.status,

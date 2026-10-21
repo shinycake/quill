@@ -6,7 +6,7 @@
 //! it passes [`HISTORY_WINDOW_CAP`] messages:
 //!
 //! - an older page landed (the viewport is at the oldest end): the newest
-//!   messages go and the window is marked `has_newer`, so scrolling back
+//!   messages go, so the window stops short of the latest and scrolling back
 //!   down pages them in again through the normal newer-page path;
 //! - a newer page landed (the viewport is at the newest end): the oldest
 //!   messages go and `loaded_complete` clears, so scrolling up pages them
@@ -65,7 +65,6 @@ impl HistoryState {
                 // row is left in the window to say so.
                 let newest = doomed.iter().copied().max().unwrap_or(0);
                 self.latest_seen = self.latest_seen.max(newest);
-                self.has_newer = true;
                 self.newer_failed = false;
             }
             WindowEnd::Oldest => {
@@ -190,7 +189,7 @@ mod tests {
             0
         );
         assert_eq!(state.messages.len(), 100);
-        assert!(!state.has_newer);
+        assert!(!state.stops_short_of(0));
     }
 
     #[test]
@@ -207,7 +206,7 @@ mod tests {
         // The oldest rows (where the reader is) are untouched.
         assert_eq!(state.oldest_id(), Some(MessageId(1)));
         assert_eq!(state.newest_id(), Some(MessageId(1200)));
-        assert!(state.has_newer);
+        assert!(state.stops_short_of(0));
         assert!(!state.newer_failed);
         // The dropped tail is remembered so has_newer survives a refresh.
         assert_eq!(state.latest_seen, 1600);
@@ -229,7 +228,7 @@ mod tests {
         assert_eq!(state.oldest_id(), Some(MessageId(401)));
         assert_eq!(state.newest_id(), Some(MessageId(1600)));
         assert!(!state.loaded_complete);
-        assert!(!state.has_newer);
+        assert!(!state.stops_short_of(0));
     }
 
     #[test]
@@ -247,7 +246,7 @@ mod tests {
             ),
             0
         );
-        assert!(!state.has_newer);
+        assert!(!state.stops_short_of(0));
         assert!(state.contains(MessageId(1_700)));
         // The oldest end has no pending rows, so that trim goes ahead.
         assert!(
@@ -299,10 +298,10 @@ mod tests {
             HISTORY_WINDOW_CAP,
             HISTORY_WINDOW_TRIM_TO,
         );
-        assert!(state.has_newer);
+        assert!(state.stops_short_of(0));
         state.reset_window();
         assert!(state.messages.is_empty());
-        assert!(!state.has_newer);
+        assert!(!state.stops_short_of(0));
         assert!(!state.loaded_complete);
     }
 

@@ -273,7 +273,7 @@ fn replay_chat_search_generation_jump_and_empty() {
             .histories
             .get(&7)
             .unwrap()
-            .contains(quill::ids::MessageId(50))
+            .contains(quill::ids::MessageId(40))
     );
     assert!(!sink.rendered().contains("CANARY_REPLAY"));
 }
