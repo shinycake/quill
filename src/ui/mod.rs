@@ -441,6 +441,7 @@ mod shell;
 mod shell_layout;
 mod shortcuts;
 mod showcase_demo;
+mod sidebar_reveal;
 mod signin_ui;
 mod similar_strip;
 mod spell_dictionaries;
