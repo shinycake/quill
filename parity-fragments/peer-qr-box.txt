@@ -1,0 +1,2 @@
+# The QR code box: card, colors, emoji pattern, free-message pill, copy and share, every entry point
+parity:profile-qr-code-box
