@@ -395,13 +395,8 @@ impl QuillApp {
         if live.driver.group_bot_users_tick() {
             progressed = true;
         }
-        // `parity:proxy-settings`: first `getProxies` + auto-switch.
-        if live.driver.proxy_tick(quill::state::unix_ms_now()) {
-            progressed = true;
-            need = RedrawNeed::Now;
-        }
-        // `parity:data-proxy-web`: what the web proxy carriers reported.
-        if live.driver.carrier_tick() {
+        // Proxies (auto-switch) and web proxy carriers; `|` so both run.
+        if live.driver.proxy_tick(quill::state::unix_ms_now()) | live.driver.carrier_tick() {
             progressed = true;
             need = RedrawNeed::Now;
         }
