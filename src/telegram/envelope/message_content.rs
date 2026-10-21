@@ -136,7 +136,7 @@ pub struct RichMessageContent {
     /// The texts a quote of the message counts in, in TDLib's order
     /// ([`crate::rich::rich_message_quote_texts`]); empty when nothing can
     /// be quoted.
-    pub quote_texts: Vec<crate::rich::QuoteRichText>,
+    pub quote_texts: std::sync::Arc<[crate::rich::QuoteRichText]>,
 }
 
 impl RichMessageContent {
@@ -680,7 +680,7 @@ pub(crate) fn parse_message_rich_message(value: &Value) -> (MessageContent, Vec<
         MessageContent::RichMessage(RichMessageContent {
             blocks,
             is_full,
-            quote_texts: crate::rich::rich_message_quote_texts(message),
+            quote_texts: crate::rich::rich_message_quote_texts(message).into(),
         }),
         Vec::new(),
     )

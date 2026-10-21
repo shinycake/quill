@@ -194,7 +194,7 @@ pub(crate) fn parse_messages_payload(
                 rich: RichMessageContent {
                     blocks,
                     is_full,
-                    quote_texts: crate::rich::rich_message_quote_texts(value),
+                    quote_texts: crate::rich::rich_message_quote_texts(value).into(),
                 },
             }))
         }
@@ -208,7 +208,7 @@ pub(crate) fn parse_messages_payload(
                     rich: RichMessageContent {
                         blocks,
                         is_full,
-                        quote_texts: Vec::new(),
+                        quote_texts: Default::default(),
                     },
                 },
             ))
