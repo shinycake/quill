@@ -232,7 +232,7 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_privacy(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.privacy.open = true;
+        self.open_settings(Some(quill::settings_catalog::Page::Privacy));
         self.connection.set_note(StatusNote::silent(
             "screenshot demo — privacy settings (injected, no live Telegram)",
         ));

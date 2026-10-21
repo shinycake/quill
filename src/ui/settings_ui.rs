@@ -827,7 +827,7 @@ impl QuillApp {
     /// Privacy and security > Archive and Mute (tdesktop
     /// `settings_privacy_security.cpp`): the three archive switches,
     /// including the one for chats from folders, inline.
-    pub(super) fn archive_privacy_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn archive_privacy_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
         let settings = session.and_then(|s| s.chat_list.archive_chat_list_settings);
         let loading = session.is_some_and(|s| s.chat_list.archive_settings_loading);

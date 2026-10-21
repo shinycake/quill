@@ -13,7 +13,7 @@ use quill::settings_catalog::Page;
 /// Older settings sections, each a block with its own heading, stacked on
 /// one outlined surface.
 /// No surface when there is nothing to show (no tray, say).
-fn cards(sections: impl IntoIterator<Item = AnyElement>) -> Option<AnyElement> {
+pub(super) fn cards(sections: impl IntoIterator<Item = AnyElement>) -> Option<AnyElement> {
     let sections: Vec<AnyElement> = sections.into_iter().collect();
     (!sections.is_empty()).then(|| {
         group(
@@ -39,7 +39,7 @@ pub(super) fn sub_title(sub: SubPage) -> &'static str {
 
 impl QuillApp {
     /// A row that runs a navigation action (most open a box).
-    fn nav_row(
+    pub(super) fn nav_row(
         &self,
         action: Nav,
         title: &'static str,
@@ -60,30 +60,7 @@ impl QuillApp {
         match page {
             Page::Account => self.account_page(cx),
             Page::Notifications => column.child(self.notifications_page(cx)),
-            Page::Privacy => column.child(group(
-                None,
-                [
-                    link_row(
-                        "settings-row-privacy-rules",
-                        tr(keys::Q_NAVIGATION_PRIVACY_RULES_AND_BLOCKED_USERS),
-                        None,
-                        cx.listener(|this, _, _, cx| this.open_privacy(cx)),
-                        cx,
-                    ),
-                    self.nav_row(Nav::Passcode, tr(keys::SETTINGS_PASSCODE_TITLE), None, cx),
-                ]
-                .into_iter()
-                .chain(self.passkeys_settings_row(cx))
-                .chain([
-                    self.nav_row(
-                        Nav::TwoFa,
-                        tr(keys::SETTINGS_CLOUD_PASSWORD_START_TITLE),
-                        None,
-                        cx,
-                    ),
-                    self.nav_row(Nav::Websites, tr(keys::SETTINGS_LOGGED_IN), None, cx),
-                ]),
-            )),
+            Page::Privacy => column.child(self.privacy_page(cx)),
             Page::Devices => column.child(group(
                 None,
                 [self.nav_row(Nav::Sessions, tr(keys::Q_NAVIGATION_DEVICES), None, cx)],
