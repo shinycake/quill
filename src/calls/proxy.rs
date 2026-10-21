@@ -25,6 +25,8 @@ pub enum ProxyKind {
     Socks5,
     Http,
     Mtproto,
+    /// `proxyTypeWeb` (TDLib 1.8.69).
+    Web,
 }
 
 /// The proxy TDLib reports as enabled, in the shape the future

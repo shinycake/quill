@@ -372,3 +372,28 @@ fn a_refused_system_proxy_waits_and_stays_out_of_the_box() {
     assert!(rig.driver.system_proxy_tick(&detected("good.lan")));
     assert_eq!(rig.count("addProxy"), 2);
 }
+
+#[test]
+fn a_web_proxy_carrier_is_refused_and_the_row_says_not_available() {
+    let mut rig = Rig::new();
+    rig.load_list(&[(1, true)]);
+    rig.feed(json!({"@type": "updateWebProxyCarrierOpened", "carrier": {
+        "@type": "webProxyCarrier", "id": 9, "proxy_id": 1, "url": "https://x.example/",
+        "origin": "https://x.example", "path_prefix": "/",
+        "bridge_object_name": "TelegramWebProxy", "is_temporary": false}}));
+    let report = sent_request(&rig.recorder, "reportWebProxyCarrierError");
+    assert_eq!(report["carrier_id"], 9);
+    assert_eq!(report["error"]["@type"], "webProxyCarrierErrorUnsupported");
+    assert_eq!(rig.driver.session.settings.proxy.carrier_failed, Some(1));
+
+    // A temporary carrier (a ping or test) is refused without marking the proxy.
+    rig.driver.session.settings.proxy.carrier_failed = None;
+    rig.feed(json!({"@type": "updateWebProxyCarrierOpened", "carrier": {
+        "@type": "webProxyCarrier", "id": 10, "proxy_id": 0, "url": "https://x.example/",
+        "origin": "https://x.example", "path_prefix": "/",
+        "bridge_object_name": "TelegramWebProxy", "is_temporary": true}}));
+    let report = sent_request(&rig.recorder, "reportWebProxyCarrierError");
+    assert_eq!(report["error"]["@type"], "webProxyCarrierErrorRefused");
+    assert_eq!(rig.driver.session.settings.proxy.carrier_failed, None);
+    assert_eq!(rig.count("reportWebProxyCarrierError"), 2);
+}

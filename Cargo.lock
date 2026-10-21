@@ -7126,6 +7126,7 @@ dependencies = [
  "icu_normalizer",
  "icu_plurals",
  "icu_provider",
+ "idna",
  "image",
  "interprocess",
  "inventory",

@@ -30,10 +30,31 @@ impl Session {
             .into_iter()
             .partition(crate::system_proxy::is_system_entry);
         proxy.system = system;
+        let enabled = list.iter().find(|p| p.is_enabled).map(|p| p.id);
+        if proxy.carrier_failed != enabled {
+            proxy.carrier_failed = None;
+        }
         proxy.list = Some(list);
         proxy.loading = false;
         proxy.stale = false;
         proxy.error = None;
+    }
+
+    /// `updateWebProxyCarrierOpened`: Quill has no hidden web view to host
+    /// a web proxy's relay page, so the carrier is refused (queued for the
+    /// driver) and the proxy's row says it is not available. A temporary
+    /// carrier (ping / test) is not a failure of the saved proxy.
+    pub(crate) fn apply_web_proxy_carrier(
+        &mut self,
+        carrier_id: i32,
+        proxy_id: i32,
+        temporary: bool,
+    ) {
+        let proxy = &mut self.settings.proxy;
+        proxy.carrier_reports.push((carrier_id, temporary));
+        if !temporary && proxy_id != 0 {
+            proxy.carrier_failed = Some(proxy_id);
+        }
     }
 
     /// `addProxy` / `editProxy` answer.

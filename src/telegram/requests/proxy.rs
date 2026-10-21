@@ -62,6 +62,27 @@ pub fn ping_proxy(extra: RequestId, proxy: &ProxyDraft) -> String {
     json!({"@type": "pingProxy", "@extra": extra.as_extra(), "proxy": proxy.to_json()}).to_string()
 }
 
+/// `reportWebProxyCarrierError carrier_id:int32 error:WebProxyCarrierError =
+/// Ok`: Quill cannot host the relay page (`webProxyCarrierErrorUnsupported`),
+/// and refuses temporary carriers outright (`webProxyCarrierErrorRefused`).
+pub fn report_web_proxy_carrier_error(
+    extra: RequestId,
+    carrier_id: i32,
+    temporary: bool,
+) -> String {
+    json!({
+        "@type": "reportWebProxyCarrierError",
+        "@extra": extra.as_extra(),
+        "carrier_id": carrier_id,
+        "error": {"@type": if temporary {
+            "webProxyCarrierErrorRefused"
+        } else {
+            "webProxyCarrierErrorUnsupported"
+        }},
+    })
+    .to_string()
+}
+
 /// `setOption("prefer_ipv6", optionValueBoolean)`.
 pub fn set_prefer_ipv6(extra: RequestId, on: bool) -> String {
     json!({

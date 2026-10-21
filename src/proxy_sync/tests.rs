@@ -9,6 +9,7 @@ fn socks(server: &str, password: &str) -> ProxyDraft {
         username: "u".into(),
         password: password.into(),
         secret: String::new(),
+        path: String::new(),
         http_only: false,
     }
 }

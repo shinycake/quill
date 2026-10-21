@@ -86,6 +86,7 @@ frame-profiler = ["ui", "gpui-kit/profiler"]
 
 [dependencies]
 base64 = { version = "0.23", default-features = false, features = ["std"] }
+idna = "1"
 directories = "6"
 flate2 = "1"
 # Image files sent as documents: the formats tdesktop previews in-app

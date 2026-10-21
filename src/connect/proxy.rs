@@ -12,7 +12,7 @@ use crate::system_proxy::{Detected, SYSTEM_PROXY_COMMENT, SystemProxyStep, plan_
 use crate::telegram::envelope::ConnectionState;
 use crate::telegram::requests::{
     add_proxy, disable_proxy, edit_proxy, enable_proxy, get_proxies, ping_proxy, remove_proxy,
-    set_prefer_ipv6,
+    report_web_proxy_carrier_error, set_prefer_ipv6,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -62,10 +62,29 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Refetch after a mutation marked the list stale (called from
     /// `ingest`, the `refresh_*_if_stale` pattern).
     pub fn refresh_proxies_if_stale(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        self.refuse_web_proxy_carriers();
         if !self.session.settings.proxy.stale {
             return Ok(None);
         }
         self.maybe_fetch_proxies()
+    }
+
+    /// Answer every pending `updateWebProxyCarrierOpened`: Quill cannot
+    /// host the relay page, so TDLib is told to stop asking.
+    fn refuse_web_proxy_carriers(&mut self) {
+        let reports = std::mem::take(&mut self.session.settings.proxy.carrier_reports);
+        for (carrier_id, temporary) in reports {
+            let extra = self.session.request(
+                RequestPurpose::Settings(SettingsPurpose::ReportWebProxyCarrier),
+                None,
+            );
+            let sent = self.sender.send_json(&report_web_proxy_carrier_error(
+                extra, carrier_id, temporary,
+            ));
+            if sent.is_err() {
+                self.session.requests.take(extra);
+            }
+        }
     }
 
     fn send_proxy_mutation(

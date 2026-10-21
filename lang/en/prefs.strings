@@ -98,6 +98,7 @@
 "lng_proxy_box_username" = "Username";
 "lng_proxy_check_ip_proceed" = "Proceed";
 "lng_proxy_check_ip_warning" = "This will expose your IP address to the admin of the proxy server.";
+"lng_proxy_connecting" = "connecting…";
 "lng_proxy_description" = "Your saved proxy list will be here.";
 "lng_proxy_disable" = "Disable proxy";
 "lng_proxy_edit" = "Edit proxy";
@@ -105,8 +106,10 @@
 "lng_proxy_edit_share_list_toast" = "Proxy List copied to clipboard.";
 "lng_proxy_menu_delete" = "Delete";
 "lng_proxy_menu_edit" = "Edit";
+"lng_proxy_online" = "online";
 "lng_proxy_settings" = "Proxy settings";
 "lng_proxy_sponsor_warning" = "This proxy may display a sponsored channel in your chat list. This doesn't reveal any of your Telegram traffic.";
+"lng_proxy_unavailable" = "not available";
 "lng_proxy_use_custom" = "Use custom proxy";
 "lng_proxy_use_for_calls" = "Use proxy for calls";
 "lng_proxy_use_system_settings" = "Use system proxy settings";
@@ -452,6 +455,7 @@
 "qll_prefs_hide" = "Hide";
 "qll_prefs_hint" = "Hint: {password_hint}";
 "qll_prefs_hint_optional" = "Hint (optional)";
+"qll_prefs_enter_a_web_proxy_address" = "Enter a valid web proxy address and a secret.";
 "qll_prefs_hostname" = "Hostname";
 "qll_prefs_hour" = "− hour";
 "qll_prefs_hour_2" = "+ hour";
@@ -828,3 +832,6 @@
 "qll_prefs_default_app_could_not_find_quill" = "Quill could not find its own program.";
 "qll_prefs_default_app_could_not_write_entry" = "The desktop entry could not be written.";
 "qll_prefs_default_app_could_not_remove" = "Quill's registration could not be removed.";
+"lng_proxy_web_host_ph" = "proxy.example.com";
+"lng_proxy_web_server_label" = "Web proxy server";
+"lng_proxy_web_warning" = "This WEB proxy runs a web page from its provider in the background while you're connected. Only use it if you trust the provider. It may also display a sponsored channel in your chat list. This doesn't reveal any of your Telegram traffic.";

@@ -260,6 +260,11 @@ impl Session {
                 self.apply_added_proxies(pending, proxies);
             }
             SettingsPayload::AddedProxy { .. } => self.apply_added_proxy(pending),
+            SettingsPayload::WebProxyCarrierOpened {
+                carrier_id,
+                proxy_id,
+                temporary,
+            } => self.apply_web_proxy_carrier(carrier_id, proxy_id, temporary),
             payload @ (SettingsPayload::NewChatPrivacySettings(_)
             | SettingsPayload::CanSendMessageToUser(_)
             | SettingsPayload::StarCount(_)

@@ -34,6 +34,9 @@ pub struct ProxyDraft {
     pub password: String,
     /// MTProto secret as TDLib wants it (hexadecimal).
     pub secret: String,
+    /// Web proxies only: the base path on the server (empty for the
+    /// root). `server` holds the host and `port` is always 443.
+    pub path: String,
     /// HTTP only: the proxy cannot do `CONNECT` tunnelling.
     pub http_only: bool,
 }
@@ -47,7 +50,30 @@ impl ProxyDraft {
             username: String::new(),
             password: String::new(),
             secret: String::new(),
+            path: String::new(),
             http_only: false,
+        }
+    }
+
+    /// A web proxy from the form's address field (host with an optional
+    /// base path, tdesktop `setWebAddress`) and secret. An address that
+    /// does not parse leaves `server` empty, which `validated` rejects.
+    pub fn web(address: &str, secret: &str) -> Self {
+        let (server, path) = crate::proxy_web::parse_address(address).unwrap_or_default();
+        Self {
+            server,
+            path,
+            port: crate::proxy_web::WEB_PROXY_PORT,
+            secret: secret.to_string(),
+            ..Self::empty(ProxyKind::Web)
+        }
+    }
+
+    /// `host` or `host/path` for a web proxy, the host otherwise.
+    pub fn display_address(&self) -> String {
+        match self.kind {
+            ProxyKind::Web => crate::proxy_web::address(&self.server, &self.path),
+            _ => self.server.clone(),
         }
     }
 
@@ -60,6 +86,9 @@ impl ProxyDraft {
             && self.port == other.port
             && match self.kind {
                 ProxyKind::Mtproto => self.secret.eq_ignore_ascii_case(&other.secret),
+                ProxyKind::Web => {
+                    self.path == other.path && self.secret.eq_ignore_ascii_case(&other.secret)
+                }
                 _ => self.username == other.username && self.password == other.password,
             }
     }
@@ -72,7 +101,18 @@ impl ProxyDraft {
         if self.server.is_empty() || self.port == 0 {
             return Err(ProxyIssue::Invalid);
         }
-        if self.kind == ProxyKind::Mtproto {
+        let web = self.kind == ProxyKind::Web;
+        if web
+            && (self.port != crate::proxy_web::WEB_PROXY_PORT
+                || crate::proxy_web::normalize_host(&self.server).as_deref()
+                    != Some(self.server.as_str())
+                || (!self.path.is_empty()
+                    && crate::proxy_web::normalize_base_path(&self.path).as_deref()
+                        != Some(self.path.as_str())))
+        {
+            return Err(ProxyIssue::Invalid);
+        }
+        if self.kind == ProxyKind::Mtproto || web {
             let secret = self.secret.trim();
             match mtproto_secret_status(secret) {
                 SecretStatus::Valid => {}
@@ -81,6 +121,10 @@ impl ProxyDraft {
                 SecretStatus::IncorrectSecret => return Err(ProxyIssue::IncorrectSecret),
             }
             self.secret = secret_to_hex(secret).ok_or(ProxyIssue::Invalid)?;
+            // A web proxy has no fake-TLS mode (tdesktop `status()`).
+            if web && self.secret.starts_with("ee") && self.secret.len() >= 42 {
+                return Err(ProxyIssue::Unsupported);
+            }
         }
         Ok(self)
     }
@@ -97,8 +141,20 @@ impl ProxyDraft {
         let path = match self.kind {
             ProxyKind::Socks5 => "socks",
             ProxyKind::Mtproto => "proxy",
+            ProxyKind::Web => "webproxy",
             ProxyKind::Http => return None,
         };
+        let scheme = if scheme_tg { "tg://" } else { "https://t.me/" };
+        if self.kind == ProxyKind::Web {
+            return Some(format!(
+                "{scheme}{path}?server={}&secret={}",
+                percent_encode(&self.display_address()),
+                percent_encode(&crate::proxy_web::encode_link_secret(
+                    &self.path,
+                    &self.secret
+                ))
+            ));
+        }
         let mut link = format!(
             "{}{path}?server={}&port={}",
             if scheme_tg { "tg://" } else { "https://t.me/" },
@@ -142,6 +198,11 @@ impl ProxyDraft {
                 "@type": "proxyTypeMtproto",
                 "secret": self.secret,
             }),
+            ProxyKind::Web => serde_json::json!({
+                "@type": "proxyTypeWeb",
+                "path": self.path,
+                "secret": self.secret,
+            }),
         };
         serde_json::json!({
             "@type": "proxy",
@@ -157,6 +218,7 @@ pub fn kind_label(kind: ProxyKind) -> &'static str {
         ProxyKind::Socks5 => "SOCKS5",
         ProxyKind::Http => "HTTP",
         ProxyKind::Mtproto => "MTPROTO",
+        ProxyKind::Web => "WEB",
     }
 }
 
@@ -333,6 +395,7 @@ pub fn parse_added_proxy(value: &Value) -> Option<ProxyEntry> {
         "proxyTypeSocks5" => ProxyKind::Socks5,
         "proxyTypeHttp" => ProxyKind::Http,
         "proxyTypeMtproto" => ProxyKind::Mtproto,
+        "proxyTypeWeb" => ProxyKind::Web,
         _ => return None,
     };
     Some(ProxyEntry {
@@ -357,6 +420,7 @@ pub fn parse_added_proxy(value: &Value) -> Option<ProxyEntry> {
             username: json_str(kind_value.get("username")),
             password: json_str(kind_value.get("password")),
             secret: json_str(kind_value.get("secret")),
+            path: json_str(kind_value.get("path")),
             http_only: kind_value
                 .get("http_only")
                 .and_then(Value::as_bool)
@@ -402,6 +466,7 @@ pub fn parse_proxy_link(url: &str) -> Option<Result<ProxyDraft, ProxyIssue>> {
     let kind = match command.as_str() {
         "proxy" => ProxyKind::Mtproto,
         "socks" => ProxyKind::Socks5,
+        "webproxy" => ProxyKind::Web,
         _ => return None,
     };
     let params: Vec<(String, String)> = crate::connect::tg_query_params(url)
@@ -415,6 +480,19 @@ pub fn parse_proxy_link(url: &str) -> Option<Result<ProxyDraft, ProxyIssue>> {
             .map(|(_, v)| v.clone())
             .unwrap_or_default()
     };
+    if kind == ProxyKind::Web {
+        // tdesktop `ProxyDataFromFields`: `server` (or `host`) is the
+        // address; the secret may carry the base-path marker.
+        let address = match param("server") {
+            server if server.is_empty() => param("host"),
+            server => server,
+        };
+        let mut draft = ProxyDraft::web(&address, "");
+        let secret = param("secret").replace('+', "-").replace('/', "_");
+        draft.secret = crate::proxy_web::decode_link_secret(&secret, !draft.path.is_empty())
+            .unwrap_or_default();
+        return Some(draft.validated());
+    }
     let mut draft = ProxyDraft::empty(kind);
     draft.server = param("server");
     draft.port = param("port").parse().unwrap_or(0);
@@ -543,6 +621,12 @@ pub struct ProxyState {
     pub fetch_attempted: bool,
     /// Auto-switch: when the connection last stopped being usable (ms).
     pub disconnected_since_ms: Option<u64>,
+    /// The enabled web proxy whose relay page the app could not open
+    /// (the carrier was refused); its row says "not available".
+    pub carrier_failed: Option<i32>,
+    /// `(carrier id, temporary)` of carriers TDLib asked for that the
+    /// driver has yet to refuse with `reportWebProxyCarrierError`.
+    pub carrier_reports: Vec<(i32, bool)>,
 }
 
 impl ProxyState {

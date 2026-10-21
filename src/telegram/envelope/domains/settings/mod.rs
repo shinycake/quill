@@ -133,6 +133,13 @@ pub enum SettingsPayload {
     AddedProxy {
         proxy: Option<crate::proxy::ProxyEntry>,
     },
+    /// `parity:data-proxy-web`: `updateWebProxyCarrierOpened` — TDLib wants
+    /// a hidden web view for a web proxy (`proxy_id` 0: a ping or test).
+    WebProxyCarrierOpened {
+        carrier_id: i32,
+        proxy_id: i32,
+        temporary: bool,
+    },
     /// Slice A7: `accountTtl` — `getAccountTtl` response (schema 1.8.67,
     /// line 9053). Stored in `Session::account_ttl_days` when the
     /// pending purpose is `GetAccountTtl`.

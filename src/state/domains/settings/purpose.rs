@@ -70,6 +70,9 @@ pub enum SettingsPurpose {
     /// `ok`) only marks the list stale; the authoritative `getProxies`
     /// refetch replaces it (never optimistic).
     MutateProxy,
+    /// `parity:data-proxy-web`: `reportWebProxyCarrierError`. Response is
+    /// `ok`, which needs no handling.
+    ReportWebProxyCarrier,
     /// `parity:proxy-settings`: `pingProxy`. Response is `seconds`; an
     /// error means the proxy is not available.
     PingProxy {
@@ -298,6 +301,7 @@ flat_purposes!(Settings(SettingsPurpose) {
     GetConnectedWebsites,
     GetProxies,
     MutateProxy,
+    ReportWebProxyCarrier,
     DisconnectAllWebsites,
     AddSavedNotificationSound,
     GetSupportUser,

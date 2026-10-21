@@ -155,6 +155,7 @@ pub mod promotion;
 pub mod proxy;
 pub mod proxy_extras;
 pub mod proxy_sync;
+pub mod proxy_web;
 pub mod pull_next;
 pub mod quick_action;
 pub mod quick_replies;

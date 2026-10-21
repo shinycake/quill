@@ -24,50 +24,73 @@ impl QuillApp {
             let editing = editor.id;
             let kind = editor.kind;
             let error = editor.error.clone();
-            let (server, port, username, password, secret) = (
+            let (server, web_host, port, username, password, secret) = (
                 editor.server.clone(),
+                editor.web_host.clone(),
                 editor.port.clone(),
                 editor.username.clone(),
                 editor.password.clone(),
                 editor.secret.clone(),
             );
-            let kinds = [ProxyKind::Socks5, ProxyKind::Http, ProxyKind::Mtproto];
-            let mut body = div()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .child(
-                    RadioGroup::horizontal("proxy-kind")
-                        .selected_index(kinds.iter().position(|k| *k == kind))
-                        .children(kinds.iter().map(|k| {
-                            Radio::new(format!("proxy-kind-{}", kind_label(*k)))
-                                .label(kind_label(*k))
-                        }))
-                        .on_click(cx.listener(move |this, &ix, _, cx| {
-                            if let Some(editor) = this.settings.proxy.editor.as_mut()
-                                && let Some(&kind) = kinds.get(ix)
-                            {
-                                editor.kind = kind;
-                                editor.error = None;
-                            }
-                            cx.notify();
-                        })),
-                )
-                .child(Self::editor_field(
+            let kinds = [
+                ProxyKind::Socks5,
+                ProxyKind::Http,
+                ProxyKind::Mtproto,
+                ProxyKind::Web,
+            ];
+            let mut body = div().flex().flex_col().gap_2().child(
+                RadioGroup::horizontal("proxy-kind")
+                    .selected_index(kinds.iter().position(|k| *k == kind))
+                    .children(kinds.iter().map(|k| {
+                        Radio::new(format!("proxy-kind-{}", kind_label(*k))).label(kind_label(*k))
+                    }))
+                    .on_click(cx.listener(move |this, &ix, _, cx| {
+                        if let Some(editor) = this.settings.proxy.editor.as_mut()
+                            && let Some(&kind) = kinds.get(ix)
+                        {
+                            editor.kind = kind;
+                            editor.error = None;
+                        }
+                        cx.notify();
+                    })),
+            );
+            // tdesktop shows the sponsor warning for MTProto and the web
+            // warning for WEB right under the type radios.
+            if matches!(kind, ProxyKind::Mtproto | ProxyKind::Web) {
+                body = body.child(div().text_xs().text_color(text_muted()).child(
+                    if kind == ProxyKind::Web {
+                        tr(keys::PROXY_WEB_WARNING)
+                    } else {
+                        tr(keys::PROXY_SPONSOR_WARNING)
+                    },
+                ));
+            }
+            if kind == ProxyKind::Web {
+                body = body.child(Self::editor_field(
                     cx,
-                    tr(keys::Q_PREFS_HOSTNAME),
-                    Input::new(&server)
-                        .aria_label(tr(keys::Q_PREFS_HOSTNAME))
-                        .h(px(40.)),
-                ))
-                .child(Self::editor_field(
-                    cx,
-                    tr(keys::PROXY_BOX_PORT),
-                    Input::new(&port)
-                        .aria_label(tr(keys::PROXY_BOX_PORT))
+                    tr(keys::PROXY_WEB_SERVER_LABEL),
+                    Input::new(&web_host)
+                        .aria_label(tr(keys::PROXY_WEB_SERVER_LABEL))
                         .h(px(40.)),
                 ));
-            if kind == ProxyKind::Mtproto {
+            } else {
+                body = body
+                    .child(Self::editor_field(
+                        cx,
+                        tr(keys::Q_PREFS_HOSTNAME),
+                        Input::new(&server)
+                            .aria_label(tr(keys::Q_PREFS_HOSTNAME))
+                            .h(px(40.)),
+                    ))
+                    .child(Self::editor_field(
+                        cx,
+                        tr(keys::PROXY_BOX_PORT),
+                        Input::new(&port)
+                            .aria_label(tr(keys::PROXY_BOX_PORT))
+                            .h(px(40.)),
+                    ));
+            }
+            if matches!(kind, ProxyKind::Mtproto | ProxyKind::Web) {
                 body = body.child(Self::editor_field(
                     cx,
                     tr(keys::PROXY_BOX_SECRET),
@@ -208,21 +231,20 @@ impl QuillApp {
             let ping = this
                 .session()
                 .and_then(|s| s.settings.proxy.pings.get(&LINK_PING_ID).copied());
-            let mut body = div()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .child(Self::link_row(
-                    tr(keys::PROXY_BOX_SERVER),
-                    draft.server.clone(),
-                    cx,
-                ))
-                .child(Self::link_row(
+            let mut body = div().flex().flex_col().gap_2().child(Self::link_row(
+                tr(keys::PROXY_BOX_SERVER),
+                draft.display_address(),
+                cx,
+            ));
+            // A web proxy has no port to show (always 443).
+            if draft.kind != ProxyKind::Web {
+                body = body.child(Self::link_row(
                     tr(keys::PROXY_BOX_PORT),
                     draft.port.to_string(),
                     cx,
                 ));
-            if draft.kind == ProxyKind::Mtproto {
+            }
+            if matches!(draft.kind, ProxyKind::Mtproto | ProxyKind::Web) {
                 body = body.child(Self::link_row(
                     tr(keys::PROXY_BOX_SECRET),
                     draft.secret.clone(),
@@ -275,20 +297,23 @@ impl QuillApp {
                         .on_click(cx.listener(|this, _, _, cx| this.check_link_proxy(cx))),
                 ),
             };
-            body = body.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_4()
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(tr(keys::PROXY_BOX_STATUS)),
-                    )
-                    .child(status),
-            );
+            // tdesktop does not check the status of a web proxy.
+            if draft.kind != ProxyKind::Web {
+                body = body.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_4()
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(tr(keys::PROXY_BOX_STATUS)),
+                        )
+                        .child(status),
+                );
+            }
             if warn {
                 body = body.child(
                     div()
@@ -312,13 +337,14 @@ impl QuillApp {
                         ),
                 );
             }
-            if draft.kind == ProxyKind::Mtproto {
-                body = body.child(
-                    div()
-                        .text_xs()
-                        .text_color(text_muted())
-                        .child(tr(keys::PROXY_SPONSOR_WARNING)),
-                );
+            if matches!(draft.kind, ProxyKind::Mtproto | ProxyKind::Web) {
+                body = body.child(div().text_xs().text_color(text_muted()).child(
+                    if draft.kind == ProxyKind::Web {
+                        tr(keys::PROXY_WEB_WARNING)
+                    } else {
+                        tr(keys::PROXY_SPONSOR_WARNING)
+                    },
+                ));
             }
             let footer = div()
                 .flex()
