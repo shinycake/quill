@@ -93,3 +93,14 @@ drawn in several places keeps its name without repeating it at each one.
 returns the font and size the input lays its text out with. Quill's inline bot
 hint is drawn over the field and uses it, so the hint follows the field's own
 style (`docs/decisions/composer-gaps-2.md`).
+
+## Scroll bounce reports its displacement
+
+`src/scroll_bounce.rs`, `src/overscroll.rs`, `src/lib.rs`:
+`ScrollBounce::displacement(Rc<Cell<ScrollBounceDisplacement>>)` writes the
+edge's offset and whether a finger still holds it, once per prepaint. The
+wrapper keeps the stretch private, so Quill's chat list could not tell a pull
+(a drag past the top, which expands the stories strip) from a fling that
+throws the edge. Nothing else changes: the offset the list is drawn at and
+the physics are untouched. Background:
+`docs/decisions/elastic-chat-list.md`.

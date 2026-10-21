@@ -38,7 +38,7 @@ pub const SMALL_THUMBS: usize = 3;
 /// `dialogsStoriesList.readOpacity` (dialogs.style:790).
 pub const READ_OPACITY: f32 = 0.6;
 /// `kExpandAfterRatio` / `kCollapseAfterRatio` (dialogs_stories_list.cpp:36).
-const EXPAND_AFTER: f32 = 0.72;
+pub const EXPAND_AFTER: f32 = 0.72;
 const COLLAPSE_AFTER: f32 = 0.68;
 /// `kFrictionRatio`: how far the collapsed state follows a pull.
 const FRICTION: f32 = 0.15;

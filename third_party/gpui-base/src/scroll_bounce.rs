@@ -1,4 +1,7 @@
 //! Boundary displacement only: the list keeps its clamped logical position.
+//!
+//! Quill patch: [`ScrollBounce::displacement`] reports the edge's offset and
+//! whether a finger holds it (see `QUILL-CHANGES.md`).
 
 use crate::overscroll::Overscroll;
 use crate::{OngoingScrollExt as _, ScrollbarHandle};
@@ -9,7 +12,11 @@ use gpui::{
 };
 #[cfg(not(target_family = "wasm"))]
 use std::time::Instant;
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+    time::Duration,
+};
 #[cfg(target_family = "wasm")]
 use web_time::Instant;
 
@@ -123,6 +130,18 @@ impl ScrollBounceMotion {
     }
 }
 
+/// How far a [`ScrollBounce`] edge is drawn from its place, as the owner of
+/// the wrapper last saw it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ScrollBounceDisplacement {
+    /// Pixels the content is drawn past the start (positive) or the end
+    /// (negative) of the scroll range.
+    pub offset: f32,
+    /// A finger on the trackpad still holds the stretched edge. False while
+    /// the edge returns, and for an edge thrown by a fling.
+    pub held: bool,
+}
+
 /// Adds vertical touch overscroll to an existing scroll viewport.
 ///
 /// The child owns layout, content, and ordinary scrolling; `handle` must be the
@@ -148,6 +167,7 @@ pub struct ScrollBounce {
     scroll_wheel: bool,
     motion: ScrollBounceMotion,
     on_scroll: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
+    displacement: Option<Rc<Cell<ScrollBounceDisplacement>>>,
 }
 
 impl ScrollBounce {
@@ -164,6 +184,7 @@ impl ScrollBounce {
             scroll_wheel: true,
             motion: ScrollBounceMotion::default(),
             on_scroll: None,
+            displacement: None,
         }
     }
 
@@ -198,6 +219,14 @@ impl ScrollBounce {
     /// Set how far a drag stretches past an edge and how the edge returns.
     pub fn motion(mut self, motion: ScrollBounceMotion) -> Self {
         self.motion = motion;
+        self
+    }
+
+    /// Write the edge's displacement into `cell` on every frame, so the
+    /// owner can react to a pull (pull to expand) without a second gesture
+    /// handler. Only the wheel-owning mode (the default) reports.
+    pub fn displacement(mut self, cell: Rc<Cell<ScrollBounceDisplacement>>) -> Self {
+        self.displacement = Some(cell);
         self
     }
 
@@ -339,7 +368,14 @@ impl Element for ScrollBounce {
                 if state.overscroll.step(cx.background_executor().now()) {
                     window.request_animation_frame();
                 }
-                state.overscroll.offset()
+                let offset = state.overscroll.offset();
+                if let Some(cell) = &self.displacement {
+                    cell.set(ScrollBounceDisplacement {
+                        offset,
+                        held: state.overscroll.is_held(),
+                    });
+                }
+                offset
             } else {
                 state.physics.motion = self.motion;
                 let now = Instant::now();

@@ -166,7 +166,7 @@ pub use resizable::{
     resizable_panel, resize_handle, v_resizable,
 };
 pub use root::{Root, RootPlugin};
-pub use scroll_bounce::{ScrollBounce, ScrollBounceMotion};
+pub use scroll_bounce::{ScrollBounce, ScrollBounceDisplacement, ScrollBounceMotion};
 pub use scrollable_mask::{RoundedFrameCover, ScrollableMask};
 pub use scrollbar::{
     Scrollbar, ScrollbarAxis, ScrollbarEntrance, ScrollbarHandle, ScrollbarMode, ScrollbarMotion,

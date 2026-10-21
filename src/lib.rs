@@ -201,6 +201,7 @@ pub mod sticker_suggest;
 pub mod sticker_video;
 pub mod storage_limits;
 pub mod stories_menu;
+pub mod stories_pull;
 pub mod stories_strip;
 pub mod story_composer;
 pub mod story_extras;

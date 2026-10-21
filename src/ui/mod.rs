@@ -462,6 +462,8 @@ mod sticker_playback;
 mod sticker_set_box;
 mod stickers_ui;
 mod stories_menu_ui;
+mod stories_pull_ui;
+mod stories_pull_ui_tests;
 mod stories_strip_ui;
 mod story_albums;
 mod story_composer;
