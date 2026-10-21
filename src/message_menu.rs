@@ -232,72 +232,74 @@ pub fn tone_offered(
         && saved_count < limits.max_count
 }
 
-/// One media action. Telegram Desktop's labels are in [`MediaAction::label`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MediaAction {
-    CancelDownload,
-    OpenGif,
-    SaveGif,
-    ViewStickerSet {
-        installed: bool,
-    },
+/// Declares [`MediaAction`] and [`MediaAction::ALL`] from one list. Each
+/// entry is a variant plus the slots it owns, as `pattern => value` pairs: a
+/// variant with no slot cannot be written, and one that is not written does
+/// not exist. The list order is tdesktop's `AddPhotoActions` /
+/// `AddDocumentActions` order, and a variant with fields (`AddToSet`) gets
+/// one slot per listed value.
+macro_rules! media_actions {
+    ($(
+        $(#[$meta:meta])*
+        $name:ident $({ $($field:ident : $ty:ty),+ })? => [$($pat:pat => $value:expr),+ $(,)?]
+    ),+ $(,)?) => {
+        /// One media action. Telegram Desktop's labels are in
+        /// [`MediaAction::label`].
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum MediaAction {
+            $($(#[$meta])* $name $({ $($field: $ty),+ })?,)+
+        }
+
+        impl MediaAction {
+            /// Every slot's action, in slot order. Its length is the block width.
+            pub const ALL: [Self; 0 $($(+ { let _ = stringify!($pat); 1 })+)+] =
+                [$($($value),+),+];
+
+            /// The listed value that stands for this action's slot.
+            const fn canonical(self) -> Self {
+                match self {
+                    $($($pat => $value,)+)+
+                }
+            }
+        }
+    };
+}
+
+media_actions! {
+    CancelDownload => [Self::CancelDownload => Self::CancelDownload],
+    OpenGif => [Self::OpenGif => Self::OpenGif],
+    SaveGif => [Self::SaveGif => Self::SaveGif],
+    ViewStickerSet { installed: bool } => [
+        Self::ViewStickerSet { .. } => Self::ViewStickerSet { installed: true },
+    ],
     /// "Add to Sticker Set" / "Add to Emoji Set" for a sticker that
     /// belongs to no set (tdesktop `AddAddToOwnedSetAction`): a page
-    /// listing the sets the user created.
-    AddToSet {
-        emoji: bool,
-    },
-    ToggleFavorite {
-        remove: bool,
-    },
-    ShowInFolder,
+    /// listing the sets the user created. One slot per kind.
+    AddToSet { emoji: bool } => [
+        Self::AddToSet { emoji: false } => Self::AddToSet { emoji: false },
+        Self::AddToSet { emoji: true } => Self::AddToSet { emoji: true },
+    ],
+    ToggleFavorite { remove: bool } => [
+        Self::ToggleFavorite { .. } => Self::ToggleFavorite { remove: false },
+    ],
+    ShowInFolder => [Self::ShowInFolder => Self::ShowInFolder],
     /// "Save for Notifications" (`addSavedNotificationSound`).
-    SaveForNotifications,
+    SaveForNotifications => [Self::SaveForNotifications => Self::SaveForNotifications],
     /// A song: "Save to..." with Profile, Saved Messages and Downloads.
-    SaveTo,
-    SaveAs,
-    CopyImage,
-    CopyFilename,
+    SaveTo => [Self::SaveTo => Self::SaveTo],
+    SaveAs => [Self::SaveAs => Self::SaveAs],
+    CopyImage => [Self::CopyImage => Self::CopyImage],
+    CopyFilename => [Self::CopyFilename => Self::CopyFilename],
 }
 
 impl MediaAction {
-    /// The variants in slot order, and the block width. The slot test and an
-    /// exhaustive-match test catch a variant left out of this list.
-    pub const ALL: [Self; 13] = [
-        Self::CancelDownload,
-        Self::OpenGif,
-        Self::SaveGif,
-        Self::ViewStickerSet { installed: true },
-        Self::AddToSet { emoji: false },
-        Self::AddToSet { emoji: true },
-        Self::ToggleFavorite { remove: false },
-        Self::ShowInFolder,
-        Self::SaveForNotifications,
-        Self::SaveTo,
-        Self::SaveAs,
-        Self::CopyImage,
-        Self::CopyFilename,
-    ];
-
-    /// Fixed place in the media block, in tdesktop's `AddPhotoActions` /
-    /// `AddDocumentActions` order. Every action has its own slot, so rows
-    /// never tie and never reach the Copy Text section.
-    pub const fn slot(self) -> u8 {
-        match self {
-            Self::CancelDownload => 0,
-            Self::OpenGif => 1,
-            Self::SaveGif => 2,
-            Self::ViewStickerSet { .. } => 3,
-            Self::AddToSet { emoji: false } => 4,
-            Self::AddToSet { emoji: true } => 5,
-            Self::ToggleFavorite { .. } => 6,
-            Self::ShowInFolder => 7,
-            Self::SaveForNotifications => 8,
-            Self::SaveTo => 9,
-            Self::SaveAs => 10,
-            Self::CopyImage => 11,
-            Self::CopyFilename => 12,
-        }
+    /// Fixed place in the media block, in tdesktop's order. Every action has
+    /// its own slot, so rows never tie and never reach the Copy Text section.
+    pub fn slot(self) -> u8 {
+        let canonical = self.canonical();
+        let index = Self::ALL.iter().position(|listed| *listed == canonical);
+        // `canonical` returns a listed value, so the position exists.
+        index.and_then(|i| u8::try_from(i).ok()).unwrap_or(0)
     }
 
     /// Sort key of this action's menu row.
@@ -643,45 +645,15 @@ mod tests {
         assert!(keys.iter().all(|key| *key < order::COPY_TEXT));
     }
 
-    /// The next variant in declaration order. An exhaustive match (no
-    /// wildcard): a new variant does not compile until it gets an arm, and
-    /// the arm of the one before it must lead to it.
-    fn next_variant(action: MediaAction) -> Option<MediaAction> {
-        use MediaAction::*;
-        match action {
-            CancelDownload => Some(OpenGif),
-            OpenGif => Some(SaveGif),
-            SaveGif => Some(ViewStickerSet { installed: true }),
-            ViewStickerSet { .. } => Some(AddToSet { emoji: false }),
-            AddToSet { .. } => Some(ToggleFavorite { remove: false }),
-            ToggleFavorite { .. } => Some(ShowInFolder),
-            ShowInFolder => Some(SaveForNotifications),
-            SaveForNotifications => Some(SaveTo),
-            SaveTo => Some(SaveAs),
-            SaveAs => Some(CopyImage),
-            CopyImage => Some(CopyFilename),
-            CopyFilename => None,
-        }
-    }
-
-    /// Every variant, including a last one, appears in `ALL`.
+    /// Every slot is a distinct action.
     #[test]
-    fn all_lists_every_variant() {
-        use std::mem::discriminant;
-        let mut seen = vec![MediaAction::CancelDownload];
-        while let Some(next) = seen.last().copied().and_then(next_variant) {
-            seen.push(next);
-        }
-        for action in &seen {
-            assert!(
-                MediaAction::ALL
-                    .iter()
-                    .any(|listed| discriminant(listed) == discriminant(action)),
-                "{action:?} is missing from ALL"
-            );
-        }
-        // `AddToSet` has two slots (sticker set, emoji set).
-        assert_eq!(MediaAction::ALL.len(), seen.len() + 1);
+    fn all_has_no_duplicates() {
+        let all = super::MediaAction::ALL;
+        assert!(
+            all.iter()
+                .enumerate()
+                .all(|(i, a)| all.iter().position(|b| b == a) == Some(i))
+        );
     }
 
     #[test]

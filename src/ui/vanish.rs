@@ -259,13 +259,30 @@ fn grains(seed: u64, area: Bounds<Pixels>, palette: &Palette) -> Vec<Grain> {
     grains
 }
 
+/// Consecutive frames a borrow conflict may keep the tick going: about two
+/// seconds at 60 fps. A borrow that never lets go then goes idle instead of
+/// ticking forever.
+const MAX_CONFLICT_FRAMES: u16 = 120;
+
+/// Count one more conflicted frame; true while the run is within the bound.
+/// The count is reset by the caller on the first clean borrow.
+fn conflict_keeps_running(conflicts: &std::cell::Cell<u16>) -> bool {
+    let frames = conflicts.get().saturating_add(1);
+    conflicts.set(frames);
+    if frames == MAX_CONFLICT_FRAMES + 1 {
+        eprintln!("vanish: dissolve list stayed borrowed; the tick is stopped");
+    }
+    frames <= MAX_CONFLICT_FRAMES
+}
+
 /// Where the dissolves read the time. Every instant they judge comes from
 /// here: when a delete was asked for, the frame's pin, and a read before
 /// any pin.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum VanishClock {
-    // Only `initial` builds it, and not in a demo-capture test.
-    #[allow(dead_code)]
+    // Only `initial` builds it, and that is compiled out in a test with the
+    // `demo-capture` feature, so `Wall` is unused there.
+    #[cfg_attr(test, cfg_attr(feature = "demo-capture", allow(dead_code)))]
     Wall,
     /// Tests: time stands at this instant until the test moves it, so no
     /// phase depends on how fast the runner is.
@@ -609,12 +626,15 @@ impl QuillApp {
         }
         // The rows are kept while it runs: the frame clock drives it. The
         // tick is requested with no borrow held.
-        // A conflict keeps the tick going: the next frame sorts it out.
-        let running = self
-            .history
-            .vanishing
-            .try_borrow()
-            .map_or(true, |vanishing| !vanishing.is_empty());
+        // A conflict keeps the tick going for a bounded run of frames: the
+        // next frame normally sorts it out.
+        let running = match self.history.vanishing.try_borrow() {
+            Ok(vanishing) => {
+                self.history.vanish_conflicts.set(0);
+                !vanishing.is_empty()
+            }
+            Err(_) => conflict_keeps_running(&self.history.vanish_conflicts),
+        };
         if running {
             self.request_animation_tick(60, cx);
         }
@@ -800,7 +820,9 @@ impl CutLeft {
 
 #[cfg(test)]
 mod tests {
-    use super::{FADE, Grain, MAX_GRAINS, Palette, WIPE, grains};
+    use super::{
+        FADE, Grain, MAX_CONFLICT_FRAMES, MAX_GRAINS, Palette, WIPE, conflict_keeps_running, grains,
+    };
     use gpui_kit::{Bounds, hsla, point, px, size, white};
 
     fn palette() -> Palette {
@@ -809,6 +831,16 @@ mod tests {
             text: white(),
             picture: None,
         }
+    }
+
+    #[test]
+    fn a_leaked_borrow_stops_the_tick_after_the_bound() {
+        let conflicts = std::cell::Cell::new(0);
+        for _ in 0..MAX_CONFLICT_FRAMES {
+            assert!(conflict_keeps_running(&conflicts));
+        }
+        assert!(!conflict_keeps_running(&conflicts));
+        assert!(!conflict_keeps_running(&conflicts));
     }
 
     #[test]

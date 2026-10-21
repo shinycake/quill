@@ -113,6 +113,9 @@ pub(crate) struct HistoryUi {
     /// The instant the rows being worked out are judged at, so the rows key
     /// and the build agree on how far each dissolve has got.
     pub(super) vanish_now: std::cell::Cell<Option<std::time::Instant>>,
+    /// Frames in a row the dissolve list was borrowed elsewhere
+    /// (`vanish::conflict_keeps_running`).
+    pub(super) vanish_conflicts: std::cell::Cell<u16>,
     /// Where the dissolves read the time: the wall clock in the app, a
     /// clock that only moves when told to in tests.
     pub(super) vanish_clock: std::cell::Cell<super::vanish::VanishClock>,
@@ -183,6 +186,7 @@ impl HistoryUi {
             stream_reveal: Default::default(),
             vanishing: Default::default(),
             vanish_now: Default::default(),
+            vanish_conflicts: Default::default(),
             vanish_clock: Default::default(),
             self_destruct_tick_chat: None,
             live_location_tick_chat: None,
