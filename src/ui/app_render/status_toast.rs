@@ -174,8 +174,17 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// A click on the toast sends it away and brings the next one.
+    /// A click on the toast sends it away and brings the next one; a
+    /// "saved" toast first shows its file in the file manager.
     fn dismiss_status_toast(&mut self, cx: &mut Context<Self>) {
+        let reveal = self
+            .connection
+            .toasts
+            .visible()
+            .and_then(|note| note.reveal().map(std::path::Path::to_path_buf));
+        if let Some(path) = reveal {
+            quill::platform::reveal_in_file_manager(&path);
+        }
         self.connection.toasts.dismiss(std::time::Instant::now());
         self.connection.toast_wake = None;
         cx.notify();

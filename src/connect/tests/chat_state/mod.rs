@@ -13,6 +13,7 @@ use std::sync::atomic::AtomicU64;
 
 mod export;
 mod list_ops;
+mod rich_html;
 
 #[test]
 fn forum_flow_topics_then_topic_history() {

@@ -1,0 +1,2 @@
+# Save as HTML for one selected rich message, written off the main thread
+parity:menu-save-selection-html

@@ -165,6 +165,7 @@ pub mod release_notes;
 pub mod reply_options;
 pub mod request_share;
 pub mod rich;
+pub mod rich_html;
 pub mod row_fx;
 pub mod schedule;
 #[doc(hidden)]

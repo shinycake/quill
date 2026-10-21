@@ -9,6 +9,10 @@ pub enum SettingsPurpose {
     ExportAccount,
     /// A request from the running chat export (`export::ChatExport`).
     ExportChat,
+    /// A request from a running "Save as HTML"
+    /// (`rich_html::RichHtmlExport`); the answer goes to the export whose
+    /// link awaits this request id.
+    ExportRichHtml,
     /// `setChatNotificationSettings`. Response is `ok`; mute via
     /// `updateChatNotificationSettings`.
     SetChatNotificationSettings,
@@ -288,6 +292,7 @@ pub enum SettingsPurpose {
 flat_purposes!(Settings(SettingsPurpose) {
     ExportAccount,
     ExportChat,
+    ExportRichHtml,
     SetChatNotificationSettings,
     GetSavedNotificationSounds,
     GetScopeNotificationSettings,
