@@ -217,6 +217,7 @@ fn user_full_info_bio_parsed() {
             photo,
             photo_id: _,
             blocked,
+            share_theme: _,
         }) => {
             assert_eq!(bio, "CANARY bio text");
             assert!(bot_info.is_none());

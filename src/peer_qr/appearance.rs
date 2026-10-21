@@ -88,12 +88,14 @@ pub fn swatches(backdrops: &[ShareThemeBackdrop]) -> Vec<Swatch> {
     out
 }
 
-/// The backdrop and emoji the box shows.
+/// The backdrop and pattern the box shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Appearance {
     pub center: Rgb,
     pub edge: Rgb,
-    pub emoji: Vec<String>,
+    pub emoji: Vec<super::theme::ThemeEmoji>,
+    /// The upgraded gift whose model and symbol make the pattern, by id.
+    pub gift: Option<i64>,
 }
 
 impl Default for Appearance {
@@ -102,6 +104,7 @@ impl Default for Appearance {
             center: DEFAULT_CENTER,
             edge: DEFAULT_EDGE,
             emoji: Vec::new(),
+            gift: None,
         }
     }
 }

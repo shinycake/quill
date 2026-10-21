@@ -1,6 +1,7 @@
 //! What opens inside the box: the colors and emoji panels (tdesktop
-//! `PeerQrColorsPanel`, `PeerQrEmojiPanel`), the free-message pill with
-//! its menu (`PeerQrFreeController`) and the toast.
+//! `PeerQrColorsPanel`, `PeerQrEmojiPanel`; the gifts panel is in
+//! `gifts_panel.rs`), the free-message pill with its menu
+//! (`PeerQrFreeController`) and the toast.
 #![deny(clippy::indexing_slicing)]
 
 use super::super::app::QuillApp;
@@ -18,7 +19,7 @@ use quill::peer_qr::color::{Rgb, contrast};
 use quill::peer_qr::free::{FreeMenuItem, FreeMode};
 use quill::peer_qr::layout::{
     BOX_WIDTH, BUTTON, BUTTON_SKIP, PANEL_MARGIN, PANEL_PADDING, PANEL_RADIUS, PILL_HEIGHT,
-    SWATCH_SKIP, content_in, panel_height, swatch_size,
+    SWATCH_SKIP, content_in, swatch_size,
 };
 use quill::peer_qr::link::countdown_text;
 use quill::peer_qr::pattern::Rect;
@@ -94,12 +95,15 @@ impl QuillApp {
         let radius = BUTTON / 2. + (PANEL_RADIUS - BUTTON / 2.) * progress;
         let width = BOX_WIDTH - 2. * PANEL_MARGIN;
         let shown = content_in(open_elapsed_ms).min(progress) as f32;
+        let height = self.qr_panel_height(panel, width);
         let content = match panel {
             QrPanel::Colors => self.qr_colors_panel(view, width, cx).into_any_element(),
             QrPanel::Emoji => self.qr_emoji_panel(view, width, cx).into_any_element(),
+            QrPanel::Gifts => self.qr_gifts_panel(view, width, cx),
         };
         div()
             .id("peer-qr-panel")
+            .debug_selector(|| "peer-qr-panel".into())
             .absolute()
             .left(at(rect.x))
             .top(at(rect.y))
@@ -112,7 +116,7 @@ impl QuillApp {
             .child(
                 div()
                     .w(at(width))
-                    .h(at(panel_height(width)))
+                    .h(at(height))
                     .opacity(shown)
                     .child(content),
             )
@@ -128,7 +132,13 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let circle = swatch_size(width);
-        let chosen = self.peer_qr.open.as_ref().map(|open| open.state.color);
+        // A shown gift has its own backdrop: no circle is chosen.
+        let chosen = self
+            .peer_qr
+            .open
+            .as_ref()
+            .filter(|open| open.state.gift.is_none())
+            .map(|open| open.state.color);
         let ring = |inset: f64, width: f64, color: Hsla| {
             div()
                 .absolute()
@@ -209,7 +219,7 @@ impl QuillApp {
             .peer_qr
             .open
             .as_ref()
-            .map(|open| open.state.emoji.clone())
+            .map(|open| super::plain_picks(&open.state.emoji))
             .unwrap_or_default();
         let highlight = rgba(view.colors.control);
         v_virtual_list(

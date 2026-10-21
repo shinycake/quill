@@ -1,29 +1,13 @@
 //! What the session keeps for the box: the backdrops the colors panel
-//! offers, the current user's temporary contact link and the free-code
-//! answers the open box has not taken yet.
+//! offers, each peer's saved share theme, the gifts panel's list, the
+//! current user's temporary contact link and the answers the open box
+//! has not taken yet.
 
-use super::appearance::ShareThemeBackdrop;
 use super::free::{FreeCode, FreeResult, FreeTicket};
 use super::link::{UserLinkData, UserLinkFetch};
-
-/// `getProfileShareThemeBackdrops`.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum BackdropsFetch {
-    #[default]
-    Idle,
-    Loading,
-    Ready(Vec<ShareThemeBackdrop>),
-    Failed,
-}
-
-impl BackdropsFetch {
-    pub fn backdrops(&self) -> &[ShareThemeBackdrop] {
-        match self {
-            BackdropsFetch::Ready(list) => list,
-            _ => &[],
-        }
-    }
-}
+use super::state::SaveTicket;
+use super::theme::{Backdrops, ShareTheme, ThemeChoice, ThemeGifts, ThemeOwner};
+use std::collections::HashMap;
 
 /// A `getUserLink` answer before it is made absolute.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,7 +34,17 @@ impl UserLinkAnswer {
 /// The users domain's share for the box.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PeerQrData {
-    pub backdrops: BackdropsFetch,
+    /// `getProfileShareThemeBackdrops`, asked for again hourly.
+    pub backdrops: Backdrops,
+    /// Each peer's `share_theme` from its full info, or what a save sent
+    /// (tdesktop `ShareThemes::_kept`).
+    pub themes: HashMap<ThemeOwner, ShareTheme>,
+    /// The gifts panel's owned upgraded gifts.
+    pub gifts: ThemeGifts,
+    /// `setProfileShareTheme` requests on their way.
+    pub saves: Vec<(SaveTicket, ThemeOwner, ThemeChoice)>,
+    /// Save answers in arrival order.
+    pub save_answers: Vec<(SaveTicket, Result<ThemeChoice, String>)>,
     /// The plain `getUserLink`, for an account with no username and a
     /// hidden number.
     pub contact_link: UserLinkFetch,
@@ -97,5 +91,36 @@ impl PeerQrData {
 
     pub fn take_free_answers(&mut self) -> Vec<(FreeTicket, FreeResult)> {
         std::mem::take(&mut self.free_answers)
+    }
+
+    /// The saved theme came in with `owner`'s full info.
+    pub fn keep_theme(&mut self, owner: ThemeOwner, theme: ShareTheme) {
+        self.themes.insert(owner, theme);
+    }
+
+    /// A save went out.
+    pub fn start_save(&mut self, ticket: SaveTicket, owner: ThemeOwner, choice: ThemeChoice) {
+        self.saves.push((ticket, owner, choice));
+    }
+
+    /// The server took the save: the owner's theme is what was sent
+    /// (tdesktop sets `_kept` on done).
+    pub fn finish_save(&mut self, ticket: SaveTicket) {
+        let Some(at) = self.saves.iter().position(|(t, _, _)| *t == ticket) else {
+            return;
+        };
+        let (ticket, owner, choice) = self.saves.remove(at);
+        self.themes.insert(owner, choice.to_theme());
+        self.save_answers.push((ticket, Ok(choice)));
+    }
+
+    /// `reason` is the error to show; empty when there is none to tell.
+    pub fn fail_save(&mut self, ticket: SaveTicket, reason: String) {
+        self.saves.retain(|(t, _, _)| *t != ticket);
+        self.save_answers.push((ticket, Err(reason)));
+    }
+
+    pub fn take_save_answers(&mut self) -> Vec<(SaveTicket, Result<ThemeChoice, String>)> {
+        std::mem::take(&mut self.save_answers)
     }
 }

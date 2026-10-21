@@ -175,6 +175,14 @@ impl Session {
             }
             PaymentsPayload::ReceivedGifts(page) => {
                 if let Some(p) = pending
+                    && let RequestPurpose::Users(UsersPurpose::GetShareThemeGifts {
+                        serial,
+                        first,
+                        ..
+                    }) = p.purpose
+                {
+                    self.apply_share_theme_gifts(page, serial, first);
+                } else if let Some(p) = pending
                     && matches!(
                         p.purpose,
                         RequestPurpose::Media(MediaPurpose::GetProfileGifts { .. })

@@ -1,12 +1,14 @@
 //! The QR code box (`parity:profile-qr-code-box`, tdesktop
 //! `FillPeerQrBox`): a peer's link, or an invite, chat or proxy link, as a
 //! code on a white card over a colored backdrop, with copy, share, the
-//! colors and emoji panels and, in your own box, the free-message pill.
+//! colors, emoji and gifts panels that style and save the peer's share
+//! theme (`parity:profile-share-theme`) and, in your own box, the
+//! free-message pill.
 //!
 //! [`quill::peer_qr`] owns the state and its reducer; this module keeps
 //! the open box, runs the reducer's effects, and draws the box as a
 //! function of that state and the session. See
-//! docs/decisions/peer-qr-box.md.
+//! docs/decisions/peer-qr-box.md and docs/decisions/profile-share-theme.md.
 #![deny(clippy::indexing_slicing)]
 
 mod art;
@@ -14,6 +16,9 @@ mod card;
 mod entry;
 pub(in crate::ui) use entry::qr_row_button;
 mod export;
+mod gift_art;
+mod gift_view;
+mod gifts_panel;
 mod panels;
 mod pattern_view;
 mod qr_path;
@@ -29,7 +34,10 @@ use quill::ids::ChatId;
 use quill::peer_qr::free::FreeMode;
 use quill::peer_qr::link::OwnLinkState;
 use quill::peer_qr::session::PeerQrData;
-use quill::peer_qr::state::{PeerQrBox, QrAction, QrEffect, QrPanel, QrSubject, QrToast};
+use quill::peer_qr::state::{
+    PeerQrBox, QrAction, QrEffect, QrPanel, QrPeer, QrSubject, QrToast, SaveTicket,
+};
+use quill::peer_qr::theme::ThemeChoice;
 use quill::telegram::requests_privacy::PrivacySettingKey;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -101,6 +109,14 @@ pub(super) struct PatternSwap {
     pub(super) started: Instant,
 }
 
+/// The plain emoji of `picks`, the ones the pattern draws.
+pub(super) fn plain_picks(picks: &[quill::peer_qr::theme::ThemeEmoji]) -> Vec<String> {
+    picks
+        .iter()
+        .filter_map(|pick| pick.plain().map(str::to_string))
+        .collect()
+}
+
 /// The box on screen.
 pub(super) struct OpenQr {
     pub(super) state: PeerQrBox,
@@ -108,6 +124,9 @@ pub(super) struct OpenQr {
     pub(super) motion: PanelMotion,
     pub(super) toast: Option<(QrToast, Instant)>,
     pub(super) swap: Option<PatternSwap>,
+    /// When the shown gift's pattern began to come in (tdesktop
+    /// `PeerQrGiftField::startEntry`).
+    pub(super) gift_entry: Instant,
     /// The card image to attach in the chat the share chooser opens.
     pub(super) share_image: Option<PathBuf>,
     /// A card image is being made for copy or share.
@@ -118,8 +137,9 @@ pub(super) struct OpenQr {
 
 /// The QR box's part of the app.
 pub(crate) struct PeerQrUi {
-    pub(super) open: Option<OpenQr>,
+    pub(super) open: Option<Box<OpenQr>>,
     art: art::Art,
+    gift_art: gift_art::GiftArt,
     /// The last box's id; each box gets the next one.
     last_box: u64,
     /// A shared card waiting for its chat's composer.
@@ -131,6 +151,7 @@ impl PeerQrUi {
         Self {
             open: None,
             art: art::Art::default(),
+            gift_art: gift_art::GiftArt::default(),
             last_box: 0,
             pending_attach: None,
         }
@@ -150,32 +171,43 @@ impl QuillApp {
     }
 
     /// Open the box for `subject`, replacing any open one, and ask the
-    /// session for what it shows: the colors, and for your own code the
-    /// phone privacy rules and the message price.
+    /// session for what it shows: the colors, the peer's saved theme, and
+    /// for your own code the phone privacy rules and the message price.
     pub(super) fn open_qr_box(&mut self, subject: QrSubject, cx: &mut Context<Self>) {
+        if self.peer_qr.open.is_some() {
+            self.close_qr_box(cx);
+        }
         let own = matches!(
             subject,
             QrSubject::Peer(peer) if self.qr_is_self(peer)
         );
-        let styled = matches!(subject, QrSubject::Peer(_));
+        let peer = match subject {
+            QrSubject::Peer(peer) => Some(peer),
+            QrSubject::Custom(_) => None,
+        };
         self.drop_shared_card(cx);
         self.peer_qr.last_box += 1;
-        self.peer_qr.open = Some(OpenQr {
+        let now = Instant::now();
+        self.peer_qr.open = Some(Box::new(OpenQr {
             state: PeerQrBox::new(subject, self.peer_qr.last_box),
-            opened: Instant::now(),
+            opened: now,
             motion: PanelMotion::IDLE,
             toast: None,
             swap: None,
+            gift_entry: now,
             share_image: None,
             exporting: false,
             clock_running: false,
-        });
+        }));
         if own && let Some(data) = self.qr_data_mut() {
             data.retry_contact_link();
         }
         if let Some(live) = self.live.as_mut() {
-            if styled {
-                let _ = live.driver.fetch_share_theme_backdrops();
+            if let Some(peer) = peer {
+                let _ = live
+                    .driver
+                    .fetch_share_theme_backdrops(quill::local_time::now_unix());
+                let _ = live.driver.ensure_share_theme(peer);
             }
             if own {
                 let _ = live
@@ -187,16 +219,43 @@ impl QuillApp {
                 let _ = live.driver.fetch_new_chat_privacy();
             }
         }
+        self.qr_serve_theme(cx);
         self.qr_refresh(cx);
         cx.notify();
     }
 
+    /// Close the box. A pick still unsaved is saved first (tdesktop saves
+    /// when the box is destroyed).
     pub(super) fn close_qr_box(&mut self, cx: &mut Context<Self>) {
+        self.qr_act(QrAction::Closing, cx);
         if let Some(path) = self.peer_qr.open.take().and_then(|open| open.share_image) {
             remove_card_file(path, cx);
         }
         self.peer_qr.art.clear();
+        self.peer_qr.gift_art.clear();
         cx.notify();
+    }
+
+    /// The peer the open box styles, if it is a peer's box.
+    fn qr_peer(&self) -> Option<QrPeer> {
+        match self.peer_qr.open.as_ref()?.state.subject {
+            QrSubject::Peer(peer) => Some(peer),
+            QrSubject::Custom(_) => None,
+        }
+    }
+
+    /// Hand the box the peer's saved theme as the session knows it.
+    fn qr_serve_theme(&mut self, cx: &mut Context<Self>) {
+        let Some(peer) = self.qr_peer() else {
+            return;
+        };
+        let served = self.session().and_then(|session| {
+            let theme = session.qr_served_theme(peer)?;
+            Some(theme.choice(&session.users_state.peer_qr.backdrops.list))
+        });
+        if let Some(choice) = served {
+            self.qr_act(QrAction::Served(choice), cx);
+        }
     }
 
     /// Run `action` through the box's reducer and do what it asks.
@@ -211,9 +270,13 @@ impl QuillApp {
         let changed = open.state != before;
         if open.state.emoji != before.emoji {
             open.swap = Some(PatternSwap {
-                previous: before.emoji.clone(),
+                previous: plain_picks(&before.emoji),
                 started: now,
             });
+        }
+        let gift = |state: &PeerQrBox| state.gift.as_ref().map(|gift| gift.id);
+        if gift(&open.state) != gift(&before) {
+            open.gift_entry = now;
         }
         if open.state.panel != before.panel {
             open.motion = match open.state.panel {
@@ -256,8 +319,48 @@ impl QuillApp {
                     }
                 }
                 QrEffect::Toast(toast) => self.show_qr_toast(toast, cx),
+                QrEffect::SaveTheme { ticket, choice } => self.qr_save_theme(ticket, choice, cx),
+                QrEffect::LoadGifts { more } => {
+                    if let (Some(peer), Some(live)) = (self.qr_peer(), self.live.as_mut()) {
+                        let _ = live.driver.fetch_share_theme_gifts(peer, more);
+                    }
+                }
             }
         }
+    }
+
+    /// `setProfileShareTheme`; its answer comes back on a poll step. The
+    /// demo has no server: the save is taken at once.
+    fn qr_save_theme(&mut self, ticket: SaveTicket, choice: ThemeChoice, cx: &mut Context<Self>) {
+        let Some(peer) = self.qr_peer() else {
+            return;
+        };
+        if let Some(live) = self.live.as_mut() {
+            // A refused request leaves its own answer to take.
+            let _ = live.driver.save_share_theme(ticket, peer, choice);
+            return;
+        }
+        let owner = self
+            .session()
+            .and_then(|session| session.qr_theme_owner(peer));
+        if let (Some(owner), Some(data)) = (owner, self.qr_data_mut()) {
+            data.start_save(ticket, owner, choice);
+            data.finish_save(ticket);
+        }
+        self.qr_take_save_answers(cx);
+    }
+
+    /// Save answers, for this box or an earlier one.
+    fn qr_take_save_answers(&mut self, cx: &mut Context<Self>) -> bool {
+        let answers = self
+            .qr_data_mut()
+            .map(|data| data.take_save_answers())
+            .unwrap_or_default();
+        let any = !answers.is_empty();
+        for (ticket, result) in answers {
+            self.qr_act(QrAction::SaveAnswer { ticket, result }, cx);
+        }
+        any
     }
 
     /// After the box or what it shows changed (and on every poll step):
@@ -267,6 +370,7 @@ impl QuillApp {
     fn qr_refresh(&mut self, cx: &mut Context<Self>) {
         self.ensure_qr_contact_link();
         self.qr_prepare_art(cx);
+        self.qr_prepare_gift_art(cx);
         self.sync_qr_clock(cx);
     }
 
@@ -348,8 +452,9 @@ impl QuillApp {
         going
     }
 
-    /// Poll step: hand the box the free-code answers and a failed contact
-    /// link's reason, and follow account changes.
+    /// Poll step: hand the box the free-code and save answers, a failed
+    /// contact link's reason and the peer's saved theme, and follow
+    /// account changes.
     pub(super) fn drain_peer_qr(&mut self, cx: &mut Context<Self>) -> bool {
         let open = self.peer_qr.open.is_some();
         let own = self
@@ -364,9 +469,11 @@ impl QuillApp {
         let answers = data.take_free_answers();
         let failed = if own { data.contact_error.take() } else { None };
         if !open {
+            data.save_answers.clear();
             return false;
         }
-        let progressed = !answers.is_empty() || failed.is_some();
+        let saved = self.qr_take_save_answers(cx);
+        let progressed = !answers.is_empty() || failed.is_some() || saved;
         for (ticket, result) in answers {
             self.qr_act(QrAction::FreeAnswer { ticket, result }, cx);
         }
@@ -378,6 +485,7 @@ impl QuillApp {
             };
             self.show_qr_toast(toast, cx);
         }
+        self.qr_serve_theme(cx);
         self.qr_act(QrAction::Sync, cx);
         self.qr_refresh(cx);
         progressed

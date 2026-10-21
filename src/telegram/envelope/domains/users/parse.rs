@@ -85,6 +85,7 @@ pub(crate) fn parse_users_payload(
             photo: parse_user_full_info_photo(value),
             photo_id: int53(value.get("photo").and_then(|p| p.get("id"))).ok(),
             blocked: is_block_list_main(value.get("block_list")),
+            share_theme: crate::peer_qr::theme::parse_share_theme(value.get("share_theme")),
         })),
         "updateUserFullInfo" => Ok(EnvelopePayload::Users(UsersPayload::UpdateUserFullInfo {
             user_id: UserId(int53(value.get("user_id"))?),
@@ -111,6 +112,11 @@ pub(crate) fn parse_users_payload(
                 value
                     .get("user_full_info")
                     .and_then(|info| info.get("block_list")),
+            ),
+            share_theme: crate::peer_qr::theme::parse_share_theme(
+                value
+                    .get("user_full_info")
+                    .and_then(|info| info.get("share_theme")),
             ),
         })),
         "profileShareThemeBackdrops" => Ok(EnvelopePayload::Users(

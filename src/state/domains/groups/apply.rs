@@ -30,6 +30,7 @@ impl Session {
                 custom_emoji_sticker_set_id,
                 admin,
                 bot_commands,
+                share_theme,
             } => {
                 let full_info_group = pending
                     .filter(|p| p.purpose == RequestPurpose::GetSupergroupFullInfo)
@@ -59,6 +60,10 @@ impl Session {
                     );
                     self.set_direct_messages_chat(supergroup_id, direct_messages_chat_id);
                     self.merge_full_admin(supergroup_id, admin);
+                    self.keep_share_theme(
+                        crate::peer_qr::theme::ThemeOwner::Supergroup(supergroup_id),
+                        share_theme,
+                    );
                 }
             }
             // Parity slice: `updateSupergroupFullInfo` — the update carries
@@ -82,7 +87,12 @@ impl Session {
                 custom_emoji_sticker_set_id,
                 admin,
                 bot_commands,
+                share_theme,
             } => {
+                self.keep_share_theme(
+                    crate::peer_qr::theme::ThemeOwner::Supergroup(supergroup_id),
+                    share_theme,
+                );
                 self.store_group_bot_commands(
                     GroupCommandsKey::Supergroup(supergroup_id),
                     bot_commands,

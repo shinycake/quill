@@ -192,11 +192,21 @@ pub struct Placement {
     pub panel: Rect,
 }
 
-/// tdesktop `ComputeOpenLayout` blended with the closed layout.
+/// tdesktop `ComputeOpenLayout` blended with the closed layout, for a
+/// panel as tall as the colors panel.
 pub fn placement(layout: &BoxLayout, progress: f64) -> Placement {
+    placement_with(
+        layout,
+        progress,
+        panel_height(layout.width - 2. * PANEL_MARGIN),
+    )
+}
+
+/// [`placement`] for a panel `height` tall (the gifts panel opens only
+/// as tall as its tiles).
+pub fn placement_with(layout: &BoxLayout, progress: f64, height: f64) -> Placement {
     let progress = progress.clamp(0., 1.);
     let width = layout.width - 2. * PANEL_MARGIN;
-    let height = panel_height(width);
     let panel = Rect::new(
         PANEL_MARGIN,
         layout.height - PANEL_MARGIN - height,

@@ -1,0 +1,2 @@
+# QR box PR 2: saved share themes, server backdrops, gift themes
+parity:profile-share-theme
