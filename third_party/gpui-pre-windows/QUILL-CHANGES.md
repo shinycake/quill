@@ -231,3 +231,16 @@ uploads 3 MB instead of 8 MB (`docs/decisions/video-player-nv12.md`):
 
 The HLSL was validated with glslang on macOS; the CI Windows release build
 compiles it with fxc. Not run on Windows by the author.
+
+## Touchpad inertia is momentum
+
+`src/direct_manipulation.rs`: when the viewport goes from running to
+inertia (the fingers lifted) during a scroll, the handler now emits the
+gesture's `Ended`, and the inertia deltas that follow stay phaseless `Moved`
+events, which is how a macOS trackpad reports momentum. Before, `Ended` came
+only when the viewport was ready again, after the inertia, so consumers saw a
+held finger throughout the fling. Quill's chat list takes a held edge past a
+threshold as a pull that expands the stories strip, and a fling into the top
+did that on Windows (`docs/decisions/elastic-chat-list.md`). The final
+`Ended` at ready stays and is harmless. Not compiled or run on Windows by the
+author of the patch.

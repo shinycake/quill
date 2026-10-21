@@ -12,17 +12,21 @@
 use super::app::QuillApp;
 use super::chat_row::chat_avatar;
 use super::pressable::PressableDiv;
+use gpui_base::ScrollBounceDisplacement;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
+use quill::stories_pull::StripPull;
 use quill::stories_strip as metrics;
 use quill::stories_strip::{Axis, AxisLock};
 use quill::story_ring::StoryRing;
 use quill::story_tray_walk::story_to_open;
 use quill::story_viewer::StoryOpenScope;
+use std::cell::Cell;
+use std::rc::Rc;
 
 /// One entry of the strip: a poster with active stories.
 #[derive(Clone)]
@@ -50,6 +54,14 @@ pub(super) struct StoryStripState {
     /// Sideways offset of the expanded cells, px.
     pub scroll: f32,
     pub axis: AxisLock,
+    /// Whether the strip is a row of the chat list, and its slide-in
+    /// (`quill::stories_pull`).
+    pub pull: StripPull,
+    /// What the chat list's bounce reports each frame: how far the list is
+    /// pulled past its edge, and whether a finger holds it.
+    pub bounce: Rc<Cell<ScrollBounceDisplacement>>,
+    /// The list context the strip was last settled for.
+    pub context: Option<super::stories_pull_ui::PullContext>,
 }
 
 impl QuillApp {
@@ -101,7 +113,7 @@ impl QuillApp {
     }
 
     /// How far the chat list is scrolled down, px.
-    fn chat_list_scroll_top(&self) -> f32 {
+    pub(super) fn chat_list_scroll_top(&self) -> f32 {
         -f32::from(self.chat_list.scroll.offset().y)
     }
 
@@ -267,11 +279,10 @@ impl QuillApp {
     /// opacity, so the search field gives way smoothly.
     pub(super) fn story_compact_stack(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let tiles = &self.stories.strip.tiles;
-        if tiles.is_empty() {
+        if !self.story_strip_available() {
             return None;
         }
-        let opacity =
-            metrics::compact_opacity(metrics::collapse_progress(self.chat_list_scroll_top()));
+        let opacity = self.story_stack_opacity();
         if opacity <= 0.0 {
             return None;
         }
@@ -312,11 +323,7 @@ impl QuillApp {
                 .w(px((width + 4.) * opacity))
                 .opacity(opacity)
                 .child(stack)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    // Expand: back to the top of the list.
-                    this.chat_list.scroll.set_offset(point(px(0.), px(0.)));
-                    this.notify_sidebar(cx);
-                }))
+                .on_click(cx.listener(|this, _, _, cx| this.expand_story_strip(cx)))
                 .into_any_element(),
         )
     }

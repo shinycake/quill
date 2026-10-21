@@ -237,6 +237,7 @@ impl QuillApp {
                     // that takes its place beside the search field once
                     // the list scrolls the strip away.
                     self.refresh_story_tiles();
+                    self.follow_story_pull(cx);
                     let story_stack = if self.search_is_open() {
                         None
                     } else {
@@ -362,9 +363,10 @@ impl QuillApp {
                         // category). The archived chats themselves never
                         // sit inside the main list.
                         let has_archived = self.session().is_some_and(|s| s.has_archived_chats());
-                        // tdesktop's stories strip is the first row: it
-                        // scrolls away with the list (and collapses).
-                        if !self.stories.strip.tiles.is_empty() {
+                        // tdesktop's stories strip: collapsed at rest, pulled
+                        // open at the top of the list, then the first row
+                        // (it scrolls away with the list and collapses).
+                        if self.stories.strip.pull.expanded() {
                             items.push(ChatListItem::StoryStrip);
                         }
                         match quill::chatlist_archive::row_mode(
@@ -513,8 +515,9 @@ impl QuillApp {
                                     MouseButton::Left,
                                     cx.listener(|this, _, _, cx| this.finish_pin_drag(cx)),
                                 )
-                                .child(
-                                    v_virtual_list(
+                                .child({
+                                    let pull_gap = self.story_pull_gap(cx);
+                                    let rows = v_virtual_list(
                                         cx.entity(),
                                         "chat-list",
                                         sizes,
@@ -529,8 +532,22 @@ impl QuillApp {
                                     .track_scroll(&self.chat_list.scroll)
                                     .flex_1()
                                     .min_h_0()
-                                    .w_full(),
-                                ),
+                                    .w_full();
+                                    // The kit's bounce stretches either end
+                                    // of the list; a pull at the top also
+                                    // opens the stories strip.
+                                    self.chat_list_bounce(
+                                        div()
+                                            .relative()
+                                            .flex()
+                                            .flex_col()
+                                            .flex_1()
+                                            .min_h_0()
+                                            .w_full()
+                                            .child(rows)
+                                            .children(pull_gap),
+                                    )
+                                }),
                         );
                     }
                 }
