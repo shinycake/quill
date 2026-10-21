@@ -95,11 +95,7 @@ impl Session {
             return None;
         }
         let chat_id = self.open_chat?;
-        if self
-            .histories
-            .get(&chat_id.0)
-            .is_some_and(|history| history.has_newer)
-        {
+        if self.history_has_newer(chat_id) {
             return None;
         }
         let entry = self.messages.sponsored.get(&chat_id.0)?;

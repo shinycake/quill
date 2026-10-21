@@ -381,7 +381,8 @@ impl Session {
                 if let Some(list) = self.messages.pinned_messages.get_mut(&chat_id.0) {
                     list.retain(|message| !message_ids.contains(&message.id));
                 }
-                self.history_entry(chat_id);
+                self.history_entry(chat_id)
+                    .forget_deleted_latest(&message_ids);
                 for id in message_ids.iter().copied() {
                     // Permanent or "became inaccessible": either way the
                     // row must not come back from a stale page.

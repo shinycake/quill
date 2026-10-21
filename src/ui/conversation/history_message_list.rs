@@ -71,8 +71,12 @@ impl QuillApp {
             Some(thread) => (thread.unread_anchor, thread.has_newer, thread.window_epoch),
             None => session
                 .filter(|_| viewed_topic.is_none())
-                .and_then(|s| viewed_chat.and_then(|chat| s.histories.get(&chat.0)))
-                .map(|h| (h.unread_anchor, h.has_newer, h.window_epoch))
+                .and_then(|s| {
+                    let chat = viewed_chat?;
+                    s.histories
+                        .get(&chat.0)
+                        .map(|h| (h.unread_anchor, s.history_has_newer(chat), h.window_epoch))
+                })
                 .unwrap_or((None, false, 0)),
         };
         // A history opened at its saved position anchors once the window

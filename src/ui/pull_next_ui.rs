@@ -128,8 +128,7 @@ impl QuillApp {
         match target.mode {
             Mode::History => self
                 .session()
-                .and_then(|s| s.histories.get(&target.chat.0))
-                .is_none_or(|history| !history.has_newer),
+                .is_none_or(|s| !s.history_has_newer(target.chat)),
             // A topic's history opens at its newest messages and pages
             // older only.
             Mode::Topic => true,

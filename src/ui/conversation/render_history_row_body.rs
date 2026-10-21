@@ -365,8 +365,7 @@ impl QuillApp {
                 live.driver
                     .session
                     .open_chat
-                    .and_then(|chat| live.driver.session.histories.get(&chat.0))
-                    .is_some_and(|h| h.has_newer)
+                    .is_some_and(|chat| live.driver.session.history_has_newer(chat))
                     && live.driver.jump_to_latest().is_ok()
             })
         };

@@ -208,7 +208,7 @@ impl QuillApp {
             .map(|m| m.id.0)
             .collect();
         let current = self.composer_ui.reply().map(|reply| reply.message_id.0);
-        match reply_nav(&ids, current, forward, !history.has_newer) {
+        match reply_nav(&ids, current, forward, !session.history_has_newer(chat_id)) {
             ReplyNav::Reply(id) => {
                 self.jump_to_replied_message(MessageId(id), cx);
                 self.begin_reply_from_message(chat_id, MessageId(id), window, cx);
