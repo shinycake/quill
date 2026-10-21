@@ -354,6 +354,7 @@ impl QuillApp {
                     .items_center()
                     .gap_1()
                     .min_w_0()
+                    .children(self.sidebar_toggle_button(cx))
                     .when(thread_header.is_some(), |this| {
                         this.child(self.thread_back_button(cx))
                     })

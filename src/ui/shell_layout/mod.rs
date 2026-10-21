@@ -16,6 +16,7 @@
 //! derives from it.
 #![deny(clippy::indexing_slicing)]
 
+mod sidebar_view;
 mod view;
 
 #[cfg(test)]
@@ -57,6 +58,10 @@ pub(crate) struct ShellInput {
     pub(crate) topic_open: bool,
     /// Summed preferred width of the open side panels, if any is open.
     pub(crate) panels: Option<f32>,
+    /// Share of the list column (rail plus list) in the layout, `0..=1`:
+    /// 1 shown, 0 hidden, between while it slides (`sidebar_reveal`).
+    /// One column ignores it.
+    pub(crate) docked: f32,
 }
 
 /// The forum topic column.
@@ -88,8 +93,12 @@ pub(crate) enum PanelPane {
 pub(crate) struct ShellLayout {
     /// Too narrow for the list beside the chat: one of them at a time.
     pub(crate) one_column: bool,
-    /// The chat list's width (without the folder rail), when shown.
+    /// The chat list's width (without the folder rail), when shown. The
+    /// list keeps this width while it slides out of a hidden column.
     pub(crate) list: Option<f32>,
+    /// Share of the list column on screen beside the chat (always 1 in
+    /// one column).
+    pub(crate) docked: f32,
     pub(crate) forum: ForumPane,
     /// The conversation pane (the open chat, or the empty placeholder).
     pub(crate) chat: bool,
@@ -103,6 +112,28 @@ impl ShellLayout {
         self.one_column && self.chat
     }
 
+    /// Whether the list column can be hidden: only beside the chat.
+    pub(crate) fn sidebar_toggle(&self) -> bool {
+        !self.one_column
+    }
+
+    /// The list column's width on screen: rail plus list, narrowed while it
+    /// slides out of a hidden column.
+    pub(crate) fn list_column(&self, rail: f32) -> f32 {
+        self.list.map_or(0., |list| (list + rail) * self.docked)
+    }
+
+    /// The list column takes no room: hidden, or not laid out at all.
+    pub(crate) fn list_column_hidden(&self) -> bool {
+        self.list.is_some() && self.docked <= 0.
+    }
+
+    /// The chat list's resize edge: beside the chat, while the column is
+    /// on screen.
+    pub(crate) fn resize_handle(&self) -> bool {
+        !self.one_column && self.list.is_some() && self.docked > 0.
+    }
+
     /// The space the conversation pane leaves at the window's left and
     /// right edges (the list, rail and topics before it; the side panels
     /// after it), where a toast centres over the conversation. Zero both
@@ -111,7 +142,7 @@ impl ShellLayout {
         if !self.chat {
             return (0., 0.);
         }
-        let list = self.list.map_or(0., |list| list + rail);
+        let list = self.list_column(rail);
         let forum = match self.forum {
             ForumPane::Column { .. } => FORUM_COLUMN_WIDTH,
             ForumPane::Hidden | ForumPane::Fill => 0.,
@@ -179,7 +210,8 @@ pub(crate) fn shell_layout(input: ShellInput) -> ShellLayout {
             FORUM_COLUMN_WIDTH,
         ),
     };
-    let list_column = list.map_or(0., |list| list + input.rail);
+    let docked = input.docked.clamp(0., 1.);
+    let list_column = list.map_or(0., |list| (list + input.rail) * docked);
     let chat_area = input.width - list_column - forum_width;
     let panels = match input.panels {
         None => PanelPane::Hidden,
@@ -189,6 +221,7 @@ pub(crate) fn shell_layout(input: ShellInput) -> ShellLayout {
     ShellLayout {
         one_column: false,
         list,
+        docked,
         forum,
         chat: panels != PanelPane::Fill,
         panels,
@@ -202,7 +235,7 @@ pub(crate) fn chat_pane_width(input: ShellInput, layout: &ShellLayout) -> f32 {
     if layout.one_column {
         return input.width.max(0.);
     }
-    let list = layout.list.map_or(0., |list| list + input.rail);
+    let list = layout.list_column(input.rail);
     let forum = match layout.forum {
         ForumPane::Column { .. } => FORUM_COLUMN_WIDTH,
         ForumPane::Hidden | ForumPane::Fill => 0.,
@@ -227,6 +260,7 @@ fn one_column(input: ShellInput) -> ShellLayout {
     let hidden = ShellLayout {
         one_column: true,
         list: None,
+        docked: 1.,
         forum: ForumPane::Hidden,
         chat: false,
         panels: PanelPane::Hidden,

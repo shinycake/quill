@@ -83,6 +83,7 @@ mod tests {
             height: 600.,
             maximized: false,
             sidebar_width: 300.,
+            sidebar_hidden: false,
         }
     }
 

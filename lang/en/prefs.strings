@@ -754,6 +754,7 @@
 "qll_prefs_to" = "To";
 "qll_prefs_toggle_fullscreen" = "Toggle fullscreen";
 "qll_prefs_toggle_link_preview" = "Toggle link preview";
+"qll_prefs_toggle_sidebar" = "Toggle Sidebar";
 "qll_prefs_toggle_theme" = "Toggle Theme";
 "qll_prefs_too_many_tries_try_again" = "Too many tries. Try again in {div_ceil} s.";
 "qll_prefs_top_left" = "Top left";

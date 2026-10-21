@@ -132,7 +132,10 @@ actions!(
         ArchiveOpenChat,
         ShowAdminLog,
         /// Cmd/Ctrl+Shift+T: bring back the chat window closed last.
-        ReopenClosedWindow
+        ReopenClosedWindow,
+        /// Hide or show the chat list column (`sidebar_reveal`): Cmd+Ctrl+S
+        /// on macOS, Ctrl+Shift+S elsewhere, and the View menu.
+        ToggleSidebar
     ]
 );
 

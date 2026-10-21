@@ -45,6 +45,11 @@ impl QuillApp {
             }),
             topic_open: session.is_some_and(|s| s.open_topic.is_some()),
             panels: self.side_panels_width(),
+            docked: if self.pane_mode() == PaneMode::Ready {
+                self.frame.sidebar.docked(std::time::Instant::now())
+            } else {
+                1.
+            },
         }
     }
 
@@ -100,13 +105,15 @@ impl QuillApp {
         // Also records the peek and whether the topics are on screen.
         self.forum_column_layout(window);
         self.keep_shared_media_search_field(window, cx);
+        let layout = self.shell_layout();
+        self.settle_sidebar(&layout, window, cx);
         let input = self.shell_input();
         let layout = shell_layout(input);
         self.seed_history_width(chat_pane_width(input, &layout));
         let open = self.session().and_then(|s| s.open_chat);
-        let list = layout.list.map(|list| {
+        let list = layout.list.and_then(|list| {
             let column = if self.pane_mode() == PaneMode::Ready {
-                self.sidebar_slot()
+                self.docked_sidebar(&layout)?
             } else {
                 self.sidebar(
                     auth,
@@ -118,8 +125,9 @@ impl QuillApp {
                     cx,
                 )
             };
-            (list, column)
+            Some((list, column))
         });
+        let peek = self.sidebar_peek_layer(&layout, cx);
         let panels: Vec<AnyElement> = [
             self.info_panel(cx),
             self.downloads_panel(cx),
@@ -147,9 +155,14 @@ impl QuillApp {
         };
         div()
             .id("quill-shell")
+            .relative()
             .flex()
             .flex_1()
             .min_h_0()
+            // Outside the peeking column (it blocks the mouse).
+            .on_mouse_move(cx.listener(|this, _: &MouseMoveEvent, _, cx| {
+                this.sidebar_pointer_moved_away(cx);
+            }))
             // The chat list follows its resize edge while dragged.
             .on_drag_move(
                 cx.listener(|this, event: &DragMoveEvent<SidebarResize>, window, cx| {
@@ -162,13 +175,14 @@ impl QuillApp {
                 }),
             )
             .when_some(list, |this, (_, column)| {
-                this.child(column).when(!layout.one_column, |this| {
+                this.child(column).when(layout.resize_handle(), |this| {
                     this.child(self.sidebar_resize_handle(cx))
                 })
             })
             .children(forum)
             .when(layout.chat, |this| this.child(self.conversation_slot(cx)))
             .children(panels)
+            .children(peek)
             .into_any_element()
     }
 

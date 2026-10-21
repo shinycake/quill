@@ -9,6 +9,7 @@ fn input(width: f32) -> ShellInput {
         forum: ForumColumn::Hidden,
         topic_open: false,
         panels: None,
+        docked: 1.,
     }
 }
 
@@ -304,4 +305,69 @@ fn a_toast_centres_in_forum_and_fill_layouts() {
     });
     assert_eq!(fill.panels, PanelPane::Fill);
     assert_eq!(fill.chat_insets(0.), (0., 0.));
+}
+
+#[test]
+fn a_hidden_list_column_gives_the_chat_the_whole_window() {
+    let input = ShellInput {
+        rail: 72.,
+        docked: 0.,
+        ..input(1200.)
+    };
+    let layout = shell_layout(input);
+    assert!(!layout.one_column);
+    // The list keeps its width to slide back in, but takes no room.
+    assert_eq!(layout.list, Some(300.));
+    assert_eq!(layout.list_column(72.), 0.);
+    assert!(layout.list_column_hidden());
+    assert!(!layout.resize_handle());
+    assert!(layout.sidebar_toggle());
+    assert_eq!(layout.chat_insets(72.), (0., 0.));
+    assert_eq!(chat_pane_width(input, &layout), 1200.);
+}
+
+#[test]
+fn a_sliding_list_column_narrows_without_squeezing_the_list() {
+    let input = ShellInput {
+        rail: 72.,
+        docked: 0.5,
+        ..input(1200.)
+    };
+    let layout = shell_layout(input);
+    assert_eq!(layout.list, Some(300.));
+    assert_eq!(layout.list_column(72.), 186.);
+    assert!(layout.resize_handle());
+    assert_eq!(layout.chat_insets(72.), (186., 0.));
+    assert_eq!(chat_pane_width(input, &layout), 1200. - 186.);
+}
+
+#[test]
+fn a_hidden_column_leaves_room_for_a_side_panel() {
+    // Shown, 300 list + 380 chat leaves only 220: the panel fills.
+    let shown = ShellInput {
+        panels: Some(INFO_PANEL_WIDTH),
+        ..input(900.)
+    };
+    assert_eq!(shell_layout(shown).panels, PanelPane::Fill);
+    let layout = shell_layout(ShellInput {
+        docked: 0.,
+        ..shown
+    });
+    assert_eq!(layout.panels, PanelPane::Column(INFO_PANEL_WIDTH));
+    assert!(layout.chat);
+}
+
+#[test]
+fn one_column_ignores_a_hidden_list_column() {
+    let narrow = one_column_below(0.) - 1.;
+    let layout = shell_layout(ShellInput {
+        chat_open: false,
+        docked: 0.,
+        ..input(narrow)
+    });
+    assert!(layout.one_column);
+    assert_eq!(layout.list, Some(narrow));
+    assert_eq!(layout.list_column(0.), narrow);
+    assert!(!layout.sidebar_toggle());
+    assert!(!layout.list_column_hidden());
 }

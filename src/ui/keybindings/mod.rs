@@ -10,9 +10,9 @@ use super::actions::{
     RecordRoundMessage, ReopenClosedWindow, ReplyToNext, ReplyToPrevious, ScheduleSend,
     SelectionExtendNewer, SelectionExtendOlder, SelectionFocusNewer, SelectionFocusOlder,
     SendSilently, ShowAdminLog, ShowChatMenu, ShowChatPreview, ShowScheduledMessages,
-    StoryTogglePause, ToggleFullscreen, ToggleLinkPreview, ToggleMessageSelection, ToggleTheme,
-    ViewerCopy, ViewerFlipHorizontal, ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave,
-    ViewerZoomIn, ViewerZoomOut, ViewerZoomReset,
+    StoryTogglePause, ToggleFullscreen, ToggleLinkPreview, ToggleMessageSelection, ToggleSidebar,
+    ToggleTheme, ViewerCopy, ViewerFlipHorizontal, ViewerFlipVertical, ViewerNext, ViewerPrev,
+    ViewerSave, ViewerZoomIn, ViewerZoomOut, ViewerZoomReset,
 };
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -44,6 +44,13 @@ macro_rules! primary {
 const QUOTE_CHORDS: &[&str] = &["cmd->", "cmd-shift-."];
 #[cfg(not(target_os = "macos"))]
 const QUOTE_CHORDS: &[&str] = &["ctrl-shift-.", "ctrl->"];
+
+/// Hide / show the chat list column: macOS's own Show Sidebar chord
+/// (Cmd+Ctrl+S), Ctrl+Shift+S elsewhere (Ctrl+S alone would read as Save).
+#[cfg(target_os = "macos")]
+pub(in crate::ui) const SIDEBAR_CHORD: &str = "cmd-ctrl-s";
+#[cfg(not(target_os = "macos"))]
+pub(in crate::ui) const SIDEBAR_CHORD: &str = "ctrl-shift-s";
 
 /// Key context of the composer's Textarea wrapper (see
 /// [`composer_bindings`]).
@@ -104,6 +111,11 @@ pub const REBINDABLE_ACTIONS: &[RebindableAction] = &[
         id: "focus-composer",
         label: keys::Q_PREFS_FOCUS_COMPOSER,
         defaults: &["cmd-shift-l", "ctrl-shift-l"],
+    },
+    RebindableAction {
+        id: "toggle-sidebar",
+        label: keys::Q_PREFS_TOGGLE_SIDEBAR,
+        defaults: &[SIDEBAR_CHORD],
     },
     RebindableAction {
         id: "next-chat",
@@ -301,6 +313,7 @@ pub fn keybinding_for(id: &str, keystroke: &str) -> Option<KeyBinding> {
     match id {
         "focus-sidebar" => Some(KeyBinding::new(keystroke, FocusSidebar, None)),
         "focus-composer" => Some(KeyBinding::new(keystroke, FocusComposer, None)),
+        "toggle-sidebar" => Some(KeyBinding::new(keystroke, ToggleSidebar, None)),
         "next-chat" => Some(KeyBinding::new(keystroke, NextChat, None)),
         "prev-chat" => Some(KeyBinding::new(keystroke, PrevChat, None)),
         "load-older" => Some(KeyBinding::new(keystroke, LoadOlder, None)),
@@ -755,7 +768,7 @@ mod tests {
     fn reference_table_matches_resolved_defaults() {
         let defaults = default_bindings();
         // macOS adds ⌃⌘F first, for the Window menu's Toggle Full Screen.
-        let expected = if cfg!(target_os = "macos") { 107 } else { 106 };
+        let expected = if cfg!(target_os = "macos") { 108 } else { 107 };
         assert_eq!(defaults.len(), expected);
         for row in resolve_keybindings(&[]) {
             for chord in row.live {

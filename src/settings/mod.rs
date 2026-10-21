@@ -230,6 +230,9 @@ pub struct WindowState {
     pub maximized: bool,
     #[serde(default = "default_sidebar_width")]
     pub sidebar_width: f32,
+    /// The chat list column is hidden (the conversation fills the window).
+    #[serde(default)]
+    pub sidebar_hidden: bool,
 }
 
 fn default_sidebar_width() -> f32 {
@@ -345,8 +348,13 @@ mod tests {
             height: 800.,
             maximized: false,
             sidebar_width: 9000.,
+            sidebar_hidden: true,
         };
         assert_eq!(state.sanitized().unwrap().sidebar_width, MAX_SIDEBAR_WIDTH);
+        assert!(state.sanitized().unwrap().sidebar_hidden);
+        let saved = serde_json::to_string(&state).unwrap();
+        let loaded: WindowState = serde_json::from_str(&saved).unwrap();
+        assert_eq!(loaded, state);
         assert!(WindowState { width: 0., ..state }.sanitized().is_none());
         assert!(
             WindowState {
@@ -360,6 +368,7 @@ mod tests {
         let legacy: WindowState =
             serde_json::from_str(r#"{"x":0,"y":0,"width":1000,"height":700}"#).unwrap();
         assert_eq!(legacy.sidebar_width, DEFAULT_SIDEBAR_WIDTH);
+        assert!(!legacy.sidebar_hidden);
     }
 
     #[test]

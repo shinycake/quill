@@ -25,6 +25,8 @@ pub(crate) struct WindowMenuState {
     pub(crate) session_usable: bool,
     /// The main window is the active (key) window.
     pub(crate) main_active: bool,
+    /// The chat list column is hidden (the View menu offers Show Sidebar).
+    pub(crate) sidebar_hidden: bool,
 }
 
 /// The Window menu's commands.
@@ -129,6 +131,7 @@ mod tests {
         let signed_out = WindowMenuState {
             session_usable: false,
             main_active: true,
+            sidebar_hidden: false,
         };
         assert_eq!(
             titles(signed_out),
@@ -147,6 +150,7 @@ mod tests {
         let ready_in_background = WindowMenuState {
             session_usable: true,
             main_active: false,
+            sidebar_hidden: false,
         };
         assert!(
             titles(ready_in_background)
