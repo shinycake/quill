@@ -116,6 +116,8 @@ pub(super) fn message(missing: &Missing, virtio_gpu: bool, detail: &str) -> Stri
 pub(super) fn summary(missing: &Missing) -> &'static str {
     match missing {
         Missing::Loader => tr(keys::Q_MISC_VULKAN_SUMMARY_LOADER),
+        // An installed card driver needs checking, not lavapipe first.
+        Missing::UsableDevice { hardware: true, .. } => tr(keys::Q_MISC_VULKAN_SUMMARY_GPU),
         Missing::Driver | Missing::UsableDevice { .. } => tr(keys::Q_MISC_VULKAN_SUMMARY_LAVAPIPE),
     }
 }
