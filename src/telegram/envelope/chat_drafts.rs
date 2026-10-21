@@ -9,9 +9,9 @@ pub struct ChatDraft {
     pub text: String,
     pub reply_to_message_id: Option<MessageId>,
     /// Slice G1: partial-message quote carried by the draft's `reply_to`
-    /// (`inputTextQuote`, schema 1.8.67 line 3056) — `(text, position)`
-    /// with `position` in UTF-16 code units.
-    pub quote: Option<(String, i32)>,
+    /// (`inputTextQuote`, schema 1.8.67 line 3056): text, formatting and
+    /// `position` in UTF-16 code units.
+    pub quote: Option<crate::composer::QuoteSelection>,
     /// The checklist task or poll option the draft replies to.
     pub item: crate::composer::ReplyItem,
     /// `draftMessage.suggested_post_info`: the suggest bar's terms in a
@@ -86,12 +86,20 @@ pub(crate) fn parse_chat_draft(value: Option<&Value>) -> Option<ChatDraft> {
                 if quote.get("@type").and_then(Value::as_str) != Some("inputTextQuote") {
                     return None;
                 }
-                let text = quote
-                    .get("text")
+                let formatted = quote.get("text");
+                let text = formatted
                     .and_then(|formatted| formatted.get("text"))
                     .and_then(Value::as_str)?;
                 let position = quote.get("position").and_then(Value::as_i64)?.sat_i32();
-                Some((text.to_string(), position))
+                Some(crate::composer::QuoteSelection {
+                    text: text.to_string(),
+                    position,
+                    entities: super::message_content::parse_text_entities(text, formatted),
+                    from_rich: quote
+                        .get("rich_texts")
+                        .and_then(Value::as_array)
+                        .is_some_and(|texts| !texts.is_empty()),
+                })
             });
             let task = reply
                 .get("checklist_task_id")

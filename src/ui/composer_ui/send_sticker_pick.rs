@@ -816,6 +816,16 @@ impl QuillApp {
                     super::search_ui::one_line_preview(&item_line.unwrap_or_default()),
                 ))
                 .into_any_element(),
+            (Some(quote), _) if !quote.entities.is_empty() => div()
+                .text_sm()
+                .child(super::chatlist_style::chat_list_preview_line(
+                    None,
+                    &quote.text,
+                    &quote.entities,
+                    &std::collections::HashMap::new(),
+                    cx,
+                ))
+                .into_any_element(),
             (Some(quote), _) => div()
                 .text_sm()
                 .truncate()

@@ -38,6 +38,8 @@ pub struct ReplyHeader {
     /// Quote, else a one-line preview of the original, else the state
     /// text ("Deleted message", "Loading…").
     pub text: String,
+    /// Formatting of `text` when it is a quote.
+    pub entities: Vec<crate::text::TextEntity>,
     pub is_quote: bool,
     /// Title of the other chat for replies from elsewhere ("Name › Chat").
     pub external_chat: Option<String>,
@@ -245,6 +247,7 @@ impl Session {
             name,
             accent,
             text: "Story".to_string(),
+            entities: Vec::new(),
             is_quote: false,
             external_chat: None,
             thumb: story.map(story_thumb_candidates).unwrap_or_default(),
@@ -297,11 +300,18 @@ impl Session {
             .histories
             .get(&target_chat.0)
             .is_some_and(|history| history.is_tombstone(reply.message_id));
-        let quote = reply
-            .quote_text
-            .as_deref()
-            .map(str::trim)
-            .filter(|text| !text.is_empty());
+        let (quote, quote_entities) = match reply.quote_text.as_deref() {
+            Some(text) => {
+                let (trimmed, entities) =
+                    crate::text::quote::trim_with_entities(text, &reply.quote_entities);
+                if trimmed.is_empty() {
+                    (None, Vec::new())
+                } else {
+                    (Some(trimmed), entities)
+                }
+            }
+            None => (None, Vec::new()),
+        };
         let original_preview = original.map(effective_preview);
         let preview = original_preview
             .clone()
@@ -361,6 +371,7 @@ impl Session {
             name,
             accent,
             text,
+            entities: quote_entities,
             is_quote: quote.is_some(),
             external_chat,
             thumb,

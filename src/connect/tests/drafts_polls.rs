@@ -325,7 +325,7 @@ fn quoted_draft_round_trips_input_text_quote() {
     driver.select_chat(ChatId(7)).unwrap();
     let reply = SendReply {
         message_id: MessageId(3),
-        quote: Some(("meet at".to_string(), 0)),
+        quote: Some(crate::composer::QuoteSelection::plain("meet at", 0)),
         source_chat: None,
         item: Default::default(),
     };
@@ -341,7 +341,10 @@ fn quoted_draft_round_trips_input_text_quote() {
     let saved = driver.session.chats.get(&7).unwrap().draft.clone().unwrap();
     assert_eq!(saved.text, "sounds good");
     assert_eq!(saved.reply_to_message_id, Some(MessageId(3)));
-    assert_eq!(saved.quote, Some(("meet at".to_string(), 0)));
+    assert_eq!(
+        saved.quote,
+        Some(crate::composer::QuoteSelection::plain("meet at", 0))
+    );
     assert!(!sink.rendered().contains("CANARY"));
     let _ = std::fs::remove_dir_all(&dir);
 }

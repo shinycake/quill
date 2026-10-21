@@ -58,6 +58,23 @@ pub struct ComposerReplyTo {
 pub struct QuoteSelection {
     pub text: String,
     pub position: i32,
+    /// The formatting of the quoted part (`inputTextQuote.text.entities`).
+    pub entities: Vec<crate::text::TextEntity>,
+    /// The quote was cut from a rich message, so `inputTextQuote.rich_texts`
+    /// carries it too and `position` counts in the joined quotable texts.
+    pub from_rich: bool,
+}
+
+impl QuoteSelection {
+    /// An unformatted quote of an ordinary message.
+    pub fn plain(text: impl Into<String>, position: i32) -> Self {
+        Self {
+            text: text.into(),
+            position,
+            entities: Vec::new(),
+            from_rich: false,
+        }
+    }
 }
 
 impl ComposerReplyTo {
@@ -139,10 +156,7 @@ impl ComposerReplyTo {
     /// reply is not for that chat. Drafts keep using [`Self::send_reply`],
     /// which only knows same-chat replies.
     pub fn send_target(&self, chat: ChatId) -> Option<crate::telegram::SendReply> {
-        let quote = self
-            .quote
-            .as_ref()
-            .map(|quote| (quote.text.clone(), quote.position));
+        let quote = self.quote.clone();
         if self.chat_id == chat {
             Some(crate::telegram::SendReply {
                 message_id: self.message_id,
@@ -173,10 +187,7 @@ impl ComposerReplyTo {
         (self.chat_id == chat_id && self.target_chat.is_none()).then(|| {
             crate::telegram::SendReply {
                 message_id: self.message_id,
-                quote: self
-                    .quote
-                    .as_ref()
-                    .map(|quote| (quote.text.clone(), quote.position)),
+                quote: self.quote.clone(),
                 source_chat: None,
                 item: self.item.clone(),
             }
@@ -247,10 +258,7 @@ mod tests {
     fn updating_the_quote_keeps_the_target() {
         let reply = ComposerReplyTo::new(ChatId(12), MessageId(40))
             .into_chat(ChatId(11))
-            .with_new_quote(Some(QuoteSelection {
-                text: "q".into(),
-                position: 0,
-            }));
+            .with_new_quote(Some(QuoteSelection::plain("q", 0)));
         assert_eq!(reply.target_chat, Some(ChatId(11)));
         assert!(reply.quote.is_some());
         assert!(reply.with_new_quote(None).quote.is_none());

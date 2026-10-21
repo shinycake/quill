@@ -312,17 +312,14 @@ mod tests {
             ComposerReplyTo::with_quote(
                 ChatId(12),
                 MessageId(40),
-                QuoteSelection {
-                    text: "part".into(),
-                    position: 3,
-                },
+                QuoteSelection::plain("part", 3),
             )
             .into_chat(ChatId(11)),
         ));
         let reply = aimed.send_reply().unwrap();
         assert_eq!(reply.message_id, MessageId(40));
         assert_eq!(reply.source_chat, Some(ChatId(12)));
-        assert_eq!(reply.quote, Some(("part".to_string(), 3)));
+        assert_eq!(reply.quote, Some(QuoteSelection::plain("part", 3)));
     }
 
     #[test]

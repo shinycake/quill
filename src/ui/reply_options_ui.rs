@@ -20,7 +20,8 @@ use gpui_kit::*;
 use quill::composer::{ComposerReplyTo, QuoteSelection};
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
-use quill::reply_options::{ReplyOption, quote_segments, reply_options};
+use quill::quote_source::QuotableText;
+use quill::reply_options::{ReplyOption, reply_options};
 use quill::telegram::envelope::{ChatKind, MessageSender, effective_content};
 use std::path::PathBuf;
 
@@ -71,19 +72,32 @@ fn section_label(text: &'static str, cx: &App) -> Div {
 }
 
 impl QuillApp {
-    /// The text of the message a reply points at, if it is loaded.
-    pub(in crate::ui) fn reply_message_text(&self, reply: &ComposerReplyTo) -> Option<String> {
+    /// The quotable text of a loaded message, with its formatting.
+    pub(in crate::ui) fn message_quotable(
+        &self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Option<QuotableText> {
         let message = self
             .session()?
             .histories
-            .get(&reply.chat_id.0)?
+            .get(&chat_id.0)?
             .messages
-            .get(&reply.message_id.0)?;
-        Self::message_copyable_text(effective_content(
-            &message.content,
-            message.ephemeral.as_ref(),
-        ))
-        .filter(|text| !text.trim().is_empty())
+            .get(&message_id.0)?;
+        let content = effective_content(&message.content, message.ephemeral.as_ref());
+        QuotableText::of(content).or_else(|| {
+            Self::message_copyable_text(content)
+                .filter(|text| !text.trim().is_empty())
+                .map(QuotableText::plain)
+        })
+    }
+
+    /// The text of the message a reply points at, if it is loaded.
+    pub(in crate::ui) fn reply_message_text(
+        &self,
+        reply: &ComposerReplyTo,
+    ) -> Option<QuotableText> {
+        self.message_quotable(reply.chat_id, reply.message_id)
     }
 
     /// Whether the reply's message may be answered in another chat:
@@ -426,7 +440,7 @@ impl QuillApp {
             .gap_1()
             .max_h(px(220.))
             .overflow_y_scroll();
-        for (index, part) in quote_segments(&text).into_iter().enumerate() {
+        for (index, part) in text.segments().into_iter().enumerate() {
             let selected = picked.as_ref() == Some(&part);
             let label = part.text.clone();
             list = list.child(

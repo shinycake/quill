@@ -446,7 +446,7 @@ fn set_chat_draft_message_matches_1_8_67() {
         Some("agree"),
         Some(&SendReply {
             message_id: MessageId(101),
-            quote: Some(("meet at".to_string(), 0)),
+            quote: Some(crate::composer::QuoteSelection::plain("meet at", 0)),
             source_chat: None,
             item: Default::default(),
         }),

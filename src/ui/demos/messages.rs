@@ -164,8 +164,23 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_reply(session, &self.demo_ui.sink, &self.demo_ui.seq);
-            self.composer_ui
-                .set_reply(Some(ComposerReplyTo::new(ChatId(11), MessageId(101))));
+            // The quoted part keeps its formatting in the bar and the strip.
+            let entity = |start, end, kind| quill::text::TextEntity {
+                utf8_start: start,
+                utf8_end: end,
+                kind,
+            };
+            let mut quote = quill::composer::QuoteSelection::plain("Hello from injected JSON.", 0);
+            quote.entities = vec![
+                entity(0, 5, quill::text::TextEntityKind::Bold),
+                entity(11, 19, quill::text::TextEntityKind::Italic),
+                entity(20, 24, quill::text::TextEntityKind::Code),
+            ];
+            self.composer_ui.set_reply(Some(ComposerReplyTo::with_quote(
+                ChatId(11),
+                MessageId(101),
+                quote,
+            )));
         }
     }
 

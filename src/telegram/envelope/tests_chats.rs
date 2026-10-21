@@ -621,7 +621,30 @@ fn draft_message_parses_partial_quote() {
             let draft = draft.expect("draft");
             assert_eq!(draft.text, "sounds good");
             assert_eq!(draft.reply_to_message_id, Some(MessageId(101)));
-            assert_eq!(draft.quote, Some(("meet at".to_string(), 7)));
+            assert_eq!(
+                draft.quote,
+                Some(crate::composer::QuoteSelection::plain("meet at", 7))
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn draft_message_quote_keeps_its_entities() {
+    let env = parse_envelope(
+        r#"{"@type":"updateChatDraftMessage","chat_id":11,"draft_message":{"@type":"draftMessage","reply_to":{"@type":"inputMessageReplyToMessage","message_id":101,"quote":{"@type":"inputTextQuote","text":{"@type":"formattedText","text":"meet at noon","entities":[{"@type":"textEntity","offset":8,"length":4,"type":{"@type":"textEntityTypeItalic"}}]},"rich_texts":[{"@type":"richTextPlain","text":"meet at noon"}],"position":7},"checklist_task_id":0,"poll_option_id":""},"date":1,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"ok","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null},"positions":[]}"#,
+    )
+    .unwrap();
+    match env.payload {
+        EnvelopePayload::Messages(MessagesPayload::UpdateChatDraftMessage { draft, .. }) => {
+            let quote = draft.expect("draft").quote.expect("quote");
+            assert_eq!(quote.entities.len(), 1);
+            assert_eq!(
+                (quote.entities[0].utf8_start, quote.entities[0].utf8_end),
+                (8, 12)
+            );
+            assert!(quote.from_rich);
         }
         other => panic!("{other:?}"),
     }

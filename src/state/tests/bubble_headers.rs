@@ -4,6 +4,7 @@ use super::common::*;
 use super::*;
 use crate::ids::UserId;
 use crate::state::footer_tooltip;
+use crate::text::{TextEntity, TextEntityKind};
 
 const GROUP: i64 = -1001;
 
@@ -89,6 +90,42 @@ fn reply_header_shows_the_quote_instead_of_the_message() {
     assert!(header.is_quote);
     assert_eq!(header.text, "two");
     assert_eq!(header.name.as_deref(), Some("Ada Lovelace"));
+}
+
+#[test]
+fn reply_header_quote_keeps_its_formatting() {
+    let (mut session, sink, seq) = seeded();
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &text_message(10, 31, "one two three", ""),
+    );
+    // A quote cut from a rich message: TDLib fills `text` with the same
+    // formatting it puts in `rich_texts`. The padding is trimmed and the
+    // bold span moves with the text.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &text_message(
+            11,
+            77,
+            "answer",
+            r#","reply_to":{"@type":"messageReplyToMessage","chat_id":-1001,"message_id":10,"quote":{"@type":"textQuote","text":{"@type":"formattedText","text":"  two three","entities":[{"@type":"textEntity","offset":2,"length":3,"type":{"@type":"textEntityTypeBold"}}]},"rich_texts":[{"@type":"richTexts","texts":[{"@type":"richTextBold","text":{"@type":"richTextPlain","text":"two"}},{"@type":"richTextPlain","text":" three"}]}],"position":4,"is_manual":true},"checklist_task_id":0,"poll_option_id":"","origin":null,"origin_send_date":0,"content":null}"#,
+        ),
+    );
+    let header = session.reply_header(&message(&session, 11)).unwrap();
+    assert!(header.is_quote);
+    assert_eq!(header.text, "two three");
+    assert_eq!(
+        header.entities,
+        vec![TextEntity {
+            utf8_start: 0,
+            utf8_end: 3,
+            kind: TextEntityKind::Bold,
+        }]
+    );
 }
 
 #[test]

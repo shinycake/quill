@@ -539,6 +539,7 @@ pub fn last_line_is_rtl(text: &str) -> bool {
 }
 
 pub mod about;
+pub mod quote;
 
 #[cfg(test)]
 mod tests;
