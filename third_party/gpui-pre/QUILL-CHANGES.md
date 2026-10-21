@@ -47,3 +47,16 @@ DirectX renderer as YUV instead of BGRA (`docs/decisions/video-player-nv12.md`):
   window can't draw (with an image) and knows when a paused picture is on
   screen. The answer belongs to the frame, so each window answers for
   itself.
+
+## List scroll range counts the padding
+
+Added in 2026 with gpui-kit 0.8.0 (`docs/decisions/gpui-kit-0-8-0.md`).
+`src/elements/list.rs`: `ListState::max_scroll_offset`, which backs
+`max_offset_for_scrollbar` and the bottom-aligned
+`scroll_px_offset_for_scrollbar`, left out the list's vertical padding,
+while the list's own wheel scroll and `set_offset_from_scrollbar` include
+it. Kit 0.8.0's `ScrollBounce` scrolls a list through the scrollbar handle
+and clamps to that smaller range, so on macOS a padded `MessageScroller`
+(the chat history) stopped one padding short of its end: tail following
+never resumed and the jump-to-latest button stayed up. The range now adds
+`padding.top + padding.bottom`, the same bound the list clamps to.
