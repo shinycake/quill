@@ -178,6 +178,7 @@ pub mod service_text;
 mod service_text_tests;
 pub mod settings;
 pub mod settings_account;
+pub mod settings_catalog;
 pub mod share_box;
 pub mod signin;
 pub mod single_instance;
