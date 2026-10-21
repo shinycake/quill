@@ -394,6 +394,7 @@ impl QuillApp {
         self.settings.whats_new.notes = Notes::Loaded(Rc::new(notes));
     }
 
+    #[cfg(test)]
     pub(crate) fn whats_new_window(&self) -> Option<AnyWindowHandle> {
         self.settings.whats_new.window
     }
