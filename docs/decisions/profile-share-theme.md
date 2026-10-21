@@ -29,13 +29,13 @@ Parity item `profile-share-theme`, PR 2 of the QR box (PR 1 is `profile-qr-code-
 
 There is no performance change to measure: the new work runs only while the box is open. Struct sizes, measured with `size_of` in the debug `demo-capture` test build:
 
-| | main (after #1082) | this PR |
+| | main (6898573d5) | this PR |
 |---|---|---|
-| `QuillApp` | 73,128 B | 73,256 B |
+| `QuillApp` | 41,016 B | 41,024 B |
+| `Session` | 3,592 B | 3,792 B |
 | `PeerQrUi` | 432 B | 240 B |
-| `Session` | | 36,128 B |
 
-`PeerQrUi::open` is now `Option<Box<OpenQr>>` (`OpenQr` is 400 B). `PeerQrData` grew to 304 B with the themes map, the gifts list and the save queues. All of them are heap collections, and the budgets in `src/ui/stack_budget_tests.rs` still pass.
+`PeerQrUi::open` is now `Option<Box<OpenQr>>` (`OpenQr` is 400 B), which pays for most of the new fields in `QuillApp`. `Session` grows by 200 B because `PeerQrData` sits inline in `UsersState` and now holds the themes map, the gifts list and the save queues (304 B). Their contents live on the heap. Both types stay well inside the bounds in `src/ui/stack_budget_tests.rs` (48 KB and 8 KB).
 
 ## Not verified
 
