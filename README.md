@@ -252,7 +252,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Bubble tails and grouped-message corner radii <!-- parity:render-bubble-tails -->
 - [x] Sender avatar sticks to the bottom of a group of messages while scrolling <!-- parity:render-sticky-avatar -->
 - [x] Code blocks show a language header with a Copy button <!-- parity:render-code-block-header -->
-- [ ] Syntax highlighting in code blocks, from the block's language (tdesktop libprisma; GPUI Kit 0.8 `syntect` feature) <!-- parity:render-code-syntax-highlight -->
+- [x] Syntax highlighting in code blocks, from the block's language (tdesktop libprisma; GPUI Kit 0.8 `syntect` feature) <!-- parity:render-code-syntax-highlight -->
 - [x] "Photo has expired" style placeholders for expired media (partial: generic unsupported card for some) <!-- parity:render-expired-media -->
 - [x] Fact-check block under messages <!-- parity:render-fact-check -->
 - [x] "About sponsored messages" info box from the Ad menu <!-- parity:render-sponsored-info -->
