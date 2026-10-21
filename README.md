@@ -160,7 +160,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Clear formatting on selection (applies to message text and captions) <!-- parity:msg-clear-formatting --> (M1: toolbar clear strips markup on selection or whole text, composer.rs)
 - [x] Reply to a message <!-- parity:msg-reply --> (begin_reply_to ui/mod.rs:4269)
 - [x] Quote selected text in a reply — "Quote reply" menu item → quote picker → validated UTF-16 offset → `inputTextQuote` on every send path (text, media, albums, voice notes, GIFs/stickers, polls); ❝quote❞ shown in the reply banner (src/composer.rs, src/telegram/requests.rs, src/ui/mod.rs) <!-- parity:msg-reply-quote -->
-- [ ] Quote formatted text from rich messages (TDLib 1.8.69 `rich_texts` in quotes) <!-- parity:msg-quote-rich-text -->
+- [x] Quote formatted text from rich messages (TDLib 1.8.69 `rich_texts` in quotes) <!-- parity:msg-quote-rich-text -->
 - [x] Reply bar in composer with cancel <!-- parity:msg-reply-bar-cancel --> (cancel_reply_draft composer.rs:131)
 - [x] Swipe-to-reply gesture <!-- parity:msg-swipe-reply --> (M1: leftward drag >24px on a message starts a reply, ui/mod.rs)
 - [x] Forward with "Forwarded from" attribution <!-- parity:msg-forward-attribution --> (forward_messages, send_copy:false requests.rs:2172)

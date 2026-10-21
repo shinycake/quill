@@ -1,2 +1,0 @@
-# quotes keep their formatting; quotes from rich messages send rich_texts
-parity:msg-quote-rich-text
