@@ -60,3 +60,13 @@ and clamps to that smaller range, so on macOS a padded `MessageScroller`
 (the chat history) stopped one padding short of its end: tail following
 never resumed and the jump-to-latest button stayed up. The range now adds
 `padding.top + padding.bottom`, the same bound the list clamps to.
+
+## Animations read the executor clock
+
+Added in 2026 (`docs/decisions/fix-gift-delete-flake.md`).
+`src/elements/animation.rs`: `with_animation` and the spring element took
+their start and step times from `Instant::now()`, the wall clock, so a test
+that advanced the executor's clock never moved them and a loaded machine let
+real time decide whether a kit dialog or alert had finished entering. They
+now read `cx.background_executor().now()`, which is the wall clock in a
+running app and the simulated clock under `TestAppContext`.

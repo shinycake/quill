@@ -180,7 +180,8 @@ fn the_experimental_row_on_the_advanced_page_opens_the_experimental_page(cx: &mu
     app.update(vcx, |_, cx| cx.notify());
     for _ in 0..3 {
         vcx.run_until_parked();
-        std::thread::sleep(std::time::Duration::from_millis(300));
+        vcx.executor()
+            .advance_clock(std::time::Duration::from_millis(300));
         vcx.update(|window, cx| window.render_frame(cx));
     }
     vcx.update(|window, cx| window.click("settings-experimental", cx));
@@ -241,7 +242,8 @@ fn the_hardware_video_switch_on_the_advanced_page_flips_the_setting(cx: &mut Tes
     app.update(vcx, |_, cx| cx.notify());
     for _ in 0..3 {
         vcx.run_until_parked();
-        std::thread::sleep(std::time::Duration::from_millis(300));
+        vcx.executor()
+            .advance_clock(std::time::Duration::from_millis(300));
         vcx.update(|window, cx| window.render_frame(cx));
     }
     vcx.update(|window, cx| window.click("advanced-hardware-video", cx));

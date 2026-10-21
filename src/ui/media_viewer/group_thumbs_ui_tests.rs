@@ -45,9 +45,9 @@ fn album_of_three(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
 }
 
 /// Let the slide to a new current thumb finish. GPUI times it on the
-/// wall clock, so this waits for real rather than advancing the test one.
+/// executor clock, so this advances the test one.
 fn slide(vcx: &mut VisualTestContext) {
-    std::thread::sleep(Duration::from_millis(200));
+    vcx.executor().advance_clock(Duration::from_millis(200));
     settle(vcx);
 }
 
