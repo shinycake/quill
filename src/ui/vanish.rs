@@ -55,7 +55,10 @@ thread_local! {
 
 fn record(id: i64, update: impl FnOnce(&mut Painted)) {
     PAINTED.with(|painted| {
-        let mut painted = painted.borrow_mut();
+        // A conflict skips this frame's record; the next paint writes it.
+        let Ok(mut painted) = painted.try_borrow_mut() else {
+            return;
+        };
         if painted.len() > 4096 {
             painted.clear();
         }
@@ -256,12 +259,31 @@ fn grains(seed: u64, area: Bounds<Pixels>, palette: &Palette) -> Vec<Grain> {
     grains
 }
 
+/// Consecutive frames a borrow conflict may keep the tick going: about two
+/// seconds at 60 fps. A borrow that never lets go then goes idle instead of
+/// ticking forever.
+const MAX_CONFLICT_FRAMES: u16 = 120;
+
+/// Count one more conflicted frame; true while the run is within the bound.
+/// The count is reset by the caller on the first clean borrow.
+fn conflict_keeps_running(conflicts: &std::cell::Cell<u16>) -> bool {
+    let frames = conflicts.get().saturating_add(1);
+    conflicts.set(frames);
+    if frames == MAX_CONFLICT_FRAMES + 1 {
+        // Once per conflict streak: the count is only reset by a clean borrow.
+        eprintln!("quill: vanish: dissolve list stayed borrowed; the tick is stopped");
+    }
+    frames <= MAX_CONFLICT_FRAMES
+}
+
 /// Where the dissolves read the time. Every instant they judge comes from
 /// here: when a delete was asked for, the frame's pin, and a read before
 /// any pin.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub(super) enum VanishClock {
-    #[default]
+    // Only `initial` builds it, and that is compiled out in a test with the
+    // `demo-capture` feature, so `Wall` is unused there.
+    #[cfg_attr(test, cfg_attr(feature = "demo-capture", allow(dead_code)))]
     Wall,
     /// Tests: time stands at this instant until the test moves it, so no
     /// phase depends on how fast the runner is.
@@ -270,7 +292,33 @@ pub(super) enum VanishClock {
     Manual(Instant),
 }
 
+/// Wall time in production. In a demo-capture test every app starts on a
+/// stopped clock, whichever constructor built it, so no test dissolves on
+/// the wall clock.
+impl Default for VanishClock {
+    fn default() -> Self {
+        Self::initial()
+    }
+}
+
 impl VanishClock {
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
+    fn initial() -> Self {
+        Self::Manual(Instant::now())
+    }
+
+    #[cfg(test)]
+    #[cfg(not(feature = "demo-capture"))]
+    fn initial() -> Self {
+        Self::Wall
+    }
+
+    #[cfg(not(test))]
+    fn initial() -> Self {
+        Self::Wall
+    }
+
     fn now(self) -> Instant {
         match self {
             Self::Wall => Instant::now(),
@@ -309,14 +357,18 @@ enum Phase {
 
 impl Vanishing {
     fn phase(&self, now: Instant) -> Phase {
-        let Some(started) = self.started else {
-            return if now.duration_since(self.requested) < VANISH_WAIT {
+        if self.started.is_none() {
+            // A clock behind the request counts as no time passed.
+            let waited = now
+                .checked_duration_since(self.requested)
+                .unwrap_or(Duration::ZERO);
+            return if waited < VANISH_WAIT {
                 Phase::Waiting
             } else {
                 Phase::Done
             };
-        };
-        let t = now.duration_since(started).as_secs_f32();
+        }
+        let t = self.elapsed(now).unwrap_or(0.);
         if t >= DUST_LIFE {
             Phase::Done
         } else if self.row.is_some() && t < WIPE + self.collapse() {
@@ -330,7 +382,12 @@ impl Vanishing {
     /// vanish logic judges (`vanish_now`), so paint, the rows hash and the
     /// remeasure all agree.
     fn elapsed(&self, now: Instant) -> Option<f32> {
-        Some(now.duration_since(self.started?).as_secs_f32())
+        let started = self.started?;
+        Some(
+            now.checked_duration_since(started)
+                .unwrap_or(Duration::ZERO)
+                .as_secs_f32(),
+        )
     }
 
     fn collapse(&self) -> f32 {
@@ -364,13 +421,17 @@ impl QuillApp {
             return;
         };
         let now = self.vanish_clock_now();
-        let mut vanishing = self.history.vanishing.borrow_mut();
+        // A borrow conflict drops the request: the message just vanishes
+        // without the effect.
+        let Ok(mut vanishing) = self.history.vanishing.try_borrow_mut() else {
+            return;
+        };
         for id in ids {
             let Some(message) = history.messages.get(&id.0) else {
                 continue;
             };
             let (row, bubble) = PAINTED
-                .with(|painted| painted.borrow().get(&id.0).copied())
+                .with(|painted| painted.try_borrow().ok()?.get(&id.0).copied())
                 .map_or((None, None), |(row, bubble)| {
                     ((row.size.height > px(0.)).then_some(row), bubble)
                 });
@@ -404,7 +465,10 @@ impl QuillApp {
     pub(super) fn merge_vanishing(&self, messages: &mut Vec<HistoryMessage>) {
         let now = self.vanish_now();
         self.prune_vanishing(now);
-        let mut vanishing = self.history.vanishing.borrow_mut();
+        // A borrow conflict leaves the rows as they are for this frame.
+        let Ok(mut vanishing) = self.history.vanishing.try_borrow_mut() else {
+            return;
+        };
         let chat = messages.first().map(|m| m.chat_id);
         let mut added = false;
         for ghost in vanishing.iter_mut() {
@@ -496,7 +560,9 @@ impl QuillApp {
     /// A crumbling message's row, `t` seconds in: the message cut away
     /// behind the front, then an empty gap closing with a half-sine ease.
     pub(super) fn ghost_row(&self, id: MessageId, t: f32, row: AnyElement) -> AnyElement {
-        let vanishing = self.history.vanishing.borrow();
+        let Ok(vanishing) = self.history.vanishing.try_borrow() else {
+            return row;
+        };
         let Some(ghost) = vanishing.iter().find(|ghost| ghost.message.id == id) else {
             return row;
         };
@@ -561,12 +627,26 @@ impl QuillApp {
         }
         // The rows are kept while it runs: the frame clock drives it. The
         // tick is requested with no borrow held.
-        let running = !self.history.vanishing.borrow().is_empty();
+        // A conflict keeps the tick going for a bounded run of frames: the
+        // next frame normally sorts it out.
+        let running = match self.history.vanishing.try_borrow() {
+            Ok(vanishing) => {
+                self.history.vanish_conflicts.set(0);
+                !vanishing.is_empty()
+            }
+            Err(_) => conflict_keeps_running(&self.history.vanish_conflicts),
+        };
         if running {
             self.request_animation_tick(60, cx);
+        } else if self.history.vanish_conflicts.get() == MAX_CONFLICT_FRAMES + 1 {
+            // The bound just stopped the tick: paint once more so the next
+            // render prunes the finished ghosts.
+            cx.notify();
         }
         let now = self.vanish_now();
-        let vanishing = self.history.vanishing.borrow();
+        let Ok(vanishing) = self.history.vanishing.try_borrow() else {
+            return None;
+        };
         let clouds: Vec<(f32, Rc<Vec<Grain>>)> = vanishing
             .iter()
             .filter_map(|ghost| Some((ghost.elapsed(now)?, ghost.grains.clone())))
@@ -745,7 +825,9 @@ impl CutLeft {
 
 #[cfg(test)]
 mod tests {
-    use super::{FADE, Grain, MAX_GRAINS, Palette, WIPE, grains};
+    use super::{
+        FADE, Grain, MAX_CONFLICT_FRAMES, MAX_GRAINS, Palette, WIPE, conflict_keeps_running, grains,
+    };
     use gpui_kit::{Bounds, hsla, point, px, size, white};
 
     fn palette() -> Palette {
@@ -754,6 +836,30 @@ mod tests {
             text: white(),
             picture: None,
         }
+    }
+
+    #[test]
+    fn a_leaked_borrow_stops_the_tick_after_the_bound() {
+        let conflicts = std::cell::Cell::new(0);
+        for _ in 0..MAX_CONFLICT_FRAMES {
+            assert!(conflict_keeps_running(&conflicts));
+        }
+        assert!(!conflict_keeps_running(&conflicts));
+        assert!(!conflict_keeps_running(&conflicts));
+    }
+
+    #[test]
+    fn a_clean_borrow_gives_the_next_streak_the_full_bound() {
+        let conflicts = std::cell::Cell::new(0);
+        for _ in 0..MAX_CONFLICT_FRAMES - 1 {
+            assert!(conflict_keeps_running(&conflicts));
+        }
+        // The overlay resets the count on a clean borrow.
+        conflicts.set(0);
+        for _ in 0..MAX_CONFLICT_FRAMES {
+            assert!(conflict_keeps_running(&conflicts));
+        }
+        assert!(!conflict_keeps_running(&conflicts));
     }
 
     #[test]

@@ -28,10 +28,7 @@ fn new_app(cx: &mut TestAppContext, demo: &str) -> (Entity<QuillApp>, VisualTest
         Root::new(shell, window, cx)
     });
     let app: Entity<QuillApp> = slot.borrow().clone().unwrap();
-    let mut vcx = VisualTestContext::from_window(handle.into(), cx);
-    // Dissolves run on a clock only the test moves: how fast the runner is
-    // cannot end one early or move it to another phase.
-    app.update(&mut vcx, |app, _| app.freeze_vanish_clock());
+    let vcx = VisualTestContext::from_window(handle.into(), cx);
     (app, vcx)
 }
 
