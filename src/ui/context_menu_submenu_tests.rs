@@ -3,6 +3,7 @@
 //! focus back to the parent row, Up and Down stay inside it. A submenu the
 //! pointer opened takes the keys the same way, from the parent row.
 use super::context_menu_focus_tests::{focus_chat_list, new_app, open_chat_menu};
+use super::is_submenu_key;
 use crate::ui::app::QuillApp;
 use crate::ui::menu_states::ChatMenuSubmenu;
 use gpui_kit::test::TestWindowExt;
@@ -306,6 +307,50 @@ fn right_from_the_parent_row_enters_a_hover_opened_submenu(cx: &mut TestAppConte
     assert_eq!(submenu(&app, vcx), Some(ChatMenuSubmenu::Mute));
 }
 
+/// Enter on the parent row of a hover-opened submenu moves into it.
+#[gpui_kit::test]
+fn enter_from_the_parent_row_enters_a_hover_opened_submenu(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    hover_open_with_focus_on_mute(&app, vcx);
+    let drawn = submenu_labels(vcx);
+    assert!(drawn.len() > 1, "the submenu draws several rows");
+    vcx.simulate_keystrokes("enter");
+    settle(vcx);
+    assert_eq!(focused_label(vcx).as_ref(), drawn.first(), "first row");
+    assert_eq!(submenu(&app, vcx), Some(ChatMenuSubmenu::Mute));
+}
+
+/// A drawn submenu with no live row takes Down and Enter and leaves the focus
+/// on its parent row. The rows are dropped from the frame's claims, as if the
+/// submenu had drawn none.
+#[gpui_kit::test]
+fn a_drawn_submenu_without_live_rows_keeps_the_focus_on_its_parent(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    hover_open_with_focus_on_mute(&app, vcx);
+    app.update_in(vcx, |app, _, _| {
+        let items = &app.frame.context_menu_items;
+        let rows = items
+            .keys
+            .borrow()
+            .iter()
+            .filter(|k| is_submenu_key(**k))
+            .count();
+        assert!(rows > 0, "the submenu drew rows before they were dropped");
+        items.keys.borrow_mut().retain(|k| !is_submenu_key(*k));
+    });
+    for key in ["down", "enter"] {
+        vcx.simulate_keystrokes(key);
+        assert_eq!(
+            focused_label(vcx),
+            Some(mute_label()),
+            "{key} leaves the focus on the parent row"
+        );
+        assert_eq!(submenu(&app, vcx), Some(ChatMenuSubmenu::Mute), "{key}");
+    }
+}
+
 /// A submenu marked open whose parent row is not drawn (here Add to folder,
 /// absent without folders) is closed by the next key, which then acts as if
 /// none were open.
@@ -353,8 +398,9 @@ fn escape_with_a_stale_submenu_closes_the_menu(cx: &mut TestAppContext) {
     );
 }
 
-/// The first live row of a submenu is the first one drawn and enabled, not
-/// the one at index 0; a submenu with no live row has none.
+/// The first live row of a submenu is the first one that claimed a key (a
+/// disabled row never claims one), not the one at index 0; a submenu with no
+/// live row has none.
 #[gpui_kit::test]
 fn the_first_submenu_row_is_the_first_live_one(cx: &mut TestAppContext) {
     use crate::ui::context_menu_keys::{ContextMenuItems, MenuKeyTarget, row_key, submenu_key};
@@ -365,7 +411,7 @@ fn the_first_submenu_row_is_the_first_live_one(cx: &mut TestAppContext) {
         items.begin();
         items.mark_submenu_parent(30, ChatMenuSubmenu::Mute);
         assert_eq!(items.first_submenu_key(row_key(30)), None, "no rows drawn");
-        // Rows 0 and 1 are disabled, so only the rows from index 2 claim.
+        // Only rows 2 and 3 are drawn enabled; rows 0 and 1 claim nothing.
         for index in [2usize, 3] {
             let _ = div()
                 .id(("row", index))

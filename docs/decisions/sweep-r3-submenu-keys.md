@@ -3,8 +3,8 @@
 ## What tdesktop does
 
 `PopupMenu::popupSubmenu` sets `_activeSubmenu` whenever a submenu is shown,
-by hover or by key (lib_ui/ui/widgets/popup_menu.cpp:540); `childHiding` and
-`hideMenu` clear it (:688, :560). While it is set, `handleKeyPress`
+by hover or by key (lib_ui/ui/widgets/popup_menu.cpp:540); `childHiding` clears it (:688); a submenu that
+fails to prepare clears it (:560). While it is set, `handleKeyPress`
 (:571-590) hands every key to the submenu first, whichever row of the parent
 has the selection: Down and Up enter and walk the submenu (its selection was
 cleared on show, so Down takes its first item and Up its last,
