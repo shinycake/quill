@@ -10,6 +10,26 @@ use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::settings_catalog::Page;
 
+/// Older settings sections, each a block with its own heading, stacked on
+/// one outlined surface.
+/// No surface when there is nothing to show (no tray, say).
+fn cards(sections: impl IntoIterator<Item = AnyElement>) -> Option<AnyElement> {
+    let sections: Vec<AnyElement> = sections.into_iter().collect();
+    (!sections.is_empty()).then(|| {
+        group(
+            None,
+            [div()
+                .flex()
+                .flex_col()
+                .gap_5()
+                .p_3()
+                .children(sections)
+                .into_any_element()],
+        )
+        .into_any_element()
+    })
+}
+
 pub(super) fn sub_title(sub: SubPage) -> &'static str {
     tr(match sub {
         SubPage::Experimental => keys::SETTINGS_EXPERIMENTAL,
@@ -76,19 +96,61 @@ impl QuillApp {
                 None,
                 [self.nav_row(Nav::Sessions, tr(keys::Q_NAVIGATION_DEVICES), None, cx)],
             )),
-            Page::Chats => column.child(self.media_settings_section(cx)).child(group(
-                None,
-                [self.nav_row(
-                    Nav::ArchivedStickers,
-                    tr(keys::Q_NAVIGATION_ARCHIVED_STICKERS),
+            Page::Chats => column
+                .children(cards([self.media_settings_section(cx).into_any_element()]))
+                .children(cards([
+                    self.appearance_send_key_section(cx),
+                    self.appearance_spellcheck_section(cx),
+                    self.appearance_suggest_emoji_section(cx),
+                ]))
+                .child(group(
                     None,
-                    cx,
-                )],
-            )),
-            Page::Appearance | Page::Power | Page::System => column.child(group(
-                None,
-                [self.nav_row(Nav::Appearance, tr(keys::Q_NAVIGATION_APPEARANCE), None, cx)],
-            )),
+                    [self.nav_row(
+                        Nav::ArchivedStickers,
+                        tr(keys::Q_NAVIGATION_ARCHIVED_STICKERS),
+                        None,
+                        cx,
+                    )],
+                )),
+            Page::Appearance => {
+                self.ensure_wallpapers_loaded(cx);
+                if !self.settings.system_accent_probed {
+                    self.refresh_system_accent(cx);
+                }
+                column
+                    .children(cards([
+                        self.app_themes_section(cx),
+                        self.appearance_auto_night_section(cx),
+                    ]))
+                    .children(cards([self.appearance_peer_color_section(cx)]))
+                    .children(cards([
+                        self.appearance_wallpaper_section(cx),
+                        self.appearance_telegram_wallpapers_section(cx),
+                    ]))
+                    .children(cards([
+                        self.appearance_scale_section(cx),
+                        self.appearance_font_section(cx),
+                        self.appearance_font_family_section(cx),
+                    ]))
+                    .children(cards([
+                        self.appearance_bubble_section(cx),
+                        self.appearance_chat_list_section(cx),
+                    ]))
+            }
+            Page::Power => column.children(cards([self.appearance_power_section(cx)])),
+            Page::System => {
+                let mut system = vec![
+                    self.general_autostart_section(cx),
+                    self.general_link_handler_section(cx),
+                ];
+                system.extend(self.general_send_to_section(cx));
+                column
+                    .children(cards(system))
+                    .children(cards(
+                        self.window_behavior_sections(quill::tray::tray_available(), cx),
+                    ))
+                    .children(cards([self.update_settings_section(cx)]))
+            }
             Page::Folders => column.child(group(
                 None,
                 [link_row(
@@ -123,21 +185,25 @@ impl QuillApp {
                 None,
                 [self.nav_row(Nav::Language, tr(keys::SETTINGS_LANGUAGE), None, cx)],
             )),
-            Page::Shortcuts => column.child(group(
-                None,
-                [link_row(
-                    "settings-row-shortcuts",
-                    tr(keys::Q_SETTINGS_PAGE_SHORTCUTS),
+            Page::Shortcuts => column
+                .children(cards([self.appearance_keybindings_section(cx)]))
+                .child(group(
                     None,
-                    cx.listener(|this, _, _, cx| {
-                        this.settings.shortcuts_open = true;
-                        cx.notify();
-                    }),
-                    cx,
-                )],
-            )),
+                    [link_row(
+                        "settings-row-shortcuts",
+                        tr(keys::Q_SETTINGS_PAGE_SHORTCUTS),
+                        None,
+                        cx.listener(|this, _, _, cx| {
+                            this.settings.shortcuts_open = true;
+                            cx.notify();
+                        }),
+                        cx,
+                    )],
+                )),
             Page::Telegram => column.child(group(None, self.telegram_rows(cx))),
-            Page::About => column.child(self.settings_help_footer(cx)),
+            Page::About => column
+                .children(cards([self.about_settings_section(cx)]))
+                .child(self.settings_help_footer(cx)),
             Page::Advanced => column.child(self.advanced_settings_page(cx)),
         }
         .into_any_element()

@@ -99,7 +99,7 @@ impl QuillApp {
 
     /// Themes: the built-in tiles, the accent of the one on screen, custom
     /// themes and high contrast.
-    pub(crate) fn app_themes_section(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::ui) fn app_themes_section(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let applied = self.applied_theme_id().cloned();
         let mut tiles = div().flex().flex_wrap().gap_3();
         for theme in BuiltinTheme::ALL {

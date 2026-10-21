@@ -50,7 +50,7 @@ impl QuillApp {
     /// window-wide scale factor, so this scales the rem size: text and
     /// rem-based spacing follow, fixed-pixel widths (avatars, chat rows) do
     /// not — the hint says so.
-    pub(super) fn appearance_scale_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::ui) fn appearance_scale_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let current = self.appearance.interface_scale_pct;
         let mut row = div().flex().flex_wrap().gap_2().items_center();
         for pct in quill::settings::INTERFACE_SCALE_CHOICES {
@@ -70,7 +70,7 @@ impl QuillApp {
         )
     }
 
-    pub(super) fn appearance_wallpaper_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::ui) fn appearance_wallpaper_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let current = self
             .appearance
             .wallpaper_rgb
@@ -114,7 +114,7 @@ impl QuillApp {
         )
     }
 
-    pub(super) fn appearance_font_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::ui) fn appearance_font_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let size = self.appearance.font_size_px;
         let control = div()
             .flex()
@@ -147,7 +147,7 @@ impl QuillApp {
         )
     }
 
-    pub(super) fn appearance_bubble_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::ui) fn appearance_bubble_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let bubbles = self.appearance.bubbles;
         // kit Phase 6 style: a kit RadioGroup (was: hand-rolled chips).
         let control = RadioGroup::horizontal("appearance-style")
@@ -211,7 +211,7 @@ impl QuillApp {
     /// Slice chatlist-list-style: chat-list row style — preview line
     /// count (kit RadioGroup, like the theme/chat-style sections), media
     /// icons and formatted preview text (kit Switch rows).
-    pub(super) fn appearance_chat_list_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::ui) fn appearance_chat_list_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let lines = self.appearance.preview_lines;
         // kit Phase 6 style: a kit RadioGroup (was: hand-rolled chips).
         let control = RadioGroup::horizontal("appearance-chat-list-lines")
@@ -287,7 +287,7 @@ impl QuillApp {
     /// `parity:platform-autostart` — "Launch at login" switch. OS-level
     /// (XDG Autostart on Linux, LaunchAgents on macOS); unsupported
     /// platforms render an explanatory line instead of the switch.
-    pub(super) fn general_autostart_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::ui) fn general_autostart_section(&self, cx: &mut Context<Self>) -> AnyElement {
         if !quill::autostart::supported() {
             return self.appearance_section(
                 cx,
@@ -337,7 +337,7 @@ impl QuillApp {
     /// links (`quill::link_handler`). Quill never claims it on its own.
     /// Windows/Linux get a switch; macOS cannot hand the scheme back to
     /// another app, so it gets a one-way "Make default" button.
-    pub(super) fn general_link_handler_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::ui) fn general_link_handler_section(&self, cx: &mut Context<Self>) -> AnyElement {
         use quill::link_handler::{self, ControlKind, LinkHandlerState};
         let state = link_handler::state();
         self.repaint_when_link_handler_read(cx);
@@ -409,7 +409,7 @@ impl QuillApp {
         )
     }
 
-    pub(super) fn appearance_send_key_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::ui) fn appearance_send_key_section(&self, cx: &mut Context<Self>) -> AnyElement {
         use quill::composer::SendKeyMode;
         let current = self.chat_prefs.send_key_mode;
         let control = RadioGroup::horizontal("appearance-send-key")
@@ -444,7 +444,10 @@ impl QuillApp {
     /// tdesktop's spell-checker language list where Quill owns the
     /// dictionaries (Hunspell on Linux, ISpellChecker languages on
     /// Windows; macOS lets the system pick).
-    pub(super) fn appearance_spellcheck_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::ui) fn appearance_spellcheck_section(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let checked = self.chat_prefs.spellcheck_enabled;
         let hint = self.spell.info.hint();
         let row = div()
@@ -525,7 +528,10 @@ impl QuillApp {
 
     /// tdesktop "Suggest emoji replacements" (`suggestEmoji`, default on):
     /// the `:name` emoji popup in the composer.
-    pub(super) fn appearance_suggest_emoji_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::ui) fn appearance_suggest_emoji_section(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let suggest = div()
             .flex()
             .items_center()

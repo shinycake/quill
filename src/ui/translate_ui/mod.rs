@@ -121,9 +121,6 @@ pub(super) struct TranslateUi {
     pub(super) dialog: Option<TranslateDialog>,
     toast: Option<TranslateToast>,
     toast_seq: u64,
-    /// Screenshot demo: the Appearance dialog shows only the translation
-    /// options.
-    pub(super) settings_only: bool,
     offer: RefCell<Option<(OfferKey, Option<&'static str>)>>,
     /// What `pump_translation` tested last (`pump_scan`).
     pub(super) pump: pump_scan::PumpScan,
@@ -136,7 +133,6 @@ impl TranslateUi {
             dialog: None,
             toast: None,
             toast_seq: 0,
-            settings_only: false,
             offer: RefCell::new(None),
             pump: Default::default(),
         }

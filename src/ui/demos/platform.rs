@@ -90,6 +90,6 @@ impl QuillApp {
                 "update-plan.json".into(),
             ),
         };
-        self.open_appearance();
+        self.open_settings_on(quill::settings_catalog::Page::System);
     }
 }

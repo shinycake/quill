@@ -228,6 +228,14 @@ crate::ui::screenshot_demo::register_demos![
         .setup(|app, _, _| app.demo_settings(Page::Chats)),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-telegram")
         .setup(|app, _, _| app.demo_settings(Page::Telegram)),
+    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-appearance")
+        .setup(|app, _, _| app.demo_settings(Page::Appearance)),
+    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-system")
+        .setup(|app, _, _| app.demo_settings(Page::System)),
+    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-power")
+        .setup(|app, _, _| app.demo_settings(Page::Power)),
+    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-shortcuts")
+        .setup(|app, _, _| app.demo_settings(Page::Shortcuts)),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-about")
         .setup(|app, _, _| app.demo_settings(Page::About)),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-log-out").setup(|app, _, _| {

@@ -56,7 +56,7 @@ impl QuillApp {
     /// it right away. On Linux the read runs on a background thread (it
     /// spawns `gdbus`), so this only requests it and returns the cached
     /// value; a short poll applies the result once it lands.
-    pub(super) fn refresh_system_accent(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn refresh_system_accent(&mut self, cx: &mut Context<Self>) {
         // Screenshot demos keep their fixture accent.
         if self.demo_session.is_some() {
             return;
@@ -122,7 +122,10 @@ impl QuillApp {
     }
 
     /// tdesktop's "Font family" row.
-    pub(super) fn appearance_font_family_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::ui) fn appearance_font_family_section(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let missing = !self.appearance.font_family.is_empty()
             && quill::font_choice::resolve(&self.appearance.font_family, installed_fonts(cx))
                 .is_none();
@@ -149,7 +152,7 @@ impl QuillApp {
     /// then "Save Power on Low Battery" where the platform reports a
     /// battery saver. While that saver forces everything on, the switches
     /// are dimmed and a click explains why they do not change.
-    pub(super) fn appearance_power_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::ui) fn appearance_power_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let bits = self.appearance.power_saving;
         let muted = cx.theme().muted_foreground;
         let saver = quill::battery_saving::state();

@@ -21,7 +21,7 @@ pub(super) fn removable(background: &Background, in_use: Option<i64>) -> bool {
 }
 
 impl QuillApp {
-    pub(super) fn appearance_telegram_wallpapers_section(
+    pub(in crate::ui) fn appearance_telegram_wallpapers_section(
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -194,7 +194,7 @@ impl QuillApp {
 
     /// Fetch the installed wallpapers when Appearance opens, and start the
     /// photo and pattern downloads.
-    pub(crate) fn ensure_wallpapers_loaded(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn ensure_wallpapers_loaded(&mut self, cx: &mut Context<Self>) {
         let dark = cx.theme().is_dark();
         if let Some(live) = self.live.as_mut() {
             if live
