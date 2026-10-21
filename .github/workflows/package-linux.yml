@@ -45,7 +45,7 @@ jobs:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
       - uses: Swatinem/rust-cache@v2
         with:
           # A credential build's target/ holds the embedded pair (dep-info
