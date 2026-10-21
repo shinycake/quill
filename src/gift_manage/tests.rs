@@ -306,3 +306,38 @@ fn delete_is_offered_only_when_tdlib_allows_it_to_the_owner() {
     // tdesktop never offers it for a collectible, whatever the flag says.
     assert!(!unique(json!({"can_be_deleted": true})).can_delete(true));
 }
+
+fn regular_gift_with(gift_extra: Value) -> ReceivedGift {
+    let mut gift = json!({"@type": "gift", "id": "9", "star_count": 100});
+    merge(&mut gift, gift_extra);
+    parse_received_gift(&json!({
+        "@type": "receivedGift", "received_gift_id": "r1", "date": 5,
+        "is_saved": true, "can_be_deleted": true,
+        "gift": {"@type": "sentGiftRegular", "gift": gift},
+    }))
+    .unwrap()
+}
+
+#[test]
+fn a_limited_supply_gift_is_marked_limited_and_not_deletable() {
+    let limited = regular_gift_with(json!({
+        "overall_limits": {"@type": "giftPurchaseLimits", "total_count": 1000, "remaining_count": 12}
+    }));
+    assert!(limited.gift.limited);
+    assert!(!limited.can_delete(true));
+    let unlimited = regular_gift_with(json!({
+        "overall_limits": {"@type": "giftPurchaseLimits", "total_count": 0, "remaining_count": 0},
+        "auction_info": null
+    }));
+    assert!(!unlimited.gift.limited);
+    assert!(unlimited.can_delete(true));
+}
+
+#[test]
+fn an_auction_gift_is_marked_limited() {
+    let auction = regular_gift_with(json!({
+        "auction_info": {"@type": "giftAuction", "id": "a1", "gifts_per_round": 5, "start_date": 100}
+    }));
+    assert!(auction.gift.limited);
+    assert!(!auction.can_delete(true));
+}
