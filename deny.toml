@@ -1,5 +1,6 @@
-# cargo-deny configuration. CI runs only the license check:
+# cargo-deny configuration. CI runs the license and advisory checks:
 #   cargo deny check licenses
+#   cargo deny check advisories
 # A crate whose license is not on this list fails the `licenses` job. Before
 # adding a license here, check that it is compatible with shipping Quill under
 # MIT and record the decision in docs/decisions/codex-legal-compliance.md.
@@ -12,6 +13,25 @@ targets = [
   "x86_64-unknown-linux-gnu",
   "aarch64-unknown-linux-gnu",
   "x86_64-pc-windows-msvc",
+]
+
+[advisories]
+# A new RustSec vulnerability or yanked crate fails the `licenses` job, so it is
+# seen on the next PR instead of the next weekly watch. Unmaintained notices are
+# listed here only when the crate comes in through a dependency Quill does not
+# control; each one leaves this list when that dependency moves.
+ignore = [
+  # Through gpui-base (GPUI Kit).
+  { id = "RUSTSEC-2024-0384", reason = "instant: only via gpui-base" },
+  # Through gpui-component (GPUI Kit).
+  { id = "RUSTSEC-2024-0436", reason = "paste: only via gpui-component" },
+  # Through resvg/usvg 0.45 and cosmic-text (GPUI's text and SVG stack).
+  { id = "RUSTSEC-2026-0206", reason = "rustybuzz: only via GPUI's usvg and cosmic-text" },
+  { id = "RUSTSEC-2026-0192", reason = "ttf-parser: only via GPUI's fontdb and usvg" },
+  # Folded into zbus 6; held at zbus 5 with ashpd, ksni and GPUI (docs/dependency-updates.md).
+  { id = "RUSTSEC-2026-0371", reason = "zbus_names: zbus 5, held" },
+  { id = "RUSTSEC-2026-0370", reason = "zvariant: zbus 5, held" },
+  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive: zbus 5, held" },
 ]
 
 [licenses]

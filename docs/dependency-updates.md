@@ -21,7 +21,7 @@ Updates are found by a weekly watch, filed as issues, and integrated in small PR
 | --- | --- | --- |
 | `tdlib` | tdlib/td master (`scripts/tdlib-watch.py`) | `src/pins.rs` |
 | `gpui-kit` | gpui-kit on crates.io, and `gpui-base` / `gpui-pre-*` | `=` pin in `Cargo.toml`, `third_party/*/Cargo.toml` |
-| `crates` | `cargo update --dry-run`, newer majors via the crates.io API | `Cargo.lock`, direct deps |
+| `crates` | `cargo update --dry-run`, newer majors via the crates.io API | `Cargo.lock`, the resolved direct deps of every workspace member |
 | `native:ffmpeg` | FFmpeg release tags | `TAG` in `scripts/build-ffmpeg.sh` |
 | `native:rlottie` | Samsung/rlottie master (no releases) | `PIN` in `scripts/build-rlottie.sh` |
 | `native:ntgcalls` | pytgcalls/ntgcalls releases | `NTGCALLS_VERSION` in `scripts/vendor-ntgcalls.sh` |

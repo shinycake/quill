@@ -199,19 +199,24 @@ def parse_cargo_update(text: str) -> list:
 
 
 def direct_registry_deps(metadata: dict) -> dict:
-    """name -> highest locked version, for the root package's crates.io dependencies."""
-    root_id = metadata["resolve"]["root"]
-    root = next(p for p in metadata["packages"] if p["id"] == root_id)
-    locked = {}
-    for pkg in metadata["packages"]:
-        if (pkg.get("source") or "").startswith("registry+"):
-            cur = locked.get(pkg["name"])
-            if cur is None or vtuple(pkg["version"]) > vtuple(cur):
-                locked[pkg["name"]] = pkg["version"]
+    """name -> locked version of each crates.io crate a workspace member depends on directly.
+
+    Reads the resolved graph, so a member's own `rand 0.8` is reported even when another
+    crate pulls `rand 0.10` into the lockfile. A name locked at two versions keeps the lower.
+    """
+    packages = {p["id"]: p for p in metadata["packages"]}
+    members = set(metadata.get("workspace_members") or [metadata["resolve"]["root"]])
     out = {}
-    for dep in root["dependencies"]:
-        if (dep.get("source") or "").startswith("registry+") and dep["name"] in locked:
-            out[dep["name"]] = locked[dep["name"]]
+    for node in metadata["resolve"]["nodes"]:
+        if node["id"] not in members:
+            continue
+        for dep in node["deps"]:
+            pkg = packages.get(dep["pkg"])
+            if not pkg or not (pkg.get("source") or "").startswith("registry+"):
+                continue
+            cur = out.get(pkg["name"])
+            if cur is None or vtuple(pkg["version"]) < vtuple(cur):
+                out[pkg["name"]] = pkg["version"]
     return out
 
 
