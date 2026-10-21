@@ -304,6 +304,11 @@ impl QuillApp {
                     .child(quill::about::DISCLAIMER),
             )
             .child(
+                Button::new("about-whats-new")
+                    .label(tr(keys::Q_PREFS_WHATS_NEW))
+                    .on_click(cx.listener(|this, _, _, cx| this.open_whats_new(cx))),
+            )
+            .child(
                 Button::new("open-source-licenses")
                     .label(tr(keys::Q_OPS_OPEN_SOURCE_LICENSES))
                     .on_click(cx.listener(|_, _, _, cx| {
@@ -347,10 +352,7 @@ impl QuillApp {
                         Button::new("show-release-notes")
                             .label(tr(keys::Q_OPS_RELEASE_NOTES))
                             .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_settings_on(quill::settings_catalog::Page::About);
-                                cx.notify();
-                            })),
+                            .on_click(cx.listener(|this, _, _, cx| this.open_whats_new(cx))),
                     )
                     .child(
                         Button::new("dismiss-update-banner")

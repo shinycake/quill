@@ -9,7 +9,7 @@ pub const LATEST_API_URL: &str = "https://api.github.com/repos/shinycake/quill/r
 /// (`/releases/latest` never returns a pre-release).
 pub const RELEASES_API_URL: &str =
     "https://api.github.com/repos/shinycake/quill/releases?per_page=30";
-const MAX_RESPONSE_BYTES: u64 = 1_048_576;
+pub(crate) const MAX_RESPONSE_BYTES: u64 = 1_048_576;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReleaseInfo {
@@ -144,12 +144,14 @@ impl UpdateState {
 }
 
 #[derive(Deserialize)]
-struct GithubRelease {
-    tag_name: String,
-    html_url: String,
-    body: Option<String>,
-    draft: bool,
-    prerelease: bool,
+pub(crate) struct GithubRelease {
+    pub(crate) tag_name: String,
+    pub(crate) html_url: String,
+    pub(crate) body: Option<String>,
+    pub(crate) draft: bool,
+    pub(crate) prerelease: bool,
+    #[serde(default)]
+    pub(crate) published_at: Option<String>,
     #[serde(default)]
     assets: Vec<GithubAsset>,
 }
@@ -194,7 +196,7 @@ pub fn interpret_release(status: u16, body: &[u8], current: &str) -> UpdateState
     release_state(release, version, &current)
 }
 
-fn release_version(tag: &str) -> Option<Version> {
+pub(crate) fn release_version(tag: &str) -> Option<Version> {
     Version::parse(tag.strip_prefix('v').unwrap_or(tag)).ok()
 }
 
@@ -294,7 +296,30 @@ pub fn check_release(beta: bool) -> UpdateState {
             interpret_release(status, body, crate::version::APP)
         }
     };
-    let (url, https_only) = check_endpoint(beta);
+    match fetch_release_json(beta) {
+        Ok((status, body)) => interpret(status, &body),
+        Err(Fetch::Unreachable) => UpdateState::Failed(
+            "Could not reach the release server. Check your connection and retry.",
+        ),
+        Err(Fetch::Unreadable) => {
+            UpdateState::Failed("Could not read release information. Retry the check.")
+        }
+    }
+}
+
+#[cfg(feature = "ui")]
+/// Why [`fetch_release_json`] got no answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Fetch {
+    Unreachable,
+    Unreadable,
+}
+
+#[cfg(feature = "ui")]
+/// The latest release (`list == false`) or the releases list, as status and
+/// body; the body is empty unless the status is 200. Blocking and bounded.
+pub(crate) fn fetch_release_json(list: bool) -> Result<(u16, Vec<u8>), Fetch> {
+    let (url, https_only) = check_endpoint(list);
     let agent = ureq::Agent::config_builder()
         .https_only(https_only)
         .max_redirects(0)
@@ -302,29 +327,23 @@ pub fn check_release(beta: bool) -> UpdateState {
         .http_status_as_error(false)
         .build()
         .new_agent();
-    let response = agent
+    let mut response = agent
         .get(&url)
         .header("User-Agent", format!("Quill/{}", crate::version::APP))
         .header("Accept", "application/vnd.github+json")
-        .call();
-    let Ok(mut response) = response else {
-        return UpdateState::Failed(
-            "Could not reach the release server. Check your connection and retry.",
-        );
-    };
+        .call()
+        .map_err(|_| Fetch::Unreachable)?;
     let status = response.status().as_u16();
     if status != 200 {
-        return interpret(status, &[]);
+        return Ok((status, Vec::new()));
     }
-    let Ok(body) = response
+    let body = response
         .body_mut()
         .with_config()
         .limit(MAX_RESPONSE_BYTES)
         .read_to_vec()
-    else {
-        return UpdateState::Failed("Could not read release information. Retry the check.");
-    };
-    interpret(status, &body)
+        .map_err(|_| Fetch::Unreadable)?;
+    Ok((status, body))
 }
 
 #[cfg(test)]
