@@ -89,6 +89,7 @@ pub mod inline_members;
 pub mod json_access;
 pub mod key_fingerprint;
 pub mod lang;
+pub mod large_alloc;
 pub mod layout;
 pub mod lifecycle;
 pub mod link_handler;
