@@ -299,3 +299,130 @@ fn late_error_for_an_earlier_message_keeps_the_new_menu_loading() {
             .is_loading_for(ChatId(7), MessageId(51))
     );
 }
+
+fn reactions_answer(extra: &str, top: &str) -> String {
+    format!(
+        r#"{{"@type":"availableReactions","@extra":"{extra}","top_reactions":[{top}],"recent_reactions":[],"popular_reactions":[],"allow_custom_emoji":false,"are_tags":false,"unavailability_reason":null}}"#
+    )
+}
+
+const THUMB: &str = r#"{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"needs_premium":false}"#;
+const STAR: &str =
+    r#"{"@type":"availableReaction","type":{"@type":"reactionTypePaid"},"needs_premium":false}"#;
+
+#[test]
+fn late_answer_for_an_earlier_message_leaves_the_loading_menu_alone() {
+    let mut h = menu_harness();
+    let first = h
+        .driver
+        .fetch_message_reactions(ChatId(7), MessageId(50))
+        .unwrap()
+        .expect("request");
+    let second = h
+        .driver
+        .fetch_message_reactions(ChatId(7), MessageId(51))
+        .unwrap()
+        .expect("request");
+    h.ingest(&reactions_answer(
+        &first.0.to_string(),
+        &format!("{THUMB},{STAR}"),
+    ));
+    let state = &h.driver.session.stickers.message_reaction_options;
+    assert!(state.is_loading_for(ChatId(7), MessageId(51)));
+    assert!(!h.driver.session.payments.paid.offered_for(7, 50));
+    h.ingest(&reactions_answer(&second.0.to_string(), THUMB));
+    assert!(
+        h.driver
+            .session
+            .stickers
+            .message_reaction_options
+            .ready_for(ChatId(7), MessageId(51))
+            .is_some()
+    );
+}
+
+#[test]
+fn late_answers_after_b_answered_keep_bs_strip() {
+    for late in [format!("{THUMB},{STAR}"), String::new()] {
+        let mut h = menu_harness();
+        let first = h
+            .driver
+            .fetch_message_reactions(ChatId(7), MessageId(50))
+            .unwrap()
+            .expect("request");
+        let second = h
+            .driver
+            .fetch_message_reactions(ChatId(7), MessageId(51))
+            .unwrap()
+            .expect("request");
+        h.ingest(&reactions_answer(&second.0.to_string(), THUMB));
+        h.ingest(&reactions_answer(&first.0.to_string(), &late));
+        let state = &h.driver.session.stickers.message_reaction_options;
+        assert!(state.ready_for(ChatId(7), MessageId(51)).is_some());
+        assert!(!state.is_unavailable_for(ChatId(7), MessageId(50)));
+        assert!(!h.driver.session.payments.paid.offered_for(7, 50));
+    }
+}
+
+#[test]
+fn reopening_the_menu_after_an_error_asks_again() {
+    let mut h = menu_harness();
+    let extra = h
+        .driver
+        .fetch_message_reactions(ChatId(7), MessageId(50))
+        .unwrap()
+        .expect("request");
+    h.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":500,"message":"Timeout"}}"#,
+        extra.0
+    ));
+    assert!(
+        h.driver
+            .session
+            .stickers
+            .message_reaction_options
+            .is_unavailable_for(ChatId(7), MessageId(50))
+    );
+    let again = h
+        .driver
+        .fetch_message_reactions(ChatId(7), MessageId(50))
+        .unwrap();
+    assert!(again.is_some());
+    assert!(
+        h.driver
+            .session
+            .stickers
+            .message_reaction_options
+            .is_loading_for(ChatId(7), MessageId(50))
+    );
+}
+
+#[test]
+fn an_answer_offering_only_stars_still_shows_the_strip() {
+    let mut h = menu_harness();
+    let extra = h
+        .driver
+        .fetch_message_reactions(ChatId(7), MessageId(50))
+        .unwrap()
+        .expect("request");
+    h.ingest(&reactions_answer(&extra.0.to_string(), STAR));
+    let state = &h.driver.session.stickers.message_reaction_options;
+    assert!(state.ready_for(ChatId(7), MessageId(50)).is_some());
+    assert!(h.driver.session.payments.paid.offered_for(7, 50));
+}
+
+#[test]
+fn closing_the_menu_resets_the_options_and_ignores_the_late_answer() {
+    let mut h = menu_harness();
+    let extra = h
+        .driver
+        .fetch_message_reactions(ChatId(7), MessageId(50))
+        .unwrap()
+        .expect("request");
+    h.driver.session.reset_message_reactions();
+    h.ingest(&reactions_answer(&extra.0.to_string(), THUMB));
+    assert_eq!(
+        h.driver.session.stickers.message_reaction_options,
+        crate::state::MessageReactionsState::Idle
+    );
+}

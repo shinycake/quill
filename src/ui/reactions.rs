@@ -152,7 +152,7 @@ impl QuillApp {
         if self.message_ui.menu.is_none() && self.chat_list.menu.is_none() {
             return false;
         }
-        self.message_ui.menu = None;
+        self.close_message_menu();
         self.chat_list.menu = None;
         cx.notify();
         true

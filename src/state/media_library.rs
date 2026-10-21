@@ -127,9 +127,11 @@ impl MessageReactionsState {
         }
     }
 
-    /// The state already answers (or awaits) this message.
+    /// The state already answers (or awaits) this message. A failed or
+    /// empty answer does not count: reopening the menu asks again.
     pub fn covers(&self, chat_id: ChatId, message_id: MessageId) -> bool {
-        self.target() == Some((chat_id, message_id))
+        matches!(self, Self::Loading { .. } | Self::Ready(_))
+            && self.target() == Some((chat_id, message_id))
     }
 }
 
@@ -193,6 +195,15 @@ impl Session {
         popular: Vec<StoryAvailableReactionView>,
         allow_custom_emoji: bool,
     ) {
+        // Only the answer this menu waits for counts; a late one for a
+        // message the menu left must not touch the current state.
+        if !self
+            .stickers
+            .message_reaction_options
+            .is_loading_for(chat_id, message_id)
+        {
+            return;
+        }
         // The Star reaction is its own flow (`paid_reaction`): note whether
         // this message's picker offers it.
         let paid_offered = top
@@ -215,7 +226,10 @@ impl Session {
             popular: convert(popular),
             allow_custom_emoji,
         };
-        self.stickers.message_reaction_options = if options.all().is_empty() {
+        // tdesktop adds the paid reaction to `recent` when paid is enabled
+        // (data_message_reactions.cpp), so an offer of Stars alone still
+        // earns the strip.
+        self.stickers.message_reaction_options = if options.all().is_empty() && !paid_offered {
             MessageReactionsState::Unavailable {
                 chat_id,
                 message_id,
@@ -223,6 +237,13 @@ impl Session {
         } else {
             MessageReactionsState::Ready(options)
         };
+    }
+
+    /// The message menu closed: nothing is asked for, and an answer still on
+    /// its way is ignored.
+    pub fn reset_message_reactions(&mut self) {
+        self.stickers.message_reaction_options = MessageReactionsState::Idle;
+        self.payments.paid.offered = None;
     }
 
     /// `getMessageAvailableReactions` failed: the strip stays away, unless

@@ -136,3 +136,52 @@ fn strip_shows_once_the_options_are_ready(cx: &mut TestAppContext) {
     assert!(has(vcx, "reaction-strip"));
     assert!(!has(vcx, "reaction-strip-loading"));
 }
+
+#[gpui_kit::test]
+fn ready_options_of_another_message_draw_no_strip(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    show_menu_with(&app, vcx, MessageReactionsState::Idle);
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            crate::ui::demos::seed_reaction_options(session, CHAT, MessageId(999));
+        }
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(has(vcx, "menu-reply"));
+    assert!(!has(vcx, "reaction-strip"));
+    assert!(!has(vcx, "reaction-strip-loading"));
+}
+
+#[gpui_kit::test]
+fn opening_the_menu_shows_the_strip_and_closing_it_resets_the_options(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.open_message_menu(
+                MessageMenuState {
+                    chat_id: CHAT,
+                    message_id: MESSAGE,
+                    position: point(px(420.), px(300.)),
+                },
+                window,
+                cx,
+            );
+        });
+    });
+    frames(vcx);
+    assert!(has(vcx, "reaction-strip"));
+    app.update(vcx, |app, cx| {
+        assert!(app.close_context_menus(cx));
+    });
+    frames(vcx);
+    let state = app.read_with(vcx, |app, _| {
+        app.demo_session
+            .as_ref()
+            .map(|s| s.stickers.message_reaction_options.clone())
+    });
+    assert_eq!(state, Some(MessageReactionsState::Idle));
+    assert!(!has(vcx, "reaction-strip"));
+}

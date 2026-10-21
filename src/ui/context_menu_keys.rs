@@ -320,13 +320,25 @@ impl QuillApp {
             || self.folders.tab_menu.is_some()
     }
 
+    /// Close the message menu and forget the reaction options it asked for.
+    pub(super) fn close_message_menu(&mut self) {
+        self.message_ui.menu = None;
+        let session = match self.live.as_mut() {
+            Some(live) => Some(&mut live.driver.session),
+            None => self.demo_session.as_mut(),
+        };
+        if let Some(session) = session {
+            session.reset_message_reactions();
+        }
+    }
+
     /// Close every context menu. Returns whether one was open.
     pub(super) fn dismiss_context_menus(&mut self, cx: &mut Context<Self>) -> bool {
         if !self.context_menu_open() {
             return false;
         }
         self.playback.playlist_menu = None;
-        self.message_ui.menu = None;
+        self.close_message_menu();
         self.chat_list.menu = None;
         self.chat_list.archive_menu = None;
         self.chat_list.global.story_menu = None;
