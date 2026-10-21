@@ -10,7 +10,10 @@ impl QuillApp {
     /// The chip shows only a chord that is actually bound. A press that
     /// collides with fixed chrome or another rebindable action is refused
     /// and explained under the row.
-    pub(super) fn appearance_keybindings_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::ui) fn appearance_keybindings_section(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         use super::super::keybindings::{
             REBINDABLE_ACTIONS, apply_custom_bindings, conflict_message, resolve_keybindings,
         };

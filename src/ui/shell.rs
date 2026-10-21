@@ -496,7 +496,6 @@ mod tests {
         DialogKind::BlockBar,
         DialogKind::JoinRequests,
         DialogKind::Translate,
-        DialogKind::Appearance,
         DialogKind::AccountLifecycle,
         DialogKind::CommunityCreate,
         DialogKind::CommunityHub,

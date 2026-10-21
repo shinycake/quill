@@ -55,28 +55,17 @@ pub(super) const COMPOSER_CONTEXT: &str = "QuillComposer";
 /// a depth tie), which `apply_custom_bindings` and `shortcut_rows` do.
 const COMPOSER_INPUT_CONTEXT: &str = "QuillComposer > Input";
 
-/// Dismissing Appearance must also release ownership of composer keystrokes.
-pub(super) fn close_appearance_capture(
-    appearance_open: &mut bool,
-    capture: &mut Option<String>,
-    error: &mut Option<(String, String)>,
-) {
-    *appearance_open = false;
-    *capture = None;
-    *error = None;
-}
-
-/// Also discard stale capture state if a dialog was dismissed elsewhere.
+/// Also discard stale capture state once the Shortcuts page is gone.
 pub(super) fn capture_active(
-    appearance_open: bool,
+    shown: bool,
     capture: &mut Option<String>,
     error: &mut Option<(String, String)>,
 ) -> bool {
-    if !appearance_open {
+    if !shown {
         *capture = None;
         *error = None;
     }
-    appearance_open && capture.is_some()
+    shown && capture.is_some()
 }
 
 /// A new prefs root needs its own keymap, even when it has no overrides.
@@ -748,10 +737,10 @@ mod tests {
     // attribute and fail macro expansion ("recursion limit reached").
     use super::{
         Action, KeybindingConflict, Keystroke, Modifiers, OpenPinnedChat, QuitApp,
-        REBINDABLE_ACTIONS, canonical_event_chord, capture_active, close_appearance_capture,
-        composer_bindings, composer_scoped_bindings, conflict_message, context_menu_captures_key,
-        default_bindings, fixed_keystrokes, invalidate_account_keybindings, keybinding_conflict,
-        keybinding_for, resolve_keybindings, same_chord,
+        REBINDABLE_ACTIONS, canonical_event_chord, capture_active, composer_bindings,
+        composer_scoped_bindings, conflict_message, context_menu_captures_key, default_bindings,
+        fixed_keystrokes, invalidate_account_keybindings, keybinding_conflict, keybinding_for,
+        resolve_keybindings, same_chord,
     };
     use quill::settings::CustomKeybinding;
 
@@ -801,19 +790,7 @@ mod tests {
     }
 
     #[test]
-    fn appearance_dismiss_clears_capture_and_error() {
-        let mut open = true;
-        let mut capture = Some("focus-composer".to_string());
-        let mut error = Some(("focus-composer".to_string(), "Conflict".to_string()));
-        close_appearance_capture(&mut open, &mut capture, &mut error);
-        assert!(!open);
-        assert_eq!(capture, None);
-        assert_eq!(error, None);
-        assert!(!capture_active(open, &mut capture, &mut error));
-    }
-
-    #[test]
-    fn capture_only_consumes_keys_while_appearance_is_open_and_armed() {
+    fn capture_only_consumes_keys_while_shortcuts_are_shown_and_armed() {
         let mut capture = None;
         let mut error = None;
         assert!(!capture_active(true, &mut capture, &mut error));

@@ -11,11 +11,9 @@
 use super::QuillApp;
 use super::chat_theme::{set_high_contrast, set_theme_mode};
 use super::synthetic::BubbleLook;
-use super::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::color_picker::{ColorPickerEvent, ColorPickerState};
-use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::theme::{ActiveTheme, Theme, ThemeMode};
@@ -28,8 +26,6 @@ use quill::settings::{
     AccountPaths, AppearancePrefs, AutoNight, ChatPrefs, ThemeChoice, clamp_font_size,
     load_appearance_prefs, load_chat_prefs, safe_app_root, save_appearance_prefs, save_chat_prefs,
 };
-use std::cell::RefCell;
-use std::rc::Rc;
 /// Accent presets (0xRRGGBB); the "Default" chip keeps the theme accent.
 /// The kit's unscaled rem size (gpui-component `Theme::font_size`).
 const BASE_REM_PX: f32 = 16.;
@@ -71,25 +67,20 @@ impl QuillApp {
     pub(crate) fn minimize_to_tray(&self) -> bool {
         self.appearance.minimize_to_tray
     }
-    /// Opens the Appearance dialog. The default-app row is drawn from the
-    /// link handler's cache, so this is where it is read (on macOS, on this
-    /// thread, once).
-    pub(super) fn open_appearance(&mut self) {
+    /// Opens Settings on `page`. The System page's default-app row is drawn
+    /// from the link handler's cache, so this is where it is read (on
+    /// macOS, on this thread, once).
+    pub(super) fn open_settings_on(&mut self, page: quill::settings_catalog::Page) {
         quill::link_handler::read_now();
-        self.settings.appearance_open = true;
+        self.open_settings(Some(page));
     }
 
-    pub(super) fn close_appearance(&mut self) {
-        super::keybindings::close_appearance_capture(
-            &mut self.settings.appearance_open,
-            &mut self.settings.keybinding_capture,
-            &mut self.settings.keybinding_error,
-        );
-    }
-
+    /// Shortcuts take keystrokes for rebinding only while their page is up.
     pub(super) fn keybinding_capture_active(&mut self) -> bool {
+        let shown = self.settings.open
+            && self.settings.page == Some(quill::settings_catalog::Page::Shortcuts);
         super::keybindings::capture_active(
-            self.settings.appearance_open,
+            shown,
             &mut self.settings.keybinding_capture,
             &mut self.settings.keybinding_error,
         )
@@ -336,111 +327,6 @@ impl QuillApp {
         }
     }
 
-    /// kit Phase 2 (redo) pattern: the Appearance dialog hosted in a kit
-    /// `Dialog` via `window.open_dialog` (see `QuillShell::sync_kit_dialogs`).
-    /// Esc / backdrop / ✕ clear state via `on_close`. Every control applies
-    /// live through `set_appearance`, so there is no OK/apply step — the
-    /// footer is a single Close button.
-    pub(crate) fn build_appearance_dialog(
-        app: &Entity<QuillApp>,
-        shell: &Entity<QuillShell>,
-        dialog: Dialog,
-        cx: &mut App,
-    ) -> Dialog {
-        let on_close =
-            QuillShell::on_close_kind(app, shell, DialogKind::Appearance, |this, _, cx| {
-                this.close_appearance();
-                cx.notify();
-            });
-        app.update(cx, |this, cx| {
-            if !this.settings.system_accent_probed {
-                this.refresh_system_accent(cx);
-            }
-            let mut body = div().flex().flex_col().gap_3();
-            if this.settings.translate.settings_only {
-                body = body.child(this.translate_settings_section(cx));
-            } else if this.settings.window_settings_screenshot {
-                for section in this.window_behavior_sections(true, cx) {
-                    body = body.child(section);
-                }
-            } else if this.settings.appearance_power_screenshot {
-                body = body.child(this.appearance_accent_section(cx));
-                body = body.child(this.appearance_font_family_section(cx));
-                body = body.child(this.appearance_power_section(cx));
-            } else if this.settings.keybindings_screenshot {
-                body = body.child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(tr(
-                            keys::Q_PREFS_KEYBOARD_SHORTCUTS_CHANGES_APPLY_IMMEDIATELY,
-                        )),
-                );
-                body = body.child(this.appearance_keybindings_section(cx));
-            } else {
-                body = body.child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(tr(keys::Q_PREFS_CUSTOMIZE_HOW_QUILL_LOOKS_AND)),
-                );
-                body = body.child(this.app_themes_section(cx));
-                body = body.child(this.appearance_peer_color_section(cx));
-                body = body.child(this.appearance_spellcheck_section(cx));
-                body = body.child(this.appearance_suggest_emoji_section(cx));
-                body = body.child(this.appearance_auto_night_section(cx));
-                body = body.child(this.appearance_scale_section(cx));
-                this.ensure_wallpapers_loaded(cx);
-                body = body.child(this.appearance_wallpaper_section(cx));
-                body = body.child(this.appearance_telegram_wallpapers_section(cx));
-                body = body.child(this.appearance_font_section(cx));
-                body = body.child(this.appearance_font_family_section(cx));
-                body = body.child(this.appearance_bubble_section(cx));
-                body = body.child(this.appearance_chat_list_section(cx));
-                body = body.child(this.appearance_power_section(cx));
-                body = body.child(this.appearance_send_key_section(cx));
-                body = body.child(this.general_autostart_section(cx));
-                body = body.child(this.general_link_handler_section(cx));
-                if let Some(section) = this.general_send_to_section(cx) {
-                    body = body.child(section);
-                }
-                body = body.child(this.update_settings_section(cx));
-                body = body.child(this.about_settings_section(cx));
-                for section in this.window_behavior_sections(quill::tray::tray_available(), cx) {
-                    body = body.child(section);
-                }
-                body = body.child(this.appearance_keybindings_section(cx));
-            }
-            let footer = div().flex().justify_end().child(
-                Button::new("close-appearance")
-                    .label(tr(keys::CLOSE))
-                    .ghost()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.close_appearance();
-                        cx.notify();
-                        this.close_kit_dialog_if_done(DialogKind::Appearance, window, cx);
-                    })),
-            );
-            dialog
-                .overlay(true)
-                .title(crate::ui::shell::dialog_title(tr(keys::Q_PREFS_APPEARANCE)))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
-                .footer(footer)
-                .on_close(on_close)
-        })
-    }
-
     /// A labeled section: title + control row + hint line.
     pub(super) fn appearance_section(
         &self,
@@ -578,7 +464,7 @@ impl QuillApp {
 
     /// Tray and window-close switches of the General settings. `tray_available`
     /// is a parameter so the screenshot demo can show them without a tray.
-    pub(crate) fn window_behavior_sections(
+    pub(in crate::ui) fn window_behavior_sections(
         &self,
         tray_available: bool,
         cx: &mut Context<Self>,
@@ -658,7 +544,10 @@ impl QuillApp {
         )
     }
 
-    fn appearance_auto_night_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::ui) fn appearance_auto_night_section(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         const MODES: [AutoNight; 3] = [AutoNight::Off, AutoNight::System, AutoNight::Scheduled];
         const LABELS: [&str; 3] = ["Off", "System", "Scheduled"];
         let current = self.appearance.auto_night;
@@ -717,14 +606,6 @@ impl QuillApp {
         }
         body.into_any_element()
     }
-}
-
-crate::ui::shell::register_dialogs! {
-    Appearance => DialogSpec::new(
-        6600,
-        |app| app.settings.appearance_open,
-        QuillApp::build_appearance_dialog,
-    ),
 }
 
 mod appearance_keybindings_section;

@@ -150,7 +150,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    pub(super) fn update_settings_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::ui) fn update_settings_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let mut section = div()
             .flex()
             .flex_col()
@@ -269,7 +269,7 @@ impl QuillApp {
 
     /// "About Quill": version, the unofficial-client and no-warranty notice,
     /// and the bundled open-source license notices.
-    pub(super) fn about_settings_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::ui) fn about_settings_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let version = tr_with(
             keys::Q_OPS_QUILL,
             &[("quill_version_app", (quill::version::APP))],
@@ -348,7 +348,7 @@ impl QuillApp {
                             .label(tr(keys::Q_OPS_RELEASE_NOTES))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_appearance();
+                                this.open_settings_on(quill::settings_catalog::Page::About);
                                 cx.notify();
                             })),
                     )

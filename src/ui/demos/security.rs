@@ -119,13 +119,13 @@ impl QuillApp {
         quill::link_handler::demo_pin(
             checking.then_some(quill::link_handler::LinkHandlerState::Checking),
         );
-        self.open_appearance();
+        self.open_settings_on(quill::settings_catalog::Page::System);
         self.connection
             .set_note(StatusNote::silent("screenshot demo — default app row"));
     }
 
     fn demo_appearance(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        // Settings → Appearance: the Appearance dialog open over the
+        // Settings → Appearance: the Appearance page over the
         // ReadyChats fixture (injected, no live Telegram). Non-default
         // values so the screenshot shows the slice live: dark theme,
         // blue accent, dark wallpaper, 16px message text. They are only
@@ -142,7 +142,7 @@ impl QuillApp {
         self.appearance.accent_rgb = 0x2f81f7;
         self.appearance.wallpaper_rgb = Some(0x0e1621);
         self.appearance.font_size_px = 16;
-        self.settings.appearance_open = true;
+        self.open_settings_on(quill::settings_catalog::Page::Appearance);
         self.connection
             .set_note(StatusNote::silent("screenshot demo — appearance settings"));
     }

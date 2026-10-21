@@ -233,7 +233,6 @@
 "qll_prefs_alright_delete_account" = "Alright, delete account.";
 "qll_prefs_another_shortcut" = "another shortcut";
 "qll_prefs_app_badge_counter" = "App badge counter";
-"qll_prefs_appearance" = "Appearance";
 "qll_prefs_archive_chat" = "Archive chat";
 "qll_prefs_archive_settings_still_loading" = "archive settings still loading…";
 "qll_prefs_are_you_sure_you_want" = "Are you sure you want to disconnect all websites?";
@@ -351,7 +350,6 @@
 "qll_prefs_custom_2" = "Custom";
 "qll_prefs_custom_auto_lock_time_hours" = "Custom auto-lock time, hours and minutes";
 "qll_prefs_custom_time_is_hours_minutes" = "Custom time is hours:minutes, like 0:30.";
-"qll_prefs_customize_how_quill_looks_and" = "Customize how Quill looks and feels. Changes are saved on this device.";
 "qll_prefs_cut" = "Cut";
 "qll_prefs_danger_this_is_the_last" = "Danger: this is the last confirmation prompt. Once you press the button below, all data will be erased from Telegram servers. Using the same phone number will create a new empty account.";
 "qll_prefs_data_saver" = "Data saver";
@@ -478,7 +476,6 @@
 "qll_prefs_keeps_the_contacts_tab_up" = "Keeps the Contacts tab up to date with the Telegram servers.";
 "qll_prefs_keyboard_shortcuts" = "Keyboard shortcuts";
 "qll_prefs_keyboard_shortcuts_2" = "Keyboard Shortcuts";
-"qll_prefs_keyboard_shortcuts_changes_apply_immediately" = "Keyboard shortcuts. Changes apply immediately and are saved on this device.";
 "qll_prefs_large_emoji" = "Large emoji";
 "qll_prefs_last_active" = "Last active: {last_active_date}";
 "qll_prefs_last_chat" = "Last chat";

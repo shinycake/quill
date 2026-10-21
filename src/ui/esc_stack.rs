@@ -245,15 +245,6 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
             cx.notify();
         }
     ),
-    // Settings → Appearance: changes already applied live.
-    layer!(
-        "appearance",
-        |app| app.settings.appearance_open,
-        |app, _, cx| {
-            app.close_appearance();
-            cx.notify();
-        }
-    ),
     // Slice A3: Esc on the sessions overlay cancels a pending terminate
     // confirmation first, then closes the overlay.
     layer!("sessions", |app| app.privacy.sessions_open, |app, _, cx| {
