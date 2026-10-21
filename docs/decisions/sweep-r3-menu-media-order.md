@@ -22,8 +22,9 @@ could wrap.
 - Every `MediaAction` has one fixed `slot()` (an exhaustive match, so a new
   action cannot be added without choosing its place), and `sort_key()` adds it
   to `order::MEDIA` with a saturating add.
-- `MediaAction::ALL` lists every variant; `MEDIA_SLOTS` is its length, so the
-  block width follows the enum. A `const` assertion fails the build if
+- `MediaAction::ALL` lists the variants; `MEDIA_SLOTS` is its length, so the
+  block width follows that list (a variant left out of it is caught by a test
+  that walks an exhaustive match, not by the length). A `const` assertion fails the build if
   `MEDIA + MEDIA_SLOTS` passes `COPY_TEXT`. The orders from `COPY_TEXT` on moved
   up by 5 to make room for all 13 actions; only their relative order matters.
 - A unit test iterates `MediaAction::ALL` and checks each slot equals its index

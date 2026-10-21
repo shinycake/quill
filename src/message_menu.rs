@@ -261,8 +261,8 @@ pub enum MediaAction {
 }
 
 impl MediaAction {
-    /// Every variant, in slot order. The source of truth for the block width;
-    /// the slot test fails if a variant is missing here.
+    /// The variants in slot order, and the block width. The slot test and an
+    /// exhaustive-match test catch a variant left out of this list.
     pub const ALL: [Self; 13] = [
         Self::CancelDownload,
         Self::OpenGif,
@@ -641,6 +641,47 @@ mod tests {
         );
         assert!(keys.iter().all(|key| *key >= order::MEDIA));
         assert!(keys.iter().all(|key| *key < order::COPY_TEXT));
+    }
+
+    /// The next variant in declaration order. An exhaustive match (no
+    /// wildcard): a new variant does not compile until it gets an arm, and
+    /// the arm of the one before it must lead to it.
+    fn next_variant(action: MediaAction) -> Option<MediaAction> {
+        use MediaAction::*;
+        match action {
+            CancelDownload => Some(OpenGif),
+            OpenGif => Some(SaveGif),
+            SaveGif => Some(ViewStickerSet { installed: true }),
+            ViewStickerSet { .. } => Some(AddToSet { emoji: false }),
+            AddToSet { .. } => Some(ToggleFavorite { remove: false }),
+            ToggleFavorite { .. } => Some(ShowInFolder),
+            ShowInFolder => Some(SaveForNotifications),
+            SaveForNotifications => Some(SaveTo),
+            SaveTo => Some(SaveAs),
+            SaveAs => Some(CopyImage),
+            CopyImage => Some(CopyFilename),
+            CopyFilename => None,
+        }
+    }
+
+    /// Every variant, including a last one, appears in `ALL`.
+    #[test]
+    fn all_lists_every_variant() {
+        use std::mem::discriminant;
+        let mut seen = vec![MediaAction::CancelDownload];
+        while let Some(next) = seen.last().copied().and_then(next_variant) {
+            seen.push(next);
+        }
+        for action in &seen {
+            assert!(
+                MediaAction::ALL
+                    .iter()
+                    .any(|listed| discriminant(listed) == discriminant(action)),
+                "{action:?} is missing from ALL"
+            );
+        }
+        // `AddToSet` has two slots (sticker set, emoji set).
+        assert_eq!(MediaAction::ALL.len(), seen.len() + 1);
     }
 
     #[test]
