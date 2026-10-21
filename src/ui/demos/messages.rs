@@ -174,7 +174,7 @@ impl QuillApp {
             quote.entities = vec![
                 entity(0, 5, quill::text::TextEntityKind::Bold),
                 entity(11, 19, quill::text::TextEntityKind::Italic),
-                entity(20, 24, quill::text::TextEntityKind::Code),
+                entity(20, 24, quill::text::TextEntityKind::Strikethrough),
             ];
             self.composer_ui.set_reply(Some(ComposerReplyTo::with_quote(
                 ChatId(11),

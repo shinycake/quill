@@ -85,11 +85,7 @@ impl QuillApp {
             .messages
             .get(&message_id.0)?;
         let content = effective_content(&message.content, message.ephemeral.as_ref());
-        QuotableText::of(content).or_else(|| {
-            Self::message_copyable_text(content)
-                .filter(|text| !text.trim().is_empty())
-                .map(QuotableText::plain)
-        })
+        QuotableText::for_reply(content, Self::message_copyable_text(content))
     }
 
     /// The text of the message a reply points at, if it is loaded.
@@ -441,7 +437,9 @@ impl QuillApp {
             .max_h(px(220.))
             .overflow_y_scroll();
         for (index, part) in text.segments().into_iter().enumerate() {
-            let selected = picked.as_ref() == Some(&part);
+            let selected = picked
+                .as_ref()
+                .is_some_and(|picked| picked.same_part(&part));
             let label = part.text.clone();
             list = list.child(
                 div()

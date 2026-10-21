@@ -86,19 +86,38 @@ pub(crate) fn parse_chat_draft(value: Option<&Value>) -> Option<ChatDraft> {
                 if quote.get("@type").and_then(Value::as_str) != Some("inputTextQuote") {
                     return None;
                 }
+                let position = quote.get("position").and_then(Value::as_i64)?.sat_i32();
+                // A quote from a rich message lives in `rich_texts`; TDLib
+                // leaves `text` empty. One Quill cannot read is dropped, so
+                // it never goes back out as an ordinary quote.
+                if let Some(values) = quote
+                    .get("rich_texts")
+                    .and_then(Value::as_array)
+                    .filter(|values| !values.is_empty())
+                {
+                    let rich_texts = values
+                        .iter()
+                        .map(crate::rich::QuoteRichText::from_json)
+                        .collect::<Option<Vec<_>>>()?;
+                    let (text, entities) = crate::rich::join_quote_texts(&rich_texts);
+                    return Some(crate::composer::QuoteSelection {
+                        text,
+                        position,
+                        entities,
+                        rich_texts,
+                    });
+                }
                 let formatted = quote.get("text");
                 let text = formatted
                     .and_then(|formatted| formatted.get("text"))
                     .and_then(Value::as_str)?;
-                let position = quote.get("position").and_then(Value::as_i64)?.sat_i32();
                 Some(crate::composer::QuoteSelection {
                     text: text.to_string(),
                     position,
-                    entities: super::message_content::parse_text_entities(text, formatted),
-                    from_rich: quote
-                        .get("rich_texts")
-                        .and_then(Value::as_array)
-                        .is_some_and(|texts| !texts.is_empty()),
+                    entities: crate::text::quote::quote_entities(
+                        &super::message_content::parse_text_entities(text, formatted),
+                    ),
+                    rich_texts: Vec::new(),
                 })
             });
             let task = reply

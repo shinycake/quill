@@ -346,6 +346,36 @@ fn quoted_draft_round_trips_input_text_quote() {
         Some(crate::composer::QuoteSelection::plain("meet at", 0))
     );
     assert!(!sink.rendered().contains("CANARY"));
+
+    // A quote from a rich message: TDLib echoes the draft with an empty
+    // `text` and the quote in `rich_texts`. The echo matches the composer's
+    // quote, so the next note saves nothing.
+    let mut quote = crate::composer::QuoteSelection::plain("noon", 8);
+    quote.rich_texts = vec![crate::rich::QuoteRichText::Plain("noon".into())];
+    let reply = SendReply {
+        message_id: MessageId(3),
+        quote: Some(quote),
+        source_chat: None,
+        item: Default::default(),
+    };
+    let outcome = driver
+        .note_composer_draft(ChatId(7), "ok", Some(reply.clone()), 10_000, false)
+        .unwrap();
+    assert_eq!(outcome, DraftSaveOutcome::Sent);
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateChatDraftMessage","chat_id":7,"draft_message":{"@type":"draftMessage","reply_to":{"@type":"inputMessageReplyToMessage","message_id":3,"quote":{"@type":"inputTextQuote","text":{"@type":"formattedText","text":"","entities":[]},"rich_texts":[{"@type":"richTextPlain","text":"noon"}],"position":8},"checklist_task_id":0,"poll_option_id":""},"date":1,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"ok","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null},"positions":[]}"#,
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let outcome = driver
+        .note_composer_draft(ChatId(7), "ok", Some(reply), 20_000, false)
+        .unwrap();
+    assert_eq!(outcome, DraftSaveOutcome::Skipped);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

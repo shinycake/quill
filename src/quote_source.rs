@@ -6,27 +6,32 @@
 
 use crate::composer::QuoteSelection;
 use crate::reply_options::QUOTE_MAX_CHARS;
-use crate::rich::RichBlock;
+use crate::rich::QuoteRichText;
 use crate::telegram::envelope::MessageContent;
 use crate::text::TextEntity;
-use crate::text::quote::{slice_entities, trim_with_entities};
+use crate::text::quote::{quote_entities, slice_entities};
+use std::ops::Range;
 
-/// One quotable text of a message: a whole message text, or one paragraph,
-/// heading or list item of a rich message.
+/// Most texts one quote of a rich message may cover (`inputTextQuote`).
+const MAX_RICH_TEXTS: usize = 32;
+
+/// One quotable text of a message: a whole message text, or one quotable
+/// text of a rich message (TDLib `for_each_quote_text`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct QuoteNode {
     text: String,
+    /// Only the formatting a quote keeps.
     entities: Vec<TextEntity>,
+    /// The text as a `RichText`, for a quotable text of a rich message.
+    rich: Option<QuoteRichText>,
 }
 
-/// Everything of a message that can be quoted.
+/// Everything of a message that can be quoted. For a rich message a quote's
+/// position counts in the nodes joined by line feeds, and the quote also
+/// goes out as `rich_texts` (TDLib 1.8.69 `inputTextQuote`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuotableText {
     nodes: Vec<QuoteNode>,
-    /// The nodes are the quotable texts of a rich message, so a quote's
-    /// position counts in them joined by line feeds and a quote also goes out
-    /// as `rich_texts` (TDLib 1.8.69 `inputTextQuote`).
-    rich: bool,
 }
 
 impl QuotableText {
@@ -35,163 +40,204 @@ impl QuotableText {
         Self::formatted(text, Vec::new())
     }
 
-    /// The text of an ordinary message with its entities.
+    /// The text of an ordinary message with its entities; only those a
+    /// quote keeps stay.
     pub fn formatted(text: impl Into<String>, entities: Vec<TextEntity>) -> Self {
         Self {
             nodes: vec![QuoteNode {
                 text: text.into(),
-                entities,
+                entities: quote_entities(&entities),
+                rich: None,
             }],
-            rich: false,
         }
     }
 
     /// The quotable text of `content` where its formatting is known: a text
-    /// message, or a rich message made only of paragraphs, headings and
-    /// lists (any other block holds quotable text Quill cannot place, which
-    /// would put the position of a quote off). `None` otherwise.
+    /// message, a media caption, or a rich message whose quotable texts
+    /// Quill could read. `None` otherwise.
     pub fn of(content: &MessageContent) -> Option<Self> {
-        match content {
-            MessageContent::Text(text) if !text.text.trim().is_empty() => {
-                Some(Self::formatted(&text.text, text.entities.clone()))
-            }
-            MessageContent::RichMessage(rich) => {
-                let mut nodes = Vec::new();
-                for block in &rich.blocks {
-                    match block {
-                        RichBlock::Paragraph { text, entities, .. }
-                        | RichBlock::Heading { text, entities, .. } => nodes.push(QuoteNode {
-                            text: text.clone(),
-                            entities: entities.clone(),
-                        }),
-                        RichBlock::List { items, .. } => {
-                            nodes.extend(items.iter().map(|item| QuoteNode {
-                                text: item.text.clone(),
-                                entities: Vec::new(),
-                            }))
-                        }
-                        RichBlock::ButtonRow { .. } | RichBlock::Divider | RichBlock::Empty => {}
-                        _ => return None,
-                    }
+        let (text, entities) = match content {
+            MessageContent::Text(text) => (&text.text, &text.entities),
+            MessageContent::Photo(media) => (&media.caption, &media.caption_entities),
+            MessageContent::Video(media) => (&media.caption, &media.caption_entities),
+            MessageContent::Animation(media) => (&media.caption, &media.caption_entities),
+            MessageContent::Document(media) => (&media.caption, &media.caption_entities),
+            MessageContent::Audio(media) => (&media.caption, &media.caption_entities),
+            MessageContent::VoiceNote(media) => (&media.caption, &media.caption_entities),
+            _ => return Self::of_rich(content),
+        };
+        (!text.trim().is_empty()).then(|| Self::formatted(text, entities.clone()))
+    }
+
+    fn of_rich(content: &MessageContent) -> Option<Self> {
+        let MessageContent::RichMessage(rich) = content else {
+            return None;
+        };
+        let nodes: Vec<QuoteNode> = rich
+            .quote_texts
+            .iter()
+            .map(|rich_text| {
+                let (text, entities) = rich_text.parts();
+                QuoteNode {
+                    text,
+                    entities,
+                    rich: Some(rich_text.clone()),
                 }
-                nodes.retain(|node| !node.text.is_empty());
-                (!nodes.is_empty()).then_some(Self { nodes, rich: true })
-            }
-            _ => None,
+            })
+            .collect();
+        (!nodes.is_empty()).then_some(Self { nodes })
+    }
+
+    /// What a reply to `content` can quote. `copy_text` is the message's
+    /// copyable text, used for content with no known formatting. A rich
+    /// message never falls back to it: an ordinary quote of a rich message is
+    /// not allowed (`schema/td_api.tl:3483`), so one Quill cannot read offers
+    /// no parts and the reply goes to the whole message.
+    pub fn for_reply(content: &MessageContent, copy_text: Option<String>) -> Option<Self> {
+        if matches!(content, MessageContent::RichMessage(_)) {
+            return Self::of(content);
         }
+        Self::of(content).or_else(|| {
+            copy_text
+                .filter(|text| !text.trim().is_empty())
+                .map(Self::plain)
+        })
     }
 
     /// The parts to pick from: one per line, and inside a line one per
     /// sentence, each with its formatting. Positions are UTF-16 code-unit
     /// offsets as `inputTextQuote.position` needs. Parts longer than
-    /// [`QUOTE_MAX_CHARS`] are left out.
+    /// [`QUOTE_MAX_CHARS`], and parts that would cut custom emoji or math
+    /// of a rich message, are left out.
     pub fn segments(&self) -> Vec<QuoteSelection> {
         let mut parts = Vec::new();
-        for (node, base) in self.nodes_with_base() {
-            let mut offset16 = base;
-            let mut offset8 = 0usize;
+        for (node, _, base16) in self.nodes_with_bases() {
+            let mut line8 = 0usize;
             for line in node.text.split_inclusive('\n') {
-                self.push_sentences(node, line, offset8, offset16, &mut parts);
-                offset8 += line.len();
-                offset16 += line.encode_utf16().count();
+                let mut start = 0usize;
+                let mut chars = line.char_indices().peekable();
+                while let Some((index, ch)) = chars.next() {
+                    let ends = matches!(ch, '.' | '!' | '?' | '…')
+                        && chars.peek().is_none_or(|(_, next)| next.is_whitespace());
+                    if ends {
+                        let end = index + ch.len_utf8();
+                        parts.extend(sentence(node, base16, line, line8, start..end));
+                        start = end;
+                    }
+                }
+                parts.extend(sentence(node, base16, line, line8, start..line.len()));
+                line8 += line.len();
             }
         }
         parts
     }
 
-    /// The quote for `selected`, a verbatim piece of one text of the message.
+    /// The quote for `selected`, verbatim text of the message. In a rich
+    /// message it may run over several quotable texts, separated by line
+    /// feeds; each becomes its own `RichText`. The first occurrence wins.
     pub fn quote_for(&self, selected: &str) -> Option<QuoteSelection> {
         if selected.is_empty() {
             return None;
         }
-        self.nodes_with_base().find_map(|(node, base)| {
-            let start = node.text.find(selected)?;
-            let before = node.text.get(..start)?.encode_utf16().count();
-            Some(QuoteSelection {
-                text: selected.to_string(),
-                position: i32::try_from(base + before).ok()?,
-                entities: slice_entities(&node.entities, start..start + selected.len()),
-                from_rich: self.rich,
-            })
-        })
-    }
-
-    /// Each text with the UTF-16 offset where it starts in the position
-    /// text: the texts joined by line feeds for a rich message, the text
-    /// itself otherwise.
-    fn nodes_with_base(&self) -> impl Iterator<Item = (&QuoteNode, usize)> {
-        let mut base = 0usize;
-        self.nodes.iter().map(move |node| {
-            let start = base;
-            base += node.text.encode_utf16().count() + 1;
-            (node, start)
-        })
-    }
-
-    fn push_sentences(
-        &self,
-        node: &QuoteNode,
-        line: &str,
-        line8: usize,
-        base16: usize,
-        parts: &mut Vec<QuoteSelection>,
-    ) {
-        let mut start = 0usize;
-        let mut chars = line.char_indices().peekable();
-        while let Some((index, ch)) = chars.next() {
-            let ends = matches!(ch, '.' | '!' | '?' | '…')
-                && chars.peek().is_none_or(|(_, next)| next.is_whitespace());
-            if ends {
-                let end = index + ch.len_utf8();
-                self.push_part(node, line, line8, start, end, base16, parts);
-                start = end;
+        let joined = self
+            .nodes
+            .iter()
+            .map(|node| node.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = joined.find(selected)?;
+        let end = start + selected.len();
+        let mut quote = QuoteSelection::plain(selected, 0);
+        let mut first = true;
+        for (node, base8, base16) in self.nodes_with_bases() {
+            let from = start.max(base8);
+            let to = end.min(base8 + node.text.len());
+            if from >= to {
+                continue;
             }
+            let piece = node_quote(node, base16, from - base8..to - base8)?;
+            if first {
+                quote.position = piece.position;
+                first = false;
+            }
+            let shift = from - start;
+            quote
+                .entities
+                .extend(piece.entities.into_iter().map(|entity| TextEntity {
+                    utf8_start: entity.utf8_start + shift,
+                    utf8_end: entity.utf8_end + shift,
+                    kind: entity.kind,
+                }));
+            quote.rich_texts.extend(piece.rich_texts);
         }
-        self.push_part(node, line, line8, start, line.len(), base16, parts);
+        let too_long = !quote.rich_texts.is_empty()
+            && (quote.rich_texts.len() > MAX_RICH_TEXTS
+                || selected.chars().count() > QUOTE_MAX_CHARS);
+        (!first && !too_long).then_some(quote)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn push_part(
-        &self,
-        node: &QuoteNode,
-        line: &str,
-        line8: usize,
-        start: usize,
-        end: usize,
-        base16: usize,
-        parts: &mut Vec<QuoteSelection>,
-    ) {
-        let raw = line.get(start..end).unwrap_or_default();
-        let lead = raw.len() - raw.trim_start().len();
-        let trimmed = raw.trim();
-        if trimmed.is_empty() || trimmed.chars().count() > QUOTE_MAX_CHARS {
-            return;
-        }
-        let position = base16
-            + line
-                .get(..start + lead)
-                .unwrap_or_default()
-                .encode_utf16()
-                .count();
-        let from = line8 + start;
-        let (_, entities) = trim_with_entities(
-            node.text.get(from..line8 + end).unwrap_or_default(),
-            &slice_entities(&node.entities, from..line8 + end),
-        );
-        parts.push(QuoteSelection {
-            text: trimmed.to_string(),
-            position: i32::try_from(position).unwrap_or(i32::MAX),
-            entities,
-            from_rich: self.rich,
-        });
+    /// Each text with the UTF-8 and UTF-16 offsets where it starts in the
+    /// position text: the texts joined by line feeds for a rich message,
+    /// the text itself otherwise.
+    fn nodes_with_bases(&self) -> impl Iterator<Item = (&QuoteNode, usize, usize)> {
+        let (mut base8, mut base16) = (0usize, 0usize);
+        self.nodes.iter().map(move |node| {
+            let at = (node, base8, base16);
+            base8 += node.text.len() + 1;
+            base16 += node.text.encode_utf16().count() + 1;
+            at
+        })
     }
+}
+
+/// The part for the sentence `range` of `line`, which starts at byte `line8`
+/// of the node: trimmed, and left out when empty or too long.
+fn sentence(
+    node: &QuoteNode,
+    base16: usize,
+    line: &str,
+    line8: usize,
+    range: Range<usize>,
+) -> Option<QuoteSelection> {
+    let raw = line.get(range.clone())?;
+    let lead = raw.len() - raw.trim_start().len();
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.chars().count() > QUOTE_MAX_CHARS {
+        return None;
+    }
+    let from = line8 + range.start + lead;
+    node_quote(node, base16, from..from + trimmed.len())
+}
+
+/// The quote of bytes `range` of `node`, whose text starts at UTF-16 offset
+/// `base16` of the position text. `None` when the range is not on char
+/// boundaries or would cut custom emoji or math, which a quote keeps whole.
+fn node_quote(node: &QuoteNode, base16: usize, range: Range<usize>) -> Option<QuoteSelection> {
+    let text = node.text.get(range.clone())?;
+    let before = node.text.get(..range.start)?;
+    let rich_texts = match &node.rich {
+        None => Vec::new(),
+        Some(rich) => {
+            let begin = before.chars().count();
+            let fragment = rich.fragment(begin, begin + text.chars().count())?;
+            if fragment.quote_text() != text {
+                return None;
+            }
+            vec![fragment]
+        }
+    };
+    Some(QuoteSelection {
+        text: text.to_string(),
+        position: i32::try_from(base16 + before.encode_utf16().count()).ok()?,
+        entities: slice_entities(&node.entities, range),
+        rich_texts,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::QuotableText;
-    use crate::rich::{RichBlock, RichListItem};
-    use crate::telegram::envelope::{MessageContent, RichMessageContent, TextContent};
+    use crate::telegram::envelope::{MessageContent, TextContent};
     use crate::text::{TextEntity, TextEntityKind};
 
     fn entity(start: usize, end: usize, kind: TextEntityKind) -> TextEntity {
@@ -200,13 +246,6 @@ mod tests {
             utf8_end: end,
             kind,
         }
-    }
-
-    fn rich(blocks: Vec<RichBlock>) -> MessageContent {
-        MessageContent::RichMessage(RichMessageContent {
-            blocks,
-            is_full: true,
-        })
     }
 
     #[test]
@@ -229,58 +268,177 @@ mod tests {
             parts[1].entities,
             vec![entity(4, 10, TextEntityKind::Italic)]
         );
-        assert!(!parts[1].from_rich);
+        assert!(parts[1].rich_texts.is_empty());
         let picked = source.quote_for("bold. two italic").expect("verbatim");
         assert_eq!(picked.position, 4);
         assert_eq!(picked.entities.len(), 2);
+        assert!(picked.rich_texts.is_empty());
     }
 
     #[test]
     fn rich_message_positions_count_the_texts_joined_by_line_feeds() {
-        let source = QuotableText::of(&rich(vec![
-            RichBlock::Heading {
-                level: 1,
-                text: "Title".into(),
-                entities: Vec::new(),
-            },
-            RichBlock::Divider,
-            RichBlock::Paragraph {
-                text: "some bold text".into(),
-                entities: vec![entity(5, 9, TextEntityKind::Bold)],
-                buttons: Vec::new(),
-            },
-            RichBlock::List {
-                ordered: false,
-                items: vec![RichListItem {
-                    text: "item".into(),
-                    checked: None,
-                }],
-            },
-        ]))
+        let source = QuotableText::of(&parsed(serde_json::json!([
+            {"@type": "pageBlockTitle", "title": plain_json("Title")},
+            {"@type": "pageBlockDivider"},
+            paragraph_json(serde_json::json!({"@type": "richTexts", "texts": [
+                plain_json("some "),
+                {"@type": "richTextBold", "text": plain_json("bold")},
+                plain_json(" text"),
+            ]})),
+            {"@type": "pageBlockList", "items": [
+                item_json("\u{2022}", vec![paragraph_json(plain_json("item"))]),
+            ]},
+        ])))
         .expect("a rich message of text blocks");
         let parts = source.segments();
         let positions: Vec<_> = parts.iter().map(|part| part.position).collect();
         // "Title\nsome bold text\nitem": 0, 6, 21.
         assert_eq!(positions, [0, 6, 21]);
-        assert!(parts.iter().all(|part| part.from_rich));
+        assert!(parts.iter().all(|part| part.rich_texts.len() == 1));
         assert_eq!(parts[1].entities, vec![entity(5, 9, TextEntityKind::Bold)]);
         let picked = source.quote_for("bold").expect("inside the paragraph");
         assert_eq!(picked.position, 11);
         assert_eq!(picked.entities, vec![entity(0, 4, TextEntityKind::Bold)]);
+        assert_eq!(
+            crate::telegram::requests::input_text_quote_json(&picked)["rich_texts"],
+            serde_json::json!([{"@type": "richTexts", "texts": [
+                {"@type": "richTextBold", "text": plain_json("bold")},
+            ]}])
+        );
     }
 
     #[test]
-    fn a_rich_message_with_blocks_that_cannot_be_placed_is_not_quotable() {
-        let content = rich(vec![
-            RichBlock::Paragraph {
-                text: "text".into(),
-                entities: Vec::new(),
-                buttons: Vec::new(),
-            },
-            RichBlock::Table {
-                rows: vec![vec!["cell".into()]],
-            },
-        ]);
-        assert!(QuotableText::of(&content).is_none());
+    fn a_selection_cannot_cut_math_in_two() {
+        let source = QuotableText::of(&parsed(serde_json::json!([paragraph_json(
+            serde_json::json!({"@type": "richTexts", "texts": [
+                plain_json("so "),
+                {"@type": "richTextMathematicalExpression", "expression": "a+b"},
+            ]})
+        ),])))
+        .expect("quotable");
+        assert!(source.quote_for("so a+").is_none());
+        let whole = source.quote_for("so a+b").expect("the math whole");
+        assert_eq!(whole.rich_texts.len(), 1);
+    }
+
+    fn parsed(blocks: serde_json::Value) -> MessageContent {
+        crate::telegram::envelope::parse_message_rich_message(&serde_json::json!({
+            "@type": "messageRichMessage",
+            "message": {"@type": "richMessage", "blocks": blocks, "is_full": true},
+        }))
+        .0
+    }
+
+    fn plain_json(text: &str) -> serde_json::Value {
+        serde_json::json!({"@type": "richTextPlain", "text": text})
+    }
+
+    fn paragraph_json(text: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({"@type": "pageBlockParagraph", "text": text})
+    }
+
+    fn item_json(label: &str, blocks: Vec<serde_json::Value>) -> serde_json::Value {
+        serde_json::json!({"@type": "pageBlockListItem", "label": label, "blocks": blocks,
+            "has_checkbox": false, "is_checked": false, "value": 0, "type": ""})
+    }
+
+    #[test]
+    fn list_labels_are_not_quoted_and_block_quote_credits_are() {
+        // TDLib counts a list item's blocks without its label, and a block
+        // quote's credit after its blocks (`WebPageBlock.cpp`
+        // `for_each_quote_text`).
+        let content = parsed(serde_json::json!([
+            {"@type": "pageBlockList", "items": [
+                item_json("1.", vec![paragraph_json(serde_json::json!(
+                    {"@type": "richTextBold", "text": plain_json("first")}))]),
+                item_json("\u{2022}", vec![
+                    paragraph_json(plain_json("second")),
+                    paragraph_json(plain_json("nested")),
+                ]),
+            ]},
+            {"@type": "pageBlockBlockQuote",
+             "blocks": [paragraph_json(plain_json("quoted"))],
+             "credit": plain_json("Ada")},
+        ]));
+        let source = QuotableText::of(&content).expect("lists and block quotes quote");
+        let parts = source.segments();
+        let found: Vec<_> = parts
+            .iter()
+            .map(|part| (part.text.as_str(), part.position))
+            .collect();
+        // "first\nsecond\nnested\nquoted\nAda"
+        assert_eq!(
+            found,
+            [
+                ("first", 0),
+                ("second", 6),
+                ("nested", 13),
+                ("quoted", 20),
+                ("Ada", 27)
+            ]
+        );
+        assert_eq!(parts[0].entities, vec![entity(0, 5, TextEntityKind::Bold)]);
+        // A selection across two quotable texts goes out as two RichTexts.
+        let picked = source.quote_for("second\nnested").expect("two texts");
+        assert_eq!(picked.position, 6);
+        let sent = crate::telegram::requests::input_text_quote_json(&picked);
+        assert_eq!(
+            sent["rich_texts"],
+            serde_json::json!([plain_json("second"), plain_json("nested")])
+        );
+    }
+
+    #[test]
+    fn parts_keep_only_the_formatting_a_quote_may_hold() {
+        let source = QuotableText::formatted(
+            "run code now",
+            vec![
+                entity(0, 3, TextEntityKind::Bold),
+                entity(4, 8, TextEntityKind::Code),
+                entity(
+                    9,
+                    12,
+                    TextEntityKind::TextUrl {
+                        url: "https://example.com".into(),
+                    },
+                ),
+            ],
+        );
+        let parts = source.segments();
+        assert_eq!(parts[0].entities, vec![entity(0, 3, TextEntityKind::Bold)]);
+        let picked = source.quote_for("code now").expect("verbatim");
+        assert!(picked.entities.is_empty());
+    }
+
+    #[test]
+    fn a_media_caption_quotes_with_its_formatting() {
+        let (content, _) = crate::telegram::envelope::parse_content(Some(&serde_json::json!({
+            "@type": "messagePhoto",
+            "photo": {"@type": "photo", "has_stickers": false, "minithumbnail": null, "sizes": []},
+            "caption": {"@type": "formattedText", "text": "a bold view", "entities": [
+                {"@type": "textEntity", "offset": 2, "length": 4,
+                 "type": {"@type": "textEntityTypeBold"}},
+            ]},
+            "show_caption_above_media": false, "has_spoiler": false, "is_secret": false,
+        })));
+        let source = QuotableText::for_reply(&content, None).expect("captions quote");
+        let picked = source.quote_for("bold view").expect("verbatim");
+        assert_eq!(picked.position, 2);
+        assert_eq!(picked.entities, vec![entity(0, 4, TextEntityKind::Bold)]);
+    }
+
+    #[test]
+    fn a_rich_message_never_falls_back_to_its_copy_text() {
+        // A block Quill cannot place: quoting its copy text would send an
+        // ordinary quote of a rich message, which the schema forbids.
+        let content = parsed(serde_json::json!([
+            paragraph_json(plain_json("text")),
+            {"@type": "pageBlockFromTheFuture"},
+        ]));
+        assert!(QuotableText::for_reply(&content, Some("text".into())).is_none());
+        let other = MessageContent::Unsupported {
+            type_name: "messageSomething".into(),
+        };
+        assert!(QuotableText::for_reply(&other, Some("caption".into())).is_some());
     }
 }

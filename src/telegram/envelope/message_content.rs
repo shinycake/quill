@@ -133,6 +133,10 @@ pub struct GameContent {
 pub struct RichMessageContent {
     pub blocks: Vec<RichBlock>,
     pub is_full: bool,
+    /// The texts a quote of the message counts in, in TDLib's order
+    /// ([`crate::rich::rich_message_quote_texts`]); empty when nothing can
+    /// be quoted.
+    pub quote_texts: Vec<crate::rich::QuoteRichText>,
 }
 
 impl RichMessageContent {
@@ -670,9 +674,14 @@ pub(crate) fn parse_message_game(value: &Value) -> (MessageContent, Vec<ParsedFi
 /// M2: `messageRichMessage` → `MessageContent::RichMessage` (schema 1.8.67,
 /// line 5143; `richMessage` line 123).
 pub(crate) fn parse_message_rich_message(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
-    let (blocks, is_full) = parse_rich_message(value.get("message").unwrap_or(&Value::Null));
+    let message = value.get("message").unwrap_or(&Value::Null);
+    let (blocks, is_full) = parse_rich_message(message);
     (
-        MessageContent::RichMessage(RichMessageContent { blocks, is_full }),
+        MessageContent::RichMessage(RichMessageContent {
+            blocks,
+            is_full,
+            quote_texts: crate::rich::rich_message_quote_texts(message),
+        }),
         Vec::new(),
     )
 }
@@ -795,6 +804,10 @@ pub(crate) fn parse_text_entities(text: &str, formatted: Option<&Value>) -> Vec<
                     Some(unix_time) if (0..=i64::from(i32::MAX)).contains(&unix_time) => {
                         TextEntityKind::DateTime {
                             unix_time: unix_time.sat_i32(),
+                            format: crate::text::date_time_format::DateTimeFormat::from_json(
+                                type_value.and_then(|t| t.get("formatting_type")),
+                            )
+                            .unwrap_or_default(),
                         }
                     }
                     _ => continue,

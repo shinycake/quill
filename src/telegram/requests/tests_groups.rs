@@ -889,17 +889,32 @@ fn entity(start: usize, end: usize, kind: TextEntityKind) -> TextEntity {
 }
 
 #[test]
-fn quote_request_keeps_the_formatting_of_the_quoted_part() {
+fn quote_request_keeps_only_the_formatting_a_quote_may_hold() {
+    // A quote keeps Bold, Italic, Underline, Strikethrough, Spoiler,
+    // CustomEmoji and DateTime only (`schema/td_api.tl:3481`, TDLib
+    // `is_allowed_quote_entity_type`); code and links are dropped.
     // "bold" starts after an emoji (4 bytes, 2 UTF-16 units) and a space.
-    let quote = QuoteSelection {
-        text: "\u{1F600} bold and code".into(),
-        position: 4,
-        entities: vec![
-            entity(5, 9, TextEntityKind::Bold),
-            entity(14, 18, TextEntityKind::Code),
-        ],
-        from_rich: false,
-    };
+    let mut quote = QuoteSelection::plain("\u{1F600} bold and code", 4);
+    quote.entities = vec![
+        entity(5, 9, TextEntityKind::Bold),
+        entity(14, 18, TextEntityKind::Code),
+        entity(
+            10,
+            13,
+            TextEntityKind::TextUrl {
+                url: "https://example.com".into(),
+            },
+        ),
+        // "and" as a date keeps its relative format.
+        entity(
+            10,
+            13,
+            TextEntityKind::DateTime {
+                unix_time: 1_700_000_000,
+                format: crate::text::date_time_format::DateTimeFormat::Relative,
+            },
+        ),
+    ];
     let v = input_message_reply_to_with_quote(Some(MessageId(101)), Some(&quote));
     let text = &v["quote"]["text"];
     assert_eq!(text["text"], "\u{1F600} bold and code");
@@ -908,8 +923,9 @@ fn quote_request_keeps_the_formatting_of_the_quoted_part() {
         serde_json::json!([
             {"@type": "textEntity", "offset": 3, "length": 4,
              "type": {"@type": "textEntityTypeBold"}},
-            {"@type": "textEntity", "offset": 12, "length": 4,
-             "type": {"@type": "textEntityTypeCode"}},
+            {"@type": "textEntity", "offset": 8, "length": 3,
+             "type": {"@type": "textEntityTypeDateTime", "unix_time": 1_700_000_000,
+                      "formatting_type": {"@type": "dateTimeFormattingTypeRelative"}}},
         ])
     );
     // An ordinary message sends no rich_texts.
@@ -917,36 +933,36 @@ fn quote_request_keeps_the_formatting_of_the_quoted_part() {
 }
 
 #[test]
-fn quote_from_a_rich_message_sends_its_formatting_as_rich_texts() {
-    let quote = QuoteSelection {
-        text: "plain bold both".into(),
-        position: 12,
-        entities: vec![
-            entity(6, 10, TextEntityKind::Bold),
-            entity(11, 15, TextEntityKind::Bold),
-            entity(11, 15, TextEntityKind::Italic),
-            // Code has no RichText form and stays plain.
-            entity(0, 5, TextEntityKind::Code),
-        ],
-        from_rich: true,
-    };
+fn quote_from_a_rich_message_sends_one_rich_text_per_quoted_text() {
+    use crate::rich::{QuoteRichText, QuoteStyle};
+    let mut quote = QuoteSelection::plain("bold x2\nsecond", 12);
+    quote.rich_texts = vec![
+        QuoteRichText::Concat(vec![
+            QuoteRichText::Styled {
+                style: QuoteStyle::Bold,
+                text: Box::new(QuoteRichText::Plain("bold".into())),
+            },
+            QuoteRichText::Plain(" x".into()),
+            QuoteRichText::Styled {
+                style: QuoteStyle::Superscript,
+                text: Box::new(QuoteRichText::Plain("2".into())),
+            },
+        ]),
+        QuoteRichText::Plain("second".into()),
+    ];
     let v = input_text_quote_json(&quote);
     assert_eq!(v["position"], 12);
     assert_eq!(
         v["rich_texts"],
-        serde_json::json!([{
-            "@type": "richTexts",
-            "texts": [
-                {"@type": "richTextPlain", "text": "plain "},
+        serde_json::json!([
+            {"@type": "richTexts", "texts": [
                 {"@type": "richTextBold",
                  "text": {"@type": "richTextPlain", "text": "bold"}},
-                {"@type": "richTextPlain", "text": " "},
-                {"@type": "richTextItalic",
-                 "text": {"@type": "richTextBold",
-                          "text": {"@type": "richTextPlain", "text": "both"}}},
-            ]
-        }])
+                {"@type": "richTextPlain", "text": " x"},
+                {"@type": "richTextSuperscript",
+                 "text": {"@type": "richTextPlain", "text": "2"}},
+            ]},
+            {"@type": "richTextPlain", "text": "second"},
+        ])
     );
-    // The formatted text travels with it, code included.
-    assert_eq!(v["text"]["entities"].as_array().map(Vec::len), Some(4));
 }

@@ -4,8 +4,33 @@
 //! the original entities cut to that substring and moved to its start.
 #![deny(clippy::indexing_slicing)]
 
-use super::TextEntity;
+use super::{TextEntity, TextEntityKind};
 use std::ops::Range;
+
+/// Whether a quote keeps this formatting: Bold, Italic, Underline,
+/// Strikethrough, Spoiler, CustomEmoji and DateTime only
+/// (`schema/td_api.tl:3481`, TDLib `is_allowed_quote_entity_type`).
+pub fn quote_keeps(kind: &TextEntityKind) -> bool {
+    matches!(
+        kind,
+        TextEntityKind::Bold
+            | TextEntityKind::Italic
+            | TextEntityKind::Underline
+            | TextEntityKind::Strikethrough
+            | TextEntityKind::Spoiler
+            | TextEntityKind::CustomEmoji { .. }
+            | TextEntityKind::DateTime { .. }
+    )
+}
+
+/// The entities of `entities` that a quote keeps.
+pub fn quote_entities(entities: &[TextEntity]) -> Vec<TextEntity> {
+    entities
+        .iter()
+        .filter(|entity| quote_keeps(&entity.kind))
+        .cloned()
+        .collect()
+}
 
 /// The entities that overlap `range` (UTF-8 byte offsets), clipped to it and
 /// rebased so offset 0 is the start of the range. Entities that end up empty

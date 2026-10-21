@@ -126,8 +126,12 @@ pub enum TextEntityKind {
     /// `textEntityTypeMediaTimestamp media_timestamp:int32` — seeks the
     /// message's (or the replied message's) audio or video.
     MediaTimestamp { seconds: i32 },
-    /// `textEntityTypeDateTime unix_time:int32` — offers copy of the date.
-    DateTime { unix_time: i32 },
+    /// `textEntityTypeDateTime unix_time:int32 formatting_type` — offers
+    /// copy of the date. `format` is kept so a quote sends it back.
+    DateTime {
+        unix_time: i32,
+        format: date_time_format::DateTimeFormat,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -165,7 +169,7 @@ impl TextEntity {
             TextEntityKind::MediaTimestamp { seconds } => {
                 LinkTarget::MediaTimestamp { seconds: *seconds }
             }
-            TextEntityKind::DateTime { unix_time } => LinkTarget::DateTime {
+            TextEntityKind::DateTime { unix_time, .. } => LinkTarget::DateTime {
                 unix_time: *unix_time,
                 label: covered()?,
             },
@@ -539,6 +543,7 @@ pub fn last_line_is_rtl(text: &str) -> bool {
 }
 
 pub mod about;
+pub mod date_time_format;
 pub mod quote;
 
 #[cfg(test)]

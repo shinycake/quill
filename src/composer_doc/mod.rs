@@ -214,7 +214,7 @@ impl ComposerDoc {
                 }
                 TextEntityKind::TextUrl { url } => ComposerTag::Link(url.clone()),
                 TextEntityKind::MentionName { user_id } => ComposerTag::Mention(*user_id),
-                TextEntityKind::DateTime { unix_time } if *unix_time > 0 => {
+                TextEntityKind::DateTime { unix_time, .. } if *unix_time > 0 => {
                     ComposerTag::Link(crate::composer::date_link(*unix_time))
                 }
                 TextEntityKind::CustomEmoji { custom_emoji_id } => {

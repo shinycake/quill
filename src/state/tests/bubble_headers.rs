@@ -101,9 +101,9 @@ fn reply_header_quote_keeps_its_formatting() {
         &sink,
         &text_message(10, 31, "one two three", ""),
     );
-    // A quote cut from a rich message: TDLib fills `text` with the same
-    // formatting it puts in `rich_texts`. The padding is trimmed and the
-    // bold span moves with the text.
+    // A quote cut from a rich message: TDLib leaves `text` empty and sends
+    // one `RichText` per quoted text (`MessageQuote::get_text_quote_object`).
+    // The texts join with line feeds and the bold span keeps its place.
     apply_json(
         &mut session,
         &seq,
@@ -112,19 +112,26 @@ fn reply_header_quote_keeps_its_formatting() {
             11,
             77,
             "answer",
-            r#","reply_to":{"@type":"messageReplyToMessage","chat_id":-1001,"message_id":10,"quote":{"@type":"textQuote","text":{"@type":"formattedText","text":"  two three","entities":[{"@type":"textEntity","offset":2,"length":3,"type":{"@type":"textEntityTypeBold"}}]},"rich_texts":[{"@type":"richTexts","texts":[{"@type":"richTextBold","text":{"@type":"richTextPlain","text":"two"}},{"@type":"richTextPlain","text":" three"}]}],"position":4,"is_manual":true},"checklist_task_id":0,"poll_option_id":"","origin":null,"origin_send_date":0,"content":null}"#,
+            r#","reply_to":{"@type":"messageReplyToMessage","chat_id":-1001,"message_id":10,"quote":{"@type":"textQuote","text":{"@type":"formattedText","text":"","entities":[]},"rich_texts":[{"@type":"richTexts","texts":[{"@type":"richTextBold","text":{"@type":"richTextPlain","text":"two"}},{"@type":"richTextPlain","text":" three"}]},{"@type":"richTextItalic","text":{"@type":"richTextPlain","text":"four"}}],"position":4,"is_manual":true},"checklist_task_id":0,"poll_option_id":"","origin":null,"origin_send_date":0,"content":null}"#,
         ),
     );
     let header = session.reply_header(&message(&session, 11)).unwrap();
     assert!(header.is_quote);
-    assert_eq!(header.text, "two three");
+    assert_eq!(header.text, "two three\nfour");
     assert_eq!(
         header.entities,
-        vec![TextEntity {
-            utf8_start: 0,
-            utf8_end: 3,
-            kind: TextEntityKind::Bold,
-        }]
+        vec![
+            TextEntity {
+                utf8_start: 0,
+                utf8_end: 3,
+                kind: TextEntityKind::Bold,
+            },
+            TextEntity {
+                utf8_start: 10,
+                utf8_end: 14,
+                kind: TextEntityKind::Italic,
+            },
+        ]
     );
 }
 

@@ -632,19 +632,29 @@ fn draft_message_parses_partial_quote() {
 
 #[test]
 fn draft_message_quote_keeps_its_entities() {
-    let env = parse_envelope(
-        r#"{"@type":"updateChatDraftMessage","chat_id":11,"draft_message":{"@type":"draftMessage","reply_to":{"@type":"inputMessageReplyToMessage","message_id":101,"quote":{"@type":"inputTextQuote","text":{"@type":"formattedText","text":"meet at noon","entities":[{"@type":"textEntity","offset":8,"length":4,"type":{"@type":"textEntityTypeItalic"}}]},"rich_texts":[{"@type":"richTextPlain","text":"meet at noon"}],"position":7},"checklist_task_id":0,"poll_option_id":""},"date":1,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"ok","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null},"positions":[]}"#,
-    )
+    // A draft quote cut from a rich message: TDLib leaves `text` empty
+    // (`MessageQuote::get_input_text_quote_object`) and keeps the quote in
+    // `rich_texts`, which must go back out unchanged when the draft is saved.
+    let rich_texts = r#"[{"@type":"richTexts","texts":[{"@type":"richTextPlain","text":"meet at "},{"@type":"richTextItalic","text":{"@type":"richTextPlain","text":"noon"}}]}]"#;
+    let env = parse_envelope(&format!(
+        r#"{{"@type":"updateChatDraftMessage","chat_id":11,"draft_message":{{"@type":"draftMessage","reply_to":{{"@type":"inputMessageReplyToMessage","message_id":101,"quote":{{"@type":"inputTextQuote","text":{{"@type":"formattedText","text":"","entities":[]}},"rich_texts":{rich_texts},"position":7}},"checklist_task_id":0,"poll_option_id":""}},"date":1,"content":{{"@type":"draftMessageContentText","text":{{"@type":"formattedText","text":"ok","entities":[]}},"link_preview_options":null}},"effect_id":"0","suggested_post_info":null}},"positions":[]}}"#
+    ))
     .unwrap();
     match env.payload {
         EnvelopePayload::Messages(MessagesPayload::UpdateChatDraftMessage { draft, .. }) => {
             let quote = draft.expect("draft").quote.expect("quote");
+            assert_eq!(quote.text, "meet at noon");
+            assert_eq!(quote.position, 7);
             assert_eq!(quote.entities.len(), 1);
             assert_eq!(
                 (quote.entities[0].utf8_start, quote.entities[0].utf8_end),
                 (8, 12)
             );
-            assert!(quote.from_rich);
+            let saved = crate::telegram::requests::input_text_quote_json(&quote);
+            assert_eq!(
+                saved["rich_texts"],
+                serde_json::from_str::<serde_json::Value>(rich_texts).unwrap()
+            );
         }
         other => panic!("{other:?}"),
     }

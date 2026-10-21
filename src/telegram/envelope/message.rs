@@ -736,7 +736,14 @@ pub(crate) fn parse_reply_to(value: Option<&Value>) -> Option<MessageReplyTo> {
                     if quote.is_null() {
                         return None;
                     }
-                    let (text, entities) = parse_caption(quote.get("text"));
+                    let (mut text, mut entities) = parse_caption(quote.get("text"));
+                    // A quote from a rich message comes as `rich_texts` with
+                    // an empty `text` (`schema/td_api.tl:3471`).
+                    if text.is_empty()
+                        && let Some(rich_texts) = quote.get("rich_texts").and_then(Value::as_array)
+                    {
+                        (text, entities) = crate::rich::quote_rich_texts_display(rich_texts);
+                    }
                     if text.is_empty() {
                         None
                     } else {

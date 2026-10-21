@@ -58,11 +58,14 @@ pub struct ComposerReplyTo {
 pub struct QuoteSelection {
     pub text: String,
     pub position: i32,
-    /// The formatting of the quoted part (`inputTextQuote.text.entities`).
+    /// The formatting of the quoted part that a quote keeps
+    /// ([`crate::text::quote::quote_keeps`]).
     pub entities: Vec<crate::text::TextEntity>,
-    /// The quote was cut from a rich message, so `inputTextQuote.rich_texts`
-    /// carries it too and `position` counts in the joined quotable texts.
-    pub from_rich: bool,
+    /// A quote cut from a rich message: one `RichText` per quoted text
+    /// (`inputTextQuote.rich_texts`), and `position` counts in the message's
+    /// quotable texts joined by line feeds. `text` is those texts joined by
+    /// line feeds too. Empty for a quote of an ordinary message.
+    pub rich_texts: Vec<crate::rich::QuoteRichText>,
 }
 
 impl QuoteSelection {
@@ -72,8 +75,14 @@ impl QuoteSelection {
             text: text.into(),
             position,
             entities: Vec::new(),
-            from_rich: false,
+            rich_texts: Vec::new(),
         }
+    }
+
+    /// Same quoted text at the same place: the part a picker row stands
+    /// for, whatever formatting either copy carries.
+    pub fn same_part(&self, other: &Self) -> bool {
+        self.text == other.text && self.position == other.position
     }
 }
 
