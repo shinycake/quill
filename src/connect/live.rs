@@ -211,6 +211,7 @@ fn open_prepared_client(
 ) -> Result<LiveConnect, ConnectBlocker> {
     let live = LiveTdJson::connect(diagnostics.clone()).map_err(|e| match e {
         TdJsonError::NotFound => ConnectBlocker::MissingTdjson,
+        TdJsonError::VersionMismatch { .. } => ConnectBlocker::TdjsonVersion,
         _ => ConnectBlocker::TdjsonLoad,
     })?;
     let sender = LiveSender::from_live(&live);

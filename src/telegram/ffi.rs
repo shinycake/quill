@@ -23,6 +23,11 @@ pub enum TdJsonError {
     InvalidRequest,
     #[error("TDLib native log stream could not be secured")]
     LogStreamNotSecured,
+    #[error("tdjson is TDLib {found}, this build needs {expected}")]
+    VersionMismatch {
+        found: String,
+        expected: &'static str,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,6 +160,23 @@ impl TdJson {
         Ok(())
     }
 
+    /// Refuse a `libtdjson` other than the pinned one before any client
+    /// opens the database. An older TDLib reading a database a newer one
+    /// wrote can abort on options it doesn't know.
+    pub fn check_pinned_version(&self) -> Result<(), TdJsonError> {
+        let request = r#"{"@type":"getOption","name":"version"}"#;
+        let found = self
+            .execute(request)?
+            .and_then(|body| option_string_value(&body))
+            .unwrap_or_default();
+        let expected = crate::pins::TDLIB_CMAKE_VERSION;
+        if found == expected {
+            Ok(())
+        } else {
+            Err(TdJsonError::VersionMismatch { found, expected })
+        }
+    }
+
     pub fn native_log_count() -> u64 {
         NATIVE_LOG_COUNT.load(Ordering::Relaxed)
     }
@@ -231,6 +253,14 @@ fn is_ok_response(body: &str) -> bool {
         .is_some_and(|t| t == "ok")
 }
 
+fn option_string_value(body: &str) -> Option<String> {
+    let v = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    if v.get("@type")?.as_str()? != "optionValueString" {
+        return None;
+    }
+    Some(v.get("value")?.as_str()?.to_owned())
+}
+
 unsafe extern "C" fn redacted_native_log(verbosity: c_int, _message: *const c_char) {
     // Do not call any TDLib function from this callback.
     // Do not inspect `_message`; native logs can contain account data.
@@ -245,6 +275,15 @@ unsafe extern "C" fn redacted_native_log(verbosity: c_int, _message: *const c_ch
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_option_string_values() {
+        let body = r#"{"@type":"optionValueString","value":"1.8.69"}"#;
+        assert_eq!(option_string_value(body).as_deref(), Some("1.8.69"));
+        let error = r#"{"@type":"error","code":400,"message":"Option not found"}"#;
+        assert_eq!(option_string_value(error), None);
+        assert_eq!(option_string_value("not json"), None);
+    }
 
     #[test]
     fn does_not_search_homebrew_paths() {
