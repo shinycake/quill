@@ -713,7 +713,7 @@ fn reply_to_message_preview_and_jump() {
         &mut session,
         &seq,
         &sink,
-        r#"{"@type":"updateNewMessage","message":{"id":105,"chat_id":11,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"quoted","entities":[]}},"reply_to":{"@type":"messageReplyToMessage","chat_id":11,"message_id":90,"quote":{"@type":"textQuote","text":{"@type":"formattedText","text":"manual quote","entities":[]},"position":0,"is_manual":true},"checklist_task_id":0,"poll_option_id":""}}}"#,
+        r#"{"@type":"updateNewMessage","message":{"id":105,"chat_id":11,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"quoted","entities":[]}},"reply_to":{"@type":"messageReplyToMessage","chat_id":11,"message_id":90,"quote":{"@type":"textQuote","text":{"@type":"formattedText","text":"manual quote","entities":[]},"rich_texts":[],"position":0,"is_manual":true},"checklist_task_id":0,"poll_option_id":""}}}"#,
     );
     let quoted = session
         .histories

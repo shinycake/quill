@@ -8,9 +8,10 @@
 //! Only three buttons send anything: Transfer in the confirmation
 //! (`transferGift`), "Open Fragment" (the password-less probe of
 //! `getUpgradedGiftWithdrawalUrl`, whose answer is never opened) and
-//! Submit in the password box (`getUpgradedGiftWithdrawalUrl`, which only
-//! returns Fragment's page). The password is read from the masked field
-//! once, handed to that one request and the field is emptied at once
+//! Submit in the password box (`createTemporaryPassword`, then
+//! `getUpgradedGiftWithdrawalUrl`, which only returns Fragment's page).
+//! The password is read from the masked field once, handed to the first
+//! request and the field is emptied at once
 //! (`set_value` also drops the field's undo history); it is never stored.
 #![deny(clippy::indexing_slicing)]
 

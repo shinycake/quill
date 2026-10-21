@@ -5,10 +5,11 @@ use crate::composer::{
 use crate::ids::{ChatId, MessageId, RequestId};
 use serde_json::{Value, json};
 
-/// Slice G1: `inputTextQuote` JSON (TDLib 1.8.67, `schema/td_api.tl:3056`):
-/// `inputTextQuote text:formattedText position:int32 = InputTextQuote;`
+/// Slice G1: `inputTextQuote` JSON (TDLib 1.8.69, `schema/td_api.tl:3488`):
+/// `inputTextQuote text:formattedText rich_texts:vector<RichText> position:int32`.
 /// `position` is the offset of the quoted text in the original message in
-/// UTF-16 code units.
+/// UTF-16 code units. Quotes are never picked from rich messages here, so
+/// `rich_texts` is the empty array the schema asks for.
 pub fn input_text_quote_json(text: &str, position: i32) -> Value {
     json!({
         "@type": "inputTextQuote",
@@ -17,6 +18,7 @@ pub fn input_text_quote_json(text: &str, position: i32) -> Value {
             "text": text,
             "entities": []
         },
+        "rich_texts": [],
         "position": position,
     })
 }

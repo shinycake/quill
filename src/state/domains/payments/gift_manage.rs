@@ -81,6 +81,10 @@ impl Session {
                 send.premium_loaded = true;
                 send.premium_options = options;
             }
+            (
+                GiftManagePayload::TemporaryPassword { has_password },
+                PaymentsPurpose::GiftExportTempPassword,
+            ) => self.apply_gift_export_temp_password(has_password),
             _ => {}
         }
     }
@@ -162,6 +166,24 @@ impl Session {
         }
     }
 
+    /// The temporary password for "Send via Blockchain" exists: the driver
+    /// asks for the URL next. Without one (TDLib should not answer that
+    /// way) the box says the server failed.
+    fn apply_gift_export_temp_password(&mut self, has_password: bool) {
+        let manage = &mut self.payments.gifts_manage;
+        if !manage.transfer().is_some_and(TransferPicker::exporting) {
+            return;
+        }
+        if has_password {
+            manage.export_unlocked = true;
+        } else if let Some(picker) = manage.transfer_mut() {
+            picker.stage = TransferStage::Password {
+                sending: false,
+                error: Some(ExportError::ServerError),
+            };
+        }
+    }
+
     /// The password-less probe returned a URL. It is never opened: the
     /// password box opens as after any other answer.
     pub(crate) fn apply_gift_export_probe_answer(&mut self) {
@@ -236,7 +258,9 @@ impl Session {
                 manage.send.error = Some(format!("Couldn't load the gifts: {reason}"));
             }
             PaymentsPurpose::GetPremiumGiftOptions => manage.send.premium_loaded = true,
-            PaymentsPurpose::GiftExportUrl => Self::apply_gift_export_error(manage, err, &reason),
+            PaymentsPurpose::GiftExportTempPassword | PaymentsPurpose::GiftExportUrl => {
+                Self::apply_gift_export_error(manage, err, &reason)
+            }
             PaymentsPurpose::GiftExportProbe => self.apply_gift_export_probe_error(err),
             PaymentsPurpose::SendStarGift => {
                 manage.send.sending = false;

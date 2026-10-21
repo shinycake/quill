@@ -266,9 +266,11 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// "Open Fragment" in "Manage with Fragment": tdesktop's password-less
     /// try of `getUpgradedGiftWithdrawalUrl` (`inputCheckPasswordEmpty`),
-    /// with a reload of the password state. Its error picks the security
-    /// check or the password box; a URL it returned would be dropped.
-    /// Only from that confirmation, for an unlocked gift.
+    /// with a reload of the password state. Since TDLib 1.8.69 it carries
+    /// no password, and TDLib refuses it without a temporary password. Its
+    /// error picks the security check or the password box; a URL it
+    /// returned would be dropped. Only from that confirmation, for an
+    /// unlocked gift.
     pub fn probe_gift_export(&mut self) -> Result<RequestId, ConnectSendError> {
         let Some(TransferPicker {
             id,
@@ -291,7 +293,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(picker) = self.session.payments.gifts_manage.transfer_mut() {
             picker.open_fragment();
         }
-        let json = rq::get_upgraded_gift_withdrawal_url(extra, &id, "");
+        let json = rq::get_upgraded_gift_withdrawal_url(extra, &id);
         if let Err(err) = self.send_json_request(extra, &json) {
             if let Some(picker) = self.session.payments.gifts_manage.transfer_mut() {
                 picker.stage = TransferStage::ConfirmExport;
@@ -302,11 +304,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Submit the password box of "Send via Blockchain":
-    /// `getUpgradedGiftWithdrawalUrl`. Only from the idle password stage
-    /// (after "Open Fragment" and its probe), with a typed password, for a
-    /// gift whose export is unlocked. The answer is a Fragment URL;
-    /// nothing moves here. The password goes into this one request and is
-    /// not kept.
+    /// `createTemporaryPassword`, then `getUpgradedGiftWithdrawalUrl` once
+    /// it is answered (`continue_gift_export`). Only from the idle
+    /// password stage (after "Open Fragment" and its probe), with a typed
+    /// password, for a gift whose export is unlocked. The answer is a
+    /// Fragment URL; nothing moves here. The password goes into this one
+    /// request and is not kept.
     pub fn export_picked_gift(&mut self, password: &str) -> Result<RequestId, ConnectSendError> {
         let Some(TransferPicker {
             id,
@@ -321,24 +324,57 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.export_allowed(&id)?;
         let extra = self.session.request(
-            RequestPurpose::Payments(PaymentsPurpose::GiftExportUrl),
+            RequestPurpose::Payments(PaymentsPurpose::GiftExportTempPassword),
             None,
         );
-        let set_stage = |driver: &mut Self, sending: bool| {
-            if let Some(picker) = driver.session.payments.gifts_manage.transfer_mut() {
-                picker.stage = TransferStage::Password {
-                    sending,
-                    error: None,
-                };
-            }
-        };
-        set_stage(self, true);
-        let json = rq::get_upgraded_gift_withdrawal_url(extra, &id, password);
+        self.set_export_sending(true);
+        let json = rq::create_temporary_password(extra, password);
         if let Err(err) = self.send_json_request(extra, &json) {
-            set_stage(self, false);
+            self.set_export_sending(false);
             return Err(err);
         }
         Ok(extra)
+    }
+
+    /// After each ingest: the temporary password of "Send via Blockchain"
+    /// arrived, so `getUpgradedGiftWithdrawalUrl` goes out for the picked
+    /// gift if its export is still allowed; otherwise, or when the send
+    /// fails, the idle password box comes back.
+    pub(crate) fn continue_gift_export(&mut self) -> Result<(), ConnectSendError> {
+        let manage = &mut self.session.payments.gifts_manage;
+        if !std::mem::take(&mut manage.export_unlocked) {
+            return Ok(());
+        }
+        let Some(id) = manage
+            .transfer()
+            .filter(|picker| picker.exporting())
+            .map(|picker| picker.id.clone())
+        else {
+            return Ok(());
+        };
+        if let Err(err) = self.export_allowed(&id) {
+            self.set_export_sending(false);
+            return Err(err);
+        }
+        let extra = self.session.request(
+            RequestPurpose::Payments(PaymentsPurpose::GiftExportUrl),
+            None,
+        );
+        let json = rq::get_upgraded_gift_withdrawal_url(extra, &id);
+        if let Err(err) = self.send_json_request(extra, &json) {
+            self.set_export_sending(false);
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    fn set_export_sending(&mut self, sending: bool) {
+        if let Some(picker) = self.session.payments.gifts_manage.transfer_mut() {
+            picker.stage = TransferStage::Password {
+                sending,
+                error: None,
+            };
+        }
     }
 
     /// `setGiftResalePrice`: `Some(stars)` lists the collectible, `None`

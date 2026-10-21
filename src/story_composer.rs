@@ -175,13 +175,13 @@ impl StoryExpiry {
     }
 }
 
-/// `storyAreaPosition` (schema 1.8.67, `td_api.tl:6530`) — percentages
+/// `areaPosition` (schema 1.8.69, `td_api.tl:1184`) — percentages
 /// of the story media. The composer has no media canvas yet, so areas
 /// get these fixed sensible placements.
 // ponytail: drag placement once a media canvas exists.
 fn area_position(x: f64, y: f64, w: f64, h: f64, corner_radius: f64) -> Value {
     json!({
-        "@type": "storyAreaPosition",
+        "@type": "areaPosition",
         "x_percentage": x,
         "y_percentage": y,
         "width_percentage": w,
@@ -412,9 +412,9 @@ mod tests {
         let areas = v["areas"].as_array().unwrap();
         assert_eq!(areas.len(), 3);
         // Link area: td_api.tl:6610 (inputStoryArea) / td_api.tl:6597
-        // (inputStoryAreaTypeLink); position td_api.tl:6530.
+        // (inputStoryAreaTypeLink); position td_api.tl:1184 (1.8.69).
         assert_eq!(areas[0]["@type"], "inputStoryArea");
-        assert_eq!(areas[0]["position"]["@type"], "storyAreaPosition");
+        assert_eq!(areas[0]["position"]["@type"], "areaPosition");
         assert_eq!(areas[0]["type"]["@type"], "inputStoryAreaTypeLink");
         assert_eq!(areas[0]["type"]["url"], "https://t.me/quill");
         // Reaction areas: td_api.tl:6588 + td_api.tl:2915.

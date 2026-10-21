@@ -66,6 +66,9 @@ pub struct GiftManageState {
     /// Fragment's export page from `getUpgradedGiftWithdrawalUrl`, waiting
     /// for the UI to open it.
     pub export_url: Option<String>,
+    /// One-shot: `createTemporaryPassword` succeeded for the export in
+    /// flight, so the driver sends `getUpgradedGiftWithdrawalUrl` next.
+    pub export_unlocked: bool,
 }
 
 /// tdesktop `ShowGiftTransferredToast` and `showPeerHistory` after

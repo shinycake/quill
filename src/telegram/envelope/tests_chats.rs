@@ -613,7 +613,7 @@ fn draft_message_parses_partial_quote() {
     // Slice G1: a draft saved with `inputTextQuote` (schema 1.8.67
     // line 3056) restores the quote text and UTF-16 position.
     let env = parse_envelope(
-            r#"{"@type":"updateChatDraftMessage","chat_id":11,"draft_message":{"@type":"draftMessage","reply_to":{"@type":"inputMessageReplyToMessage","message_id":101,"quote":{"@type":"inputTextQuote","text":{"@type":"formattedText","text":"meet at","entities":[]},"position":7},"checklist_task_id":0,"poll_option_id":""},"date":1,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"sounds good","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null},"positions":[]}"#,
+            r#"{"@type":"updateChatDraftMessage","chat_id":11,"draft_message":{"@type":"draftMessage","reply_to":{"@type":"inputMessageReplyToMessage","message_id":101,"quote":{"@type":"inputTextQuote","text":{"@type":"formattedText","text":"meet at","entities":[]},"rich_texts":[],"position":7},"checklist_task_id":0,"poll_option_id":""},"date":1,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"sounds good","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null},"positions":[]}"#,
         )
         .unwrap();
     match env.payload {

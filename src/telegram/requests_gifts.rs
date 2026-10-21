@@ -98,20 +98,34 @@ pub fn transfer_gift(
     .to_string()
 }
 
-/// `getUpgradedGiftWithdrawalUrl`: Fragment's page for moving the
-/// collectible to the TON blockchain. `password` is the 2-step
-/// verification password as typed; the caller never keeps it. This only
-/// returns a URL; nothing moves until the user acts on Fragment.
-pub fn get_upgraded_gift_withdrawal_url(
-    extra: RequestId,
-    received_gift_id: &str,
-    password: &str,
-) -> String {
+/// `getUpgradedGiftWithdrawalUrl` (TDLib 1.8.69): Fragment's page for
+/// moving the collectible to the TON blockchain. It needs a valid
+/// temporary password (`createTemporaryPassword`); without one TDLib
+/// refuses it before it reaches the server. This only returns a URL;
+/// nothing moves until the user acts on Fragment.
+pub fn get_upgraded_gift_withdrawal_url(extra: RequestId, received_gift_id: &str) -> String {
     json!({
         "@type": "getUpgradedGiftWithdrawalUrl",
         "@extra": extra.as_extra(),
         "received_gift_id": received_gift_id,
+    })
+    .to_string()
+}
+
+/// The shortest lifetime `createTemporaryPassword` accepts, in seconds
+/// (schema 1.8.69: 60 to 86400). The temporary password only has to
+/// outlive the one request sent right after it.
+pub const TEMPORARY_PASSWORD_SECONDS: i32 = 60;
+
+/// `createTemporaryPassword`: trades the 2-step verification password, as
+/// typed, for TDLib's temporary password. The caller never keeps the
+/// password. Response is `temporaryPasswordState`.
+pub fn create_temporary_password(extra: RequestId, password: &str) -> String {
+    json!({
+        "@type": "createTemporaryPassword",
+        "@extra": extra.as_extra(),
         "password": password,
+        "valid_for": TEMPORARY_PASSWORD_SECONDS,
     })
     .to_string()
 }
