@@ -95,6 +95,7 @@ fn iv_page() -> quill::state::InstantViewPage {
         rich: quill::telegram::envelope::RichMessageContent {
             blocks: blocks.iter().map(quill::rich::parse_page_block).collect(),
             is_full: true,
+            quote_texts: Default::default(),
         },
     }
 }
