@@ -6,6 +6,7 @@
 
 mod account;
 mod log_out;
+mod notifications;
 mod pages;
 mod rows;
 mod search;
@@ -55,6 +56,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_settings(&mut self) {
+        self.leave_notification_settings();
         self.settings.search.close();
         self.settings.open = false;
         self.settings.page = None;
@@ -62,6 +64,12 @@ impl QuillApp {
     }
 
     pub(super) fn show_settings_page(&mut self, page: Page, cx: &mut Context<Self>) {
+        if self.settings.page == Some(Page::Notifications) && page != Page::Notifications {
+            self.leave_notification_settings();
+        }
+        if page == Page::Notifications {
+            self.fetch_notification_settings();
+        }
         self.settings.page = Some(page);
         self.settings.sub = None;
         if page == Page::Privacy {
@@ -228,6 +236,8 @@ crate::ui::screenshot_demo::register_demos![
         .setup(|app, _, _| app.demo_settings(Page::Chats)),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-telegram")
         .setup(|app, _, _| app.demo_settings(Page::Telegram)),
+    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-notifications")
+        .setup(|app, _, _| app.demo_settings(Page::Notifications)),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-appearance")
         .setup(|app, _, _| app.demo_settings(Page::Appearance)),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-system")
