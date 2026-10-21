@@ -92,7 +92,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         let json = get_share_theme_gifts(extra, gifts_owner, &request.offset);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.users_state.peer_qr.gifts.fail(now);
+            self.session.users_state.peer_qr.gifts.fail();
             return Err(err);
         }
         Ok(())

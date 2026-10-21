@@ -145,7 +145,12 @@ impl QuillApp {
                 .collect(),
         );
         let list = Rc::new(list);
-        v_virtual_list(
+        let scroll = self
+            .peer_qr
+            .open
+            .as_ref()
+            .map(|open| open.gifts_scroll.clone());
+        let grid = v_virtual_list(
             cx.entity(),
             "peer-qr-gifts-grid",
             sizes,
@@ -178,7 +183,11 @@ impl QuillApp {
                     .collect::<Vec<_>>()
             },
         )
-        .size_full()
+        .size_full();
+        match scroll {
+            Some(scroll) => grid.track_scroll(&scroll),
+            None => grid,
+        }
     }
 
     /// One tile: the gift's backdrop as a rounded radial gradient, the

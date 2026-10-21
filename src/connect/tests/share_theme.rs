@@ -378,7 +378,10 @@ fn a_late_page_of_your_gifts_stays_out_of_a_channels_list() {
         "next_offset": "", "gifts": [upgraded("mine", 101, false)]}),
     );
     let gifts = &rig.driver.session.users_state.peer_qr.gifts;
-    assert!(gifts.list.is_empty() && gifts.loading, "your page is dropped");
+    assert!(
+        gifts.list.is_empty() && gifts.loading,
+        "your page is dropped"
+    );
     rig.feed(
         json!({"@type": "receivedGifts", "@extra": channel["@extra"], "total_count": 1,
         "next_offset": "", "gifts": [upgraded("theirs", 202, false)]}),

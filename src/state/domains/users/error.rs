@@ -42,7 +42,7 @@ impl Session {
             })) => {
                 let gifts = &mut self.users_state.peer_qr.gifts;
                 if gifts.is_current(owner, serial) {
-                    gifts.fail(crate::local_time::now_unix());
+                    gifts.fail();
                 }
             }
             Some(RequestPurpose::Users(UsersPurpose::SetProfileShareTheme { ticket })) => {

@@ -131,6 +131,9 @@ pub(super) struct OpenQr {
     pub(super) share_image: Option<PathBuf>,
     /// A card image is being made for copy or share.
     pub(super) exporting: bool,
+    /// The gifts grid's scroll position, kept across frames and reset
+    /// each time the panel opens.
+    pub(super) gifts_scroll: gpui_kit::base::VirtualListScrollHandle,
     /// The countdown clock is ticking.
     clock_running: bool,
 }
@@ -201,6 +204,7 @@ impl QuillApp {
             gift_entry: now,
             share_image: None,
             exporting: false,
+            gifts_scroll: gpui_kit::base::VirtualListScrollHandle::new(),
             clock_running: false,
         }));
         if own && let Some(data) = self.qr_data_mut() {
@@ -283,6 +287,9 @@ impl QuillApp {
             open.gift_entry = now;
         }
         if open.state.panel != before.panel {
+            if open.state.panel == Some(QrPanel::Gifts) {
+                open.gifts_scroll = gpui_kit::base::VirtualListScrollHandle::new();
+            }
             open.motion = match open.state.panel {
                 Some(panel) => PanelMotion {
                     shown: Some(panel),

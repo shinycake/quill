@@ -301,12 +301,19 @@ fn scrolling_the_gifts_grid_to_its_end_brings_the_next_page(cx: &mut TestAppCont
         wheel(vcx, at, -200.);
         frames(vcx);
     }
-    let (count, _) = gifts_listed(&app, vcx);
+    // Each end reached asks for the next page, until the last.
+    assert_eq!(gifts_listed(&app, vcx), (30, String::new()));
     assert!(
-        count >= 2 * DEMO_GIFTS_PAGE,
-        "the end of the list asked for the next page ({count} listed)"
+        shown(vcx, "peer-qr-gift-29"),
+        "the last page's tiles are drawn"
     );
-    // The new tiles scroll into view, picked like the first.
-    let last = vcx.debug_bounds("peer-qr-gift-23");
-    assert!(last.is_some(), "the next page's tiles are drawn");
+    assert!(!shown(vcx, "peer-qr-gift-0"), "scrolled past the first row");
+    click(vcx, "peer-qr-gift-29");
+    app.read_with(vcx, |app, _| {
+        let open = app.peer_qr.open.as_ref().expect("open");
+        assert_eq!(
+            open.state.gift.as_ref().map(|gift| gift.id),
+            Some(demo_gift(29).id)
+        );
+    });
 }

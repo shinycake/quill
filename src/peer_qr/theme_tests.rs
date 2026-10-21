@@ -547,8 +547,8 @@ fn a_gifts_request_for_another_owner_never_reuses_a_serial() {
     assert!(gifts.is_current(channel, theirs.serial));
     // A failed next page waits, then may be asked for again.
     gifts.accept(vec![gift(1, "r1")], "page2".into(), true);
-    assert!(gifts.start(channel, true, 0).is_some());
-    gifts.fail(10);
+    assert!(gifts.start(channel, true, 10).is_some());
+    gifts.fail();
     assert_eq!(gifts.list.len(), 1);
     assert!(!gifts.complete && !gifts.wants_more(10 + GIFTS_RETRY_SECS - 1));
     assert!(gifts.wants_more(10 + GIFTS_RETRY_SECS));

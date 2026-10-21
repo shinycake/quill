@@ -341,6 +341,8 @@ pub struct ThemeGifts {
     /// counting when the list moves to another owner, so a late page for
     /// the old owner never matches.
     pub serial: u64,
+    /// When the request on its way was sent (unix seconds).
+    pub requested_at: i64,
     /// The next page failed: the panel stops asking for more until
     /// `retry_at` (unix seconds).
     pub retry_at: Option<i64>,
@@ -374,6 +376,7 @@ impl ThemeGifts {
         }
         self.serial += 1;
         self.loading = true;
+        self.requested_at = now;
         self.retry_at = None;
         Some(GiftsRequest {
             serial: self.serial,
@@ -387,10 +390,7 @@ impl ThemeGifts {
 
     /// The panel may ask for the next page.
     pub fn wants_more(&self, now: i64) -> bool {
-        self.loaded
-            && !self.complete
-            && !self.loading
-            && self.retry_at.is_none_or(|at| now >= at)
+        self.loaded && !self.complete && !self.loading && self.retry_at.is_none_or(|at| now >= at)
     }
 
     /// A page or failure belongs to the request now on its way.
@@ -400,11 +400,11 @@ impl ThemeGifts {
 
     /// The request failed. The list stays as it was; the empty state shows
     /// only when there is nothing to list. A failed next page is retried
-    /// after [`GIFTS_RETRY_SECS`].
-    pub fn fail(&mut self, now: i64) {
+    /// [`GIFTS_RETRY_SECS`] after it was asked for.
+    pub fn fail(&mut self) {
         self.loading = false;
         if self.loaded {
-            self.retry_at = Some(now.saturating_add(GIFTS_RETRY_SECS));
+            self.retry_at = Some(self.requested_at.saturating_add(GIFTS_RETRY_SECS));
         } else {
             // No first page ever came: show what there is (nothing) as
             // a whole list, as tdesktop does.
