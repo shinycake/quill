@@ -24,7 +24,8 @@ pub(in crate::ui) fn session_history_row(
     animation_playing: bool,
     gif_play: Option<crate::ui::gif_clip::GifPlay>,
     sticker_frame: Option<super::super::sticker_playback::AnimatedVisual>,
-    // A slot machine's five layers, bottom to top (empty for other rows).
+    // A dice's animated layers, bottom first (`DiceStickers::layers`;
+    // empty for other rows).
     dice_layers: Vec<Option<super::super::sticker_playback::AnimatedVisual>>,
     // Decoded animations of the message's custom emoji (by custom emoji id).
     animated_emoji: HashMap<i64, super::super::sticker_playback::AnimatedVisual>,
@@ -43,7 +44,7 @@ pub(in crate::ui) fn session_history_row(
     look: BubbleLook,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
-    // Stickers, round video messages and emoji-only messages (the ones
+    // Stickers, dice, round video messages and emoji-only messages (the ones
     // drawn big) stand on their own, without a bubble, as in Telegram
     // Desktop. Their time then sits on the chat background, so it takes
     // the theme's text color instead of the bubble's.
@@ -59,7 +60,7 @@ pub(in crate::ui) fn session_history_row(
     let look = if emoji_only
         || matches!(
             message.content,
-            MessageContent::Sticker(_) | MessageContent::VideoNote(_)
+            MessageContent::Sticker(_) | MessageContent::VideoNote(_) | MessageContent::Dice(_)
         ) {
         BubbleLook {
             plain: true,
@@ -510,11 +511,8 @@ pub(in crate::ui) fn session_history_row(
             message.id.0 as u64,
             dice,
             files,
-            downloading,
             media_roots,
-            sticker_frame,
             dice_layers,
-            cx,
         )),
         // Locked paid media and forwarded stories are bubble cards.
         MessageContent::Action(_) => action_card(message, session, files, downloading, media_roots, media_max, cx),

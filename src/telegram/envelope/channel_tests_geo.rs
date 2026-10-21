@@ -116,9 +116,7 @@ fn message_contact_without_name_or_phone_is_unsupported() {
     }
 }
 
-// Phase 4.4: `messageDice` (schema 1.8.67 line 5231). `initial_state`
-// / `final_state` / `success_animation_frame_number` parse without
-// breaking and are dropped; `emoji` + `value` are kept.
+// `messageDice`: `emoji` + `value` are kept; empty stickers are absent.
 #[test]
 fn message_dice_parses_emoji_and_value() {
     let json = r#"{"@type":"updateNewMessage","message":{"id":115,"chat_id":17,"is_outgoing":false,"content":{"@type":"messageDice","initial_state":{"@type":"diceStickersRegular","sticker":{"@type":"sticker"}},"final_state":{"@type":"diceStickersRegular","sticker":{"@type":"sticker"}},"emoji":"🎲","value":4,"success_animation_frame_number":12}}}"#;
@@ -157,10 +155,41 @@ fn message_dice_keeps_the_regular_final_state_sticker() {
     let MessageContent::Dice(dice) = &message.content else {
         panic!("{:?}", message.content);
     };
-    let sticker = dice.final_sticker.as_ref().expect("final sticker");
+    let Some((DicePhase::Landing, DiceStickers::Regular(sticker))) = dice.animation() else {
+        panic!("{dice:?}");
+    };
     assert_eq!(sticker.file_id.0, 71);
     assert_eq!(sticker.format, StickerFormat::Tgs);
-    assert!(message.files.iter().any(|file| file.id.0 == 71));
+    let Some(DiceStickers::Regular(roll)) = &dice.initial else {
+        panic!("{dice:?}");
+    };
+    assert_eq!(roll.file_id.0, 70);
+    assert!(
+        [70, 71]
+            .iter()
+            .all(|id| message.files.iter().any(|file| file.id.0 == *id))
+    );
+}
+
+#[test]
+fn message_dice_rolls_until_its_value_is_known() {
+    let json = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":119,"chat_id":17,"is_outgoing":true,"content":{{"@type":"messageDice","initial_state":{{"@type":"diceStickersSlotMachine",{}}},"final_state":null,"emoji":"🎰","value":0,"success_animation_frame_number":0}}}}}}"#,
+        slot_layer_fields(&SLOT_KEYS)
+    );
+    let env = parse_envelope(&json).unwrap();
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
+        panic!("not a new message");
+    };
+    let MessageContent::Dice(dice) = &message.content else {
+        panic!("{:?}", message.content);
+    };
+    let Some((DicePhase::Rolling, stickers)) = dice.animation() else {
+        panic!("{dice:?}");
+    };
+    assert_eq!(stickers.layers().len(), 5);
+    assert_eq!(dice.label(), "🎰");
+    assert_eq!(dice.result_line(), "🎰");
 }
 
 #[test]
@@ -174,7 +203,7 @@ fn message_dice_slot_machine_has_no_single_final_sticker() {
         panic!("{:?}", message.content);
     };
     assert_eq!(dice.value, 64);
-    assert!(dice.final_sticker.is_none());
+    assert!(dice.animation().is_none());
 }
 
 fn slot_sticker(id: i32) -> String {
@@ -183,15 +212,19 @@ fn slot_sticker(id: i32) -> String {
     )
 }
 
-fn slot_machine_message(layers: &[&str], value: i32) -> String {
+fn slot_layer_fields(layers: &[&str]) -> String {
     let parts: Vec<String> = layers
         .iter()
         .zip(80..)
         .map(|(key, id)| format!(r#""{key}":{}"#, slot_sticker(id)))
         .collect();
+    parts.join(",")
+}
+
+fn slot_machine_message(layers: &[&str], value: i32) -> String {
     format!(
         r#"{{"@type":"updateNewMessage","message":{{"id":118,"chat_id":17,"is_outgoing":false,"content":{{"@type":"messageDice","initial_state":{{"@type":"diceStickersSlotMachine"}},"final_state":{{"@type":"diceStickersSlotMachine",{}}},"emoji":"🎰","value":{value},"success_animation_frame_number":0}}}}}}"#,
-        parts.join(",")
+        slot_layer_fields(layers)
     )
 }
 
@@ -213,7 +246,11 @@ fn message_dice_slot_machine_keeps_its_five_layers_in_draw_order() {
         panic!("{:?}", message.content);
     };
     assert!(dice.is_slot_machine());
-    let ids: Vec<i32> = dice.slot_layers.iter().map(|s| s.file_id.0).collect();
+    let Some((DicePhase::Landing, stickers @ DiceStickers::SlotMachine(_))) = dice.animation()
+    else {
+        panic!("{dice:?}");
+    };
+    let ids: Vec<i32> = stickers.layers().iter().map(|s| s.file_id.0).collect();
     assert_eq!(ids, [80, 81, 82, 83, 84]);
     assert!(
         (80..=84).all(|id| message.files.iter().any(|file| file.id.0 == id)),
@@ -230,7 +267,11 @@ fn message_dice_slot_machine_missing_a_layer_falls_back_to_the_emoji() {
     let MessageContent::Dice(dice) = &message.content else {
         panic!("{:?}", message.content);
     };
-    assert!(dice.slot_layers.is_empty());
+    assert!(dice.animation().is_none());
+    assert!(
+        message.files.is_empty(),
+        "no files of a machine that can't draw"
+    );
     assert_eq!(dice.face(), "🎰");
 }
 
@@ -254,8 +295,8 @@ fn dice_result_lines_state_the_roll() {
     let dice = |emoji: &str, value| DiceContent {
         emoji: emoji.into(),
         value,
-        final_sticker: None,
-        slot_layers: Vec::new(),
+        initial: None,
+        landing: None,
     };
     assert_eq!(dice("🎲", 4).result_line(), "Rolled 4");
     assert_eq!(dice("🎯", 6).result_line(), "Rolled 6");

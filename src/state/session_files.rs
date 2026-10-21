@@ -358,13 +358,13 @@ impl Session {
                         ids.push(file_id);
                     }
                 }
-                // A dice's landing animation: its thumbnail is the still
-                // shown until the animation decodes.
+                // A dice's roll and landing: their thumbnails are the
+                // stills shown until the animations decode.
                 MessageContent::Dice(dice) => {
-                    for file_id in dice
-                        .final_sticker
-                        .iter()
-                        .chain(&dice.slot_layers)
+                    for file_id in [&dice.initial, &dice.landing]
+                        .into_iter()
+                        .flatten()
+                        .flat_map(|stickers| stickers.layers())
                         .filter_map(|sticker| sticker.display_file_id())
                     {
                         if self.should_download(file_id) {

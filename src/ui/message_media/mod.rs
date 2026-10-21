@@ -24,6 +24,7 @@ mod action_card;
 mod audio;
 mod call;
 mod cards;
+mod dice;
 mod document;
 mod document_thumbed;
 mod fixtures;
@@ -41,7 +42,8 @@ mod visual;
 pub(super) use action_card::{action_card, is_bubble_card};
 pub(super) use audio::{audio_row, transcription_row, voice_note_row, waveform_row};
 pub(super) use call::call_card;
-pub(super) use cards::{ContactCardState, contact_row, dice_row};
+pub(super) use cards::{ContactCardState, contact_row};
+pub(super) use dice::dice_row;
 pub(super) use document::{
     DocOrigin, action_disc, bubble_accent, document_chip, download_display_name, format_bytes,
     inline_link,

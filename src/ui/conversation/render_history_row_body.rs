@@ -132,18 +132,21 @@ impl QuillApp {
                                     }
                                 })
                         }
-                        MessageContent::Dice(dice) => dice
-                            .final_sticker
-                            .as_ref()
-                            .and_then(|s| self.history_dice_sticker(s.file_id, s.format, cx)),
                         _ => None,
                     },
                     match &message.content {
                         MessageContent::Dice(dice) => dice
-                            .slot_layers
-                            .iter()
-                            .map(|s| self.history_dice_sticker(s.file_id, s.format, cx))
-                            .collect(),
+                            .animation()
+                            .map(|(phase, stickers)| {
+                                stickers
+                                    .layers()
+                                    .iter()
+                                    .map(|s| {
+                                        self.history_dice_sticker(s.file_id, s.format, phase, cx)
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
                         _ => Vec::new(),
                     },
                     self.message_custom_emoji_frames(message, cx),
