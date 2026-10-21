@@ -8,10 +8,12 @@
 
 mod entries;
 pub mod fuzzy;
+mod recent;
 mod search;
 mod synonyms;
 
-pub use search::{Hit, SearchContext, search};
+pub use recent::{MAX_RECENT, RecentSearches};
+pub use search::{Hit, SearchContext, Target, search};
 
 use crate::lang::{Key, keys};
 
@@ -79,6 +81,11 @@ impl Page {
             Page::About => "about",
             Page::Advanced => "advanced",
         }
+    }
+
+    /// The page with this id.
+    pub fn from_id(id: &str) -> Option<Page> {
+        Page::ALL.into_iter().find(|page| page.id() == id)
     }
 
     pub fn title(self) -> Key {
@@ -195,6 +202,13 @@ pub fn all() -> impl Iterator<Item = &'static Entry> {
 /// The entry with this id.
 pub fn find(id: &str) -> Option<&'static Entry> {
     all().find(|entry| entry.id == id)
+}
+
+/// The page or entry with this id (search history, links).
+pub fn target(id: &str) -> Option<Target> {
+    Page::from_id(id)
+        .map(Target::Page)
+        .or_else(|| find(id).map(Target::Entry))
 }
 
 #[cfg(test)]

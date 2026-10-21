@@ -159,3 +159,32 @@ fn empty_queries_match_nothing_and_find_resolves_ids() {
     assert!(find("account.log_out").is_some());
     assert!(find("nope.nothing").is_none());
 }
+
+#[test]
+fn recent_searches_keep_the_newest_known_picks() {
+    let mut recent = super::RecentSearches::default();
+    for id in ["privacy", "account.log_out", "nope.gone", "privacy"] {
+        recent.record(id);
+    }
+    assert_eq!(
+        recent.ids().collect::<Vec<_>>(),
+        ["privacy", "account.log_out"],
+        "newest first, deduped, unknown ids hidden"
+    );
+    for n in 0..20 {
+        recent.record(if n % 2 == 0 { "calls" } else { "data" });
+    }
+    assert!(recent.as_slice().len() <= super::MAX_RECENT);
+    recent.remove("calls");
+    assert!(recent.ids().all(|id| id != "calls"));
+    assert_eq!(
+        super::target("account.log_out").map(|t| t.page()),
+        Some(Page::Account)
+    );
+}
+
+#[test]
+fn highlight_keeps_a_run_inside_one_word() {
+    let m = super::fuzzy::subsequence("notif", "Show notifications from").expect("match");
+    assert_eq!(m.positions, vec![5, 6, 7, 8, 9]);
+}

@@ -29,6 +29,14 @@ impl Target {
         }
     }
 
+    /// The page it opens on.
+    pub fn page(self) -> Page {
+        match self {
+            Target::Page(page) => page,
+            Target::Entry(entry) => entry.page,
+        }
+    }
+
     fn depth(self) -> u8 {
         match self {
             Target::Page(_) => 0,

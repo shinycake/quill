@@ -17,6 +17,8 @@ pub(crate) struct SettingsUi {
     pub(super) sub: Option<super::settings_window::SubPage>,
     /// The Log out confirmation is on screen.
     pub(super) log_out_confirm: bool,
+    /// The search field and its results.
+    pub(super) search: super::settings_window::SettingsSearch,
     /// Holds focus inside the settings window, so Esc steps back.
     pub(super) focus: FocusHandle,
     /// Settings → Appearance slice: the dialog is on screen.
@@ -112,6 +114,7 @@ impl SettingsUi {
             page: None,
             sub: None,
             log_out_confirm: false,
+            search: Default::default(),
             focus: cx.focus_handle(),
             appearance_open: false,
             keybinding_capture: None,
