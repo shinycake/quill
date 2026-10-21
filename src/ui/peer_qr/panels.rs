@@ -357,6 +357,7 @@ impl QuillApp {
         &mut self,
         view: &QrView,
         pill_top: f64,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let Some(open) = self
@@ -418,17 +419,29 @@ impl QuillApp {
                     cx.listener(move |this, _, _, cx| this.qr_act(QrAction::MenuChose(item), cx)),
                 )
         });
-        let cover = div()
-            .id("peer-qr-menu-dismiss")
-            .absolute()
-            .top_0()
-            .left_0()
-            .size_full()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, _, cx| this.qr_act(QrAction::MenuDismissed, cx)),
-            )
-            .into_any_element();
+        // The whole window under the menu: the menu reaches past the
+        // box, and a press anywhere off it closes only the menu.
+        let cover = deferred(
+            anchored()
+                .position_mode(AnchoredPositionMode::Window)
+                .position(point(px(0.), px(0.)))
+                .child(
+                    div()
+                        .id("peer-qr-menu-dismiss")
+                        .w(window.viewport_size().width)
+                        .h(window.viewport_size().height)
+                        .occlude()
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _, _, cx| {
+                                cx.stop_propagation();
+                                this.qr_act(QrAction::MenuDismissed, cx);
+                            }),
+                        ),
+                ),
+        )
+        .with_priority(gpui_base::POPUP_PRIORITY - 1)
+        .into_any_element();
         let menu = div()
             .id("peer-qr-menu")
             .debug_selector(|| "peer-qr-menu".into())

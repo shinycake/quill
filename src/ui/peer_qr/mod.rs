@@ -124,8 +124,6 @@ pub(crate) struct PeerQrUi {
     last_box: u64,
     /// A shared card waiting for its chat's composer.
     pub(super) pending_attach: Option<(ChatId, PathBuf)>,
-    /// The name's measured fit, kept until the name changes.
-    pub(super) fit: Option<(String, Option<quill::peer_qr::layout::UsernameFit>)>,
 }
 
 impl PeerQrUi {
@@ -135,7 +133,6 @@ impl PeerQrUi {
             art: art::Art::default(),
             last_box: 0,
             pending_attach: None,
-            fit: None,
         }
     }
 }
@@ -190,7 +187,6 @@ impl QuillApp {
                 let _ = live.driver.fetch_new_chat_privacy();
             }
         }
-        self.ensure_qr_contact_link();
         self.qr_refresh(cx);
         cx.notify();
     }
@@ -264,9 +260,12 @@ impl QuillApp {
         }
     }
 
-    /// After the box or what it shows changed: make the pictures it needs
-    /// and run the clock while a countdown shows.
+    /// After the box or what it shows changed (and on every poll step):
+    /// ask for your contact link once the privacy rules call for one, make
+    /// the pictures the box needs, and run the clock while a countdown
+    /// shows.
     fn qr_refresh(&mut self, cx: &mut Context<Self>) {
+        self.ensure_qr_contact_link();
         self.qr_prepare_art(cx);
         self.sync_qr_clock(cx);
     }
@@ -384,18 +383,18 @@ impl QuillApp {
         progressed
     }
 
-    /// Your own box with no username and a hidden number shows a
-    /// temporary contact link; ask for one when there is none (or it ran
-    /// out). The driver skips the request while one is on its way.
+    /// Your own box: the driver asks for a temporary contact link when
+    /// there is none (or it ran out) and none is on its way.
     fn ensure_qr_contact_link(&mut self) {
-        let needs = self
+        let own = self
             .peer_qr
             .open
             .as_ref()
-            .and_then(|open| self.qr_own_link(&open.state.subject))
-            .is_some_and(|state| state == OwnLinkState::NeedsContactLink);
-        if needs && let Some(live) = self.live.as_mut() {
-            let _ = live.driver.fetch_own_user_link(None);
+            .is_some_and(|open| self.qr_own_link(&open.state.subject).is_some());
+        if own && let Some(live) = self.live.as_mut() {
+            let _ = live
+                .driver
+                .ensure_own_contact_link(quill::local_time::now_unix());
         }
     }
 
@@ -428,13 +427,15 @@ impl QuillApp {
     pub(super) fn attach_shared_qr_card(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         match self.peer_qr.pending_attach.take() {
             Some((chat, path)) if chat == chat_id => self.attach_dropped_files(&[path], cx),
-            Some(other) => self.peer_qr.pending_attach = Some(other),
+            Some((_, path)) => remove_card_file(path, cx),
             None => {}
         }
     }
 
-    /// A card shared earlier that no chat took.
-    fn drop_shared_card(&mut self, cx: &mut Context<Self>) {
+    /// A card no chat took. The share sets its chat's open together with
+    /// the card, and the open attaches it at once, so once a resolved
+    /// link's chat open has run, a card still waiting never will be.
+    pub(super) fn drop_shared_card(&mut self, cx: &mut Context<Self>) {
         if let Some((_, path)) = self.peer_qr.pending_attach.take() {
             remove_card_file(path, cx);
         }

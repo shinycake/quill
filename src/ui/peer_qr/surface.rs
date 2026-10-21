@@ -184,7 +184,7 @@ impl QuillApp {
         let name = view
             .label
             .as_ref()
-            .and_then(|label| self.qr_name_fit(label, &card_rest, window));
+            .and_then(|label| fit(label, &card_rest, window));
         let code = view
             .shown
             .as_ref()
@@ -286,7 +286,7 @@ impl QuillApp {
                     cx,
                 ));
         }
-        root.children(self.qr_free_menu(view, place.pill_top, cx))
+        root.children(self.qr_free_menu(view, place.pill_top, window, cx))
             .children(self.qr_toast_element())
             .into_any_element()
     }
@@ -361,23 +361,6 @@ impl QuillApp {
             )
             .children(self.qr_toast_element())
             .into_any_element()
-    }
-
-    /// The name's fit, kept until the name changes.
-    fn qr_name_fit(
-        &mut self,
-        label: &str,
-        card: &quill::peer_qr::layout::CardLayout,
-        window: &mut Window,
-    ) -> Option<quill::peer_qr::layout::UsernameFit> {
-        if let Some((cached, fit)) = &self.peer_qr.fit
-            && cached == label
-        {
-            return fit.clone();
-        }
-        let fitted = fit(label, card, window);
-        self.peer_qr.fit = Some((label.to_string(), fitted.clone()));
-        fitted
     }
 
     /// Colors and Emoji, one pill between copy and share.

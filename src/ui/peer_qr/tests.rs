@@ -51,11 +51,13 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, Entity<QuillShell>, Vi
 }
 
 fn frames(vcx: &mut VisualTestContext) {
-    // Dialog entrances run on the wall clock; at rest the layout is the
-    // same on every run.
+    // With reduced motion the dialog is at rest; the test clock lets
+    // anything waiting on a timer run.
     vcx.update(|_, cx| cx.set_reduce_motion(true));
     vcx.run_until_parked();
-    std::thread::sleep(std::time::Duration::from_millis(250));
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(250));
+    vcx.run_until_parked();
     for _ in 0..2 {
         vcx.update(|window, cx| window.render_frame(cx));
     }
@@ -465,11 +467,8 @@ fn the_clock_runs_only_while_a_countdown_shows(cx: &mut TestAppContext) {
     assert_eq!(toast(&app, vcx), Some(QrToast::CodeExpired));
 }
 
-#[gpui_kit::test]
-fn the_pill_menu_drops_from_the_pill_top(cx: &mut TestAppContext) {
-    let (app, _, mut vcx) = new_app(cx);
-    let vcx = &mut vcx;
-    frames(vcx);
+/// A message price and a temporary free code, then the pill's menu.
+fn open_free_menu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             session.settings.privacy_data.new_chat =
@@ -493,7 +492,14 @@ fn the_pill_menu_drops_from_the_pill_top(cx: &mut TestAppContext) {
     });
     frames(vcx);
     click(vcx, "peer-qr-pill");
+}
+
+#[gpui_kit::test]
+fn the_pill_menu_drops_from_the_pill_top(cx: &mut TestAppContext) {
+    let (app, _, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
     frames(vcx);
+    open_free_menu(&app, vcx);
     let pill = vcx.debug_bounds("peer-qr-pill").expect("the pill");
     let menu = vcx.debug_bounds("peer-qr-menu").expect("the open menu");
     assert!(
@@ -521,6 +527,67 @@ fn the_pill_menu_drops_from_the_pill_top(cx: &mut TestAppContext) {
     // The demo has no client, so the timer request comes back unavailable;
     // a press that missed the menu would only have dismissed it.
     assert_eq!(toast(&app, vcx), Some(QrToast::Unavailable));
+}
+
+#[gpui_kit::test]
+fn a_press_off_the_menu_closes_only_the_menu(cx: &mut TestAppContext) {
+    let (app, _, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    open_free_menu(&app, vcx);
+    assert!(shown(vcx, "peer-qr-menu"));
+    let qr = vcx.debug_bounds("peer-qr-box").expect("the box");
+    // Left of the box, over the dialog's backdrop.
+    let beside = gpui_kit::point(qr.origin.x - px(40.), qr.center().y);
+    vcx.simulate_click(beside, Modifiers::default());
+    frames(vcx);
+    assert!(!shown(vcx, "peer-qr-menu"), "the menu closed");
+    assert!(shown(vcx, "peer-qr-box"), "the box stayed");
+}
+
+#[gpui_kit::test]
+fn a_share_finishing_in_a_reopened_box_is_dropped(cx: &mut TestAppContext) {
+    let (app, _, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    // The card renders off the UI thread; before it is back, the same
+    // box closes and opens again.
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.qr_share(window, cx);
+            app.close_qr_box(cx);
+            app.open_own_qr_box(cx);
+        })
+    });
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.share.link_text, None, "the new box shared nothing");
+        let open = app.peer_qr.open.as_ref().expect("the new box");
+        assert_eq!(open.share_image, None);
+    });
+}
+
+#[gpui_kit::test]
+fn a_card_whose_chat_did_not_open_is_not_attached_later(cx: &mut TestAppContext) {
+    let (app, _, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    let card = std::env::temp_dir().join(format!("quill-qr-stale-{}.png", std::process::id()));
+    std::fs::write(&card, b"card").expect("a card file");
+    // The shared card waits for chat 424242, but the next chat a link
+    // opens is another one.
+    app.update(vcx, |app, cx| {
+        app.peer_qr.pending_attach = Some((quill::ids::ChatId(424_242), card.clone()));
+        app.links.pending_deep_link_open = Some((
+            quill::ids::ChatId(GROUP_CHAT),
+            quill::state::DeepLinkAction::ShareDraft { text: "hi".into() },
+        ));
+        cx.notify();
+    });
+    frames(vcx);
+    let pending = app.read_with(vcx, |app, _| app.peer_qr.pending_attach.clone());
+    assert_eq!(pending, None);
+    assert!(!card.exists(), "the card file is gone");
 }
 
 #[gpui_kit::test]

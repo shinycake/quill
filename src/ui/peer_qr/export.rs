@@ -251,7 +251,11 @@ fn copy_item(kind: CopyKind, png: Vec<u8>, link: String) -> (ClipboardItem, QrTo
 
 impl QuillApp {
     /// The link copy and share may use, or the toast saying why not.
-    fn qr_shareable(&mut self, cx: &mut Context<Self>) -> Option<(ShownLink, Picture)> {
+    fn qr_shareable(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<(ShownLink, Picture)> {
         let view = self.qr_view()?;
         let open = self.peer_qr.open.as_ref()?;
         if open.exporting {
@@ -266,17 +270,17 @@ impl QuillApp {
                 return None;
             }
         };
-        let name = view
-            .peer_box()
-            .then(|| self.peer_qr.fit.clone())
-            .flatten()
-            .and_then(|(_, fit)| fit);
         let picks = open.state.emoji.clone();
         let stills = picks
             .iter()
             .filter_map(|emoji| self.qr_emoji_still(emoji))
             .collect::<Vec<_>>();
         let card = card_layout(CARD_WIDTH, view.peer_box());
+        let name = view
+            .label
+            .as_ref()
+            .filter(|_| view.peer_box())
+            .and_then(|label| super::card::fit(label, &card, window));
         let picture = Picture {
             link: shown.link.clone(),
             ink: view.colors.ink,
@@ -343,19 +347,29 @@ impl QuillApp {
         } else {
             format!("'{family}', {FONT_FALLBACK}")
         };
-        if let Some(open) = self.peer_qr.open.as_mut() {
-            open.exporting = true;
-        }
+        let Some(open) = self.peer_qr.open.as_mut() else {
+            return;
+        };
+        open.exporting = true;
+        let box_id = open.state.id;
         let renderer = cx.svg_renderer();
         let link = picture.link.clone();
         let appearance = picture.appearance.clone();
         self.run_off_ui_then(
             move || render_png(&renderer, &picture).and_then(finish),
             move |this, result, cx| {
-                if let Some(open) = this.peer_qr.open.as_mut() {
+                // A box opened since then, even for the same link, is not
+                // the one that asked.
+                let open = this
+                    .peer_qr
+                    .open
+                    .as_mut()
+                    .filter(|open| open.state.id == box_id);
+                let same_box = open.is_some();
+                if let Some(open) = open {
                     open.exporting = false;
                 }
-                let current = this.qr_image_current(&link, &appearance, cx);
+                let current = same_box && this.qr_image_current(&link, &appearance, cx);
                 done(this, result, current, cx);
                 cx.notify();
             },
@@ -367,7 +381,7 @@ impl QuillApp {
     /// Copy: the card image, and the link where the clipboard takes both;
     /// on X11 and Wayland, the link.
     pub(super) fn qr_copy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((shown, picture)) = self.qr_shareable(cx) else {
+        let Some((shown, picture)) = self.qr_shareable(window, cx) else {
             return;
         };
         if COPY_KIND == CopyKind::Link {
@@ -385,8 +399,8 @@ impl QuillApp {
                     cx.write_to_clipboard(item);
                     this.show_qr_toast(toast, cx);
                 }
-                Some(_) => {}
-                None => this.show_qr_toast(QrToast::Unavailable, cx),
+                None if current => this.show_qr_toast(QrToast::Unavailable, cx),
+                _ => {}
             },
             cx,
         );
@@ -395,7 +409,7 @@ impl QuillApp {
     /// Share: pick a chat; the link goes into its composer with the card
     /// image attached, unsent.
     pub(super) fn qr_share(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((shown, picture)) = self.qr_shareable(cx) else {
+        let Some((shown, picture)) = self.qr_shareable(window, cx) else {
             return;
         };
         self.qr_export(

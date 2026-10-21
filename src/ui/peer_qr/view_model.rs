@@ -7,12 +7,11 @@ use super::super::app::QuillApp;
 use quill::lang::Key;
 use quill::local_time::now_unix;
 use quill::peer_qr::appearance::{Appearance, PeerQrColors, Swatch, swatches};
-use quill::peer_qr::link::{OwnLinkInputs, OwnLinkKind, OwnLinkState, own_link, username_label};
+use quill::peer_qr::link::{OwnLinkKind, OwnLinkState, username_label};
 use quill::peer_qr::state::{QrEnv, QrPeer, QrSubject, ShownLink};
-use quill::privacy::{NewChatPrivacyState, PrivacyKeyState};
+use quill::privacy::NewChatPrivacyState;
 use quill::profile_forms::profile_link;
 use quill::telegram::envelope::ChatKind;
-use quill::telegram::requests_privacy::PrivacySettingKey;
 
 /// One frame of the box.
 pub(super) struct QrView {
@@ -63,24 +62,12 @@ impl QuillApp {
         }
         let session = self.session()?;
         let user = session.user(*user_id)?;
-        let who = |key| match session.settings.privacy.get(&key) {
-            Some(PrivacyKeyState::Ready(detail)) => detail.who,
-            _ => None,
-        };
         let phone_label = if user.phone_number.is_empty() {
             String::new()
         } else {
             crate::ui::group_panels::format_phone(&user.phone_number)
         };
-        Some(own_link(OwnLinkInputs {
-            username: &user.username,
-            phone: &user.phone_number,
-            phone_label: &phone_label,
-            show_phone: who(PrivacySettingKey::ShowPhoneNumber),
-            find_by_phone: who(PrivacySettingKey::AllowFindingByPhoneNumber),
-            contact: &session.users_state.peer_qr.contact_link,
-            now: now_unix(),
-        }))
+        session.own_qr_link(&phone_label, now_unix())
     }
 
     /// The Stars your account charges per message (0 when free).
