@@ -244,7 +244,7 @@ impl QuillApp {
             Some(d) => {
                 let (seed, status, note, auth) = d.start();
                 if let Some(seed) = seed {
-                    demo_session = Some(seed(demo_sink.clone()));
+                    demo_session = Some(Box::new(seed(demo_sink.clone())));
                 }
                 (status, None, note, auth)
             }

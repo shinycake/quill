@@ -212,7 +212,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let session = self.live.as_ref().map(|live| &live.driver.session);
-        let session = session.or(self.demo_session.as_ref());
+        let session = session.or(self.demo_session.as_deref());
         let Some(session) = session else {
             return;
         };
@@ -252,7 +252,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let session = self.live.as_ref().map(|live| &live.driver.session);
-        let session = session.or(self.demo_session.as_ref());
+        let session = session.or(self.demo_session.as_deref());
         let Some(view_generation) = session.map(|session| session.view_generation) else {
             return;
         };

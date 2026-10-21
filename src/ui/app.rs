@@ -73,7 +73,7 @@ pub struct QuillApp {
     /// (parity:auth-multi-account) to reconnect as another account.
     pub(super) credentials: Option<TelegramCredentials>,
     /// Screenshot Ready list: same reducers as live, injected JSON only.
-    pub(super) demo_session: Option<Session>,
+    pub(super) demo_session: Option<Box<Session>>,
     /// Screenshot-demo stand-ins for devices, call video and the log sink (`ui/demo_state.rs`).
     pub(super) demo_ui: super::demo_state::DemoUi,
     /// One-to-one call UI: the call window, tick, sounds, images and notifications.
@@ -231,7 +231,7 @@ impl QuillApp {
         self.live
             .as_ref()
             .map(|live| &live.driver.session)
-            .or(self.demo_session.as_ref())
+            .or(self.demo_session.as_deref())
     }
 
     pub(super) fn media_display_roots(&self) -> std::rc::Rc<[PathBuf]> {

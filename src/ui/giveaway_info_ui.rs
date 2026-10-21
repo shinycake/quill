@@ -119,7 +119,7 @@ impl QuillApp {
     fn giveaway_session_mut(&mut self) -> Option<&mut Session> {
         match self.live.as_mut() {
             Some(live) => Some(&mut live.driver.session),
-            None => self.demo_session.as_mut(),
+            None => self.demo_session.as_deref_mut(),
         }
     }
 

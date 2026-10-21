@@ -516,7 +516,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| &mut live.driver.session)
             .into_iter()
-            .chain(self.demo_session.as_mut())
+            .chain(self.demo_session.as_deref_mut())
         {
             session.calls.summary = None;
         }
@@ -530,7 +530,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| &mut live.driver.session)
             .into_iter()
-            .chain(self.demo_session.as_mut())
+            .chain(self.demo_session.as_deref_mut())
         {
             session.calls.error = None;
         }
