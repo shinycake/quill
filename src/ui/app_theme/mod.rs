@@ -75,6 +75,12 @@ mod installed_state {
     }
 }
 
+/// Tests: install (or clear) a palette on this thread.
+#[cfg(test)]
+pub(crate) fn install_for_test(colors: Option<&[u32; PaletteKey::COUNT]>) {
+    installed_state::set(colors);
+}
+
 /// The installed theme's colour for `key` (0xRRGGBBAA), or `None` before a
 /// theme is applied and under high contrast.
 #[inline]

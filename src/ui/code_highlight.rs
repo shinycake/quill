@@ -232,35 +232,50 @@ pub(crate) fn start(job: Job, cx: &mut Context<QuillApp>) {
     .detach();
 }
 
-/// The slot colors on the code block's background, each held to WCAG AA
-/// there. Hues follow tdesktop's palette (light blue comments, red
-/// punctuation and literals, orange strings, blue keywords, purple class
-/// names) through Quill's tokens.
-pub(crate) fn color_of(token: Token, background: Rgba) -> Rgba {
-    let base = match token {
-        Token::Comment => chat_theme::accent_info(),
-        Token::Punctuation => chat_theme::danger_soft(),
-        Token::Literal => chat_theme::danger_bright(),
-        Token::String => chat_theme::warning_orange(),
-        Token::Operator => chat_theme::danger_pale(),
-        Token::Keyword => chat_theme::accent(),
-        Token::Type => purple(),
-    };
-    let base_hex = rgb_hex(base);
-    let readable = quill::theme_colorize::readable(
-        base_hex,
-        rgb_hex(background),
-        quill::theme_colorize::WCAG_AA,
-    );
-    gpui_kit::rgb(readable)
+impl Token {
+    const ALL: [Token; 7] = [
+        Token::Comment,
+        Token::Punctuation,
+        Token::Literal,
+        Token::String,
+        Token::Operator,
+        Token::Keyword,
+        Token::Type,
+    ];
 }
 
-fn purple() -> Rgba {
-    gpui_kit::rgb(if chat_theme::is_dark_palette() {
-        0xd2a8ff
-    } else {
-        0x8250df
+/// The slot colors on the code block's background, each held to WCAG AA
+/// there, in [`Token::ALL`] order. Slots take tdesktop's chart palette
+/// (`quill::stat_chart::ColorKey`: red punctuation, literals and operators,
+/// orange strings, blue keywords, purple class names). Comments are Quill's
+/// muted text instead of tdesktop's light blue: held to AA, the two blues
+/// come out the same color on a light background.
+pub(crate) fn palette(background: Rgba) -> [Rgba; 7] {
+    use quill::stat_chart::ColorKey;
+    let background_hex = rgb_hex(background);
+    Token::ALL.map(|token| {
+        let base = match token {
+            Token::Comment => rgb_hex(chat_theme::text_muted()),
+            Token::Punctuation | Token::Literal | Token::Operator => ColorKey::Red.rgb(),
+            Token::String => ColorKey::Orange.rgb(),
+            Token::Keyword => ColorKey::Blue.rgb(),
+            Token::Type => ColorKey::Purple.rgb(),
+        };
+        gpui_kit::rgb(quill::theme_colorize::readable(
+            base,
+            background_hex,
+            quill::theme_colorize::WCAG_AA,
+        ))
     })
+}
+
+#[cfg(test)]
+fn color_of(token: Token, background: Rgba) -> Rgba {
+    let index = Token::ALL.iter().position(|t| *t == token).unwrap_or(0);
+    palette(background)
+        .get(index)
+        .copied()
+        .unwrap_or(background)
 }
 
 fn rgb_hex(color: Rgba) -> u32 {
@@ -268,28 +283,64 @@ fn rgb_hex(color: Rgba) -> u32 {
     (channel(color.r) << 16) | (channel(color.g) << 8) | channel(color.b)
 }
 
+/// The spans that are safe to hand to the text shaper for `code`: not empty,
+/// on character boundaries, in order. The cache is keyed by a hash, so a
+/// collision could bring spans made for other text.
+fn usable(code: &str, spans: &[Span]) -> Vec<(Range<usize>, Token)> {
+    let mut end_of_last = 0;
+    let mut kept = Vec::with_capacity(spans.len());
+    for (range, token) in spans {
+        let fits = range.start < range.end
+            && range.start >= end_of_last
+            && range.end <= code.len()
+            && code.is_char_boundary(range.start)
+            && code.is_char_boundary(range.end);
+        if fits {
+            end_of_last = range.end;
+            kept.push((range.clone(), *token));
+        }
+    }
+    kept
+}
+
+fn highlights(
+    code: &str,
+    spans: &[Span],
+    colors: &[Rgba; 7],
+) -> Vec<(Range<usize>, HighlightStyle)> {
+    usable(code, spans)
+        .into_iter()
+        .filter_map(|(range, token)| {
+            let index = Token::ALL.iter().position(|t| *t == token)?;
+            let color: Hsla = (*colors.get(index)?).into();
+            Some((
+                range,
+                HighlightStyle {
+                    color: Some(color),
+                    ..HighlightStyle::default()
+                },
+            ))
+        })
+        .collect()
+}
+
 /// `code` as styled text with `spans` colored on `background`. High contrast
 /// keeps one text color.
 pub(crate) fn styled(code: &str, spans: &[Span], background: Rgba) -> StyledText {
-    let highlights: Vec<(Range<usize>, HighlightStyle)> = if chat_theme::high_contrast() {
+    let runs = if chat_theme::high_contrast() {
         Vec::new()
     } else {
-        spans
-            .iter()
-            .filter(|(range, _)| range.end <= code.len())
-            .map(|(range, token)| {
-                let color: Hsla = color_of(*token, background).into();
-                (
-                    range.clone(),
-                    HighlightStyle {
-                        color: Some(color),
-                        ..HighlightStyle::default()
-                    },
-                )
-            })
-            .collect()
+        highlights(code, spans, &palette(background))
     };
-    StyledText::new(code.to_owned()).with_highlights(highlights)
+    #[cfg(test)]
+    DRAWN_RUNS.with(|drawn| drawn.set(drawn.get() + runs.len()));
+    StyledText::new(code.to_owned()).with_highlights(runs)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: the colored runs [`styled`] handed to the text on this thread.
+    pub(crate) static DRAWN_RUNS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -373,24 +424,64 @@ mod tests {
         }
     }
 
+    fn each_mode(check: impl Fn()) {
+        use quill::app_theme::BuiltinTheme;
+        crate::ui::chat_theme::set_dark_for_test(true);
+        check();
+        crate::ui::chat_theme::set_dark_for_test(false);
+        check();
+        for theme in [BuiltinTheme::Night, BuiltinTheme::Day] {
+            crate::ui::app_theme::install_for_test(Some(theme.palette().colors()));
+            check();
+        }
+        crate::ui::app_theme::install_for_test(None);
+        crate::ui::chat_theme::set_dark_for_test(true);
+    }
+
     #[test]
     fn slot_colors_are_readable_on_the_code_background() {
+        use super::{palette, rgb_hex};
+        each_mode(|| {
+            let background = crate::ui::chat_theme::bg_code();
+            for (token, color) in Token::ALL.iter().zip(palette(background)) {
+                let ratio = quill::theme_colorize::contrast(rgb_hex(color), rgb_hex(background));
+                assert!(ratio >= quill::theme_colorize::WCAG_AA, "{token:?} {ratio}");
+            }
+        });
+    }
+
+    #[test]
+    fn comments_and_keywords_are_told_apart_in_every_mode() {
         use super::{color_of, rgb_hex};
-        let background = crate::ui::chat_theme::bg_code();
-        for token in [
-            Token::Comment,
-            Token::Punctuation,
-            Token::Literal,
-            Token::String,
-            Token::Operator,
-            Token::Keyword,
-            Token::Type,
-        ] {
-            let ratio = quill::theme_colorize::contrast(
-                rgb_hex(color_of(token, background)),
-                rgb_hex(background),
-            );
-            assert!(ratio >= quill::theme_colorize::WCAG_AA, "{token:?} {ratio}");
-        }
+        each_mode(|| {
+            let background = crate::ui::chat_theme::bg_code();
+            let comment = rgb_hex(color_of(Token::Comment, background));
+            let keyword = rgb_hex(color_of(Token::Keyword, background));
+            let distance: u32 = [16, 8, 0]
+                .iter()
+                .map(|shift| ((comment >> shift) & 0xff).abs_diff((keyword >> shift) & 0xff))
+                .sum();
+            assert!(distance >= 90, "{comment:06x} vs {keyword:06x}");
+        });
+    }
+
+    #[test]
+    fn spans_that_do_not_fit_the_text_are_dropped() {
+        use super::{highlights, palette};
+        let code = "é = 1 // ünï";
+        let colors = palette(crate::ui::chat_theme::bg_code());
+        let spans = vec![
+            (1..2, Token::Keyword),   // cuts the "é"
+            (3..3, Token::Keyword),   // empty
+            (0..2, Token::Literal),   // fits
+            (4..5, Token::Literal),   // fits
+            (3..4, Token::String),    // overlaps nothing but is out of order
+            (6..400, Token::Comment), // past the end
+        ];
+        let kept: Vec<_> = highlights(code, &spans, &colors)
+            .into_iter()
+            .map(|(range, _)| range)
+            .collect();
+        assert_eq!(kept, vec![0..2, 4..5]);
     }
 }

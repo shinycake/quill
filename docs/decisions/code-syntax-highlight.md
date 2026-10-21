@@ -38,12 +38,22 @@ The composer does not: its highlighter is the spell checker.
   background; high contrast keeps one text color. The cache stores slots, not
   colors, so a theme change needs no new tokenizing.
 
-Deviations: no "inserted" green in diffs (the kit gives no name for added
-lines); rich-page (instant view) code blocks are not wired and draw plain.
+Gaps left open:
+
+- Diffs have no "inserted" green: the kit gives no name for added lines.
+- Instant-view (rich page) code blocks are not wired to the highlighter and draw
+  plain.
+
+Colors: slots use tdesktop's chart palette (`stat_chart::ColorKey`) held to AA
+on the code background; comments use Quill's muted text, because tdesktop's
+light blue and blue come out the same color once both are held to AA on a light
+background. `styled` drops spans that are empty, out of order or off character
+boundaries before they reach the text shaper, since the cache is keyed by hash.
 
 ## How verified
 
 Unit tests for language mapping, unknown languages, the slot fold and Rust /
 Python spans; a UI test that the demo chat tokenizes its blocks; light and dark
 captures of a Rust, a Python and an unknown-language block. The release binary
-size delta is in the PR.
+size delta was not measured; the embedded syntax set is about 0.9 MB
+compressed, resident after the first highlight.

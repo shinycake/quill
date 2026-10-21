@@ -107,6 +107,12 @@ mod palette_state {
     }
 }
 
+/// Tests: switch this thread's palette between light and dark.
+#[cfg(test)]
+pub(crate) fn set_dark_for_test(on: bool) {
+    palette_state::set_dark(on);
+}
+
 #[inline]
 fn dark() -> bool {
     palette_state::dark()

@@ -68,7 +68,7 @@ impl QuillApp {
 #[cfg(feature = "demo-capture")]
 mod tests {
     use crate::ui::app::QuillApp;
-    use crate::ui::code_highlight::{Token, ready};
+    use crate::ui::code_highlight::{DRAWN_RUNS, Token, ready};
     use crate::ui::keybindings::bind_keys;
     use crate::ui::screenshot_demo::ScreenshotDemo;
     use crate::ui::shell::QuillShell;
@@ -100,8 +100,15 @@ mod tests {
 
     #[gpui_kit::test]
     fn code_blocks_render_highlighted(cx: &mut TestAppContext) {
-        let (_app, vcx) = new_app(cx);
+        let (_app, mut vcx) = new_app(cx);
         vcx.run_until_parked();
+        // The tokens arrived after the first draw; the next one colors the text.
+        vcx.update(|window, _| window.refresh());
+        vcx.run_until_parked();
+        assert!(
+            DRAWN_RUNS.with(std::cell::Cell::get) > 0,
+            "the cached spans reached the drawn text"
+        );
         let spans = ready("rust", super::RUST).expect("the rust block was tokenized");
         assert!(spans.iter().any(|(range, token)| *token == Token::Keyword
             && super::RUST.get(range.clone()) == Some("fn")));
