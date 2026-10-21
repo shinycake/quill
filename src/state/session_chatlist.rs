@@ -182,6 +182,7 @@ impl Session {
             self.release_chat_history(previous);
         }
         self.prepare_history_view(chat_id);
+        self.show_promotion_about(chat_id);
     }
 
     /// Start a fresh view of `chat_id`'s history: nothing viewed or

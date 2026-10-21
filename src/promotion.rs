@@ -14,6 +14,9 @@ use std::collections::{HashMap, HashSet};
 
 /// Prefix of the server-provided label of an announcement type.
 pub const PSA_LABEL_PREFIX: &str = "cloud_lng_badge_psa_";
+/// Prefix of the server-provided "about this announcement" text of a type
+/// (tdesktop `kPsaAboutPrefix`).
+pub const PSA_ABOUT_PREFIX: &str = "cloud_lng_about_psa_";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Promotion {
@@ -114,6 +117,8 @@ pub struct PsaLabels {
     /// Changes with the pack, so an answer for an older pack is ignored.
     epoch: u32,
     cloud: HashMap<String, String>,
+    /// The server's "about" text per type.
+    about: HashMap<String, String>,
     requested: HashSet<String>,
 }
 
@@ -147,12 +152,14 @@ impl PsaLabels {
             self.pack = pack.to_string();
             self.epoch = self.epoch.wrapping_add(1);
             self.cloud.clear();
+            self.about.clear();
             self.requested.clear();
         }
         let mut wanted = Vec::new();
         for kind in kinds {
             if self.requested.insert(kind.to_string()) {
                 wanted.push(format!("{PSA_LABEL_PREFIX}{kind}"));
+                wanted.push(format!("{PSA_ABOUT_PREFIX}{kind}"));
             }
         }
         (self.epoch, wanted)
@@ -165,14 +172,31 @@ impl PsaLabels {
             return;
         }
         for (key, value) in strings {
-            let (Some(kind), PackValue::Ordinary(text)) =
-                (key.strip_prefix(PSA_LABEL_PREFIX), value)
-            else {
+            let PackValue::Ordinary(text) = value else {
                 continue;
             };
-            if !text.is_empty() {
-                self.cloud.insert(kind.to_string(), text);
+            if text.is_empty() {
+                continue;
             }
+            if let Some(kind) = key.strip_prefix(PSA_LABEL_PREFIX) {
+                self.cloud.insert(kind.to_string(), text);
+            } else if let Some(kind) = key.strip_prefix(PSA_ABOUT_PREFIX) {
+                self.about.insert(kind.to_string(), text);
+            }
+        }
+    }
+
+    /// The text of the one-time box (`showAboutTopPromotion`): the proxy
+    /// sponsor text when there is no type, else the server's text for the
+    /// type, else the default announcement text. `**bold**` marks bold.
+    pub fn about(&self, promotion: &Promotion) -> String {
+        match promotion.psa_kind() {
+            None => tr(keys::PROXY_SPONSOR_ABOUT).to_string(),
+            Some(kind) => self
+                .about
+                .get(kind)
+                .cloned()
+                .unwrap_or_else(|| tr(keys::ABOUT_PSA_DEFAULT).to_string()),
         }
     }
 }
@@ -243,11 +267,49 @@ mod tests {
         let (_, keys) = labels.take_wanted("en", ["covid", "covid", "war"]);
         assert_eq!(
             keys,
-            vec!["cloud_lng_badge_psa_covid", "cloud_lng_badge_psa_war"]
+            vec![
+                "cloud_lng_badge_psa_covid",
+                "cloud_lng_about_psa_covid",
+                "cloud_lng_badge_psa_war",
+                "cloud_lng_about_psa_war"
+            ]
         );
         assert!(labels.take_wanted("en", ["covid", "war"]).1.is_empty());
         let (_, keys) = labels.take_wanted("ru", ["covid"]);
-        assert_eq!(keys, vec!["cloud_lng_badge_psa_covid"]);
+        assert_eq!(
+            keys,
+            vec!["cloud_lng_badge_psa_covid", "cloud_lng_about_psa_covid"]
+        );
+    }
+
+    #[test]
+    fn the_box_text_follows_the_type() {
+        let mut labels = PsaLabels::default();
+        let covid = psa("covid", "");
+        let proxy = tr(keys::PROXY_SPONSOR_ABOUT);
+        let default = tr(keys::ABOUT_PSA_DEFAULT);
+        assert_eq!(labels.about(&Promotion::MtprotoProxy), proxy);
+        assert_eq!(labels.about(&psa("", "text")), proxy, "no type");
+        assert_eq!(labels.about(&covid), default, "unknown to the server");
+        let (epoch, _) = labels.take_wanted("en", ["covid", "empty"]);
+        labels.store(
+            epoch,
+            vec![
+                (
+                    "cloud_lng_about_psa_covid".into(),
+                    PackValue::Ordinary("Stay **safe**".into()),
+                ),
+                (
+                    "cloud_lng_about_psa_empty".into(),
+                    PackValue::Ordinary(String::new()),
+                ),
+            ],
+        );
+        assert_eq!(labels.about(&covid), "Stay **safe**");
+        assert_eq!(labels.about(&psa("empty", "")), default, "empty falls back");
+        assert_eq!(labels.about(&psa("other", "")), default);
+        labels.take_wanted("ru", ["covid"]);
+        assert_eq!(labels.about(&covid), default, "a new pack forgets it");
     }
 
     fn session() -> Session {

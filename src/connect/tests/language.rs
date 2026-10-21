@@ -341,7 +341,10 @@ fn announcement_labels_are_fetched_once_and_hide_deletes_the_history() {
         .find(|v| v["@type"] == "getLanguagePackStrings")
         .unwrap();
     assert_eq!(ask["language_pack_id"], "en");
-    assert_eq!(ask["keys"], json!(["cloud_lng_badge_psa_covid"]));
+    assert_eq!(
+        ask["keys"],
+        json!(["cloud_lng_badge_psa_covid", "cloud_lng_about_psa_covid"])
+    );
     f.feed(strings(
         &ask["@extra"],
         "cloud_lng_badge_psa_covid",
@@ -385,7 +388,7 @@ fn announcement_labels_are_fetched_once_and_hide_deletes_the_history() {
         .rev()
         .find(|v| {
             v["@type"] == "getLanguagePackStrings"
-                && v["keys"] == json!(["cloud_lng_badge_psa_covid"])
+                && v["keys"] == json!(["cloud_lng_badge_psa_covid", "cloud_lng_about_psa_covid"])
         })
         .unwrap();
     assert_eq!(again["language_pack_id"], "pt-br");

@@ -384,6 +384,10 @@ mod profile_modal;
 mod profile_panels;
 mod profile_photo_sources;
 mod proxy;
+mod psa_about_ui;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod psa_about_ui_tests;
 mod ptt_delay;
 mod pull_next_ui;
 mod quick_action_ui;

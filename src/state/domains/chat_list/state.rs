@@ -105,6 +105,8 @@ pub struct ChatListState {
     pub promoted_chats: HashMap<i64, crate::promotion::Promotion>,
     /// The server's badge text per announcement type.
     pub psa_labels: crate::promotion::PsaLabels,
+    /// The one-time "about this announcement" box.
+    pub psa_about: crate::psa_about::PsaAbout,
     /// Chats whose history page was preloaded for the pull to the next
     /// channel (`pull_next`): the answer arrived.
     pub preloaded_histories: HashSet<i64>,
@@ -149,6 +151,7 @@ impl ChatListState {
             chat_preview_fetch: None,
             promoted_chats: HashMap::new(),
             psa_labels: crate::promotion::PsaLabels::default(),
+            psa_about: crate::psa_about::PsaAbout::default(),
             preloaded_histories: HashSet::new(),
         }
     }

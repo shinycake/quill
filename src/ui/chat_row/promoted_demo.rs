@@ -19,6 +19,11 @@ register_demos![
         "screenshot demo — chat list: promoted chats"
     )
     .setup(QuillApp::demo_promoted_chats),
+    DemoSpec::chats(
+        "ready-promoted-chat-about",
+        "screenshot demo — an opened promoted chat with its one-time box"
+    )
+    .setup(QuillApp::demo_promoted_chat_about),
 ];
 
 const BOT: &str = r#"{"@type":"updateUser","user":{"id":93,"first_name":"Helper","type":{"@type":"userTypeBot"}}}"#;
@@ -36,6 +41,13 @@ fn position(id: i64, order: i64, source: &str) -> String {
 }
 
 impl QuillApp {
+    fn demo_promoted_chat_about(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.demo_promoted_chats(window, cx);
+        if let Some(session) = self.demo_session.as_mut() {
+            session.open_chat(quill::ids::ChatId(91));
+        }
+    }
+
     fn demo_promoted_chats(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         let Some(session) = self.demo_session.as_mut() else {
             return;
