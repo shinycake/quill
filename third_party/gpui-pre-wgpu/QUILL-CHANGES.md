@@ -22,3 +22,12 @@ The Quill project changed it in 2026 so emoji draw in colour on Linux
   cluster shapes in colour. Text-default symbols (©, ™, a bare ❤) keep their
   text glyphs.
 - `Cargo.toml`: `unicode-properties`, for the emoji presentation tables.
+
+The Quill project also changed it in 2026 to give back memory after
+browsing (`docs/decisions/sweep-r3-browse-memory.md`):
+
+- `src/wgpu_atlas.rs`: implements `AtlasBackend::insert_image` (see
+  gpui-pre's `QUILL-CHANGES.md`). Each `WgpuAtlasTexture` records whether
+  it holds images, and `allocate` only places a tile in a texture holding
+  the same kind, so an image texture is freed once its images leave.
+  Test: `glyphs_never_keep_an_image_texture_alive`.

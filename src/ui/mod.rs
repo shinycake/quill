@@ -387,6 +387,7 @@ mod profile_modal;
 mod profile_panels;
 mod profile_photo_sources;
 mod proxy;
+mod psa_about_ui;
 mod ptt_delay;
 mod pull_next_ui;
 mod quick_action_ui;

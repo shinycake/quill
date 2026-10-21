@@ -244,3 +244,16 @@ threshold as a pull that expands the stories strip, and a fling into the top
 did that on Windows (`docs/decisions/elastic-chat-list.md`). The final
 `Ended` at ready stays and is harmless. Not compiled or run on Windows by the
 author of the patch.
+
+## Images get atlas textures of their own
+
+Added in 2026 to give back memory after browsing
+(`docs/decisions/sweep-r3-browse-memory.md`):
+
+- `src/directx_atlas.rs`: implements `AtlasBackend::insert_image` (see
+  gpui-pre's `QUILL-CHANGES.md`). Each `DirectXAtlasTexture` records
+  whether it holds images, and `allocate` only places a tile in a texture
+  holding the same kind, so an image texture is freed once its images
+  leave. Same change as gpui-pre-apple's `metal_atlas.rs`. Test:
+  `test_glyphs_never_keep_an_image_texture_alive` (on WARP); not run on
+  Windows by the author.
