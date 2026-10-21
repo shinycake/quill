@@ -383,6 +383,11 @@ pub enum GiftManagePayload {
     Upgraded(UpgradeSummary),
     Available(Vec<AvailableGift>),
     PremiumOptions(Vec<PremiumGiftOption>),
+    /// `temporaryPasswordState`: whether TDLib now holds a temporary
+    /// password.
+    TemporaryPassword {
+        has_password: bool,
+    },
 }
 
 /// Parse one of this feature's answer types; `None` = not ours.
@@ -401,6 +406,12 @@ pub fn parse_payload(type_name: &str, value: &Value) -> Option<GiftManagePayload
         "premiumGiftPaymentOptions" => {
             GiftManagePayload::PremiumOptions(parse_premium_gift_options(value))
         }
+        "temporaryPasswordState" => GiftManagePayload::TemporaryPassword {
+            has_password: value
+                .get("has_password")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        },
         _ => return None,
     })
 }

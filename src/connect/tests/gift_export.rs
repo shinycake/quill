@@ -1,6 +1,7 @@
-//! Connect-driver tests: the transfer picker's two requests, `transferGift`
-//! to a picked contact and `getUpgradedGiftWithdrawalUrl` from the password
-//! box (recorded JSON, nothing live; nothing is transferred or exported).
+//! Connect-driver tests: the transfer picker's requests, `transferGift` to
+//! a picked contact and, from the password box, `createTemporaryPassword`
+//! then `getUpgradedGiftWithdrawalUrl` (recorded JSON, nothing live;
+//! nothing is transferred or exported).
 use super::super::*;
 use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
@@ -169,29 +170,35 @@ fn the_export_url_is_asked_only_from_the_password_box() {
     assert!(p.0.export_picked_gift("").is_err());
     set_stage(&mut p, "later", password_stage());
     assert!(p.0.export_picked_gift(PASSWORD).is_err());
+    assert_eq!(count(&p.1, "createTemporaryPassword"), 0);
     assert_eq!(count(&p.1, "getUpgradedGiftWithdrawalUrl"), 0);
 
     set_stage(&mut p, "open", password_stage());
-    let extra = p.0.export_picked_gift(PASSWORD).unwrap();
-    let sent = sent_request(&p.1, "getUpgradedGiftWithdrawalUrl");
-    assert_eq!(sent["received_gift_id"], "open");
+    let unlock = p.0.export_picked_gift(PASSWORD).unwrap();
+    let sent = sent_request(&p.1, "createTemporaryPassword");
     assert_eq!(sent["password"], PASSWORD);
-    assert_eq!(
-        stage(&p),
-        Some(TransferStage::Password {
-            sending: true,
-            error: None
-        })
-    );
+    assert_eq!(sent["valid_for"], 60);
+    assert_eq!(count(&p.1, "getUpgradedGiftWithdrawalUrl"), 0);
+    let sending = Some(TransferStage::Password {
+        sending: true,
+        error: None,
+    });
+    assert_eq!(stage(&p), sending);
     // A second Submit while the first is out sends nothing.
     assert!(p.0.export_picked_gift(PASSWORD).is_err());
-    assert_eq!(count(&p.1, "getUpgradedGiftWithdrawalUrl"), 1);
+    assert_eq!(count(&p.1, "createTemporaryPassword"), 1);
     // The password lives nowhere in the session.
     let state = format!("{:?}", p.0.session.payments.gifts_manage);
     assert!(!state.contains(PASSWORD));
+    let extra = temporary_password(&mut p, unlock);
+    let sent = sent_request(&p.1, "getUpgradedGiftWithdrawalUrl");
+    assert_eq!(sent["received_gift_id"], "open");
+    assert!(sent.get("password").is_none());
+    assert_eq!(count(&p.1, "getUpgradedGiftWithdrawalUrl"), 1);
+    assert_eq!(stage(&p), sending);
     feed(
         &mut p,
-        json!({"@type": "httpUrl", "@extra": extra.as_extra(),
+        json!({"@type": "httpUrl", "@extra": extra,
             "url": "https://fragment.com/gift/PlushPepe-4?export=1"}),
     );
     let manage = &p.0.session.payments.gifts_manage;
@@ -202,14 +209,40 @@ fn the_export_url_is_asked_only_from_the_password_box() {
     );
 }
 
+/// `temporaryPasswordState` for `createTemporaryPassword`; returns the
+/// `@extra` of the `getUpgradedGiftWithdrawalUrl` the driver sends next.
+fn temporary_password(p: &mut Parts, unlock: crate::ids::RequestId) -> Value {
+    feed(
+        p,
+        json!({"@type": "temporaryPasswordState", "@extra": unlock.as_extra(),
+            "has_password": true, "valid_for": 60}),
+    );
+    sent_request(&p.1, "getUpgradedGiftWithdrawalUrl")["@extra"].clone()
+}
+
+/// Which request of the export answers with the error.
+#[derive(Clone, Copy)]
+enum Step {
+    TemporaryPassword,
+    Url,
+}
+
 fn fail_export(message: &str, code: i32) -> Option<TransferStage> {
+    fail_export_at(Step::TemporaryPassword, message, code)
+}
+
+fn fail_export_at(step: Step, message: &str, code: i32) -> Option<TransferStage> {
     let mut p = parts();
     open_my_gifts(&mut p);
     set_stage(&mut p, "open", password_stage());
-    let extra = p.0.export_picked_gift(PASSWORD).unwrap();
+    let unlock = p.0.export_picked_gift(PASSWORD).unwrap();
+    let extra = match step {
+        Step::TemporaryPassword => json!(unlock.as_extra()),
+        Step::Url => temporary_password(&mut p, unlock),
+    };
     feed(
         &mut p,
-        json!({"@type": "error", "@extra": extra.as_extra(), "code": code, "message": message}),
+        json!({"@type": "error", "@extra": extra, "code": code, "message": message}),
     );
     assert!(p.0.session.payments.gifts_manage.export_url.is_none());
     let state = format!("{:?}", p.0.session.payments.gifts_manage);
@@ -261,9 +294,15 @@ fn password_errors_land_in_the_password_box() {
             error: Some(ExportError::ServerError)
         })
     );
+    // The URL request after the temporary password: the server checks
+    // the password's age there.
+    assert_eq!(
+        fail_export_at(Step::Url, "PASSWORD_TOO_FRESH_86400", 400),
+        Some(TransferStage::SecurityCheck { later: true })
+    );
     // Anything else: the box stays, ready for another try, and says why
     // under the field (a note would hide behind the picker).
-    let other = fail_export("STARGIFT_EXPORT_IN_PROGRESS", 400);
+    let other = fail_export_at(Step::Url, "STARGIFT_EXPORT_IN_PROGRESS", 400);
     assert!(
         matches!(
             &other,
@@ -310,7 +349,8 @@ fn open_fragment_sends_the_password_less_probe_only_from_its_confirmation() {
     probe(&mut p);
     let sent = sent_request(&p.1, "getUpgradedGiftWithdrawalUrl");
     assert_eq!(sent["received_gift_id"], "open");
-    assert_eq!(sent["password"], "");
+    assert!(sent.get("password").is_none());
+    assert_eq!(count(&p.1, "createTemporaryPassword"), 0);
     assert_eq!(count(&p.1, "getPasswordState"), 1);
     assert_eq!(stage(&p), Some(TransferStage::Probing));
     // A second click while it is out sends nothing.
@@ -359,18 +399,13 @@ fn the_probe_picks_the_security_check_or_the_password_box() {
         fail_probe("PASSWORD_TOO_FRESH_86400", None),
         Some(TransferStage::SecurityCheck { later: true })
     );
-    // TDLib answers the empty password itself with PASSWORD_HASH_INVALID:
+    // TDLib 1.8.69 refuses the probe itself without a temporary password:
     // the password box, unless the reloaded state says there is none.
+    const NO_TEMPORARY: &str = "Temporary password required to withdraw the gift";
+    assert_eq!(fail_probe(NO_TEMPORARY, None), Some(password_stage()));
+    assert_eq!(fail_probe(NO_TEMPORARY, Some(true)), Some(password_stage()));
     assert_eq!(
-        fail_probe("PASSWORD_HASH_INVALID", None),
-        Some(password_stage())
-    );
-    assert_eq!(
-        fail_probe("PASSWORD_HASH_INVALID", Some(true)),
-        Some(password_stage())
-    );
-    assert_eq!(
-        fail_probe("PASSWORD_HASH_INVALID", Some(false)),
+        fail_probe(NO_TEMPORARY, Some(false)),
         Some(TransferStage::SecurityCheck { later: false })
     );
 }

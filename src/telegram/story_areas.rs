@@ -10,7 +10,7 @@ use serde_json::Value;
 #[derive(Debug, Clone, PartialEq)]
 pub struct StoryAreaView {
     /// Position/size fractions of the media (0.0–1.0) from
-    /// `storyAreaPosition` (`schema/td_api.tl:6530`). `x`/`y` are the
+    /// `areaPosition` (`schema/td_api.tl:1184`). `x`/`y` are the
     /// rectangle's CENTER, not its top-left corner: the UI places the chip
     /// with `left = x*360 − chip_w/2`, `top = y*640 − chip_h/2`, where
     /// `chip_w = (width*360).max(48)` and `chip_h = (height*640).max(24)`.
@@ -248,7 +248,7 @@ mod story_areas_tests {
         let area = |position: &str, typ: &str| -> String {
             format!(r#"{{"@type":"storyArea","position":{position},"type":{typ}}}"#)
         };
-        let position = r#"{"@type":"storyAreaPosition","x_percentage":0.1,"y_percentage":0.2,"width_percentage":0.3,"height_percentage":0.05,"rotation_angle":0.0,"corner_radius_percentage":0.0}"#;
+        let position = r#"{"@type":"areaPosition","x_percentage":0.1,"y_percentage":0.2,"width_percentage":0.3,"height_percentage":0.05,"rotation_angle":0.0,"corner_radius_percentage":0.0}"#;
         let areas = [
             area(
                 position,

@@ -103,9 +103,12 @@ pub enum TransferStage {
     /// `getUpgradedGiftWithdrawalUrl` is out (tdesktop `ExportOnBlockchain`
     /// sends `inputCheckPasswordEmpty` first). It only tells whether a
     /// password exists and is old enough; a URL it might return is dropped.
+    /// Since TDLib 1.8.69 the probe stops in TDLib unless a temporary
+    /// password exists, so a too fresh password shows up on Submit.
     Probing,
-    /// "Two-step verification": the password box. `sending` while the
-    /// request is out; the password itself is never kept here.
+    /// "Two-step verification": the password box. `sending` while
+    /// `createTemporaryPassword` or the URL request after it is out; the
+    /// password itself is never kept here.
     Password {
         sending: bool,
         error: Option<ExportError>,
@@ -200,9 +203,9 @@ impl TransferPicker {
     }
 
     /// The probe failed. tdesktop `PrePasswordErrorBox`: no password or a
-    /// too fresh one opens the security check; anything else (TDLib
-    /// answers an empty password itself with `PASSWORD_HASH_INVALID`)
-    /// opens the password box. `has_password` is the password state when
+    /// too fresh one opens the security check; anything else (TDLib 1.8.69
+    /// answers "Temporary password required" itself) opens the password
+    /// box. `has_password` is the password state when
     /// it is known and fresh: `Some(false)` also means the security check,
     /// since TDLib never lets the probe reach the server.
     pub fn probe_failed(&mut self, outcome: ProbeOutcome, has_password: Option<bool>) {

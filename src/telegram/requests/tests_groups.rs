@@ -615,17 +615,18 @@ fn g1_basic_group_full_info_shape_matches_1_8_67() {
 }
 
 #[test]
-fn g1_reply_quote_shape_matches_1_8_67() {
+fn g1_reply_quote_shape_matches_schema() {
     // Slice G1: `inputMessageReplyToMessage message_id:int53
     // quote:inputTextQuote checklist_task_id:int32 poll_option_id:string
-    // = InputMessageReplyTo` (schema 1.8.67, line 3086) with
-    // `inputTextQuote text:formattedText position:int32 =
-    // InputTextQuote` (line 3056).
+    // = InputMessageReplyTo` with `inputTextQuote text:formattedText
+    // rich_texts:vector<RichText> position:int32 = InputTextQuote`
+    // (schema 1.8.69, line 3488).
     let v = input_message_reply_to_with_quote(Some(MessageId(101)), Some(("sel", 7)));
     assert_eq!(v["@type"], "inputMessageReplyToMessage");
     assert_eq!(v["message_id"], 101);
     assert_eq!(v["quote"]["@type"], "inputTextQuote");
     assert_eq!(v["quote"]["text"]["text"], "sel");
+    assert_eq!(v["quote"]["rich_texts"], serde_json::json!([]));
     assert_eq!(v["quote"]["position"], 7);
 
     // Whole-message reply keeps `quote: null` (existing behavior).

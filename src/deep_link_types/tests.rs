@@ -46,7 +46,7 @@ fn parses_every_handled_type() {
     );
     assert_eq!(
         parsed(
-            json!({"@type":"internalLinkTypeUserPhoneNumber","phone_number":"15550001","draft_text":"yo","open_profile":false})
+            json!({"@type":"internalLinkTypeUserPhoneNumber","phone_number":"15550001","draft_text":"yo","open_profile":false,"unpaid_messages_token":""})
         ),
         InternalLink::UserPhoneNumber {
             phone: "15550001".into(),
@@ -97,7 +97,7 @@ fn route_of(value: Value) -> LinkRoute {
 fn chat_links_route_to_the_existing_chat_flow() {
     assert_eq!(
         route_of(
-            json!({"@type":"internalLinkTypePublicChat","chat_username":"durov","draft_text":"","open_profile":false})
+            json!({"@type":"internalLinkTypePublicChat","chat_username":"durov","draft_text":"","open_profile":false,"unpaid_messages_token":""})
         ),
         LinkRoute::Resolve(DeepLinkAction::OpenUsername {
             domain: "durov".into(),
@@ -108,7 +108,7 @@ fn chat_links_route_to_the_existing_chat_flow() {
     );
     assert_eq!(
         route_of(
-            json!({"@type":"internalLinkTypePublicChat","chat_username":"durov","draft_text":"hello","open_profile":false})
+            json!({"@type":"internalLinkTypePublicChat","chat_username":"durov","draft_text":"hello","open_profile":false,"unpaid_messages_token":""})
         ),
         LinkRoute::Resolve(DeepLinkAction::OpenPublicChatDraft {
             domain: "durov".into(),
@@ -157,7 +157,7 @@ fn chat_links_route_to_the_existing_chat_flow() {
     );
     assert_eq!(
         route_of(
-            json!({"@type":"internalLinkTypeUserPhoneNumber","phone_number":"+1 (555) 0001","draft_text":"","open_profile":false})
+            json!({"@type":"internalLinkTypeUserPhoneNumber","phone_number":"+1 (555) 0001","draft_text":"","open_profile":false,"unpaid_messages_token":""})
         ),
         LinkRoute::Resolve(DeepLinkAction::UserPhone {
             phone: "15550001".into(),

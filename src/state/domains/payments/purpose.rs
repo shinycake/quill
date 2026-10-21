@@ -132,8 +132,12 @@ pub enum PaymentsPurpose {
     UpgradeGift,
     /// `transferGift`, sent only after the confirmation. Response is `ok`.
     TransferGift,
-    /// `getUpgradedGiftWithdrawalUrl` from the password box of "Send via
-    /// Blockchain". Response is `httpUrl`.
+    /// `createTemporaryPassword` from the password box of "Send via
+    /// Blockchain" (TDLib 1.8.69 withdraws with a temporary password).
+    /// Response is `temporaryPasswordState`.
+    GiftExportTempPassword,
+    /// `getUpgradedGiftWithdrawalUrl`, sent once the temporary password
+    /// exists. Response is `httpUrl`.
     GiftExportUrl,
     /// The password-less `getUpgradedGiftWithdrawalUrl` sent on "Open
     /// Fragment" (tdesktop `inputCheckPasswordEmpty`): its error picks the
@@ -178,6 +182,7 @@ impl PaymentsPurpose {
                 | Self::SetPinnedGifts
                 | Self::UpgradeGift
                 | Self::TransferGift
+                | Self::GiftExportTempPassword
                 | Self::GiftExportUrl
                 | Self::GiftExportProbe
                 | Self::SetGiftResalePrice
@@ -223,6 +228,7 @@ flat_purposes!(Payments(PaymentsPurpose) {
     SetPinnedGifts,
     UpgradeGift,
     TransferGift,
+    GiftExportTempPassword,
     GiftExportUrl,
     GiftExportProbe,
     SetGiftResalePrice,

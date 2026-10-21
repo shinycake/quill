@@ -1,8 +1,8 @@
 diff --git a/td/generate/scheme/td_api.tl b/td/generate/scheme/td_api.tl
-index 2caaf9d12..63a7ef0e6 100644
+index 2f70f0abe..6c2f2e453 100644
 --- a/td/generate/scheme/td_api.tl
 +++ b/td/generate/scheme/td_api.tl
-@@ -11660,7 +11660,28 @@ testVectorString value:vector<string> = TestVectorString;
+@@ -12161,7 +12161,28 @@ testVectorString value:vector<string> = TestVectorString;
  //@description A simple object containing a vector of objects that hold a string; for testing only @value Vector of objects
  testVectorStringObject value:vector<testString> = TestVectorStringObject;
  
@@ -32,7 +32,7 @@ index 2caaf9d12..63a7ef0e6 100644
  //@description Returns the current authorization state. This is an offline method. For informational purposes only. Use updateAuthorizationState instead to maintain the current authorization state. Can be called before initialization
  getAuthorizationState = AuthorizationState;
 diff --git a/td/generate/scheme/telegram_api.tl b/td/generate/scheme/telegram_api.tl
-index 5e82cca7f..c2f21a63c 100644
+index 1806be569..892874c63 100644
 --- a/td/generate/scheme/telegram_api.tl
 +++ b/td/generate/scheme/telegram_api.tl
 @@ -28,6 +28,7 @@ inputStickerSetThumbLegacy#dbaeae9 stickerset:InputStickerSet volume_id:long loc
@@ -44,10 +44,10 @@ index 5e82cca7f..c2f21a63c 100644
  invokeWithGooglePlayIntegrityPrefix#1df92984 nonce:string token:string = Error;
  invokeWithApnsSecretPrefix#0dae54f8 nonce:string secret:string = Error;
 diff --git a/td/telegram/Requests.cpp b/td/telegram/Requests.cpp
-index 4ae9127a3..dfaff6c3a 100644
+index 3737a7708..021600428 100644
 --- a/td/telegram/Requests.cpp
 +++ b/td/telegram/Requests.cpp
-@@ -6671,6 +6671,18 @@ void Requests::on_request(uint64 id, const td_api::removeContacts &request) {
+@@ -6681,6 +6681,18 @@ void Requests::on_request(uint64 id, const td_api::removeContacts &request) {
    CREATE_REQUEST(RemoveContactsRequest, UserId::get_user_ids(request.user_ids_));
  }
  
@@ -67,10 +67,10 @@ index 4ae9127a3..dfaff6c3a 100644
    CHECK_IS_USER();
    CREATE_COUNT_REQUEST_PROMISE();
 diff --git a/td/telegram/Requests.h b/td/telegram/Requests.h
-index f62bd8569..671210226 100644
+index 6a5a5b07f..d53461c12 100644
 --- a/td/telegram/Requests.h
 +++ b/td/telegram/Requests.h
-@@ -1320,6 +1320,10 @@ class Requests {
+@@ -1322,6 +1322,10 @@ class Requests {
  
    void on_request(uint64 id, const td_api::removeContacts &request);
  
@@ -82,10 +82,10 @@ index f62bd8569..671210226 100644
  
    void on_request(uint64 id, td_api::changeImportedContacts &request);
 diff --git a/td/telegram/UserManager.cpp b/td/telegram/UserManager.cpp
-index e15eee697..830c8e278 100644
+index 1bb8035ee..1606d967f 100644
 --- a/td/telegram/UserManager.cpp
 +++ b/td/telegram/UserManager.cpp
-@@ -114,6 +114,154 @@
+@@ -118,6 +118,154 @@
  
  namespace td {
  
@@ -240,7 +240,7 @@ index e15eee697..830c8e278 100644
  class GetContactsQuery final : public Td::ResultHandler {
   public:
    void send(int64 hash) {
-@@ -8511,6 +8659,17 @@ void UserManager::on_deleted_contacts(const vector<UserId> &deleted_contact_user
+@@ -8555,6 +8703,17 @@ void UserManager::on_deleted_contacts(const vector<UserId> &deleted_contact_user
    }
  }
  
@@ -259,10 +259,10 @@ index e15eee697..830c8e278 100644
    TRY_STATUS_PROMISE(promise, G()->close_status());
  
 diff --git a/td/telegram/UserManager.h b/td/telegram/UserManager.h
-index e82c69c1c..d4fb12a94 100644
+index 2de9fed57..0874e74f3 100644
 --- a/td/telegram/UserManager.h
 +++ b/td/telegram/UserManager.h
-@@ -528,6 +528,10 @@ class UserManager final : public Actor {
+@@ -534,6 +534,10 @@ class UserManager final : public Actor {
  
    void on_deleted_contacts(const vector<UserId> &deleted_contact_user_ids);
  

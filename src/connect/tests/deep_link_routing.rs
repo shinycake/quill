@@ -323,7 +323,7 @@ fn typed_links_route_through_get_internal_link_type() {
         &seq,
         &sink,
         "https://t.me/+15550001?text=hi",
-        json!({"@type":"internalLinkTypeUserPhoneNumber","phone_number":"15550001","draft_text":"hi","open_profile":false}),
+        json!({"@type":"internalLinkTypeUserPhoneNumber","phone_number":"15550001","draft_text":"hi","open_profile":false,"unpaid_messages_token":""}),
     );
     let action = info_action(state);
     let extra = driver.resolve_deep_link(action).unwrap().unwrap();
@@ -469,7 +469,7 @@ fn typed_link_failures_use_clear_wording() {
         &seq,
         &sink,
         "https://t.me/+1555000",
-        json!({"@type":"internalLinkTypeUserPhoneNumber","phone_number":"1555000","draft_text":"","open_profile":false}),
+        json!({"@type":"internalLinkTypeUserPhoneNumber","phone_number":"1555000","draft_text":"","open_profile":false,"unpaid_messages_token":""}),
     );
     let extra = driver
         .resolve_deep_link(info_action(state))

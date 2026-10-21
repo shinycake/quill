@@ -82,7 +82,7 @@ fn reply_header_shows_the_quote_instead_of_the_message() {
             11,
             77,
             "answer",
-            r#","reply_to":{"@type":"messageReplyToMessage","chat_id":-1001,"message_id":10,"quote":{"@type":"textQuote","text":{"@type":"formattedText","text":"two","entities":[]},"position":4,"is_manual":true},"checklist_task_id":0,"poll_option_id":"","origin":null,"origin_send_date":0,"content":null}"#,
+            r#","reply_to":{"@type":"messageReplyToMessage","chat_id":-1001,"message_id":10,"quote":{"@type":"textQuote","text":{"@type":"formattedText","text":"two","entities":[]},"rich_texts":[],"position":4,"is_manual":true},"checklist_task_id":0,"poll_option_id":"","origin":null,"origin_send_date":0,"content":null}"#,
         ),
     );
     let header = session.reply_header(&message(&session, 11)).unwrap();

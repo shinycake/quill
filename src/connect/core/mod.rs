@@ -683,6 +683,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let _ = self.refresh_star_subscriptions_if_stale();
         let _ = self.refresh_received_gifts_if_stale();
         let _ = self.refresh_gift_collections_if_stale();
+        // "Send via Blockchain": the temporary password is in, ask for the URL.
+        let _ = self.continue_gift_export();
         if view_after {
             self.maybe_view_open_messages()?;
         }

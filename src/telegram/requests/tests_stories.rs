@@ -228,7 +228,7 @@ fn s2_post_story_options_match_1_8_67() {
         "areas": [{
             "@type": "inputStoryArea",
             "position": {
-                "@type": "storyAreaPosition",
+                "@type": "areaPosition",
                 "x_percentage": 35.0, "y_percentage": 80.0,
                 "width_percentage": 30.0, "height_percentage": 9.0,
                 "rotation_angle": 0.0, "corner_radius_percentage": 20.0

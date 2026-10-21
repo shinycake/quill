@@ -167,8 +167,8 @@ impl QuillApp {
                 .into_any_element()
         };
         // Phase 9.8: clickable story areas — chips over the 360x640 media
-        // box, centered on the `storyAreaPosition` x/y fractions
-        // (`schema/td_api.tl:6530`; x/y are the rectangle's CENTER). The
+        // box, centered on the `areaPosition` x/y fractions
+        // (`schema/td_api.tl:1184`; x/y are the rectangle's CENTER). The
         // media box is the positioning context (areas are media fractions)
         // and clips overflowing chips; `rotation_angle` is not rendered in
         // this slice.
@@ -179,8 +179,8 @@ impl QuillApp {
             .map(|(index, area)| {
                 let kind = area.kind.clone();
                 let label = Self::story_area_label(&kind);
-                // `storyAreaPosition` x/y are the rectangle's CENTER
-                // (`schema/td_api.tl:6530`): the chip's top-left is the
+                // `areaPosition` x/y are the rectangle's CENTER
+                // (`schema/td_api.tl:1184`): the chip's top-left is the
                 // center minus half the chip size.
                 let chip_w = (area.width * 360.0).max(48.0) as f32;
                 let chip_h = (area.height * 640.0).max(24.0) as f32;
