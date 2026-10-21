@@ -271,9 +271,7 @@ impl QuillApp {
     /// settings dialog closes so nothing sits over it, and Esc reaches the
     /// intro through the focus its cover holds.
     pub(super) fn replay_first_run(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.settings.open = false;
-        self.settings.page = None;
-        window.close_dialog(cx);
+        self.close_settings();
         self.first_run = FirstRun::welcome(open_intro(cx), Instant::now());
         window.focus(&self.focus_sidebar, cx);
         cx.notify();

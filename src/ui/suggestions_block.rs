@@ -62,7 +62,6 @@ impl QuillApp {
                 self.navigate(Nav::Profile, window, cx)
             }
             Suggestion::CheckPassword => {
-                self.settings.open = true;
                 self.navigate(Nav::Privacy, window, cx);
             }
             Suggestion::UpgradePremium => self.navigate(Nav::Premium, window, cx),

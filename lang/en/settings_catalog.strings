@@ -87,3 +87,7 @@
 "qll_settings_privacy_voice_messages" = "Who can send me voice messages";
 "qll_settings_shortcuts_reference" = "Shortcuts reference";
 "qll_settings_system_touch_bar" = "Disable Touch Bar";
+"qll_settings_back_to_chats" = "Back to chats";
+"qll_settings_log_out_warning" = "Logging out ends all your secret chats, and media downloaded on this device is erased.";
+"lng_settings_logout" = "Log out";
+"lng_sure_logout" = "Are you sure you want to log out?";

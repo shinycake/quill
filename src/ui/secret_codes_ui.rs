@@ -62,7 +62,7 @@ impl QuillApp {
         if !signed_in && (self.live.is_some() || self.auth_ui.demo_inputs) {
             return Some(CodeScreen::SignIn);
         }
-        (signed_in && self.settings.open && self.settings.page.is_none())
+        (signed_in && self.settings.open && self.settings.sub.is_none())
             .then_some(CodeScreen::Settings)
     }
 
@@ -205,7 +205,7 @@ impl QuillApp {
                 )));
             }
             debug_mode::debug_log(tr(keys::Q_OPS_DEBUG_LOGS_STARTED));
-            self.settings.open = false;
+            self.close_settings();
         }
         if let Some(root) = root.as_deref()
             && let Err(error) = debug_mode::persist(root, debug_mode::enabled())

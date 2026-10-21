@@ -10,9 +10,6 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 
-/// The Settings subpage that asks before writing to Telegram Support.
-pub(super) const ASK_QUESTION_PAGE: &str = "Ask a Question";
-
 impl QuillApp {
     /// Help rows and the version footer, below the Settings list.
     pub(super) fn settings_help_footer(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -47,11 +44,10 @@ impl QuillApp {
             )
             .child(
                 Button::new("settings-ask-question")
-                    .label(ASK_QUESTION_PAGE)
+                    .label(tr(keys::SETTINGS_ASK_QUESTION))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.settings.page = Some(ASK_QUESTION_PAGE);
-                        cx.notify();
+                        this.show_settings_sub(super::settings_window::SubPage::AskQuestion, cx);
                     })),
             )
             .child(
@@ -110,24 +106,22 @@ impl QuillApp {
                         Button::new("ask-question-volunteer")
                             .label(tr(keys::SETTINGS_ASK_OK))
                             .primary()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.ask_support(window, cx);
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.ask_support(cx);
                             })),
                     ),
             )
             .into_any_element()
     }
 
-    fn ask_support(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn ask_support(&mut self, cx: &mut Context<Self>) {
         let sent = self
             .live
             .as_mut()
             .map(|live| live.driver.open_support_chat());
         match sent {
             Some(Ok(_)) => {
-                self.settings.open = false;
-                self.settings.page = None;
-                window.close_dialog(cx);
+                self.close_settings();
             }
             Some(Err(_)) => self.set_status_note(
                 StatusNote::error(tr(keys::Q_PREFS_COULDNT_REACH_TELEGRAM_SUPPORT_TRY)),

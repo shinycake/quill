@@ -319,10 +319,10 @@ fn a_dialog_asked_for_in_a_chat_window_opens_there(cx: &mut TestAppContext) {
         .read_with(cx, |app, _| app.windows.view_for(OTHER))
         .expect("view");
     // Input in the chat window, then a flag that opens a kit dialog
-    // (Settings): the window the input happened in hosts it.
+    // (Accounts): the window the input happened in hosts it.
     h.app.update(cx, |app, _| {
         app.note_window_input(Some(OTHER));
-        app.settings.open = true;
+        app.account.accounts.open = true;
         app.set_window_scope(None);
     });
     cx.update_window(h.main, |_, window, cx| window.render_frame(cx))
@@ -344,14 +344,14 @@ fn a_dialog_asked_for_in_a_chat_window_opens_there(cx: &mut TestAppContext) {
     // The flag cleared: the window's dialog goes, and the next one asked
     // for from the main window opens in the main window.
     h.app.update(cx, |app, _| {
-        app.settings.open = false;
+        app.account.accounts.open = false;
     });
     cx.update_window(chat_window, |_, window, cx| window.render_frame(cx))
         .unwrap();
     assert!(!window_shell.read_with(cx, |shell, _| shell.dialog_open()));
     h.app.update(cx, |app, _| {
         app.note_window_input(None);
-        app.settings.open = true;
+        app.account.accounts.open = true;
     });
     cx.update_window(chat_window, |_, window, cx| window.render_frame(cx))
         .unwrap();

@@ -21,7 +21,6 @@
 "lng_menu_settings" = "Settings";
 "lng_premium_summary_title" = "Telegram Premium";
 "lng_saved_messages" = "Saved Messages";
-"lng_settings_advanced" = "Advanced";
 "lng_settings_ask_question" = "Ask a Question";
 "lng_settings_calls" = "Calls";
 "lng_settings_cloud_password_start_title" = "Two-Step Verification";
@@ -31,14 +30,12 @@
 "lng_settings_language" = "Language";
 "lng_settings_logged_in" = "Connected websites";
 "lng_settings_passcode_title" = "Local passcode";
-"lng_settings_section_chat_settings" = "Chat Settings";
 "lng_settings_section_notify" = "Notifications and Sounds";
 "lng_settings_section_privacy" = "Privacy and Security";
 "qll_navigation_account_deletion_and_inactivity" = "Account deletion and inactivity";
 "qll_navigation_accounts" = "Accounts";
 "qll_navigation_appearance" = "Appearance";
 "qll_navigation_archived_stickers" = "Archived stickers";
-"qll_navigation_back_to_settings" = "Back to Settings";
 "qll_navigation_communities" = "Communities";
 "qll_navigation_devices" = "Devices";
 "qll_navigation_new_secret_chat" = "New secret chat";

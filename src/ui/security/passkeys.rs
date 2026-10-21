@@ -84,15 +84,12 @@ impl QuillApp {
                         .text_color(cx.theme().muted_foreground)
                         .child(label),
                 )
-                .on_click(cx.listener(|this, _, window, cx| {
+                .on_click(cx.listener(|this, _, _, cx| {
                     // Nothing opens while the list is loading (tdesktop).
                     let Some(target) = this.passkeys_state().and_then(PasskeysState::row_target)
                     else {
                         return;
                     };
-                    this.settings.open = false;
-                    this.settings.page = None;
-                    window.close_dialog(cx);
                     match target {
                         RowTarget::About => this.open_passkeys_about(cx),
                         RowTarget::List => this.open_passkeys(cx),
@@ -702,8 +699,7 @@ impl QuillApp {
             .as_str()
         {
             "privacy" => {
-                self.settings.open = true;
-                self.settings.page = Some(tr(keys::Q_PREFS_PRIVACY_AND_SECURITY));
+                self.open_settings(Some(quill::settings_catalog::Page::Privacy));
             }
             "about" => {
                 self.open_passkeys(cx);

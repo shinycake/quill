@@ -156,17 +156,17 @@ fn the_privacy_row_shows_the_count_and_opens_the_list(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, window, cx| {
         app.close_passkeys(cx);
         app.close_kit_dialog_if_done(DialogKind::Passkeys, window, cx);
-        app.settings.open = true;
-        app.settings.page = Some("Privacy and security");
+        app.open_settings(Some(quill::settings_catalog::Page::Privacy));
         cx.notify();
     });
-    assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::Settings));
+    assert_eq!(shown_dialog(&shell, vcx), None);
     vcx.update(|window, cx| {
         assert!(window.find("setting-Passkeys").visible());
         window.click("setting-Passkeys", cx);
     });
     assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::Passkeys));
-    app.read_with(vcx, |app, _| assert!(!app.settings.open));
+    // The list opens over Settings, which is still there when it closes.
+    app.read_with(vcx, |app, _| assert!(app.settings.open));
 }
 
 #[gpui_kit::test]
@@ -180,11 +180,10 @@ fn the_privacy_row_without_passkeys_follows_webauthn(cx: &mut TestAppContext) {
         }
         app.close_passkeys(cx);
         app.close_kit_dialog_if_done(DialogKind::Passkeys, window, cx);
-        app.settings.open = true;
-        app.settings.page = Some("Privacy and security");
+        app.open_settings(Some(quill::settings_catalog::Page::Privacy));
         cx.notify();
     });
-    assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::Settings));
+    assert_eq!(shown_dialog(&shell, vcx), None);
     // Shown while a passkey can be created (tdesktop `canRegister`).
     let shown = quill::passkeys::webauthn_supported();
     vcx.update(|window, _| assert_eq!(window.try_find("setting-Passkeys").is_some(), shown));
