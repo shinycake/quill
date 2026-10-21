@@ -32,21 +32,18 @@ fn a_dissolve_runs_and_ends_in_a_pane_without_rows(cx: &mut TestAppContext) {
     });
     frames(vcx);
     let (_, first) = app.read_with(vcx, |app, _| app.vanishing_state_for_test());
-    // Restart the dissolve so a slow runner cannot use up its dust life
-    // before the next read; the clock keeps running from here.
-    app.update(vcx, |app, _| {
-        app.set_vanishing_clock(0.);
-        app.history.vanish_held.set(false);
+    // 1.2 s on: the row phase (1.05 s) is over, the dust (2 s) still flies.
+    app.update(vcx, |app, cx| {
+        app.advance_vanish_clock(1.2);
+        cx.notify();
     });
-    std::thread::sleep(std::time::Duration::from_millis(30));
-    app.update(vcx, |_, cx| cx.notify());
     frames(vcx);
     let (running, second) = app.read_with(vcx, |app, _| app.vanishing_state_for_test());
     assert_eq!(running, 1, "the dust is still showing");
     assert!(second > first, "the clock moves on every frame of the pane");
     // The dust settles: the next frame drops it, so no tick is asked for.
     app.update(vcx, |app, cx| {
-        app.age_vanishing_for_test(5.);
+        app.advance_vanish_clock(5.);
         cx.notify();
     });
     frames(vcx);
