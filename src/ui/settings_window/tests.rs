@@ -58,7 +58,8 @@ fn shown(vcx: &mut VisualTestContext, selector: &'static str) -> bool {
 
 fn open_dialog(shell: &Entity<QuillShell>, vcx: &mut VisualTestContext) -> Option<DialogKind> {
     vcx.run_until_parked();
-    std::thread::sleep(std::time::Duration::from_millis(300));
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(300));
     vcx.update(|window, cx| window.render_frame(cx));
     shell.read_with(vcx, |shell, _| shell.open_dialog)
 }

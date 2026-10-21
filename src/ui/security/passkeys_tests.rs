@@ -33,11 +33,12 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, Entity<QuillShell>, Vi
     (app, shell, vcx)
 }
 
-/// The kit dialog that shows, once its open animation (wall-clock time)
+/// The kit dialog that shows, once its open animation (executor clock time)
 /// has finished so clicks land where the controls are drawn.
 fn shown_dialog(shell: &Entity<QuillShell>, vcx: &mut VisualTestContext) -> Option<DialogKind> {
     vcx.run_until_parked();
-    std::thread::sleep(std::time::Duration::from_millis(400));
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(400));
     vcx.update(|window, cx| window.render_frame(cx));
     shell.read_with(vcx, |shell, _| shell.open_dialog)
 }

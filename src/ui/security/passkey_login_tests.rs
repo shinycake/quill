@@ -39,7 +39,8 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, Entity<QuillShell>, Vi
 
 fn shown_dialog(shell: &Entity<QuillShell>, vcx: &mut VisualTestContext) -> Option<DialogKind> {
     vcx.run_until_parked();
-    std::thread::sleep(std::time::Duration::from_millis(400));
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(400));
     vcx.update(|window, cx| window.render_frame(cx));
     shell.read_with(vcx, |shell, _| shell.open_dialog)
 }
