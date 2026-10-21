@@ -275,7 +275,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] "Sent by {user}" row for messages posted as a chat (`getMessageAuthor`) (#1001) <!-- parity:menu-sent-by -->
 - [x] Copy Phone Number on a contact message (#1001) <!-- parity:menu-copy-contact-phone -->
 - [x] "Original date" row for forwarded messages, as tdesktop's context menu shows it <!-- parity:menu-forward-original-date -->
-- [ ] "Edited" row in the message menu is an icon plus a bare date, as tdesktop shows it <!-- parity:menu-edited-date-row -->
+- [x] "Edited" row in the message menu is an icon plus a bare date, as tdesktop shows it <!-- parity:menu-edited-date-row -->
 - [x] "Send Another Gift" on gift service messages <!-- parity:menu-send-another-gift -->
 - [x] Block sender from the Replies chat menu <!-- parity:menu-replies-block-sender -->
 - [ ] Save selected rich messages as HTML <!-- parity:menu-save-selection-html -->
@@ -1141,8 +1141,8 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Battery and animations: power saving per category <!-- parity:appearance-power-saving -->
 - [x] Chat list quick action on swipe and middle-click (partial: swipe setting exists) <!-- parity:appearance-quick-action -->
 - [x] Spellcheck dictionaries manager with language downloads <!-- parity:appearance-dictionaries -->
-- [ ] 12/24-hour clock that follows the system setting, everywhere Quill shows a time <!-- parity:appearance-clock-format -->
-- [ ] History day separators show the year only by tdesktop's rule (shared-media rows follow it since #991) <!-- parity:render-day-separator-year -->
+- [x] 12/24-hour clock that follows the system setting, everywhere Quill shows a time <!-- parity:appearance-clock-format -->
+- [x] History day separators show the year only by tdesktop's rule (shared-media rows follow it since #991) <!-- parity:render-day-separator-year -->
 
 ### Settings: data, proxy & advanced
 

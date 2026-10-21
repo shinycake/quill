@@ -1,3 +1,0 @@
-parity:appearance-clock-format
-parity:render-day-separator-year
-parity:menu-edited-date-row
