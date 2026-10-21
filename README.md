@@ -160,6 +160,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Clear formatting on selection (applies to message text and captions) <!-- parity:msg-clear-formatting --> (M1: toolbar clear strips markup on selection or whole text, composer.rs)
 - [x] Reply to a message <!-- parity:msg-reply --> (begin_reply_to ui/mod.rs:4269)
 - [x] Quote selected text in a reply — "Quote reply" menu item → quote picker → validated UTF-16 offset → `inputTextQuote` on every send path (text, media, albums, voice notes, GIFs/stickers, polls); ❝quote❞ shown in the reply banner (src/composer.rs, src/telegram/requests.rs, src/ui/mod.rs) <!-- parity:msg-reply-quote -->
+- [ ] Quote formatted text from rich messages (TDLib 1.8.69 `rich_texts` in quotes) <!-- parity:msg-quote-rich-text -->
 - [x] Reply bar in composer with cancel <!-- parity:msg-reply-bar-cancel --> (cancel_reply_draft composer.rs:131)
 - [x] Swipe-to-reply gesture <!-- parity:msg-swipe-reply --> (M1: leftward drag >24px on a message starts a reply, ui/mod.rs)
 - [x] Forward with "Forwarded from" attribution <!-- parity:msg-forward-attribution --> (forward_messages, send_copy:false requests.rs:2172)
@@ -466,6 +467,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Report row on bots and on channels you don't own, and a Join Channel row on channels you haven't joined <!-- parity:profile-report-join -->
 - [x] Group and channel descriptions show links, mentions and hashtags (TDLib getTextEntities); groups keep only Telegram links; Copy Text and Translate menu <!-- parity:profile-about-links -->
 - [x] Groups in common load 40 at a time, with a Load more row, local search past 20 groups and a plural count <!-- parity:profile-common-groups-paging -->
+- [ ] Profile share themes for users and groups (TDLib 1.8.69 `setProfileShareTheme`, `share_theme`) <!-- parity:profile-share-theme -->
 
 ### Media
 
@@ -965,10 +967,12 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Check and apply Premium gift codes <!-- parity:premium-gift-codes -->
 - [x] Bank card info when tapping a card number <!-- parity:premium-bank-card-info -->
 - [x] Paid messages: price setting, unpaid exceptions, revenue <!-- parity:premium-paid-messages -->
+- [ ] Fee-free message links: open links that carry an unpaid-messages token, create fee-free links, show the "allowed by link" service message (TDLib 1.8.69) <!-- parity:paid-messages-free-links -->
 - [x] Suggested posts and offers in channel direct messages (deferred: low impact) <!-- parity:premium-suggested-posts -->
 - [x] Hide ads (Premium) <!-- parity:premium-disable-sponsored -->
 - [x] Buy Premium inside the app (blocked: store purchase and app verification tokens are only available to official mobile apps) <!-- parity:premium-in-app-purchase -->
 - [x] Fragment and TON wallet flows: sign-in codes, collectible info, phone and username Fragment links, low-TON top-up (#799), the Gram Balance screen with top-up and Collect via Fragment (#818, #827), the gift value box (#824) and gift transfer or export via Fragment (#819) <!-- parity:premium-fragment-ton -->
+- [ ] Delete a received gift (TDLib 1.8.69 `deleteGift`, `can_be_deleted`) <!-- parity:gifts-delete -->
 
 ### TON wallet (low priority)
 
@@ -990,6 +994,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [ ] Send Grams to a user or address, including gasless transfers (deferred: needs security & legal review) <!-- parity:wallet-send -->
 - [ ] Connect the wallet to apps with TON Connect, approve requests, manage sessions (deferred: needs security & legal review) <!-- parity:wallet-tonconnect-sessions -->
 - [ ] Buy Grams through on-ramp providers (deferred: needs security & legal review) <!-- parity:wallet-onramp -->
+- [ ] Move a collectible gift to or from your own TON wallet, and the TON wallet card on profiles (TDLib 1.8.69; deferred with the wallet items above) <!-- parity:wallet-gift-withdraw-card -->
 
 ### Scheduled messages
 
@@ -1153,6 +1158,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Network usage statistics with reset <!-- parity:data-network-usage -->
 - [x] Proxy list: add, edit, delete, enable, disable and ping SOCKS5, MTProto and HTTP proxies <!-- parity:data-proxy -->
 - [x] Proxy extras: share QR, use system proxy, auto-switch, connection-type row and shield in the connection strip (partial: all but "use system proxy", which TDLib has no hook for) <!-- parity:data-proxy-extras -->
+- [ ] Web proxies (TDLib 1.8.69 `proxyTypeWeb` and its links) <!-- parity:data-proxy-web -->
 - [x] Try IPv6 option <!-- parity:data-ipv6 -->
 - [x] Export Telegram data box: types, media sizes, date range, HTML and JSON <!-- parity:data-export-full -->
 - [x] Chat export as HTML with media, date range and senders <!-- parity:data-chat-export-html -->
