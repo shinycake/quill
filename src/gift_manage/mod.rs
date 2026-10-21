@@ -152,7 +152,7 @@ impl ReceivedGift {
     /// gift is a regular one that the receiver may delete, and the list is
     /// the signed-in user's own.
     pub fn can_delete(&self, mine: bool) -> bool {
-        mine && self.manage.can_be_deleted && !self.was_refunded
+        mine && self.manage.can_be_deleted && !self.gift.upgraded && !self.was_refunded
     }
 
     /// Stars the upgrade costs the owner: `Some(0)` when the sender prepaid

@@ -60,6 +60,9 @@ pub struct GiftManageState {
     pub flow: Option<GiftFlow>,
     /// The gift whose `deleteGift` is in flight; the answer removes it.
     pub deleting: Option<String>,
+    /// One-shot: a gift was just deleted; the UI shows the "Gift Deleted"
+    /// toast and clears it.
+    pub deleted: bool,
     /// A one-line result of the last action ("Pinned", "Upgraded to ...").
     pub note: Option<String>,
     pub send: SendGiftState,

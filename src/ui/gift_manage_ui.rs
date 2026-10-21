@@ -198,6 +198,7 @@ impl QuillApp {
                 .title(tr(keys::GIFT_MENU_DELETE))
                 .description(tr(keys::GIFT_DELETE_SURE_TEXT))
                 .ok_text(tr(keys::BOX_DELETE))
+                .ok_variant(ButtonVariant::Danger)
                 .cancel_text(tr(keys::CANCEL))
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {

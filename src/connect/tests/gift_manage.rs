@@ -398,10 +398,9 @@ fn deleting_a_gift_sends_delete_gift_and_removes_it_on_ok() {
     );
     assert_eq!(hub.gifts_total, 2);
     assert_eq!(hub.gift_selected, None);
-    assert_eq!(
-        p.0.session.payments.gifts_manage.note.as_deref(),
-        Some("Gift Deleted")
-    );
+    // The toast is a one-shot, and the server's list is refetched.
+    assert!(p.0.session.payments.gifts_manage.deleted);
+    assert!(hub.gifts_stale);
 }
 
 #[test]

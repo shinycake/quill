@@ -25,11 +25,11 @@ the gift service message.
   `delete_received_gift`, which refuses anything TDLib did not mark
   deletable or that is not the user's own.
 - Reducer: `Session::finish_gift_delete` drops the gift from the grid and
-  the box, lowers the total and sets the "Gift Deleted" note. A failure
+  the box, lowers the total, marks the list stale (the server stays the source of truth) and raises a one-shot that the UI shows as the "Gift Deleted" kit toast. A failure
   keeps the gift and sets "Couldn't delete the gift: reason". Nothing is
   optimistic.
 - UI: a "Delete Gift" button in the gift page's owner actions, shown only
-  when `can_delete`, opening a kit alert dialog with tdesktop's title and text.
+  when `can_delete`, in danger-red text, opening a kit alert dialog with tdesktop's title and text and a danger-styled Delete button.
 - Strings: `lng_gift_menu_delete`, `lng_gift_delete_sure_text`,
   `lng_gift_deleted`, Quill-only `qll_money_could_not_delete_the_gift` and
   `qll_money_delete_gift_not_sent`.
@@ -38,10 +38,9 @@ the gift service message.
 
 - The entry is a button on the gift page, next to Quill's other owner
   actions, not a "..." menu (Quill's gift page has none).
-- The confirm button uses the kit's default style, not tdesktop's red
-  attention style; the alert dialog has no destructive variant.
-- The success "toast" is the dialog's inline note, like Quill's other gift
-  actions.
+- tdesktop also lets the creator of a channel delete the channel's gifts
+  (`owner->canTransferGifts()`). Quill's gift owner actions are for the
+  signed-in user's own gifts only, so channel gifts are not covered yet.
 
 ## Verified
 

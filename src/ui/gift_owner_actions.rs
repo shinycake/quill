@@ -121,8 +121,8 @@ pub(super) fn gift_owner_actions(
                 Button::new("gift-delete")
                     .label(tr(keys::GIFT_MENU_DELETE))
                     .small()
-                    .danger()
                     .ghost()
+                    .text_color(cx.theme().danger)
                     .disabled(busy)
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.ask_delete_gift(&id, window, cx)

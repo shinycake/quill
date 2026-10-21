@@ -6,7 +6,7 @@ use crate::gift_manage::{
     ExportError, GiftManagePayload, GiftManageState, GiftTransferred, ProbeOutcome, TransferPicker,
     TransferStage,
 };
-use crate::lang::{keys, tr, tr_with};
+use crate::lang::{keys, tr_with};
 use crate::state::*;
 use crate::telegram::envelope::ParsedFile;
 
@@ -175,7 +175,10 @@ impl Session {
         }
         manage.flow = None;
         manage.collections_stale = true;
-        manage.note = Some(tr(keys::GIFT_DELETED).to_string());
+        // The list may have been reopened while the request was out: the
+        // server's list stays the source of truth.
+        hub.gifts_stale = true;
+        manage.deleted = true;
     }
 
     /// The `httpUrl` of `getUpgradedGiftWithdrawalUrl`: tdesktop opens it

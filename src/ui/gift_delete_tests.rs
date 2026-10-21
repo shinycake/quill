@@ -73,7 +73,8 @@ fn confirming_removes_the_gift_from_the_grid_and_the_box(cx: &mut TestAppContext
     vcx.run_until_parked();
     // The confirmation is up and nothing is gone yet.
     assert_eq!(ids(&app, vcx), [DELETABLE, KEPT]);
-    app.update_in(vcx, |app, _, cx| app.confirm_delete_gift(DELETABLE, cx));
+    // Enter presses the alert's OK button, so this goes through `on_ok`.
+    vcx.simulate_keystrokes("enter");
     vcx.run_until_parked();
     assert_eq!(ids(&app, vcx), [KEPT]);
     app.read_with(vcx, |app, _| {

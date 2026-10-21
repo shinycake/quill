@@ -267,6 +267,19 @@ impl QuillApp {
             self.clear_transfer_inputs(window, cx);
             cx.notify();
         }
+        if self
+            .gift_manage_mut()
+            .is_some_and(|m| std::mem::take(&mut m.deleted))
+        {
+            // tdesktop `DeleteStarGift`: the `lng_gift_deleted` toast.
+            cx.defer_in(window, |_, window, cx| {
+                window.push_notification(
+                    Notification::new().message(tr(keys::GIFT_DELETED)),
+                    cx,
+                );
+            });
+            cx.notify();
+        }
         if let Some(done) = done {
             let text = tr_with(
                 keys::GIFT_TRANSFERRED_ABOUT,
