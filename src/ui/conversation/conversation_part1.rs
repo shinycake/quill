@@ -726,8 +726,13 @@ impl QuillApp {
                     // chat known to be empty, so this cannot loop.
                     if open.is_some() && !history_loading && !history_failed {
                         let weak = cx.weak_entity();
+                        let window_chat = self.windows.scope;
                         cx.defer(move |cx| {
-                            let _ = weak.update(cx, |this, cx| this.maybe_auto_load_older(cx));
+                            let _ = weak.update(cx, |this, cx| {
+                                this.in_window_scope(window_chat, cx, |this, cx| {
+                                    this.maybe_auto_load_older(cx)
+                                })
+                            });
                         });
                     }
                     if history_failed {
