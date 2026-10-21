@@ -2,7 +2,7 @@
 //! and `getUserLink`).
 use super::*;
 use crate::peer_qr::free::{FreeRequest, FreeTicket};
-use crate::peer_qr::link::UserLinkFetch;
+use crate::peer_qr::link::{OwnLinkState, UserLinkFetch};
 use crate::peer_qr::session::BackdropsFetch;
 use crate::state::{RequestPurpose, UsersPurpose};
 use serde_json::json;
@@ -35,6 +35,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         Ok(())
+    }
+
+    /// Your own box with no username and a hidden number shows a
+    /// temporary contact link: ask for one once the privacy rules say it
+    /// is needed and none is there or on its way. Cheap to call on every
+    /// step while the box is open.
+    pub fn ensure_own_contact_link(&mut self, now: i64) -> Result<(), ConnectSendError> {
+        match self.session.own_qr_link("", now) {
+            Some(OwnLinkState::NeedsContactLink) => self.fetch_own_user_link(None),
+            _ => Ok(()),
+        }
     }
 
     /// `getUserLink`: the current user's contact link (`free` is `None`)

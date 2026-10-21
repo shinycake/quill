@@ -10,6 +10,7 @@ use crate::peer_qr::link::{UserLinkData, UserLinkFetch};
 use crate::peer_qr::session::BackdropsFetch;
 use crate::platform::MemorySecretStore;
 use crate::telegram::client::copy_and_parse;
+use crate::telegram::requests_privacy::PrivacySettingKey;
 use serde_json::Value;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -215,5 +216,48 @@ fn a_failed_contact_link_keeps_its_reason_and_is_asked_again() {
     let sent = f.2.snapshot().len();
     f.1.fetch_own_user_link(None).unwrap();
     assert_eq!(f.2.snapshot().len(), sent + 1);
+    cleanup(f);
+}
+
+/// The box opens, asks for the phone privacy rules, and only learns from
+/// their answers that it needs a contact link.
+#[test]
+fn rules_landing_after_the_box_opened_ask_for_the_contact_link() {
+    const ME: i64 = 77;
+    let mut f = fixture();
+    f.1.session.my_user_id = Some(ME);
+    ingest(
+        &mut f,
+        r#"{"@type":"updateUser","user":{"id":77,"first_name":"Avery","phone_number":"15550001","type":{"@type":"userTypeRegular"}}}"#,
+    );
+    f.1.fetch_privacy_rules(PrivacySettingKey::ShowPhoneNumber)
+        .unwrap();
+    let show = last_request(&f);
+    f.1.fetch_privacy_rules(PrivacySettingKey::AllowFindingByPhoneNumber)
+        .unwrap();
+    let find = last_request(&f);
+    let now = crate::local_time::now_unix();
+    let sent = f.2.snapshot().len();
+    f.1.ensure_own_contact_link(now).unwrap();
+    assert_eq!(f.2.snapshot().len(), sent, "the rules are still loading");
+    for (request, rule) in [
+        (&show, "userPrivacySettingRuleRestrictAll"),
+        (&find, "userPrivacySettingRuleAllowContacts"),
+    ] {
+        ingest(
+            &mut f,
+            &format!(
+                r#"{{"@type":"userPrivacySettingRules","rules":[{{"@type":"{rule}"}}],"@extra":"{}"}}"#,
+                extra_of(request)
+            ),
+        );
+    }
+    f.1.ensure_own_contact_link(now).unwrap();
+    assert_eq!(f.2.snapshot().len(), sent + 1);
+    let request = last_request(&f);
+    assert_eq!(request["@type"], "getUserLink");
+    assert_eq!(request["remove_messages_fee"], false);
+    f.1.ensure_own_contact_link(now).unwrap();
+    assert_eq!(f.2.snapshot().len(), sent + 1, "asked once");
     cleanup(f);
 }
