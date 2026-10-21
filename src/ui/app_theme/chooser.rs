@@ -102,6 +102,24 @@ impl QuillApp {
     pub(in crate::ui) fn app_themes_section(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let applied = self.applied_theme_id().cloned();
         let mut tiles = div().flex().flex_wrap().gap_3();
+        // On Omarchy its current theme comes first.
+        if let Some(palette) = self.omarchy_palette() {
+            let name = self
+                .omarchy_theme()
+                .map(|state| state.theme.name.clone())
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| tr(keys::Q_SETTINGS_OMARCHY).to_string());
+            tiles = tiles.child(
+                theme_tile(
+                    "app-theme-omarchy",
+                    name.into(),
+                    super::preview_colors(&palette),
+                    applied == Some(ThemeId::Omarchy),
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.follow_omarchy(cx))),
+            );
+        }
         for theme in BuiltinTheme::ALL {
             let selected = applied == Some(ThemeId::Builtin(theme));
             let accent = self.theme_accent(theme);
@@ -120,6 +138,8 @@ impl QuillApp {
         }
         let hint = if self.appearance.theme == ThemeChoice::HighContrast {
             tr(keys::Q_MISC_HIGH_CONTRAST_IS_ON_IT)
+        } else if applied == Some(ThemeId::Omarchy) {
+            tr(keys::Q_SETTINGS_OMARCHY_FOLLOWING)
         } else {
             tr(keys::Q_MISC_LIGHT_THEMES_SHOW_WHILE_NIGHT)
         };

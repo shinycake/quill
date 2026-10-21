@@ -89,17 +89,18 @@ fn custom_emoji_cache_is_bounded() {
 /// oldest others go instead.
 #[test]
 fn visible_custom_emoji_survives_overflow() {
-    use crate::state::{MessageReactionOptions, ReactionChoice};
+    use crate::state::{MessageReactionOptions, MessageReactionsState, ReactionChoice};
     let mut session = session();
     session.accept_custom_emoji_stickers(vec![resolved_emoji(Some(1), 1)]);
-    session.stickers.message_reaction_options = Some(MessageReactionOptions {
-        chat_id: crate::ids::ChatId(1),
-        message_id: crate::ids::MessageId(1),
-        top: vec![ReactionChoice::CustomEmoji(1)],
-        recent: Vec::new(),
-        popular: Vec::new(),
-        allow_custom_emoji: true,
-    });
+    session.stickers.message_reaction_options =
+        MessageReactionsState::Ready(MessageReactionOptions {
+            chat_id: crate::ids::ChatId(1),
+            message_id: crate::ids::MessageId(1),
+            top: vec![ReactionChoice::CustomEmoji(1)],
+            recent: Vec::new(),
+            popular: Vec::new(),
+            allow_custom_emoji: true,
+        });
     let total = CUSTOM_EMOJI_CACHE_CAP as i64 + 5;
     session.accept_custom_emoji_stickers(
         (2..=total)

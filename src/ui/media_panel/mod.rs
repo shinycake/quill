@@ -586,8 +586,7 @@ impl QuillApp {
         let Some(options) = session
             .stickers
             .message_reaction_options
-            .as_ref()
-            .filter(|o| o.chat_id == target.chat_id && o.message_id == target.message_id)
+            .ready_for(target.chat_id, target.message_id)
         else {
             return (rows, sections);
         };

@@ -589,7 +589,7 @@ impl Session {
         for topics in self.threads.forum_topics.values() {
             ids.extend(topics.iter().map(|t| t.icon_custom_emoji_id));
         }
-        if let Some(options) = &self.stickers.message_reaction_options {
+        if let Some(options) = self.stickers.message_reaction_options.ready() {
             ids.extend(options.all().into_iter().filter_map(|choice| match choice {
                 crate::state::ReactionChoice::CustomEmoji(id) => Some(id),
                 crate::state::ReactionChoice::Emoji(_) => None,

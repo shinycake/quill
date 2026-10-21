@@ -129,6 +129,10 @@ pub struct AppearancePrefs {
     /// default; Quill keeps it off so its default look is unchanged.
     #[serde(default)]
     pub adaptive_for_wide: bool,
+    /// On Omarchy, take Omarchy's current theme and follow its switches.
+    /// Choosing another theme turns this off.
+    #[serde(default = "default_true")]
+    pub follow_omarchy: bool,
     /// Interface scale in percent (tdesktop 100-300%). Scales the kit's
     /// rem size, so text and rem-based spacing grow together; widths drawn
     /// in fixed pixels do not.
@@ -237,6 +241,7 @@ impl Default for AppearancePrefs {
             wallpaper_tile_day: false,
             wallpaper_tile_night: false,
             adaptive_for_wide: false,
+            follow_omarchy: true,
             interface_scale_pct: INTERFACE_SCALE_DEFAULT,
             font_size_px: FONT_SIZE_DEFAULT,
             bubbles: true,
@@ -394,6 +399,7 @@ mod tests {
             wallpaper_tile_day: true,
             wallpaper_tile_night: false,
             adaptive_for_wide: true,
+            follow_omarchy: false,
             interface_scale_pct: 150,
             font_size_px: 17,
             bubbles: false,
