@@ -422,6 +422,7 @@ mod service_row;
 mod settings_account_ui;
 mod settings_phone_suggestion;
 mod settings_ui;
+mod settings_window;
 mod share_box_ui;
 mod share_content_ui;
 mod shared_media;

@@ -158,6 +158,9 @@ impl QuillApp {
             .filter(|reply| reply.target_chat == Some(chat_id));
         // Choosing a chat from the list ends the peek at it.
         self.chat_list.forum_chats_peek = false;
+        // A chat opened from anywhere (a link, a notification) shows over
+        // Settings' place.
+        self.close_settings();
         self.dismiss_cross_chat_state(chat_id, cx);
         // Voice notes and music keep playing across chats (the player bar
         // follows, as in Telegram Desktop).

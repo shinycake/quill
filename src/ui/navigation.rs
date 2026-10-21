@@ -2,14 +2,13 @@
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use super::dialogs::CreateChatKind;
-use super::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
-use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
+use quill::settings_catalog::Page;
 use quill::telegram::envelope::ChatKind;
 
 #[derive(Clone, Copy, Debug)]
@@ -62,10 +61,8 @@ pub(super) enum NavigationAction {
     Accounts,
     Notifications,
     Profile,
-    ChatSettings,
     ContactsSettings,
     CallSettings,
-    AdvancedSettings,
     /// Settings → Language (`parity:appearance-localization`).
     Language,
     MarkRead,
@@ -73,6 +70,40 @@ pub(super) enum NavigationAction {
     Archive,
     ArchiveToList,
 }
+impl NavigationAction {
+    /// Settings boxes open over the settings window; everything else
+    /// (a chat, a panel, a tab) needs the chats back on screen.
+    fn stays_in_settings(self) -> bool {
+        matches!(
+            self,
+            Self::ArchivedStickers
+                | Self::Storage
+                | Self::Proxy
+                | Self::Business
+                | Self::Subscriptions
+                | Self::Stars
+                | Self::Premium
+                | Self::MyGifts
+                | Self::NightMode
+                | Self::Appearance
+                | Self::Privacy
+                | Self::TwoFa
+                | Self::Sessions
+                | Self::Websites
+                | Self::Passcode
+                | Self::Account
+                | Self::Accounts
+                | Self::Notifications
+                | Self::Profile
+                | Self::ContactsSettings
+                | Self::CallSettings
+                | Self::Language
+                | Self::Settings
+                | Self::ArchiveToList
+        )
+    }
+}
+
 impl QuillApp {
     pub(super) fn navigate(
         &mut self,
@@ -80,6 +111,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !action.stays_in_settings() {
+            self.close_settings();
+        }
         match action {
             NavigationAction::ChatMute => {
                 if let Some(chat) = self.session().and_then(|s| s.open_chat)
@@ -248,9 +282,8 @@ impl QuillApp {
                 cx.notify();
             }
             NavigationAction::Privacy => {
-                self.settings.page = Some("Privacy and security");
-                // tdesktop asks for the passkeys whenever the screen opens.
-                self.request_passkeys();
+                self.open_settings(None);
+                self.show_settings_page(Page::Privacy, cx);
             }
             NavigationAction::TwoFa => {
                 self.open_twofa(cx);
@@ -268,71 +301,17 @@ impl QuillApp {
             NavigationAction::Accounts => {
                 self.open_accounts(cx);
             }
-            NavigationAction::Settings => self.settings.open = true,
+            NavigationAction::Settings => self.open_settings(None),
             NavigationAction::Notifications => self.notify.notification_defaults_open = true,
             NavigationAction::Profile => self.open_edit_profile_dialog(window, cx),
-            NavigationAction::ChatSettings => self.settings.page = Some("Chat settings"),
-            NavigationAction::ContactsSettings => self.settings.page = Some("Contacts"),
-            NavigationAction::CallSettings => self.settings.page = Some("Calls"),
-            NavigationAction::AdvancedSettings => {
-                self.settings.page = Some(super::advanced_ui::ADVANCED_PAGE)
-            }
+            NavigationAction::ContactsSettings => self.open_settings(Some(Page::Account)),
+            NavigationAction::CallSettings => self.open_settings(Some(Page::Calls)),
             NavigationAction::Language => self.open_language_box(window, cx),
             NavigationAction::MarkRead => self.mark_all_chats_as_read(false, cx),
             NavigationAction::Archive => self.open_archive_folder(cx),
             NavigationAction::ArchiveToList => self.toggle_archive_in_main_menu(cx),
         }
         cx.notify();
-    }
-    fn settings_link(
-        &self,
-        label: &'static str,
-        action: NavigationAction,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        Button::new(SharedString::from(format!("setting-{action:?}")))
-            .label(label)
-            .ghost()
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.settings.open = false;
-                this.settings.page = None;
-                window.close_dialog(cx);
-                this.navigate(action, window, cx);
-            }))
-            .into_any_element()
-    }
-    fn privacy_settings_navigation(&self, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(
-                Button::new("privacy-rules")
-                    .label(tr(keys::Q_NAVIGATION_PRIVACY_RULES_AND_BLOCKED_USERS))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.settings.open = false;
-                        window.close_dialog(cx);
-                        this.open_privacy(cx);
-                    })),
-            )
-            .child(self.settings_link(
-                tr(keys::SETTINGS_PASSCODE_TITLE),
-                NavigationAction::Passcode,
-                cx,
-            ))
-            .children(self.passkeys_settings_row(cx))
-            .child(self.settings_link(
-                tr(keys::SETTINGS_CLOUD_PASSWORD_START_TITLE),
-                NavigationAction::TwoFa,
-                cx,
-            ))
-            .child(self.settings_link(tr(keys::SETTINGS_LOGGED_IN), NavigationAction::Websites, cx))
-            .child(self.settings_link(
-                tr(keys::Q_NAVIGATION_ACCOUNT_DELETION_AND_INACTIVITY),
-                NavigationAction::Account,
-                cx,
-            ))
-            .into_any_element()
     }
     /// Whether a dark theme is in effect (the Night Mode switch).
     pub(super) fn night_mode_on(&self) -> bool {
@@ -437,197 +416,6 @@ impl QuillApp {
             .into_any_element();
         self.with_other_accounts_dot(button)
     }
-    pub(super) fn build_settings_dialog(
-        app: &Entity<Self>,
-        shell: &Entity<QuillShell>,
-        dialog: Dialog,
-        _: &mut App,
-    ) -> Dialog {
-        let app_c = app.clone();
-        dialog
-            .title(crate::ui::shell::dialog_title(tr(keys::MENU_SETTINGS)))
-            .width(px(520.))
-            .on_close(QuillShell::on_close_kind(
-                app,
-                shell,
-                DialogKind::Settings,
-                |this, _, cx| {
-                    this.settings.open = false;
-                    this.settings.page = None;
-                    cx.notify();
-                },
-            ))
-            .content(crate::ui::shell::scrollable_dialog_content(
-                move |content, _, cx| {
-                    let page = app_c.read(cx).settings.page;
-                    if let Some(page) = page {
-                        return content.child(app_c.update(cx, |this, cx| {
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap_3()
-                                .child(
-                                    Button::new("settings-back")
-                                        .label(tr(keys::Q_NAVIGATION_BACK_TO_SETTINGS))
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.settings.page = this
-                                                .settings
-                                                .page
-                                                .and_then(super::advanced_ui::parent_page);
-                                            cx.notify();
-                                        })),
-                                )
-                                .child(div().font_semibold().child(settings_page_title(page)))
-                                .child(match page {
-                                    "Chat settings" => div()
-                                        .flex()
-                                        .flex_col()
-                                        .gap_3()
-                                        .child(this.media_settings_section(cx))
-                                        .child(this.settings_link(
-                                            tr(keys::Q_NAVIGATION_ARCHIVED_STICKERS),
-                                            NavigationAction::ArchivedStickers,
-                                            cx,
-                                        ))
-                                        .into_any_element(),
-                                    "Contacts" => this.contacts_settings_section(cx),
-                                    super::advanced_ui::ADVANCED_PAGE => {
-                                        this.advanced_settings_page(cx)
-                                    }
-                                    super::advanced_ui::EXPERIMENTAL_PAGE => {
-                                        this.experimental_settings_page(cx)
-                                    }
-                                    "Privacy and security" => this.privacy_settings_navigation(cx),
-                                    super::settings_account_ui::ASK_QUESTION_PAGE => {
-                                        this.ask_question_page(cx)
-                                    }
-                                    _ => {
-                                        this.ensure_ptt_delay_slider(cx);
-                                        this.call_settings_section(cx).into_any_element()
-                                    }
-                                })
-                                .into_any_element()
-                        }));
-                    }
-                    let mut list = div().flex().flex_col().gap_2();
-                    let connection_type = app_c.update(cx, |this, _| this.connection_type_row());
-                    for (label, action) in [
-                        (tr(keys::SETTINGS_INFORMATION), NavigationAction::Profile),
-                        (tr(keys::Q_NAVIGATION_ACCOUNTS), NavigationAction::Accounts),
-                        (
-                            tr(keys::SETTINGS_SECTION_NOTIFY),
-                            NavigationAction::Notifications,
-                        ),
-                        (
-                            tr(keys::Q_NAVIGATION_APPEARANCE),
-                            NavigationAction::Appearance,
-                        ),
-                        (
-                            tr(keys::SETTINGS_SECTION_CHAT_SETTINGS),
-                            NavigationAction::ChatSettings,
-                        ),
-                        (
-                            tr(keys::SETTINGS_SECTION_PRIVACY),
-                            NavigationAction::Privacy,
-                        ),
-                        (tr(keys::Q_NAVIGATION_DEVICES), NavigationAction::Sessions),
-                        (tr(keys::SETTINGS_DATA_STORAGE), NavigationAction::Storage),
-                        (connection_type.as_str(), NavigationAction::Proxy),
-                        (tr(keys::Q_NAVIGATION_STARS), NavigationAction::Stars),
-                        (tr(keys::GIFT_STARS_TABS_MY), NavigationAction::MyGifts),
-                        (tr(keys::PREMIUM_SUMMARY_TITLE), NavigationAction::Premium),
-                        (tr(keys::BUSINESS_TITLE), NavigationAction::Business),
-                        (
-                            tr(keys::Q_NAVIGATION_STAR_SUBSCRIPTIONS),
-                            NavigationAction::Subscriptions,
-                        ),
-                        (tr(keys::MENU_CONTACTS), NavigationAction::ContactsSettings),
-                        (tr(keys::SETTINGS_CALLS), NavigationAction::CallSettings),
-                        (
-                            tr(keys::SETTINGS_ADVANCED),
-                            NavigationAction::AdvancedSettings,
-                        ),
-                        (tr(keys::SETTINGS_LANGUAGE), NavigationAction::Language),
-                    ] {
-                        if matches!(action, NavigationAction::Stars) {
-                            let app = app_c.clone();
-                            let money = app_c.update(cx, |this, cx| {
-                                this.money_settings_row(
-                                    move |window, cx| {
-                                        app.update(cx, |this, cx| {
-                                            this.settings.open = false;
-                                            window.close_dialog(cx);
-                                            this.open_money(cx);
-                                        })
-                                    },
-                                    cx,
-                                )
-                            });
-                            list = list.children(money);
-                        }
-                        let app = app_c.clone();
-                        list = list.child(
-                            Button::new(SharedString::from(format!("settings-{action:?}")))
-                                .label(label)
-                                .ghost()
-                                .on_click(move |_, window, cx| {
-                                    app.update(cx, |this, cx| {
-                                        if !matches!(
-                                            action,
-                                            NavigationAction::ChatSettings
-                                                | NavigationAction::ContactsSettings
-                                                | NavigationAction::CallSettings
-                                                | NavigationAction::AdvancedSettings
-                                                | NavigationAction::Privacy
-                                        ) {
-                                            this.settings.open = false;
-                                            window.close_dialog(cx);
-                                        }
-                                        this.navigate(action, window, cx);
-                                    });
-                                }),
-                        );
-                        if matches!(action, NavigationAction::Stars) {
-                            // tdesktop "My Grams" follows "My Stars".
-                            let app = app_c.clone();
-                            let grams = app_c.update(cx, |this, cx| {
-                                this.grams_settings_row(
-                                    move |window, cx| {
-                                        app.update(cx, |this, cx| {
-                                            this.settings.open = false;
-                                            window.close_dialog(cx);
-                                            this.open_grams(cx);
-                                        })
-                                    },
-                                    cx,
-                                )
-                            });
-                            list = list.children(grams);
-                        }
-                    }
-                    content
-                        .children(app_c.update(cx, |this, cx| this.settings_phone_suggestion(cx)))
-                        .child(list)
-                        .child(app_c.update(cx, |this, cx| this.settings_help_footer(cx)))
-                },
-            ))
-    }
-}
-
-/// The heading of a Settings page; pages are identified by their English
-/// title so deep links and demos keep working in any language.
-fn settings_page_title(page: &'static str) -> &'static str {
-    let key = match page {
-        "Chat settings" => keys::SETTINGS_SECTION_CHAT_SETTINGS,
-        "Contacts" => keys::MENU_CONTACTS,
-        "Calls" => keys::SETTINGS_CALLS,
-        "Privacy and security" => keys::SETTINGS_SECTION_PRIVACY,
-        super::advanced_ui::ADVANCED_PAGE => keys::SETTINGS_ADVANCED,
-        super::advanced_ui::EXPERIMENTAL_PAGE => keys::SETTINGS_EXPERIMENTAL,
-        super::settings_account_ui::ASK_QUESTION_PAGE => keys::SETTINGS_ASK_QUESTION,
-        _ => return page,
-    };
-    tr(key)
 }
 
 /// Drag payload for the chat list's resize edge.
@@ -746,12 +534,4 @@ impl QuillApp {
             quill::settings::stage_window_state(state);
         }
     }
-}
-
-crate::ui::shell::register_dialogs! {
-    Settings => DialogSpec::new(
-        7300,
-        |app| app.settings.open,
-        QuillApp::build_settings_dialog,
-    ),
 }

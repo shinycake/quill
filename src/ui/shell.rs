@@ -503,7 +503,6 @@ mod tests {
         DialogKind::Accounts,
         DialogKind::JumpToDate,
         DialogKind::Shortcuts,
-        DialogKind::Settings,
     ];
 
     #[test]
@@ -538,6 +537,6 @@ mod tests {
 
     #[test]
     fn dialog_kind_debug_prints_the_bare_name() {
-        assert_eq!(format!("{:?}", DialogKind::Settings), "Settings");
+        assert_eq!(format!("{:?}", DialogKind::Shortcuts), "Shortcuts");
     }
 }
