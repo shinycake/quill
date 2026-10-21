@@ -9,6 +9,7 @@ use super::{
 use crate::ui::app::{PaneMode, QuillApp};
 use crate::ui::navigation::SidebarResize;
 use gpui_kit::component::button::*;
+use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::auth::AuthView;
@@ -183,7 +184,51 @@ impl QuillApp {
             .when(layout.chat, |this| this.child(self.conversation_slot(cx)))
             .children(panels)
             .children(peek)
+            .children(self.forward_drag_banner(&layout, cx))
             .into_any_element()
+    }
+
+    /// Messages dragged over the chat list: the conversation dims under a
+    /// "Forward to…" prompt (`MainWidget::showDragForwardInfo`, tdesktop's
+    /// `HistoryHider`). Not in one column, where the list is never beside it.
+    fn forward_drag_banner(
+        &self,
+        layout: &ShellLayout,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !layout.chat || !self.forward_banner_shown(cx) {
+            return None;
+        }
+        let (left, right) = layout.chat_insets(self.folder_rail_width());
+        let theme = cx.theme();
+        Some(
+            div()
+                .id("forward-drag-banner")
+                .test_support()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left(px(left))
+                .right(px(right))
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(theme.background.opacity(0.7))
+                .child(
+                    div()
+                        .px_4()
+                        .py_2()
+                        .rounded_lg()
+                        .border_1()
+                        .border_color(theme.border)
+                        .bg(theme.popover)
+                        .text_color(theme.popover_foreground)
+                        .text_sm()
+                        .font_medium()
+                        .child(tr(keys::FORWARD_CHOOSE)),
+                )
+                .into_any_element(),
+        )
     }
 
     /// One column with the chat on screen: the header's way back to the

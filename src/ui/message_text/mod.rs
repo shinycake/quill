@@ -272,6 +272,7 @@ pub(super) fn message_footer(
     date: i32,
     pending: bool,
     receipt: OutboxReceipt,
+    drag: Option<quill::forward_drag::ForwardDrag>,
 ) -> Option<AnyElement> {
     use gpui_kit::assets::IconName;
     let time = message_time_hhmm(date)?;
@@ -295,22 +296,21 @@ pub(super) fn message_footer(
     };
     let outgoing = pending || receipt != OutboxReceipt::None;
     let accessible = format!("{time} {status}");
-    Some(
-        div()
-            .id("message-time")
-            .role(Role::Label)
-            .aria_label(accessible)
-            .flex()
-            .items_center()
-            .gap(px(3.))
-            .text_xs()
-            .opacity(footer_alpha(outgoing))
-            .child(time)
-            .when_some(mark, |this, icon| {
-                this.child(Icon::new(icon).size(px(14.)).flex_none())
-            })
-            .into_any_element(),
-    )
+    let footer = div()
+        .id("message-time")
+        .role(Role::Label)
+        .aria_label(accessible)
+        .flex()
+        .items_center()
+        .gap(px(3.))
+        .text_xs()
+        .opacity(footer_alpha(outgoing))
+        .child(time)
+        .when_some(mark, |this, icon| {
+            this.child(Icon::new(icon).size(px(14.)).flex_none())
+        });
+    // Pressing the time and moving picks the message up for a chat row.
+    Some(crate::ui::forward_drag_source::draggable(footer, drag).into_any_element())
 }
 
 /// What the in-bubble footer shows besides the time and the receipt.
@@ -331,6 +331,8 @@ pub(super) struct FooterMeta {
     pub(super) tooltip: Option<String>,
     /// The badge of a message sent with an effect, at the left end.
     pub(super) effect: Option<super::message_effect_badge::FooterEffect>,
+    /// What pressing the time and moving carries to a chat row.
+    pub(super) forward_drag: Option<quill::forward_drag::ForwardDrag>,
 }
 
 impl FooterMeta {}
@@ -338,7 +340,12 @@ impl FooterMeta {}
 /// The time footer of a message: author signature, pin, view count (eye
 /// icon), "edited" / "imported" and the time/receipt, on one row.
 pub(super) fn message_footer_meta(meta: &FooterMeta) -> Option<AnyElement> {
-    let time = message_footer(meta.date, meta.pending, meta.receipt);
+    let time = message_footer(
+        meta.date,
+        meta.pending,
+        meta.receipt,
+        meta.forward_drag.clone(),
+    );
     if meta.plain() {
         return time;
     }
@@ -506,7 +513,7 @@ pub(super) fn message_chrome(
                 kit_avatar_element(&name, photo.as_deref(), px(32.))
             }
         }),
-        footer: message_footer(date, pending, receipt),
+        footer: message_footer(date, pending, receipt, None),
         footer_inline: false,
         footer_overlay: false,
         footer_rebuild: None,

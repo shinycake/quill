@@ -179,9 +179,16 @@ pub(in crate::ui) fn session_history_row(
         .author_signature
         .clone()
         .filter(|_| message.forward_info.is_none());
-    let footer_meta = FooterMeta::of(message, receipt, views, signature.clone()).with_effect(
-        super::super::message_effect_badge::footer_effect(message, session, files, media_roots),
-    );
+    let footer_meta = FooterMeta::of(message, receipt, views, signature.clone())
+        .with_effect(super::super::message_effect_badge::footer_effect(
+            message,
+            session,
+            files,
+            media_roots,
+        ))
+        .with_forward_drag(crate::ui::forward_drag_source::drag_for_message(
+            session, message,
+        ));
     // Telegram Desktop widens a picture to its caption's longest line (the
     // time's skip block included when the caption ends the bubble).
     let info_width = footer_meta.reserve(footer_reserve(message.is_outgoing));

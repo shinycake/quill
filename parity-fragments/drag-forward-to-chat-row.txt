@@ -1,0 +1,2 @@
+# dragging messages onto a chat row forwards them (the files half shipped earlier)
+parity:chatlist-drop-on-row

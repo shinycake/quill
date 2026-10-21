@@ -76,6 +76,7 @@ pub mod folder_picker;
 pub mod folders;
 pub mod font_choice;
 pub mod force_reply;
+pub mod forward_drag;
 pub mod game_share;
 pub mod gift_colors;
 pub mod gift_manage;

@@ -13,6 +13,7 @@
 use super::*;
 use crate::ui::status_note::StatusNote;
 use quill::drop_modes::{DragEntry, DragState, DropAction, classify};
+use quill::forward_drag::{Destination, Drop, ForwardDrag, list_accepts};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -45,6 +46,11 @@ pub(in crate::ui) struct DropOnRow {
     frozen: HashMap<i64, usize>,
     /// Ends the freeze two seconds after the last update.
     unfreeze: Option<Task<()>>,
+    /// The messages of a forward drag over the list, seen last. A forward
+    /// drag skips the one-second wait (`_dragForward`).
+    forward: Option<ForwardDrag>,
+    /// The forward drag's pointer is inside the list (`_dragInScroll`).
+    in_list: bool,
     /// A screenshot demo's fixed drag (no live drag exists there).
     preview: bool,
 }
@@ -106,6 +112,11 @@ impl QuillApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
+        // A file drag replaces any forward drag seen before.
+        let state = &mut self.chat_list.drop_on_row;
+        if state.forward.take().is_some() {
+            state.in_list = false;
+        }
         if !over {
             if self.chat_list.drop_on_row.hover == Some(chat_id) {
                 self.chat_list.drop_on_row.hover = None;
@@ -148,6 +159,128 @@ impl QuillApp {
             });
         });
         self.chat_list.drop_on_row.rest = Some(rest);
+    }
+
+    /// Messages dragged out of a history moved over the list at `position`
+    /// (`dragMoveEvent` with `_dragForward`): the row under the pointer
+    /// lights up and the list keeps its order, but nothing opens by resting
+    /// on a row. `over` says the pointer is inside this row, `in_list`
+    /// inside the visible list.
+    pub(in crate::ui) fn forward_over_row(
+        &mut self,
+        chat_id: ChatId,
+        over: bool,
+        in_list: bool,
+        drag: &ForwardDrag,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !list_accepts(self.shell_layout().one_column) {
+            return;
+        }
+        let state = &mut self.chat_list.drop_on_row;
+        if state.forward.as_ref() != Some(drag) || state.in_list != in_list {
+            state.forward = Some(drag.clone());
+            state.in_list = in_list;
+            cx.notify();
+        }
+        if !over || self.rows_selecting() {
+            if self.chat_list.drop_on_row.hover == Some(chat_id) {
+                self.chat_list.drop_on_row.hover = None;
+                cx.notify();
+            }
+            return;
+        }
+        self.freeze_list(window, cx);
+        let state = &mut self.chat_list.drop_on_row;
+        if state.hover != Some(chat_id) {
+            state.hover = Some(chat_id);
+            cx.notify();
+        }
+    }
+
+    /// How many rows the list order is frozen on.
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
+    pub(in crate::ui) fn frozen_rows(&self) -> usize {
+        self.chat_list.drop_on_row.frozen.len()
+    }
+
+    /// The forward-info banner shows over the conversation while a forward
+    /// drag is inside the list (`showDragForwardInfo`); never in one column.
+    pub(in crate::ui) fn forward_banner_shown(&self, cx: &App) -> bool {
+        let state = &self.chat_list.drop_on_row;
+        state.forward.is_some()
+            && state.in_list
+            && (state.preview || cx.has_active_drag())
+            && list_accepts(self.shell_layout().one_column)
+    }
+
+    /// Messages dropped on the row of `chat_id` (`filesOrForwardDrop`): the
+    /// chat opens with them waiting in its forward bar, the same state the
+    /// Forward box leaves when one chat is chosen. A chat that takes no
+    /// forwards refuses with a toast; a forum needs a topic first.
+    pub(in crate::ui) fn drop_forward_on_row(
+        &mut self,
+        chat_id: ChatId,
+        drag: &ForwardDrag,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.chat_list.drop_on_row.clear();
+        cx.notify();
+        if self.rows_selecting() {
+            return;
+        }
+        let Some(session) = self.session() else {
+            return;
+        };
+        let Some(chat) = session.chats.get(&chat_id.0) else {
+            return;
+        };
+        let route = Destination {
+            can_receive: quill::state::Session::can_share_to(chat),
+            needs_topic: session.chat_shown_as_forum(chat_id)
+                || session.direct_messages_role(chat_id).is_some(),
+        }
+        .route();
+        match route {
+            Drop::Cannot => {
+                self.connection
+                    .set_note(StatusNote::error(tr(keys::FORWARD_CANT)));
+                return;
+            }
+            Drop::ChooseTopic => {
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_CHATLIST_OPEN_THE_FORUM_AND_FORWARD,
+                )));
+                return;
+            }
+            Drop::Forward => {}
+        }
+        // Secret chats and slow mode refuse with their own notes.
+        if let Some(note) = self.share_dest_refusal(chat_id, cx) {
+            self.connection.set_note(StatusNote::error(note));
+            return;
+        }
+        let Some(first) = drag.ids().first().copied() else {
+            return;
+        };
+        let Some(mut draft) =
+            quill::composer::ForwardDraft::from_message(drag.from_chat(), first, false)
+        else {
+            return;
+        };
+        draft.message_ids = drag.ids().to_vec();
+        self.share.pending_forward = Some(draft);
+        self.share.forward_bar_dest = Some(chat_id);
+        self.share.forward_picker_open = false;
+        self.share.selection.clear();
+        self.select_listed_chat(chat_id, window, cx);
+        self.connection.set_note(StatusNote::silent(tr(
+            keys::Q_OPS_FORWARD_BAR_READY_PRESS_SEND,
+        )));
+        cx.notify();
     }
 
     /// Freezes the list order at what is shown now, for two more seconds.
@@ -269,6 +402,24 @@ impl QuillApp {
                     this.drag_over_row(chat_id, over, position, fresh, window, cx);
                 },
             ))
+            .on_drag_move(cx.listener(
+                move |this, event: &DragMoveEvent<ForwardDrag>, window, cx| {
+                    let position = event.event.position;
+                    let in_list = this
+                        .chat_list
+                        .scroll
+                        .base_handle()
+                        .bounds()
+                        .contains(&position);
+                    let over = in_list && event.bounds.contains(&position);
+                    let drag = event.drag(cx).clone();
+                    this.forward_over_row(chat_id, over, in_list, &drag, window, cx);
+                },
+            ))
+            .on_drop(cx.listener(move |this, drag: &ForwardDrag, window, cx| {
+                cx.stop_propagation();
+                this.drop_forward_on_row(chat_id, drag, window, cx);
+            }))
             .on_file_drop_exit(cx.listener(|this, _, _, cx| this.drag_left(cx)))
             .on_drop(cx.listener(move |this, paths: &ExternalPaths, window, cx| {
                 cx.stop_propagation();
@@ -299,6 +450,11 @@ crate::ui::screenshot_demo::register_demos![
         "screenshot demo — chat list: files dragged over a row"
     )
     .setup(QuillApp::demo_drop_on_row),
+    crate::ui::screenshot_demo::DemoSpec::chats(
+        "ready-drop-forward",
+        "screenshot demo — chat list: messages dragged over a row"
+    )
+    .setup(QuillApp::demo_drop_forward),
 ];
 
 #[cfg(feature = "demo-capture")]
@@ -306,6 +462,24 @@ impl QuillApp {
     fn demo_drop_on_row(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         let state = &mut self.chat_list.drop_on_row;
         state.hover = Some(ChatId(12));
+        state.preview = true;
+    }
+
+    /// Two selected messages of chat 11 carried over the row of chat 12.
+    fn demo_drop_forward(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+        let chat = ChatId(11);
+        let ids = [quill::ids::MessageId(101), quill::ids::MessageId(102)];
+        let drag = ForwardDrag::begin(chat, quill::ids::MessageId(101), &ids, false, |_| true).ok();
+        if let Some(mut draft) =
+            quill::composer::ForwardDraft::from_message(chat, quill::ids::MessageId(101), false)
+        {
+            draft.toggle(chat, quill::ids::MessageId(102), false);
+            self.share.pending_forward = Some(draft);
+        }
+        let state = &mut self.chat_list.drop_on_row;
+        state.hover = Some(ChatId(12));
+        state.forward = drag;
+        state.in_list = true;
         state.preview = true;
     }
 }

@@ -83,6 +83,8 @@
 "lng_filters_type_non_contacts" = "Non-Contacts";
 "lng_filters_vertical" = "Tabs on the left";
 "lng_filters_view_subtitle" = "Tabs view";
+"lng_forward_cant" = "Sorry, no way to forward here :(";
+"lng_forward_choose" = "Forward to…";
 "lng_from_you" = "You";
 "lng_menu_calls" = "Calls";
 "lng_menu_contacts" = "Contacts";
@@ -186,6 +188,7 @@
 "qll_chatlist_not_now" = "Not now";
 "qll_chatlist_open_the_chat_to_mark" = "open the chat to mark it as read";
 "qll_chatlist_open_the_forum_and_drop" = "Open the forum and choose a topic to send files there.";
+"qll_chatlist_open_the_forum_and_forward" = "Open the forum and choose a topic to forward messages there.";
 "qll_chatlist_phone" = "Phone";
 "qll_chatlist_phone_number" = "Phone number";
 "qll_chatlist_pin_request_already_in_flight" = "pin request already in flight";
