@@ -374,9 +374,21 @@ fn web_proxy_relay_traffic_never_redraws() {
         ),
         RedrawNeed::Nothing
     );
+    let relay = crate::proxy_carrier::CARRIER_RELAY_EXTRA.as_extra();
+    assert_eq!(
+        need(&session, &format!(r#"{{"@type":"ok","@extra":"{relay}"}}"#)),
+        RedrawNeed::Nothing
+    );
+    assert_eq!(
+        need(
+            &session,
+            &format!(r#"{{"@type":"error","@extra":"{relay}","code":400,"message":"x"}}"#)
+        ),
+        RedrawNeed::Nothing
+    );
     let id = session.requests.register(
         generation,
-        RequestPurpose::Settings(crate::state::SettingsPurpose::ProcessWebProxyCarrierMessage),
+        RequestPurpose::Settings(crate::state::SettingsPurpose::ReportWebProxyCarrier),
         None,
         None,
     );

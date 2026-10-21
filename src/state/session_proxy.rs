@@ -80,6 +80,17 @@ impl Session {
         }
     }
 
+    /// Whether this client can host carriers, as the host now says (a
+    /// capability check finishing, or a carrier finding out it cannot
+    /// run). Once it cannot, every new carrier is refused and web proxies
+    /// are not switched to. Returns whether it changed.
+    pub fn apply_carrier_hosting(&mut self, hosting: bool) -> bool {
+        let carriers = &mut self.settings.proxy.carriers;
+        let changed = carriers.hosting != hosting;
+        carriers.hosting = hosting;
+        changed
+    }
+
     /// `addProxy` / `editProxy` answer.
     pub(crate) fn apply_added_proxy(&mut self, pending: Option<&PendingRequest>) {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::MutateProxy) {

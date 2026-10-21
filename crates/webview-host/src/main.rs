@@ -26,6 +26,11 @@
 //! Exit: when Quill closes its end of the pipe, when Quill sends `close`,
 //! or when the web view cannot be created (an `error` event explains).
 
+// A GUI program on Windows: started from Quill (which has no console) a
+// console program would get a console window of its own. Quill still
+// pipes stdin and stdout to it.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use quill_webview_protocol::{
     HelperEvent, HostCommand, MAX_IPC_MESSAGE_BYTES, MAX_WEB_APP_EVENT_BYTES, ShellEvent, decode,
     encode,

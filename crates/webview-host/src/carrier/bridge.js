@@ -1,26 +1,65 @@
 // The bridge object of a web proxy carrier (TDLib `webProxyCarrier`),
-// injected at document start. The placeholders are filled by carrier.rs
-// with validated values. Defined only in the top-level document of the
-// carrier's origin; every message to the helper starts with a token that
-// only this closure knows, so no other frame can speak for the page.
-(function () {
+// injected at document start into every frame the engine lets it reach.
+// Its one argument, at the very end, is a JSON object filled in by
+// script.rs.
+//
+// Every frame first loses what a relay page has no use for and an
+// untrusted page could abuse: native dialogs, printing, WebRTC (which a
+// content policy does not cover), WebTransport and WebAssembly (as
+// Telegram Desktop's web proxy view does). The bridge itself exists only
+// in the top-level document of the carrier's origin, and every message to
+// the helper starts with a token only this closure knows.
+(function (config) {
   'use strict';
-  if (window !== window.top || window.location.origin !== __ORIGIN__) {
+  var lock = function (name, value) {
+    try {
+      Object.defineProperty(window, name, {
+        value: value,
+        writable: false,
+        configurable: false,
+        enumerable: false,
+      });
+    } catch (error) {
+      // Already locked in this frame.
+    }
+  };
+  lock('alert', function () {});
+  lock('confirm', function () {
+    return false;
+  });
+  lock('prompt', function () {
+    return null;
+  });
+  lock('print', function () {});
+  lock('onbeforeunload', null);
+  [
+    'RTCPeerConnection',
+    'webkitRTCPeerConnection',
+    'RTCDataChannel',
+    'RTCRtpSender',
+    'RTCRtpReceiver',
+    'WebTransport',
+    'WebAssembly',
+  ].forEach(function (name) {
+    lock(name, undefined);
+  });
+
+  if (window !== window.top || window.location.origin !== config.origin) {
     return;
   }
-  var token = __TOKEN__;
+  var token = config.token;
   var send = function (body) {
     window.ipc.postMessage(token + body);
   };
 
   // The page may load from and talk to its path prefix only. A policy in a
   // <meta> only counts inside <head> and only for what loads after it, so
-  // it goes in before the parser gets to the page's own markup.
-  var policy = __POLICY__;
+  // it goes in before the parser gets to the page's own markup. The helper
+  // also blocks what leaves the prefix natively where the engine allows.
   var addPolicy = function (head) {
     var meta = document.createElement('meta');
     meta.httpEquiv = 'Content-Security-Policy';
-    meta.content = policy;
+    meta.content = config.policy;
     head.insertBefore(meta, head.firstChild);
   };
   try {
@@ -64,6 +103,7 @@
   };
 
   var receiver = null;
+  var announced = false;
   var bridge = {};
   Object.defineProperty(bridge, 'postMessage', {
     enumerable: true,
@@ -86,37 +126,49 @@
     },
     set: function (value) {
       receiver = typeof value === 'function' ? value : null;
+      // The page's own script is running: deliveries may start.
+      if (receiver && !announced) {
+        announced = true;
+        send('o');
+      }
     },
   });
-  Object.defineProperty(window, __NAME__, {
+  Object.defineProperty(window, config.name, {
     value: Object.freeze(bridge),
     writable: false,
     configurable: false,
     enumerable: false,
   });
 
-  // What the helper calls; its name is random per carrier.
-  var deliver = function (sequence, kind, value) {
-    try {
-      if (typeof receiver !== 'function') {
-        throw new Error('no onmessage');
+  // What the helper calls. Its name is random per carrier, and every call
+  // carries a key the page never sees, so the page cannot fake an
+  // acknowledgement or a sign of life by calling it.
+  var hook = {
+    deliver: function (key, sequence, kind, value) {
+      if (key !== config.key) {
+        return;
       }
-      receiver({ data: kind === 'b' ? decode(value) : value });
-      send('a' + sequence);
-    } catch (error) {
-      send('f');
-    }
-  };
-  Object.defineProperty(window, __DELIVER__, {
-    value: Object.freeze({
-      deliver: deliver,
-      probe: function () {
+      try {
+        if (typeof receiver !== 'function') {
+          throw new Error('no onmessage');
+        }
+        receiver({ data: kind === 'b' ? decode(value) : value });
+        send('a' + sequence);
+      } catch (error) {
+        send('f');
+      }
+    },
+    probe: function (key) {
+      if (key === config.key) {
         send('h');
-      },
-    }),
+      }
+    },
+  };
+  Object.defineProperty(window, config.hook, {
+    value: Object.freeze(hook),
     writable: false,
     configurable: false,
     enumerable: false,
   });
   send('h');
-})();
+})(__CONFIG__);

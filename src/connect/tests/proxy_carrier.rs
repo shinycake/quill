@@ -1,11 +1,12 @@
 //! Web proxy carriers through the driver (`parity:data-proxy-web`) with a
-//! fake host: open, relay both ways, failure, close, quit while open.
+//! fake host: open, data to the page, failure, close, hosting turning off,
+//! quit while open.
 use super::super::*;
 use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::platform::MemorySecretStore;
 use crate::proxy_carrier::{
-    CarrierError, CarrierHost, CarrierMessage, CarrierPhase, CarrierRequest, HostEvent,
+    CARRIER_RELAY_EXTRA, CarrierError, CarrierHost, CarrierPhase, CarrierRequest,
 };
 use crate::telegram::client::copy_and_parse;
 use serde_json::{Value, json};
@@ -23,18 +24,29 @@ enum Call {
     Shutdown,
 }
 
-#[derive(Default)]
 struct Log {
     calls: Vec<Call>,
-    events: Vec<(i32, HostEvent)>,
+    failures: Vec<(i32, CarrierError)>,
     refuse_open: Option<CarrierError>,
+    available: bool,
+}
+
+impl Default for Log {
+    fn default() -> Self {
+        Self {
+            calls: Vec::new(),
+            failures: Vec::new(),
+            refuse_open: None,
+            available: true,
+        }
+    }
 }
 
 struct FakeHost(Arc<Mutex<Log>>);
 
 impl CarrierHost for FakeHost {
     fn available(&self) -> bool {
-        true
+        self.0.lock().unwrap().available
     }
     fn open(&mut self, request: &CarrierRequest) -> Result<(), CarrierError> {
         let mut log = self.0.lock().unwrap();
@@ -58,8 +70,8 @@ impl CarrierHost for FakeHost {
             .calls
             .push(Call::Close(carrier_id, notify_page));
     }
-    fn poll(&mut self) -> Vec<(i32, HostEvent)> {
-        std::mem::take(&mut self.0.lock().unwrap().events)
+    fn poll(&mut self) -> Vec<(i32, CarrierError)> {
+        std::mem::take(&mut self.0.lock().unwrap().failures)
     }
     fn shutdown(&mut self) {
         self.0.lock().unwrap().calls.push(Call::Shutdown);
@@ -100,15 +112,19 @@ impl Rig {
     }
 
     fn open(&mut self, id: i32, proxy_id: i32) {
-        self.feed(json!({"@type": "updateWebProxyCarrierOpened", "carrier": {
+        self.feed(Self::opened(id, proxy_id));
+    }
+
+    fn opened(id: i32, proxy_id: i32) -> Value {
+        json!({"@type": "updateWebProxyCarrierOpened", "carrier": {
             "@type": "webProxyCarrier", "id": id, "proxy_id": proxy_id,
             "url": "https://relay.example.com/app/?bridge=cap#android=nonce",
             "origin": "https://relay.example.com", "path_prefix": "/app/",
-            "bridge_object_name": "TelegramWebProxy", "is_temporary": proxy_id == 0}}));
+            "bridge_object_name": "TelegramWebProxy", "is_temporary": proxy_id == 0}})
     }
 
-    fn host_says(&mut self, carrier_id: i32, event: HostEvent) {
-        self.log.lock().unwrap().events.push((carrier_id, event));
+    fn host_fails(&mut self, carrier_id: i32, error: CarrierError) {
+        self.log.lock().unwrap().failures.push((carrier_id, error));
         self.driver.carrier_tick();
     }
 
@@ -138,35 +154,12 @@ impl Rig {
 }
 
 #[test]
-fn a_carrier_opens_relays_both_ways_and_closes_with_the_page_told() {
+fn a_carrier_opens_takes_data_in_order_and_closes_with_the_page_told() {
     let mut rig = Rig::new();
     rig.open(7, 1);
     assert_eq!(rig.calls(), vec![Call::Open(7)]);
-    assert_eq!(rig.phase(7), Some(CarrierPhase::Opening));
+    assert_eq!(rig.phase(7), Some(CarrierPhase::Live));
     assert!(rig.sent("reportWebProxyCarrierError").is_empty());
-
-    // Page → TDLib: the init text, then binary frames, base64 as is.
-    rig.host_says(
-        7,
-        HostEvent::Message(CarrierMessage::Text(
-            r#"{"t":"tproxy-android-init","v":1,"nonce":"nonce"}"#.into(),
-        )),
-    );
-    rig.host_says(
-        7,
-        HostEvent::Message(CarrierMessage::Binary("EQAAAA==".into())),
-    );
-    let sent = rig.sent("processWebProxyCarrierMessage");
-    assert_eq!(sent.len(), 2);
-    assert_eq!(sent[0]["carrier_id"], 7);
-    assert_eq!(sent[0]["message"]["@type"], "webProxyCarrierMessageText");
-    assert_eq!(
-        sent[0]["message"]["text"],
-        r#"{"t":"tproxy-android-init","v":1,"nonce":"nonce"}"#
-    );
-    assert_eq!(sent[1]["message"]["@type"], "webProxyCarrierMessageBinary");
-    assert_eq!(sent[1]["message"]["data"], "EQAAAA==");
-    assert_eq!(rig.phase(7), Some(CarrierPhase::Relaying));
 
     // TDLib → page, in order; data for unknown carriers goes nowhere.
     rig.feed(json!({"@type": "updateWebProxyCarrierData", "carrier_id": 7, "data": "EAAAAAE="}));
@@ -180,23 +173,45 @@ fn a_carrier_opens_relays_both_ways_and_closes_with_the_page_told() {
         ]
     );
 
-    // The page has posted, so it hears {"t":"close"} first.
+    // Whether the page posted is the helper's to know, so the page is
+    // always offered {"t":"close"}.
     rig.feed(json!({"@type": "updateWebProxyCarrierClosed", "carrier_id": 7}));
     assert_eq!(rig.calls(), vec![Call::Close(7, true)]);
     assert_eq!(rig.phase(7), None);
-
-    // Messages after the close are ignored.
-    rig.host_says(7, HostEvent::Message(CarrierMessage::Binary("AAAA".into())));
-    assert_eq!(rig.sent("processWebProxyCarrierMessage").len(), 2);
 }
 
 #[test]
-fn a_silent_page_is_closed_without_the_close_message() {
+fn data_right_behind_the_open_reaches_the_host_after_it() {
     let mut rig = Rig::new();
-    rig.open(3, 1);
+    // Both parsed before the driver gets to either.
+    let opened = copy_and_parse(&Rig::opened(3, 1).to_string(), &rig.seq, &rig.sink).unwrap();
+    let data = copy_and_parse(
+        &json!({"@type": "updateWebProxyCarrierData", "carrier_id": 3, "data": "AQID"}).to_string(),
+        &rig.seq,
+        &rig.sink,
+    )
+    .unwrap();
+    rig.driver.ingest(opened).unwrap();
+    rig.driver.ingest(data).unwrap();
+    assert_eq!(
+        rig.calls(),
+        vec![Call::Open(3), Call::Deliver(3, "AQID".into())]
+    );
+}
+
+#[test]
+fn tdlib_answers_to_relayed_page_messages_are_dropped() {
+    let mut rig = Rig::new();
+    rig.open(7, 1);
     rig.calls();
-    rig.feed(json!({"@type": "updateWebProxyCarrierClosed", "carrier_id": 3}));
-    assert_eq!(rig.calls(), vec![Call::Close(3, false)]);
+    let before = rig.recorder.snapshot().len();
+    let relay = CARRIER_RELAY_EXTRA.as_extra();
+    rig.feed(json!({"@type": "ok", "@extra": relay}));
+    rig.feed(json!({"@type": "error", "@extra": relay, "code": 400,
+        "message": "Carrier not found"}));
+    assert_eq!(rig.recorder.snapshot().len(), before);
+    assert!(rig.calls().is_empty());
+    assert_eq!(rig.phase(7), Some(CarrierPhase::Live));
 }
 
 #[test]
@@ -204,7 +219,7 @@ fn a_host_failure_is_reported_once_and_marks_the_row() {
     let mut rig = Rig::new();
     rig.open(5, 2);
     rig.calls();
-    rig.host_says(5, HostEvent::Failed(CarrierError::Terminated));
+    rig.host_fails(5, CarrierError::Terminated);
     let reports = rig.sent("reportWebProxyCarrierError");
     assert_eq!(reports.len(), 1);
     assert_eq!(reports[0]["carrier_id"], 5);
@@ -216,15 +231,10 @@ fn a_host_failure_is_reported_once_and_marks_the_row() {
     assert_eq!(rig.driver.session.settings.proxy.carrier_failed, Some(2));
     assert_eq!(rig.phase(5), Some(CarrierPhase::Failed));
 
-    // A second failure, late messages and data are all dropped.
-    rig.host_says(
-        5,
-        HostEvent::Failed(CarrierError::LoadFailed("again".into())),
-    );
-    rig.host_says(5, HostEvent::Message(CarrierMessage::Text("x".into())));
+    // A second failure and late data are dropped.
+    rig.host_fails(5, CarrierError::LoadFailed("again".into()));
     rig.feed(json!({"@type": "updateWebProxyCarrierData", "carrier_id": 5, "data": "AAAA"}));
     assert_eq!(rig.sent("reportWebProxyCarrierError").len(), 1);
-    assert!(rig.sent("processWebProxyCarrierMessage").is_empty());
     assert!(rig.calls().is_empty());
 
     // TDLib closes it and retries with a new carrier: the row goes back
@@ -240,33 +250,54 @@ fn a_host_failure_is_reported_once_and_marks_the_row() {
 fn a_load_failure_keeps_its_message() {
     let mut rig = Rig::new();
     rig.open(8, 1);
-    rig.host_says(
+    rig.host_fails(
         8,
-        HostEvent::Failed(CarrierError::LoadFailed(
-            "the page tried to leave its origin".into(),
-        )),
+        CarrierError::LoadFailed("the relay page answered HTTP 404".into()),
     );
     let report = &rig.sent("reportWebProxyCarrierError")[0];
     assert_eq!(report["error"]["@type"], "webProxyCarrierErrorLoadFailed");
     assert_eq!(
         report["error"]["message"],
-        "the page tried to leave its origin"
+        "the relay page answered HTTP 404"
     );
 }
 
 #[test]
-fn a_host_that_cannot_start_the_view_reports_unsupported() {
+fn a_host_that_cannot_start_the_view_reports_why() {
     let mut rig = Rig::new();
-    rig.log.lock().unwrap().refuse_open = Some(CarrierError::Unsupported);
+    rig.log.lock().unwrap().refuse_open = Some(CarrierError::Terminated);
     rig.open(4, 1);
     let reports = rig.sent("reportWebProxyCarrierError");
     assert_eq!(reports.len(), 1);
     assert_eq!(
         reports[0]["error"]["@type"],
-        "webProxyCarrierErrorUnsupported"
+        "webProxyCarrierErrorTerminated"
     );
     assert_eq!(rig.calls(), vec![Call::Open(4), Call::Close(4, false)]);
     assert_eq!(rig.driver.session.settings.proxy.carrier_failed, Some(1));
+}
+
+#[test]
+fn a_host_that_finds_it_cannot_run_carriers_falls_back_to_the_refusal() {
+    let mut rig = Rig::new();
+    let web =
+        crate::proxy::ProxyDraft::web("relay.example.com/app", "8561944064fc730cbfa4473562d8ec59")
+            .validated()
+            .unwrap();
+    assert!(rig.driver.session.settings.proxy.can_enable(web.kind));
+    // The capability check (or a carrier) found no web view here.
+    rig.log.lock().unwrap().available = false;
+    assert!(rig.driver.carrier_tick());
+    assert!(!rig.driver.session.settings.proxy.can_enable(web.kind));
+    rig.open(9, 1);
+    assert!(rig.calls().is_empty());
+    let reports = rig.sent("reportWebProxyCarrierError");
+    assert_eq!(
+        reports[0]["error"]["@type"],
+        "webProxyCarrierErrorUnsupported"
+    );
+    // Nothing changes on the next tick.
+    assert!(!rig.driver.carrier_tick());
 }
 
 #[test]
@@ -289,9 +320,7 @@ fn quitting_while_open_shuts_every_view_down() {
     assert_eq!(rig.calls(), vec![Call::Shutdown]);
     assert!(rig.driver.session.settings.proxy.carriers.open.is_empty());
     // Whatever the host still reports is dropped.
-    rig.host_says(1, HostEvent::Message(CarrierMessage::Binary("AAAA".into())));
-    rig.host_says(2, HostEvent::Failed(CarrierError::Terminated));
-    assert!(rig.sent("processWebProxyCarrierMessage").is_empty());
+    rig.host_fails(2, CarrierError::Terminated);
     assert!(rig.sent("reportWebProxyCarrierError").is_empty());
 }
 
@@ -323,7 +352,6 @@ fn with_a_host_a_web_proxy_can_be_enabled() {
 #[test]
 fn the_url_never_shows_in_debug_output() {
     let mut rig = Rig::new();
-    rig.log.lock().unwrap().refuse_open = None;
     rig.open(12, 1);
     let state = format!("{:?}", rig.driver.session.settings.proxy);
     assert!(!state.contains("bridge=cap"));

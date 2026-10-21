@@ -50,7 +50,7 @@ fn temporary_carriers_are_refused_with_or_without_a_host() {
 }
 
 #[test]
-fn a_hosted_carrier_goes_opening_relaying_closed() {
+fn a_hosted_carrier_opens_and_closes_telling_the_page() {
     let mut carriers = hosting();
     assert_eq!(
         carriers.opened(request(5, 1)),
@@ -60,11 +60,12 @@ fn a_hosted_carrier_goes_opening_relaying_closed() {
     carriers.work.clear();
     assert!(carriers.accepts_data(5));
     assert!(!carriers.accepts_data(6));
-    assert!(carriers.page_posted(5));
     assert_eq!(
         carriers.open.get(&5).map(|c| c.phase),
-        Some(CarrierPhase::Relaying)
+        Some(CarrierPhase::Live)
     );
+    // Whether the page posted is the helper's to know (it may have, in a
+    // message still on its way), so TDLib's close always tells the page.
     carriers.closed(5);
     assert_eq!(
         carriers.work,
@@ -73,7 +74,7 @@ fn a_hosted_carrier_goes_opening_relaying_closed() {
             notify_page: true
         }]
     );
-    assert!(!carriers.page_posted(5));
+    assert!(!carriers.accepts_data(5));
     // A repeat close does nothing.
     carriers.work.clear();
     carriers.closed(5);
@@ -102,7 +103,6 @@ fn a_carrier_fails_once() {
     carriers.work.clear();
     assert_eq!(carriers.failed(5, CarrierError::Terminated), None);
     assert!(!carriers.accepts_data(5));
-    assert!(!carriers.page_posted(5));
     // TDLib's close after the failure: the view is already gone.
     carriers.closed(5);
     assert!(carriers.work.is_empty());
@@ -145,4 +145,6 @@ fn the_url_is_hidden_from_debug_output() {
     let shown = format!("{:?}", request(1, 1));
     assert!(!shown.contains("secret"));
     assert!(shown.contains("<hidden>"));
+    let work = format!("{:?}", CarrierWork::Open(request(1, 1)));
+    assert!(!work.contains("secret"), "{work}");
 }

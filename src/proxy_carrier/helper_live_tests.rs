@@ -4,10 +4,12 @@
 //! `cargo build -p quill-webview && QUILL_CARRIER_HELPER=target/debug/quill-webview
 //!  QUILL_WEBVIEW_CARRIER_LOOPBACK=1 cargo test --no-default-features --lib
 //!  helper_live -- --ignored`
-use super::helper::HelperCarrierHost;
+use super::helper::{Capability, HelperCarrierHost, HelperConfig};
 use super::*;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
+use std::sync::mpsc::{Receiver, channel};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const ECHO_PAGE: &str = r#"<!doctype html><html><head><script>
@@ -41,15 +43,26 @@ fn serve() -> u16 {
     port
 }
 
-fn next(host: &mut HelperCarrierHost, within: Duration) -> (i32, HostEvent) {
-    let deadline = Instant::now() + within;
-    while Instant::now() < deadline {
-        if let Some(event) = host.poll().into_iter().next() {
-            return event;
-        }
-        std::thread::sleep(Duration::from_micros(200));
-    }
-    panic!("no host event within {within:?}");
+/// A relay that hands each request to the test.
+fn relay() -> (RelaySink, Receiver<serde_json::Value>) {
+    let (tx, rx) = channel();
+    let tx = Mutex::new(tx);
+    let sink: RelaySink = Arc::new(move |request: &str| {
+        let value = serde_json::from_str(request).unwrap();
+        tx.lock().unwrap().send(value).is_ok()
+    });
+    (sink, rx)
+}
+
+/// The next relayed message as `(carrier_id, message)`.
+fn next(relayed: &Receiver<serde_json::Value>, within: Duration) -> (i64, serde_json::Value) {
+    let request = relayed.recv_timeout(within).expect("a relayed message");
+    assert_eq!(request["@type"], "processWebProxyCarrierMessage");
+    assert_eq!(request["@extra"], CARRIER_RELAY_EXTRA.as_extra());
+    (
+        request["carrier_id"].as_i64().unwrap(),
+        request["message"].clone(),
+    )
 }
 
 #[test]
@@ -58,7 +71,15 @@ fn helper_live_relay_round_trip() {
     let program = std::env::var_os("QUILL_CARRIER_HELPER").expect("QUILL_CARRIER_HELPER");
     let port = serve();
     let origin = format!("http://127.0.0.1:{port}");
-    let mut host = HelperCarrierHost::new(Some(program.into()));
+    let data_dir = crate::scratch::process_dir("helper-live").join("carrier");
+    let (sink, relayed) = relay();
+    let mut host = HelperCarrierHost::new(HelperConfig {
+        program: Some(program.into()),
+        data_dir: Some(data_dir.clone()),
+        probe_cache: None,
+        relay: sink,
+        capability: Capability::default(),
+    });
     let request = CarrierRequest {
         id: 21,
         proxy_id: 1,
@@ -69,25 +90,23 @@ fn helper_live_relay_round_trip() {
         temporary: false,
     };
     host.open(&request).unwrap();
-    assert_eq!(
-        next(&mut host, Duration::from_secs(20)),
-        (
-            21,
-            HostEvent::Message(CarrierMessage::Text(r#"{"t":"hello"}"#.into()))
-        )
-    );
+    // Sent before the page listens: held until it does.
+    host.deliver(21, "AQID".into());
+    let (carrier, hello) = next(&relayed, Duration::from_secs(20));
+    assert_eq!(carrier, 21);
+    assert_eq!(hello["@type"], "webProxyCarrierMessageText");
+    assert_eq!(hello["text"], r#"{"t":"hello"}"#);
+    let (_, early) = next(&relayed, Duration::from_secs(5));
+    assert_eq!(early["data"], "AwIB");
     // Relay latency through the pipe and the page, both ways.
     let mut rounds = Vec::new();
     for _ in 0..20 {
         let started = Instant::now();
         host.deliver(21, "AQID".into());
-        assert_eq!(
-            next(&mut host, Duration::from_secs(5)),
-            (
-                21,
-                HostEvent::Message(CarrierMessage::Binary("AwIB".into()))
-            )
-        );
+        let (carrier, message) = next(&relayed, Duration::from_secs(5));
+        assert_eq!(carrier, 21);
+        assert_eq!(message["@type"], "webProxyCarrierMessageBinary");
+        assert_eq!(message["data"], "AwIB");
         rounds.push(started.elapsed());
     }
     rounds.sort();
@@ -96,7 +115,23 @@ fn helper_live_relay_round_trip() {
         rounds[rounds.len() / 2],
         rounds[rounds.len() - 1]
     );
+    assert!(host.poll().is_empty());
     host.close(21, true);
     std::thread::sleep(Duration::from_millis(1500));
     assert!(host.poll().is_empty());
+    host.shutdown();
+    assert!(!data_dir.exists());
+}
+
+#[test]
+#[ignore = "needs a desktop session and QUILL_CARRIER_HELPER"]
+fn helper_live_capability_check_passes() {
+    let program = std::env::var_os("QUILL_CARRIER_HELPER").expect("QUILL_CARRIER_HELPER");
+    let data_dir = crate::scratch::process_dir("helper-live").join("probe");
+    let started = Instant::now();
+    assert_eq!(
+        super::helper::probe(std::path::Path::new(&program), &data_dir),
+        Some(true)
+    );
+    eprintln!("capability check took {:?}", started.elapsed());
 }

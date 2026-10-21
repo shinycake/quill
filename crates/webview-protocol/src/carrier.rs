@@ -60,6 +60,29 @@ pub enum CarrierFailure {
     Terminated,
 }
 
+/// The carrier's URL. It holds the proxy's capability, which the schema
+/// says must never be logged or shown, so `Debug` prints a placeholder.
+#[derive(Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SecretUrl(String);
+
+impl SecretUrl {
+    pub fn new(url: String) -> Self {
+        Self(url)
+    }
+
+    /// The URL itself, for the web view only.
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for SecretUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SecretUrl(<hidden>)")
+    }
+}
+
 /// Quill → helper, one JSON line each.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -67,10 +90,22 @@ pub enum CarrierCommand {
     /// Always the first line. Sent over the pipe rather than the command
     /// line, so the capability in the URL never shows up in `ps`.
     Open {
-        url: String,
+        url: SecretUrl,
         origin: String,
         path_prefix: String,
         bridge_object_name: String,
+        /// A folder of Quill's for what the web view must keep on disk:
+        /// WebView2's user data folder on Windows, the compiled content
+        /// rules on macOS and Linux. Without one the helper uses none
+        /// where it can and fails where it cannot.
+        #[serde(default)]
+        data_dir: Option<String>,
+    },
+    /// Instead of `open`: start the web view and its lockdown as a carrier
+    /// would, say `ready`, and exit. Quill's capability check.
+    Probe {
+        #[serde(default)]
+        data_dir: Option<String>,
     },
     /// Data for the page's `onmessage`, as an `ArrayBuffer`. Base64.
     Deliver { data: String },
@@ -83,7 +118,8 @@ pub enum CarrierCommand {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CarrierEvent {
-    /// The hidden window and its web view exist; the page is loading.
+    /// The hidden window, its web view and the lockdown are in place; the
+    /// page is loading (or, for `probe`, the helper exits next).
     Ready,
     /// The helper's loop and the page are alive (every few seconds).
     Alive,
@@ -176,6 +212,26 @@ impl CarrierScope {
     pub fn allows_navigation(&self, url: &str) -> bool {
         self.same_origin_path(url)
             .is_some_and(|path| path.starts_with(&self.path_prefix))
+    }
+
+    /// Whether the page may fetch `url` (a subresource, a request, a
+    /// socket): under the prefix on the carrier's origin, its WebSocket
+    /// form, or the page's own `data:` and `blob:` URLs.
+    pub fn allows_request(&self, url: &str) -> bool {
+        if url.starts_with("data:") || url.starts_with(&format!("blob:{}/", self.origin)) {
+            return true;
+        }
+        let socket_origin = self.socket_source();
+        if let Some(rest) = url.strip_prefix(&socket_origin) {
+            let page = format!("{}{rest}", self.page_source());
+            return self.allows_navigation(&page);
+        }
+        self.allows_navigation(url)
+    }
+
+    /// The host (with its port, for loopback tests).
+    pub fn host(&self) -> &str {
+        &self.host
     }
 
     /// Whether a bridge message whose sending frame reports `url` may be
@@ -394,16 +450,64 @@ mod tests {
     }
 
     #[test]
-    fn carrier_lines_round_trip() {
+    fn requests_stay_under_the_prefix() {
+        let relay = scope("/relay/");
+        for url in [
+            "https://proxy.example.com/relay/",
+            "https://proxy.example.com/relay/app.js?v=2",
+            "wss://proxy.example.com/relay/socket",
+            "data:image/png;base64,AAAA",
+            "blob:https://proxy.example.com/0d7c1a",
+        ] {
+            assert!(relay.allows_request(url), "{url}");
+        }
+        for url in [
+            "https://proxy.example.com/other/",
+            "https://proxy.example.com/relayx",
+            "wss://proxy.example.com/other/",
+            "wss://proxy.example.com/relay/../x",
+            "ws://proxy.example.com/relay/",
+            "https://stun.example.net/relay/",
+            "blob:https://evil.example/1",
+            "blob:https://proxy.example.com.evil.example/1",
+            "about:blank",
+            "",
+        ] {
+            assert!(!relay.allows_request(url), "{url}");
+        }
+    }
+
+    #[test]
+    fn the_url_never_shows_in_debug_output() {
         let open = CarrierCommand::Open {
-            url: "https://proxy.example.com/?bridge=x#android=y".into(),
+            url: SecretUrl::new("https://proxy.example.com/?bridge=capability".into()),
             origin: "https://proxy.example.com".into(),
             path_prefix: "/".into(),
             bridge_object_name: "TelegramWebProxy".into(),
+            data_dir: None,
+        };
+        let debug = format!("{open:?}");
+        assert!(!debug.contains("capability"), "{debug}");
+        assert!(debug.contains("<hidden>"));
+    }
+
+    #[test]
+    fn carrier_lines_round_trip() {
+        let open = CarrierCommand::Open {
+            url: SecretUrl::new("https://proxy.example.com/?bridge=x#android=y".into()),
+            origin: "https://proxy.example.com".into(),
+            path_prefix: "/".into(),
+            bridge_object_name: "TelegramWebProxy".into(),
+            data_dir: Some("/data/webview-carrier".into()),
         };
         let line = encode(&open);
         assert_eq!(line.matches('\n').count(), 1);
+        assert!(line.contains(r#""url":"https://proxy.example.com/?bridge=x#android=y""#));
         assert_eq!(decode::<CarrierCommand>(&line).unwrap(), open);
+        assert_eq!(
+            decode::<CarrierCommand>(r#"{"kind":"probe"}"#).unwrap(),
+            CarrierCommand::Probe { data_dir: None }
+        );
         let failed = CarrierEvent::Failed {
             failure: CarrierFailure::LoadFailed {
                 message: "forbidden navigation".into(),

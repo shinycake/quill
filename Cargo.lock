@@ -7217,6 +7217,8 @@ version = "0.1.0"
 dependencies = [
  "block2 0.6.2",
  "getrandom 0.4.3",
+ "libc",
+ "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "objc2-web-kit",
@@ -7224,6 +7226,9 @@ dependencies = [
  "serde",
  "serde_json",
  "tao",
+ "webkit2gtk",
+ "webview2-com",
+ "windows 0.62.2",
  "wry",
 ]
 

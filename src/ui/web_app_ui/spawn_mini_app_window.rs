@@ -39,6 +39,8 @@ impl QuillApp {
         command
             .arg("--data-id")
             .arg(data_store_id(&account, launch.bot_user_id));
+        // No console window flashes up next to the mini app on Windows.
+        quill::media_tools::NoConsole::no_console(&mut command);
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(_) => {

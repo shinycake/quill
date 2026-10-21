@@ -11,35 +11,31 @@
 //! entry per carrier TDLib opened, its phase, and the work the driver still
 //! has to do) and the [`CarrierHost`] seam the driver talks to. The live
 //! host ([`helper::HelperCarrierHost`]) runs one `quill-webview --carrier`
-//! process per carrier; tests use a fake. Data never sits in the table: the
-//! driver hands it straight to the host or to TDLib once the table says the
-//! carrier is live.
+//! process per carrier; tests use a fake. Data never sits in the table:
+//! TDLib's bytes go from the driver straight to the host, and the page's
+//! go from the host straight to TDLib through a [`RelaySink`], tagged with
+//! [`CARRIER_RELAY_EXTRA`] so their answers are dropped unread.
 
 pub mod helper;
 
+use crate::ids::RequestId;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
-/// The carrier's URL. It holds the proxy's capability, so the schema says
-/// it must never be logged or shown: `Debug` prints a placeholder.
-#[derive(Clone, PartialEq, Eq, Default)]
-pub struct CarrierUrl(String);
+/// The carrier's URL. It holds the proxy's capability, so `Debug` prints a
+/// placeholder (the schema says it must never be logged or shown).
+pub use quill_webview_protocol::carrier::SecretUrl as CarrierUrl;
 
-impl CarrierUrl {
-    pub fn new(url: String) -> Self {
-        Self(url)
-    }
+/// The `@extra` of every `processWebProxyCarrierMessage`. Those requests
+/// go out from the host's reader threads, not through the request table,
+/// and their `ok` (or an error for a carrier TDLib already closed) means
+/// nothing to anyone: the driver drops answers with this extra before the
+/// reducer.
+pub const CARRIER_RELAY_EXTRA: RequestId = RequestId(u64::MAX);
 
-    /// The URL itself, for the host only.
-    pub fn expose(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Debug for CarrierUrl {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("CarrierUrl(<hidden>)")
-    }
-}
+/// Sends one JSON request to this host's TDLib client from any thread;
+/// `false` once the client is gone.
+pub type RelaySink = Arc<dyn Fn(&str) -> bool + Send + Sync>;
 
 /// `webProxyCarrier`: what TDLib asked the app to open.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -86,38 +82,31 @@ pub enum CarrierMessage {
     Text(String),
 }
 
-/// What a host reports about one of its carriers.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HostEvent {
-    Message(CarrierMessage),
-    Failed(CarrierError),
-}
-
 /// Where carriers run. The driver owns one per TDLib client.
 pub trait CarrierHost: Send {
-    /// Whether carriers can be hosted at all (the helper is installed).
+    /// Whether carriers can be hosted here: the helper is installed and
+    /// nothing showed this system cannot run one. May change while Quill
+    /// runs (a capability check finishing, a carrier finding out).
     fn available(&self) -> bool;
     /// Start a hidden web view for `request`.
     fn open(&mut self, request: &CarrierRequest) -> Result<(), CarrierError>;
-    /// Hand base64 `data` to the page of `carrier_id`, in order.
+    /// Hand base64 `data` to the page of `carrier_id`, in order. A carrier
+    /// the host does not know fails instead.
     fn deliver(&mut self, carrier_id: i32, data: String);
-    /// Close the carrier; `notify_page` first sends the page
-    /// `{"t":"close"}`.
+    /// Close the carrier; with `notify_page`, a page that posted first
+    /// gets `{"t":"close"}`.
     fn close(&mut self, carrier_id: i32, notify_page: bool);
-    /// Events since the last call.
-    fn poll(&mut self) -> Vec<(i32, HostEvent)>;
-    /// Close everything at once (logout, quit).
+    /// Carriers that failed since the last call.
+    fn poll(&mut self) -> Vec<(i32, CarrierError)>;
+    /// End everything at once (logout, quit).
     fn shutdown(&mut self);
 }
 
 /// Where a carrier is in its life.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CarrierPhase {
-    /// Asked of the host; the page has said nothing yet.
-    Opening,
-    /// The page has posted at least once (it gets `{"t":"close"}` when
-    /// TDLib closes it).
-    Relaying,
+    /// Asked of the host, and relaying once the page is up.
+    Live,
     /// Reported to TDLib as failed; waiting for TDLib's close.
     Failed,
 }
@@ -194,14 +183,16 @@ impl Carriers {
             carrier_id,
             Carrier {
                 proxy_id,
-                phase: CarrierPhase::Opening,
+                phase: CarrierPhase::Live,
             },
         );
         self.work.push(CarrierWork::Open(request));
         OpenVerdict::Hosting { proxy_id }
     }
 
-    /// `updateWebProxyCarrierClosed`: forget it and tear its view down.
+    /// `updateWebProxyCarrierClosed`: forget it and tear its view down. The
+    /// helper knows whether its page ever posted, so the page is told
+    /// whenever it might be listening.
     pub fn closed(&mut self, carrier_id: i32) {
         // A failed carrier's view went when it failed.
         if let Some(carrier) = self.open.remove(&carrier_id)
@@ -209,7 +200,7 @@ impl Carriers {
         {
             self.work.push(CarrierWork::Close {
                 carrier_id,
-                notify_page: carrier.phase == CarrierPhase::Relaying,
+                notify_page: true,
             });
         }
     }
@@ -228,19 +219,6 @@ impl Carriers {
             notify_page: false,
         });
         Some(carrier.proxy_id)
-    }
-
-    /// The page posted a message: whether it goes to TDLib. Messages of a
-    /// carrier TDLib closed, or that failed, are dropped (the schema's
-    /// "must be ignored").
-    pub fn page_posted(&mut self, carrier_id: i32) -> bool {
-        match self.open.get_mut(&carrier_id) {
-            Some(carrier) if carrier.phase != CarrierPhase::Failed => {
-                carrier.phase = CarrierPhase::Relaying;
-                true
-            }
-            _ => false,
-        }
     }
 
     /// Whether TDLib's data for `carrier_id` goes to the page.
