@@ -107,10 +107,12 @@ impl StripPull {
 
     /// Advance the slide. `scroll_top` is where the list is now. Returns the
     /// scroll top to write, or `None` when nothing is sliding (finished, or
-    /// the user scrolled away from it).
+    /// the user scrolled down away from it). A list that sits above the
+    /// slide (its range is shorter than the strip, or the user scrolled up)
+    /// is left where it is: the slide only ever moves the list up.
     pub fn reveal_scroll_top(&mut self, now: Instant, scroll_top: f32) -> Option<f32> {
         let reveal = self.reveal.as_mut()?;
-        if (scroll_top - reveal.written).abs() > 1.0 {
+        if scroll_top > reveal.written + 1.0 {
             self.reveal = None;
             return None;
         }
@@ -119,7 +121,7 @@ impl StripPull {
         let top = if t >= 1.0 {
             0.0
         } else {
-            FULL_HEIGHT * (1.0 - sine_in_out(t))
+            (FULL_HEIGHT * (1.0 - sine_in_out(t))).min(scroll_top)
         };
         reveal.written = top;
         if t >= 1.0 {
@@ -198,13 +200,27 @@ mod tests {
         let step = pull
             .reveal_scroll_top(t0 + REVEAL_DURATION / 4, start)
             .unwrap_or(0.0);
-        // The user scrolled the list 30 px since the last write.
+        // The user scrolled the list 30 px down since the last write.
         assert_eq!(
             pull.reveal_scroll_top(t0 + REVEAL_DURATION / 2, step + 30.0),
             None
         );
         assert!(!pull.revealing());
         assert!(pull.expanded());
+    }
+
+    #[test]
+    fn a_list_that_cannot_reach_the_start_still_ends_at_the_top() {
+        let t0 = Instant::now();
+        let mut pull = StripPull::default();
+        pull.expand(t0);
+        // The list's range only allows 20 px: it was clamped there.
+        let step = pull.reveal_scroll_top(t0 + REVEAL_DURATION / 8, 20.0);
+        assert_eq!(step, Some(20.0));
+        assert!(pull.revealing());
+        let end = pull.reveal_scroll_top(t0 + REVEAL_DURATION * 2, 20.0);
+        assert_eq!(end, Some(0.0));
+        assert!(!pull.revealing());
     }
 
     #[test]

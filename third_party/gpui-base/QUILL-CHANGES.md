@@ -104,3 +104,8 @@ wrapper keeps the stretch private, so Quill's chat list could not tell a pull
 throws the edge. Nothing else changes: the offset the list is drawn at and
 the physics are untouched. Background:
 `docs/decisions/elastic-chat-list.md`.
+
+`ScrollBounceMotion::with_max_throw` caps how far a fling throws the edge
+while `max_stretch` still bounds a finger's pull. Quill's chat list lets a
+finger pull the top 96 px (to open the stories strip) but a fling throws it
+no farther than a normal bounce.

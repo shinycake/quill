@@ -262,6 +262,25 @@ impl IDirectManipulationViewportEventHandler_Impl for DirectManipulationEventHan
         self.gesture_active
             .set(current == DIRECTMANIPULATION_RUNNING || current == DIRECTMANIPULATION_INERTIA);
 
+        // Quill: the fingers lifted and the content coasts. Like a macOS
+        // trackpad, the release ends the gesture and the inertia arrives as
+        // phaseless `Moved` deltas (momentum). Without this, `Ended` came
+        // only after the inertia, so consumers saw a held finger for the
+        // whole fling (`docs/decisions/elastic-chat-list.md`).
+        if current == DIRECTMANIPULATION_INERTIA
+            && previous == DIRECTMANIPULATION_RUNNING
+            && self.gesture_kind.get() == GestureKind::Scroll
+        {
+            self.pending_events
+                .borrow_mut()
+                .push(PlatformInput::ScrollWheel(ScrollWheelEvent {
+                    position: self.mouse_position(),
+                    delta: ScrollDelta::Pixels(point(px(0.0), px(0.0))),
+                    modifiers: current_modifiers(),
+                    touch_phase: TouchPhase::Ended,
+                }));
+        }
+
         // A new gesture interrupted inertia, so end the old sequence.
         if current == DIRECTMANIPULATION_RUNNING && previous == DIRECTMANIPULATION_INERTIA {
             self.end_gesture();

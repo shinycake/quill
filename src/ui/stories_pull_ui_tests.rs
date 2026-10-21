@@ -31,6 +31,14 @@ fn frames(vcx: &mut VisualTestContext) {
 /// The ready-chats demo with a list long enough to scroll, and (when
 /// `stories`) two posters with active stories.
 fn open(cx: &mut TestAppContext, stories: bool) -> (Entity<QuillApp>, VisualTestContext) {
+    open_with(cx, stories, 40)
+}
+
+fn open_with(
+    cx: &mut TestAppContext,
+    stories: bool,
+    extra_chats: usize,
+) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
@@ -45,7 +53,7 @@ fn open(cx: &mut TestAppContext, stories: bool) -> (Entity<QuillApp>, VisualTest
     let mut vcx = VisualTestContext::from_window(handle.into(), cx);
     app.update(&mut vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            crate::ui::demo::add_stress_chats(session, 40);
+            crate::ui::demo::add_stress_chats(session, extra_chats);
             if stories {
                 let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
                 let seq = AtomicU64::new(session.last_seq);
@@ -217,6 +225,11 @@ fn the_wheel_does_not_bounce(cx: &mut TestAppContext) {
     let (app, mut vcx) = open(cx, true);
     let vcx = &mut vcx;
     let at = centre(&app, vcx);
+    // Control: a finger bounces the same list, so the bounce is wired.
+    drag(vcx, at, 3, 8.);
+    assert!(displaced(&app, vcx) > 1.);
+    wheel(vcx, at, TouchPhase::Ended, pixels(0.));
+    settle(vcx);
     for _ in 0..30 {
         wheel(
             vcx,
@@ -234,8 +247,13 @@ fn the_wheel_does_not_bounce(cx: &mut TestAppContext) {
 fn reduced_motion_turns_the_pull_off(cx: &mut TestAppContext) {
     let (app, mut vcx) = open(cx, true);
     let vcx = &mut vcx;
-    vcx.update(|_, cx| cx.set_reduce_motion(true));
     let at = centre(&app, vcx);
+    // Control: with motion allowed a short pull stretches the list.
+    drag(vcx, at, 3, 8.);
+    assert!(displaced(&app, vcx) > 1.);
+    wheel(vcx, at, TouchPhase::Ended, pixels(0.));
+    settle(vcx);
+    vcx.update(|_, cx| cx.set_reduce_motion(true));
     drag(vcx, at, 40, 12.);
     assert_eq!(displaced(&app, vcx), 0.);
     assert!(!expanded(&app, vcx));
@@ -278,4 +296,107 @@ fn scrolling_the_strip_out_of_sight_collapses_it(cx: &mut TestAppContext) {
     // without it.
     let top = app.update(vcx, |app, _| app.chat_list_scroll_top());
     assert!((top - 43.).abs() < 1., "{top}");
+}
+
+#[gpui_kit::test]
+fn a_fling_after_the_release_never_expands_the_strip(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx, true);
+    let vcx = &mut vcx;
+    let at = centre(&app, vcx);
+    // The finger lifts (Ended), then inertia keeps arriving as phaseless
+    // moves, as a macOS trackpad and (patched) Windows Direct Manipulation
+    // report it.
+    drag(vcx, at, 2, 4.);
+    wheel(vcx, at, TouchPhase::Ended, pixels(0.));
+    for _ in 0..40 {
+        wheel(vcx, at, TouchPhase::Moved, pixels(200.));
+        vcx.update(|window, cx| window.render_frame(cx));
+        assert!(
+            displaced(&app, vcx) < 60.,
+            "a thrown edge stays near a normal bounce"
+        );
+    }
+    settle(vcx);
+    assert!(!expanded(&app, vcx));
+}
+
+#[gpui_kit::test]
+fn the_stack_opens_the_strip_fully_on_a_list_that_fits(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_with(cx, true, 0);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| app.expand_story_strip(cx));
+    frames(vcx);
+    settle(vcx);
+    assert!(expanded(&app, vcx));
+    assert!(strip_listed(&app, vcx));
+    assert!(!app.update(vcx, |app, _| app.stories.strip.pull.revealing()));
+    assert_eq!(app.update(vcx, |app, _| app.chat_list_scroll_top()), 0.);
+}
+
+#[gpui_kit::test]
+fn with_reduced_motion_the_stack_opens_the_strip_in_place(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx, true);
+    let vcx = &mut vcx;
+    vcx.update(|_, cx| cx.set_reduce_motion(true));
+    app.update(vcx, |app, cx| app.expand_story_strip(cx));
+    assert!(expanded(&app, vcx));
+    assert!(!app.update(vcx, |app, _| app.stories.strip.pull.revealing()));
+    assert_eq!(app.update(vcx, |app, _| app.chat_list_scroll_top()), 0.);
+}
+
+fn expand_now(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    app.update(vcx, |app, cx| app.expand_story_strip(cx));
+    frames(vcx);
+    settle(vcx);
+    assert!(expanded(app, vcx));
+}
+
+#[gpui_kit::test]
+fn changing_the_filter_collapses_the_strip(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx, true);
+    let vcx = &mut vcx;
+    expand_now(&app, vcx);
+    app.update(vcx, |app, cx| {
+        app.chat_list.filter = crate::ui::app::ChatListFilter::Unread;
+        app.notify_sidebar(cx);
+    });
+    frames(vcx);
+    assert!(!expanded(&app, vcx));
+    assert!(!strip_listed(&app, vcx));
+}
+
+#[gpui_kit::test]
+fn the_archive_shows_no_strip(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx, true);
+    let vcx = &mut vcx;
+    expand_now(&app, vcx);
+    app.update(vcx, |app, cx| {
+        app.chat_list.filter = crate::ui::app::ChatListFilter::Archived;
+        app.notify_sidebar(cx);
+    });
+    frames(vcx);
+    assert!(!expanded(&app, vcx));
+    assert!(!app.update(vcx, |app, _| app.story_strip_available()));
+}
+
+#[gpui_kit::test]
+fn opening_a_chat_collapses_the_strip(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx, true);
+    let vcx = &mut vcx;
+    expand_now(&app, vcx);
+    app.update_in(vcx, |app, window, cx| {
+        app.select_listed_chat(quill::ids::ChatId(12), window, cx)
+    });
+    frames(vcx);
+    assert!(!expanded(&app, vcx));
+}
+
+#[gpui_kit::test]
+fn starting_a_search_collapses_the_strip(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx, true);
+    let vcx = &mut vcx;
+    expand_now(&app, vcx);
+    app.update_in(vcx, |app, window, cx| app.open_search_ui(window, cx));
+    frames(vcx);
+    assert!(!expanded(&app, vcx));
 }

@@ -31,6 +31,9 @@ pub struct ScrollBounceMotion {
     tracking: f32,
     response: Duration,
     max_stretch: Option<f32>,
+    /// Quill: the farthest a fling throws the edge, when that differs from
+    /// `max_stretch`.
+    max_throw: Option<f32>,
 }
 
 impl Default for ScrollBounceMotion {
@@ -48,6 +51,7 @@ impl Default for ScrollBounceMotion {
                 tracking: 0.55,
                 response: Duration::from_millis(524),
                 max_stretch: None,
+                max_throw: None,
             }
         } else {
             Self {
@@ -55,6 +59,7 @@ impl Default for ScrollBounceMotion {
                 // 2π / 12.5
                 response: Duration::from_micros(502_655),
                 max_stretch: Some(36.),
+                max_throw: None,
             }
         }
     }
@@ -104,6 +109,21 @@ impl ScrollBounceMotion {
             "scroll bounce max stretch must be finite and positive"
         );
         self.max_stretch = Some(max_stretch);
+        self
+    }
+
+    /// Quill: the farthest a fling throws the edge, while a finger may still
+    /// stretch it as far as `max_stretch`. Defaults to `max_stretch`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `max_throw` is not finite or not positive.
+    pub fn with_max_throw(mut self, max_throw: f32) -> Self {
+        assert!(
+            max_throw.is_finite() && max_throw > 0.,
+            "scroll bounce max throw must be finite and positive"
+        );
+        self.max_throw = Some(max_throw);
         self
     }
 
@@ -784,7 +804,7 @@ impl Physics {
         } else {
             0.
         };
-        if let Some(max) = self.motion.max_stretch {
+        if let Some(max) = self.motion.max_throw.or(self.motion.max_stretch) {
             outward =
                 outward.signum() * limit_throw(self.position.abs(), outward.abs(), omega, max);
         }

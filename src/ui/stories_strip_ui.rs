@@ -60,6 +60,8 @@ pub(super) struct StoryStripState {
     /// What the chat list's bounce reports each frame: how far the list is
     /// pulled past its edge, and whether a finger holds it.
     pub bounce: Rc<Cell<ScrollBounceDisplacement>>,
+    /// The list context the strip was last settled for.
+    pub context: Option<super::stories_pull_ui::PullContext>,
 }
 
 impl QuillApp {
@@ -277,7 +279,7 @@ impl QuillApp {
     /// opacity, so the search field gives way smoothly.
     pub(super) fn story_compact_stack(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let tiles = &self.stories.strip.tiles;
-        if tiles.is_empty() {
+        if !self.story_strip_available() {
             return None;
         }
         let opacity = self.story_stack_opacity();
