@@ -440,7 +440,6 @@ mod tests {
         DialogKind::Sessions,
         DialogKind::TwoFa,
         DialogKind::StorageUsage,
-        DialogKind::NotificationDefaults,
         DialogKind::CallConfirm,
         DialogKind::CallSwap,
         DialogKind::FolderLimit,

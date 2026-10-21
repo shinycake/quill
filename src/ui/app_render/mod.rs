@@ -722,8 +722,6 @@ impl Render for QuillApp {
             // via the shell sync — render wiring deleted.
             // kit Phase 2 (redo): call confirm now hosted in a kit Dialog
             // via the shell sync — render wiring deleted.
-            // kit Phase 2 (redo): notification defaults now hosted in a kit
-            // Dialog via the shell sync — render wiring deleted.
             // kit Phase 2 (redo): storage usage now hosted in a kit Dialog
             // via the shell sync — render wiring deleted.
             // kit Phase 2 (redo): two-step verification now hosted in a kit

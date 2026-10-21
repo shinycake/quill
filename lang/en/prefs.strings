@@ -561,7 +561,6 @@
 "qll_prefs_not_set" = "Not set";
 "qll_prefs_not_tested" = "{kind} · not tested";
 "qll_prefs_note_if_you_forget_your" = "Note: if you forget your passcode, you'll need to log out of Quill and log in again.";
-"qll_prefs_notification_defaults" = "Notification defaults";
 "qll_prefs_notification_settings_reset" = "notification settings reset";
 "qll_prefs_notification_sound" = "Notification sound: {sound_label}";
 "qll_prefs_notification_sound_volume" = "Notification sound volume";
@@ -784,7 +783,7 @@
 "qll_prefs_updating_session_setting" = "Updating session setting…";
 "qll_prefs_use_less_data_for_calls" = "Use less data for calls";
 "qll_prefs_use_the_system_window_frame" = "Use the system window frame";
-"qll_prefs_used_when_a_chat_keeps" = "Used when a chat keeps the default setting. Changes apply via setScopeNotificationSettings.";
+"qll_prefs_used_when_a_chat_keeps" = "Used when a chat keeps the default setting.";
 "qll_prefs_user" = "User {user_id}";
 "qll_prefs_username_optional" = "Username (optional)";
 "qll_prefs_video_messages" = "Video messages";

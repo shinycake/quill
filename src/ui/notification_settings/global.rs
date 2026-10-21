@@ -1,5 +1,5 @@
 //! App-wide notification settings: badge counter, desktop notifications,
-//! in-app sounds, the defaults dialog sections, and Reset All.
+//! in-app sounds, the Notifications page sections, and Reset All.
 
 use super::*;
 use crate::ui::status_note::StatusNote;
@@ -88,113 +88,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// kit Phase 2 (redo): notification defaults hosted in a kit `Dialog`
-    /// via `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
-    pub(in crate::ui) fn build_notification_defaults_dialog(
-        app: &Entity<QuillApp>,
-        shell: &Entity<QuillShell>,
-        dialog: Dialog,
-        cx: &mut App,
-    ) -> Dialog {
-        let on_close = QuillShell::on_close_kind(
-            app,
-            shell,
-            DialogKind::NotificationDefaults,
-            |this, _, cx| {
-                this.notify.notification_defaults_open = false;
-                this.notify.defaults_sound_picker = None;
-                this.notify.defaults_exceptions_scope = None;
-                this.notify.notifications_confirm = None;
-                this.notify_corner_preview(None, cx);
-                cx.notify();
-            },
-        );
-        app.update(cx, |this, cx| {
-            this.ensure_scope_volume_sliders(cx);
-            let session = this.session();
-            let saved_sounds: Vec<NotificationSound> = session
-                .as_ref()
-                .map(|s| s.settings.saved_notification_sounds.clone())
-                .unwrap_or_default();
-            let mut body = div().flex().flex_col().gap_3();
-            body = body.child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(tr(keys::Q_PREFS_USED_WHEN_A_CHAT_KEEPS)),
-            );
-            if let Some(confirm) = this.notify.notifications_confirm {
-                body = body.child(this.notifications_confirm_banner(confirm, cx));
-            }
-            for scope in NotificationSettingsScope::ALL {
-                body = body.child(this.scope_settings_section(cx, scope, &saved_sounds));
-            }
-            // Parity slice: reaction + poll-vote notification settings
-            // (`setReactionNotificationSettings`).
-            body = body.child(this.reaction_settings_section(cx, &saved_sounds));
-            // Slice parity:chatlist-badge-settings: app badge counter
-            // preferences (include muted/archived, messages vs chats).
-            body = body.child(this.badge_counter_section(cx));
-            // tdesktop "Show notifications from: All accounts" (2+ accounts).
-            body = body.children(this.notify_from_all_section(cx));
-            // Parity slice: in-app notification sounds (tdesktop "Play
-            // sounds") — the client-side toggle gating
-            // `Session::notification_sound_for`.
-            body = body.child(this.desktop_notifications_section(cx));
-            body = body.children(this.notify_view_section(cx));
-            body = body.child(this.notify_options_section(cx));
-            body = body.child(this.attention_section(cx));
-            body = body.child(this.events_section(cx));
-            body = body.child(this.inapp_sounds_section(cx));
-            this.ensure_notification_volume_slider(cx);
-            body = body.child(this.notification_volume_section(cx));
-            let footer = div().flex().justify_end().gap_2().children([
-                Button::new("reset-all-notif-settings")
-                    .small()
-                    .label(tr(keys::Q_PREFS_RESET_ALL))
-                    .danger()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.notify.notifications_confirm = Some(NotificationsConfirm::ResetAll);
-                        cx.notify();
-                    }))
-                    .into_any_element(),
-                Button::new("close-notif-defaults")
-                    .small()
-                    .label(tr(keys::CLOSE))
-                    .ghost()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.notify.notification_defaults_open = false;
-                        this.notify.defaults_sound_picker = None;
-                        this.notify.defaults_exceptions_scope = None;
-                        this.notify.notifications_confirm = None;
-                        this.notify_corner_preview(None, cx);
-                        cx.notify();
-                        this.close_kit_dialog_if_done(DialogKind::NotificationDefaults, window, cx);
-                    }))
-                    .into_any_element(),
-            ]);
-            dialog
-                .overlay(true)
-                .title(crate::ui::shell::dialog_title(tr(
-                    keys::Q_PREFS_NOTIFICATION_DEFAULTS,
-                )))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
-                .footer(footer)
-                .on_close(on_close)
-        })
-    }
-
     /// Slice parity:chatlist-badge-settings: one labeled kit Switch row
     /// for the app badge counter section.
     pub(in crate::ui) fn badge_switch_row(
@@ -229,7 +122,7 @@ impl QuillApp {
 
     /// Slice parity:chatlist-badge-settings: app badge counter
     /// preferences (include muted / include archived / messages vs
-    /// chats) as kit Switch rows in the notification defaults dialog.
+    /// chats) as kit Switch rows on the Notifications page.
     /// Toggling persists via `set_badge_pref`; the tray picks the new
     /// count up on its next 1s sync.
     pub(in crate::ui) fn badge_counter_section(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -398,7 +291,7 @@ impl QuillApp {
     }
 
     /// Parity slice: in-app notification sounds (tdesktop "Play sounds")
-    /// as a single kit Switch row in the notification defaults dialog.
+    /// as a single kit Switch row on the Notifications page.
     /// Toggling writes through to `prefs.json` and updates the Session
     /// mirror so the next notification's sound decision sees it.
     /// tdesktop "Desktop notifications" switch.
@@ -510,10 +403,10 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Parity slice: the "Reset all" confirmation banner in the defaults
-    /// dialog — the `sessions_confirm_banner` pattern. Destructive
-    /// `resetAllNotificationSettings` has no undo, so the footer's "Reset
-    /// all" button arms this banner instead of sending the request.
+    /// Parity slice: the "Reset all" confirmation banner on the
+    /// Notifications page — the `sessions_confirm_banner` pattern. Destructive
+    /// `resetAllNotificationSettings` has no undo, so the page's "Reset
+    /// all" row arms this banner instead of sending the request.
     pub(in crate::ui) fn notifications_confirm_banner(
         &self,
         confirm: NotificationsConfirm,

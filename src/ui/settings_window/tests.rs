@@ -293,3 +293,29 @@ fn account_rows_open_their_editors(cx: &mut TestAppContext) {
     assert!(open_dialog(&shell, vcx).is_some());
     app.read_with(vcx, |app, _| assert!(app.settings.open));
 }
+
+#[gpui_kit::test]
+fn notifications_live_on_their_page_and_reset_asks_first(cx: &mut TestAppContext) {
+    let (app, shell, mut vcx) = new_app_sized(cx, 1100., 3000.);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.demo_settings(Page::Account);
+        cx.notify();
+    });
+    frames(vcx);
+    app.update(vcx, |app, cx| {
+        app.show_settings_page(Page::Notifications, cx)
+    });
+    frames(vcx);
+    assert!(shown(vcx, "settings-page-notifications"));
+    assert_eq!(open_dialog(&shell, vcx), None, "no box opens over the page");
+
+    vcx.update(|window, cx| window.click("settings-row-reset-notifications", cx));
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.notify.notifications_confirm.is_some()));
+
+    // Leaving the page drops the pending reset.
+    app.update(vcx, |app, cx| app.show_settings_page(Page::Account, cx));
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.notify.notifications_confirm.is_none()));
+}

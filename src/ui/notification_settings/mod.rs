@@ -4,9 +4,7 @@
 use super::app::QuillApp;
 use super::chat_theme::{danger, danger_bg};
 use super::dialogs::NotificationsConfirm;
-use super::shell::{DialogKind, QuillShell};
 use gpui_kit::component::button::*;
-use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
@@ -21,8 +19,6 @@ use quill::telegram::envelope::{
     MUTE_FOREVER, NotificationSettingsScope, NotificationSound, ReactionNotificationSettings,
     ReactionNotificationSource, ScopeNotificationSettings,
 };
-use std::cell::RefCell;
-use std::rc::Rc;
 
 mod desktop_options;
 mod fixtures;
