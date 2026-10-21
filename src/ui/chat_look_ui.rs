@@ -245,7 +245,7 @@ impl QuillApp {
         self.dialogs.chat_look_dialog = None;
         if let Some(session) = match self.live.as_mut() {
             Some(live) => Some(&mut live.driver.session),
-            None => self.demo_session.as_mut(),
+            None => self.demo_session.as_deref_mut(),
         } {
             session.chats_state.background_error = None;
         }

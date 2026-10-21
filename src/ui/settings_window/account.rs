@@ -90,6 +90,13 @@ impl QuillApp {
                 cx,
             ),
             link_row(
+                "settings-row-qr-code",
+                tr(keys::GROUP_INVITE_CONTEXT_QR),
+                None,
+                cx.listener(|this, _, _, cx| this.open_own_qr_box(cx)),
+                cx,
+            ),
+            link_row(
                 "settings-row-phone",
                 tr(keys::SETTINGS_PHONE_LABEL),
                 Some(profile.phone.clone().into()),

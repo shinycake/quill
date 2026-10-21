@@ -34,6 +34,13 @@ impl Session {
             Some(RequestPurpose::GetProfilePhotoEmojiIcons) => {
                 self.users_state.profile_photo_emoji_icons_failed = true;
             }
+            Some(RequestPurpose::GetProfileShareThemeBackdrops) => {
+                self.users_state.peer_qr.backdrops =
+                    crate::peer_qr::session::BackdropsFetch::Failed;
+            }
+            Some(RequestPurpose::Users(UsersPurpose::GetUserLink { free })) => {
+                self.users_state.peer_qr.fail_link(free, error_reason(err));
+            }
             Some(RequestPurpose::GetBackgroundEmojiIcons) => {
                 self.users_state.background_emoji_icons_failed = true;
             }

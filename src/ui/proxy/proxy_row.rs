@@ -176,4 +176,23 @@ impl QuillApp {
                 .on_click(cx.listener(move |this, _, _, cx| this.delete_proxy_entry(id, cx))),
             )
     }
+
+    /// Row action "Show QR code": the proxy's `tg://` link in the QR box
+    /// (tdesktop `ShowProxyQrBox`).
+    fn open_proxy_qr(&mut self, id: i32, cx: &mut Context<Self>) {
+        let link = self
+            .session()
+            .and_then(|session| session.settings.proxy.find(id))
+            .and_then(quill::proxy_extras::qr_share_link);
+        match link {
+            Some(link) => {
+                self.open_custom_qr_box(link, keys::PROXY_EDIT_SHARE_QR_BOX_TITLE, None, cx);
+            }
+            None => {
+                self.settings.proxy.notice =
+                    Some(tr(keys::Q_MISC_HTTP_PROXIES_CANT_BE_SHARED).into());
+                cx.notify();
+            }
+        }
+    }
 }

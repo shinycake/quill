@@ -468,29 +468,50 @@ impl QuillApp {
                             },
                         ];
                         let tapped = actions[0].clone();
+                        let qr_peer = quill::peer_qr::state::QrPeer::Chat(chat_id.0);
                         this.child(
                             div()
-                                .id("group-username")
-                                .text_sm()
-                                .text_color(cx.theme().muted_foreground)
-                                .cursor_pointer()
-                                .child(mention)
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    if collectible {
-                                        let name = tapped.text.trim_start_matches('@');
-                                        let link = quill::profile_forms::profile_link(name);
-                                        this.open_collectible_info(
-                                            name,
-                                            &owner_name,
-                                            Some(chat_id),
-                                            link,
-                                            cx,
-                                        );
-                                    } else {
-                                        this.copy_profile_text(&tapped.text, tapped.toast, cx);
-                                    }
-                                }))
-                                .context_menu(move |menu, _, _| copy_menu(menu, &owner, &actions)),
+                                .flex()
+                                .items_center()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .id("group-username")
+                                        .text_sm()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .cursor_pointer()
+                                        .child(mention)
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            if collectible {
+                                                let name = tapped.text.trim_start_matches('@');
+                                                let link = quill::profile_forms::profile_link(name);
+                                                this.open_collectible_info(
+                                                    name,
+                                                    &owner_name,
+                                                    Some(chat_id),
+                                                    link,
+                                                    cx,
+                                                );
+                                            } else {
+                                                this.copy_profile_text(
+                                                    &tapped.text,
+                                                    tapped.toast,
+                                                    cx,
+                                                );
+                                            }
+                                        }))
+                                        .context_menu(move |menu, _, _| {
+                                            copy_menu(menu, &owner, &actions)
+                                        }),
+                                )
+                                .child(div().debug_selector(|| "group-username-qr".into()).child(
+                                    crate::ui::peer_qr::qr_row_button(
+                                        "group-username-qr",
+                                        cx.listener(move |this, _, _, cx| {
+                                            this.open_peer_qr_box(qr_peer, cx)
+                                        }),
+                                    ),
+                                )),
                         )
                     }),
             );

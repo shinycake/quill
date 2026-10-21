@@ -69,6 +69,7 @@ mod passkeys;
 mod passkeys_login;
 mod payments;
 mod peer_color;
+mod peer_qr;
 mod polls;
 mod premium_hub;
 mod privacy_data;

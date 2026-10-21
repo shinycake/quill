@@ -24,7 +24,7 @@ impl QuillApp {
             .live
             .as_mut()
             .map(|live| &mut live.driver.session)
-            .or(self.demo_session.as_mut())
+            .or(self.demo_session.as_deref_mut())
         else {
             return;
         };

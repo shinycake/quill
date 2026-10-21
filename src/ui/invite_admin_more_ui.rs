@@ -5,7 +5,6 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::auth_ui::render_qr_image;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
@@ -449,61 +448,14 @@ impl QuillApp {
         Some(block.into_any_element())
     }
 
-    /// Show or hide the QR code of one link.
-    pub(super) fn toggle_invite_link_qr(
-        &mut self,
-        chat_id: ChatId,
-        invite_link: &str,
-        cx: &mut Context<Self>,
-    ) {
-        let open = self
-            .admin
-            .invite_link_qr
-            .as_ref()
-            .is_some_and(|(chat, link, _)| *chat == chat_id && link == invite_link);
-        self.admin.invite_link_qr = if open {
-            None
-        } else {
-            render_qr_image(invite_link).map(|image| (chat_id, invite_link.to_owned(), image))
-        };
-        cx.notify();
-    }
-
-    /// The QR code under a link's row while it is open.
-    pub(super) fn invite_link_qr_block(
-        &self,
-        chat_id: ChatId,
-        invite_link: &str,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        let (_, _, image) = self
-            .admin
-            .invite_link_qr
-            .as_ref()
-            .filter(|(chat, link, _)| *chat == chat_id && link == invite_link)?;
-        Some(
-            div()
-                .id(format!("invite-link-qr-{}", invite_link.len()))
-                .flex()
-                .flex_col()
-                .items_center()
-                .gap_1()
-                .child(
-                    div().p_2().rounded_lg().bg(gpui_kit::white()).child(
-                        img(ImageSource::from(image.clone()))
-                            .size(px(176.))
-                            .aspect_square()
-                            .object_fit(ObjectFit::Contain),
-                    ),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(tr(keys::Q_OPS_SCAN_TO_JOIN)),
-                )
-                .into_any_element(),
-        )
+    /// A link's QR code in the QR box (tdesktop `InviteLinkQrBox`).
+    pub(super) fn open_invite_link_qr(&mut self, invite_link: &str, cx: &mut Context<Self>) {
+        self.open_custom_qr_box(
+            invite_link.to_owned(),
+            keys::GROUP_INVITE_QR_TITLE,
+            Some(keys::GROUP_INVITE_QR_ABOUT),
+            cx,
+        );
     }
 }
 

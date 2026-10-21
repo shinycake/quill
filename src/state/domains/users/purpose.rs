@@ -120,6 +120,14 @@ pub enum UsersPurpose {
     /// Phase B1: `closeSecretChat`. Response is `ok`; the state change to
     /// `secretChatStateClosed` arrives as `updateSecretChat`.
     CloseSecretChat,
+    /// `getProfileShareThemeBackdrops` (TDLib 1.8.69): the QR box's
+    /// colors. Response is `profileShareThemeBackdrops`.
+    GetProfileShareThemeBackdrops,
+    /// `getUserLink` for the QR box: the contact link (`free` is `None`)
+    /// or a free-message code. Response is `userLink`.
+    GetUserLink {
+        free: Option<crate::peer_qr::free::FreeTicket>,
+    },
 }
 
 flat_purposes!(Users(UsersPurpose) {
@@ -157,4 +165,5 @@ flat_purposes!(Users(UsersPurpose) {
     CreateNewSecretChat,
     GetSecretChat,
     CloseSecretChat,
+    GetProfileShareThemeBackdrops,
 });

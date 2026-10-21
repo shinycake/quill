@@ -212,6 +212,21 @@ impl Session {
                     self.users_state.contacts_notice = Some("Contacts imported.".to_string());
                 }
             }
+            UsersPayload::ProfileShareThemeBackdrops(backdrops) => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetProfileShareThemeBackdrops)
+                {
+                    self.users_state.peer_qr.backdrops =
+                        crate::peer_qr::session::BackdropsFetch::Ready(backdrops);
+                }
+            }
+            UsersPayload::UserLink(answer) => {
+                if let Some(RequestPurpose::Users(UsersPurpose::GetUserLink { free })) =
+                    pending.map(|p| p.purpose)
+                {
+                    let now = i64::try_from(crate::state::unix_ms_now() / 1000).unwrap_or(0);
+                    self.users_state.peer_qr.accept_link(free, answer, now);
+                }
+            }
         }
     }
 }

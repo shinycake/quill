@@ -117,6 +117,7 @@ impl QuillApp {
         // resolved to (take-once; render owns the `Window`).
         if let Some((chat_id, action)) = self.links.pending_deep_link_open.take() {
             self.open_deep_link_chat(chat_id, &action, window, cx);
+            self.drop_shared_card(cx);
         }
         if let Some(ui) = self.links.pending_deep_link_ui.take() {
             self.run_deep_link_ui(ui, window, cx);

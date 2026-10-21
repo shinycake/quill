@@ -325,7 +325,7 @@ impl QuillApp {
         self.message_ui.menu = None;
         let session = match self.live.as_mut() {
             Some(live) => Some(&mut live.driver.session),
-            None => self.demo_session.as_mut(),
+            None => self.demo_session.as_deref_mut(),
         };
         if let Some(session) = session {
             session.reset_message_reactions();

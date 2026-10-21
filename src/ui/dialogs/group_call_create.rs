@@ -310,7 +310,7 @@ impl QuillApp {
         };
         let session = match self.live.as_mut() {
             Some(live) => Some(&mut live.driver.session),
-            None => self.demo_session.as_mut(),
+            None => self.demo_session.as_deref_mut(),
         };
         let Some(session) = session else {
             return;

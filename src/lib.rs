@@ -131,6 +131,7 @@ pub mod path_expand;
 pub mod payment_invoice;
 pub mod peer_badge;
 pub mod peer_color;
+pub mod peer_qr;
 pub mod personal_channel;
 pub mod phone;
 pub mod phone_suggestion;

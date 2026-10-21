@@ -128,14 +128,14 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn show_business_link_qr(&mut self, link: String, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(image) = crate::ui::auth_ui::render_qr_image(&link) else {
-            return;
-        };
-        self.business_go(View::LinkQr, window, cx);
-        if let Some(d) = self.business_mut() {
-            d.link_qr = Some((link, image));
-        }
+    /// A link's QR code in the QR box (tdesktop `ChatLinks` "Get QR Code").
+    fn show_business_link_qr(&mut self, link: String, cx: &mut Context<Self>) {
+        self.open_custom_qr_box(
+            link,
+            keys::CHAT_LINK_QR_TITLE,
+            Some(keys::CHAT_LINK_QR_ABOUT),
+            cx,
+        );
     }
 
     fn business_link_row(&self, index: usize, link: &ChatLink, cx: &mut Context<Self>) -> Div {
@@ -209,9 +209,9 @@ impl QuillApp {
                             this.copy_business_link(&link.link, cx);
                         }))
                         .item(item(
-                            tr(keys::Q_OPS_GET_QR_CODE),
-                            |this, link, window, cx| {
-                                this.show_business_link_qr(link.link.clone(), window, cx);
+                            tr(keys::GROUP_INVITE_CONTEXT_QR),
+                            |this, link, _, cx| {
+                                this.show_business_link_qr(link.link.clone(), cx);
                             },
                         ))
                         .item(item(tr(keys::Q_OPS_EDIT), |this, link, window, cx| {
@@ -371,51 +371,5 @@ impl QuillApp {
             .child(Textarea::new(&text).aria_label(tr(keys::Q_OPS_PRESET_MESSAGE)))
             .child(Input::new(&name).aria_label(tr(keys::Q_OPS_LINK_NAME)))
             .child(div().text_xs().text_color(muted).child(NAME_ABOUT))
-    }
-
-    pub(super) fn business_link_qr_body(&mut self, cx: &mut Context<Self>) -> Div {
-        let muted = cx.theme().muted_foreground;
-        let Some((link, image)) = self
-            .dialogs
-            .business_dialog
-            .as_ref()
-            .and_then(|d| d.link_qr.clone())
-        else {
-            return div();
-        };
-        let copy = link.clone();
-        div()
-            .flex()
-            .flex_col()
-            .items_center()
-            .gap_2()
-            .child(
-                div().p_2().rounded_lg().bg(gpui_kit::white()).child(
-                    img(ImageSource::from(image))
-                        .size(px(200.))
-                        .aspect_square()
-                        .object_fit(ObjectFit::Contain),
-                ),
-            )
-            .child(
-                div()
-                    .text_sm()
-                    .child(link.trim_start_matches("https://").to_string()),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(muted)
-                    .text_center()
-                    .child(tr(keys::CHAT_LINK_QR_ABOUT)),
-            )
-            .child(
-                Button::new("business-link-qr-copy")
-                    .label(tr(keys::CONTEXT_COPY_LINK))
-                    .icon(IconName::Copy)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.copy_business_link(&copy, cx);
-                    })),
-            )
     }
 }

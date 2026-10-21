@@ -244,7 +244,7 @@ impl QuillApp {
             Some(d) => {
                 let (seed, status, note, auth) = d.start();
                 if let Some(seed) = seed {
-                    demo_session = Some(seed(demo_sink.clone()));
+                    demo_session = Some(Box::new(seed(demo_sink.clone())));
                 }
                 (status, None, note, auth)
             }
@@ -348,6 +348,7 @@ impl QuillApp {
             mini_apps: Default::default(),
             folders: super::folders_state::FolderUi::new(),
             windows: super::chat_window::ChatWindows::new(cx),
+            peer_qr: super::peer_qr::PeerQrUi::new(cx),
         };
 
         if let Some(chosen) = spell_chosen {

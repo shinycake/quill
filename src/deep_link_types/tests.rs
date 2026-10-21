@@ -188,6 +188,16 @@ fn ui_links_route_without_a_request() {
         ),
         LinkRoute::Ui(DeepLinkUi::Settings(SettingsTarget::Appearance))
     );
+    for subsection in ["", "share", "scan"] {
+        assert_eq!(
+            route_of(json!({
+                "@type": "internalLinkTypeSettings",
+                "section": {"@type": "settingsSectionQrCode", "subsection": subsection}
+            })),
+            LinkRoute::Ui(DeepLinkUi::Settings(SettingsTarget::QrCode)),
+            "{subsection}"
+        );
+    }
     for (section, subsection, tab) in [
         (
             "settingsSectionEditProfile",

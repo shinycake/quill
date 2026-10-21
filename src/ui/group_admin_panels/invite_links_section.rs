@@ -141,7 +141,6 @@ impl QuillApp {
                             self.invite_link_members_block(chat_id, &link.invite_link, cx);
                         let requests_block =
                             self.link_requests_block(chat_id, &link.invite_link, cx);
-                        let qr_block = self.invite_link_qr_block(chat_id, &link.invite_link, cx);
                         let requests_link = link.invite_link.clone();
                         let qr_link = link.invite_link.clone();
                         let pending_requests = link.pending_join_request_count;
@@ -245,10 +244,10 @@ impl QuillApp {
                                 })
                                 .child(
                                     Button::new(format!("invite-link-qr-{index}"))
-                                        .label(tr(keys::Q_PEOPLE_QR_CODE))
+                                        .label(tr(keys::GROUP_INVITE_CONTEXT_QR))
                                         .ghost()
                                         .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.toggle_invite_link_qr(chat_id, &qr_link, cx);
+                                            this.open_invite_link_qr(&qr_link, cx);
                                         })),
                                 )
                                 .when(subscription.is_some(), |actions| {
@@ -280,9 +279,6 @@ impl QuillApp {
                             row = row.child(block);
                         }
                         if let Some(block) = requests_block {
-                            row = row.child(block);
-                        }
-                        if let Some(block) = qr_block {
                             row = row.child(block);
                         }
                         section = section.child(row);
