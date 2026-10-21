@@ -46,6 +46,9 @@ fn text(value: &Value, key: &str) -> String {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GiftManageInfo {
     pub can_be_transferred: bool,
+    /// `can_be_deleted`: a regular gift its receiver may delete with
+    /// `deleteGift` (tdesktop `CanDeleteSavedStarGift`).
+    pub can_be_deleted: bool,
     pub collection_ids: Vec<i32>,
     /// Stars the sender prepaid for the upgrade (the receiver upgrades free).
     pub prepaid_upgrade_star_count: i64,
@@ -73,6 +76,7 @@ impl GiftManageInfo {
         let resale = inner.and_then(|g| g.get("resale_parameters"));
         Self {
             can_be_transferred: flag(received, "can_be_transferred"),
+            can_be_deleted: flag(received, "can_be_deleted"),
             collection_ids: received
                 .get("collection_ids")
                 .and_then(Value::as_array)
@@ -142,6 +146,13 @@ impl ReceivedGift {
         } else {
             PinGate::Pin
         }
+    }
+
+    /// Whether "Delete Gift" is offered in the gift's menu: TDLib says the
+    /// gift is a regular one that the receiver may delete, and the list is
+    /// the signed-in user's own.
+    pub fn can_delete(&self, mine: bool) -> bool {
+        mine && self.manage.can_be_deleted && !self.gift.upgraded && !self.was_refunded
     }
 
     /// Stars the upgrade costs the owner: `Some(0)` when the sender prepaid

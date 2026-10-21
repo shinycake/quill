@@ -368,6 +368,80 @@ fn collections_are_created_renamed_filled_and_deleted() {
 }
 
 #[test]
+fn deleting_a_gift_sends_delete_gift_and_removes_it_on_ok() {
+    let mut p = parts();
+    open_my_gifts(
+        &mut p,
+        vec![
+            regular("a", json!({"can_be_deleted": true})),
+            regular("b", json!({})),
+            received("c", json!({"can_be_deleted": true})),
+        ],
+    );
+    p.0.session.payments.hub.gift_selected = Some("a".into());
+    // Only a gift TDLib marks deletable, and only one that is listed.
+    assert!(p.0.delete_received_gift("b").is_err());
+    assert!(p.0.delete_received_gift("zzz").is_err());
+    assert_eq!(count(&p.1, "deleteGift"), 0);
+    let extra = p.0.delete_received_gift("a").unwrap();
+    let sent = sent_request(&p.1, "deleteGift");
+    assert_eq!(sent["received_gift_id"], "a");
+    assert!(p.0.session.payments.hub.gift_mutating);
+    // Nothing is optimistic: the gift stays until the answer.
+    assert_eq!(p.0.session.payments.hub.gifts.len(), 3);
+    feed(&mut p, json!({"@type": "ok", "@extra": extra.as_extra()}));
+    let hub = &p.0.session.payments.hub;
+    assert!(!hub.gift_mutating);
+    assert_eq!(
+        hub.gifts.iter().map(|g| g.id.as_str()).collect::<Vec<_>>(),
+        ["b", "c"]
+    );
+    assert_eq!(hub.gifts_total, 2);
+    assert_eq!(hub.gift_selected, None);
+    // The toast is a one-shot, and the server's list is refetched.
+    assert!(p.0.session.payments.gifts_manage.deleted);
+    // ...so the driver asked for the list again, right after the answer.
+    assert_eq!(count(&p.1, "getReceivedGifts"), 2);
+}
+
+#[test]
+fn a_failed_delete_keeps_the_gift_and_says_why() {
+    let mut p = parts();
+    open_my_gifts(&mut p, vec![regular("a", json!({"can_be_deleted": true}))]);
+    let extra = p.0.delete_received_gift("a").unwrap();
+    feed(
+        &mut p,
+        json!({"@type": "error", "@extra": extra.as_extra(), "code": 400, "message": "SAVED_ID_INVALID"}),
+    );
+    let hub = &p.0.session.payments.hub;
+    assert!(!hub.gift_mutating);
+    assert_eq!(hub.gifts.len(), 1);
+    assert_eq!(p.0.session.payments.gifts_manage.deleting, None);
+    assert!(
+        p.0.session
+            .payments
+            .gifts_manage
+            .note
+            .as_deref()
+            .is_some_and(|n| n.starts_with("Couldn't delete the gift"))
+    );
+}
+
+#[test]
+fn deleting_is_refused_on_other_peoples_gifts() {
+    let mut p = parts();
+    let extra =
+        p.0.open_received_gifts(MessageSender::User { user_id: 99 })
+            .unwrap();
+    feed(
+        &mut p,
+        json!({"@type": "receivedGifts", "@extra": extra.as_extra(), "total_count": 1,
+            "next_offset": "", "gifts": [regular("a", json!({"can_be_deleted": true}))]}),
+    );
+    assert!(p.0.delete_received_gift("a").is_err());
+}
+
+#[test]
 fn owner_actions_are_refused_on_other_peoples_gifts() {
     let mut p = parts();
     let extra =

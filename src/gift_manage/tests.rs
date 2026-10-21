@@ -288,3 +288,17 @@ fn premium_options_parse_and_label() {
     assert_eq!(options[1].discount_percentage, 25);
     assert!(options[0].price_label().contains("9.99"));
 }
+
+#[test]
+fn delete_is_offered_only_when_tdlib_allows_it_to_the_owner() {
+    assert!(!regular(json!({})).manage.can_be_deleted);
+    let gift = regular(json!({"can_be_deleted": true}));
+    assert!(gift.manage.can_be_deleted);
+    assert!(gift.can_delete(true));
+    // Someone else's list never offers it.
+    assert!(!gift.can_delete(false));
+    assert!(!regular(json!({"can_be_deleted": true, "was_refunded": true})).can_delete(true));
+    assert!(!regular(json!({})).can_delete(true));
+    // tdesktop never offers it for a collectible, whatever the flag says.
+    assert!(!unique(json!({"can_be_deleted": true})).can_delete(true));
+}

@@ -437,6 +437,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         })
     }
 
+    /// `deleteGift` (tdesktop `DeleteStarGift`): only for a regular gift
+    /// of the signed-in user that TDLib marks `can_be_deleted`.
+    pub fn delete_received_gift(&mut self, id: &str) -> Result<RequestId, ConnectSendError> {
+        let gift = self.own_gift(id)?;
+        if !gift.can_delete(true) || self.session.payments.hub.gift_mutating {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.mutate_own_gifts(PaymentsPurpose::DeleteGift, |extra, _| {
+            rq::delete_gift(extra, id)
+        })?;
+        self.session.payments.gifts_manage.deleting = Some(id.to_string());
+        Ok(extra)
+    }
+
     /// Add a gift to a collection, or remove it from one.
     pub fn change_gift_collection(
         &mut self,
