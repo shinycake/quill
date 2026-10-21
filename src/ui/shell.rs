@@ -496,7 +496,6 @@ mod tests {
         DialogKind::CommunityHub,
         DialogKind::Accounts,
         DialogKind::JumpToDate,
-        DialogKind::Shortcuts,
     ];
 
     #[test]
@@ -531,6 +530,6 @@ mod tests {
 
     #[test]
     fn dialog_kind_debug_prints_the_bare_name() {
-        assert_eq!(format!("{:?}", DialogKind::Shortcuts), "Shortcuts");
+        assert_eq!(format!("{:?}", DialogKind::TwoFa), "TwoFa");
     }
 }

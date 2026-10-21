@@ -127,19 +127,7 @@ impl QuillApp {
             Page::Language => column.child(self.language_page(cx)),
             Page::Shortcuts => column
                 .children(cards([self.appearance_keybindings_section(cx)]))
-                .child(group(
-                    None,
-                    [link_row(
-                        "settings-row-shortcuts",
-                        tr(keys::Q_SETTINGS_PAGE_SHORTCUTS),
-                        None,
-                        cx.listener(|this, _, _, cx| {
-                            this.settings.shortcuts_open = true;
-                            cx.notify();
-                        }),
-                        cx,
-                    )],
-                )),
+                .child(self.shortcuts_reference(cx)),
             Page::Telegram => column.child(group(None, self.telegram_rows(cx))),
             Page::About => column
                 .children(cards([self.about_settings_section(cx)]))
