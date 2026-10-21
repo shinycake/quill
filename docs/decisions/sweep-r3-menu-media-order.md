@@ -6,25 +6,32 @@
 media's own actions (`AddPhotoActions` / `AddDocumentActions`) first, then Copy
 Text, then Translate. Inside the media block the order is: cancel download,
 Open GIF, Save GIF, sticker pack info, add to own set, favorite, Show in
-Finder/Folder, attached stickers, Save for Notifications, Save As, Copy
-Filename. A photo is Save Image, Copy Image, attached stickers.
+Finder/Folder, Save for Notifications, Save As, Copy Filename. A photo is Save
+Image, Copy Image. Quill does not model tdesktop's attached-stickers row or the
+voice "Rate/Transcribe" row.
 
 ## What was wrong
 
 Media rows were sorted by `order::MEDIA + index as u8`, the index of the action
 in the list that happened to apply. The block had no declared width, so enough
-actions would tie with or pass `COPY_TEXT` and `TRANSLATE`, and the row keys
-would collide. `index as u8` could also wrap.
+actions could tie with or pass `COPY_TEXT` and `TRANSLATE`, and `index as u8`
+could wrap.
 
 ## What changed
 
 - Every `MediaAction` has one fixed `slot()` (an exhaustive match, so a new
   action cannot be added without choosing its place), and `sort_key()` adds it
   to `order::MEDIA` with a saturating add.
-- `MEDIA_SLOTS` is the block width. A `const` assertion fails the build if
+- `MediaAction::ALL` lists every variant; `MEDIA_SLOTS` is its length, so the
+  block width follows the enum. A `const` assertion fails the build if
   `MEDIA + MEDIA_SLOTS` passes `COPY_TEXT`. The orders from `COPY_TEXT` on moved
   up by 5 to make room for all 13 actions; only their relative order matters.
-- A unit test checks the slots are distinct, increasing and inside the block.
+- A unit test iterates `MediaAction::ALL` and checks each slot equals its index
+  and the keys are increasing and inside the block. It guards the slot order;
+  it does not reproduce the original tie.
+- `REPLY_TIMECODE` and `REPLY_ELSEWHERE` shared key 11, and a playing voice
+  message can show both. Reply in Another Chat is Quill's own row (tdesktop has
+  none), so it now follows the timecode row at 12 and the rows after moved up one.
 - A UI test opens the menu on a captioned song with every action it can have
   and reads the rows from the accessibility tree: media rows, then Copy Text,
   then Translate.

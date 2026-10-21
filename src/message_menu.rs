@@ -20,14 +20,14 @@ pub mod order {
     pub const REPLY: u8 = 10;
     /// "Reply with timecode" follows Reply on a playing voice message.
     pub const REPLY_TIMECODE: u8 = 11;
-    /// "Reply in Another Chat" sits with the reply rows (stable sort keeps
-    /// the push order inside the shared slot).
-    pub const REPLY_ELSEWHERE: u8 = 11;
-    pub const COPY_SELECTED: u8 = 12;
+    /// "Reply in Another Chat" is Quill's own row. A voice message can show it
+    /// together with the timecode row, so it gets its own slot after it.
+    pub const REPLY_ELSEWHERE: u8 = 12;
+    pub const COPY_SELECTED: u8 = 13;
     /// "Translate Selected Text" (`ui/translate_ui.rs`).
-    pub const TRANSLATE_SELECTED: u8 = 13;
-    pub const GO_TO_MESSAGE: u8 = 14;
-    pub const VIEW_COMMENTS: u8 = 15;
+    pub const TRANSLATE_SELECTED: u8 = 14;
+    pub const GO_TO_MESSAGE: u8 = 15;
+    pub const VIEW_COMMENTS: u8 = 16;
     pub const EDIT: u8 = 20;
     /// "Add Fact Check" / "Edit Fact Check" follows Edit.
     pub const FACT_CHECK: u8 = 21;
@@ -65,10 +65,11 @@ pub mod order {
     pub const EMOJI_PACKS: u8 = 99;
 }
 
-/// Width of the media block in sort keys: one fixed slot per [`MediaAction`].
-pub const MEDIA_SLOTS: u8 = 13;
+/// Width of the media block in sort keys: one fixed slot per [`MediaAction`],
+/// taken from [`MediaAction::ALL`].
+pub const MEDIA_SLOTS: usize = MediaAction::ALL.len();
 
-const _: () = assert!(order::MEDIA as usize + MEDIA_SLOTS as usize <= order::COPY_TEXT as usize);
+const _: () = assert!(order::MEDIA as usize + MEDIA_SLOTS <= order::COPY_TEXT as usize);
 
 /// The kinds of message content that carry a file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -260,6 +261,24 @@ pub enum MediaAction {
 }
 
 impl MediaAction {
+    /// Every variant, in slot order. The source of truth for the block width;
+    /// the slot test fails if a variant is missing here.
+    pub const ALL: [Self; 13] = [
+        Self::CancelDownload,
+        Self::OpenGif,
+        Self::SaveGif,
+        Self::ViewStickerSet { installed: true },
+        Self::AddToSet { emoji: false },
+        Self::AddToSet { emoji: true },
+        Self::ToggleFavorite { remove: false },
+        Self::ShowInFolder,
+        Self::SaveForNotifications,
+        Self::SaveTo,
+        Self::SaveAs,
+        Self::CopyImage,
+        Self::CopyFilename,
+    ];
+
     /// Fixed place in the media block, in tdesktop's `AddPhotoActions` /
     /// `AddDocumentActions` order. Every action has its own slot, so rows
     /// never tie and never reach the Copy Text section.
@@ -283,7 +302,9 @@ impl MediaAction {
 
     /// Sort key of this action's menu row.
     pub fn sort_key(self) -> u8 {
-        order::MEDIA.saturating_add(self.slot().min(MEDIA_SLOTS - 1))
+        // `MEDIA + MEDIA_SLOTS <= COPY_TEXT` is asserted above, and every slot
+        // is below `MEDIA_SLOTS` (tested), so this stays inside the block.
+        order::MEDIA.saturating_add(self.slot())
     }
 }
 
@@ -605,22 +626,14 @@ mod tests {
     #[test]
     fn media_actions_have_distinct_keys_inside_their_block() {
         use super::{MEDIA_SLOTS, MediaAction, order};
-        let all = [
-            MediaAction::CancelDownload,
-            MediaAction::OpenGif,
-            MediaAction::SaveGif,
-            MediaAction::ViewStickerSet { installed: true },
-            MediaAction::AddToSet { emoji: false },
-            MediaAction::AddToSet { emoji: true },
-            MediaAction::ToggleFavorite { remove: false },
-            MediaAction::ShowInFolder,
-            MediaAction::SaveForNotifications,
-            MediaAction::SaveTo,
-            MediaAction::SaveAs,
-            MediaAction::CopyImage,
-            MediaAction::CopyFilename,
-        ];
-        assert_eq!(all.len(), usize::from(MEDIA_SLOTS), "one slot per action");
+        let all = MediaAction::ALL;
+        assert!(
+            all.iter()
+                .enumerate()
+                .all(|(index, action)| usize::from(action.slot()) == index),
+            "ALL lists every variant once, in slot order"
+        );
+        assert_eq!(all.len(), MEDIA_SLOTS, "one slot per action");
         let keys: Vec<u8> = all.iter().map(|action| action.sort_key()).collect();
         assert!(
             keys.iter().zip(keys.iter().skip(1)).all(|(a, b)| a < b),
