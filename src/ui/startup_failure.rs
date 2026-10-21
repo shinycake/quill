@@ -18,7 +18,7 @@ use quill::lang::{keys, tr};
 pub(crate) fn window_failed(error: &dyn std::fmt::Display) -> ! {
     let detail = error.to_string();
     eprintln!("quill: could not open a window: {detail}");
-    let message = alert_detail(&detail);
+    let (message, summary) = alert_detail(&detail);
     #[cfg(target_os = "linux")]
     eprintln!("\n{message}");
     // A missing driver is not a crash: the next launch shows no
@@ -26,29 +26,36 @@ pub(crate) fn window_failed(error: &dyn std::fmt::Display) -> ! {
     if let Some(root) = quill::settings::safe_app_root() {
         quill::crash_log::mark_clean_exit(&root);
     }
-    show_alert(tr(keys::Q_MISC_QUILL_COULD_NOT_OPEN_A), &message);
+    show_alert(tr(keys::Q_MISC_QUILL_COULD_NOT_OPEN_A), &message, &summary);
     std::process::exit(1)
 }
 
-/// The alert's body. On Linux a missing Vulkan loader, driver or usable
-/// device gets the package to install; other graphics errors get the general
-/// driver steps.
-fn alert_detail(detail: &str) -> String {
+/// The alert's body, and a short version for a desktop notification (which
+/// shows only a few lines). On Linux a missing Vulkan loader, driver or
+/// usable device gets the package to install; other graphics errors get the
+/// general driver steps.
+fn alert_detail(detail: &str) -> (String, String) {
     #[cfg(target_os = "linux")]
     {
         let setup = vulkan::probe();
         if let Some(missing) = vulkan::diagnose(detail, &setup) {
-            return vulkan::message(&missing, setup.virtio_gpu, detail);
+            return (
+                vulkan::message(&missing, setup.virtio_gpu, detail),
+                vulkan::summary(&missing).to_owned(),
+            );
         }
     }
     #[cfg(target_os = "linux")]
     if is_vulkan_failure(detail) {
-        return quill::lang::tr_with(
-            keys::Q_MISC_QUILL_COULD_NOT_OPEN_A_GPU,
-            &[("detail", detail)],
+        return (
+            quill::lang::tr_with(
+                keys::Q_MISC_QUILL_COULD_NOT_OPEN_A_GPU,
+                &[("detail", detail)],
+            ),
+            tr(keys::Q_MISC_VULKAN_SUMMARY_GPU).to_owned(),
         );
     }
-    detail.to_string()
+    (detail.to_string(), detail.to_string())
 }
 
 /// Whether the window error comes from the graphics stack (GPUI on Linux
@@ -62,7 +69,7 @@ fn is_vulkan_failure(detail: &str) -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn show_alert(title: &str, detail: &str) {
+fn show_alert(title: &str, detail: &str, _summary: &str) {
     use objc2::MainThreadMarker;
     use objc2_app_kit::NSAlert;
     use objc2_foundation::NSString;
@@ -77,7 +84,7 @@ fn show_alert(title: &str, detail: &str) {
 }
 
 #[cfg(target_os = "windows")]
-fn show_alert(title: &str, detail: &str) {
+fn show_alert(title: &str, detail: &str, _summary: &str) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         MB_ICONERROR, MB_OK, MB_SETFOREGROUND, MessageBoxW,
     };
@@ -100,7 +107,7 @@ fn show_alert(title: &str, detail: &str) {
 /// helper when one is installed, otherwise a desktop notification (which
 /// needs no GPU). stderr already has the message too.
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn show_alert(title: &str, detail: &str) {
+fn show_alert(title: &str, detail: &str, summary: &str) {
     use std::process::{Command, Stdio};
     let text = format!("{title}.\n\n{detail}");
     let zenity = Command::new("zenity")
@@ -129,7 +136,7 @@ fn show_alert(title: &str, detail: &str) {
         return;
     }
     #[cfg(target_os = "linux")]
-    if let Err(error) = notify(title, detail) {
+    if let Err(error) = notify(title, summary) {
         eprintln!("quill: could not show a notification either: {error}");
     }
 }

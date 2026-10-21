@@ -490,6 +490,9 @@
 "qll_misc_vulkan_install_hardware" = "For faster drawing, install your graphics card's driver instead: vulkan-radeon or vulkan-intel on Arch (mesa-vulkan-drivers elsewhere) for AMD and Intel, or the NVIDIA driver for NVIDIA cards.";
 "qll_misc_vulkan_check_hardware" = "If your graphics card's driver is meant to work, check that its kernel driver is loaded and that your user can open /dev/dri.";
 "qll_misc_vulkan_start_again" = "Then start Quill again.\n\nDetails: {detail}";
+"qll_misc_vulkan_summary_lavapipe" = "No Vulkan device can draw the window. Install lavapipe: vulkan-swrast on Arch, mesa-vulkan-drivers on Debian, Ubuntu and Fedora.";
+"qll_misc_vulkan_summary_loader" = "The Vulkan graphics loader is not installed. Install vulkan-icd-loader and vulkan-swrast on Arch, or libvulkan1 and mesa-vulkan-drivers on Debian and Ubuntu.";
+"qll_misc_vulkan_summary_gpu" = "The graphics driver could not draw the window. Start Quill from a terminal to see what to check.";
 "qll_misc_quill_needs_access_to_your" = "Quill needs access to your {device} to record. Turn on \"Let desktop apps access your {device_2}\" in Settings › Privacy & security › {pane}.";
 "qll_misc_quill_needs_access_to_your_2" = "Quill needs access to your {device} to record. Allow it in System Settings → Privacy & Security → {pane}.";
 "qll_misc_quit_quill" = "Quit Quill";
