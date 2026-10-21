@@ -19,7 +19,7 @@ jobs:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: app name copy
@@ -123,7 +123,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
       - uses: Swatinem/rust-cache@v2
       - name: build UI binary
         run: cargo build --features demo-capture --locked --bin quill
@@ -166,7 +166,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny@0.20.2,cargo-about@0.9.2
