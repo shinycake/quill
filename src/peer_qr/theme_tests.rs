@@ -470,3 +470,86 @@ fn someone_elses_box_shows_their_theme_and_takes_no_picks() {
     qr.apply(QrAction::PickColor(SwatchKey::Backdrop(1)), env(false));
     assert_eq!(qr.choice(), served);
 }
+
+fn backdrop_pick(id: i32) -> ThemeChoice {
+    ThemeChoice::Emoji {
+        color: SwatchKey::Backdrop(id),
+        emoji: Vec::new(),
+    }
+}
+
+fn pick_and_close(qr: &mut PeerQrBox, key: SwatchKey) -> Vec<QrEffect> {
+    qr.apply(QrAction::OpenPanel(QrPanel::Colors), env(true));
+    qr.apply(QrAction::PickColor(key), env(true));
+    qr.apply(QrAction::ClosePanel, env(true))
+}
+
+#[test]
+fn a_failed_save_is_sent_again_only_after_another_pick() {
+    let mut qr = own_box();
+    qr.apply(QrAction::Served(ThemeChoice::default()), env(true));
+    let effects = pick_and_close(&mut qr, SwatchKey::Backdrop(3));
+    let ticket = ticket_of(&effects);
+    qr.apply(
+        QrAction::SaveAnswer {
+            ticket,
+            result: Err("Too many attempts.".into()),
+        },
+        env(true),
+    );
+    // Opening and closing a panel, or the box, does not resend it.
+    qr.apply(QrAction::OpenPanel(QrPanel::Emoji), env(true));
+    assert!(saves(&qr.apply(QrAction::ClosePanel, env(true))).is_empty());
+    assert!(saves(&pick_and_close(&mut qr, SwatchKey::Backdrop(3))).is_empty());
+    assert!(saves(&qr.apply(QrAction::Closing, env(true))).is_empty());
+    // A different pick goes out, and so does the failed one picked again
+    // after it.
+    let effects = pick_and_close(&mut qr, SwatchKey::Backdrop(4));
+    assert_eq!(saves(&effects), vec![backdrop_pick(4)]);
+    qr.apply(
+        QrAction::SaveAnswer {
+            ticket: ticket_of(&effects),
+            result: Ok(backdrop_pick(4)),
+        },
+        env(true),
+    );
+    assert_eq!(
+        saves(&pick_and_close(&mut qr, SwatchKey::Backdrop(3))),
+        vec![backdrop_pick(3)]
+    );
+}
+
+#[test]
+fn the_default_is_not_saved_while_the_saved_theme_is_unknown() {
+    let mut qr = own_box();
+    qr.apply(QrAction::OpenPanel(QrPanel::Colors), env(true));
+    qr.apply(QrAction::PickColor(SwatchKey::Backdrop(3)), env(true));
+    qr.apply(QrAction::PickColor(SwatchKey::Default), env(true));
+    assert!(saves(&qr.apply(QrAction::ClosePanel, env(true))).is_empty());
+    // Once the saved theme is known, going back to the default saves.
+    qr.apply(QrAction::Served(backdrop_pick(5)), env(true));
+    assert_eq!(
+        saves(&pick_and_close(&mut qr, SwatchKey::Default)),
+        vec![ThemeChoice::default()]
+    );
+}
+
+#[test]
+fn a_gifts_request_for_another_owner_never_reuses_a_serial() {
+    use crate::peer_qr::theme::{GIFTS_RETRY_SECS, ThemeOwner};
+    let me = ThemeOwner::User(1);
+    let channel = ThemeOwner::Supergroup(113);
+    let mut gifts = ThemeGifts::default();
+    let own = gifts.start(me, false, 0).unwrap();
+    let theirs = gifts.start(channel, false, 0).unwrap();
+    assert_ne!(own.serial, theirs.serial);
+    assert!(!gifts.is_current(me, own.serial));
+    assert!(gifts.is_current(channel, theirs.serial));
+    // A failed next page waits, then may be asked for again.
+    gifts.accept(vec![gift(1, "r1")], "page2".into(), true);
+    assert!(gifts.start(channel, true, 0).is_some());
+    gifts.fail(10);
+    assert_eq!(gifts.list.len(), 1);
+    assert!(!gifts.complete && !gifts.wants_more(10 + GIFTS_RETRY_SECS - 1));
+    assert!(gifts.wants_more(10 + GIFTS_RETRY_SECS));
+}

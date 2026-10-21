@@ -337,11 +337,82 @@ pub struct ThemeGifts {
     pub loaded: bool,
     pub complete: bool,
     pub loading: bool,
-    /// Tells a page for the current request from an older one.
+    /// Tells a page for the current request from an older one. It keeps
+    /// counting when the list moves to another owner, so a late page for
+    /// the old owner never matches.
     pub serial: u64,
+    /// The next page failed: the panel stops asking for more until
+    /// `retry_at` (unix seconds).
+    pub retry_at: Option<i64>,
+}
+
+/// How long the gifts panel waits after a failed page before it asks for
+/// the next one again.
+pub const GIFTS_RETRY_SECS: i64 = 5;
+
+/// What a gifts request asks for: its serial and the offset to start from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GiftsRequest {
+    pub serial: u64,
+    pub offset: String,
 }
 
 impl ThemeGifts {
+    /// A request for `owner`'s list: the first page again, or the next
+    /// one when there is one, none is on its way and none failed in the
+    /// last few seconds. A list for another owner starts empty.
+    pub fn start(&mut self, owner: ThemeOwner, more: bool, now: i64) -> Option<GiftsRequest> {
+        if self.owner != Some(owner) {
+            *self = ThemeGifts {
+                owner: Some(owner),
+                serial: self.serial,
+                ..ThemeGifts::default()
+            };
+        }
+        if more && !self.wants_more(now) {
+            return None;
+        }
+        self.serial += 1;
+        self.loading = true;
+        self.retry_at = None;
+        Some(GiftsRequest {
+            serial: self.serial,
+            offset: if more {
+                self.offset.clone()
+            } else {
+                String::new()
+            },
+        })
+    }
+
+    /// The panel may ask for the next page.
+    pub fn wants_more(&self, now: i64) -> bool {
+        self.loaded
+            && !self.complete
+            && !self.loading
+            && self.retry_at.is_none_or(|at| now >= at)
+    }
+
+    /// A page or failure belongs to the request now on its way.
+    pub fn is_current(&self, owner: ThemeOwner, serial: u64) -> bool {
+        self.owner == Some(owner) && self.serial == serial
+    }
+
+    /// The request failed. The list stays as it was; the empty state shows
+    /// only when there is nothing to list. A failed next page is retried
+    /// after [`GIFTS_RETRY_SECS`].
+    pub fn fail(&mut self, now: i64) {
+        self.loading = false;
+        if self.loaded {
+            self.retry_at = Some(now.saturating_add(GIFTS_RETRY_SECS));
+        } else {
+            // No first page ever came: show what there is (nothing) as
+            // a whole list, as tdesktop does.
+            self.loaded = true;
+            self.complete = true;
+        }
+    }
+
     /// A page came back. The first page replaces the list; burned gifts
     /// and gifts already listed are skipped (tdesktop `AppendGifts`).
     pub fn accept(&mut self, gifts: Vec<ThemeGift>, next_offset: String, first: bool) {
@@ -357,6 +428,7 @@ impl ThemeGifts {
         self.offset = next_offset;
         self.loaded = true;
         self.loading = false;
+        self.retry_at = None;
     }
 }
 

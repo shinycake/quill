@@ -173,6 +173,9 @@ pub struct PeerQrBox {
     /// The save in flight, by serial.
     pub saving: Option<(u64, ThemeChoice)>,
     pub save_serial: u64,
+    /// The pick whose save last failed: not sent again until the pick
+    /// changes.
+    pub failed: Option<ThemeChoice>,
 }
 
 impl PeerQrBox {
@@ -189,6 +192,7 @@ impl PeerQrBox {
             chosen: false,
             saving: None,
             save_serial: 0,
+            failed: None,
         }
     }
 
@@ -218,7 +222,7 @@ impl PeerQrBox {
                 if styling {
                     self.color = key;
                     self.gift = None;
-                    self.chosen = true;
+                    self.picked();
                 }
             }
             QrAction::ToggleEmoji(emoji) => {
@@ -229,14 +233,14 @@ impl PeerQrBox {
                         self.color = SwatchKey::Default;
                     }
                     self.toggle_emoji(ThemeEmoji::Plain(emoji));
-                    self.chosen = true;
+                    self.picked();
                 }
             }
             QrAction::PickGift(gift) => {
                 if styling {
                     self.emoji.clear();
                     self.gift = Some(gift);
-                    self.chosen = true;
+                    self.picked();
                 }
             }
             QrAction::MoreGifts => {
@@ -301,6 +305,20 @@ impl PeerQrBox {
         }
     }
 
+    /// Something was picked. A pick away from the one that failed to
+    /// save lets that one be sent again later.
+    fn picked(&mut self) {
+        self.chosen = true;
+        let choice = self.choice();
+        if self
+            .failed
+            .as_ref()
+            .is_some_and(|failed| !failed.same_key(&choice))
+        {
+            self.failed = None;
+        }
+    }
+
     /// The theme may no longer be changed: the panel closes unsaved and
     /// the box shows the saved theme again (tdesktop `RevertToServed`).
     fn lose_rights(&mut self) {
@@ -314,7 +332,9 @@ impl PeerQrBox {
 
     /// Save the pick, once, when a panel or the box closes; nothing when
     /// it is the saved theme or the one being saved (tdesktop
-    /// `SaveAppearance`). A gift with no received id cannot be sent.
+    /// `SaveAppearance`), the pick whose save just failed, or the default
+    /// while the saved theme is not known. A gift with no received id
+    /// cannot be sent.
     fn save(&mut self, env: QrEnv) -> Vec<QrEffect> {
         if !self.chosen || !env.can_save || !self.styled() {
             return Vec::new();
@@ -325,9 +345,17 @@ impl PeerQrBox {
             .as_ref()
             .map(|(_, choice)| choice)
             .or(self.served.as_ref());
-        if baseline.is_some_and(|baseline| baseline.same_key(&choice))
-            || choice.input_json().is_none()
-        {
+        let unchanged = match baseline {
+            Some(baseline) => baseline.same_key(&choice),
+            // The saved theme is not known yet: a pick back to the
+            // default could erase a theme this box never saw.
+            None => choice.same_key(&ThemeChoice::default()),
+        };
+        let failed_before = self
+            .failed
+            .as_ref()
+            .is_some_and(|failed| failed.same_key(&choice));
+        if unchanged || failed_before || choice.input_json().is_none() {
             return Vec::new();
         }
         self.save_serial += 1;
@@ -351,20 +379,26 @@ impl PeerQrBox {
         if ticket.box_id != self.id {
             return Vec::new();
         }
-        if self
+        let sent = self
             .saving
-            .as_ref()
-            .is_some_and(|(serial, _)| *serial == ticket.serial)
-        {
-            self.saving = None;
-        }
+            .take_if(|(serial, _)| *serial == ticket.serial)
+            .map(|(_, choice)| choice);
         match result {
             Ok(saved) => {
                 self.served = Some(saved);
+                self.failed = None;
                 Vec::new()
             }
-            Err(reason) if reason.is_empty() => Vec::new(),
-            Err(reason) => vec![QrEffect::Toast(QrToast::Failed(reason))],
+            Err(reason) => {
+                if sent.is_some() {
+                    self.failed = sent;
+                }
+                if reason.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![QrEffect::Toast(QrToast::Failed(reason))]
+                }
+            }
         }
     }
 

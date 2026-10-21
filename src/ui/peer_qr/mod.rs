@@ -159,6 +159,10 @@ impl PeerQrUi {
 }
 
 impl QuillApp {
+    /// Only the demo serves gifts pages without a server.
+    #[cfg(not(feature = "demo-capture"))]
+    fn qr_demo_more_gifts(&mut self, _now: i64) {}
+
     /// The session's part for the box, live or demo.
     fn qr_data_mut(&mut self) -> Option<&mut PeerQrData> {
         match self.live.as_mut() {
@@ -321,8 +325,11 @@ impl QuillApp {
                 QrEffect::Toast(toast) => self.show_qr_toast(toast, cx),
                 QrEffect::SaveTheme { ticket, choice } => self.qr_save_theme(ticket, choice, cx),
                 QrEffect::LoadGifts { more } => {
+                    let now = quill::local_time::now_unix();
                     if let (Some(peer), Some(live)) = (self.qr_peer(), self.live.as_mut()) {
-                        let _ = live.driver.fetch_share_theme_gifts(peer, more);
+                        let _ = live.driver.fetch_share_theme_gifts(peer, more, now);
+                    } else if more {
+                        self.qr_demo_more_gifts(now);
                     }
                 }
             }

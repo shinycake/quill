@@ -13,10 +13,16 @@ impl Session {
         self.users_state.peer_qr.keep_theme(owner, theme);
     }
 
-    /// A page of the gifts panel's list: only the current request's, only
-    /// upgraded gifts that are not burned.
-    pub(crate) fn apply_share_theme_gifts(&mut self, page: GiftsPage, serial: u64, first: bool) {
-        if self.users_state.peer_qr.gifts.serial != serial {
+    /// A page of the gifts panel's list: only the current request's for
+    /// the list's owner, only upgraded gifts that are not burned.
+    pub(crate) fn apply_share_theme_gifts(
+        &mut self,
+        page: GiftsPage,
+        owner: ThemeOwner,
+        serial: u64,
+        first: bool,
+    ) {
+        if !self.users_state.peer_qr.gifts.is_current(owner, serial) {
             return;
         }
         let gifts: Vec<ThemeGift> = page

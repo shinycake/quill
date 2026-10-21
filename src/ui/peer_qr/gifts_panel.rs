@@ -20,7 +20,7 @@ use quill::lang::{keys, tr};
 use quill::peer_qr::gift_tiles::{
     EMPTY_BUTTON, EMPTY_BUTTON_SKIP, EMPTY_PADDING, EMPTY_STICKER, EMPTY_TEXT_SKIP,
     EMPTY_TEXT_WIDTH, EMPTY_TITLE_SKIP, GIFT_RADIUS, GIFT_SKIP, TILE_MODEL_RATIO,
-    gifts_panel_height, square_size, tile_rect,
+    gifts_panel_height, grid_row, square_size, tile_rect,
 };
 use quill::peer_qr::layout::{PANEL_PADDING, panel_height};
 use quill::peer_qr::pattern::Rect;
@@ -92,7 +92,7 @@ impl QuillApp {
         let gifts = &session.users_state.peer_qr.gifts;
         let layout = gifts_layout(gifts);
         let list = gifts.list.clone();
-        let more = gifts.loaded && !gifts.complete && !gifts.loading;
+        let more = gifts.wants_more(quill::local_time::now_unix());
         let chosen = self
             .peer_qr
             .open
@@ -139,8 +139,11 @@ impl QuillApp {
     ) -> impl IntoElement {
         let size = square_size(width);
         let rows = list.len().div_ceil(GIFT_COLUMNS);
-        let sizes: Rc<Vec<ItemSize<Pixels>>> =
-            Rc::new(vec![ItemSize::new(px(0.), at(size + GIFT_SKIP)); rows]);
+        let sizes: Rc<Vec<ItemSize<Pixels>>> = Rc::new(
+            (0..rows)
+                .map(|row| ItemSize::new(px(0.), at(grid_row(width, row, rows).0)))
+                .collect(),
+        );
         let list = Rc::new(list);
         v_virtual_list(
             cx.entity(),
@@ -167,6 +170,7 @@ impl QuillApp {
                             .collect::<Vec<_>>();
                         div()
                             .px(at(PANEL_PADDING))
+                            .pt(at(grid_row(width, row, rows).1))
                             .flex()
                             .gap(at(GIFT_SKIP))
                             .children(tiles)
@@ -174,7 +178,6 @@ impl QuillApp {
                     .collect::<Vec<_>>()
             },
         )
-        .pt(at(PANEL_PADDING))
         .size_full()
     }
 

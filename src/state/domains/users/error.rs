@@ -38,12 +38,11 @@ impl Session {
                 self.users_state.peer_qr.backdrops.fail();
             }
             Some(RequestPurpose::Users(UsersPurpose::GetShareThemeGifts {
-                serial, first, ..
+                owner, serial, ..
             })) => {
-                // tdesktop takes a failure as an empty last page.
                 let gifts = &mut self.users_state.peer_qr.gifts;
-                if gifts.serial == serial {
-                    gifts.accept(Vec::new(), String::new(), first);
+                if gifts.is_current(owner, serial) {
+                    gifts.fail(crate::local_time::now_unix());
                 }
             }
             Some(RequestPurpose::Users(UsersPurpose::SetProfileShareTheme { ticket })) => {
