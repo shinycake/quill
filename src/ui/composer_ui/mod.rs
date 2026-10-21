@@ -27,7 +27,6 @@ use quill::ids::{ChatId, FileId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
-use quill::telegram::envelope::effective_content;
 use quill::telegram::requests::SelfDestructSend;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -130,32 +129,17 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let full_text = self
-            .session()
-            .and_then(|session| session.histories.get(&chat_id.0))
-            .and_then(|history| history.messages.get(&message_id.0))
-            .and_then(|message| {
-                Self::message_copyable_text(effective_content(
-                    &message.content,
-                    message.ephemeral.as_ref(),
-                ))
-            })
-            .unwrap_or_default();
         let quote = quote.trim();
-        let Some(position) = quill::composer::quote_position(&full_text, quote) else {
+        let Some(selection) = self
+            .message_quotable(chat_id, message_id)
+            .and_then(|text| text.quote_for(quote))
+        else {
             // Not verbatim text of the message (it shouldn't happen for a
             // selection); reply to the whole message instead.
             self.begin_reply_from_message(chat_id, message_id, window, cx);
             return;
         };
-        let reply = quill::composer::ComposerReplyTo::with_quote(
-            chat_id,
-            message_id,
-            quill::composer::QuoteSelection {
-                text: quote.to_string(),
-                position,
-            },
-        );
+        let reply = quill::composer::ComposerReplyTo::with_quote(chat_id, message_id, selection);
         self.begin_reply_to(reply, window, cx);
         cx.notify();
     }

@@ -126,6 +126,9 @@ pub struct MessageReplyTo {
     pub chat_id: ChatId,
     pub message_id: MessageId,
     pub quote_text: Option<String>,
+    /// Formatting of `quote_text` (`textQuote.text.entities`), which also
+    /// covers a quote cut from a rich message.
+    pub quote_entities: Vec<crate::text::TextEntity>,
     pub content_preview: Option<String>,
     /// `messageReplyToMessage.origin`: who wrote the replied message when it
     /// sits in another chat or topic (null for same-chat replies).
@@ -727,13 +730,27 @@ pub(crate) fn parse_reply_to(value: Option<&Value>) -> Option<MessageReplyTo> {
             if message_id == 0 {
                 return None;
             }
-            let quote_text = value.get("quote").and_then(|quote| {
-                if quote.is_null() {
-                    return None;
-                }
-                let text = parse_formatted_text(quote.get("text"));
-                if text.is_empty() { None } else { Some(text) }
-            });
+            let (quote_text, quote_entities) = value
+                .get("quote")
+                .and_then(|quote| {
+                    if quote.is_null() {
+                        return None;
+                    }
+                    let (mut text, mut entities) = parse_caption(quote.get("text"));
+                    // A quote from a rich message comes as `rich_texts` with
+                    // an empty `text` (`schema/td_api.tl:3471`).
+                    if text.is_empty()
+                        && let Some(rich_texts) = quote.get("rich_texts").and_then(Value::as_array)
+                    {
+                        (text, entities) = crate::rich::quote_rich_texts_display(rich_texts);
+                    }
+                    if text.is_empty() {
+                        None
+                    } else {
+                        Some((Some(text), entities))
+                    }
+                })
+                .unwrap_or_default();
             let content_preview = value.get("content").and_then(|content| {
                 if content.is_null() {
                     return None;
@@ -753,6 +770,7 @@ pub(crate) fn parse_reply_to(value: Option<&Value>) -> Option<MessageReplyTo> {
                 chat_id: ChatId(int53_or_zero(value.get("chat_id"))),
                 message_id: MessageId(message_id),
                 quote_text,
+                quote_entities,
                 content_preview,
                 origin: parse_message_origin(value.get("origin")),
                 origin_send_date: value
@@ -774,6 +792,7 @@ pub(crate) fn parse_reply_to(value: Option<&Value>) -> Option<MessageReplyTo> {
                 chat_id: ChatId(int53_or_zero(value.get("story_poster_chat_id"))),
                 message_id: MessageId(0),
                 quote_text: None,
+                quote_entities: Vec::new(),
                 content_preview: None,
                 origin: None,
                 origin_send_date: 0,

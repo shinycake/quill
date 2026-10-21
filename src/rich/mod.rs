@@ -15,9 +15,13 @@ use std::path::PathBuf;
 mod input;
 mod markup;
 mod parse;
+mod quote;
 pub use input::*;
 pub use markup::*;
 pub use parse::*;
+pub use quote::{
+    QuoteRichText, QuoteStyle, join_quote_texts, quote_rich_texts_display, rich_message_quote_texts,
+};
 
 /// One page block, either parsed from an incoming `pageBlock*` or produced
 /// by the rich-text editor. Text is plain; `entities` carry the inline

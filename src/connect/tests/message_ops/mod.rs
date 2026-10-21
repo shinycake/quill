@@ -31,14 +31,8 @@ fn driver_sends_a_reply_aimed_at_another_chat_as_external() {
     let seq = AtomicU64::new(0);
     seed_ready_alice(&mut driver, &seq, &dyn_sink);
 
-    let reply = ComposerReplyTo::with_quote(
-        ChatId(12),
-        MessageId(40),
-        QuoteSelection {
-            text: "else".into(),
-            position: 5,
-        },
-    );
+    let reply =
+        ComposerReplyTo::with_quote(ChatId(12), MessageId(40), QuoteSelection::plain("else", 5));
     // Not aimed at chat 7: no reply goes out.
     let snap = crate::composer::ComposerSnapshot::capture(
         ChatId(7),
@@ -615,10 +609,7 @@ fn driver_send_snapshot_carries_quote() {
     .with_reply(Some(ComposerReplyTo::with_quote(
         ChatId(7),
         MessageId(50),
-        QuoteSelection {
-            text: "already".to_string(),
-            position: 6,
-        },
+        QuoteSelection::plain("already", 6),
     )));
     let extra = driver.send_snapshot(&snap).unwrap();
     let send_json = recorder.snapshot().last().cloned().expect("sendMessage");

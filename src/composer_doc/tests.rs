@@ -296,6 +296,7 @@ fn a_date_travels_as_a_date_entity_and_comes_back_as_a_date() {
             utf8_end: 13,
             kind: TextEntityKind::DateTime {
                 unix_time: 1_790_632_300,
+                format: Default::default(),
             },
         }],
     );

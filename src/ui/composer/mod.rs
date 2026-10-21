@@ -37,7 +37,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 pub(super) fn apply_ready_reply(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let json = r#"{"@type":"updateNewMessage","message":{"id":104,"chat_id":11,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Got it — quoting you.","entities":[]}},"reply_to":{"@type":"messageReplyToMessage","chat_id":11,"message_id":101,"quote":{"@type":"textQuote","text":{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]},"rich_texts":[],"position":0,"is_manual":false},"checklist_task_id":0,"poll_option_id":""}}}"#;
+    let json = r#"{"@type":"updateNewMessage","message":{"id":104,"chat_id":11,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Got it — quoting you.","entities":[]}},"reply_to":{"@type":"messageReplyToMessage","chat_id":11,"message_id":101,"quote":{"@type":"textQuote","text":{"@type":"formattedText","text":"Hello from injected JSON.","entities":[{"@type":"textEntity","offset":0,"length":5,"type":{"@type":"textEntityTypeBold"}},{"@type":"textEntity","offset":11,"length":8,"type":{"@type":"textEntityTypeItalic"}},{"@type":"textEntity","offset":20,"length":4,"type":{"@type":"textEntityTypeStrikethrough"}}]},"rich_texts":[],"position":0,"is_manual":false},"checklist_task_id":0,"poll_option_id":""}}}"#;
     if let Some(owned) = copy_and_parse(json, seq, &dyn_sink) {
         session.apply(owned);
     }
