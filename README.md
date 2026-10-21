@@ -252,6 +252,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Bubble tails and grouped-message corner radii <!-- parity:render-bubble-tails -->
 - [x] Sender avatar sticks to the bottom of a group of messages while scrolling <!-- parity:render-sticky-avatar -->
 - [x] Code blocks show a language header with a Copy button <!-- parity:render-code-block-header -->
+- [ ] Syntax highlighting in code blocks, from the block's language (tdesktop libprisma; GPUI Kit 0.8 `syntect` feature) <!-- parity:render-code-syntax-highlight -->
 - [x] "Photo has expired" style placeholders for expired media (partial: generic unsupported card for some) <!-- parity:render-expired-media -->
 - [x] Fact-check block under messages <!-- parity:render-fact-check -->
 - [x] "About sponsored messages" info box from the Ad menu <!-- parity:render-sponsored-info -->
@@ -671,6 +672,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 #### View stories
 - [x] Active-story tray above the chat list, unread ring vs muted read ring (ui/mod.rs:7566 story_tray; DECISIONS.md Phase 9.1) <!-- parity:stories-tray -->
+- [ ] Elastic chat list: overscroll at both ends, and pulling down expands the story tray (tdesktop `setOverscrollTypes`; GPUI Kit 0.8 shared bounce engine) <!-- parity:chatlist-elastic-overscroll -->
 - [x] Tap a tray entry opens fullscreen viewer on the first unread story (tdesktop `toOpen`), or the first story when all are read; missing details prefetched via getStory (ui/mod.rs:5427 open_story_viewer) <!-- parity:stories-viewer-open -->
 - [x] Viewer renders photo stories at full size and video stories (video shows thumbnail only; full clip not renderable by the img element) (src/story_viewer.rs; DECISIONS.md Phase 9.1) <!-- parity:stories-viewer-photo-video -->
 - [x] Viewer shows poster name + "Story N of M" + caption with formatted entities (src/story_viewer.rs:55-56 caption fields) <!-- parity:stories-viewer-caption -->

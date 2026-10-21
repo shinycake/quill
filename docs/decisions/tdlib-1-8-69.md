@@ -74,3 +74,12 @@ features and are not built here.
   would open Fragment), `--connect-smoke` (it opens the real data root and
   Keychain item), and the Windows and Linux builds (both read the pin from
   `pins.rs`; CI caches are keyed on it).
+
+## For follow-up work
+
+New in 1.8.69 and tracked as README parity items: `gifts-delete`,
+`paid-messages-free-links` (including rendering `messageUnpaidMessagesAllowedByLink`),
+`profile-share-theme`, `data-proxy-web`, `msg-quote-rich-text` and
+`wallet-gift-withdraw-card`. TDLib now expires its own caches of user photos,
+recommendations, invite link info, common chats and public chat search results, so
+Quill needs no eviction of its own for those.
