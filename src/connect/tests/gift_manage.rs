@@ -563,3 +563,29 @@ fn bots_and_self_are_handled_as_recipients() {
     let purpose = RequestPurpose::Payments(PaymentsPurpose::GetAvailableGifts);
     assert!(p.0.session.requests.has_purpose(purpose));
 }
+
+#[test]
+fn a_channel_creator_can_delete_its_gift_and_an_admin_cannot() {
+    let mut p = parts();
+    for (id, title) in [(-1001, "Mine"), (-1002, "Theirs")] {
+        feed(
+            &mut p,
+            json!({"@type": "updateNewChat", "chat": {"id": id, "title": title, "unread_count": 0,
+                "type": {"@type": "chatTypeSupergroup", "supergroup_id": -id - 1_000_000_000_000_i64, "is_channel": true}}}),
+        );
+    }
+    p.0.session.chats.get_mut(&-1001).unwrap().my_member_status =
+        Some(crate::telegram::envelope::ChannelMemberStatus::Creator);
+    p.0.session.chats.get_mut(&-1002).unwrap().my_member_status =
+        Some(crate::telegram::envelope::ChannelMemberStatus::Administrator);
+    p.0.session.payments.hub.gifts_owner = Some(MessageSender::Chat { chat_id: -1002 });
+    p.0.session.payments.hub.gifts = vec![
+        crate::premium_hub::parse_received_gift(&regular("a", json!({"can_be_deleted": true})))
+            .unwrap(),
+    ];
+    assert!(p.0.delete_received_gift("a").is_err());
+    assert_eq!(count(&p.1, "deleteGift"), 0);
+    p.0.session.payments.hub.gifts_owner = Some(MessageSender::Chat { chat_id: -1001 });
+    p.0.delete_received_gift("a").unwrap();
+    assert_eq!(sent_request(&p.1, "deleteGift")["received_gift_id"], "a");
+}

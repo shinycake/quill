@@ -465,6 +465,8 @@ pub struct GiftInfo {
     pub colors: Option<crate::gift_colors::UpgradedGiftColors>,
     /// Model, symbol, backdrop, craft chance and listing of a collectible.
     pub collectible: Option<Box<upgraded::Collectible>>,
+    /// A limited-supply or auction gift (tdesktop `limitedCount` / `auction()`).
+    pub limited: bool,
 }
 
 fn sticker_content(
@@ -532,6 +534,7 @@ pub fn parse_gift_info(gift: &Value) -> GiftInfo {
                 .get("colors")
                 .and_then(crate::gift_colors::parse_upgraded_gift_colors),
             collectible: upgraded::parse_collectible(gift).map(Box::new),
+            limited: false,
         };
     }
     let (sticker, files) = sticker_content(gift.get("sticker"));
@@ -545,6 +548,11 @@ pub fn parse_gift_info(gift: &Value) -> GiftInfo {
         files,
         colors: None,
         collectible: None,
+        limited: int(gift
+            .get("overall_limits")
+            .and_then(|l| l.get("total_count")))
+            > 0
+            || gift.get("auction_info").is_some_and(|a| !a.is_null()),
     }
 }
 

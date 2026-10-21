@@ -7,6 +7,7 @@
 use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
+use quill::ids::MessageId;
 use quill::state::Session;
 
 use crate::ui::message_menu_ui::origin_rows::{FORWARD_CHAT, GIFT_CHAT, REPLIES_CHAT, TIMES_CHAT};
@@ -22,7 +23,7 @@ register_demos![
 ];
 
 impl QuillApp {
-    fn demo_origin_menus(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn demo_origin_menus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use std::sync::atomic::Ordering;
         let mode = std::env::var("QUILL_DEMO_ORIGIN").unwrap_or_else(|_| "forward".into());
         if let Some(session) = self.demo_session.as_mut() {
@@ -31,8 +32,32 @@ impl QuillApp {
             session.open_chat(match mode.as_str() {
                 "gift" => GIFT_CHAT,
                 "replies" => REPLIES_CHAT,
-                "times" => TIMES_CHAT,
+                "times" | "times-menu" => TIMES_CHAT,
                 _ => FORWARD_CHAT,
+            });
+        }
+        if mode == "times-menu" {
+            // The menu of a sent message in a private chat with a read time.
+            // window-scope: demo setup in the one demo window.
+            cx.defer_in(window, |this, window, cx| {
+                this.open_message_menu(
+                    crate::ui::menu_states::MessageMenuState {
+                        chat_id: TIMES_CHAT,
+                        message_id: MessageId(71),
+                        position: point(px(700.), px(300.)),
+                    },
+                    window,
+                    cx,
+                );
+                if let Some(session) = this.demo_session.as_mut() {
+                    let mut audience =
+                        quill::state::MessageAudience::new(TIMES_CHAT, MessageId(71));
+                    audience.read_date = quill::state::Audience::Ready(
+                        quill::telegram::envelope::MessageReadDate::Read(1_773_504_420),
+                    );
+                    session.messages.message_audience = Some(audience);
+                }
+                cx.notify();
             });
         }
         cx.notify();

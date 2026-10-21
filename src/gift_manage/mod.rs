@@ -148,11 +148,16 @@ impl ReceivedGift {
         }
     }
 
-    /// Whether "Delete Gift" is offered in the gift's menu: TDLib says the
-    /// gift is a regular one that the receiver may delete, and the list is
-    /// the signed-in user's own.
-    pub fn can_delete(&self, mine: bool) -> bool {
-        mine && self.manage.can_be_deleted && !self.gift.upgraded && !self.was_refunded
+    /// Whether "Delete Gift" is offered in the gift's menu
+    /// (`CanDeleteSavedStarGift`): TDLib says the gift can be deleted, it is
+    /// a regular unlimited one, and the viewer may delete from this list
+    /// (`allowed`: their own, or a channel they own).
+    pub fn can_delete(&self, allowed: bool) -> bool {
+        allowed
+            && self.manage.can_be_deleted
+            && !self.gift.upgraded
+            && !self.gift.limited
+            && !self.was_refunded
     }
 
     /// Stars the upgrade costs the owner: `Some(0)` when the sender prepaid

@@ -27,6 +27,7 @@ use quill::state::Session;
 pub(super) fn gift_owner_actions(
     session: &Session,
     gift: &ReceivedGift,
+    mine: bool,
     price_input: &Entity<InputState>,
     price_text: &str,
     cx: &mut Context<QuillApp>,
@@ -47,8 +48,8 @@ pub(super) fn gift_owner_actions(
         )
     };
     let mut col = div().flex().flex_col().gap_2();
-    col = pin_section(col, gift, manage, hub.gifts.as_slice(), busy, cx);
-    if let Some(cost) = gift.upgrade_cost(true) {
+    col = pin_section(col, gift, mine, manage, hub.gifts.as_slice(), busy, cx);
+    if let Some(cost) = gift.upgrade_cost(mine) {
         col = upgrade_section(
             col,
             gift,
@@ -60,7 +61,7 @@ pub(super) fn gift_owner_actions(
             cx,
         );
     }
-    match gift.transfer_gate(true, now) {
+    match gift.transfer_gate(mine, now) {
         TransferGate::Later(date) => {
             col = col.child(hint(
                 tr_with(
@@ -76,12 +77,12 @@ pub(super) fn gift_owner_actions(
         TransferGate::Ready { .. } => col = col.child(transfer_button(gift, busy, cx)),
         // tdesktop offers Transfer for a collectible in a TON wallet too;
         // it opens "Action Locked".
-        TransferGate::Unavailable if gift.held_outside_telegram() && !gift.was_refunded => {
+        TransferGate::Unavailable if mine && gift.held_outside_telegram() && !gift.was_refunded => {
             col = col.child(transfer_button(gift, busy, cx));
         }
         TransferGate::Unavailable => {}
     }
-    match gift.resale_gate(true, now) {
+    match gift.resale_gate(mine, now) {
         ResaleGate::Later(date) => {
             col = col.child(hint(
                 tr_with(
@@ -103,7 +104,7 @@ pub(super) fn gift_owner_actions(
         ResaleGate::Unavailable => {}
     }
     // tdesktop's "Craft" in the gift's menu (`CanCraftGift`).
-    if let Some(craft) = super::gift_craft_ui::craft_gift_of(gift) {
+    if let Some(craft) = super::gift_craft_ui::craft_gift_of(gift).filter(|_| mine) {
         col = col.child(
             Button::new("gift-craft")
                 .label(tr(keys::GIFT_CRAFT_MENU_BUTTON))
@@ -114,7 +115,7 @@ pub(super) fn gift_owner_actions(
                 })),
         );
     }
-    if gift.can_delete(true) {
+    if gift.can_delete(session.gifts_deletable()) {
         let id = gift.id.clone();
         col = col.child(
             div().debug_selector(|| "gift-delete".into()).child(
@@ -130,7 +131,7 @@ pub(super) fn gift_owner_actions(
             ),
         );
     }
-    if !manage.collections.is_empty() {
+    if mine && !manage.collections.is_empty() {
         let mut chips = div().flex().flex_wrap().gap_1();
         for collection in &manage.collections {
             let cid = collection.id;
@@ -161,6 +162,7 @@ pub(super) fn gift_owner_actions(
 fn pin_section(
     col: Div,
     gift: &ReceivedGift,
+    mine: bool,
     manage: &quill::gift_manage::GiftManageState,
     gifts: &[ReceivedGift],
     busy: bool,
@@ -172,7 +174,7 @@ fn pin_section(
     }
     let id = gift.id.clone();
     let limit = manage.limits.pinned();
-    match gift.pin_gate(true, pinned_ids(gifts).len(), limit) {
+    match gift.pin_gate(mine, pinned_ids(gifts).len(), limit) {
         PinGate::Pin => col.child(
             Button::new("gift-pin")
                 .label(tr(keys::Q_MONEY_PIN_TO_THE_TOP_OF))

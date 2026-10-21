@@ -378,16 +378,18 @@ impl QuillApp {
                 body = body.child(div().text_sm().child(note.clone()));
             }
             if let Some(gift) = hub.selected_gift() {
-                let owner_actions = mine.then(|| {
-                    let typed = this.payments.gift_price_input.read(cx).value().to_string();
-                    super::gift_owner_actions::gift_owner_actions(
-                        session,
-                        gift,
-                        &this.payments.gift_price_input,
-                        &typed,
-                        cx,
-                    )
-                });
+                let owner_actions =
+                    (mine || gift.can_delete(session.gifts_deletable())).then(|| {
+                        let typed = this.payments.gift_price_input.read(cx).value().to_string();
+                        super::gift_owner_actions::gift_owner_actions(
+                            session,
+                            gift,
+                            mine,
+                            &this.payments.gift_price_input,
+                            &typed,
+                            cx,
+                        )
+                    });
                 body = body.child(gift_details(session, gift, mine, owner_actions, &roots, cx));
             } else {
                 body = body.child(super::gift_manage_ui::gift_collection_tabs(
@@ -857,9 +859,9 @@ fn gift_details(
                 );
             }
         }
-        if let Some(actions) = owner_actions {
-            col = col.child(actions);
-        }
+    }
+    if let Some(actions) = owner_actions {
+        col = col.child(actions);
     }
     if let Some(err) = hub.gifts_error.as_ref() {
         col = col.child(div().text_sm().child(err.clone()));

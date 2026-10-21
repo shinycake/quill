@@ -155,6 +155,22 @@ impl Session {
         }
     }
 
+    /// Whether the open gifts list is one the viewer may delete from:
+    /// their own, or a channel they created (tdesktop `canTransferGifts`).
+    pub fn gifts_deletable(&self) -> bool {
+        let hub = &self.payments.hub;
+        match hub.gifts_owner {
+            Some(crate::telegram::envelope::MessageSender::Chat { chat_id }) => {
+                self.chats.get(&chat_id).is_some_and(|chat| {
+                    chat.is_channel()
+                        && chat.my_member_status
+                            == Some(crate::telegram::envelope::ChannelMemberStatus::Creator)
+                })
+            }
+            _ => hub.gifts_are_mine(self.my_user_id),
+        }
+    }
+
     /// `deleteGift` succeeded. tdesktop `DeleteStarGift`:
     /// `notifyGiftUpdate(Delete)` drops the gift from the grid and the
     /// box, then the toast.

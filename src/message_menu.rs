@@ -60,6 +60,8 @@ pub mod order {
     pub const RESCHEDULE: u8 = 77;
     /// The "N Seen" / "N Reacted" row and the date line follow a separator.
     pub const AUDIENCE: u8 = 95;
+    /// A private chat's read time, under its date line (which takes AUDIENCE).
+    pub const PRIVATE_READ: u8 = 96;
     pub const SENT: u8 = 97;
     /// "This message contains emoji from X pack" closes the menu.
     pub const EMOJI_PACKS: u8 = 99;
