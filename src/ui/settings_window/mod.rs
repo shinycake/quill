@@ -4,6 +4,7 @@
 //! its own and a page opens over it with a back arrow.
 #![deny(clippy::indexing_slicing)]
 
+mod account;
 mod log_out;
 mod pages;
 mod rows;

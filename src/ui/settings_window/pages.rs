@@ -3,10 +3,9 @@
 //! closing one comes back here.
 #![deny(clippy::indexing_slicing)]
 
-use super::rows::{danger_row, group, link_row};
+use super::rows::{group, link_row};
 use super::{QuillApp, SubPage};
 use crate::ui::navigation::NavigationAction as Nav;
-use gpui_kit::assets::IconName;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::settings_catalog::Page;
@@ -39,40 +38,7 @@ impl QuillApp {
     pub(super) fn settings_page_body(&mut self, page: Page, cx: &mut Context<Self>) -> AnyElement {
         let column = div().flex().flex_col().gap_6().w_full();
         match page {
-            Page::Account => column
-                .children(self.settings_phone_suggestion(cx))
-                .child(group(
-                    None,
-                    [
-                        self.nav_row(Nav::Profile, tr(keys::SETTINGS_INFORMATION), None, cx),
-                        self.nav_row(Nav::Accounts, tr(keys::Q_NAVIGATION_ACCOUNTS), None, cx),
-                    ],
-                ))
-                .child(self.contacts_settings_section(cx))
-                .child(group(
-                    Some(tr(keys::Q_SETTINGS_ACCOUNT_SEC_SESSION)),
-                    [self.nav_row(
-                        Nav::Account,
-                        tr(keys::Q_NAVIGATION_ACCOUNT_DELETION_AND_INACTIVITY),
-                        None,
-                        cx,
-                    )],
-                ))
-                // Log out ends the Account page (owner, 2026-10-21: here,
-                // not pinned to the sidebar).
-                .child(group(
-                    None,
-                    [danger_row(
-                        "settings-row-log-out",
-                        IconName::LogOut,
-                        tr(keys::Q_PREFS_LOG_OUT),
-                        cx.listener(|this, _, _, cx| {
-                            this.settings.log_out_confirm = true;
-                            cx.notify();
-                        }),
-                        cx,
-                    )],
-                )),
+            Page::Account => self.account_page(cx),
             Page::Notifications => column.child(group(
                 None,
                 [self.nav_row(
