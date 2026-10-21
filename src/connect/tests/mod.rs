@@ -97,6 +97,7 @@ mod settings;
 mod settings_account;
 mod share;
 mod share_content;
+mod share_theme;
 mod shared_media_search;
 mod shared_media_tabs;
 mod signin_polish;

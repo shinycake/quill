@@ -170,7 +170,7 @@ fn an_emoji_toggles_in_and_out_of_the_pattern(cx: &mut TestAppContext) {
             app.peer_qr
                 .open
                 .as_ref()
-                .map(|open| open.state.emoji.clone())
+                .map(|open| super::plain_picks(&open.state.emoji))
                 .unwrap_or_default()
         })
     };
@@ -627,3 +627,5 @@ fn share_hides_the_box_under_the_chat_chooser_until_cancelled(cx: &mut TestAppCo
         assert_eq!(open.share_image, None);
     });
 }
+
+mod theme;

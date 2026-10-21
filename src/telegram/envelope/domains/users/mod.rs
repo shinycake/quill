@@ -68,6 +68,8 @@ pub enum UsersPayload {
         /// line 2468) — true when it is `blockListMain` (line 9692),
         /// parsed with the same `is_block_list_main` as `chat.block_list`.
         blocked: bool,
+        /// `share_theme`: the QR box's saved theme.
+        share_theme: crate::peer_qr::theme::ShareTheme,
     },
     /// `updateUserFullInfo` — full info changed (schema 1.8.67, line 10744);
     /// the user id is explicit here.
@@ -82,6 +84,8 @@ pub enum UsersPayload {
         /// Slice A6: `block_list` (schema 1.8.67, line 2468), same as
         /// `UserFullInfo::blocked`.
         blocked: bool,
+        /// `share_theme`, as above.
+        share_theme: crate::peer_qr::theme::ShareTheme,
     },
     /// `profileShareThemeBackdrops`: the `getProfileShareThemeBackdrops`
     /// answer.

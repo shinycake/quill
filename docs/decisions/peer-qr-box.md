@@ -37,7 +37,7 @@ Parity item `profile-qr-code-box`, PR 1 of 2. PR 2 adds the upgraded-gift themes
 - **No rotation in the pattern.** GPUI cannot rotate an image. The tiles keep the drift, bob, falloff, entry pop and the swap's shrink and pop. They lose the tilt and sway, dragging, the glide, the bloom from the code, the dust, the wave and the plane fly-in. With reduced motion or power saving the pattern holds its first frame.
 - **Tiles stay off the card and the glass.** tdesktop tucks tiles partly under the card's edge and under its blurred buttons and panels. Quill's glass has no blur, so no tile is drawn where it would touch the card, a button or an open panel. The saved image leaves out tiles touching the card the same way.
 - **Backdrop.** GPUI has no radial gradient, so Quill draws one image per color pair at half size in Rust (off the UI thread) and scales it up. It follows the card while a panel opens. A new color fades in over 220 ms. The backdrop is clipped to the box's rounded corners when it is painted.
-- **Colors and emoji are a preview.** Picking a color or emoji changes this open box only. Saving them as your profile's share theme is PR 2.
+- **Saving the theme** and the upgraded-gift themes are in docs/decisions/profile-share-theme.md (PR 2).
 - **The colors panel** has no ring animation: the white ring is on the chosen circle at once. The hairline under it shows when either gradient color is close to white.
 - **The emoji panel** lists Quill's Unicode emoji catalog, eight to a row, in a virtual list. tdesktop uses its emoji list with sections.
 - **Pattern emoji.** The pattern uses the emoji set's picture when a set is chosen. Otherwise Quill draws the system emoji once into a 128-pixel still through the SVG renderer.

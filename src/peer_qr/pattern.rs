@@ -71,6 +71,10 @@ pub fn node_hash(row: i32, column: i32, salt: u32) -> u32 {
     hash(seeded ^ (column as u32).wrapping_mul(0x85EB_CA6B))
 }
 
+pub(crate) fn node_random_salt(row: i32, column: i32, salt: u32) -> f64 {
+    f64::from(node_hash(row, column, salt)) / 4_294_967_296.
+}
+
 fn node_random(row: i32, column: i32, salt: Salt) -> f64 {
     f64::from(node_hash(row, column, salt as u32)) / 4_294_967_296.
 }
@@ -295,7 +299,7 @@ pub struct Tile {
     pub pick: usize,
 }
 
-fn place_item(falloff: &Falloff, flat: (f64, f64), size: f64) -> Option<Place> {
+pub(crate) fn place_item(falloff: &Falloff, flat: (f64, f64), size: f64) -> Option<Place> {
     let place = falloff.place(flat);
     if place.scale < SCALE_CUTOFF {
         return None;

@@ -152,9 +152,28 @@ impl Session {
                 photo,
                 photo_id,
                 blocked,
-            } => self.apply_user_full_info(
-                bot_info, bio, photo, photo_id, blocked, extras, pending, extra, seq,
-            ),
+                share_theme,
+            } => {
+                // The answer names no user: the request does (as in
+                // `apply_user_full_info`).
+                let user_id = pending
+                    .filter(|p| p.purpose == RequestPurpose::GetUserFullInfo)
+                    .and_then(|p| {
+                        p.user_id.or_else(|| {
+                            p.chat_id
+                                .and_then(|chat_id| self.private_chat_user_id(chat_id))
+                        })
+                    });
+                if let Some(user_id) = user_id {
+                    self.keep_share_theme(
+                        crate::peer_qr::theme::ThemeOwner::User(user_id),
+                        share_theme,
+                    );
+                }
+                self.apply_user_full_info(
+                    bot_info, bio, photo, photo_id, blocked, extras, pending, extra, seq,
+                )
+            }
             UsersPayload::UpdateUserFullInfo {
                 user_id,
                 extras,
@@ -163,7 +182,12 @@ impl Session {
                 photo,
                 photo_id,
                 blocked,
+                share_theme,
             } => {
+                self.keep_share_theme(
+                    crate::peer_qr::theme::ThemeOwner::User(user_id.0),
+                    share_theme,
+                );
                 self.bots.bot_info.insert(user_id.0, bot_info);
                 let photo_file_id = photo.map(|file| {
                     let id = file.id.0;
@@ -215,8 +239,7 @@ impl Session {
             UsersPayload::ProfileShareThemeBackdrops(backdrops) => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetProfileShareThemeBackdrops)
                 {
-                    self.users_state.peer_qr.backdrops =
-                        crate::peer_qr::session::BackdropsFetch::Ready(backdrops);
+                    self.users_state.peer_qr.backdrops.accept(backdrops);
                 }
             }
             UsersPayload::UserLink(answer) => {

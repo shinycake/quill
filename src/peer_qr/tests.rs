@@ -38,6 +38,7 @@ fn env(now: i64) -> QrEnv {
         now,
         price: 50,
         temporary_only: false,
+        can_save: true,
     }
 }
 
@@ -253,7 +254,7 @@ fn emoji_toggle_and_keep_the_last_six() {
         qr.apply(QrAction::ToggleEmoji(emoji.into()), env(0));
     }
     assert_eq!(qr.emoji.len(), MAX_EMOJI);
-    assert_eq!(qr.emoji.first().map(String::as_str), Some("🐱"));
+    assert_eq!(qr.emoji.first().and_then(|e| e.plain()), Some("🐱"));
     qr.apply(QrAction::ToggleEmoji("🍕".into()), env(0));
     assert_eq!(qr.emoji, vec!["🐱", "🎉", "🚀", "🌈", "⭐"]);
     assert_eq!(qr.appearance(&[]).emoji, qr.emoji);

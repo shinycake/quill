@@ -128,6 +128,18 @@ pub enum UsersPurpose {
     GetUserLink {
         free: Option<crate::peer_qr::free::FreeTicket>,
     },
+    /// The QR box's gifts panel: `getReceivedGifts` for the upgraded
+    /// gifts `owner` owns. `serial` tells the current request from an
+    /// older one; `first` is the first page. Response is `receivedGifts`.
+    GetShareThemeGifts {
+        owner: crate::peer_qr::theme::ThemeOwner,
+        serial: u64,
+        first: bool,
+    },
+    /// `setProfileShareTheme` (TDLib 1.8.69). Response is `ok`.
+    SetProfileShareTheme {
+        ticket: crate::peer_qr::state::SaveTicket,
+    },
 }
 
 flat_purposes!(Users(UsersPurpose) {

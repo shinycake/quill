@@ -1,11 +1,12 @@
-//! The open box and its reducer: what it shows, which color and emoji
-//! are picked, which panel is open and which free code is shown. The UI
-//! renders from this and the session alone, and runs the effects
-//! [`PeerQrBox::apply`] returns.
+//! The open box and its reducer: what it shows, which color, emoji or
+//! gift is picked, which panel is open, which free code is shown and
+//! when the theme is saved. The UI renders from this and the session
+//! alone, and runs the effects [`PeerQrBox::apply`] returns.
 
 use super::appearance::{Appearance, Swatch, SwatchKey};
 use super::free::{FreeMenuItem, FreeMode, FreeRequest, FreeResult, FreeState, FreeTicket};
 use super::link::SHARE_CUTOFF_SECS;
+use super::theme::{ThemeChoice, ThemeEmoji, ThemeGift};
 use crate::lang::Key;
 
 /// tdesktop `kMaxEmojiPicks`.
@@ -42,6 +43,14 @@ pub enum QrSubject {
 pub enum QrPanel {
     Colors,
     Emoji,
+    Gifts,
+}
+
+/// Tells this box's save answers from an earlier box's or request's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SaveTicket {
+    pub box_id: u64,
+    pub serial: u64,
 }
 
 /// Something the user did in the box, or a fact it reacts to.
@@ -53,6 +62,20 @@ pub enum QrAction {
     /// Add the emoji, or remove it when already picked; a seventh drops
     /// the oldest (tdesktop `ChooseEmoji`).
     ToggleEmoji(String),
+    /// A tile of the gifts panel (tdesktop `ChooseGift`).
+    PickGift(Box<ThemeGift>),
+    /// The gifts panel scrolled near its end.
+    MoreGifts,
+    /// The peer's saved theme, as the session now knows it.
+    Served(ThemeChoice),
+    /// A `setProfileShareTheme` came back: the theme it saved, or the
+    /// reason it failed (empty when there is none to tell).
+    SaveAnswer {
+        ticket: SaveTicket,
+        result: Result<ThemeChoice, String>,
+    },
+    /// The box is closing: a pick still unsaved is saved now.
+    Closing,
     /// The free-code pill under the card.
     PillClicked,
     MenuDismissed,
@@ -78,6 +101,8 @@ pub struct QrEnv {
     pub price: i64,
     /// The account's own link is itself temporary, so codes are too.
     pub temporary_only: bool,
+    /// The theme may be changed and saved (tdesktop `ShareThemes::CanSave`).
+    pub can_save: bool,
 }
 
 /// A toast the box shows over itself.
@@ -108,6 +133,15 @@ pub enum QrToast {
 pub enum QrEffect {
     RequestFreeCode(FreeTicket),
     Toast(QrToast),
+    /// `setProfileShareTheme` with `choice`.
+    SaveTheme {
+        ticket: SaveTicket,
+        choice: ThemeChoice,
+    },
+    /// The owned upgraded gifts: the first page again, or the next one.
+    LoadGifts {
+        more: bool,
+    },
 }
 
 /// The link the code currently shows.
@@ -126,9 +160,19 @@ pub struct PeerQrBox {
     pub id: u64,
     pub subject: QrSubject,
     pub color: SwatchKey,
-    pub emoji: Vec<String>,
+    pub emoji: Vec<ThemeEmoji>,
+    /// The gift shown instead of the color and emoji.
+    pub gift: Option<Box<ThemeGift>>,
     pub panel: Option<QrPanel>,
     pub free: FreeState,
+    /// The peer's saved theme as last heard; `None` until it is known.
+    pub served: Option<ThemeChoice>,
+    /// Something was picked in this box (tdesktop `chosen`): the box
+    /// stops following the saved theme and saves the pick.
+    pub chosen: bool,
+    /// The save in flight, by serial.
+    pub saving: Option<(u64, ThemeChoice)>,
+    pub save_serial: u64,
 }
 
 impl PeerQrBox {
@@ -138,8 +182,13 @@ impl PeerQrBox {
             subject,
             color: SwatchKey::Default,
             emoji: Vec::new(),
+            gift: None,
             panel: None,
             free: FreeState::default(),
+            served: None,
+            chosen: false,
+            saving: None,
+            save_serial: 0,
         }
     }
 
@@ -149,24 +198,55 @@ impl PeerQrBox {
     }
 
     pub fn apply(&mut self, action: QrAction, env: QrEnv) -> Vec<QrEffect> {
+        let styling = self.styled() && env.can_save;
         match action {
             QrAction::OpenPanel(panel) => {
-                if self.styled() && self.panel.is_none() {
+                if styling && self.panel.is_none() {
                     self.panel = Some(panel);
                     self.free.menu_open = false;
+                    if panel == QrPanel::Gifts {
+                        return vec![QrEffect::LoadGifts { more: false }];
+                    }
                 }
             }
-            QrAction::ClosePanel => self.panel = None,
+            QrAction::ClosePanel => {
+                if self.panel.take().is_some() {
+                    return self.save(env);
+                }
+            }
             QrAction::PickColor(key) => {
-                if self.styled() {
+                if styling {
                     self.color = key;
+                    self.gift = None;
+                    self.chosen = true;
                 }
             }
             QrAction::ToggleEmoji(emoji) => {
-                if self.styled() && !emoji.is_empty() {
-                    self.toggle_emoji(emoji);
+                if styling && !emoji.is_empty() {
+                    // A gift has no emoji: the picks go on the default
+                    // backdrop (tdesktop `BackdropHalf`).
+                    if self.gift.take().is_some() {
+                        self.color = SwatchKey::Default;
+                    }
+                    self.toggle_emoji(ThemeEmoji::Plain(emoji));
+                    self.chosen = true;
                 }
             }
+            QrAction::PickGift(gift) => {
+                if styling {
+                    self.emoji.clear();
+                    self.gift = Some(gift);
+                    self.chosen = true;
+                }
+            }
+            QrAction::MoreGifts => {
+                if styling && self.panel == Some(QrPanel::Gifts) {
+                    return vec![QrEffect::LoadGifts { more: true }];
+                }
+            }
+            QrAction::Served(choice) => self.served(choice),
+            QrAction::SaveAnswer { ticket, result } => return self.save_answer(ticket, result),
+            QrAction::Closing => return self.save(env),
             QrAction::PillClicked => return self.pill_clicked(env),
             QrAction::MenuDismissed => self.free.menu_open = false,
             QrAction::MenuChose(item) => return self.menu_chose(item, env),
@@ -174,12 +254,121 @@ impl PeerQrBox {
                 return self.free_answer(ticket, result, env);
             }
             QrAction::Tick => return self.tick(env),
-            QrAction::Sync => self.sync(env),
+            QrAction::Sync => {
+                self.sync(env);
+                if !env.can_save {
+                    self.lose_rights();
+                }
+            }
         }
         Vec::new()
     }
 
-    fn toggle_emoji(&mut self, emoji: String) {
+    /// What the box shows now.
+    pub fn choice(&self) -> ThemeChoice {
+        match &self.gift {
+            Some(gift) => ThemeChoice::Gift(gift.clone()),
+            None => ThemeChoice::Emoji {
+                color: self.color,
+                emoji: self.emoji.clone(),
+            },
+        }
+    }
+
+    fn show(&mut self, choice: ThemeChoice) {
+        match choice {
+            ThemeChoice::Emoji { color, emoji } => {
+                self.color = color;
+                self.emoji = emoji;
+                self.gift = None;
+            }
+            ThemeChoice::Gift(gift) => {
+                self.emoji.clear();
+                self.gift = Some(gift);
+            }
+        }
+    }
+
+    /// The saved theme changed: shown unless something was picked
+    /// (tdesktop `QrServedThemeValue` and `ApplyServedTheme`).
+    fn served(&mut self, choice: ThemeChoice) {
+        if self.served.as_ref() == Some(&choice) {
+            return;
+        }
+        self.served = Some(choice.clone());
+        if !self.chosen {
+            self.show(choice);
+        }
+    }
+
+    /// The theme may no longer be changed: the panel closes unsaved and
+    /// the box shows the saved theme again (tdesktop `RevertToServed`).
+    fn lose_rights(&mut self) {
+        self.panel = None;
+        if self.chosen {
+            self.chosen = false;
+            let served = self.served.clone().unwrap_or_default();
+            self.show(served);
+        }
+    }
+
+    /// Save the pick, once, when a panel or the box closes; nothing when
+    /// it is the saved theme or the one being saved (tdesktop
+    /// `SaveAppearance`). A gift with no received id cannot be sent.
+    fn save(&mut self, env: QrEnv) -> Vec<QrEffect> {
+        if !self.chosen || !env.can_save || !self.styled() {
+            return Vec::new();
+        }
+        let choice = self.choice();
+        let baseline = self
+            .saving
+            .as_ref()
+            .map(|(_, choice)| choice)
+            .or(self.served.as_ref());
+        if baseline.is_some_and(|baseline| baseline.same_key(&choice))
+            || choice.input_json().is_none()
+        {
+            return Vec::new();
+        }
+        self.save_serial += 1;
+        self.saving = Some((self.save_serial, choice.clone()));
+        vec![QrEffect::SaveTheme {
+            ticket: SaveTicket {
+                box_id: self.id,
+                serial: self.save_serial,
+            },
+            choice,
+        }]
+    }
+
+    /// tdesktop's save `done` and `fail`: the saved theme becomes the
+    /// baseline; a failure is toasted and the pick stays on screen.
+    fn save_answer(
+        &mut self,
+        ticket: SaveTicket,
+        result: Result<ThemeChoice, String>,
+    ) -> Vec<QrEffect> {
+        if ticket.box_id != self.id {
+            return Vec::new();
+        }
+        if self
+            .saving
+            .as_ref()
+            .is_some_and(|(serial, _)| *serial == ticket.serial)
+        {
+            self.saving = None;
+        }
+        match result {
+            Ok(saved) => {
+                self.served = Some(saved);
+                Vec::new()
+            }
+            Err(reason) if reason.is_empty() => Vec::new(),
+            Err(reason) => vec![QrEffect::Toast(QrToast::Failed(reason))],
+        }
+    }
+
+    fn toggle_emoji(&mut self, emoji: ThemeEmoji) {
         if let Some(at) = self.emoji.iter().position(|picked| *picked == emoji) {
             self.emoji.remove(at);
             return;
@@ -352,9 +541,18 @@ impl PeerQrBox {
         Ok(shown)
     }
 
-    /// The backdrop and emoji to draw. A color whose backdrop is no longer
-    /// offered shows the default one.
+    /// The backdrop and pattern to draw: the gift's, or the color's with
+    /// the emoji. A color whose backdrop is not offered shows the default
+    /// one.
     pub fn appearance(&self, swatches: &[Swatch]) -> Appearance {
+        if let Some(gift) = &self.gift {
+            return Appearance {
+                center: gift.center,
+                edge: gift.edge,
+                emoji: Vec::new(),
+                gift: Some(gift.id),
+            };
+        }
         let swatch = swatches
             .iter()
             .find(|swatch| swatch.key == self.color)
@@ -364,6 +562,7 @@ impl PeerQrBox {
             center: swatch.center,
             edge: swatch.edge,
             emoji: self.emoji.clone(),
+            gift: None,
         }
     }
 }

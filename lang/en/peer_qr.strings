@@ -8,6 +8,10 @@
 "lng_group_invite_qr_copied" = "QR Code copied to clipboard.";
 "lng_qr_box_colors" = "Colors";
 "lng_qr_box_emoji" = "Emoji";
+"lng_qr_box_gifts" = "Gifts";
+"lng_qr_box_gifts_empty_title" = "No gifts yet";
+"lng_qr_box_gifts_empty_about" = "Use any collectible gift you own to style your QR code.";
+"lng_qr_box_gifts_browse" = "Browse Gifts";
 "lng_peer_qr_link_expiring" = "This link is about to expire.";
 "lng_peer_qr_link_unavailable" = "This link is unavailable. Please reopen the QR code to try again.";
 "lng_no_paid_token_pill_remove_fee" = "Remove {emoji} {amount} fee";

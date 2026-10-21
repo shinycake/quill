@@ -35,8 +35,21 @@ impl Session {
                 self.users_state.profile_photo_emoji_icons_failed = true;
             }
             Some(RequestPurpose::GetProfileShareThemeBackdrops) => {
-                self.users_state.peer_qr.backdrops =
-                    crate::peer_qr::session::BackdropsFetch::Failed;
+                self.users_state.peer_qr.backdrops.fail();
+            }
+            Some(RequestPurpose::Users(UsersPurpose::GetShareThemeGifts {
+                serial, first, ..
+            })) => {
+                // tdesktop takes a failure as an empty last page.
+                let gifts = &mut self.users_state.peer_qr.gifts;
+                if gifts.serial == serial {
+                    gifts.accept(Vec::new(), String::new(), first);
+                }
+            }
+            Some(RequestPurpose::Users(UsersPurpose::SetProfileShareTheme { ticket })) => {
+                self.users_state
+                    .peer_qr
+                    .fail_save(ticket, error_reason(err));
             }
             Some(RequestPurpose::Users(UsersPurpose::GetUserLink { free })) => {
                 self.users_state.peer_qr.fail_link(free, error_reason(err));
