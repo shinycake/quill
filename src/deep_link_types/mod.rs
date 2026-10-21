@@ -607,9 +607,6 @@ pub fn route(link: &InternalLink, original: &str) -> LinkRoute {
         InternalLink::Settings(SettingsTarget::PrivacyPolicy) => LinkRoute::Message(
             "The Telegram Privacy Policy is at https://telegram.org/privacy.".into(),
         ),
-        InternalLink::Settings(SettingsTarget::Language) => LinkRoute::Message(
-            "Quill is available in English only for now, so there is no language to pick.".into(),
-        ),
         InternalLink::Settings(target) => LinkRoute::Ui(DeepLinkUi::Settings(*target)),
         InternalLink::AuthenticationCode { .. } => LinkRoute::Message(
             "This is a sign-in code link. Codes are only used while signing in, and you are \

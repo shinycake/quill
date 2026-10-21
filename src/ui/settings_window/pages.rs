@@ -136,10 +136,7 @@ impl QuillApp {
                 self.ensure_ptt_delay_slider(cx);
                 column.child(self.call_settings_section(cx))
             }
-            Page::Language => column.child(group(
-                None,
-                [self.nav_row(Nav::Language, tr(keys::SETTINGS_LANGUAGE), None, cx)],
-            )),
+            Page::Language => column.child(self.language_page(cx)),
             Page::Shortcuts => column
                 .children(cards([self.appearance_keybindings_section(cx)]))
                 .child(group(

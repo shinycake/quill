@@ -48,5 +48,8 @@ fn premium_offer_privacy_policy_and_language_settings_links() {
     let language = route_of(
         json!({"@type":"internalLinkTypeSettings","section":{"@type":"settingsSectionLanguage","subsection":""}}),
     );
-    assert!(matches!(&language, LinkRoute::Message(text) if text.contains("English")));
+    assert_eq!(
+        language,
+        LinkRoute::Ui(DeepLinkUi::Settings(SettingsTarget::Language))
+    );
 }

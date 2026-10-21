@@ -69,6 +69,9 @@ impl QuillApp {
         if self.settings.page == Some(Page::Notifications) && page != Page::Notifications {
             self.leave_notification_settings();
         }
+        if self.settings.page == Some(Page::Language) && page != Page::Language {
+            self.close_language_settings(cx);
+        }
         if self.settings.page == Some(Page::DataStorage) && page != Page::DataStorage {
             self.leave_data_storage();
         }
@@ -129,6 +132,9 @@ impl QuillApp {
         self.settings_search_input(window, cx);
         if !window.has_active_dialog(cx) && window.focused(cx).is_none() {
             window.focus(&self.settings.focus, cx);
+        }
+        if self.settings.page == Some(Page::Language) {
+            self.ensure_language_box(window, cx);
         }
         let searching = self.settings_searching(window, cx);
         // A narrow window shows the results in the list's place.
