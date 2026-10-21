@@ -89,7 +89,7 @@ impl QuillApp {
         cx.notify();
     }
     pub(super) fn poll_device_qr(&mut self, cx: &mut Context<Self>) {
-        if !self.privacy.sessions_open
+        if self.settings.page != Some(quill::settings_catalog::Page::Devices)
             || !self.live.as_ref().is_some_and(|live| {
                 matches!(
                     live.driver.session.auth,

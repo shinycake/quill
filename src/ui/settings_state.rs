@@ -34,9 +34,6 @@ pub(crate) struct SettingsUi {
     /// Parity slice (platform-custom-keybindings): saved shortcut overrides
     /// applied to the keymap once the live driver is ready.
     pub(super) keybindings_applied: bool,
-    /// Slice parity:platform-shortcuts-reference: the keyboard shortcuts
-    /// reference dialog is on screen.
-    pub(super) shortcuts_open: bool,
     pub(super) sticker_settings_open: bool,
     /// Settings → Appearance slice: last `(theme mode, accent)` pushed
     /// into the global component theme, so `apply_appearance` only
@@ -110,7 +107,6 @@ impl SettingsUi {
             keybinding_error: None,
             keybinding_focus: cx.focus_handle(),
             keybindings_applied: false,
-            shortcuts_open: false,
             sticker_settings_open: false,
             appearance_applied: None,
             app_theme: Default::default(),

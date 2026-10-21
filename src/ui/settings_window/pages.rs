@@ -61,10 +61,7 @@ impl QuillApp {
             Page::Account => self.account_page(cx),
             Page::Notifications => column.child(self.notifications_page(cx)),
             Page::Privacy => column.child(self.privacy_page(cx)),
-            Page::Devices => column.child(group(
-                None,
-                [self.nav_row(Nav::Sessions, tr(keys::Q_NAVIGATION_DEVICES), None, cx)],
-            )),
+            Page::Devices => column.child(self.sessions_page(cx)),
             Page::Chats => column
                 .children(cards([self.media_settings_section(cx).into_any_element()]))
                 .children(cards([
@@ -120,41 +117,17 @@ impl QuillApp {
                     ))
                     .children(cards([self.update_settings_section(cx)]))
             }
-            Page::Folders => column.child(group(
-                None,
-                [link_row(
-                    "settings-row-folders",
-                    tr(keys::Q_CHATLIST_MANAGE_CHAT_FOLDERS),
-                    None,
-                    cx.listener(|this, _, _, cx| this.open_folder_manage(cx)),
-                    cx,
-                )],
-            )),
+            Page::Folders => column.child(self.folders_page(cx)),
             Page::DataStorage => column.child(self.data_storage_page(cx)),
             Page::Connection => column.child(self.proxy_settings_body(cx)),
             Page::Calls => {
                 self.ensure_ptt_delay_slider(cx);
                 column.child(self.call_settings_section(cx))
             }
-            Page::Language => column.child(group(
-                None,
-                [self.nav_row(Nav::Language, tr(keys::SETTINGS_LANGUAGE), None, cx)],
-            )),
+            Page::Language => column.child(self.language_page(cx)),
             Page::Shortcuts => column
                 .children(cards([self.appearance_keybindings_section(cx)]))
-                .child(group(
-                    None,
-                    [link_row(
-                        "settings-row-shortcuts",
-                        tr(keys::Q_SETTINGS_PAGE_SHORTCUTS),
-                        None,
-                        cx.listener(|this, _, _, cx| {
-                            this.settings.shortcuts_open = true;
-                            cx.notify();
-                        }),
-                        cx,
-                    )],
-                )),
+                .child(self.shortcuts_reference(cx)),
             Page::Telegram => column.child(group(None, self.telegram_rows(cx))),
             Page::About => column
                 .children(cards([self.about_settings_section(cx)]))

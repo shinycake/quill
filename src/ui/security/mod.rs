@@ -123,19 +123,12 @@ impl QuillApp {
         })
     }
 
-    /// kit Phase 2 (redo): sessions hosted in a kit `Dialog` via
-    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
-    pub(super) fn build_sessions_dialog(
-        app: &Entity<QuillApp>,
-        shell: &Entity<QuillShell>,
-        dialog: Dialog,
-        cx: &mut App,
-    ) -> Dialog {
-        let on_close =
-            QuillShell::on_close_kind(app, shell, DialogKind::Sessions, |this, _, cx| {
-                this.close_sessions(cx);
-            });
-        app.update(cx, |this, cx| {
+    /// The Devices settings page: link a device, the sessions grouped like
+    /// tdesktop (this device, incomplete logins, others), terminate all and
+    /// the auto-terminate period; a tapped session shows its details.
+    pub(crate) fn sessions_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let this = self;
+        {
             let session = this.session();
             let sessions = session
                 .as_ref()
@@ -356,9 +349,8 @@ impl QuillApp {
                             .label(tr(keys::SESSIONS_TERMINATE_ALL))
                             .danger()
                             .disabled(!any_other || mutating)
-                            .on_click(cx.listener(|this, _, window, cx| {
+                            .on_click(cx.listener(|this, _, _, cx| {
                                 this.begin_terminate_all_sessions(cx);
-                                this.close_kit_dialog_if_done(DialogKind::Sessions, window, cx);
                             })),
                     ),
                 );
@@ -374,52 +366,26 @@ impl QuillApp {
                 this.privacy.extra.session_details = None;
                 body = body.child(this.sessions_ttl_section(cx));
             }
-            let body = match details {
-                Some(details) => div().flex().flex_col().gap_2().child(details),
-                None => body,
-            };
-            let footer = div()
-                .flex()
-                .justify_end()
-                .gap_2()
-                .child(
-                    Button::new("sessions-refresh")
-                        .label(tr(keys::Q_PREFS_REFRESH))
-                        .ghost()
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.refresh_sessions(cx);
-                            this.close_kit_dialog_if_done(DialogKind::Sessions, window, cx);
-                        })),
-                )
-                .child(
-                    Button::new("close-sessions")
-                        .label(tr(keys::CLOSE))
-                        .ghost()
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.close_sessions(cx);
-                            this.close_kit_dialog_if_done(DialogKind::Sessions, window, cx);
-                        })),
-                );
-            dialog
-                .overlay(true)
-                .title(crate::ui::shell::dialog_title(tr(
-                    keys::SETTINGS_SHOW_SESSIONS,
-                )))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
-                .footer(footer)
-                .on_close(on_close)
-        })
+            match details {
+                Some(details) => div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(details)
+                    .into_any_element(),
+                None => body
+                    .child(
+                        div().flex().child(
+                            Button::new("sessions-refresh")
+                                .label(tr(keys::Q_PREFS_REFRESH))
+                                .outline()
+                                .small()
+                                .on_click(cx.listener(|this, _, _, cx| this.refresh_sessions(cx))),
+                        ),
+                    )
+                    .into_any_element(),
+            }
+        }
     }
 
     /// kit Phase 2 (redo): connected websites hosted in a kit `Dialog`
@@ -692,7 +658,13 @@ impl QuillApp {
     /// the authoritative `getActiveSessions` answer (cached state reused,
     /// in-flight fetch deduped). Demo: the fixture is already injected.
     pub(super) fn open_sessions(&mut self, cx: &mut Context<Self>) {
-        self.privacy.sessions_open = true;
+        self.open_settings(Some(quill::settings_catalog::Page::Devices));
+        self.fetch_sessions();
+        cx.notify();
+    }
+
+    /// Entering the Devices page: a clean list and a guarded fetch.
+    pub(crate) fn fetch_sessions(&mut self) {
         self.privacy.sessions_confirm = None;
         self.privacy.extra.session_details = None;
         self.privacy.extra.renaming_device = false;
@@ -704,7 +676,6 @@ impl QuillApp {
                 .inactive_session_ttl_days
                 .get_or_insert(180);
         }
-        cx.notify();
     }
 
     /// Slice A2: close the overlay and clear every 2FA input — passwords
@@ -729,12 +700,26 @@ impl QuillApp {
             .update(cx, |input, cx| input.set_value("", window, cx));
     }
 
-    /// Slice A3: close the overlay and drop any pending terminate
-    /// confirmation.
-    pub(super) fn close_sessions(&mut self, cx: &mut Context<Self>) {
+    /// Leaving the Devices page stops a camera scan and drops a pending
+    /// terminate confirmation.
+    pub(crate) fn leave_devices(&mut self) {
         self.clear_device_qr();
-        self.privacy.sessions_open = false;
         self.privacy.sessions_confirm = None;
+        self.privacy.extra.session_details = None;
+        self.privacy.extra.renaming_device = false;
+    }
+
+    /// Something over the Devices list that Esc peels first.
+    pub(crate) fn sessions_layer_open(&self) -> bool {
+        self.privacy.sessions_confirm.is_some() || self.privacy.extra.session_details.is_some()
+    }
+
+    /// Esc on the Devices page: the confirmation first, then the details.
+    pub(crate) fn close_sessions_top(&mut self, cx: &mut Context<Self>) {
+        if self.privacy.sessions_confirm.take().is_none() {
+            self.privacy.extra.session_details = None;
+            self.privacy.extra.renaming_device = false;
+        }
         cx.notify();
     }
 
@@ -945,12 +930,6 @@ crate::ui::shell::register_dialogs! {
         600,
         |app| app.privacy.websites_open,
         QuillApp::build_websites_dialog,
-    ),
-
-    Sessions => DialogSpec::new(
-        700,
-        |app| app.privacy.sessions_open,
-        QuillApp::build_sessions_dialog,
     ),
 
     TwoFa => DialogSpec::new(

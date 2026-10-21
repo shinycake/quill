@@ -7,11 +7,9 @@
 use super::app::QuillApp;
 use super::language_state::LanguageBox;
 use super::language_state::LanguageFile;
-use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
-use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::radio::Radio;
@@ -22,8 +20,6 @@ use quill::lang::prefs::{self, LanguageChoice};
 use quill::lang::{keys, tr};
 use quill::state::LanguageReady;
 use quill::telegram::envelope::LanguagePackInfoData;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 /// One row of the box.
 #[derive(Clone, Debug, PartialEq)]
@@ -102,6 +98,15 @@ fn current_id() -> String {
 impl QuillApp {
     /// Settings → Language.
     pub(super) fn open_language_box(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_settings(Some(quill::settings_catalog::Page::Language));
+        self.ensure_language_box(window, cx);
+    }
+
+    /// The page's search field and pack request, made once per visit.
+    pub(crate) fn ensure_language_box(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.language.open.is_some() {
+            return;
+        }
         let search = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder(tr(keys::PARTICIPANT_FILTER))
@@ -128,13 +133,14 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn close_language_settings(&mut self, cx: &mut Context<Self>) {
+    /// Leaving the page: drop the search field and forget the recent
+    /// languages removed while it was open.
+    pub(crate) fn leave_language_settings(&mut self) {
         if let Some(open) = self.language.open.take() {
             self.language
                 .recent
                 .retain(|choice| !open.removed.contains(&choice.pack_id));
         }
-        cx.notify();
     }
 
     /// The official packs: TDLib's list, or the demo fixture.
@@ -447,7 +453,7 @@ impl QuillApp {
         line.into_any_element()
     }
 
-    fn language_box_body(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn language_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let Some(search) = self.language.open.as_ref().map(|open| open.search.clone()) else {
             return div().into_any_element();
         };
@@ -509,58 +515,6 @@ impl QuillApp {
             )
             .into_any_element()
     }
-
-    pub(super) fn build_language_dialog(
-        app: &Entity<QuillApp>,
-        shell: &Entity<QuillShell>,
-        dialog: Dialog,
-        cx: &mut App,
-    ) -> Dialog {
-        let on_close =
-            QuillShell::on_close_kind(app, shell, DialogKind::Language, |this, _, cx| {
-                this.close_language_settings(cx);
-            });
-        app.update(cx, |this, cx| {
-            let body = this.language_box_body(cx);
-            let footer = div().flex().justify_end().child(
-                Button::new("language-ok")
-                    .label(tr(keys::BOX_OK))
-                    .primary()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.close_language_settings(cx);
-                        this.close_kit_dialog_if_done(DialogKind::Language, window, cx);
-                    })),
-            );
-            dialog
-                .overlay(true)
-                .width(px(480.))
-                .title(crate::ui::shell::dialog_title(tr(keys::LANGUAGES)))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built
-                    // once per dialog render: hand it over through a cell.
-                    let body = Rc::new(RefCell::new(Some(body)));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
-                .footer(footer)
-                .on_close(on_close)
-        })
-    }
-}
-
-crate::ui::shell::register_dialogs! {
-    /// Settings → Language.
-    Language => DialogSpec::new(
-        // The Do Not Translate list (Translate, 6500) opens over it.
-        6550,
-        |app| app.language.open.is_some(),
-        QuillApp::build_language_dialog,
-    ),
 }
 
 #[cfg(test)]

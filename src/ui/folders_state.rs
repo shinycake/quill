@@ -7,9 +7,6 @@ pub(crate) struct FolderUi {
     /// Phase 7.1: selected folder tab (`None` = Main). Folder membership
     /// comes from chat positions (`chatListFolder`); the tab only filters.
     pub(super) tab: Option<i32>,
-    /// Parity slice: folder management (manage dialog / editor / delete
-    /// confirm / per-chat folder menu).
-    pub(super) manage_open: bool,
     pub(super) editor: Option<FolderEditorDialog>,
     pub(super) delete_confirm: Option<FolderDeleteConfirm>,
     /// Share Folder (invite links) dialog.
@@ -37,7 +34,6 @@ impl FolderUi {
     pub(super) fn new() -> Self {
         Self {
             tab: None,
-            manage_open: false,
             editor: None,
             delete_confirm: None,
             share: None,

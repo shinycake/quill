@@ -41,12 +41,12 @@ fn settings_action(target: SettingsTarget) -> Option<NavigationAction> {
         SettingsTarget::NewChannel => Some(NavigationAction::Channel),
         SettingsTarget::SavedMessages => Some(NavigationAction::Saved),
         SettingsTarget::Premium => Some(NavigationAction::Premium),
+        SettingsTarget::Language => Some(NavigationAction::Language),
         SettingsTarget::PeerColor(_)
         | SettingsTarget::ChangePhone
         | SettingsTarget::Root
         | SettingsTarget::Unsupported
-        | SettingsTarget::PrivacyPolicy
-        | SettingsTarget::Language => None,
+        | SettingsTarget::PrivacyPolicy => None,
     }
 }
 

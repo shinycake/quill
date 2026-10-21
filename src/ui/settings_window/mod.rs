@@ -52,13 +52,15 @@ impl QuillApp {
     pub(super) fn open_settings(&mut self, page: Option<Page>) {
         self.settings.open = true;
         self.settings.sub = None;
-        if page.is_some() {
-            self.settings.page = page;
+        if let Some(page) = page {
+            self.switch_settings_page(page);
         }
     }
 
     pub(super) fn close_settings(&mut self) {
-        self.leave_notification_settings();
+        if let Some(page) = self.settings.page {
+            self.leave_settings_page(page);
+        }
         self.settings.search.close();
         self.settings.open = false;
         self.settings.page = None;
@@ -66,26 +68,42 @@ impl QuillApp {
     }
 
     pub(super) fn show_settings_page(&mut self, page: Page, cx: &mut Context<Self>) {
-        if self.settings.page == Some(Page::Notifications) && page != Page::Notifications {
-            self.leave_notification_settings();
+        self.settings.sub = None;
+        self.switch_settings_page(page);
+        cx.notify();
+    }
+
+    /// The one way a page changes: the old page lets go of its drafts and
+    /// pickers, the new one asks for what it shows.
+    fn switch_settings_page(&mut self, page: Page) {
+        if self.settings.page == Some(page) {
+            return;
         }
-        if self.settings.page == Some(Page::DataStorage) && page != Page::DataStorage {
-            self.leave_data_storage();
-        }
-        if page == Page::Connection {
-            self.fetch_proxy_list();
-        }
-        if page == Page::Notifications {
-            self.fetch_notification_settings();
+        if let Some(old) = self.settings.page {
+            self.leave_settings_page(old);
         }
         self.settings.page = Some(page);
-        self.settings.sub = None;
-        if page == Page::Privacy {
+        match page {
+            Page::Notifications => self.fetch_notification_settings(),
             // tdesktop asks for the passkeys whenever the screen opens.
-            self.request_passkeys();
-            self.fetch_privacy();
+            Page::Privacy => {
+                self.request_passkeys();
+                self.fetch_privacy();
+            }
+            Page::Devices => self.fetch_sessions(),
+            Page::Connection => self.fetch_proxy_list(),
+            _ => {}
         }
-        cx.notify();
+    }
+
+    fn leave_settings_page(&mut self, page: Page) {
+        match page {
+            Page::Notifications => self.leave_notification_settings(),
+            Page::Language => self.leave_language_settings(),
+            Page::Devices => self.leave_devices(),
+            Page::DataStorage => self.leave_data_storage(),
+            _ => {}
+        }
     }
 
     pub(super) fn show_settings_sub(&mut self, sub: SubPage, cx: &mut Context<Self>) {
@@ -129,6 +147,9 @@ impl QuillApp {
         self.settings_search_input(window, cx);
         if !window.has_active_dialog(cx) && window.focused(cx).is_none() {
             window.focus(&self.settings.focus, cx);
+        }
+        if self.settings.page == Some(Page::Language) {
+            self.ensure_language_box(window, cx);
         }
         let searching = self.settings_searching(window, cx);
         // A narrow window shows the results in the list's place.
@@ -262,6 +283,28 @@ crate::ui::screenshot_demo::register_demos![
         .setup(|app, _, _| app.demo_settings(Page::Telegram)),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-notifications")
         .setup(|app, _, _| app.demo_settings(Page::Notifications)),
+    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-folders").setup(|app, _, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            for (id, name, icon) in [
+                (1, "Work", "Work"),
+                (2, "Family", "Love"),
+                (3, "News", "Channels"),
+            ] {
+                session
+                    .chat_list
+                    .chat_folders
+                    .push(quill::telegram::envelope::ChatFolderInfo {
+                        id,
+                        name: name.into(),
+                        icon_name: icon.into(),
+                        color_id: -1,
+                        is_shareable: false,
+                        has_my_invite_links: false,
+                    });
+            }
+        }
+        app.demo_settings(Page::Folders)
+    }),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-appearance")
         .setup(|app, _, _| app.demo_settings(Page::Appearance)),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-system")

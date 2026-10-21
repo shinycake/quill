@@ -235,10 +235,10 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app| app.sticker_panel_open(),
         |app, _, cx| app.close_sticker_panel(cx)
     ),
-    // Slice A3: Esc on the sessions overlay cancels a pending terminate
-    // confirmation first, then closes the overlay.
-    layer!("sessions", |app| app.privacy.sessions_open, |app, _, cx| {
-        app.close_sessions(cx)
+    // Devices page: Esc cancels a pending terminate confirmation first,
+    // then leaves a session's details.
+    layer!("sessions", |app| app.sessions_layer_open(), |app, _, cx| {
+        app.close_sessions_top(cx)
     }),
     // Slice S3: privacy peels one level per press (picker, exceptions,
     // then the editor), like TGX's back stack.

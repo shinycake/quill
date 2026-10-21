@@ -437,7 +437,6 @@ mod tests {
         DialogKind::GroupCallStart,
         DialogKind::ArchiveSettings,
         DialogKind::Websites,
-        DialogKind::Sessions,
         DialogKind::TwoFa,
         DialogKind::CallConfirm,
         DialogKind::CallSwap,
@@ -451,7 +450,6 @@ mod tests {
         DialogKind::FolderInvite,
         DialogKind::ChatLook,
         DialogKind::FolderNewChats,
-        DialogKind::FolderManage,
         DialogKind::CallbackPassword,
         DialogKind::LoginUrlConfirm,
         DialogKind::RequestShare,
@@ -498,7 +496,6 @@ mod tests {
         DialogKind::CommunityHub,
         DialogKind::Accounts,
         DialogKind::JumpToDate,
-        DialogKind::Shortcuts,
     ];
 
     #[test]
@@ -533,6 +530,6 @@ mod tests {
 
     #[test]
     fn dialog_kind_debug_prints_the_bare_name() {
-        assert_eq!(format!("{:?}", DialogKind::Shortcuts), "Shortcuts");
+        assert_eq!(format!("{:?}", DialogKind::TwoFa), "TwoFa");
     }
 }

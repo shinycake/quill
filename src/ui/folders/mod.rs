@@ -265,19 +265,12 @@ impl QuillApp {
         })
     }
 
-    /// kit Phase 2 (redo): folder manager hosted in a kit `Dialog` via
-    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
-    pub(super) fn build_folder_manage_dialog(
-        app: &Entity<QuillApp>,
-        shell: &Entity<QuillShell>,
-        dialog: Dialog,
-        cx: &mut App,
-    ) -> Dialog {
-        let on_close =
-            QuillShell::on_close_kind(app, shell, DialogKind::FolderManage, |this, _, cx| {
-                this.close_folder_manage(cx);
-            });
-        app.update(cx, |this, cx| {
+    /// The Folders settings page: the folders in order with their actions,
+    /// Telegram's recommendations, tags, a new-folder button and the tab
+    /// settings.
+    pub(crate) fn folders_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let this = self;
+        {
             let session = this.session();
             let tags_enabled = session
                 .as_ref()
@@ -323,13 +316,7 @@ impl QuillApp {
                         .collect()
                 })
                 .unwrap_or_default();
-            let mut list = div()
-                .id("folder-manage-list")
-                .flex()
-                .flex_col()
-                .gap_1()
-                .max_h(px(300.))
-                .overflow_y_scroll();
+            let mut list = div().id("folder-manage-list").flex().flex_col().gap_1();
             if folders.is_empty() {
                 list = list.child(
                     div()
@@ -376,13 +363,8 @@ impl QuillApp {
                                         .label("↑")
                                         .ghost()
                                         .when(is_first, |this| this.disabled(true))
-                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                        .on_click(cx.listener(move |this, _, _, cx| {
                                             this.move_folder(folder_id, true, cx);
-                                            this.close_kit_dialog_if_done(
-                                                DialogKind::FolderManage,
-                                                window,
-                                                cx,
-                                            );
                                         })),
                                 )
                                 .child(
@@ -390,13 +372,8 @@ impl QuillApp {
                                         .label("↓")
                                         .ghost()
                                         .when(is_last, |this| this.disabled(true))
-                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                        .on_click(cx.listener(move |this, _, _, cx| {
                                             this.move_folder(folder_id, false, cx);
-                                            this.close_kit_dialog_if_done(
-                                                DialogKind::FolderManage,
-                                                window,
-                                                cx,
-                                            );
                                         })),
                                 )
                                 .child(
@@ -405,11 +382,6 @@ impl QuillApp {
                                         .ghost()
                                         .on_click(cx.listener(move |this, _, window, cx| {
                                             this.open_folder_edit(folder_id, window, cx);
-                                            this.close_kit_dialog_if_done(
-                                                DialogKind::FolderManage,
-                                                window,
-                                                cx,
-                                            );
                                         })),
                                 )
                                 .child(
@@ -420,24 +392,14 @@ impl QuillApp {
                                         .accessibility_label(tr(keys::FILTERS_LINK))
                                         .on_click(cx.listener(move |this, _, window, cx| {
                                             this.open_folder_share(folder_id, window, cx);
-                                            this.close_kit_dialog_if_done(
-                                                DialogKind::FolderManage,
-                                                window,
-                                                cx,
-                                            );
                                         })),
                                 )
                                 .child(
                                     Button::new(format!("folder-delete-{folder_id}"))
                                         .label(tr(keys::BOX_DELETE))
                                         .ghost()
-                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                        .on_click(cx.listener(move |this, _, _, cx| {
                                             this.open_folder_delete(folder_id, cx);
-                                            this.close_kit_dialog_if_done(
-                                                DialogKind::FolderManage,
-                                                window,
-                                                cx,
-                                            );
                                         })),
                                 ),
                         ),
@@ -494,18 +456,13 @@ impl QuillApp {
                             Button::new(("folder-recommended-add", ix))
                                 .label(tr(keys::FILTERS_RECOMMENDED_ADD))
                                 .small()
-                                .on_click(cx.listener(move |this, _, window, cx| {
+                                .on_click(cx.listener(move |this, _, _, cx| {
                                     this.add_recommended_folder(ix, cx);
-                                    this.close_kit_dialog_if_done(
-                                        DialogKind::FolderManage,
-                                        window,
-                                        cx,
-                                    );
                                 })),
                         ),
                 );
             }
-            let body = div()
+            div()
                 .flex()
                 .flex_col()
                 .gap_2()
@@ -517,41 +474,27 @@ impl QuillApp {
                         Checkbox::new("folder-tags-toggle")
                             .checked(tags_enabled)
                             .label(tr(keys::FILTERS_ENABLE_TAGS))
-                            .on_click(cx.listener(move |this, &on, window, cx| {
+                            .on_click(cx.listener(move |this, &on, _, cx| {
                                 if on != tags_enabled {
                                     this.toggle_folder_tags_ui(cx);
                                 }
-                                this.close_kit_dialog_if_done(DialogKind::FolderManage, window, cx);
                             })),
                     ),
                 )
                 .child(
-                    Button::new("folder-create")
-                        .label(tr(keys::FILTERS_NEW))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.open_folder_create(window, cx);
-                            this.close_kit_dialog_if_done(DialogKind::FolderManage, window, cx);
-                        })),
+                    div().flex().child(
+                        Button::new("folder-create")
+                            .icon(gpui_kit::assets::IconName::Plus)
+                            .label(tr(keys::FILTERS_NEW))
+                            .outline()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_folder_create(window, cx);
+                            })),
+                    ),
                 )
                 .child(tabs_settings)
-                .into_any_element();
-            dialog
-                .overlay(true)
-                .title(crate::ui::shell::dialog_title(tr(
-                    keys::SETTINGS_SECTION_FILTERS,
-                )))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
-                .on_close(on_close)
-        })
+                .into_any_element()
+        }
     }
 
     /// Parity slice: create/edit folder form — name, include-type filters,
@@ -820,16 +763,9 @@ impl QuillApp {
                 &err,
             )));
         }
-        self.folders.manage_open = true;
         self.folders.editor = None;
         self.folders.delete_confirm = None;
-        cx.notify();
-    }
-
-    pub(super) fn close_folder_manage(&mut self, cx: &mut Context<Self>) {
-        self.folders.manage_open = false;
-        self.folders.editor = None;
-        self.folders.delete_confirm = None;
+        self.open_settings(Some(quill::settings_catalog::Page::Folders));
         cx.notify();
     }
 
@@ -906,12 +842,6 @@ crate::ui::shell::register_dialogs! {
         1800,
         |app| app.folders.delete_confirm.is_some(),
         QuillApp::build_folder_delete_dialog,
-    ),
-
-    FolderManage => DialogSpec::new(
-        2300,
-        |app| app.folders.manage_open,
-        QuillApp::build_folder_manage_dialog,
     ),
 }
 
