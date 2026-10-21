@@ -27,3 +27,19 @@ The majors that `scripts/deps-watch.py` lists (`chacha20poly1305`, `pbkdf2`, `cp
   `atomic_write_failure_keeps_old_file`, which fails only when the tests run as root (the
   cloud container) and passes when the same binary runs as an unprivileged user.
 - `cargo deny --locked check licenses` and `scripts/third-party-licenses.sh --check`.
+
+## 2026-10-21: TLS advisories
+
+`cargo update -p` for 24 crates, `Cargo.lock` only. `rustls-webpki` 0.103.16 and
+`webpki-roots` 1.0.10 fix RUSTSEC-2026-0382 and RUSTSEC-2026-0381 (certificate paths
+through the distrusted emSign intermediates were accepted). That stack carries the
+in-app updater downloads and the passkey hybrid tunnel. `inout` 0.2.3 was yanked and
+moves to 0.2.5. The rest are patch releases (`tokio` 1.54.0, `zip` 9.0.5, `ksni` 0.3.7,
+`libc` 0.2.191 and others).
+
+`gpui-fast` 0.1.10 is left at 0.1.8: it is an optional backend of GPUI Kit that Quill
+does not enable, and 0.1.10 would add `wgpu` 30 to the lockfile. It moves with the GPUI
+Kit 0.8 bump.
+
+Verified with `cargo deny --locked check advisories` (no vulnerabilities or yanked
+crates left; the unmaintained notices come through GPUI and zbus 5) and the gate.
