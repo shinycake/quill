@@ -231,7 +231,7 @@ impl Session {
                 if self
                     .stickers
                     .message_reaction_options
-                    .as_ref()
+                    .ready()
                     .is_some_and(|options| options.chat_id.0 == chat_id)
                 {
                     self.stickers.reaction_options_stale = true;

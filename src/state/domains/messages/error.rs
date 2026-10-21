@@ -32,6 +32,13 @@ impl Session {
         ) {
             self.note_premium_limit(err, pending);
         }
+        if let Some(RequestPurpose::Messages(MessagesPurpose::GetMessageAvailableReactions {
+            message_id,
+        })) = pending.map(|p| p.purpose)
+            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+        {
+            self.fail_message_reaction_options(chat_id, MessageId(message_id));
+        }
         match pending.map(|p| p.purpose) {
             // The message menu's Report flow and audience lists.
             Some(RequestPurpose::ReportMessages) => {

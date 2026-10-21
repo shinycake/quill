@@ -21,6 +21,7 @@ mod messages;
 mod payments;
 mod platform;
 mod privacy_media;
+pub(crate) mod reaction_fixtures;
 mod security;
 pub(crate) mod shared_media;
 mod shared_media_search;

@@ -73,7 +73,8 @@ impl QuillApp {
         // reaction it allows.
         let page = self.message_ui.menu_ui.page;
         let strip = (message.can_react() && page == MessageMenuPage::Main)
-            .then(|| self.reaction_strip(chat_id, message_id, &message, cx));
+            .then(|| self.reaction_strip(chat_id, message_id, &message, cx))
+            .flatten();
         // Telegram Desktop's message menu: left-aligned rows with an icon,
         // in its order (Reply, Edit, Pin, Copy Text, Copy Link, Forward,
         // Delete, Select). Items are collected with their position, then

@@ -149,7 +149,7 @@ impl QuillApp {
         if self.message_ui.menu.is_none() && self.chat_list.menu.is_none() {
             return false;
         }
-        self.message_ui.menu = None;
+        self.close_message_menu();
         self.chat_list.menu = None;
         cx.notify();
         true
@@ -504,32 +504,45 @@ impl QuillApp {
         message_id: MessageId,
         message: &HistoryMessage,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> Option<AnyElement> {
         let session = self.session();
-        let options = session
-            .and_then(|s| s.stickers.message_reaction_options.as_ref())
-            .filter(|o| o.chat_id == chat_id && o.message_id == message_id);
+        let state = session.map(|s| &s.stickers.message_reaction_options);
+        let options = state.and_then(|state| state.ready_for(chat_id, message_id));
         let Some(options) = options else {
-            // Options are on their way: keep the strip's height steady.
-            return div()
-                .id("reaction-strip-loading")
-                .h(px(STRIP_CELL + 8.))
-                .mx_1()
-                .mb_1()
-                .flex()
-                .items_center()
-                .gap_1()
-                .children((0..6).map(|ix| {
-                    div()
-                        .id(("reaction-skeleton", ix as u64))
-                        .size(px(STRIP_CELL - 8.))
-                        .mx(px(4.))
-                        .rounded_full()
-                        .bg(bg_subtle())
-                }))
-                .into_any_element();
+            // Only a request in flight earns a placeholder (it keeps the
+            // strip's height steady); no options, a failure or an empty
+            // answer leave no strip, like tdesktop.
+            if !state.is_some_and(|state| state.is_loading_for(chat_id, message_id)) {
+                return None;
+            }
+            return Some(
+                div()
+                    .id("reaction-strip-loading")
+                    .test_support()
+                    .h(px(STRIP_CELL + 8.))
+                    .mx_1()
+                    .mb_1()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .children((0..6).map(|ix| {
+                        div()
+                            .id(("reaction-skeleton", ix as u64))
+                            .size(px(STRIP_CELL - 8.))
+                            .mx(px(4.))
+                            .rounded_full()
+                            .bg(bg_subtle())
+                    }))
+                    .into_any_element(),
+            );
         };
-        let mut container = div().id("reaction-strip").flex().flex_col().px_1().py_1();
+        let mut container = div()
+            .id("reaction-strip")
+            .test_support()
+            .flex()
+            .flex_col()
+            .px_1()
+            .py_1();
         if !self.message_ui.reactions_expanded {
             let mut row = div().flex().items_center().gap(px(2.));
             for (ix, choice) in options.top.iter().take(7).enumerate() {
@@ -568,7 +581,11 @@ impl QuillApp {
                             // reaction, custom packs); otherwise the grid.
                             let custom = this
                                 .session()
-                                .and_then(|s| s.stickers.message_reaction_options.as_ref())
+                                .and_then(|s| {
+                                    s.stickers
+                                        .message_reaction_options
+                                        .ready_for(chat_id, message_id)
+                                })
                                 .is_some_and(|o| o.allow_custom_emoji);
                             let position = this.message_ui.menu.map(|menu| menu.position);
                             match position {
@@ -585,7 +602,7 @@ impl QuillApp {
                         })),
                 );
             }
-            return container.child(row).into_any_element();
+            return Some(container.child(row).into_any_element());
         }
         let mut choices = options.all();
         if options.allow_custom_emoji
@@ -621,7 +638,7 @@ impl QuillApp {
             grid = grid.child(row);
         }
         container = container.child(grid);
-        container.into_any_element()
+        Some(container.into_any_element())
     }
 }
 
@@ -643,3 +660,8 @@ pub(super) fn emoji_presentation(emoji: &str) -> String {
         _ => emoji.to_string(),
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "reaction_strip_state_tests.rs"]
+mod reaction_strip_state_tests;

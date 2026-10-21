@@ -62,6 +62,79 @@ pub struct MessageReactionOptions {
     pub allow_custom_emoji: bool,
 }
 
+/// Where the open message menu's reaction options stand. tdesktop reads
+/// them from its local cache and skips the strip when there are none
+/// (`AttachSelectorToMenu`, `reactions.recent.empty()`); Quill asks TDLib, so
+/// the wait and a failed or empty answer are states of their own.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum MessageReactionsState {
+    /// Nothing was asked for.
+    #[default]
+    Idle,
+    /// `getMessageAvailableReactions` is in flight for this message.
+    Loading {
+        chat_id: ChatId,
+        message_id: MessageId,
+    },
+    Ready(MessageReactionOptions),
+    /// The request failed or the answer held no reaction: no strip.
+    Unavailable {
+        chat_id: ChatId,
+        message_id: MessageId,
+    },
+}
+
+impl MessageReactionsState {
+    /// The options, whichever message they belong to.
+    pub fn ready(&self) -> Option<&MessageReactionOptions> {
+        match self {
+            Self::Ready(options) => Some(options),
+            _ => None,
+        }
+    }
+
+    /// The options when they belong to this message.
+    pub fn ready_for(
+        &self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Option<&MessageReactionOptions> {
+        self.ready()
+            .filter(|o| o.chat_id == chat_id && o.message_id == message_id)
+    }
+
+    pub fn is_loading_for(&self, chat_id: ChatId, message_id: MessageId) -> bool {
+        matches!(self, Self::Loading { chat_id: c, message_id: m } if *c == chat_id && *m == message_id)
+    }
+
+    pub fn is_unavailable_for(&self, chat_id: ChatId, message_id: MessageId) -> bool {
+        matches!(self, Self::Unavailable { chat_id: c, message_id: m } if *c == chat_id && *m == message_id)
+    }
+
+    /// The message the state is about, if any.
+    pub fn target(&self) -> Option<(ChatId, MessageId)> {
+        match self {
+            Self::Idle => None,
+            Self::Loading {
+                chat_id,
+                message_id,
+            }
+            | Self::Unavailable {
+                chat_id,
+                message_id,
+            } => Some((*chat_id, *message_id)),
+            Self::Ready(o) => Some((o.chat_id, o.message_id)),
+        }
+    }
+
+    /// The state already holds the answer for this message. A wait does not
+    /// count (its request may be gone), nor does a failed or empty answer:
+    /// reopening the menu asks again unless a request is really pending.
+    pub fn covers(&self, chat_id: ChatId, message_id: MessageId) -> bool {
+        self.ready_for(chat_id, message_id).is_some()
+    }
+}
+
 impl MessageReactionOptions {
     /// Every offered reaction, deduplicated: top, then recent, then popular.
     pub fn all(&self) -> Vec<ReactionChoice> {
@@ -122,6 +195,15 @@ impl Session {
         popular: Vec<StoryAvailableReactionView>,
         allow_custom_emoji: bool,
     ) {
+        // Only the answer this menu waits for counts; a late one for a
+        // message the menu left must not touch the current state.
+        if !self
+            .stickers
+            .message_reaction_options
+            .is_loading_for(chat_id, message_id)
+        {
+            return;
+        }
         // The Star reaction is its own flow (`paid_reaction`): note whether
         // this message's picker offers it.
         let paid_offered = top
@@ -136,13 +218,46 @@ impl Session {
                 .filter_map(ReactionChoice::from_view)
                 .collect()
         };
-        self.stickers.message_reaction_options = Some(MessageReactionOptions {
+        let options = MessageReactionOptions {
             chat_id,
             message_id,
             top: convert(top),
             recent: convert(recent),
             popular: convert(popular),
             allow_custom_emoji,
-        });
+        };
+        // tdesktop adds the paid reaction to `recent` when paid is enabled
+        // (data_message_reactions.cpp), so an offer of Stars alone still
+        // earns the strip.
+        self.stickers.message_reaction_options = if options.all().is_empty() && !paid_offered {
+            MessageReactionsState::Unavailable {
+                chat_id,
+                message_id,
+            }
+        } else {
+            MessageReactionsState::Ready(options)
+        };
+    }
+
+    /// The message menu closed: nothing is asked for, and an answer still on
+    /// its way is ignored.
+    pub fn reset_message_reactions(&mut self) {
+        self.stickers.message_reaction_options = MessageReactionsState::Idle;
+        self.payments.paid.offered = None;
+    }
+
+    /// `getMessageAvailableReactions` failed: the strip stays away, unless
+    /// the menu moved on to another message meanwhile.
+    pub(crate) fn fail_message_reaction_options(&mut self, chat_id: ChatId, message_id: MessageId) {
+        if self
+            .stickers
+            .message_reaction_options
+            .is_loading_for(chat_id, message_id)
+        {
+            self.stickers.message_reaction_options = MessageReactionsState::Unavailable {
+                chat_id,
+                message_id,
+            };
+        }
     }
 }
