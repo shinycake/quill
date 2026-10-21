@@ -81,7 +81,14 @@ impl QuillApp {
             // layer does that) and is not the start of a message drag.
             return;
         }
-        let forward = click_toggles && self.selection_forward_drag(chat, message_id).is_some();
+        // A press on a selected row never selects a range (`PrepareDrag`); when
+        // the selection cannot be forwarded the drag simply does nothing.
+        let forward = click_toggles
+            && self
+                .share
+                .pending_forward
+                .as_ref()
+                .is_some_and(|draft| draft.from_chat_id == chat && draft.contains(message_id));
         self.message_ui.selection_drag = Some(DragSelect {
             chat,
             press: message_id,
@@ -106,7 +113,7 @@ impl QuillApp {
         let drag = self.message_ui.selection_drag.as_ref()?;
         // A message drag is under way (or this press may become one): no
         // range selects, and no swipe replies.
-        if cx.has_active_drag() {
+        if super::forward_drag_source::forward_lift_live(cx) {
             self.message_ui.selection_drag = None;
             self.message_ui.swipe_reply_start = None;
             return None;
@@ -187,6 +194,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A lifted message drag ends here wherever it was dropped.
+        super::forward_drag_source::end_forward_lift(cx);
+        self.end_forward_drag(cx);
         let Some(drag) = self.message_ui.selection_drag.take() else {
             return;
         };

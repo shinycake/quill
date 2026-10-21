@@ -50,13 +50,50 @@ pub(super) fn drag_for(
     .ok()
 }
 
-/// The drag of a lone message (its time), for a press outside selection
-/// mode (`_mouseCursorState == CursorState::Date`).
+/// The drag of a message's time, for a press outside selection mode
+/// (`_mouseCursorState == CursorState::Date`): the message, or its whole
+/// album (`itemOrItsGroup`).
 pub(super) fn drag_for_message(
     session: Option<&Session>,
     message: &HistoryMessage,
 ) -> Option<ForwardDrag> {
-    drag_for(session?, message.chat_id, message.id, &[])
+    let session = session?;
+    let group: Vec<MessageId> = if message.media_album_id == 0 {
+        Vec::new()
+    } else {
+        session
+            .histories
+            .get(&message.chat_id.0)
+            .map(|history| {
+                history
+                    .messages
+                    .values()
+                    .filter(|m| m.media_album_id == message.media_album_id)
+                    .map(|m| m.id)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    drag_for(session, message.chat_id, message.id, &group)
+}
+
+/// Set while a lifted message drag is in flight, so the history can tell it
+/// from any other drag. Cleared when the button comes up.
+#[derive(Default)]
+struct ForwardLift(bool);
+
+impl Global for ForwardLift {}
+
+/// A message drag was lifted and has not ended.
+pub(super) fn forward_lift_live(cx: &App) -> bool {
+    cx.try_global::<ForwardLift>().is_some_and(|lift| lift.0) && cx.has_active_drag()
+}
+
+/// The button came up: the lifted drag, if any, is over.
+pub(super) fn end_forward_lift(cx: &mut App) {
+    if cx.has_global::<ForwardLift>() {
+        cx.set_global(ForwardLift(false));
+    }
 }
 
 impl QuillApp {
@@ -67,10 +104,12 @@ impl QuillApp {
         chat: ChatId,
         pressed: MessageId,
     ) -> Option<ForwardDrag> {
-        let draft = self.forward_draft().filter(|d| d.from_chat_id == chat)?;
-        if !draft.contains(pressed) {
-            return None;
-        }
+        // Most rows are not selected: leave before anything is cloned.
+        let draft = self
+            .share
+            .pending_forward
+            .as_ref()
+            .filter(|d| d.from_chat_id == chat && d.contains(pressed))?;
         drag_for(self.session()?, chat, pressed, &draft.message_ids)
     }
 }
@@ -120,6 +159,7 @@ where
 {
     match drag {
         Some(drag) => element.on_drag(drag, |drag: &ForwardDrag, _, _, cx| {
+            cx.set_global(ForwardLift(true));
             cx.new(|_| ForwardGhost::new(drag))
         }),
         None => element,

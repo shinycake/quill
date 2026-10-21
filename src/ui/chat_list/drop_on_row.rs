@@ -179,7 +179,7 @@ impl QuillApp {
             return;
         }
         let state = &mut self.chat_list.drop_on_row;
-        if state.forward.as_ref() != Some(drag) || state.in_list != in_list {
+        if !state.forward.as_ref().is_some_and(|seen| seen.same(drag)) || state.in_list != in_list {
             state.forward = Some(drag.clone());
             state.in_list = in_list;
             cx.notify();
@@ -204,6 +204,16 @@ impl QuillApp {
     #[cfg(feature = "demo-capture")]
     pub(in crate::ui) fn frozen_rows(&self) -> usize {
         self.chat_list.drop_on_row.frozen.len()
+    }
+
+    /// A lifted message drag ended (dropped on a row, elsewhere, or
+    /// cancelled): nothing stays lit and the list unfreezes.
+    pub(in crate::ui) fn end_forward_drag(&mut self, cx: &mut Context<Self>) {
+        let state = &mut self.chat_list.drop_on_row;
+        if state.forward.is_some() {
+            state.clear();
+            cx.notify();
+        }
     }
 
     /// The forward-info banner shows over the conversation while a forward

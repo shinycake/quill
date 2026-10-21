@@ -51,10 +51,20 @@ README: `parity:chatlist-drop-on-row`. The file half lives in
   label and selected rows do.
 - A drop on a forum (or direct messages) row shows a note instead of the topic
   chooser tdesktop opens, as the file drop already does.
+- Forwardability is only known per message for pending/self-destructing
+  ones, the last message whose properties were fetched, and chat-level
+  protection. Other messages are treated as forwardable, so a message TDLib
+  would refuse (`can_be_forwarded` false) is caught when Send fails, not at
+  the lift.
+- The source side does not skip the lift in one column, and search results
+  and forum topic rows are not drop targets yet.
+- A press on a selected row whose selection cannot be forwarded does nothing
+  (tdesktop's `prepareDrag` returns null); a time label press carries the
+  whole album.
 - The drag picture is a count pill, not the rendered messages.
 
 ## Verified
 
 Unit tests (`forward_drag`), GPUI UI tests (`chat_list/forward_drop_tests.rs`:
 lift, light, banner, no timer, frozen order, drop routing, forum, protected,
-one column), and demo captures `ready-drop-forward` in light and dark.
+one column, a second drag starting clean, an unforwardable member, forum, secret and same-chat drops, album from the time), and demo captures `ready-drop-forward` in light and dark.

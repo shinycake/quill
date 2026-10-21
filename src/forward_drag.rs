@@ -60,6 +60,12 @@ impl ForwardDrag {
         })
     }
 
+    /// Whether `other` is this very drag (the shared id list), the cheap
+    /// check the list makes for every row on every move.
+    pub fn same(&self, other: &Self) -> bool {
+        self.from == other.from && Arc::ptr_eq(&self.ids, &other.ids)
+    }
+
     pub fn from_chat(&self) -> ChatId {
         self.from
     }

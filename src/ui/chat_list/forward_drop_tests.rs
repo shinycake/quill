@@ -260,3 +260,162 @@ fn a_wiggle_shorter_than_the_start_distance_is_still_a_click(cx: &mut TestAppCon
     });
     assert_eq!(ids, vec![MessageId(102)], "the click toggled the row off");
 }
+
+#[gpui_kit::test]
+fn a_second_drag_starts_clean_after_one_released_elsewhere(cx: &mut TestAppContext) {
+    let (app, mut vcx) = selected(cx);
+    let vcx = &mut vcx;
+    let to = row_centre(vcx, 12);
+    lift_and_move(&app, vcx, MessageId(101), to);
+    assert!(lit(vcx, 12));
+    // Released over the conversation, not on a row.
+    let away = message_centre(&app, vcx, MessageId(102));
+    vcx.simulate_mouse_move(away, Some(MouseButton::Left), Modifiers::default());
+    vcx.simulate_mouse_up(away, MouseButton::Left, Modifiers::default());
+    frames(vcx);
+    assert!(!lit(vcx, 12) && !banner(vcx));
+    let frozen = app.read_with(vcx, |app, _| app.frozen_rows());
+    assert_eq!(frozen, 0, "the list unfroze");
+    assert_eq!(open_chat(&app, vcx), Some(ChatId(11)));
+    // The next drag lights only what it is over.
+    let other = row_centre(vcx, 13);
+    lift_and_move(&app, vcx, MessageId(101), other);
+    assert!(lit(vcx, 13) && !lit(vcx, 12));
+}
+
+#[gpui_kit::test]
+fn an_unforwardable_member_keeps_the_selection_from_lifting(cx: &mut TestAppContext) {
+    let (app, mut vcx) = selected(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, _| {
+        if let Some(message) = app
+            .demo_session
+            .as_mut()
+            .and_then(|s| s.histories.get_mut(&11))
+            .and_then(|h| h.messages.get_mut(&102))
+        {
+            message.pending = true;
+        }
+    });
+    frames(vcx);
+    let to = row_centre(vcx, 12);
+    lift_and_move(&app, vcx, MessageId(101), to);
+    assert!(!dragging(vcx) && !lit(vcx, 12) && !banner(vcx));
+    vcx.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
+    frames(vcx);
+    let ids = app.read_with(vcx, |app, _| {
+        app.share
+            .pending_forward
+            .as_ref()
+            .map(|d| d.message_ids.clone())
+            .unwrap_or_default()
+    });
+    assert_eq!(
+        ids,
+        vec![MessageId(101), MessageId(102)],
+        "nothing was range-selected"
+    );
+}
+
+#[gpui_kit::test]
+fn a_drop_on_a_forum_row_shows_a_note_and_opens_nothing(cx: &mut TestAppContext) {
+    let (app, mut vcx) = selected(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, _| {
+        if let Some(summary) = app.demo_session.as_mut().and_then(|s| s.chats.get_mut(&13)) {
+            summary.kind = quill::telegram::envelope::ChatKind::Supergroup {
+                supergroup_id: 4242,
+                is_channel: false,
+            };
+            summary.is_forum = Some(true);
+        }
+    });
+    frames(vcx);
+    let to = row_centre(vcx, 13);
+    lift_and_move(&app, vcx, MessageId(101), to);
+    vcx.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
+    frames(vcx);
+    assert_eq!(open_chat(&app, vcx), Some(ChatId(11)));
+    assert_eq!(
+        app.read_with(vcx, |app, _| app.share.forward_bar_dest),
+        None
+    );
+}
+
+#[gpui_kit::test]
+fn a_drop_on_a_secret_chat_is_refused(cx: &mut TestAppContext) {
+    let (app, mut vcx) = selected(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, _| {
+        if let Some(summary) = app.demo_session.as_mut().and_then(|s| s.chats.get_mut(&13)) {
+            summary.kind = quill::telegram::envelope::ChatKind::Secret {
+                secret_chat_id: 9,
+                user_id: quill::ids::UserId(9),
+            };
+        }
+    });
+    frames(vcx);
+    let to = row_centre(vcx, 13);
+    lift_and_move(&app, vcx, MessageId(101), to);
+    vcx.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
+    frames(vcx);
+    assert_eq!(open_chat(&app, vcx), Some(ChatId(11)));
+    assert_eq!(
+        app.read_with(vcx, |app, _| app.share.forward_bar_dest),
+        None
+    );
+}
+
+#[gpui_kit::test]
+fn a_drop_on_the_same_chat_puts_the_forward_bar_in_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = selected(cx);
+    let vcx = &mut vcx;
+    let to = row_centre(vcx, 11);
+    lift_and_move(&app, vcx, MessageId(101), to);
+    vcx.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
+    frames(vcx);
+    assert_eq!(open_chat(&app, vcx), Some(ChatId(11)));
+    assert_eq!(
+        app.read_with(vcx, |app, _| app.share.forward_bar_dest),
+        Some(ChatId(11))
+    );
+}
+
+#[gpui_kit::test]
+fn a_one_column_window_ignores_a_forward_drag_over_a_row(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx, "ready-selection", 600.);
+    let drag =
+        quill::forward_drag::ForwardDrag::begin(ChatId(11), MessageId(101), &[], false, |_| true)
+            .ok();
+    app.update_in(&mut vcx, |app, window, cx| {
+        if let Some(drag) = drag.as_ref() {
+            app.forward_over_row(ChatId(12), true, true, drag, window, cx);
+        }
+    });
+    assert!(!banner(&mut vcx));
+    assert!(!lit(&mut vcx, 12));
+}
+
+#[gpui_kit::test]
+fn the_time_of_an_album_message_lifts_the_whole_album(cx: &mut TestAppContext) {
+    let (app, mut vcx) = selected(cx);
+    let vcx = &mut vcx;
+    let ids = app.update(vcx, |app, _| {
+        if let Some(history) = app
+            .demo_session
+            .as_mut()
+            .and_then(|s| s.histories.get_mut(&11))
+        {
+            for id in [101, 102] {
+                if let Some(message) = history.messages.get_mut(&id) {
+                    message.media_album_id = 5;
+                }
+            }
+        }
+        let session = app.session()?;
+        let message = session.histories.get(&11)?.messages.get(&101)?;
+        let drag = crate::ui::forward_drag_source::drag_for_message(Some(session), message)?;
+        Some(drag.ids().to_vec())
+    });
+    assert_eq!(ids, Some(vec![MessageId(101), MessageId(102)]));
+}
