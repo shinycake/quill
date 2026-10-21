@@ -471,6 +471,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Report row on bots and on channels you don't own, and a Join Channel row on channels you haven't joined <!-- parity:profile-report-join -->
 - [x] Group and channel descriptions show links, mentions and hashtags (TDLib getTextEntities); groups keep only Telegram links; Copy Text and Translate menu <!-- parity:profile-about-links -->
 - [x] Groups in common load 40 at a time, with a Load more row, local search past 20 groups and a plural count <!-- parity:profile-common-groups-paging -->
+- [ ] "My QR code" box: the styled QR card for your profile and for users, groups and channels with a username, with colors, an emoji pattern, upgraded-gift themes, and copy and share; opened from Settings, the profile actions and the info top bar (tdesktop `peer_qr_box`) <!-- parity:profile-qr-code-box -->
 - [ ] Profile share themes for users and groups (TDLib 1.8.69 `setProfileShareTheme`, `share_theme`) <!-- parity:profile-share-theme -->
 
 ### Media
