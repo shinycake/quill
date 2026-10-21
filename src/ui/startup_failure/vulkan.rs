@@ -112,6 +112,14 @@ pub(super) fn message(missing: &Missing, virtio_gpu: bool, detail: &str) -> Stri
     parts.join("\n\n")
 }
 
+/// What to install, short enough for a desktop notification.
+pub(super) fn summary(missing: &Missing) -> &'static str {
+    match missing {
+        Missing::Loader => tr(keys::Q_MISC_VULKAN_SUMMARY_LOADER),
+        Missing::Driver | Missing::UsableDevice { .. } => tr(keys::Q_MISC_VULKAN_SUMMARY_LAVAPIPE),
+    }
+}
+
 /// Read the machine's Vulkan setup.
 pub(super) fn probe() -> Setup {
     Setup {
@@ -355,6 +363,8 @@ mod tests {
         ] {
             assert!(virtio.contains(needle), "{needle} missing from {virtio}");
         }
+        assert!(summary(&Missing::Driver).contains("vulkan-swrast"));
+        assert!(summary(&Missing::Loader).contains("vulkan-icd-loader"));
         let loader = message(&Missing::Loader, false, NO_DEVICE);
         assert!(loader.contains("vulkan-icd-loader"));
         assert!(loader.contains("NVIDIA"));
