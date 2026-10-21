@@ -4,7 +4,7 @@
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::menu_states::MessageMenuState;
-use crate::ui::message_menu_ui::origin_rows::{FORWARD_CHAT, GIFT_CHAT, REPLIES_CHAT};
+use crate::ui::message_menu_ui::origin_rows::{FORWARD_CHAT, GIFT_CHAT, REPLIES_CHAT, TIMES_CHAT};
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
@@ -100,11 +100,21 @@ fn a_forward_shows_when_it_was_first_sent(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn an_edited_message_gets_the_edited_date_row(cx: &mut TestAppContext) {
+fn an_edited_message_shows_only_the_edited_date(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
-    open_menu_on(&app, vcx, FORWARD_CHAT, MessageId(40));
+    open_menu_on(&app, vcx, TIMES_CHAT, MessageId(71));
+    assert!(has(vcx, "menu-sent"));
     assert!(!has(vcx, "menu-edited"));
+    open_menu_on(&app, vcx, TIMES_CHAT, MessageId(72));
+    assert!(has(vcx, "menu-edited"));
+    assert!(!has(vcx, "menu-sent"));
+}
+
+#[gpui_kit::test]
+fn an_edited_forward_shows_only_its_original_date(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
         if let Some(message) = app
             .demo_session
@@ -116,8 +126,10 @@ fn an_edited_message_gets_the_edited_date_row(cx: &mut TestAppContext) {
         }
         cx.notify();
     });
-    frames(vcx);
-    assert!(has(vcx, "menu-edited"));
+    open_menu_on(&app, vcx, FORWARD_CHAT, MessageId(40));
+    assert!(has(vcx, "menu-original-date"));
+    assert!(!has(vcx, "menu-edited"));
+    assert!(!has(vcx, "menu-sent"));
 }
 
 #[gpui_kit::test]
