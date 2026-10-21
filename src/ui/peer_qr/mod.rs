@@ -131,6 +131,9 @@ pub(super) struct OpenQr {
     pub(super) share_image: Option<PathBuf>,
     /// A card image is being made for copy or share.
     pub(super) exporting: bool,
+    /// The gifts grid's scroll position, kept across frames and reset
+    /// each time the panel opens.
+    pub(super) gifts_scroll: gpui_kit::base::VirtualListScrollHandle,
     /// The countdown clock is ticking.
     clock_running: bool,
 }
@@ -159,6 +162,10 @@ impl PeerQrUi {
 }
 
 impl QuillApp {
+    /// Only the demo serves gifts pages without a server.
+    #[cfg(not(feature = "demo-capture"))]
+    fn qr_demo_more_gifts(&mut self, _now: i64) {}
+
     /// The session's part for the box, live or demo.
     fn qr_data_mut(&mut self) -> Option<&mut PeerQrData> {
         match self.live.as_mut() {
@@ -197,6 +204,7 @@ impl QuillApp {
             gift_entry: now,
             share_image: None,
             exporting: false,
+            gifts_scroll: gpui_kit::base::VirtualListScrollHandle::new(),
             clock_running: false,
         }));
         if own && let Some(data) = self.qr_data_mut() {
@@ -279,6 +287,9 @@ impl QuillApp {
             open.gift_entry = now;
         }
         if open.state.panel != before.panel {
+            if open.state.panel == Some(QrPanel::Gifts) {
+                open.gifts_scroll = gpui_kit::base::VirtualListScrollHandle::new();
+            }
             open.motion = match open.state.panel {
                 Some(panel) => PanelMotion {
                     shown: Some(panel),
@@ -321,8 +332,11 @@ impl QuillApp {
                 QrEffect::Toast(toast) => self.show_qr_toast(toast, cx),
                 QrEffect::SaveTheme { ticket, choice } => self.qr_save_theme(ticket, choice, cx),
                 QrEffect::LoadGifts { more } => {
+                    let now = quill::local_time::now_unix();
                     if let (Some(peer), Some(live)) = (self.qr_peer(), self.live.as_mut()) {
-                        let _ = live.driver.fetch_share_theme_gifts(peer, more);
+                        let _ = live.driver.fetch_share_theme_gifts(peer, more, now);
+                    } else if more {
+                        self.qr_demo_more_gifts(now);
                     }
                 }
             }

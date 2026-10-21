@@ -176,12 +176,12 @@ impl Session {
             PaymentsPayload::ReceivedGifts(page) => {
                 if let Some(p) = pending
                     && let RequestPurpose::Users(UsersPurpose::GetShareThemeGifts {
+                        owner,
                         serial,
                         first,
-                        ..
                     }) = p.purpose
                 {
-                    self.apply_share_theme_gifts(page, serial, first);
+                    self.apply_share_theme_gifts(page, owner, serial, first);
                 } else if let Some(p) = pending
                     && matches!(
                         p.purpose,

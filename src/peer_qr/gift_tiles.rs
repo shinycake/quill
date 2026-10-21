@@ -102,6 +102,20 @@ pub fn content_height(layout: GiftsLayout, width: f64, count: usize, browse: boo
     (2. * PANEL_PADDING + content).ceil()
 }
 
+/// Row `row` of `rows` in the scrolling grid: its height and the space
+/// above its tiles. The first row carries the top padding, the last the
+/// bottom one and the others the skip under them, so the rows add up to
+/// [`content_height`] (tdesktop pads both ends of the list).
+pub fn grid_row(width: f64, row: usize, rows: usize) -> (f64, f64) {
+    let top = if row == 0 { PANEL_PADDING } else { 0. };
+    let bottom = if row + 1 >= rows {
+        PANEL_PADDING
+    } else {
+        GIFT_SKIP
+    };
+    (top + square_size(width) + bottom, top)
+}
+
 /// How tall the gifts panel opens: as tall as the colors panel while it
 /// loads or scrolls, else its content up to that (tdesktop `openHeight`).
 pub fn gifts_panel_height(layout: GiftsLayout, width: f64, count: usize, browse: bool) -> f64 {

@@ -7,7 +7,7 @@
 //! - `QUILL_DEMO_PEER_QR_EMOJI=<a>,<b>`: pick emoji for the pattern.
 //! - `QUILL_DEMO_PEER_QR_PANEL=colors|emoji|gifts`: open a panel.
 //! - `QUILL_DEMO_PEER_QR_GIFTS=<n>`: how many upgraded gifts you own
-//!   (default 5; 0 shows the empty state).
+//!   (default 5; 0 shows the empty state), served twelve to a page.
 //! - `QUILL_DEMO_PEER_QR_GIFT=<n>`: show the n-th of them (1-based).
 //! - `QUILL_DEMO_PEER_QR_THEME=emoji|gift`: every peer has a saved share
 //!   theme: the third color with 🐱 and 🌸, or the second gift.
@@ -120,14 +120,14 @@ pub(super) fn seed_peer_qr_session(sink: Arc<MemorySink>) -> Session {
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(5);
+    let (list, offset) = demo_gifts_page(0, count);
     session.users_state.peer_qr.gifts = ThemeGifts {
         owner: Some(ThemeOwner::User(ME)),
-        list: (0..count).map(demo_gift).collect(),
-        offset: String::new(),
+        list,
+        complete: offset.is_empty(),
+        offset,
         loaded: true,
-        complete: true,
-        loading: false,
-        serial: 0,
+        ..ThemeGifts::default()
     };
     let theme = match std::env::var("QUILL_DEMO_PEER_QR_THEME").as_deref() {
         Ok("emoji") => Some(ShareTheme::Emoji {
@@ -182,6 +182,49 @@ fn sticker(file: i32) -> StickerContent {
 
 /// The `index`-th upgraded gift you own in the demo, on the backdrop of
 /// the same index.
+/// Demo gifts come in pages this long, so a short scroll reaches the next.
+pub(super) const DEMO_GIFTS_PAGE: usize = 12;
+
+/// Demo gifts `start..` of `total`, a page of them, and the offset of the
+/// next page (empty after the last).
+pub(super) fn demo_gifts_page(start: usize, total: usize) -> (Vec<ThemeGift>, String) {
+    let end = start.saturating_add(DEMO_GIFTS_PAGE).min(total);
+    let list = (start..end).map(demo_gift).collect();
+    let offset = if end < total {
+        format!("demo-{end}-{total}")
+    } else {
+        String::new()
+    };
+    (list, offset)
+}
+
+impl QuillApp {
+    /// The demo has no server: the next page of gifts comes at once.
+    pub(super) fn qr_demo_more_gifts(&mut self, now: i64) {
+        let Some(gifts) = self
+            .demo_session
+            .as_mut()
+            .map(|session| &mut session.users_state.peer_qr.gifts)
+        else {
+            return;
+        };
+        let Some(owner) = gifts.owner else {
+            return;
+        };
+        let next = gifts.offset.strip_prefix("demo-").and_then(|rest| {
+            let (start, total) = rest.split_once('-')?;
+            Some((start.parse().ok()?, total.parse().ok()?))
+        });
+        let Some((start, total)) = next else {
+            return;
+        };
+        if gifts.start(owner, true, now).is_some() {
+            let (list, offset) = demo_gifts_page(start, total);
+            gifts.accept(list, offset, false);
+        }
+    }
+}
+
 pub(super) fn demo_gift(index: usize) -> ThemeGift {
     let (_, center, edge) = BACKDROPS
         .get(index % BACKDROPS.len())

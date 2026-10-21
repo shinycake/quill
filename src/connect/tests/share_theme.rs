@@ -7,7 +7,9 @@ use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::peer_qr::appearance::SwatchKey;
 use crate::peer_qr::state::{QrPeer, SaveTicket};
-use crate::peer_qr::theme::{SaveRights, ShareTheme, ThemeChoice, ThemeEmoji, can_save};
+use crate::peer_qr::theme::{
+    GIFTS_RETRY_SECS, SaveRights, ShareTheme, ThemeChoice, ThemeEmoji, can_save,
+};
 use crate::platform::MemorySecretStore;
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::ChannelMemberStatus;
@@ -19,6 +21,7 @@ const ME: i64 = 7;
 const FRIEND: i64 = 21;
 const CHANNEL: i64 = -1_000_113;
 const SUPERGROUP: i64 = 113;
+const NOW: i64 = 1_000_000;
 
 struct Rig {
     driver: ConnectDriver<Arc<RecordingSender>>,
@@ -266,7 +269,7 @@ fn upgraded(received: &str, id: i64, burned: bool) -> Value {
 fn the_gifts_panel_pages_through_your_upgraded_gifts() {
     let mut rig = Rig::new();
     rig.driver
-        .fetch_share_theme_gifts(QrPeer::User(ME), false)
+        .fetch_share_theme_gifts(QrPeer::User(ME), false, NOW)
         .unwrap();
     let first = rig.last();
     assert_eq!(first["@type"], "getReceivedGifts");
@@ -279,7 +282,7 @@ fn the_gifts_panel_pages_through_your_upgraded_gifts() {
     assert_eq!(first["limit"], 50);
     let sent = rig.sent();
     rig.driver
-        .fetch_share_theme_gifts(QrPeer::User(ME), true)
+        .fetch_share_theme_gifts(QrPeer::User(ME), true, NOW)
         .unwrap();
     assert_eq!(rig.sent(), sent, "no next page before the first one");
     rig.feed(
@@ -293,7 +296,7 @@ fn the_gifts_panel_pages_through_your_upgraded_gifts() {
     assert_eq!(gifts.list[0].received_id, "r1");
     assert!(gifts.loaded && !gifts.complete);
     rig.driver
-        .fetch_share_theme_gifts(QrPeer::User(ME), true)
+        .fetch_share_theme_gifts(QrPeer::User(ME), true, NOW)
         .unwrap();
     let second = rig.last();
     assert_eq!(second["offset"], "page2");
@@ -307,7 +310,7 @@ fn the_gifts_panel_pages_through_your_upgraded_gifts() {
     assert!(gifts.complete);
     let sent = rig.sent();
     rig.driver
-        .fetch_share_theme_gifts(QrPeer::User(ME), true)
+        .fetch_share_theme_gifts(QrPeer::User(ME), true, NOW)
         .unwrap();
     assert_eq!(rig.sent(), sent, "nothing after the last page");
 }
@@ -316,11 +319,11 @@ fn the_gifts_panel_pages_through_your_upgraded_gifts() {
 fn a_stale_gifts_page_is_dropped() {
     let mut rig = Rig::new();
     rig.driver
-        .fetch_share_theme_gifts(QrPeer::User(ME), false)
+        .fetch_share_theme_gifts(QrPeer::User(ME), false, NOW)
         .unwrap();
     let stale = rig.last();
     rig.driver
-        .fetch_share_theme_gifts(QrPeer::User(ME), false)
+        .fetch_share_theme_gifts(QrPeer::User(ME), false, NOW)
         .unwrap();
     rig.feed(
         json!({"@type": "receivedGifts", "@extra": stale["@extra"], "total_count": 1,
@@ -336,8 +339,124 @@ fn a_peer_you_cannot_style_lists_no_gifts() {
     let sent = rig.sent();
     assert!(
         rig.driver
-            .fetch_share_theme_gifts(QrPeer::User(FRIEND), false)
+            .fetch_share_theme_gifts(QrPeer::User(FRIEND), false, NOW)
             .is_err()
     );
     assert_eq!(rig.sent(), sent);
+}
+
+fn gifts_error(rig: &mut Rig, request: &Value) {
+    rig.feed(
+        json!({"@type": "error", "@extra": request["@extra"], "code": 500,
+        "message": "Request aborted"}),
+    );
+}
+
+fn gift_ids(rig: &Rig) -> Vec<i64> {
+    let gifts = &rig.driver.session.users_state.peer_qr.gifts;
+    gifts.list.iter().map(|gift| gift.id).collect()
+}
+
+#[test]
+fn a_late_page_of_your_gifts_stays_out_of_a_channels_list() {
+    let mut rig = Rig::new();
+    rig.channel(creator(), true);
+    set_rights(&mut rig, ChannelMemberStatus::Creator, None);
+    // Your own panel opens, then closes before its page comes back, and
+    // the channel's panel opens.
+    rig.driver
+        .fetch_share_theme_gifts(QrPeer::User(ME), false, NOW)
+        .unwrap();
+    let own = rig.last();
+    rig.driver
+        .fetch_share_theme_gifts(QrPeer::Chat(CHANNEL), false, NOW)
+        .unwrap();
+    let channel = rig.last();
+    assert_eq!(channel["owner_id"]["chat_id"], CHANNEL);
+    rig.feed(
+        json!({"@type": "receivedGifts", "@extra": own["@extra"], "total_count": 1,
+        "next_offset": "", "gifts": [upgraded("mine", 101, false)]}),
+    );
+    let gifts = &rig.driver.session.users_state.peer_qr.gifts;
+    assert!(
+        gifts.list.is_empty() && gifts.loading,
+        "your page is dropped"
+    );
+    rig.feed(
+        json!({"@type": "receivedGifts", "@extra": channel["@extra"], "total_count": 1,
+        "next_offset": "", "gifts": [upgraded("theirs", 202, false)]}),
+    );
+    assert_eq!(gift_ids(&rig), vec![202]);
+}
+
+#[test]
+fn a_failed_refetch_keeps_the_gifts_already_listed() {
+    let mut rig = Rig::new();
+    rig.driver
+        .fetch_share_theme_gifts(QrPeer::User(ME), false, NOW)
+        .unwrap();
+    let first = rig.last();
+    rig.feed(
+        json!({"@type": "receivedGifts", "@extra": first["@extra"], "total_count": 2,
+        "next_offset": "", "gifts": [upgraded("r1", 101, false), upgraded("r2", 102, false)]}),
+    );
+    // The panel opens again and its refetch fails.
+    rig.driver
+        .fetch_share_theme_gifts(QrPeer::User(ME), false, NOW)
+        .unwrap();
+    let again = rig.last();
+    gifts_error(&mut rig, &again);
+    assert_eq!(gift_ids(&rig), vec![101, 102]);
+    let gifts = &rig.driver.session.users_state.peer_qr.gifts;
+    assert!(gifts.loaded && gifts.complete && !gifts.loading);
+}
+
+#[test]
+fn a_failed_first_page_shows_an_empty_list() {
+    let mut rig = Rig::new();
+    rig.driver
+        .fetch_share_theme_gifts(QrPeer::User(ME), false, NOW)
+        .unwrap();
+    let first = rig.last();
+    gifts_error(&mut rig, &first);
+    let gifts = &rig.driver.session.users_state.peer_qr.gifts;
+    assert!(gifts.list.is_empty() && gifts.loaded && !gifts.loading);
+}
+
+#[test]
+fn a_failed_next_page_is_asked_for_again_a_little_later() {
+    let mut rig = Rig::new();
+    rig.driver
+        .fetch_share_theme_gifts(QrPeer::User(ME), false, NOW)
+        .unwrap();
+    let first = rig.last();
+    rig.feed(
+        json!({"@type": "receivedGifts", "@extra": first["@extra"], "total_count": 2,
+        "next_offset": "page2", "gifts": [upgraded("r1", 101, false)]}),
+    );
+    rig.driver
+        .fetch_share_theme_gifts(QrPeer::User(ME), true, NOW)
+        .unwrap();
+    let second = rig.last();
+    gifts_error(&mut rig, &second);
+    let gifts = &rig.driver.session.users_state.peer_qr.gifts;
+    assert!(!gifts.complete, "a failed page does not end the list");
+    assert_eq!(gift_ids(&rig), vec![101]);
+    let sent = rig.sent();
+    rig.driver
+        .fetch_share_theme_gifts(QrPeer::User(ME), true, NOW + 1)
+        .unwrap();
+    assert_eq!(rig.sent(), sent, "not straight away");
+    rig.driver
+        .fetch_share_theme_gifts(QrPeer::User(ME), true, NOW + GIFTS_RETRY_SECS)
+        .unwrap();
+    let retry = rig.last();
+    assert_eq!(retry["@type"], "getReceivedGifts");
+    assert_eq!(retry["offset"], "page2");
+    rig.feed(
+        json!({"@type": "receivedGifts", "@extra": retry["@extra"], "total_count": 2,
+        "next_offset": "", "gifts": [upgraded("r2", 102, false)]}),
+    );
+    assert_eq!(gift_ids(&rig), vec![101, 102]);
+    assert!(rig.driver.session.users_state.peer_qr.gifts.complete);
 }
