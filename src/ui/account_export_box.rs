@@ -50,8 +50,6 @@ fn format_label(format: ExportFormat) -> &'static str {
 impl QuillApp {
     /// Open the box. While an export is running it shows that export.
     pub(super) fn open_account_export(&mut self, cx: &mut Context<Self>) {
-        // One surface at a time: the box replaces Data & Storage.
-        self.settings.storage_usage_open = false;
         if self
             .session()
             .is_some_and(|s| s.settings.account_export.is_some())

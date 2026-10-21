@@ -92,7 +92,11 @@ impl QuillApp {
             .set_note(StatusNote::silent("screenshot demo — active sessions"));
     }
 
-    fn demo_ready_storage_usage(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+    pub(crate) fn demo_ready_storage_usage(
+        &mut self,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
         // Slice S4: Data & Storage fixture — fixture stats (including the
         // secret category and per-chat rows) plus seeded per-network
         // download settings, with the dialog open (injected, no live
@@ -104,7 +108,7 @@ impl QuillApp {
             session.settings.data_storage = demo_data_storage_prefs();
             session.settings.storage_freed = Some(54_525_952);
         }
-        self.settings.storage_usage_open = true;
+        self.open_settings(Some(quill::settings_catalog::Page::DataStorage));
         self.connection
             .set_note(StatusNote::silent("screenshot demo — data & storage"));
     }

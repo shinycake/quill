@@ -340,3 +340,43 @@ fn privacy_rules_open_over_the_page_and_esc_closes_them_first(cx: &mut TestAppCo
     assert!(app.read_with(vcx, |app, _| app.privacy.editor.is_none()));
     assert!(shown(vcx, "settings-page-privacy"), "the page stays");
 }
+
+#[gpui_kit::test]
+fn data_storage_editor_opens_in_the_page_and_leaving_drops_it(cx: &mut TestAppContext) {
+    let (app, _, mut vcx) = new_app_sized(cx, 1100., 2400.);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.demo_ready_storage_usage(window, cx)
+    });
+    frames(vcx);
+    assert!(shown(vcx, "settings-page-data"));
+    app.update(vcx, |app, cx| {
+        let network = quill::data_settings::NetworkKind::WiFi;
+        let draft = app
+            .session()
+            .map(|s| *s.settings.data_storage.for_network(network));
+        app.settings.data_storage_editor = draft.map(|draft| (network, draft));
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.settings.data_storage_editor.is_some()));
+    vcx.update(|window, cx| window.click("data-storage-back", cx));
+    frames(vcx);
+    assert!(
+        app.read_with(vcx, |app, _| app.settings.data_storage_editor.is_none()),
+        "back returns to the overview"
+    );
+
+    app.update(vcx, |app, cx| {
+        let network = quill::data_settings::NetworkKind::WiFi;
+        let draft = app
+            .session()
+            .map(|s| *s.settings.data_storage.for_network(network));
+        app.settings.data_storage_editor = draft.map(|draft| (network, draft));
+    });
+
+    app.update(vcx, |app, cx| app.show_settings_page(Page::Connection, cx));
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.settings.data_storage_editor.is_none()));
+    assert!(shown(vcx, "settings-page-connection"));
+}
