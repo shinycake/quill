@@ -119,9 +119,11 @@ An idle carrier on macOS (Apple M-series, macOS 27, debug helper build, local re
 physical footprint 24 MB for the helper plus 13 MB WebContent, 13 MB GPU and 6 MB Networking
 processes, 55 MB in all (`footprint`). Quill itself adds two threads per carrier and no memory
 beyond the queues. Each signed-in account's TDLib asks for its own carrier, so the cost is per
-account using the web proxy. Data crosses the UI thread once each way (the poll loop is woken by
-the helper's reader thread); a fast path on the receive thread would remove that hop if relay
-latency ever shows up.
+account using the web proxy. A 3-byte round trip from Quill's host through the helper, the page
+and back (`src/proxy_carrier/helper_live_tests.rs`, 20 rounds, polled every 200 µs) takes
+0.54 ms at the median and 66 ms at worst, which was the first, cold round. In the app, data
+crosses the UI thread once each way (the helper's reader thread wakes the poll loop). If relay
+latency ever becomes a problem, a fast path on the receive thread would remove that hop.
 
 ## How verified
 Carrier hosting:
@@ -144,6 +146,10 @@ Carrier hosting:
   `Terminated`; a plain-`http` origin is refused before loading. Debug builds accept a loopback
   `http://127.0.0.1` origin for this test when `QUILL_WEBVIEW_CARRIER_LOOPBACK` is set; release
   builds never do.
+- Quill's live host against the real helper (`src/proxy_carrier/helper_live_tests.rs`, ignored by
+  default): the page's hello reaches the host, and 20 deliveries come back reversed and in order.
+  After the close, the host reports nothing more.
+- Light and dark captures of the proxy list with the web proxy enabled (`ready-proxy-web-list`).
 - Not run: Linux (WebKitGTK, X11 and Wayland) and Windows (WebView2) are built by CI, not run
   here. No public web proxy was found to try, so a real relay page and real traffic are untested.
 
