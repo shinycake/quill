@@ -44,9 +44,21 @@ the main process (the mini-app web view is a separate helper process), so:
 - Testing: tdesktop does not test web proxies, so Quill hides the row's check button and the link
   box's status row for them.
 
-Hosting the carrier (a hidden web view per carrier, the bridge object and binary relay through the
-helper process) is a separate feature. Until it lands, a web proxy can be added, edited, shared
-and enabled, but it will not carry traffic.
+Because switching to a web proxy would cut the connection, Quill does not enable one while it cannot
+host the carrier: the driver refuses `enableProxy` for a web proxy and saves it disabled when an add
+or edit asks to enable it, the row's "use this proxy" click shows "Web proxies aren't supported in
+this version yet" (also printed under the row), and the "use custom proxy" radio skips web proxies.
+Parsing, links, editing, sharing and listing work. A web proxy that is already enabled (settings
+sync, another device) shows "not available" once TDLib asks for its carrier.
+
+## Open part: carrier hosting
+`parity:data-proxy-web` stays unticked until Quill hosts carriers: a hidden web view per carrier
+that defines the read-only `TelegramWebProxy` bridge object only for the carrier's origin, relays
+binary and text messages through `processWebProxyCarrierMessage` and `updateWebProxyCarrierData`,
+and reports failures with `reportWebProxyCarrierError`. Two hosts are candidates: the kit 0.8
+`gpui-webview` crate (macOS, Windows, Linux X11), which runs in the GPUI process and looks the
+likelier fit for hidden, per-carrier views, and the wry view in the mini-app helper process, which
+would need a binary relay over stdin/stdout. Not evaluated in this PR.
 
 ## How verified
 Unit tests for the address rules, link secret, validation, `proxyTypeWeb` both ways and web

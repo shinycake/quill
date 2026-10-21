@@ -279,6 +279,16 @@ impl QuillApp {
     }
 
     fn enable_proxy_entry(&mut self, id: i32, cx: &mut Context<Self>) {
+        let web = self
+            .session()
+            .and_then(|s| s.settings.proxy.find(id))
+            .is_some_and(|p| !p.proxy.kind.can_be_enabled());
+        if web {
+            self.settings.proxy.notice =
+                Some(tr(keys::Q_PREFS_WEB_PROXIES_ARENT_SUPPORTED_YET).into());
+            cx.notify();
+            return;
+        }
         let _ = self.proxy_driver(|driver| driver.enable_proxy(id));
         cx.notify();
     }
@@ -386,6 +396,7 @@ impl QuillApp {
                 .proxy
                 .entries()
                 .iter()
+                .filter(|p| p.proxy.kind.can_be_enabled())
                 .max_by_key(|p| p.last_used_date)
                 .map(|p| p.id)
         });
@@ -461,7 +472,8 @@ impl QuillApp {
                 .map(|p| p.id)
         });
         let _ = self.proxy_driver(|driver| match existing {
-            Some(id) => driver.enable_proxy(id),
+            Some(id) if link.draft.kind.can_be_enabled() => driver.enable_proxy(id),
+            Some(_) => Err(quill::connect::ConnectSendError::InvalidRequest),
             None => driver.add_proxy(&link.draft, true, ""),
         });
         cx.notify();

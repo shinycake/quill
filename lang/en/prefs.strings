@@ -456,6 +456,7 @@
 "qll_prefs_hint" = "Hint: {password_hint}";
 "qll_prefs_hint_optional" = "Hint (optional)";
 "qll_prefs_enter_a_web_proxy_address" = "Enter a valid web proxy address and a secret.";
+"qll_prefs_web_proxies_arent_supported_yet" = "Web proxies aren't supported in this version yet.";
 "qll_prefs_hostname" = "Hostname";
 "qll_prefs_hour" = "− hour";
 "qll_prefs_hour_2" = "+ hour";

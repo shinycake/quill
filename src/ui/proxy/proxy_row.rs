@@ -75,7 +75,9 @@ impl QuillApp {
                     .min_w_0()
                     .items_center()
                     .gap_2()
-                    .cursor_pointer()
+                    .when(entry.proxy.kind.can_be_enabled(), |this| {
+                        this.cursor_pointer()
+                    })
                     // The proxy in use stays on (tdesktop `applyItem`); the
                     // radios above switch it off.
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -107,6 +109,18 @@ impl QuillApp {
                                     .text_xs()
                                     .text_color(status_color)
                                     .child(row_subtitle(entry, ping, web)),
+                            )
+                            // Quill cannot host a web proxy's carrier yet, so
+                            // it cannot be switched to.
+                            .when(
+                                !entry.proxy.kind.can_be_enabled() && !entry.is_enabled,
+                                |this| {
+                                    this.child(
+                                        div().text_xs().text_color(text_muted()).child(tr(
+                                            keys::Q_PREFS_WEB_PROXIES_ARENT_SUPPORTED_YET,
+                                        )),
+                                    )
+                                },
                             ),
                     ),
             )

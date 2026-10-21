@@ -29,6 +29,14 @@ pub enum ProxyKind {
     Web,
 }
 
+impl ProxyKind {
+    /// Quill cannot host the carrier of a web proxy yet, so switching to
+    /// one would cut the connection (`parity:data-proxy-web`).
+    pub fn can_be_enabled(self) -> bool {
+        self != ProxyKind::Web
+    }
+}
+
 /// The proxy TDLib reports as enabled, in the shape the future
 /// `getProxies` plumbing will hand over.
 #[derive(Debug, Clone, PartialEq, Eq)]

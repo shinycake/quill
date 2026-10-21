@@ -2,6 +2,7 @@
 //! request may be sent before authorization (schema 1.8.67 :16202), so
 //! the gate is "not shutting down", not "auth Ready".
 use super::*;
+use crate::calls::proxy::ProxyKind;
 use crate::ids::RequestId;
 use crate::proxy::{PingStatus, ProxyDraft, ProxyEntry, RotationAction};
 use crate::proxy_sync::{ProxySyncStep, plan_proxy_sync};
@@ -115,6 +116,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         enable: bool,
         comment: &str,
     ) -> Result<RequestId, ConnectSendError> {
+        // Quill cannot host a web proxy's carrier yet: it is saved, never
+        // switched to (`crate::proxy_web`).
+        let enable = enable && draft.kind != ProxyKind::Web;
         self.send_proxy_mutation(|extra| add_proxy(extra, draft, enable, comment))
     }
 
@@ -129,13 +133,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.settings.proxy.find(proxy_id).is_none() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        let enable = enable && draft.kind != ProxyKind::Web;
         self.session.settings.proxy.pings.remove(&proxy_id);
         self.send_proxy_mutation(|extra| edit_proxy(extra, proxy_id, draft, enable, comment))
     }
 
     /// `enableProxy` (TDLib keeps one enabled at a time).
     pub fn enable_proxy(&mut self, proxy_id: i32) -> Result<RequestId, ConnectSendError> {
-        if self.session.settings.proxy.find(proxy_id).is_none() {
+        let enableable = self
+            .session
+            .settings
+            .proxy
+            .find(proxy_id)
+            .is_some_and(|p| p.proxy.kind.can_be_enabled());
+        if !enableable {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.send_proxy_mutation(|extra| enable_proxy(extra, proxy_id))

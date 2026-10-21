@@ -397,3 +397,33 @@ fn a_web_proxy_carrier_is_refused_and_the_row_says_not_available() {
     assert_eq!(rig.driver.session.settings.proxy.carrier_failed, None);
     assert_eq!(rig.count("reportWebProxyCarrierError"), 2);
 }
+
+#[test]
+fn a_web_proxy_is_saved_but_never_switched_to() {
+    let mut rig = Rig::new();
+    rig.load_list(&[(1, false)]);
+    let web =
+        crate::proxy::ProxyDraft::web("relay.example.com/app", "8561944064fc730cbfa4473562d8ec59")
+            .validated()
+            .unwrap();
+    // Adding with "enable" saves the proxy without enabling it.
+    rig.driver.add_proxy(&web, true, "").unwrap();
+    assert_eq!(sent_request(&rig.recorder, "addProxy")["enable"], false);
+    rig.answer(
+        "addProxy",
+        json!({"@type": "addedProxy", "id": 2, "last_used_date": 0, "is_enabled": false,
+            "comment": "", "proxy": web.to_json()}),
+    );
+    rig.answer(
+        "getProxies",
+        json!({"@type": "addedProxies", "proxies": [
+            {"@type": "addedProxy", "id": 2, "last_used_date": 0, "is_enabled": false,
+             "comment": "", "proxy": web.to_json()}]}),
+    );
+    // Enabling it is refused and nothing is sent.
+    assert!(rig.driver.enable_proxy(2).is_err());
+    assert_eq!(rig.count("enableProxy"), 0);
+    // Editing it keeps it off too.
+    rig.driver.edit_proxy(2, &web, true, "").unwrap();
+    assert_eq!(sent_request(&rig.recorder, "editProxy")["enable"], false);
+}

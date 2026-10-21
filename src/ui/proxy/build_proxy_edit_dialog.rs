@@ -361,7 +361,11 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("proxy-link-connect")
-                        .label(tr(keys::PROXY_BOX_TABLE_BUTTON))
+                        .label(if draft.kind == ProxyKind::Web {
+                            tr(keys::PROXY_ADD)
+                        } else {
+                            tr(keys::PROXY_BOX_TABLE_BUTTON)
+                        })
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.connect_link_proxy(cx);
