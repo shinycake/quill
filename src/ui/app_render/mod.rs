@@ -722,8 +722,6 @@ impl Render for QuillApp {
             // via the shell sync — render wiring deleted.
             // kit Phase 2 (redo): call confirm now hosted in a kit Dialog
             // via the shell sync — render wiring deleted.
-            // kit Phase 2 (redo): notification defaults now hosted in a kit
-            // Dialog via the shell sync — render wiring deleted.
             // kit Phase 2 (redo): storage usage now hosted in a kit Dialog
             // via the shell sync — render wiring deleted.
             // kit Phase 2 (redo): two-step verification now hosted in a kit
@@ -736,11 +734,8 @@ impl Render for QuillApp {
             // Dialog via the shell sync — render wiring deleted.
             // kit Phase 2 (redo): appearance now hosted in a kit Dialog via
             // the shell sync — render wiring deleted.
-            // Slice S3: privacy overlay (Settings → Privacy) plus the
-            // per-rule editor and the always/never exception list.
-            .when(self.privacy.open, |this| {
-                this.child(self.privacy_overlay(cx))
-            })
+            // Settings → Privacy: the per-rule editor and the always/never
+            // exception list, over the settings page.
             .when_some(self.privacy_editor_overlay(cx), |this, overlay| {
                 this.child(overlay)
             })

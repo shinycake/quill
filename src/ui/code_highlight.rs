@@ -28,9 +28,9 @@ const LANGUAGE_LIMIT: usize = 32;
 
 /// The slots tdesktop colors, in its order (`colors` in
 /// `spellcheck_highlight_syntax.cpp`): comment, punctuation, property /
-/// number / constant, string, operator, keyword / function, class name. Its
-/// "inserted" slot has no source here: the kit names a diff's added lines
-/// no differently from other text.
+/// number / constant, string, operator, keyword / function, class name,
+/// inserted. The kit names no "inserted" token, so only [`diff_spans`] sets
+/// it; tdesktop's "deleted" shares the red `Literal` slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Token {
     Comment,
@@ -40,6 +40,7 @@ pub(crate) enum Token {
     Operator,
     Keyword,
     Type,
+    Inserted,
 }
 
 /// A colored stretch of a block's text, in bytes.
@@ -98,6 +99,9 @@ pub(crate) fn language_for(raw: &str) -> Option<String> {
 /// know. Pure, but loads the syntaxes on first use, so it runs off the main
 /// thread.
 pub(crate) fn tokenize(language: &str, text: &str) -> Vec<Span> {
+    if is_diff(language) {
+        return diff_spans(text);
+    }
     let mut spans: Vec<Span> = Vec::new();
     let mut end_of_last = 0;
     for (range, name) in capture_names(language, text) {
@@ -120,6 +124,83 @@ pub(crate) fn tokenize(language: &str, text: &str) -> Vec<Span> {
         }
     }
     spans
+}
+
+/// Languages tdesktop gives its diff grammar (`diff` and `patch` alias to
+/// it); [`language_for`] already folds `patch` into `diff`.
+fn is_diff(language: &str) -> bool {
+    matches!(language, "diff" | "git")
+}
+
+/// The token a diff line takes from its first character, as libprisma's
+/// diff grammar does: `+` is inserted, `-` is deleted, which tdesktop colors
+/// like literals, and `#` is a comment. (tdesktop's compiled grammar stores
+/// the deleted class as `[-\x13]`, so an en dash never matches.)
+pub(crate) fn diff_line_token(line: &str) -> Option<Token> {
+    match line.chars().next()? {
+        '+' => Some(Token::Inserted),
+        '-' => Some(Token::Literal),
+        '#' => Some(Token::Comment),
+        _ => None,
+    }
+}
+
+/// One span per colored line of a diff, without its line break.
+fn diff_spans(text: &str) -> Vec<Span> {
+    let mut spans = Vec::new();
+    let mut start = 0;
+    for line in text.split_inclusive('\n') {
+        let end = start + line.len();
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        let content = content.strip_suffix('\r').unwrap_or(content);
+        if let Some(token) = diff_line_token(content) {
+            spans.push((start..start + content.len(), token));
+        } else {
+            // libprisma lists `string` before `command`, `coord` and
+            // `commit-sha1`, which have no color, so quoted strings color on
+            // every line the line rules leave.
+            for range in quoted_strings(content) {
+                spans.push((start + range.start..start + range.end, Token::String));
+            }
+        }
+        start = end;
+    }
+    spans
+}
+
+/// The byte ranges of the `"…"` and `'…'` strings of one line, as libprisma's
+/// `("|')(?:\\.|(?!\1)[^\\\r\n])*\1`: a backslash takes the next character,
+/// and a quote that never closes matches nothing.
+fn quoted_strings(line: &str) -> Vec<Range<usize>> {
+    let mut found = Vec::new();
+    let mut chars = line.char_indices().peekable();
+    while let Some((open, quote)) = chars.next() {
+        if quote != '"' && quote != '\'' {
+            continue;
+        }
+        let mut probe = chars.clone();
+        let mut closed = None;
+        while let Some((at, c)) = probe.next() {
+            if c == quote {
+                closed = Some(at + c.len_utf8());
+                break;
+            }
+            if c == '\\' {
+                if probe.next().is_none() {
+                    break;
+                }
+            } else if c == '\r' || c == '\n' {
+                break;
+            }
+        }
+        if let Some(close) = closed {
+            found.push(open..close);
+            while chars.peek().is_some_and(|(at, _)| *at < close) {
+                chars.next();
+            }
+        }
+    }
+    found
 }
 
 enum Entry {
@@ -233,7 +314,7 @@ pub(crate) fn start(job: Job, cx: &mut Context<QuillApp>) {
 }
 
 impl Token {
-    const ALL: [Token; 7] = [
+    const ALL: [Token; 8] = [
         Token::Comment,
         Token::Punctuation,
         Token::Literal,
@@ -241,6 +322,7 @@ impl Token {
         Token::Operator,
         Token::Keyword,
         Token::Type,
+        Token::Inserted,
     ];
 }
 
@@ -250,7 +332,7 @@ impl Token {
 /// orange strings, blue keywords, purple class names). Comments are Quill's
 /// muted text instead of tdesktop's light blue: held to AA, the two blues
 /// come out the same color on a light background.
-pub(crate) fn palette(background: Rgba) -> [Rgba; 7] {
+pub(crate) fn palette(background: Rgba) -> [Rgba; 8] {
     use quill::stat_chart::ColorKey;
     let background_hex = rgb_hex(background);
     Token::ALL.map(|token| {
@@ -260,6 +342,7 @@ pub(crate) fn palette(background: Rgba) -> [Rgba; 7] {
             Token::String => ColorKey::Orange.rgb(),
             Token::Keyword => ColorKey::Blue.rgb(),
             Token::Type => ColorKey::Purple.rgb(),
+            Token::Inserted => ColorKey::Green.rgb(),
         };
         gpui_kit::rgb(quill::theme_colorize::readable(
             base,
@@ -306,7 +389,7 @@ fn usable(code: &str, spans: &[Span]) -> Vec<(Range<usize>, Token)> {
 fn highlights(
     code: &str,
     spans: &[Span],
-    colors: &[Rgba; 7],
+    colors: &[Rgba; 8],
 ) -> Vec<(Range<usize>, HighlightStyle)> {
     usable(code, spans)
         .into_iter()
@@ -462,6 +545,67 @@ mod tests {
                 .map(|shift| ((comment >> shift) & 0xff).abs_diff((keyword >> shift) & 0xff))
                 .sum();
             assert!(distance >= 90, "{comment:06x} vs {keyword:06x}");
+        });
+    }
+
+    #[test]
+    fn diff_lines_are_classified_by_their_first_character() {
+        use super::diff_line_token;
+        assert_eq!(diff_line_token("+added"), Some(Token::Inserted));
+        assert_eq!(diff_line_token("-removed"), Some(Token::Literal));
+        assert_eq!(diff_line_token("\u{2013}dash"), None);
+        assert_eq!(diff_line_token("# note"), Some(Token::Comment));
+        assert_eq!(diff_line_token(" context"), None);
+        assert_eq!(diff_line_token("@@ -1 +1 @@"), None);
+        assert_eq!(diff_line_token(""), None);
+    }
+
+    #[test]
+    fn strings_color_on_diff_lines_without_a_line_token() {
+        let code = "@@ -1 +1 @@ \"hunk\"\n say(\"Hi\", 'a\\'b', \"open\n+ add(\"no\")\n \"é\" 'x";
+        let spans = tokenize("diff", code);
+        assert_eq!(
+            text_of(code, &spans, Token::String),
+            vec!["\"hunk\"", "\"Hi\"", "'a\\'b'", "\"é\""]
+        );
+        assert_eq!(
+            text_of(code, &spans, Token::Inserted),
+            vec!["+ add(\"no\")"]
+        );
+        for (range, _) in &spans {
+            assert!(code.is_char_boundary(range.start) && code.is_char_boundary(range.end));
+        }
+    }
+
+    #[test]
+    fn diff_blocks_color_added_and_removed_lines() {
+        let code = "@@ -1,3 +1,3 @@\n fn a() {\n-    old();\r\n+    new();\n }\n+é";
+        for language in ["diff", "git"] {
+            let spans = tokenize(language, code);
+            assert_eq!(
+                text_of(code, &spans, Token::Inserted),
+                vec!["+    new();", "+é"]
+            );
+            assert_eq!(text_of(code, &spans, Token::Literal), vec!["-    old();"]);
+            for (range, _) in &spans {
+                assert!(code.is_char_boundary(range.start) && code.is_char_boundary(range.end));
+            }
+        }
+        assert!(tokenize("diff", "").is_empty());
+        assert!(tokenize("diff", "\n\n").is_empty());
+    }
+
+    #[test]
+    fn inserted_green_is_told_apart_from_deleted_red_in_every_mode() {
+        use super::{color_of, rgb_hex};
+        each_mode(|| {
+            let background = crate::ui::chat_theme::bg_code();
+            let inserted = rgb_hex(color_of(Token::Inserted, background));
+            let deleted = rgb_hex(color_of(Token::Literal, background));
+            let (green, red) = (inserted >> 8 & 0xff, deleted >> 8 & 0xff);
+            let (inserted_red, deleted_red) = (inserted >> 16 & 0xff, deleted >> 16 & 0xff);
+            assert!(green > inserted_red, "{inserted:06x} is green");
+            assert!(deleted_red > red, "{deleted:06x} is red");
         });
     }
 

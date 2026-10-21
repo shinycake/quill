@@ -106,3 +106,13 @@
 "lng_settings_username_add" = "Add username";
 "qll_settings_omarchy" = "Omarchy";
 "qll_settings_omarchy_following" = "Quill follows your Omarchy theme and changes with it. Choose another theme to stop.";
+// The What's New window: every Quill release with its notes.
+"qll_whats_new_title" = "What's new in Quill";
+"qll_whats_new_installed" = "Installed";
+"qll_whats_new_available" = "Available";
+"qll_whats_new_beta" = "Beta";
+"qll_whats_new_loading" = "Loading release notes…";
+"qll_whats_new_failed" = "Couldn't load the release notes. Check your connection and try again.";
+"qll_whats_new_retry" = "Try again";
+"qll_whats_new_all_releases" = "All releases on GitHub";
+"qll_settings_privacy_security" = "Security";

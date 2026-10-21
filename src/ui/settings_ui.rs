@@ -827,7 +827,7 @@ impl QuillApp {
     /// Privacy and security > Archive and Mute (tdesktop
     /// `settings_privacy_security.cpp`): the three archive switches,
     /// including the one for chats from folders, inline.
-    pub(super) fn archive_privacy_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn archive_privacy_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
         let settings = session.and_then(|s| s.chat_list.archive_chat_list_settings);
         let loading = session.is_some_and(|s| s.chat_list.archive_settings_loading);
@@ -895,13 +895,5 @@ crate::ui::shell::register_dialogs! {
         500,
         |app| app.session().is_some_and(|s| s.chat_list.archive_settings_open),
         QuillApp::build_archive_settings_dialog,
-    ),
-
-    /// Built in notification_settings.rs; registered here until that file's
-    /// split lands, then the entry can move next to its builder.
-    NotificationDefaults => DialogSpec::new(
-        1000,
-        |app| app.notify.notification_defaults_open,
-        QuillApp::build_notification_defaults_dialog,
     ),
 }

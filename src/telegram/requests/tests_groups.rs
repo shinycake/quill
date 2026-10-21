@@ -1,6 +1,7 @@
-use crate::composer::SendOptions;
+use crate::composer::{QuoteSelection, SendOptions};
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::telegram::requests::*;
+use crate::text::{TextEntity, TextEntityKind};
 use serde_json::Value;
 
 #[test]
@@ -621,7 +622,10 @@ fn g1_reply_quote_shape_matches_schema() {
     // = InputMessageReplyTo` with `inputTextQuote text:formattedText
     // rich_texts:vector<RichText> position:int32 = InputTextQuote`
     // (schema 1.8.69, line 3488).
-    let v = input_message_reply_to_with_quote(Some(MessageId(101)), Some(("sel", 7)));
+    let v = input_message_reply_to_with_quote(
+        Some(MessageId(101)),
+        Some(&QuoteSelection::plain("sel", 7)),
+    );
     assert_eq!(v["@type"], "inputMessageReplyToMessage");
     assert_eq!(v["message_id"], 101);
     assert_eq!(v["quote"]["@type"], "inputTextQuote");
@@ -632,7 +636,9 @@ fn g1_reply_quote_shape_matches_schema() {
     // Whole-message reply keeps `quote: null` (existing behavior).
     let v = input_message_reply_to_with_quote(Some(MessageId(101)), None);
     assert!(v["quote"].is_null());
-    assert!(input_message_reply_to_with_quote(None, Some(("sel", 7))).is_null());
+    assert!(
+        input_message_reply_to_with_quote(None, Some(&QuoteSelection::plain("sel", 7))).is_null()
+    );
 }
 
 #[test]
@@ -642,7 +648,7 @@ fn g1_send_reply_quote_rides_send_text() {
     // through the `sendMessage` builder.
     let reply = SendReply {
         message_id: MessageId(101),
-        quote: Some(("sel".to_string(), 7)),
+        quote: Some(QuoteSelection::plain("sel", 7)),
         source_chat: None,
         item: Default::default(),
     };
@@ -677,7 +683,11 @@ fn g1_send_reply_quote_rides_send_text() {
 fn external_reply_rides_send_text_with_its_quote() {
     // "Reply in Another Chat": `inputMessageReplyToExternalMessage`
     // (schema `td_api.tl:3404`) carries the source chat and the quote.
-    let reply = SendReply::external(ChatId(12), MessageId(40), Some(("sel".to_string(), 7)));
+    let reply = SendReply::external(
+        ChatId(12),
+        MessageId(40),
+        Some(QuoteSelection::plain("sel", 7)),
+    );
     let json = send_text(
         RequestId(1),
         ChatId(7),
@@ -868,4 +878,91 @@ fn g2_thread_boost_welcome_request_shapes_match_1_8_67() {
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert_eq!(v["@type"], "deleteChatWelcomeMessage");
     assert_eq!(v["welcome_message_id"], 5);
+}
+
+fn entity(start: usize, end: usize, kind: TextEntityKind) -> TextEntity {
+    TextEntity {
+        utf8_start: start,
+        utf8_end: end,
+        kind,
+    }
+}
+
+#[test]
+fn quote_request_keeps_only_the_formatting_a_quote_may_hold() {
+    // A quote keeps Bold, Italic, Underline, Strikethrough, Spoiler,
+    // CustomEmoji and DateTime only (`schema/td_api.tl:3481`, TDLib
+    // `is_allowed_quote_entity_type`); code and links are dropped.
+    // "bold" starts after an emoji (4 bytes, 2 UTF-16 units) and a space.
+    let mut quote = QuoteSelection::plain("\u{1F600} bold and code", 4);
+    quote.entities = vec![
+        entity(5, 9, TextEntityKind::Bold),
+        entity(14, 18, TextEntityKind::Code),
+        entity(
+            10,
+            13,
+            TextEntityKind::TextUrl {
+                url: "https://example.com".into(),
+            },
+        ),
+        // "and" as a date keeps its relative format.
+        entity(
+            10,
+            13,
+            TextEntityKind::DateTime {
+                unix_time: 1_700_000_000,
+                format: crate::text::date_time_format::DateTimeFormat::Relative,
+            },
+        ),
+    ];
+    let v = input_message_reply_to_with_quote(Some(MessageId(101)), Some(&quote));
+    let text = &v["quote"]["text"];
+    assert_eq!(text["text"], "\u{1F600} bold and code");
+    assert_eq!(
+        text["entities"],
+        serde_json::json!([
+            {"@type": "textEntity", "offset": 3, "length": 4,
+             "type": {"@type": "textEntityTypeBold"}},
+            {"@type": "textEntity", "offset": 8, "length": 3,
+             "type": {"@type": "textEntityTypeDateTime", "unix_time": 1_700_000_000,
+                      "formatting_type": {"@type": "dateTimeFormattingTypeRelative"}}},
+        ])
+    );
+    // An ordinary message sends no rich_texts.
+    assert_eq!(v["quote"]["rich_texts"], serde_json::json!([]));
+}
+
+#[test]
+fn quote_from_a_rich_message_sends_one_rich_text_per_quoted_text() {
+    use crate::rich::{QuoteRichText, QuoteStyle};
+    let mut quote = QuoteSelection::plain("bold x2\nsecond", 12);
+    quote.rich_texts = vec![
+        QuoteRichText::Concat(vec![
+            QuoteRichText::Styled {
+                style: QuoteStyle::Bold,
+                text: Box::new(QuoteRichText::Plain("bold".into())),
+            },
+            QuoteRichText::Plain(" x".into()),
+            QuoteRichText::Styled {
+                style: QuoteStyle::Superscript,
+                text: Box::new(QuoteRichText::Plain("2".into())),
+            },
+        ]),
+        QuoteRichText::Plain("second".into()),
+    ];
+    let v = input_text_quote_json(&quote);
+    assert_eq!(v["position"], 12);
+    assert_eq!(
+        v["rich_texts"],
+        serde_json::json!([
+            {"@type": "richTexts", "texts": [
+                {"@type": "richTextBold",
+                 "text": {"@type": "richTextPlain", "text": "bold"}},
+                {"@type": "richTextPlain", "text": " x"},
+                {"@type": "richTextSuperscript",
+                 "text": {"@type": "richTextPlain", "text": "2"}},
+            ]},
+            {"@type": "richTextPlain", "text": "second"},
+        ])
+    );
 }

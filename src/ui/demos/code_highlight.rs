@@ -1,6 +1,8 @@
-//! Screenshot demo: code blocks highlighted by their language. One chat with
-//! a Rust block, a Python block and a block whose language the highlighter
-//! does not know, which stays plain (injected, no live Telegram).
+//! Screenshot demos: code blocks highlighted by their language. One chat with
+//! a Rust block, a Python block, a diff and a block whose language the
+//! highlighter does not know, which stays plain; and the Instant View reader
+//! with a Rust block, a diff and a block without a language (injected, no live
+//! Telegram).
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
@@ -14,6 +16,14 @@ const CHAT: i64 = 31;
 
 pub(crate) const RUST: &str = "// Add two numbers\nfn add(a: i32, b: i32) -> i32 {\n    let sum = a + b; // 42 max\n    println!(\"sum = {sum}\");\n    sum\n}";
 pub(crate) const PYTHON: &str = "# Greet someone\ndef greet(name: str) -> str:\n    if not name:\n        return \"Hello, world!\"\n    return f\"Hello, {name}!\"";
+pub(crate) const DIFF: &str = "@@ -1,5 +1,5 @@\n fn greet(name: &str) {\n     println!(\"start\");\n-    println!(\"Hi\");\n+    println!(\"Hello, {name}!\");\n }";
+// The reader's blocks differ from the chat's, so tests running side by side do
+// not share cache entries.
+pub(crate) const IV_RUST: &str =
+    "// Add two numbers\nfn add(a: i32, b: i32) -> i32 {\n    a + b // 42 max\n}";
+pub(crate) const IV_DIFF: &str =
+    "@@ -1,3 +1,3 @@\n fn add(a: i32, b: i32) -> i32 {\n-    a - b\n+    a + b\n }";
+const IV_PLAIN: &str = "WIBBLE y = 7; // not a language";
 const UNKNOWN: &str = "WIBBLE x = 42; // not a language\nfrob(\"quux\") -> 7";
 
 register_demos![
@@ -22,6 +32,11 @@ register_demos![
         "screenshot demo — code blocks highlighted by language (injected)"
     )
     .setup(QuillApp::demo_code_highlight),
+    DemoSpec::chats(
+        "ready-iv-code-highlight",
+        "screenshot demo — Instant View code blocks highlighted by language (injected)"
+    )
+    .setup(QuillApp::demo_iv_code_highlight),
 ];
 
 fn message(id: i64, intro: &str, code: &str, language: &str) -> String {
@@ -54,13 +69,42 @@ impl QuillApp {
             position,
             message(201, "Rust:", RUST, "rust"),
             message(202, "Python:", PYTHON, "python"),
-            message(203, "Unknown language:", UNKNOWN, "wibble"),
+            message(203, "Diff:", DIFF, "diff"),
+            message(204, "Unknown language:", UNKNOWN, "wibble"),
         ] {
             if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
                 session.apply(owned);
             }
         }
         session.open_chat(ChatId(CHAT));
+    }
+}
+
+/// An Instant View page: a heading, then `pageBlockPreformatted` blocks as
+/// TDLib sends them.
+fn iv_page() -> quill::state::InstantViewPage {
+    let plain = |text: &str| serde_json::json!({"@type": "richTextPlain", "text": text});
+    let blocks = [
+        serde_json::json!({"@type": "pageBlockHeader", "text": plain("Adding numbers")}),
+        serde_json::json!({"@type": "pageBlockPreformatted", "text": plain(IV_RUST), "language": "rust"}),
+        serde_json::json!({"@type": "pageBlockPreformatted", "text": plain(IV_DIFF), "language": "diff"}),
+        serde_json::json!({"@type": "pageBlockPreformatted", "text": plain(IV_PLAIN), "language": ""}),
+    ];
+    quill::state::InstantViewPage {
+        url: "https://example.com/adding-numbers".to_owned(),
+        rich: quill::telegram::envelope::RichMessageContent {
+            blocks: blocks.iter().map(quill::rich::parse_page_block).collect(),
+            is_full: true,
+            quote_texts: Default::default(),
+        },
+    }
+}
+
+impl QuillApp {
+    fn demo_iv_code_highlight(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+        if let Some(session) = self.demo_session.as_mut() {
+            session.messages.instant_view = Some(iv_page());
+        }
     }
 }
 
@@ -75,19 +119,14 @@ mod tests {
     use gpui_kit::component::Root;
     use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 
-    fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+    fn new_app(cx: &mut TestAppContext, demo: &str) -> (Entity<QuillApp>, VisualTestContext) {
         cx.update(gpui_kit::init);
         cx.update(bind_keys);
         let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
         let slot_in = slot.clone();
         let handle = cx.open_window(size(px(1100.), px(700.)), move |window, cx| {
             let view = cx.new(|cx| {
-                QuillApp::new_with_demo(
-                    window,
-                    cx,
-                    None,
-                    Some(ScreenshotDemo::named("ready-code-highlight")),
-                )
+                QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named(demo)))
             });
             *slot_in.borrow_mut() = Some(view.clone());
             let shell = cx.new(|_| QuillShell::new(view));
@@ -100,7 +139,7 @@ mod tests {
 
     #[gpui_kit::test]
     fn code_blocks_render_highlighted(cx: &mut TestAppContext) {
-        let (_app, mut vcx) = new_app(cx);
+        let (_app, mut vcx) = new_app(cx, "ready-code-highlight");
         vcx.run_until_parked();
         // The tokens arrived after the first draw; the next one colors the text.
         vcx.update(|window, _| window.refresh());
@@ -116,6 +155,25 @@ mod tests {
         assert!(
             ready("wibble", super::UNKNOWN).is_some_and(|spans| spans.is_empty()),
             "an unknown language is cached as plain"
+        );
+        let diff = ready("diff", super::DIFF).expect("the diff block was tokenized");
+        assert!(diff.iter().any(|(range, token)| *token == Token::Inserted
+            && super::DIFF.get(range.clone()) == Some("+    println!(\"Hello, {name}!\");")));
+    }
+
+    #[gpui_kit::test]
+    fn instant_view_code_blocks_render_highlighted(cx: &mut TestAppContext) {
+        let (_app, mut vcx) = new_app(cx, "ready-iv-code-highlight");
+        vcx.run_until_parked();
+        vcx.update(|window, _| window.refresh());
+        vcx.run_until_parked();
+        let spans = ready("rust", super::IV_RUST).expect("the page's rust block was tokenized");
+        assert!(spans.iter().any(|(range, token)| *token == Token::Keyword
+            && super::IV_RUST.get(range.clone()) == Some("fn")));
+        assert!(ready("diff", super::IV_DIFF).is_some_and(|spans| !spans.is_empty()));
+        assert!(
+            DRAWN_RUNS.with(std::cell::Cell::get) > 0,
+            "the cached spans reached the reader's drawn text"
         );
     }
 }

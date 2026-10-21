@@ -63,6 +63,18 @@ pub(super) fn reply_header_strip(
     let clickable = header.clickable;
     let state = header.state;
     let text = super::search_ui::one_line_preview(&header.text);
+    // A quote keeps the formatting of the part it was cut from.
+    let quote_line = (header.is_quote && !header.entities.is_empty()).then(|| {
+        super::chatlist_style::chat_list_preview_line_layered(
+            None,
+            &header.text,
+            &header.entities,
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+            None,
+            body,
+        )
+    });
     let aria = match &name {
         Some(name) => tr_with(
             keys::Q_MISC_REPLY_TO,
@@ -166,11 +178,11 @@ pub(super) fn reply_header_strip(
                             muted
                         })
                         .when(state != ReplyState::Ready, |this| this.italic())
-                        .child(
+                        .child(quote_line.unwrap_or_else(|| {
                             super::emoji_sprites::one_line(&text, px(12.)).unwrap_or_else(|| {
                                 super::bidi_line::one_line_plain(text).into_any_element()
-                            }),
-                        ),
+                            })
+                        })),
                 ),
         )
         .into_any_element()

@@ -29,6 +29,7 @@ fn new_app_sized(
     let _ = std::fs::create_dir_all(&root);
     quill::settings::use_isolated_app_root(root);
     cx.update(gpui_kit::init);
+    cx.update(crate::ui::bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
     let handle = cx.open_window(size(px(width), px(height)), move |window, cx| {
@@ -292,4 +293,50 @@ fn account_rows_open_their_editors(cx: &mut TestAppContext) {
     vcx.update(|window, cx| window.click("settings-row-name-color", cx));
     assert!(open_dialog(&shell, vcx).is_some());
     app.read_with(vcx, |app, _| assert!(app.settings.open));
+}
+
+#[gpui_kit::test]
+fn notifications_live_on_their_page_and_reset_asks_first(cx: &mut TestAppContext) {
+    let (app, shell, mut vcx) = new_app_sized(cx, 1100., 3000.);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.demo_settings(Page::Account);
+        cx.notify();
+    });
+    frames(vcx);
+    app.update(vcx, |app, cx| {
+        app.show_settings_page(Page::Notifications, cx)
+    });
+    frames(vcx);
+    assert!(shown(vcx, "settings-page-notifications"));
+    assert_eq!(open_dialog(&shell, vcx), None, "no box opens over the page");
+
+    vcx.update(|window, cx| window.click("settings-row-reset-notifications", cx));
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.notify.notifications_confirm.is_some()));
+
+    // Leaving the page drops the pending reset.
+    app.update(vcx, |app, cx| app.show_settings_page(Page::Account, cx));
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.notify.notifications_confirm.is_none()));
+}
+
+#[gpui_kit::test]
+fn privacy_rules_open_over_the_page_and_esc_closes_them_first(cx: &mut TestAppContext) {
+    let (app, _, mut vcx) = new_app_sized(cx, 1100., 2400.);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.demo_settings(Page::Account);
+        app.show_settings_page(Page::Privacy, cx);
+    });
+    frames(vcx);
+    assert!(shown(vcx, "settings-page-privacy"));
+    vcx.update(|window, cx| window.click("privacy-rule-userPrivacySettingShowStatus", cx));
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.privacy.editor.is_some()));
+
+    vcx.simulate_keystrokes("escape");
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.privacy.editor.is_none()));
+    assert!(shown(vcx, "settings-page-privacy"), "the page stays");
 }

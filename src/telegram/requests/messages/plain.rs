@@ -16,7 +16,7 @@ impl SendReply {
     pub fn external(
         source_chat: ChatId,
         message_id: MessageId,
-        quote: Option<(String, i32)>,
+        quote: Option<QuoteSelection>,
     ) -> Self {
         Self {
             message_id,

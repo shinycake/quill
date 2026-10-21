@@ -816,13 +816,21 @@ impl QuillApp {
                     super::search_ui::one_line_preview(&item_line.unwrap_or_default()),
                 ))
                 .into_any_element(),
-            (Some(quote), _) => div()
-                .text_sm()
-                .truncate()
-                .child(super::bidi_line::one_line_plain(
-                    super::search_ui::one_line_preview(&format!("❝{}❞", quote.text)),
-                ))
-                .into_any_element(),
+            // The quote as it reads in the message, with its formatting and
+            // no quote marks (tdesktop `FieldHeader::updateShownMessageText`).
+            (Some(quote), _) => {
+                let emoji = self.custom_emoji_images(&quote.entities, cx);
+                div()
+                    .text_sm()
+                    .child(super::chatlist_style::chat_list_preview_line(
+                        None,
+                        &quote.text,
+                        &quote.entities,
+                        &emoji,
+                        cx,
+                    ))
+                    .into_any_element()
+            }
             (None, Some(quill::telegram::envelope::MessageContent::Text(text))) => {
                 let emoji = self.custom_emoji_images(&text.entities, cx);
                 div()

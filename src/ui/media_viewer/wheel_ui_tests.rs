@@ -90,7 +90,7 @@ pub(in crate::ui::media_viewer) fn open(
     id: i64,
 ) {
     app.update_in(vcx, |app, _, cx| {
-        app.privacy.open = false;
+        app.close_settings();
         app.open_media_viewer(ChatId(11), MessageId(id), cx);
     });
     settle(vcx);

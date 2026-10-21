@@ -5,8 +5,6 @@
 //! wording of a reply that comes from another chat.
 #![deny(clippy::indexing_slicing)]
 
-use crate::composer::QuoteSelection;
-
 /// Longest quote Telegram accepts by default (`quote_length_max`).
 pub const QUOTE_MAX_CHARS: usize = 1024;
 
@@ -70,58 +68,15 @@ pub fn reply_bar_title(sender: Option<&str>, from_chat: Option<&str>) -> String 
     }
 }
 
-/// Split message text into parts to quote: one per line, and inside a
-/// line one per sentence. Positions are UTF-16 code-unit offsets into
-/// `text`, as `inputTextQuote.position` needs. Parts longer than
-/// [`QUOTE_MAX_CHARS`] are left out.
-pub fn quote_segments(text: &str) -> Vec<QuoteSelection> {
-    let mut parts = Vec::new();
-    let mut offset16 = 0usize;
-    for line in text.split_inclusive('\n') {
-        push_sentences(line, offset16, &mut parts);
-        offset16 += line.encode_utf16().count();
-    }
-    parts
-}
-
-fn push_sentences(line: &str, base16: usize, parts: &mut Vec<QuoteSelection>) {
-    let mut start = 0usize;
-    let mut chars = line.char_indices().peekable();
-    while let Some((index, ch)) = chars.next() {
-        let ends = matches!(ch, '.' | '!' | '?' | '…')
-            && chars.peek().is_none_or(|(_, next)| next.is_whitespace());
-        if ends {
-            let end = index + ch.len_utf8();
-            push_part(line, start, end, base16, parts);
-            start = end;
-        }
-    }
-    push_part(line, start, line.len(), base16, parts);
-}
-
-fn push_part(line: &str, start: usize, end: usize, base16: usize, parts: &mut Vec<QuoteSelection>) {
-    let raw = line.get(start..end).unwrap_or_default();
-    let lead = raw.len() - raw.trim_start().len();
-    let trimmed = raw.trim();
-    if trimmed.is_empty() || trimmed.chars().count() > QUOTE_MAX_CHARS {
-        return;
-    }
-    let position = base16
-        + line
-            .get(..start + lead)
-            .unwrap_or_default()
-            .encode_utf16()
-            .count();
-    parts.push(QuoteSelection {
-        text: trimmed.to_string(),
-        position: position as i32,
-    });
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::composer::quote_position;
-    use crate::reply_options::{ReplyOption, quote_segments, reply_bar_title, reply_options};
+    use crate::composer::{QuoteSelection, quote_position};
+    use crate::quote_source::QuotableText;
+    use crate::reply_options::{ReplyOption, reply_bar_title, reply_options};
+
+    fn quote_segments(text: &str) -> Vec<QuoteSelection> {
+        QuotableText::plain(text).segments()
+    }
 
     #[test]
     fn options_follow_the_message() {

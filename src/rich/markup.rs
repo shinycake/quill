@@ -252,6 +252,7 @@ fn markup_preview_text(text: &str) -> (String, Vec<TextEntity>) {
                 },
                 crate::composer::FormatKind::DateTime => TextEntityKind::DateTime {
                     unix_time: crate::composer::date_link_time(&entity.url)?,
+                    format: Default::default(),
                 },
                 crate::composer::FormatKind::BlockQuote => return None,
             };
@@ -440,6 +441,7 @@ mod tests {
         let flat = crate::telegram::envelope::RichMessageContent {
             blocks: blocks.clone(),
             is_full: true,
+            quote_texts: Default::default(),
         }
         .copy_text();
         let flat_blocks = markup_to_blocks(&flat);

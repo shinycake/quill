@@ -191,7 +191,11 @@ pub(crate) fn parse_messages_payload(
         "richMessage" => {
             let (blocks, is_full) = parse_rich_message(value);
             Ok(EnvelopePayload::Messages(MessagesPayload::RichMessage {
-                rich: RichMessageContent { blocks, is_full },
+                rich: RichMessageContent {
+                    blocks,
+                    is_full,
+                    quote_texts: crate::rich::rich_message_quote_texts(value).into(),
+                },
             }))
         }
         // MED4: `webPageInstantView` (schema:4377) — same `blocks` /
@@ -200,7 +204,12 @@ pub(crate) fn parse_messages_payload(
             let (blocks, is_full) = parse_rich_message(value);
             Ok(EnvelopePayload::Messages(
                 MessagesPayload::WebPageInstantView {
-                    rich: RichMessageContent { blocks, is_full },
+                    // An Instant View page is never quoted.
+                    rich: RichMessageContent {
+                        blocks,
+                        is_full,
+                        quote_texts: Default::default(),
+                    },
                 },
             ))
         }

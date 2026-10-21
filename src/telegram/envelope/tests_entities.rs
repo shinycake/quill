@@ -71,6 +71,7 @@ fn each_interactive_type_is_parsed() {
             json!({"@type": "textEntityTypeDateTime", "unix_time": 1700000000, "formatting_type": null}),
             K::DateTime {
                 unix_time: 1_700_000_000,
+                format: Default::default(),
             },
         ),
     ];

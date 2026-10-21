@@ -24,7 +24,7 @@ fn ready_viewer(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext
     let (app, mut vcx) = open_scripted(cx, &script);
     // The demo opens the privacy page over the window; clicks go there.
     app.update_in(&mut vcx, |app, _, cx| {
-        app.privacy.open = false;
+        app.close_settings();
         cx.notify();
     });
     settle(&mut vcx);

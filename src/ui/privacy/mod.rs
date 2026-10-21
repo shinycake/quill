@@ -64,17 +64,22 @@ impl PrivacyExceptionKind {
     }
 }
 impl QuillApp {
-    /// Slice S3: open the Privacy overlay (TGX Settings → Privacy).
-    /// Live: fetch all five privacy rules, the read-date setting, and the
-    /// first blocked page (unguarded: always fresh on open). Demo: the
-    /// `ReadyPrivacy` fixture seeds state directly.
+    /// Settings → Privacy, with nothing open over it, freshly fetched.
     pub(crate) fn open_privacy(&mut self, cx: &mut Context<Self>) {
-        self.privacy.open = true;
         self.privacy.editor = None;
         self.privacy.exceptions = None;
         self.privacy.exception_picker_open = false;
         self.privacy.block_picker_open = false;
         self.privacy.unblock_confirm = None;
+        self.open_settings(Some(quill::settings_catalog::Page::Privacy));
+        self.fetch_privacy();
+        cx.notify();
+    }
+
+    /// Live: all privacy rules, the read-date setting, the first blocked
+    /// page, new-chat and archive settings, unguarded (always fresh). Demo:
+    /// the `ReadyPrivacy` fixture seeds state directly.
+    pub(crate) fn fetch_privacy(&mut self) {
         if let Some(live) = self.live.as_mut() {
             for key in PrivacySettingKey::all() {
                 let _ = live.driver.fetch_privacy_rules(key);
@@ -87,7 +92,6 @@ impl QuillApp {
                 let _ = live.driver.fetch_user_full_info(me);
             }
         }
-        cx.notify();
     }
 
     /// Slice S3: close the topmost privacy layer (exceptions →
@@ -98,9 +102,8 @@ impl QuillApp {
             self.privacy.exception_picker_open = false;
             self.privacy.block_picker_open = false;
         } else if self.privacy.exceptions.take().is_some() {
-        } else if self.privacy.editor.take().is_some() {
         } else {
-            self.privacy.open = false;
+            self.privacy.editor = None;
         }
         self.privacy.unblock_confirm = None;
         cx.notify();
@@ -177,101 +180,48 @@ impl QuillApp {
             .into_any_element()
     }
 
-    /// Slice S3: the main Privacy overlay — the five visibility rules,
-    /// the two call rows, and the blocked-users list (TGX
-    /// `SettingsPrivacyController`).
-    pub(crate) fn privacy_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
-        let mut body = div().flex().flex_col().gap_3();
-
-        if self
-            .session()
-            .is_some_and(|s| s.settings.privacy_data.check_password_suggested)
-        {
-            body = body.child(self.password_check_card(cx));
-        }
-
-        let mut visibility = div().flex().flex_col().gap_1();
-        visibility = visibility.child(
-            div()
-                .text_sm()
-                .font_semibold()
-                .px_1()
-                .child(tr(keys::Q_PREFS_WHO_CAN_SEE)),
-        );
-        for key in PrivacySettingKey::visibility_rows() {
-            visibility = visibility.child(self.privacy_rule_row(cx, key));
-        }
-        body = body.child(visibility);
-
-        let mut contact = div().flex().flex_col().gap_1();
-        contact = contact.child(
-            div()
-                .text_sm()
-                .font_semibold()
-                .px_1()
-                .child(tr(keys::Q_PREFS_WHO_CAN_CONTACT_ME)),
-        );
-        contact = contact.child(self.privacy_rule_row(cx, PrivacySettingKey::AllowCalls));
-        contact = contact.child(self.privacy_rule_row(cx, PrivacySettingKey::PeerToPeer));
-        contact = contact.child(self.privacy_rule_row(cx, PrivacySettingKey::AllowVoiceMessages));
-        contact = contact.child(self.new_chat_privacy_row(cx));
-        contact = contact.child(self.privacy_rule_row(cx, PrivacySettingKey::AllowChatInvites));
-        body = body.child(contact);
-
-        body = body.child(self.archive_privacy_section(cx));
-
-        body = body.child(self.privacy_frequent_contacts_section(cx));
-
-        body = body.child(self.privacy_blocked_section(cx));
-
-        body = body.child(self.privacy_security_section(cx));
-
-        // Slice payments: the "Clear saved payment/shipping info" row
-        // (`parity:bots-payment-clear`) — destructive, with the shared
-        // confirm dialog, next to the other data-clearing controls.
-        let mut payments = div().flex().flex_col().gap_1();
-        payments = payments.child(
-            div()
-                .text_sm()
-                .font_semibold()
-                .px_1()
-                .child(tr(keys::Q_PREFS_PAYMENTS)),
-        );
-        payments = payments.child(
-            div().flex().flex_col().gap_1().child(
-                Button::new("privacy-clear-payment-info")
-                    .small()
-                    .label(tr(keys::Q_PREFS_CLEAR_SAVED_PAYMENT_SHIPPING_INFO))
-                    .custom(super::security::quiet_danger(cx))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.open_group_confirm(
-                            ChatId(0),
-                            GroupConfirmAction::ClearPaymentInfo,
-                            cx,
-                        );
-                    })),
-            ),
-        );
-        payments = payments.child(
-            div()
-                .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .child(tr(keys::Q_PREFS_DELETES_THE_SHIPPING_INFO_AND)),
-        );
-        body = body.child(payments);
-
-        self.privacy_shell(
-            cx,
-            "main",
-            tr(keys::SETTINGS_PRIVACY_TITLE),
-            body.into_any_element(),
-        )
+    /// "Clear saved payment/shipping info" (`parity:bots-payment-clear`):
+    /// destructive, with the shared confirm dialog.
+    pub(crate) fn privacy_payments_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .px_1()
+                    .child(tr(keys::Q_PREFS_PAYMENTS)),
+            )
+            .child(
+                div().flex().flex_col().gap_1().child(
+                    Button::new("privacy-clear-payment-info")
+                        .small()
+                        .label(tr(keys::Q_PREFS_CLEAR_SAVED_PAYMENT_SHIPPING_INFO))
+                        .custom(super::security::quiet_danger(cx))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.open_group_confirm(
+                                ChatId(0),
+                                GroupConfirmAction::ClearPaymentInfo,
+                                cx,
+                            );
+                        })),
+                ),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr(keys::Q_PREFS_DELETES_THE_SHIPPING_INFO_AND)),
+            )
+            .into_any_element()
     }
 
     /// tdesktop Settings > Privacy > "Suggest frequent contacts": whether
     /// the search panel shows the people you message most
     /// (`lng_settings_top_peers_*`; TDLib option `disable_top_chats`).
-    fn privacy_frequent_contacts_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn privacy_frequent_contacts_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let enabled = !self
             .session()
             .is_some_and(|s| s.search.search.top_chats_disabled);
@@ -317,44 +267,10 @@ impl QuillApp {
             .into_any_element()
     }
 
-    /// Slice S3: one visibility-rule row (label + current value).
-    fn privacy_rule_row(&self, cx: &mut Context<Self>, key: PrivacySettingKey) -> AnyElement {
-        let value = self
-            .session()
-            .map(|s| privacy_key_value(s, key))
-            .unwrap_or_default();
-        let target = PrivacyEditorTarget::Rule(key);
-        div()
-            .id(format!("privacy-rule-{}", key.td_type()))
-            .role(gpui_kit::Role::Button)
-            .aria_label(format!("{} · {}", target.label(), value))
-            .tab_index(0)
-            .cursor_pointer()
-            .flex()
-            .items_center()
-            .justify_between()
-            .px_2()
-            .py_1()
-            .rounded_md()
-            .child(div().text_sm().child(key.label()))
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(value),
-            )
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.privacy.editor = Some(target);
-                this.privacy.exception_picker_open = false;
-                cx.notify();
-            }))
-            .into_any_element()
-    }
-
     /// Slice S3: the blocked-users section (TGX
     /// `SettingsBlockedController`): list with two-step Unblock,
     /// "Block…" contact picker, and paging.
-    fn privacy_blocked_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn privacy_blocked_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
         let total = session.map(|s| s.settings.blocked_total).unwrap_or(0);
         let list: Vec<i64> = session
@@ -882,7 +798,7 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
 /// Slice S3: the Privacy-screen row value for one rule key: the base
 /// choice, with the always/never exception counts when non-zero (TGX
 /// `SettingsPrivacyKeyController` shows the mode plus exceptions).
-fn privacy_key_value(session: &Session, key: PrivacySettingKey) -> String {
+pub(crate) fn privacy_key_value(session: &Session, key: PrivacySettingKey) -> String {
     match session.settings.privacy.get(&key) {
         None | Some(PrivacyKeyState::Loading) => tr(keys::Q_PREFS_LOADING).to_string(),
         Some(PrivacyKeyState::Failed) => tr(keys::Q_PREFS_COULDNT_LOAD).to_string(),
@@ -901,7 +817,7 @@ fn privacy_key_value(session: &Session, key: PrivacySettingKey) -> String {
 }
 
 /// B13: the "Who can message me" row value (tdesktop Messages privacy).
-pub(super) fn new_chat_privacy_value(session: &Session) -> String {
+pub(crate) fn new_chat_privacy_value(session: &Session) -> String {
     match session.settings.privacy_data.new_chat {
         None | Some(quill::privacy::NewChatPrivacyState::Loading) => {
             tr(keys::Q_PREFS_LOADING).to_string()

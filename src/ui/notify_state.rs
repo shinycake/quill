@@ -45,8 +45,6 @@ pub(crate) struct NotifyUi {
     /// Parity slice (`parity:stories-notify-settings`): the notifications
     /// panel's story-sound picker sub-view is open.
     pub(super) story_sound_picker_open: bool,
-    /// Parity slice: scope-default notification settings dialog is open.
-    pub(super) notification_defaults_open: bool,
     /// Parity slice: which defaults-dialog section's sound picker is
     /// expanded (`None` = all collapsed).
     pub(super) defaults_sound_picker: Option<SoundPickerTarget>,
@@ -94,7 +92,6 @@ impl NotifyUi {
             ttl_custom_secs: 86_400,
             notif_sound_picker_open: false,
             story_sound_picker_open: false,
-            notification_defaults_open: false,
             defaults_sound_picker: None,
             defaults_exceptions_scope: None,
             notifications_confirm: None,

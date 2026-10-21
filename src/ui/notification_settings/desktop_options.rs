@@ -32,11 +32,18 @@ fn corner_id(corner: ScreenCorner) -> usize {
 }
 
 impl QuillApp {
-    pub(in crate::ui) fn notify_options_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// `None` when there is nothing to choose here (macOS: always native).
+    pub(in crate::ui) fn notify_options_section(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let support = self.native_notify_support();
         let prefs = quill::notify_prefs::current();
         let platform = self.notify.windows.platform;
         let custom_active = self.custom_notifications_active();
+        if !custom::native_switch_shown(support) && !custom_active {
+            return None;
+        }
         let mut section = div()
             .id("notify-options-section")
             .flex()
@@ -74,7 +81,7 @@ impl QuillApp {
             ));
         }
         if !custom_active {
-            return section.into_any_element();
+            return Some(section.into_any_element());
         }
         // Only the custom windows check Focus mode (tdesktop
         // `advancedWrap`).
@@ -108,6 +115,7 @@ impl QuillApp {
                     })),
             )
             .into_any_element()
+            .into()
     }
 
     /// tdesktop "Display for notifications": shown with two or more

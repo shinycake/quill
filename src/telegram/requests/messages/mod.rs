@@ -1,27 +1,9 @@
 use crate::composer::{
-    ComposerEntity, ComposerScheduling, FormatKind, LinkPreviewChoice, PreviewMediaSize, ReplyItem,
-    SendOptions, parse_format_markup,
+    ComposerEntity, ComposerScheduling, FormatKind, LinkPreviewChoice, PreviewMediaSize,
+    QuoteSelection, ReplyItem, SendOptions, parse_format_markup,
 };
 use crate::ids::{ChatId, MessageId, RequestId};
 use serde_json::{Value, json};
-
-/// Slice G1: `inputTextQuote` JSON (TDLib 1.8.69, `schema/td_api.tl:3488`):
-/// `inputTextQuote text:formattedText rich_texts:vector<RichText> position:int32`.
-/// `position` is the offset of the quoted text in the original message in
-/// UTF-16 code units. Quotes are never picked from rich messages here, so
-/// `rich_texts` is the empty array the schema asks for.
-pub fn input_text_quote_json(text: &str, position: i32) -> Value {
-    json!({
-        "@type": "inputTextQuote",
-        "text": {
-            "@type": "formattedText",
-            "text": text,
-            "entities": []
-        },
-        "rich_texts": [],
-        "position": position,
-    })
-}
 
 /// Slice G1: reply target for the send builders — a message id plus an
 /// optional validated partial quote (`inputTextQuote`, schema 1.8.67
@@ -30,7 +12,7 @@ pub fn input_text_quote_json(text: &str, position: i32) -> Value {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SendReply {
     pub message_id: MessageId,
-    pub quote: Option<(String, i32)>,
+    pub quote: Option<QuoteSelection>,
     /// The chat the replied-to message lives in when it is not the chat
     /// being sent to (`inputMessageReplyToExternalMessage`); `None` for a
     /// same-chat reply (`inputMessageReplyToMessage`).
@@ -50,12 +32,7 @@ impl SendReply {
 /// `input_message_reply_to_with_quote` so whole-message replies keep
 /// the exact shape the old `input_message_reply_to` produced.
 pub(crate) fn send_reply_value(reply_to: Option<&SendReply>) -> Value {
-    let quote = reply_to.and_then(|reply| {
-        reply
-            .quote
-            .as_ref()
-            .map(|(text, position)| (text.as_str(), *position))
-    });
+    let quote = reply_to.and_then(|reply| reply.quote.as_ref());
     let item = reply_to
         .map(|reply| &reply.item)
         .unwrap_or(&ReplyItem::Message);
@@ -75,7 +52,7 @@ pub(crate) fn send_reply_value(reply_to: Option<&SendReply>) -> Value {
 pub fn input_message_reply_to_external(
     chat_id: ChatId,
     message_id: MessageId,
-    quote: Option<(&str, i32)>,
+    quote: Option<&QuoteSelection>,
 ) -> Value {
     input_message_reply_to_external_item(chat_id, message_id, quote, &ReplyItem::Message)
 }
@@ -84,7 +61,7 @@ pub fn input_message_reply_to_external(
 pub fn input_message_reply_to_external_item(
     chat_id: ChatId,
     message_id: MessageId,
-    quote: Option<(&str, i32)>,
+    quote: Option<&QuoteSelection>,
     item: &ReplyItem,
 ) -> Value {
     json!({
@@ -92,7 +69,7 @@ pub fn input_message_reply_to_external_item(
         "chat_id": chat_id.0,
         "message_id": message_id.0,
         "quote": quote
-            .map(|(text, position)| input_text_quote_json(text, position))
+            .map(input_text_quote_json)
             .unwrap_or(Value::Null),
         "checklist_task_id": item.task_id(),
         "poll_option_id": item.option_id()
@@ -106,7 +83,7 @@ pub fn input_message_reply_to_external_item(
 /// `quote` is null for a whole-message reply.
 pub fn input_message_reply_to_with_quote(
     message_id: Option<MessageId>,
-    quote: Option<(&str, i32)>,
+    quote: Option<&QuoteSelection>,
 ) -> Value {
     input_message_reply_to_item(message_id, quote, &ReplyItem::Message)
 }
@@ -114,7 +91,7 @@ pub fn input_message_reply_to_with_quote(
 /// [`input_message_reply_to_with_quote`] pointing at a task or poll option.
 pub fn input_message_reply_to_item(
     message_id: Option<MessageId>,
-    quote: Option<(&str, i32)>,
+    quote: Option<&QuoteSelection>,
     item: &ReplyItem,
 ) -> Value {
     match message_id {
@@ -122,7 +99,7 @@ pub fn input_message_reply_to_item(
         Some(id) => json!({
             "@type": "inputMessageReplyToMessage",
             "message_id": id.0,
-            "quote": quote.map(|(text, position)| input_text_quote_json(text, position)).unwrap_or(Value::Null),
+            "quote": quote.map(input_text_quote_json).unwrap_or(Value::Null),
             "checklist_task_id": item.task_id(),
             "poll_option_id": item.option_id()
         }),
@@ -955,7 +932,9 @@ pub fn reaction_type_custom_emoji(custom_emoji_id: i64) -> Value {
 mod add_message_reaction;
 mod link_at;
 mod plain;
+mod quote;
 #[allow(unused_imports)]
 pub use add_message_reaction::*;
 #[allow(unused_imports)]
 pub use link_at::*;
+pub use quote::input_text_quote_json;

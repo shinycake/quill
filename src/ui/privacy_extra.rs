@@ -7,7 +7,7 @@
 
 use super::app::QuillApp;
 use super::chat_theme::{danger, text_muted};
-use super::privacy::{PrivacyEditorTarget, new_chat_privacy_value};
+use super::privacy::PrivacyEditorTarget;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
@@ -124,38 +124,6 @@ impl QuillApp {
             .child(div().text_xs().child(if selected { "●" } else { "○" }))
             .child(text)
             .on_click(cx.listener(move |this, _, _, cx| on_pick(this, cx)))
-            .into_any_element()
-    }
-
-    /// The "Who can message me" row of the main overlay.
-    pub(super) fn new_chat_privacy_row(&self, cx: &mut Context<Self>) -> AnyElement {
-        let value = self
-            .session()
-            .map(new_chat_privacy_value)
-            .unwrap_or_default();
-        div()
-            .id("privacy-rule-new-chat")
-            .role(gpui_kit::Role::Button)
-            .aria_label(tr_with(
-                keys::Q_PREFS_MESSAGES_2,
-                &[("value", &value.to_string())],
-            ))
-            .tab_index(0)
-            .cursor_pointer()
-            .flex()
-            .items_center()
-            .justify_between()
-            .px_2()
-            .py_1()
-            .rounded_md()
-            .child(div().text_sm().child(tr(keys::SETTINGS_MESSAGES_PRIVACY)))
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(value),
-            )
-            .on_click(cx.listener(|this, _, _, cx| this.open_new_chat_editor(cx)))
             .into_any_element()
     }
 
@@ -338,7 +306,7 @@ impl QuillApp {
 
     /// "Security" block of the main overlay: the 18+ switch (when the
     /// account may turn it on) and the file-open confirmations row.
-    pub(super) fn privacy_security_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn privacy_security_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
         let can_ignore = session.is_some_and(|s| s.settings.privacy_data.can_ignore_sensitive);
         let ignore = session
@@ -441,7 +409,7 @@ impl QuillApp {
     }
 
     /// Open the whitelist editor, loading the saved values.
-    fn open_file_open_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn open_file_open_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let prefs = file_prefs::current();
         let text = file_prefs::format_extension_list(&prefs.no_warning_extensions);
         self.privacy
@@ -771,7 +739,7 @@ impl QuillApp {
     /// The password check card (tdesktop's "Your password" suggestion):
     /// a password field, "Check" and "Dismiss". A right password shows
     /// the finish step; "Done" tells the server to stop suggesting it.
-    pub(super) fn password_check_card(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn password_check_card(&self, cx: &mut Context<Self>) -> AnyElement {
         let check = self
             .session()
             .map(|s| s.settings.privacy_data.password_check)
@@ -920,7 +888,7 @@ crate::ui::shell::register_dialogs! {
 
 #[cfg(test)]
 mod tests {
-    use super::new_chat_privacy_value;
+    use crate::ui::privacy::new_chat_privacy_value;
     use quill::diagnostics::{DiagnosticSink, MemorySink};
     use quill::ids::AccountKey;
     use quill::privacy::{NewChatPrivacy, NewChatPrivacyState};

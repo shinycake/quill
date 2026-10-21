@@ -669,14 +669,7 @@ impl QuillApp {
         {
             self.open_message_url(&url, cx);
         }
-        let page = self
-            .live
-            .as_ref()?
-            .driver
-            .session
-            .messages
-            .instant_view
-            .clone()?;
+        let page = self.session()?.messages.instant_view.clone()?;
         let url = page.url.clone();
         Some(
             div()
@@ -710,6 +703,8 @@ impl QuillApp {
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     if let Some(live) = this.live.as_mut() {
                                         live.driver.session.messages.instant_view = None;
+                                    } else if let Some(demo) = this.demo_session.as_mut() {
+                                        demo.messages.instant_view = None;
                                     }
                                     cx.notify();
                                 })),

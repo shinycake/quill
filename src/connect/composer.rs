@@ -179,7 +179,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             (Some(draft), Some(text)) => {
                 draft.text == text
                     && draft.reply_to_message_id == reply_to.map(|reply| reply.message_id)
-                    && draft.quote == reply_to.and_then(|reply| reply.quote.clone())
+                    // The same part of the message: TDLib may echo the
+                    // formatting in another shape.
+                    && match (&draft.quote, reply_to.and_then(|reply| reply.quote.as_ref())) {
+                        (None, None) => true,
+                        (Some(saved), Some(quote)) => saved.same_part(quote),
+                        _ => false,
+                    }
                     && draft.item == reply_to.map(|reply| reply.item.clone()).unwrap_or_default()
                     && draft.suggested_post == terms
             }

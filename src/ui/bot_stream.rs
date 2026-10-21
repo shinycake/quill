@@ -9,7 +9,9 @@ use super::app::QuillApp;
 use gpui_kit::*;
 use quill::ids::MessageId;
 use quill::state::{HistoryMessage, unix_ms_now};
-use quill::telegram::envelope::{ChatKind, MessageContent, MessageSender, TextContent};
+use quill::telegram::envelope::{
+    ChatKind, MessageContent, MessageSender, RichMessageContent, TextContent,
+};
 use std::time::Instant;
 
 /// Reveal state of the streaming draft on screen.
@@ -93,6 +95,23 @@ pub(super) fn open_chat_draft(
     }
 }
 
+/// A streaming draft's rich content as the history shows it. A draft has
+/// no server message for callback buttons, a full-message fetch or a
+/// quote (its id is negative), so those are dropped.
+fn stream_rich(rich: &RichMessageContent) -> RichMessageContent {
+    let mut rich = rich.clone();
+    rich.is_full = true;
+    rich.quote_texts = Default::default();
+    rich.blocks
+        .retain(|block| !matches!(block, quill::rich::RichBlock::ButtonRow { .. }));
+    for block in &mut rich.blocks {
+        if let quill::rich::RichBlock::Paragraph { buttons, .. } = block {
+            buttons.clear();
+        }
+    }
+    rich
+}
+
 impl QuillApp {
     /// What the history rows key needs to know about a streaming reply:
     /// the draft and how much of it shows; while the reveal runs, a fresh
@@ -141,20 +160,7 @@ impl QuillApp {
                 }
                 MessageContent::Text(reveal_text(text, shown))
             }
-            MessageContent::RichMessage(rich) => {
-                // A draft has no server message for callback buttons or a
-                // full-message fetch.
-                let mut rich = rich.clone();
-                rich.is_full = true;
-                rich.blocks
-                    .retain(|block| !matches!(block, quill::rich::RichBlock::ButtonRow { .. }));
-                for block in &mut rich.blocks {
-                    if let quill::rich::RichBlock::Paragraph { buttons, .. } = block {
-                        buttons.clear();
-                    }
-                }
-                MessageContent::RichMessage(rich)
-            }
+            MessageContent::RichMessage(rich) => MessageContent::RichMessage(stream_rich(rich)),
             // No text yet: Telegram's "Thinking…" placeholder.
             _ => MessageContent::Text(TextContent {
                 text: "Thinking…".into(),
@@ -189,8 +195,9 @@ impl QuillApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{StreamReveal, reveal_text};
-    use quill::telegram::envelope::TextContent;
+    use super::{StreamReveal, reveal_text, stream_rich};
+    use quill::rich::QuoteRichText;
+    use quill::telegram::envelope::{RichMessageContent, TextContent};
     use quill::text::{TextEntity, TextEntityKind};
 
     #[test]
@@ -224,5 +231,19 @@ mod tests {
         reveal.advance(1, 100);
         reveal.shown = 50.0;
         assert_eq!(reveal.advance(2, 100), 0);
+    }
+
+    #[test]
+    fn streaming_draft_carries_no_quote_texts() {
+        let quote = QuoteRichText::Plain("quotable".into());
+        let rich = RichMessageContent {
+            blocks: Vec::new(),
+            is_full: false,
+            quote_texts: vec![quote].into(),
+        };
+        let shown = stream_rich(&rich);
+        assert!(shown.quote_texts.is_empty());
+        assert!(shown.is_full);
+        assert_eq!(rich.quote_texts.len(), 1);
     }
 }
