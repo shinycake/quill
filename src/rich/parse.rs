@@ -231,11 +231,23 @@ pub fn parse_page_block(value: &Value) -> RichBlock {
         "pageBlockPreformatted" => {
             let (text, mut entities, buttons) =
                 rich_text_to_parts(value.get("text").unwrap_or(&Value::Null));
+            // tdesktop keeps the block's trimmed `language` for highlighting.
+            let language = value
+                .get("language")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .unwrap_or_default();
             if !text.is_empty() {
                 entities.push(TextEntity {
                     utf8_start: 0,
                     utf8_end: text.len(),
-                    kind: TextEntityKind::Pre,
+                    kind: if language.is_empty() {
+                        TextEntityKind::Pre
+                    } else {
+                        TextEntityKind::PreCode {
+                            language: language.to_owned(),
+                        }
+                    },
                 });
             }
             RichBlock::Paragraph {
@@ -434,6 +446,28 @@ mod tests {
             buttons[0].kind,
             crate::telegram::envelope::InlineKeyboardButtonType::Callback { .. }
         ));
+    }
+
+    #[test]
+    fn preformatted_block_keeps_its_language() {
+        let block = |language: &str| {
+            parse_page_block(&json!({
+                "@type": "pageBlockPreformatted",
+                "text": { "@type": "richTextPlain", "text": "let x = 1;" },
+                "language": language,
+            }))
+        };
+        let kind = |block: RichBlock| match block {
+            RichBlock::Paragraph { entities, .. } => entities.first().map(|e| e.kind.clone()),
+            _ => None,
+        };
+        assert_eq!(
+            kind(block(" rust ")),
+            Some(TextEntityKind::PreCode {
+                language: "rust".into()
+            })
+        );
+        assert_eq!(kind(block("  ")), Some(TextEntityKind::Pre));
     }
 
     #[test]
