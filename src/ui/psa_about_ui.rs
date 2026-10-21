@@ -115,3 +115,8 @@ impl QuillApp {
         Some(&mut session.chat_list.psa_about)
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "psa_about_ui_tests.rs"]
+mod tests;
