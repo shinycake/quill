@@ -9,7 +9,9 @@ use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
-use gpui_kit::{AppContext, Entity, Focusable, TestAppContext, VisualTestContext, point, px, size};
+use gpui_kit::{
+    AppContext, Entity, Focusable, Modifiers, TestAppContext, VisualTestContext, point, px, size,
+};
 use quill::connect::{ConnectDriver, RecordingSender, prepare_connect};
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
@@ -195,6 +197,34 @@ fn opening_the_menu_shows_the_strip_and_closing_it_resets_the_options(cx: &mut T
     });
     assert_eq!(state, Some(MessageReactionsState::Idle));
     assert!(!has(vcx, "reaction-strip"));
+}
+
+#[gpui_kit::test]
+fn clicking_away_resets_the_options_like_escape(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    show_menu_with(
+        &app,
+        vcx,
+        MessageReactionsState::Loading {
+            chat_id: CHAT,
+            message_id: MESSAGE,
+        },
+    );
+    assert!(has(vcx, "reaction-strip-loading"));
+    vcx.simulate_click(point(px(20.), px(20.)), Modifiers::default());
+    frames(vcx);
+    let (menu_open, state) = app.read_with(vcx, |app, _| {
+        (
+            app.message_ui.menu.is_some(),
+            app.demo_session
+                .as_ref()
+                .map(|s| s.stickers.message_reaction_options.clone()),
+        )
+    });
+    assert!(!menu_open);
+    assert_eq!(state, Some(MessageReactionsState::Idle));
+    assert!(!has(vcx, "reaction-strip-loading"));
 }
 
 /// The reducer state a real driver reaches: ask, then ingest TDLib's reply.
