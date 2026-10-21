@@ -11,7 +11,9 @@ fi
 if [[ ! -d "$DEST/source/.git" ]]; then
   git clone https://github.com/Samsung/rlottie.git "$DEST/source"
 fi
-git -C "$DEST/source" checkout --detach "$PIN"
+# --force drops a previous run's patch so it re-applies cleanly.
+git -C "$DEST/source" checkout --force --detach "$PIN"
+git -C "$DEST/source" apply "$ROOT/native/patches/rlottie-animated-shape-budget.patch"
 cmake -S "$DEST/source" -B "$DEST/build" -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
   "-DCMAKE_CXX_FLAGS=$CXX_FLAGS" \

@@ -330,6 +330,38 @@ mod tests {
         );
     }
     #[test]
+    #[ignore = "requires the pinned, patched rlottie runtime (scripts/build-rlottie.sh)"]
+    fn animated_paths_are_not_dropped_by_the_shape_budget() {
+        // Sixteen animated four-point bars. Unpatched rlottie charges each
+        // keyframed path 1024 points against its 15000-point shape budget
+        // and drops the front bars, as it dropped stickers' faces and hands.
+        // Raw JSON: rlottie needs "ty" first, and serde_json sorts keys.
+        let bar = |x: usize| {
+            let shape = format!(
+                r#"{{"i":[[0,0],[0,0],[0,0],[0,0]],"o":[[0,0],[0,0],[0,0],[0,0]],"v":[[{x},0],[{},0],[{},64],[{x},64]],"c":true}}"#,
+                x + 3,
+                x + 3
+            );
+            format!(
+                r#"{{"ty":"sh","ks":{{"a":1,"k":[{{"t":0,"i":{{"x":0.5,"y":0.5}},"o":{{"x":0.5,"y":0.5}},"s":[{shape}],"e":[{shape}]}},{{"t":1,"s":[{shape}]}}]}}}}"#
+            )
+        };
+        let bars: Vec<String> = (0..16).map(|i| bar(i * 4)).collect();
+        let path = fixture_text(&format!(
+            r#"{{"v":"5.7.0","fr":30,"ip":0,"op":2,"w":64,"h":64,"assets":[],"layers":[{{"ty":4,"ip":0,"op":2,"st":0,"ks":{{"o":{{"a":0,"k":100}},"r":{{"a":0,"k":0}},"p":{{"a":0,"k":[0,0,0]}},"a":{{"a":0,"k":[0,0,0]}},"s":{{"a":0,"k":[100,100,100]}}}},"shapes":[{},{{"ty":"fl","c":{{"a":0,"k":[1,1,1,1]}},"o":{{"a":0,"k":100}},"r":1}}]}}]}}"#,
+            bars.join(",")
+        ));
+        let decoded = decode_tgs_sized(&path, 64, 1, f64::INFINITY, &AtomicBool::new(false));
+        let _ = std::fs::remove_file(path);
+        let frames = decoded.unwrap().frames;
+        let frame = frames.first().unwrap();
+        let painted: Vec<usize> = (0..16)
+            .filter(|bar| frame.get((32 * 64 + bar * 4 + 1) * 4 + 3) == Some(&255))
+            .collect();
+        assert_eq!(painted, (0..16).collect::<Vec<_>>());
+    }
+
+    #[test]
     fn playback_samples_at_most_the_rate_cap() {
         // A 3 s, 60 fps sticker: 90 frames at 30 fps.
         assert_eq!(sampled_frame_count(180, 60.0, 120, 30.0), 90);
@@ -346,12 +378,16 @@ mod tests {
     }
 
     fn fixture(value: &serde_json::Value) -> PathBuf {
+        fixture_text(&value.to_string())
+    }
+
+    fn fixture_text(json: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!("quill-sticker-{}.tgs", std::process::id()));
         let mut gzip = flate2::write::GzEncoder::new(
             std::fs::File::create(&path).unwrap(),
             flate2::Compression::default(),
         );
-        gzip.write_all(value.to_string().as_bytes()).unwrap();
+        gzip.write_all(json.as_bytes()).unwrap();
         gzip.finish().unwrap();
         path
     }

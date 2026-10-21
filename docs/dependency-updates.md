@@ -81,7 +81,9 @@ the `=` pinned crates. Updates there are deliberate and visually verified.
   (it hashes the script), rebuild `quillvideo`, run the `video_decode` tests.
   `scripts/release-lgpl-sources.sh` reads the pin for the LGPL source archive.
 - **rlottie**: change `PIN` in `scripts/build-rlottie.sh` **and** `$pin` in
-  `scripts/build-rlottie-windows.ps1`; run the sticker tests.
+  `scripts/build-rlottie-windows.ps1`; both apply
+  `native/patches/rlottie-animated-shape-budget.patch` (Samsung/rlottie#602), so
+  drop the patch once upstream merges it, then run the sticker tests.
 - **ntgcalls**: change `NTGCALLS_VERSION` and the per-asset checksums in
   `scripts/vendor-ntgcalls.sh`; check the calls smoke path and
   `scripts/release-lgpl-sources.sh`.

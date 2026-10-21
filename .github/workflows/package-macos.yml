@@ -79,7 +79,7 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: vendor/rlottie/prefix
-          key: rlottie-macos-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie.sh') }}
+          key: rlottie-macos-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie.sh', 'native/patches/rlottie-animated-shape-budget.patch') }}
       - name: build rlottie
         if: steps.rlottie-cache.outputs.cache-hit != 'true'
         run: bash scripts/build-rlottie.sh
@@ -88,7 +88,7 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: vendor/rlottie/prefix
-          key: rlottie-macos-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie.sh') }}
+          key: rlottie-macos-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie.sh', 'native/patches/rlottie-animated-shape-budget.patch') }}
       - name: vendor ntgcalls (checksum pinned)
         run: bash scripts/vendor-ntgcalls.sh
       # The secrets reach only this step, as compile-time env read by

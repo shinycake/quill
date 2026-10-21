@@ -7,7 +7,9 @@ $srcDir = Join-Path $dest 'source'
 if (-not (Test-Path (Join-Path $srcDir '.git'))) {
     Invoke-Native git @('clone', 'https://github.com/Samsung/rlottie.git', $srcDir)
 }
-Invoke-Native git @('-C', $srcDir, 'checkout', '--detach', $pin)
+# --force drops a previous run's patch so it re-applies cleanly; keep in sync with build-rlottie.sh.
+Invoke-Native git @('-C', $srcDir, 'checkout', '--force', '--detach', $pin)
+Invoke-Native git @('-C', $srcDir, 'apply', (Join-Path $root 'native/patches/rlottie-animated-shape-budget.patch'))
 $prefix = Join-Path $dest 'prefix'
 Invoke-Native cmake @('-S', $srcDir, '-B', (Join-Path $dest 'build'), '-A', 'x64',
     '-DCMAKE_POLICY_VERSION_MINIMUM=3.5', '-DBUILD_SHARED_LIBS=ON', '-DLOTTIE_MODULE=OFF', '-DLOTTIE_TEST=OFF',
