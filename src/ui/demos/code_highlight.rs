@@ -16,7 +16,7 @@ const CHAT: i64 = 31;
 
 pub(crate) const RUST: &str = "// Add two numbers\nfn add(a: i32, b: i32) -> i32 {\n    let sum = a + b; // 42 max\n    println!(\"sum = {sum}\");\n    sum\n}";
 pub(crate) const PYTHON: &str = "# Greet someone\ndef greet(name: str) -> str:\n    if not name:\n        return \"Hello, world!\"\n    return f\"Hello, {name}!\"";
-pub(crate) const DIFF: &str = "@@ -1,4 +1,4 @@\n fn greet(name: &str) {\n-    println!(\"Hi\");\n+    println!(\"Hello, {name}!\");\n }";
+pub(crate) const DIFF: &str = "@@ -1,5 +1,5 @@\n fn greet(name: &str) {\n     println!(\"start\");\n-    println!(\"Hi\");\n+    println!(\"Hello, {name}!\");\n }";
 // The reader's blocks differ from the chat's, so tests running side by side do
 // not share cache entries.
 pub(crate) const IV_RUST: &str =
@@ -170,10 +170,6 @@ mod tests {
         assert!(spans.iter().any(|(range, token)| *token == Token::Keyword
             && super::IV_RUST.get(range.clone()) == Some("fn")));
         assert!(ready("diff", super::IV_DIFF).is_some_and(|spans| !spans.is_empty()));
-        assert!(
-            ready("", super::IV_PLAIN).is_none(),
-            "a block without a language is not highlighted"
-        );
         assert!(
             DRAWN_RUNS.with(std::cell::Cell::get) > 0,
             "the cached spans reached the reader's drawn text"

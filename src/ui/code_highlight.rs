@@ -133,12 +133,13 @@ fn is_diff(language: &str) -> bool {
 }
 
 /// The token a diff line takes from its first character, as libprisma's
-/// diff grammar does: `+` is inserted, `-` (or an en dash) is deleted, which
-/// tdesktop colors like literals, and `#` is a comment.
+/// diff grammar does: `+` is inserted, `-` is deleted, which tdesktop colors
+/// like literals, and `#` is a comment. (tdesktop's compiled grammar stores
+/// the deleted class as `[-\x13]`, so an en dash never matches.)
 pub(crate) fn diff_line_token(line: &str) -> Option<Token> {
     match line.chars().next()? {
         '+' => Some(Token::Inserted),
-        '-' | '\u{2013}' => Some(Token::Literal),
+        '-' => Some(Token::Literal),
         '#' => Some(Token::Comment),
         _ => None,
     }
@@ -154,10 +155,52 @@ fn diff_spans(text: &str) -> Vec<Span> {
         let content = content.strip_suffix('\r').unwrap_or(content);
         if let Some(token) = diff_line_token(content) {
             spans.push((start..start + content.len(), token));
+        } else {
+            // libprisma lists `string` before `command`, `coord` and
+            // `commit-sha1`, which have no color, so quoted strings color on
+            // every line the line rules leave.
+            for range in quoted_strings(content) {
+                spans.push((start + range.start..start + range.end, Token::String));
+            }
         }
         start = end;
     }
     spans
+}
+
+/// The byte ranges of the `"…"` and `'…'` strings of one line, as libprisma's
+/// `("|')(?:\\.|(?!\1)[^\\\r\n])*\1`: a backslash takes the next character,
+/// and a quote that never closes matches nothing.
+fn quoted_strings(line: &str) -> Vec<Range<usize>> {
+    let mut found = Vec::new();
+    let mut chars = line.char_indices().peekable();
+    while let Some((open, quote)) = chars.next() {
+        if quote != '"' && quote != '\'' {
+            continue;
+        }
+        let mut probe = chars.clone();
+        let mut closed = None;
+        while let Some((at, c)) = probe.next() {
+            if c == quote {
+                closed = Some(at + c.len_utf8());
+                break;
+            }
+            if c == '\\' {
+                if probe.next().is_none() {
+                    break;
+                }
+            } else if c == '\r' || c == '\n' {
+                break;
+            }
+        }
+        if let Some(close) = closed {
+            found.push(open..close);
+            while chars.peek().is_some_and(|(at, _)| *at < close) {
+                chars.next();
+            }
+        }
+    }
+    found
 }
 
 enum Entry {
@@ -510,11 +553,28 @@ mod tests {
         use super::diff_line_token;
         assert_eq!(diff_line_token("+added"), Some(Token::Inserted));
         assert_eq!(diff_line_token("-removed"), Some(Token::Literal));
-        assert_eq!(diff_line_token("\u{2013}dash"), Some(Token::Literal));
+        assert_eq!(diff_line_token("\u{2013}dash"), None);
         assert_eq!(diff_line_token("# note"), Some(Token::Comment));
         assert_eq!(diff_line_token(" context"), None);
         assert_eq!(diff_line_token("@@ -1 +1 @@"), None);
         assert_eq!(diff_line_token(""), None);
+    }
+
+    #[test]
+    fn strings_color_on_diff_lines_without_a_line_token() {
+        let code = "@@ -1 +1 @@ \"hunk\"\n say(\"Hi\", 'a\\'b', \"open\n+ add(\"no\")\n \"é\" 'x";
+        let spans = tokenize("diff", code);
+        assert_eq!(
+            text_of(code, &spans, Token::String),
+            vec!["\"hunk\"", "\"Hi\"", "'a\\'b'", "\"é\""]
+        );
+        assert_eq!(
+            text_of(code, &spans, Token::Inserted),
+            vec!["+ add(\"no\")"]
+        );
+        for (range, _) in &spans {
+            assert!(code.is_char_boundary(range.start) && code.is_char_boundary(range.end));
+        }
     }
 
     #[test]

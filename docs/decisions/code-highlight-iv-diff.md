@@ -12,8 +12,11 @@ Follows `code-syntax-highlight.md`.
 - `diff` and `patch` use libprisma's `git` grammar. Its "inserted" token (lines
   starting with `+`) takes slot 8, `statisticsChartLineGreen`; its "deleted"
   token (lines starting with `-`) takes slot 3, the red `statisticsChartLineRed`
-  that literals use; `#` lines are comments. Other lines, headers and hunk
-  markers included, stay plain.
+  that literals use (the compiled class is `[-\x13]`, so an en dash never
+  matches); `#` lines are comments. On the other lines the grammar's `string`
+  rule (slot 4, orange) colors same-line `"…"` and `'…'` strings. It is listed
+  before `command`, `coord` and `commit-sha1`, which have no color, so hunk
+  headers and context lines get orange strings too; the rest stays plain.
 
 ## What changed
 
