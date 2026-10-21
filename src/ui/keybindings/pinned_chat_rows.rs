@@ -216,6 +216,14 @@ pub(in crate::ui) fn app_menus_with(
             MenuItem::action(tr(keys::Q_PREFS_QUICK_SWITCH), OpenSearch),
             MenuItem::action(tr(keys::Q_PREFS_FIND_IN_CHAT_2), OpenChatSearch),
             MenuItem::separator(),
+            MenuItem::action(
+                tr(if state.sidebar_hidden {
+                    keys::Q_CHAT_SHOW_SIDEBAR
+                } else {
+                    keys::Q_CHAT_HIDE_SIDEBAR
+                }),
+                ToggleSidebar,
+            ),
             // kit Phase 8: light/dark switch for the whole app.
             MenuItem::action(tr(keys::Q_PREFS_TOGGLE_THEME), ToggleTheme),
         ],
@@ -227,6 +235,9 @@ pub(in crate::ui) fn app_menus_with(
             MenuItem::action(tr(keys::Q_PREFS_QUICK_SWITCH), OpenSearch),
             MenuItem::action(tr(keys::Q_PREFS_FIND_IN_CHAT_2), OpenChatSearch),
             MenuItem::separator(),
+            // The in-window menu bar is built once, so its label does not
+            // follow the state.
+            MenuItem::action(tr(keys::Q_PREFS_TOGGLE_SIDEBAR), ToggleSidebar),
             MenuItem::action(tr(keys::Q_PREFS_ENTER_FULL_SCREEN), ToggleFullscreen),
             // kit Phase 8: light/dark switch for the whole app.
             MenuItem::action(tr(keys::Q_PREFS_TOGGLE_THEME), ToggleTheme),

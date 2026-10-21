@@ -354,6 +354,7 @@ fn spawn_menu_sync(window: &mut Window, cx: &mut Context<QuillApp>) {
                 let state = WindowMenuState {
                     session_usable: this.os_menu_session_usable(),
                     main_active: main_now,
+                    sidebar_hidden: this.frame.sidebar.hidden(),
                 };
                 (this.dock_model(registry), state)
             };

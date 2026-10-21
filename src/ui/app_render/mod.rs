@@ -12,7 +12,7 @@ use super::actions::{
     PrevFolder, QuitApp, ReplyToNext, ReplyToPrevious, SelectionExtendNewer, SelectionExtendOlder,
     SelectionFocusNewer, SelectionFocusOlder, ShowChatMenu, ShowChatPreview, SpellingIgnore,
     SpellingLearn, SpellingReplace, SpellingUnlearn, StoryTogglePause, SubmitCode, SubmitPassword,
-    SubmitPhone, ToggleFullscreen, ToggleMessageSelection, ToggleTheme, ViewerCopy,
+    SubmitPhone, ToggleFullscreen, ToggleMessageSelection, ToggleSidebar, ToggleTheme, ViewerCopy,
     ViewerFlipHorizontal, ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn,
     ViewerZoomOut, ViewerZoomReset, ZoomWindow,
 };
@@ -219,6 +219,9 @@ impl Render for QuillApp {
             .on_action(cx.listener(|this, _: &ToggleFullscreen, window, _| {
                 let _ = this;
                 window.toggle_fullscreen();
+            }))
+            .on_action(cx.listener(|this, _: &ToggleSidebar, window, cx| {
+                this.toggle_sidebar(window, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleTheme, _, cx| {
                 // Write through the appearance funnel (persist + re-apply)

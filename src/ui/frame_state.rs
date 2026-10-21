@@ -33,6 +33,8 @@ pub(crate) struct FrameUi {
     pub(super) motion: super::motion::MotionState,
     /// Chat list column width (drag its right edge; double-click resets).
     pub(super) sidebar_width: Pixels,
+    /// Whether the chat list column is hidden, and its slide and peek.
+    pub(super) sidebar: super::sidebar_reveal::SidebarReveal,
     /// The main window's content width as last drawn (`shell_layout`).
     pub(super) main_width: Pixels,
     /// A debounced `window_state.json` save is scheduled.
@@ -52,6 +54,7 @@ pub(crate) struct FrameUi {
 
 impl FrameUi {
     pub(super) fn new(cx: &mut Context<QuillApp>) -> Self {
+        let stored = quill::settings::load_window_state();
         Self {
             animation_demand: Default::default(),
             row_fx: Default::default(),
@@ -63,10 +66,15 @@ impl FrameUi {
             media_roots_frame: Default::default(),
             frame_clock_running: Default::default(),
             motion: Default::default(),
-            sidebar_width: px(quill::settings::load_window_state()
-                .map_or(quill::settings::DEFAULT_SIDEBAR_WIDTH, |state| {
+            sidebar_width: px(
+                stored.map_or(quill::settings::DEFAULT_SIDEBAR_WIDTH, |state| {
                     state.sidebar_width
-                })),
+                }),
+            ),
+            sidebar: super::sidebar_reveal::SidebarReveal::new(
+                stored.is_some_and(|state| state.sidebar_hidden),
+                std::time::Instant::now(),
+            ),
             main_width: px(0.),
             window_state_save_pending: false,
             capture_blocked: false,

@@ -16,6 +16,7 @@
 //! derives from it.
 #![deny(clippy::indexing_slicing)]
 
+mod sidebar_view;
 mod view;
 
 #[cfg(test)]

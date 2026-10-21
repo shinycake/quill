@@ -392,6 +392,7 @@ impl QuillApp {
         let send_fly = self.send_fly_overlay(cx);
         let slot = div()
             .id("conversation-slot")
+            .debug_selector(|| "conversation-slot".into())
             .relative()
             .flex()
             .flex_1()

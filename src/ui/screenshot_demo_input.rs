@@ -139,13 +139,15 @@ async fn run_step(step: &str, demo_window: AnyWindowHandle, cx: &mut AsyncApp) {
         }
         return;
     }
-    // `k:key` presses one key (GPUI key names, e.g. `escape`).
+    // `k:key` presses one key (GPUI key names, e.g. `escape`), modifiers
+    // included (`cmd-f`).
     if let Some(key) = step.strip_prefix("k:") {
-        let keystroke = Keystroke {
+        let key = key.trim();
+        let keystroke = Keystroke::parse(key).unwrap_or_else(|_| Keystroke {
             modifiers: Modifiers::default(),
-            key: key.trim().to_string(),
+            key: key.to_string(),
             key_char: None,
-        };
+        });
         dispatch(
             demo_window,
             cx,

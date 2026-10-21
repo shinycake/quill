@@ -109,6 +109,12 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
             tr(keys::Q_PREFS_GENERAL),
             ToggleFullscreen,
         ),
+        row(
+            SIDEBAR_CHORD,
+            tr(keys::Q_PREFS_TOGGLE_SIDEBAR),
+            tr(keys::Q_PREFS_GENERAL),
+            ToggleSidebar,
+        ),
         // Navigation.
         row(
             "cmd-alt-1",

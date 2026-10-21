@@ -512,23 +512,28 @@ impl QuillApp {
     }
 
     fn stage_window_state(&self, window: &Window) {
+        // Demo windows run on an isolated app root; nothing to protect.
+        if let Some(state) = self.window_state(window).sanitized() {
+            quill::settings::stage_window_state(state);
+        }
+    }
+
+    /// What `window_state.json` gets for this window now.
+    pub(super) fn window_state(&self, window: &Window) -> quill::settings::WindowState {
         let (bounds, maximized) = match window.window_bounds() {
             WindowBounds::Windowed(bounds) => (bounds, false),
             WindowBounds::Maximized(bounds) => (bounds, true),
             // Fullscreen is not restored; keep the windowed geometry.
             WindowBounds::Fullscreen(bounds) => (bounds, false),
         };
-        let state = quill::settings::WindowState {
+        quill::settings::WindowState {
             x: f32::from(bounds.origin.x),
             y: f32::from(bounds.origin.y),
             width: f32::from(bounds.size.width),
             height: f32::from(bounds.size.height),
             maximized,
             sidebar_width: f32::from(self.frame.sidebar_width),
-        };
-        // Demo windows run on an isolated app root; nothing to protect.
-        if let Some(state) = state.sanitized() {
-            quill::settings::stage_window_state(state);
+            sidebar_hidden: self.frame.sidebar.hidden(),
         }
     }
 }

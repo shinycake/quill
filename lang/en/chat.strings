@@ -299,6 +299,7 @@
 "qll_chat_hide" = "Hide";
 "qll_chat_hide_info" = "Hide info";
 "qll_chat_hide_pinned_message" = "Hide pinned message";
+"qll_chat_hide_sidebar" = "Hide Sidebar";
 "qll_chat_hide_with_spoiler" = "Hide with spoiler";
 "qll_chat_i_understand" = "I understand";
 "qll_chat_in_chat_search_closed" = "in-chat search closed";
@@ -498,6 +499,7 @@
 "qll_chat_show_link_preview" = "Show link preview";
 "qll_chat_show_more" = "Show more";
 "qll_chat_show_preview" = "Show Preview";
+"qll_chat_show_sidebar" = "Show Sidebar";
 "qll_chat_show_the_post_in_the" = "Show the post in the discussion group";
 "qll_chat_shrink" = "Shrink";
 "qll_chat_sign_in_before_sending" = "sign in before sending";

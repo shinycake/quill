@@ -300,6 +300,12 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app| app.message_ui.pending_stop_poll.is_some(),
         |app, _, cx| app.cancel_stop_poll(cx)
     ),
+    // The chat list peeking over the conversation (`sidebar_reveal`).
+    layer!(
+        "sidebar-peek",
+        |app| app.frame.sidebar.pointer() != super::sidebar_reveal::Peek::Off,
+        |app, window, cx| app.dismiss_sidebar_peek(window, cx)
+    ),
     // Slice media-shared-gallery: above the chat-search layer (the row-click
     // jump closes the gallery into a chat search).
     layer!(
