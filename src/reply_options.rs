@@ -68,10 +68,6 @@ pub fn reply_bar_title(sender: Option<&str>, from_chat: Option<&str>) -> String 
     }
 }
 
-/// Split message text into parts to quote: one per line, and inside a
-/// line one per sentence. Positions are UTF-16 code-unit offsets into
-/// `text`, as `inputTextQuote.position` needs. Parts longer than
-/// [`QUOTE_MAX_CHARS`] are left out.
 #[cfg(test)]
 mod tests {
     use crate::composer::{QuoteSelection, quote_position};
