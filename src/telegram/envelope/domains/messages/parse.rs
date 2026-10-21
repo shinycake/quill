@@ -1,6 +1,6 @@
 //! Parses TDLib objects for history, sending, editing, reactions, polls, translation and message menus.
 use crate::ids::{ChatId, MessageId};
-use crate::rich::parse_rich_message;
+use crate::telegram::envelope::message_content::rich_message_content;
 use crate::telegram::envelope::*;
 use serde_json::Value;
 
@@ -188,22 +188,16 @@ pub(crate) fn parse_messages_payload(
                 },
             ))
         }
-        "richMessage" => {
-            let (blocks, is_full) = parse_rich_message(value);
-            Ok(EnvelopePayload::Messages(MessagesPayload::RichMessage {
-                rich: RichMessageContent { blocks, is_full },
-            }))
-        }
+        "richMessage" => Ok(EnvelopePayload::Messages(MessagesPayload::RichMessage {
+            rich: rich_message_content(value),
+        })),
         // MED4: `webPageInstantView` (schema:4377) — same `blocks` /
         // `is_full` shape as `richMessage`, so the M2 parser applies.
-        "webPageInstantView" => {
-            let (blocks, is_full) = parse_rich_message(value);
-            Ok(EnvelopePayload::Messages(
-                MessagesPayload::WebPageInstantView {
-                    rich: RichMessageContent { blocks, is_full },
-                },
-            ))
-        }
+        "webPageInstantView" => Ok(EnvelopePayload::Messages(
+            MessagesPayload::WebPageInstantView {
+                rich: rich_message_content(value),
+            },
+        )),
         // MED4b: `getLinkPreview` answer (schema:14792) — the full
         // `linkPreview` object. Thumbnail `ParsedFile`s are dropped: the
         // composer chip shows title/description + a media glyph, never

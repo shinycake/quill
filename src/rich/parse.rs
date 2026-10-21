@@ -130,7 +130,12 @@ fn walk_rich_text(value: &Value, w: &mut RichWalk) {
         "richTextDateTime" => {
             walk_rich_text(value.get("text").unwrap_or(&Value::Null), w);
         }
-        _ => {}
+        // A kind this build does not know keeps its inner text.
+        _ => {
+            if let Some(inner) = value.get("text").filter(|inner| inner.is_object()) {
+                walk_rich_text(inner, w);
+            }
+        }
     }
 }
 

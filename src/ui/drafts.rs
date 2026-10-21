@@ -6,7 +6,7 @@
 use super::app::QuillApp;
 use super::draft_timer::DraftTimerStep;
 use gpui_kit::*;
-use quill::composer::{ComposerReplyTo, DraftTopic, QuoteSelection, draft_text_to_store};
+use quill::composer::{ComposerReplyTo, DraftTopic, draft_text_to_store};
 use quill::connect::DraftSaveOutcome;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
@@ -295,9 +295,11 @@ impl QuillApp {
             // Slice G1: a draft saved with a partial quote restores the
             // quote picker state, not just the replied-to message.
             match draft.as_ref().and_then(|draft| draft.quote.clone()) {
-                Some((text, position)) => {
-                    ComposerReplyTo::with_quote(chat_id, id, QuoteSelection { text, position })
-                }
+                Some((text, position)) => ComposerReplyTo::with_quote(
+                    chat_id,
+                    id,
+                    self.quote_in_message(chat_id, id, text, position),
+                ),
                 None => ComposerReplyTo::new(chat_id, id),
             }
             .to_item(item)

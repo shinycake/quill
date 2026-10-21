@@ -15,6 +15,7 @@ use std::path::PathBuf;
 mod input;
 mod markup;
 mod parse;
+pub mod quote;
 pub use input::*;
 pub use markup::*;
 pub use parse::*;

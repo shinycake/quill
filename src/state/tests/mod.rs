@@ -43,6 +43,7 @@ mod payments;
 mod premium_hub;
 mod premium_limit;
 mod profile_panels;
+mod quote_rich;
 mod redraw;
 mod requests;
 mod search;

@@ -643,6 +643,7 @@ fn g1_send_reply_quote_rides_send_text() {
     let reply = SendReply {
         message_id: MessageId(101),
         quote: Some(("sel".to_string(), 7)),
+        quote_rich: Vec::new(),
         source_chat: None,
         item: Default::default(),
     };

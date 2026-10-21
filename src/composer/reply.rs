@@ -1,6 +1,8 @@
 //! Reply drafts and quote selections.
 
 use super::*;
+use crate::telegram::envelope::MessageContent;
+use serde_json::Value;
 
 /// The part of a message a reply points at: the whole message, one
 /// checklist task (`checklist_task_id`) or one poll option
@@ -58,6 +60,55 @@ pub struct ComposerReplyTo {
 pub struct QuoteSelection {
     pub text: String,
     pub position: i32,
+    /// `inputTextQuote.rich_texts` when the quote comes from a rich
+    /// message (empty otherwise); `text` is then only what Quill shows.
+    pub rich_texts: Vec<Value>,
+}
+
+impl QuoteSelection {
+    /// A quote of plain message text.
+    pub fn plain(text: String, position: i32) -> Self {
+        Self {
+            text,
+            position,
+            rich_texts: Vec::new(),
+        }
+    }
+
+    /// A quote of `text` at `position` in `content`: when `content` is a
+    /// rich message the quote carries the matching `rich_texts`, cut from
+    /// the message's quotable texts (a span that cannot be cut stays plain).
+    pub fn in_content(content: &MessageContent, text: String, position: i32) -> Self {
+        let rich_texts = match content {
+            MessageContent::RichMessage(rich) => {
+                crate::rich::quote::quote_rich_texts(&rich.quote_texts, &text, position)
+                    .unwrap_or_default()
+            }
+            _ => Vec::new(),
+        };
+        Self {
+            text,
+            position,
+            rich_texts,
+        }
+    }
+
+    /// Whether both pick the same part of the message.
+    pub fn same_span(&self, other: &Self) -> bool {
+        self.text == other.text && self.position == other.position
+    }
+}
+
+/// The text quotes are picked from and positioned in: the quotable texts of
+/// a rich message joined by line feeds (TDLib's definition of
+/// `inputTextQuote.position` there), else `None`.
+pub fn rich_quote_source_text(content: &MessageContent) -> Option<String> {
+    match content {
+        MessageContent::RichMessage(rich) if !rich.quote_texts.is_empty() => {
+            Some(crate::rich::quote::quote_full_text(&rich.quote_texts))
+        }
+        _ => None,
+    }
 }
 
 impl ComposerReplyTo {
@@ -143,21 +194,31 @@ impl ComposerReplyTo {
             .quote
             .as_ref()
             .map(|quote| (quote.text.clone(), quote.position));
+        let rich = self.quote_rich_texts();
         if self.chat_id == chat {
             Some(crate::telegram::SendReply {
                 message_id: self.message_id,
                 quote,
+                quote_rich: rich,
                 source_chat: None,
                 item: self.item.clone(),
             })
         } else if self.target_chat == Some(chat) {
             Some(
                 crate::telegram::SendReply::external(self.chat_id, self.message_id, quote)
-                    .with_item(self.item.clone()),
+                    .with_item(self.item.clone())
+                    .with_quote_rich(rich),
             )
         } else {
             None
         }
+    }
+
+    fn quote_rich_texts(&self) -> Vec<Value> {
+        self.quote
+            .as_ref()
+            .map(|quote| quote.rich_texts.clone())
+            .unwrap_or_default()
     }
 
     /// Replace the quote (`None` replies to the whole message).
@@ -177,6 +238,7 @@ impl ComposerReplyTo {
                     .quote
                     .as_ref()
                     .map(|quote| (quote.text.clone(), quote.position)),
+                quote_rich: self.quote_rich_texts(),
                 source_chat: None,
                 item: self.item.clone(),
             }
@@ -250,6 +312,7 @@ mod tests {
             .with_new_quote(Some(QuoteSelection {
                 text: "q".into(),
                 position: 0,
+                rich_texts: Vec::new(),
             }));
         assert_eq!(reply.target_chat, Some(ChatId(11)));
         assert!(reply.quote.is_some());

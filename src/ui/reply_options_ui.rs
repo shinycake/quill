@@ -17,7 +17,7 @@ use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::composer::{ComposerReplyTo, QuoteSelection};
+use quill::composer::{ComposerReplyTo, QuoteSelection, rich_quote_source_text};
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::reply_options::{ReplyOption, quote_segments, reply_options};
@@ -71,19 +71,47 @@ fn section_label(text: &'static str, cx: &App) -> Div {
 }
 
 impl QuillApp {
-    /// The text of the message a reply points at, if it is loaded.
-    pub(in crate::ui) fn reply_message_text(&self, reply: &ComposerReplyTo) -> Option<String> {
+    /// The text quotes of a message are picked from: its quotable texts for
+    /// a rich message, else the copyable text.
+    pub(in crate::ui) fn quote_source_text(
+        &self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Option<String> {
         let message = self
             .session()?
             .histories
-            .get(&reply.chat_id.0)?
+            .get(&chat_id.0)?
             .messages
-            .get(&reply.message_id.0)?;
-        Self::message_copyable_text(effective_content(
-            &message.content,
-            message.ephemeral.as_ref(),
-        ))
-        .filter(|text| !text.trim().is_empty())
+            .get(&message_id.0)?;
+        let content = effective_content(&message.content, message.ephemeral.as_ref());
+        rich_quote_source_text(content).or_else(|| Self::message_copyable_text(content))
+    }
+
+    /// The quote of `text` at `position` in the message, carrying the
+    /// `rich_texts` of a rich message.
+    pub(in crate::ui) fn quote_in_message(
+        &self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        text: String,
+        position: i32,
+    ) -> QuoteSelection {
+        let content = self
+            .session()
+            .and_then(|session| session.histories.get(&chat_id.0))
+            .and_then(|history| history.messages.get(&message_id.0))
+            .map(|message| effective_content(&message.content, message.ephemeral.as_ref()));
+        match content {
+            Some(content) => QuoteSelection::in_content(content, text, position),
+            None => QuoteSelection::plain(text, position),
+        }
+    }
+
+    /// The text of the message a reply points at, if it is loaded.
+    pub(in crate::ui) fn reply_message_text(&self, reply: &ComposerReplyTo) -> Option<String> {
+        self.quote_source_text(reply.chat_id, reply.message_id)
+            .filter(|text| !text.trim().is_empty())
     }
 
     /// Whether the reply's message may be answered in another chat:
@@ -274,7 +302,12 @@ impl QuillApp {
         let Some(reply) = self.composer_ui.take_reply() else {
             return;
         };
-        let same = reply.quote.as_ref() == Some(&quote);
+        let same = reply
+            .quote
+            .as_ref()
+            .is_some_and(|picked| picked.same_span(&quote));
+        let quote =
+            self.quote_in_message(reply.chat_id, reply.message_id, quote.text, quote.position);
         self.composer_ui
             .set_reply(Some(reply.with_new_quote((!same).then_some(quote))));
         self.note_open_draft(true, cx);
@@ -427,7 +460,9 @@ impl QuillApp {
             .max_h(px(220.))
             .overflow_y_scroll();
         for (index, part) in quote_segments(&text).into_iter().enumerate() {
-            let selected = picked.as_ref() == Some(&part);
+            let selected = picked
+                .as_ref()
+                .is_some_and(|picked| picked.same_span(&part));
             let label = part.text.clone();
             list = list.child(
                 div()

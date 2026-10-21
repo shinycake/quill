@@ -3,6 +3,7 @@
 //! `HistoryMessageVia`; `history/history_item_components.cpp`).
 use super::*;
 use crate::ids::UserId;
+use crate::text::TextEntity;
 
 /// The replied-to message of a loaded row when it is not in the loaded
 /// history window, fetched with `getRepliedMessage` (tdesktop
@@ -38,6 +39,8 @@ pub struct ReplyHeader {
     /// Quote, else a one-line preview of the original, else the state
     /// text ("Deleted message", "Loading…").
     pub text: String,
+    /// Styling of `text`: set for quotes chosen from rich messages.
+    pub entities: Vec<TextEntity>,
     pub is_quote: bool,
     /// Title of the other chat for replies from elsewhere ("Name › Chat").
     pub external_chat: Option<String>,
@@ -245,6 +248,7 @@ impl Session {
             name,
             accent,
             text: "Story".to_string(),
+            entities: Vec::new(),
             is_quote: false,
             external_chat: None,
             thumb: story.map(story_thumb_candidates).unwrap_or_default(),
@@ -328,6 +332,13 @@ impl Session {
         } else {
             ReplyState::Loading
         };
+        let entities = match quote {
+            Some(_) => crate::rich::quote::trimmed_entities(
+                reply.quote_text.as_deref().unwrap_or_default(),
+                &reply.quote_entities,
+            ),
+            None => Vec::new(),
+        };
         let text = match (state, quote) {
             (_, Some(quote)) => quote.to_string(),
             (ReplyState::Ready, None) => preview.unwrap_or_default(),
@@ -361,6 +372,7 @@ impl Session {
             name,
             accent,
             text,
+            entities,
             is_quote: quote.is_some(),
             external_chat,
             thumb,

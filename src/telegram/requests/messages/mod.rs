@@ -8,8 +8,9 @@ use serde_json::{Value, json};
 /// Slice G1: `inputTextQuote` JSON (TDLib 1.8.69, `schema/td_api.tl:3488`):
 /// `inputTextQuote text:formattedText rich_texts:vector<RichText> position:int32`.
 /// `position` is the offset of the quoted text in the original message in
-/// UTF-16 code units. Quotes are never picked from rich messages here, so
-/// `rich_texts` is the empty array the schema asks for.
+/// UTF-16 code units. A quote from a rich message gets its `rich_texts`
+/// through [`SendReply::quote_rich`]; this builder sends the empty array the
+/// schema asks for when the quote is not from a rich message.
 pub fn input_text_quote_json(text: &str, position: i32) -> Value {
     json!({
         "@type": "inputTextQuote",
@@ -31,6 +32,9 @@ pub fn input_text_quote_json(text: &str, position: i32) -> Value {
 pub struct SendReply {
     pub message_id: MessageId,
     pub quote: Option<(String, i32)>,
+    /// `inputTextQuote.rich_texts` of a quote chosen from a rich message;
+    /// when set, `quote`'s text is not sent.
+    pub quote_rich: Vec<Value>,
     /// The chat the replied-to message lives in when it is not the chat
     /// being sent to (`inputMessageReplyToExternalMessage`); `None` for a
     /// same-chat reply (`inputMessageReplyToMessage`).
@@ -40,6 +44,11 @@ pub struct SendReply {
 }
 
 impl SendReply {
+    pub fn with_quote_rich(mut self, quote_rich: Vec<Value>) -> Self {
+        self.quote_rich = quote_rich;
+        self
+    }
+
     pub fn with_item(mut self, item: ReplyItem) -> Self {
         self.item = item;
         self
@@ -59,12 +68,21 @@ pub(crate) fn send_reply_value(reply_to: Option<&SendReply>) -> Value {
     let item = reply_to
         .map(|reply| &reply.item)
         .unwrap_or(&ReplyItem::Message);
-    match reply_to.and_then(|reply| reply.source_chat.map(|chat| (chat, reply.message_id))) {
+    let mut value = match reply_to
+        .and_then(|reply| reply.source_chat.map(|chat| (chat, reply.message_id)))
+    {
         Some((chat_id, message_id)) => {
             input_message_reply_to_external_item(chat_id, message_id, quote, item)
         }
         None => input_message_reply_to_item(reply_to.map(|reply| reply.message_id), quote, item),
+    };
+    if let Some(reply) = reply_to
+        && !reply.quote_rich.is_empty()
+        && let Some(quote) = value.get_mut("quote").and_then(Value::as_object_mut)
+    {
+        quote.insert("rich_texts".into(), Value::Array(reply.quote_rich.clone()));
     }
+    value
 }
 
 /// Reply to a message of another chat (TDLib 1.8.68, `schema/td_api.tl:3404`):

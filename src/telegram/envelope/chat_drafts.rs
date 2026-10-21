@@ -86,12 +86,22 @@ pub(crate) fn parse_chat_draft(value: Option<&Value>) -> Option<ChatDraft> {
                 if quote.get("@type").and_then(Value::as_str) != Some("inputTextQuote") {
                     return None;
                 }
-                let text = quote
-                    .get("text")
-                    .and_then(|formatted| formatted.get("text"))
-                    .and_then(Value::as_str)?;
+                let rich_texts = quote
+                    .get("rich_texts")
+                    .and_then(Value::as_array)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default();
+                let text = if rich_texts.is_empty() {
+                    quote
+                        .get("text")
+                        .and_then(|formatted| formatted.get("text"))
+                        .and_then(Value::as_str)?
+                        .to_string()
+                } else {
+                    crate::rich::quote::quote_display(rich_texts).0
+                };
                 let position = quote.get("position").and_then(Value::as_i64)?.sat_i32();
-                Some((text.to_string(), position))
+                Some((text, position))
             });
             let task = reply
                 .get("checklist_task_id")

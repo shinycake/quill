@@ -326,6 +326,7 @@ fn quoted_draft_round_trips_input_text_quote() {
     let reply = SendReply {
         message_id: MessageId(3),
         quote: Some(("meet at".to_string(), 0)),
+        quote_rich: Vec::new(),
         source_chat: None,
         item: Default::default(),
     };

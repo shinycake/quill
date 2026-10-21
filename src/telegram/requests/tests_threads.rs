@@ -37,6 +37,7 @@ fn message_thread_requests_match_1_8_67() {
         Some(SendReply {
             message_id: MessageId(520),
             quote: None,
+            quote_rich: Vec::new(),
             source_chat: None,
             item: Default::default(),
         }),

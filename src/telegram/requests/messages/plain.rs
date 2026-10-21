@@ -7,6 +7,7 @@ impl SendReply {
         Self {
             message_id,
             quote: None,
+            quote_rich: Vec::new(),
             source_chat: None,
             item: ReplyItem::Message,
         }
@@ -21,6 +22,7 @@ impl SendReply {
         Self {
             message_id,
             quote,
+            quote_rich: Vec::new(),
             source_chat: Some(source_chat),
             item: ReplyItem::Message,
         }

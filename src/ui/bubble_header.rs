@@ -63,6 +63,7 @@ pub(super) fn reply_header_strip(
     let clickable = header.clickable;
     let state = header.state;
     let text = super::search_ui::one_line_preview(&header.text);
+    let styled = !header.entities.is_empty() && !quill::text::has_rtl_text(&header.text);
     let aria = match &name {
         Some(name) => tr_with(
             keys::Q_MISC_REPLY_TO,
@@ -166,11 +167,18 @@ pub(super) fn reply_header_strip(
                             muted
                         })
                         .when(state != ReplyState::Ready, |this| this.italic())
-                        .child(
+                        .child(if styled {
+                            super::reply_quote_text::styled_quote_line(
+                                &header.text,
+                                &header.entities,
+                                body,
+                            )
+                            .into_any_element()
+                        } else {
                             super::emoji_sprites::one_line(&text, px(12.)).unwrap_or_else(|| {
                                 super::bidi_line::one_line_plain(text).into_any_element()
-                            }),
-                        ),
+                            })
+                        }),
                 ),
         )
         .into_any_element()

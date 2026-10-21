@@ -447,6 +447,7 @@ fn set_chat_draft_message_matches_1_8_67() {
         Some(&SendReply {
             message_id: MessageId(101),
             quote: Some(("meet at".to_string(), 0)),
+            quote_rich: Vec::new(),
             source_chat: None,
             item: Default::default(),
         }),

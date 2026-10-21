@@ -194,6 +194,7 @@ fn a_reply_to_an_option_survives_in_the_draft() {
     let reply = SendReply {
         message_id: MessageId(120),
         quote: None,
+        quote_rich: Vec::new(),
         source_chat: None,
         item: ReplyItem::PollOption("a".to_string()),
     };

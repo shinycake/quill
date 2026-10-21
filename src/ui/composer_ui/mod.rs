@@ -27,7 +27,6 @@ use quill::ids::{ChatId, FileId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
-use quill::telegram::envelope::effective_content;
 use quill::telegram::requests::SelfDestructSend;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -131,15 +130,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let full_text = self
-            .session()
-            .and_then(|session| session.histories.get(&chat_id.0))
-            .and_then(|history| history.messages.get(&message_id.0))
-            .and_then(|message| {
-                Self::message_copyable_text(effective_content(
-                    &message.content,
-                    message.ephemeral.as_ref(),
-                ))
-            })
+            .quote_source_text(chat_id, message_id)
             .unwrap_or_default();
         let quote = quote.trim();
         let Some(position) = quill::composer::quote_position(&full_text, quote) else {
@@ -151,10 +142,7 @@ impl QuillApp {
         let reply = quill::composer::ComposerReplyTo::with_quote(
             chat_id,
             message_id,
-            quill::composer::QuoteSelection {
-                text: quote.to_string(),
-                position,
-            },
+            self.quote_in_message(chat_id, message_id, quote.to_string(), position),
         );
         self.begin_reply_to(reply, window, cx);
         cx.notify();

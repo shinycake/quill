@@ -112,10 +112,7 @@ fn push_part(line: &str, start: usize, end: usize, base16: usize, parts: &mut Ve
             .unwrap_or_default()
             .encode_utf16()
             .count();
-    parts.push(QuoteSelection {
-        text: trimmed.to_string(),
-        position: position as i32,
-    });
+    parts.push(QuoteSelection::plain(trimmed.to_string(), position as i32));
 }
 
 #[cfg(test)]

@@ -66,7 +66,9 @@ pub use media_prep::{
 };
 pub use placeholder::{ComposerPlaceholder, PlaceholderFacts, edit_text_changed, inline_bot_hint};
 pub use reply::ReplyItem;
-pub use reply::{ComposerReplyTo, QuoteSelection, cancel_reply_draft, quote_position};
+pub use reply::{
+    ComposerReplyTo, QuoteSelection, cancel_reply_draft, quote_position, rich_quote_source_text,
+};
 pub use send::{
     ComposerScheduling, EnterEvent, PreviewMediaSize, SendKeyMode, SendOptions,
     enter_event_from_kit, send_started_note, send_text_on_enter, should_send_on_enter,
@@ -315,6 +317,7 @@ mod tests {
                 QuoteSelection {
                     text: "part".into(),
                     position: 3,
+                    rich_texts: Vec::new(),
                 },
             )
             .into_chat(ChatId(11)),

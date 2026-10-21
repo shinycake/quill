@@ -1,4 +1,5 @@
 use super::*;
+use crate::rich::quote::quote_texts;
 use crate::rich::{RichBlock, parse_rich_message};
 use crate::text::{TextEntity, TextEntityKind, utf16_to_utf8_offset};
 use serde_json::Value;
@@ -133,6 +134,9 @@ pub struct GameContent {
 pub struct RichMessageContent {
     pub blocks: Vec<RichBlock>,
     pub is_full: bool,
+    /// The `RichText` trees a quote can be cut from, in order of
+    /// appearance ([`crate::rich::quote`]).
+    pub quote_texts: Vec<Value>,
 }
 
 impl RichMessageContent {
@@ -667,12 +671,23 @@ pub(crate) fn parse_message_game(value: &Value) -> (MessageContent, Vec<ParsedFi
     )
 }
 
+/// A `richMessage` (or `webPageInstantView`) object as [`RichMessageContent`].
+pub(crate) fn rich_message_content(value: &Value) -> RichMessageContent {
+    let (blocks, is_full) = parse_rich_message(value);
+    RichMessageContent {
+        blocks,
+        is_full,
+        quote_texts: quote_texts(value.get("blocks").unwrap_or(&Value::Null)),
+    }
+}
+
 /// M2: `messageRichMessage` → `MessageContent::RichMessage` (schema 1.8.67,
 /// line 5143; `richMessage` line 123).
 pub(crate) fn parse_message_rich_message(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
-    let (blocks, is_full) = parse_rich_message(value.get("message").unwrap_or(&Value::Null));
     (
-        MessageContent::RichMessage(RichMessageContent { blocks, is_full }),
+        MessageContent::RichMessage(rich_message_content(
+            value.get("message").unwrap_or(&Value::Null),
+        )),
         Vec::new(),
     )
 }

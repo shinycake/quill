@@ -1,5 +1,6 @@
 use super::*;
 use crate::ids::{ChatId, MessageId, UserId};
+use crate::text::TextEntity;
 use serde_json::Value;
 
 /// `messageSenderUser` / `messageSenderChat` (TDLib 1.8.67).
@@ -126,6 +127,9 @@ pub struct MessageReplyTo {
     pub chat_id: ChatId,
     pub message_id: MessageId,
     pub quote_text: Option<String>,
+    /// Styling of `quote_text`; only quotes from rich messages carry it
+    /// (`textQuote.rich_texts`).
+    pub quote_entities: Vec<TextEntity>,
     pub content_preview: Option<String>,
     /// `messageReplyToMessage.origin`: who wrote the replied message when it
     /// sits in another chat or topic (null for same-chat replies).
@@ -727,13 +731,7 @@ pub(crate) fn parse_reply_to(value: Option<&Value>) -> Option<MessageReplyTo> {
             if message_id == 0 {
                 return None;
             }
-            let quote_text = value.get("quote").and_then(|quote| {
-                if quote.is_null() {
-                    return None;
-                }
-                let text = parse_formatted_text(quote.get("text"));
-                if text.is_empty() { None } else { Some(text) }
-            });
+            let (quote_text, quote_entities) = parse_reply_quote(value.get("quote"));
             let content_preview = value.get("content").and_then(|content| {
                 if content.is_null() {
                     return None;
@@ -753,6 +751,7 @@ pub(crate) fn parse_reply_to(value: Option<&Value>) -> Option<MessageReplyTo> {
                 chat_id: ChatId(int53_or_zero(value.get("chat_id"))),
                 message_id: MessageId(message_id),
                 quote_text,
+                quote_entities,
                 content_preview,
                 origin: parse_message_origin(value.get("origin")),
                 origin_send_date: value
@@ -774,6 +773,7 @@ pub(crate) fn parse_reply_to(value: Option<&Value>) -> Option<MessageReplyTo> {
                 chat_id: ChatId(int53_or_zero(value.get("story_poster_chat_id"))),
                 message_id: MessageId(0),
                 quote_text: None,
+                quote_entities: Vec::new(),
                 content_preview: None,
                 origin: None,
                 origin_send_date: 0,
@@ -782,6 +782,30 @@ pub(crate) fn parse_reply_to(value: Option<&Value>) -> Option<MessageReplyTo> {
             })
         }
         _ => None,
+    }
+}
+
+/// `messageReplyToMessage.quote`: the quoted text and its styling. A quote
+/// chosen from a rich message has its text in `rich_texts` (`text` may be
+/// empty), which wins; anything else is plain `text`.
+fn parse_reply_quote(quote: Option<&Value>) -> (Option<String>, Vec<TextEntity>) {
+    let Some(quote) = quote.filter(|quote| !quote.is_null()) else {
+        return (None, Vec::new());
+    };
+    let rich_texts = quote
+        .get("rich_texts")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let (text, entities) = if rich_texts.is_empty() {
+        (parse_formatted_text(quote.get("text")), Vec::new())
+    } else {
+        crate::rich::quote::quote_display(rich_texts)
+    };
+    if text.is_empty() {
+        (None, Vec::new())
+    } else {
+        (Some(text), entities)
     }
 }
 

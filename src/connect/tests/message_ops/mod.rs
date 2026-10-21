@@ -37,6 +37,7 @@ fn driver_sends_a_reply_aimed_at_another_chat_as_external() {
         QuoteSelection {
             text: "else".into(),
             position: 5,
+            rich_texts: Vec::new(),
         },
     );
     // Not aimed at chat 7: no reply goes out.
@@ -618,6 +619,7 @@ fn driver_send_snapshot_carries_quote() {
         QuoteSelection {
             text: "already".to_string(),
             position: 6,
+            rich_texts: Vec::new(),
         },
     )));
     let extra = driver.send_snapshot(&snap).unwrap();

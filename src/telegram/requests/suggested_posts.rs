@@ -94,6 +94,7 @@ pub fn send_suggested_change(
     let reply = SendReply {
         message_id,
         quote: None,
+        quote_rich: Vec::new(),
         source_chat: None,
         item: Default::default(),
     };

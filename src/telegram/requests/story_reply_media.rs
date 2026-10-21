@@ -132,6 +132,7 @@ mod tests {
                 reply_to: Some(SendReply {
                     message_id: MessageId(9),
                     quote: None,
+                    quote_rich: Vec::new(),
                     source_chat: None,
                     item: Default::default(),
                 }),
