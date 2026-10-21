@@ -8,8 +8,8 @@
 
 use crate::ids::{ChatId, MessageId};
 use crate::lang::{keys, tr_with};
-use crate::local_time::{CivilTime, hhmm};
-use crate::state::{HistoryMessage, Session, short_date_time};
+use crate::local_time::{CivilTime, hhmm, needs_year, short_date};
+use crate::state::{HistoryMessage, Session, month_small};
 use crate::telegram::envelope::{
     GiftOrigin, MessageContent, MessageOrigin, MessageSender, ServiceAction,
 };
@@ -31,14 +31,32 @@ impl Session {
     }
 }
 
-/// "today at 12:34", "yesterday at 12:34", "Apr 15 at 00:20"
-/// (`FormatReadDate`: `lng_mediaview_today`, `_yesterday`, `_date_time`).
+/// "today at 12:34", "yesterday at 12:34", "Apr 15 at 00:20" and, past
+/// tdesktop's year rule, "15.04.24 at 00:20" (`FormatReadDate`:
+/// `lng_mediaview_today`, `_yesterday`, `_date_time` over
+/// `langDayOfMonthShort`). The read, original and edited rows all use it.
 pub fn original_date_text(date: &CivilTime, now: &CivilTime) -> String {
     let time = hhmm(date);
     match now.day_number() - date.day_number() {
         0 => tr_with(keys::MEDIAVIEW_TODAY, &[("time", &time)]),
         1 => tr_with(keys::MEDIAVIEW_YESTERDAY, &[("time", &time)]),
-        _ => short_date_time(date, now),
+        _ => {
+            let day = if needs_year(date, now) {
+                short_date(date)
+            } else {
+                tr_with(
+                    keys::MONTH_DAY,
+                    &[
+                        ("month", month_small(date.month)),
+                        ("day", &date.day.to_string()),
+                    ],
+                )
+            };
+            tr_with(
+                keys::MEDIAVIEW_DATE_TIME,
+                &[("date", &day), ("time", &time)],
+            )
+        }
     }
 }
 
@@ -305,7 +323,7 @@ mod tests {
         assert_eq!(original_date_text(&yesterday, &now), "yesterday at 21:42");
         assert_eq!(original_date_text(&older, &now), "Sep 18 at 21:42");
         let far = crate::local_time::civil_at(1_790_631_720 - 400 * 86_400, 0);
-        assert_eq!(original_date_text(&far, &now), "Aug 24, 2025 at 21:42");
+        assert_eq!(original_date_text(&far, &now), "24.08.25 at 21:42");
     }
 
     #[test]

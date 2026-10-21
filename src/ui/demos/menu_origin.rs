@@ -1,13 +1,15 @@
 //! Screenshot demo: the message menu's origin rows. `QUILL_DEMO_ORIGIN` picks
 //! the open chat: `forward` (a forwarded message), `gift` (a gift service
-//! message you sent) or `replies` (the Replies chat).
+//! message you sent), `replies` (the Replies chat) or `times` (messages from
+//! 2024, from earlier this year and from today, the last one edited: day
+//! separators, bubble times and the Edited row).
 
 use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::state::Session;
 
-use crate::ui::message_menu_ui::origin_rows::{FORWARD_CHAT, GIFT_CHAT, REPLIES_CHAT};
+use crate::ui::message_menu_ui::origin_rows::{FORWARD_CHAT, GIFT_CHAT, REPLIES_CHAT, TIMES_CHAT};
 
 register_demos![
     // The original date of a forward, "Send Another Gift" and the Replies
@@ -29,6 +31,7 @@ impl QuillApp {
             session.open_chat(match mode.as_str() {
                 "gift" => GIFT_CHAT,
                 "replies" => REPLIES_CHAT,
+                "times" => TIMES_CHAT,
                 _ => FORWARD_CHAT,
             });
         }
@@ -91,6 +94,33 @@ fn apply_origin_menus(
         60,
         REPLIES_CHAT.0,
         "Great post, thanks for sharing",
+    ));
+    jsons.push(user(TIMES_CHAT.0, "Ada"));
+    jsons.extend(
+        chat(TIMES_CHAT.0, "Ada", "57")
+            .split('|')
+            .map(str::to_string),
+    );
+    let now = quill::local_time::now_unix();
+    let sample = |id: i64, date: i64, edit_date: i64, value: &str| {
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{chat},"sender_id":{{"@type":"messageSenderUser","user_id":{chat}}},"is_outgoing":false,"date":{date},"edit_date":{edit_date},"content":{}}}}}"#,
+            text(value),
+            chat = TIMES_CHAT.0
+        )
+    };
+    jsons.push(sample(70, 1_730_809_200, 0, "A message from November 2024"));
+    jsons.push(sample(
+        71,
+        1_773_500_820,
+        0,
+        "A message from March this year",
+    ));
+    jsons.push(sample(
+        72,
+        now - 2 * 3600,
+        now - 3600,
+        "Sent two hours ago and edited an hour later",
     ));
     for json in jsons {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {

@@ -290,7 +290,7 @@ impl QuillApp {
                 rows.push(info_row(
                     order::SENT + 1,
                     "menu-edited",
-                    None,
+                    Some(IconName::Pencil),
                     quill::message_menu::edited_label(&edited, &now),
                 ));
             }

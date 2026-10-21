@@ -191,16 +191,35 @@ pub fn weekday_name(weekday: u8) -> &'static str {
         .unwrap_or_default()
 }
 
-/// `HH:MM`.
+/// The time of day in the system's clock style: `21:42` or `9:42 PM`
+/// (see [`crate::clock_style`]).
 pub fn hhmm(time: &CivilTime) -> String {
-    format!("{:02}:{:02}", time.hour, time.minute)
+    crate::clock_style::ClockStyle::current().format(time)
+}
+
+/// tdesktop `langDateMaybeWithYear`: the year shows only when the date is
+/// more than a year from now, or in the neighbouring year but more than
+/// three months away across the new year ("Dec 28" still reads without it
+/// in January).
+pub fn needs_year(date: &CivilTime, now: &CivilTime) -> bool {
+    let much_greater = |year: i64, other: i64| year > other + 1;
+    let month_much_greater = |year: i64, month: i64, other_year: i64, other_month: i64| {
+        year == other_year + 1 && month + 12 > other_month + 3
+    };
+    let (month, now_month) = (i64::from(date.month), i64::from(now.month));
+    date.year != now.year
+        && (much_greater(date.year, now.year)
+            || much_greater(now.year, date.year)
+            || month_much_greater(date.year, month, now.year, now_month)
+            || month_much_greater(now.year, now_month, date.year, month))
 }
 
 /// Day separator label for a message dated `date`, seen at `now`, as
-/// Telegram Desktop prints it (`langDayOfMonthFull`): "October 6" this
-/// year, "October 6, 2025" otherwise — always the date, never "Today".
+/// Telegram Desktop prints it (`langDayOfMonthFull`): "October 6", with
+/// the year by [`needs_year`] ("October 6, 2024") — always the date,
+/// never "Today".
 pub fn day_label(date: &CivilTime, now: &CivilTime) -> String {
-    if date.year == now.year {
+    if !needs_year(date, now) {
         format!("{} {}", month_name(date.month), date.day)
     } else {
         format!("{} {}, {}", month_name(date.month), date.day, date.year)
@@ -231,13 +250,19 @@ pub fn chat_list_stamp(date: &CivilTime, now: &CivilTime) -> String {
                 month_name(date.month).get(..3).unwrap_or_default()
             )
         }
-        _ => format!(
-            "{:02}.{:02}.{:02}",
-            date.day,
-            date.month,
-            date.year.rem_euclid(100)
-        ),
+        _ => short_date(date),
     }
+}
+
+/// The numeric short date, `12.03.25` (tdesktop prints
+/// `QLocale().toString(date, ShortFormat)`).
+pub fn short_date(date: &CivilTime) -> String {
+    format!(
+        "{:02}.{:02}.{:02}",
+        date.day,
+        date.month,
+        date.year.rem_euclid(100)
+    )
 }
 
 /// `12 March 2026, 21:42` — full local timestamp for tooltips and receipts.
@@ -259,7 +284,7 @@ pub fn viewer_stamp(date: &CivilTime, now: &CivilTime) -> String {
     match now.day_number() - date.day_number() {
         0 => format!("today at {time}"),
         1 => format!("yesterday at {time}"),
-        _ if date.year == now.year => {
+        _ if !needs_year(date, now) => {
             format!("{} {} at {time}", date.day, month_name(date.month))
         }
         _ => format!(
@@ -341,6 +366,49 @@ mod tests {
         assert_eq!(label(86_400), "September 27");
         assert_eq!(label(30 * 86_400), "August 29");
         assert_eq!(label(400 * 86_400), "August 24, 2025");
+    }
+
+    #[test]
+    fn the_year_follows_tdesktops_three_month_rule() {
+        let year_needed = |year: i64, month: u8, now_year: i64, now_month: u8| {
+            let at = |year, month| CivilTime {
+                year,
+                month,
+                day: 15,
+                hour: 0,
+                minute: 0,
+                weekday: 0,
+            };
+            needs_year(&at(year, month), &at(now_year, now_month))
+        };
+        // Same year: never.
+        assert!(!year_needed(2026, 1, 2026, 12));
+        // Neighbouring year: only when more than three months apart.
+        assert!(!year_needed(2025, 12, 2026, 1));
+        assert!(!year_needed(2025, 12, 2026, 3));
+        assert!(year_needed(2025, 12, 2026, 4));
+        assert!(!year_needed(2027, 1, 2026, 12));
+        assert!(year_needed(2027, 4, 2026, 12));
+        assert!(year_needed(2025, 6, 2026, 2));
+        // More than a year apart: always.
+        assert!(year_needed(2024, 12, 2026, 1));
+        assert!(year_needed(2028, 1, 2026, 12));
+    }
+
+    #[test]
+    fn separators_drop_the_year_across_new_year_within_three_months() {
+        // 2026-01-10 and a message from 2025-12-28: still "December 28".
+        let now = civil_at(T - 261 * 86_400, 0);
+        assert_eq!((now.year, now.month), (2026, 1));
+        let december = civil_at(1_766_880_000, 0);
+        assert_eq!(
+            (december.year, december.month, december.day),
+            (2025, 12, 28)
+        );
+        assert_eq!(day_label(&december, &now), "December 28");
+        // Seen from September the same message carries its year.
+        let later = civil_at(T, 0);
+        assert_eq!(day_label(&december, &later), "December 28, 2025");
     }
 
     #[test]

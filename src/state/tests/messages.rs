@@ -424,6 +424,21 @@ fn message_time_hhmm_formats_local_and_rejects_missing() {
 }
 
 #[test]
+fn message_time_follows_the_system_clock_style() {
+    let local = crate::local_time::civil_local(1790631720);
+    let hour = match local.hour % 12 {
+        0 => 12,
+        hour => hour,
+    };
+    let marker = if local.hour >= 12 { "PM" } else { "AM" };
+    let _twelve = crate::clock_style::ClockStyle::Hour12.pin();
+    assert_eq!(
+        message_time_hhmm(1790631720),
+        Some(format!("{hour}:{:02} {marker}", local.minute))
+    );
+}
+
+#[test]
 fn read_inbox_and_outbox_update_cursors() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);

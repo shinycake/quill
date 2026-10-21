@@ -5,7 +5,7 @@
 
 use crate::ids::FileId;
 use crate::lang::{Key, keys, tr, tr_with};
-use crate::local_time::{CivilTime, civil_local, hhmm};
+use crate::local_time::{CivilTime, civil_local, hhmm, needs_year};
 use crate::message_a11y::format_duration_text;
 use crate::telegram::envelope::{
     MessageContent, MessageOrigin, MessageSender, MiniThumbnail, ParsedMessage, TextContent,
@@ -382,34 +382,8 @@ fn text_before_links(text: &str, entities: &[TextEntity]) -> String {
     kept.trim().to_string()
 }
 
-/// tdesktop `langDateMaybeWithYear`: the year shows only when the date is
-/// more than a year from now, or in the neighbouring year but more than
-/// three months away across the new year ("Dec 28" still reads without it
-/// in January).
-fn needs_year(year: i64, month: i64, now_year: i64, now_month: i64) -> bool {
-    let much_greater = |year: i64, other: i64| year > other + 1;
-    let month_much_greater = |year: i64, month: i64, other_year: i64, other_month: i64| {
-        year == other_year + 1 && month + 12 > other_month + 3
-    };
-    year != now_year
-        && (much_greater(year, now_year)
-            || much_greater(now_year, year)
-            || month_much_greater(year, month, now_year, now_month)
-            || month_much_greater(now_year, now_month, year, month))
-}
-
-/// tdesktop `langDateTime`: "Oct 10 at 07:00", with the year by
-/// [`needs_year`].
-fn date_time(date: i32, now: i64) -> String {
-    if date <= 0 {
-        return String::new();
-    }
-    short_date_time(&civil_local(i64::from(date)), &civil_local(now))
-}
-
-/// [`date_time`] over already-split times, so callers (and tests) choose
-/// the time zone.
-pub fn short_date_time(at: &CivilTime, current: &CivilTime) -> String {
+/// The abbreviated month name (tdesktop `MonthSmall`): "Oct".
+pub fn month_small(month: u8) -> &'static str {
     const MONTHS: [Key; 12] = [
         keys::MONTH1_SMALL,
         keys::MONTH2_SMALL,
@@ -424,18 +398,28 @@ pub fn short_date_time(at: &CivilTime, current: &CivilTime) -> String {
         keys::MONTH11_SMALL,
         keys::MONTH12_SMALL,
     ];
-    let month = usize::from(at.month.clamp(1, 12))
+    usize::from(month.clamp(1, 12))
         .checked_sub(1)
         .and_then(|ix| MONTHS.get(ix))
         .map(|key| tr(*key))
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
+
+/// tdesktop `langDateTime`: "Oct 10 at 07:00", with the year by
+/// [`needs_year`].
+fn date_time(date: i32, now: i64) -> String {
+    if date <= 0 {
+        return String::new();
+    }
+    short_date_time(&civil_local(i64::from(date)), &civil_local(now))
+}
+
+/// [`date_time`] over already-split times, so callers (and tests) choose
+/// the time zone.
+pub fn short_date_time(at: &CivilTime, current: &CivilTime) -> String {
+    let month = month_small(at.month);
     let day = at.day.to_string();
-    let day_part = if !needs_year(
-        at.year,
-        i64::from(at.month),
-        current.year,
-        i64::from(current.month),
-    ) {
+    let day_part = if !needs_year(at, current) {
         tr_with(keys::MONTH_DAY, &[("month", month), ("day", &day)])
     } else {
         tr_with(
@@ -741,22 +725,6 @@ mod tests {
             .lines(DATE, NOW + 400 * 86_400, no_name, no_origin)
             .expect("lines");
         assert!(older.date.starts_with("Oct 10, 2026 at "), "{}", older.date);
-    }
-
-    #[test]
-    fn the_year_follows_tdesktops_three_month_rule() {
-        // Same year: never.
-        assert!(!needs_year(2026, 1, 2026, 12));
-        // Neighbouring year: only when more than three months apart.
-        assert!(!needs_year(2025, 12, 2026, 1));
-        assert!(!needs_year(2025, 12, 2026, 3));
-        assert!(needs_year(2025, 12, 2026, 4));
-        assert!(!needs_year(2027, 1, 2026, 12));
-        assert!(needs_year(2027, 4, 2026, 12));
-        assert!(needs_year(2025, 6, 2026, 2));
-        // More than a year apart: always.
-        assert!(needs_year(2024, 12, 2026, 1));
-        assert!(needs_year(2028, 1, 2026, 12));
     }
 
     #[test]
