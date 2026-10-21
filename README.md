@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/shinycake/quill/actions/workflows/ci.yml/badge.svg)](https://github.com/shinycake/quill/actions/workflows/ci.yml)
 ![Rust 1.92](https://img.shields.io/badge/rust-1.92-orange)
-![TDLib 1.8.68](https://img.shields.io/badge/TDLib-1.8.68-blue)
+![TDLib 1.8.69](https://img.shields.io/badge/TDLib-1.8.69-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
 Quill is an independent, unofficial Telegram desktop client written in Rust. It uses Telegram's official [TDLib](https://core.telegram.org/tdlib) library for everything that talks to Telegram, and draws its interface with [GPUI](https://www.gpui.rs).
@@ -94,7 +94,7 @@ Without credentials, `cargo run --features ui` opens a synthetic demo chat. To s
 
 On Linux, building the UI also needs the GTK 3 and ALSA development packages (`libgtk-3-dev` and `libasound2-dev` on Debian and Ubuntu).
 
-Toolchain: Rust 1.99.1, pinned in `rust-toolchain.toml` (the minimum supported version is 1.92). UI: gpui-kit 0.7.3. TDLib: 1.8.68.
+Toolchain: Rust 1.99.1, pinned in `rust-toolchain.toml` (the minimum supported version is 1.92). UI: gpui-kit 0.8.0. TDLib: 1.8.69.
 
 ## Status
 

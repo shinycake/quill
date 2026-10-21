@@ -21,7 +21,7 @@ Notes on specific crates:
 
 | Crate(s) | License | Notes |
 |---|---|---|
-| gpui-kit, gpui-component, gpui-pre (GPUI) and related crates | Apache-2.0 | crates.io 0.7.3 / gpui-pre 0.3.9 |
+| gpui-kit, gpui-component, gpui-pre (GPUI) and related crates | Apache-2.0 | crates.io 0.8.0 / gpui-pre 0.3.9 |
 | gpui-base 0.7.3 | Apache-2.0 | Patched copy in `third_party/gpui-base`; the changes are listed in `third_party/gpui-base/QUILL-CHANGES.md` and marked in each changed file. |
 | gpui-pre 0.3.9 | Apache-2.0 | Patched copy in `third_party/gpui-pre`; the changes are listed in `third_party/gpui-pre/QUILL-CHANGES.md` and marked in each changed file. |
 | gpui-pre-apple 0.3.9 | Apache-2.0 | Patched copy in `third_party/gpui-pre-apple`; the changes are listed in `third_party/gpui-pre-apple/QUILL-CHANGES.md` and marked in each changed file. |
@@ -29,7 +29,7 @@ Notes on specific crates:
 | gpui-pre-linux 0.3.9 | Apache-2.0 | Patched copy in `third_party/gpui-pre-linux`; the changes are listed in `third_party/gpui-pre-linux/QUILL-CHANGES.md` and marked in each changed file. |
 | gpui-pre-wgpu 0.3.9 | Apache-2.0 | Patched copy in `third_party/gpui-pre-wgpu`; the changes are listed in `third_party/gpui-pre-wgpu/QUILL-CHANGES.md` and marked in each changed file. |
 | gpui-pre-windows 0.3.9 | Apache-2.0 | Patched copy in `third_party/gpui-pre-windows`; the changes are listed in `third_party/gpui-pre-windows/QUILL-CHANGES.md` and marked in each changed file. |
-| gpui-kit-assets 0.7.3 | Apache-2.0; bundled Lucide icons ISC, some derived from Feather (MIT) | The icon license is in `licenses/lucide-ISC.txt` (copied from the crate's `LICENSE-LUCIDE`). |
+| gpui-kit-assets 0.8.0 | Apache-2.0; bundled Lucide icons ISC, some derived from Feather (MIT) | The icon license is in `licenses/lucide-ISC.txt` (copied from the crate's `LICENSE-LUCIDE`). |
 | spellbook, symphonia (via rodio), dwrote, option-ext | MPL-2.0 | Unmodified crates.io releases. MPL-2.0 is file-level copyleft; the source of these files is on crates.io and in each project's repository (links in `THIRD_PARTY_LICENSES.md`). |
 | webpki-roots | CDLA-Permissive-2.0 | Mozilla CA certificate data. |
 | ICU4X crates (icu_*, zerovec, yoke, ...) | Unicode-3.0 | |
