@@ -374,7 +374,7 @@ fn a_refused_system_proxy_waits_and_stays_out_of_the_box() {
 }
 
 #[test]
-fn a_web_proxy_carrier_is_refused_and_the_row_says_not_available() {
+fn without_a_carrier_host_a_web_proxy_carrier_is_refused() {
     let mut rig = Rig::new();
     rig.load_list(&[(1, true)]);
     rig.feed(json!({"@type": "updateWebProxyCarrierOpened", "carrier": {
@@ -399,7 +399,7 @@ fn a_web_proxy_carrier_is_refused_and_the_row_says_not_available() {
 }
 
 #[test]
-fn a_web_proxy_is_saved_but_never_switched_to() {
+fn without_a_carrier_host_a_web_proxy_is_saved_but_never_switched_to() {
     let mut rig = Rig::new();
     rig.load_list(&[(1, false)]);
     let web =
@@ -429,7 +429,7 @@ fn a_web_proxy_is_saved_but_never_switched_to() {
 }
 
 #[test]
-fn the_enabled_proxy_cannot_be_edited_into_a_web_proxy() {
+fn without_a_carrier_host_the_enabled_proxy_cannot_become_a_web_proxy() {
     let mut rig = Rig::new();
     rig.load_list(&[(1, true), (2, false)]);
     let web =

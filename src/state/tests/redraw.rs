@@ -362,3 +362,41 @@ fn download_manager_updates_redraw_now_for_downloads_the_user_started() {
     session.begin_user_download(crate::ids::FileId(31));
     assert_eq!(need(&session, download), RedrawNeed::Now);
 }
+
+#[test]
+fn web_proxy_relay_traffic_never_redraws() {
+    let mut session = two_chats();
+    let generation = session.account_generation;
+    assert_eq!(
+        need(
+            &session,
+            r#"{"@type":"updateWebProxyCarrierData","carrier_id":3,"data":"AAAA"}"#
+        ),
+        RedrawNeed::Nothing
+    );
+    let relay = crate::proxy_carrier::CARRIER_RELAY_EXTRA.as_extra();
+    assert_eq!(
+        need(&session, &format!(r#"{{"@type":"ok","@extra":"{relay}"}}"#)),
+        RedrawNeed::Nothing
+    );
+    assert_eq!(
+        need(
+            &session,
+            &format!(r#"{{"@type":"error","@extra":"{relay}","code":400,"message":"x"}}"#)
+        ),
+        RedrawNeed::Nothing
+    );
+    let id = session.requests.register(
+        generation,
+        RequestPurpose::Settings(crate::state::SettingsPurpose::ReportWebProxyCarrier),
+        None,
+        None,
+    );
+    assert_eq!(
+        need(
+            &session,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, id.0)
+        ),
+        RedrawNeed::Nothing
+    );
+}

@@ -45,6 +45,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Div {
         let id = entry.id;
+        // Without a carrier host (no helper, or this system cannot run a
+        // web view) a web proxy cannot be switched to, and one already in
+        // use says why it cannot connect.
+        let switchable = self
+            .session()
+            .is_none_or(|s| s.settings.proxy.can_enable(entry.proxy.kind));
         let status_color = match (web, ping) {
             (Some(WebRowState::Online), _) | (None, Some(PingStatus::Available(_))) => success(),
             (Some(WebRowState::Unavailable), _) | (None, Some(PingStatus::Unavailable)) => danger(),
@@ -108,18 +114,14 @@ impl QuillApp {
                                     .text_color(status_color)
                                     .child(row_subtitle(entry, ping, web)),
                             )
-                            // Quill cannot host a web proxy's carrier yet, so
-                            // it cannot be switched to.
-                            .when(
-                                !entry.proxy.kind.can_be_enabled() && !entry.is_enabled,
-                                |this| {
-                                    this.child(
-                                        div().text_xs().text_color(text_muted()).child(tr(
-                                            keys::Q_PREFS_WEB_PROXIES_ARENT_SUPPORTED_YET,
-                                        )),
-                                    )
-                                },
-                            ),
+                            .when(!switchable, |this| {
+                                this.child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(text_muted())
+                                        .child(tr(keys::Q_PREFS_WEB_PROXIES_ARENT_SUPPORTED_YET)),
+                                )
+                            }),
                     ),
             )
             // Web proxies are never pinged (tdesktop shows "not tested").

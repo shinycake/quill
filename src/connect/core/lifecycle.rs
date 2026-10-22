@@ -54,6 +54,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             flood_attempts: HashMap::new(),
             last_request_sweep: None,
             system_proxy_sent: None,
+            carrier_host: None,
         }
     }
 

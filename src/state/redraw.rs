@@ -19,7 +19,7 @@ use crate::ids::{ChatId, UserId};
 use crate::telegram::envelope::{ChatKind, Envelope, EnvelopePayload, ParsedFile};
 use crate::telegram::envelope::{
     ChatListPayload, ChatsPayload, CommonPayload, GroupsPayload, MediaPayload, MessagesPayload,
-    UsersPayload,
+    SettingsPayload, UsersPayload,
 };
 
 /// What an envelope's effect on screen asks for, least urgent first.
@@ -48,18 +48,29 @@ pub fn redraw_need(session: &Session, envelope: &Envelope) -> RedrawNeed {
     // spinner, a panel, an error). Only a few fire-and-forget calls
     // return nothing anyone watches.
     if let Some(id) = envelope.extra {
+        // A web proxy carrier's relayed page message (never in the
+        // request table; the driver drops the answer).
+        if id == crate::proxy_carrier::CARRIER_RELAY_EXTRA {
+            return RedrawNeed::Nothing;
+        }
         return match session.requests.purpose(id) {
             Some(super::RequestPurpose::ViewMessages | super::RequestPurpose::SetOnline)
                 if matches!(envelope.payload, P::Ok) =>
             {
                 RedrawNeed::Nothing
             }
+            // A web proxy carrier's failure report: nothing waits on it.
+            Some(super::RequestPurpose::Settings(
+                super::SettingsPurpose::ReportWebProxyCarrier,
+            )) => RedrawNeed::Nothing,
             _ => RedrawNeed::Now,
         };
     }
     match &envelope.payload {
         // The reducer ignores these (`unknown-variant` diagnostic only).
         P::Unknown(_) => RedrawNeed::Nothing,
+        // A web proxy's relay traffic; nothing on screen shows it.
+        P::Settings(SettingsPayload::WebProxyCarrierData { .. }) => RedrawNeed::Nothing,
         // Unread totals feed the tray and the dock badge, which sync on
         // their own timer; no pane draws them.
         P::ChatList(ChatListPayload::UpdateUnreadMessageCount { .. })

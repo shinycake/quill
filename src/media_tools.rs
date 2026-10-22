@@ -256,7 +256,7 @@ pub fn quiet_command(name: &str) -> Command {
 }
 
 /// Hide the console window a child would flash on Windows GUI apps.
-pub(crate) trait NoConsole {
+pub trait NoConsole {
     fn no_console(&mut self) -> &mut Self;
 }
 

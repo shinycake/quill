@@ -30,9 +30,10 @@ pub enum ProxyKind {
 }
 
 impl ProxyKind {
-    /// Quill cannot host the carrier of a web proxy yet, so switching to
-    /// one would cut the connection (`parity:data-proxy-web`).
-    pub fn can_be_enabled(self) -> bool {
+    /// Whether the auto-switch may pick it: web proxies are never pinged,
+    /// so they are left out (tdesktop `ProxyRotationManager` skips
+    /// `Type::Web` too).
+    pub fn can_be_rotated_to(self) -> bool {
         self != ProxyKind::Web
     }
 }

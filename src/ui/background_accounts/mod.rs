@@ -445,7 +445,10 @@ impl QuillApp {
                 }
             }
             let _ = live.driver.end_batch();
-            ingested |= live.driver.request_tick(now);
+            ingested |= live
+                .driver
+                .poll_ticks(quill::connect::TickScope::Background, now)
+                .progressed;
             // One proxy list for the app (`quill::proxy_sync`; tdesktop keeps
             // proxies app-wide): follow the account on screen, whose
             // auto-switch picks the proxy for everyone.

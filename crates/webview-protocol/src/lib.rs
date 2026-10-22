@@ -13,8 +13,14 @@
 //! `<iframe>` holding the bot page. Shell-level clicks come back as
 //! [`ShellEvent`]s; presentation changes go out as commands the shell
 //! applies.
+//!
+//! The same helper also hosts web proxy carriers (`--carrier`), with their
+//! own line types in [`carrier`].
 
 use serde::{Deserialize, Serialize};
+
+pub mod carrier;
+pub mod lines;
 
 /// Longest `data` payload of one mini-app event the helper forwards. The
 /// Telegram bridge's biggest legitimate payloads (a `web_app_data_send`

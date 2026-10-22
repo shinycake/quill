@@ -380,42 +380,13 @@ impl QuillApp {
             progressed = true;
             need = RedrawNeed::Now;
         }
-        // Q1/R5: re-send rate-limited reads whose wait is over and sweep
-        // requests whose answer never came (no timers of their own; the
-        // poll loop already ticks).
-        if live.driver.request_tick(std::time::Instant::now()) {
-            progressed = true;
-            need = RedrawNeed::Now;
-        }
-        // Settings → My Grams: the balance probe and unknown names.
-        if live.driver.grams_tick(settings_open) {
-            progressed = true;
-        }
-        // Bots named by a group's command list that the app does not know.
-        if live.driver.group_bot_users_tick() {
-            progressed = true;
-        }
-        // `parity:proxy-settings`: first `getProxies` + auto-switch.
-        if live.driver.proxy_tick(quill::state::unix_ms_now()) {
-            progressed = true;
-            need = RedrawNeed::Now;
-        }
-        // `parity:data-proxy-extras`: "Use system proxy settings".
-        let proxy = &live.driver.session.settings.proxy;
-        let wanted = proxy.prefs.use_system && proxy.enabled().is_none();
-        if live
-            .driver
-            .system_proxy_tick(&quill::system_proxy::latest(wanted))
-        {
-            progressed = true;
-        }
-        // Star reactions: commit the ones whose Undo window ended, and keep
-        // the toast's countdown redrawing while one is waiting.
-        let paid_now = quill::state::unix_ms_now();
-        if live.driver.paid_reaction_tick(paid_now)
-            || live.driver.session.payments.paid.has_pending()
-        {
-            progressed = true;
+        // The driver's timed work (`quill::connect::ticks`).
+        let ticks = live.driver.poll_ticks(
+            quill::connect::TickScope::OnScreen { settings_open },
+            std::time::Instant::now(),
+        );
+        progressed |= ticks.progressed;
+        if ticks.redraw_now {
             need = RedrawNeed::Now;
         }
         // A desktop notification, its sound or a forced reply is handed

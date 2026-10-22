@@ -40,21 +40,55 @@ impl Session {
         proxy.error = None;
     }
 
-    /// `updateWebProxyCarrierOpened`: Quill has no hidden web view to host
-    /// a web proxy's relay page, so the carrier is refused (queued for the
-    /// driver) and the proxy's row says it is not available. A temporary
-    /// carrier (ping / test) is not a failure of the saved proxy.
+    /// `updateWebProxyCarrierOpened`: host it, or refuse it when this
+    /// client has no carrier host (`crate::proxy_carrier`). A temporary
+    /// carrier (ping / test) is refused and is not a failure of the saved
+    /// proxy.
     pub(crate) fn apply_web_proxy_carrier(
         &mut self,
+        carrier: crate::proxy_carrier::CarrierRequest,
+    ) {
+        use crate::proxy_carrier::OpenVerdict;
+        let proxy = &mut self.settings.proxy;
+        match proxy.carriers.opened(carrier) {
+            OpenVerdict::Hosting { proxy_id } => {
+                if proxy.carrier_failed == Some(proxy_id) {
+                    proxy.carrier_failed = None;
+                }
+            }
+            OpenVerdict::Refused { proxy_id } => proxy.carrier_failed = Some(proxy_id),
+            OpenVerdict::Temporary => {}
+        }
+    }
+
+    /// `updateWebProxyCarrierClosed`.
+    pub(crate) fn apply_web_proxy_carrier_closed(&mut self, carrier_id: i32) {
+        self.settings.proxy.carriers.closed(carrier_id);
+    }
+
+    /// A carrier's host failed it (or could not start it): TDLib hears
+    /// why, and the proxy's row says "not available" until TDLib tries
+    /// again.
+    pub fn apply_web_proxy_carrier_failed(
+        &mut self,
         carrier_id: i32,
-        proxy_id: i32,
-        temporary: bool,
+        error: crate::proxy_carrier::CarrierError,
     ) {
         let proxy = &mut self.settings.proxy;
-        proxy.carrier_reports.push((carrier_id, temporary));
-        if !temporary && proxy_id != 0 {
+        if let Some(proxy_id) = proxy.carriers.failed(carrier_id, error) {
             proxy.carrier_failed = Some(proxy_id);
         }
+    }
+
+    /// Whether this client can host carriers, as the host now says (a
+    /// capability check finishing, or a carrier finding out it cannot
+    /// run). Once it cannot, every new carrier is refused and web proxies
+    /// are not switched to. Returns whether it changed.
+    pub fn apply_carrier_hosting(&mut self, hosting: bool) -> bool {
+        let carriers = &mut self.settings.proxy.carriers;
+        let changed = carriers.hosting != hosting;
+        carriers.hosting = hosting;
+        changed
     }
 
     /// `addProxy` / `editProxy` answer.

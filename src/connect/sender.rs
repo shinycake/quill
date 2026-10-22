@@ -184,6 +184,16 @@ impl LiveSender {
             guard: Default::default(),
         }
     }
+
+    /// `parity:data-proxy-web`: sends a carrier page's messages to this
+    /// client from the carrier host's reader threads (`td_send` is
+    /// thread-safe). They skip the paid-chat screen and the retry stash:
+    /// they are never paid sends and never retried.
+    pub fn relay_sink(&self) -> crate::proxy_carrier::RelaySink {
+        let api = self.api.clone();
+        let client_id = self.client_id;
+        Arc::new(move |request: &str| api.send(client_id, request).is_ok())
+    }
 }
 
 impl JsonSender for LiveSender {

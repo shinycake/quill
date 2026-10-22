@@ -19,6 +19,8 @@ path = "src/main.rs"
 quill-webview-protocol = { path = "../webview-protocol" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The web proxy carrier's per-page bridge token (`--carrier`).
+getrandom = "0.4"
 # Windowing for the helper only. tao runs a GTK main loop on Linux, which
 # is exactly why the web view cannot live in the GPUI process
 # (docs/decisions/codex-miniapp-webview.md). `dbus` (Linux taskbar progress)
@@ -27,9 +29,26 @@ tao = { version = "0.37", default-features = false, features = ["rwh_06", "x11"]
 wry = "0.57"
 
 # `--capture <png>` (screenshot demos): WebKit's own snapshot, written as PNG.
-# Same objc2 generation wry 0.57 links.
+# `--carrier`: content rules and the App Nap activity. Same objc2
+# generation wry 0.57 links.
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"
+objc2 = "0.6"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSGraphics"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSData", "NSDictionary", "NSError", "NSString", "NSObject"] }
-objc2-web-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKSnapshotConfiguration"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSData", "NSDictionary", "NSError", "NSString", "NSObject", "NSProcessInfo", "NSURL"] }
+objc2-web-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKSnapshotConfiguration", "WKContentRuleList", "WKContentRuleListStore", "WKUserContentController", "WKWebViewConfiguration"] }
+
+# `--carrier`: end at once when Quill is gone (`_exit`, Linux parent death).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# `--carrier`: dialogs, printing, WebRTC and content rules on the web view
+# wry builds (the same webkit2gtk wry 0.57 pins).
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
+
+# `--carrier`: script dialogs and the request filter on wry's WebView2, and
+# ending the process (same windows generation wry 0.57 links).
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.39"
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Threading"] }

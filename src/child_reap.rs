@@ -5,11 +5,14 @@
 //! helpers hand the child to a detached thread that reaps it.
 
 use std::process::Child;
+use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// Kill `child` and reap it on a detached thread.
-pub fn kill_and_reap(child: Child) {
+/// Kill `child` now (sending the signal does not block) and reap it on a
+/// detached thread.
+pub fn kill_and_reap(mut child: Child) {
+    let _ = child.kill();
     reap_after(child, Duration::ZERO);
 }
 
@@ -17,6 +20,18 @@ pub fn kill_and_reap(child: Child) {
 /// detached thread. If no thread can be started the child is killed here
 /// and polled briefly (about 50 ms at most) for its exit, then left to the OS.
 pub fn reap_after(child: Child, grace: Duration) {
+    reap_after_with(child, grace, None);
+}
+
+/// [`reap_after`], and the returned receiver hears (or disconnects) once
+/// the child is gone, for a caller that may want to wait for that.
+pub fn reap_after_notice(child: Child, grace: Duration) -> Receiver<()> {
+    let (done, notice) = sync_channel(1);
+    reap_after_with(child, grace, Some(done));
+    notice
+}
+
+fn reap_after_with(child: Child, grace: Duration, done: Option<SyncSender<()>>) {
     let slot = Arc::new(Mutex::new(Some(child)));
     let worker = slot.clone();
     let spawned = std::thread::Builder::new()
@@ -25,6 +40,9 @@ pub fn reap_after(child: Child, grace: Duration) {
             let child = worker.lock().ok().and_then(|mut slot| slot.take());
             if let Some(child) = child {
                 reap(child, grace);
+            }
+            if let Some(done) = done {
+                let _ = done.try_send(());
             }
         });
     if spawned.is_err() {

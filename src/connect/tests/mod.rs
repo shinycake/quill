@@ -83,6 +83,7 @@ mod privacy_data;
 mod profile_music;
 mod profile_panels;
 mod proxy;
+mod proxy_carrier;
 mod pull_next;
 mod quick_replies;
 mod reactions_live;

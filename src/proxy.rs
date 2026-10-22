@@ -621,17 +621,23 @@ pub struct ProxyState {
     pub fetch_attempted: bool,
     /// Auto-switch: when the connection last stopped being usable (ms).
     pub disconnected_since_ms: Option<u64>,
-    /// The enabled web proxy whose relay page the app could not open
-    /// (the carrier was refused); its row says "not available".
+    /// The enabled web proxy whose last carrier failed or was refused;
+    /// its row says "not available" until TDLib opens the next one.
     pub carrier_failed: Option<i32>,
-    /// `(carrier id, temporary)` of carriers TDLib asked for that the
-    /// driver has yet to refuse with `reportWebProxyCarrierError`.
-    pub carrier_reports: Vec<(i32, bool)>,
+    /// The web proxy carriers TDLib opened and what the driver still has
+    /// to do about them (`crate::proxy_carrier`).
+    pub carriers: crate::proxy_carrier::Carriers,
 }
 
 impl ProxyState {
     pub fn entries(&self) -> &[ProxyEntry] {
         self.list.as_deref().unwrap_or(&[])
+    }
+
+    /// Whether a proxy of `kind` may be switched to: a web proxy only when
+    /// this client can host its carrier (`crate::proxy_carrier`).
+    pub fn can_enable(&self, kind: ProxyKind) -> bool {
+        kind != ProxyKind::Web || self.carriers.hosting
     }
 
     /// The enabled proxy, if any.
@@ -714,11 +720,10 @@ impl ProxyState {
         let entries = self.entries();
         let current = entries.iter().position(|p| p.is_enabled).unwrap_or(0);
         // Candidates in list order, starting after the current proxy.
-        // Web proxies are skipped: they can't be pinged or switched to
-        // (tdesktop `ProxyRotationManager` leaves `Type::Web` out too).
+        // Web proxies are skipped: they can't be pinged.
         let order: Vec<&ProxyEntry> = (1..entries.len())
             .filter_map(|step| entries.get((current + step) % entries.len()))
-            .filter(|p| p.proxy.kind.can_be_enabled())
+            .filter(|p| p.proxy.kind.can_be_rotated_to())
             .collect();
         if let Some(found) = order
             .iter()
