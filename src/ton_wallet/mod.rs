@@ -1,22 +1,25 @@
-//! Telegram's TON wallet (Gram wallet), phase 1: read-only display of what
-//! arrives with messages. See `docs/decisions/research-ton-wallet.md`.
+//! Telegram's TON wallet (Gram wallet): display of what arrives with
+//! messages, plus the state of the shared "not supported" notice. See
+//! `docs/decisions/research-ton-wallet.md` and
+//! `docs/decisions/wallet-not-supported-notice.md`.
 //!
 //! Quill never holds wallet keys, never signs and never moves value. This
-//! module only parses and words what TDLib 1.8.68 delivers:
+//! module only parses and words what TDLib 1.8.69 delivers:
 //! `textEntityTypeTonAddress` / `richTextTonAddress` (the address helpers
 //! in [`address`]), `messageTonWalletTransfer` and `messageTonConnectRequest`
 //! (the contents in [`message`]), and the `pushMessageContentTon*` texts
-//! (in [`push`]). Telegram Desktop has none of this; the wording follows
-//! the official iOS app (`Notification.GramTransfer*`, `Wallet.*`,
+//! (in [`push`]). Telegram Desktop has a real wallet that Quill does not
+//! build; the wording follows the official iOS app (`Notification.GramTransfer*`, `Wallet.*`,
 //! `MESSAGE_GRAM_TRANSFER*` in its `Localizable.strings`).
 //!
 //! The profile and own-wallet side (`docs/decisions/ton-wallet-profile-and-overview.md`)
 //! adds a user's public address on their profile ([`ProfileAddress`]), the
 //! Money page with the own address, balance, fiat value, backup status,
 //! history and NFTs ([`own`], [`fiat`]), the notice for wallet links
-//! ([`links`]) and the first-transfer hint. All of it only reads: the
-//! methods it may send are [`READ_ONLY_METHODS`], the ones it must never
-//! send are [`FORBIDDEN_METHODS`], and every wallet getter waits for the
+//! ([`links`]) and the first-transfer hint. Everything that would act on the
+//! wallet opens the notice ([`notice`]) instead: the methods Quill may send
+//! are [`READ_ONLY_METHODS`], the ones it must never send are
+//! [`FORBIDDEN_METHODS`], and every wallet getter waits for the
 //! `can_use_ton_wallet` option.
 #![deny(clippy::indexing_slicing)]
 
@@ -213,6 +216,7 @@ pub struct TonWalletState {
     pub money: MoneyPage,
     /// Public addresses of profiles opened this session.
     pub profile_addresses: HashMap<i64, ProfileAddress>,
+    /// The surface whose notice is open, if any.
     pub notice: Option<WalletSurface>,
 }
 

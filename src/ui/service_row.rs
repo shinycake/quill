@@ -337,7 +337,8 @@ pub(super) fn service_message_row(
     let ton_transfer = super::ton_wallet_ui::transfer_of(&message.content).map(|transfer| {
         super::ton_wallet_ui::transfer_card(row_id, message, transfer, session, cx)
     });
-    let connect_review = super::ton_wallet_ui::connect_review_button(row_id, &message.content, cx);
+    let connect_review =
+        super::ton_wallet_ui::connect_review_button(row_id, &message.content, session, cx);
     let open_code = super::premium_ui::gift_card_of(&message.content)
         .and_then(|(_, card)| super::link_info_boxes::gift_code_open_button(row_id, card, cx));
     div()

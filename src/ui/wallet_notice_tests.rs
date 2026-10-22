@@ -379,3 +379,69 @@ fn move_to_my_wallet_opens_the_notice_once_the_gift_is_unlocked(cx: &mut TestApp
     });
     assert_eq!(notice(&app, vcx), Some(WalletSurface::GiftToWallet));
 }
+
+#[gpui_kit::test]
+fn the_encrypted_comment_and_review_request_do_nothing_while_the_wallet_is_off(
+    cx: &mut TestAppContext,
+) {
+    let (app, _shell, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    let card = 90_000_000_031;
+    let pending = 90_000_000_032;
+    app.update_in(vcx, |app, _, _| {
+        add_service(
+            app,
+            card,
+            ServiceAction::TonWalletTransfer(Box::new(TonWalletTransfer {
+                sender_user_id: OPEN.0,
+                transaction_id: "t1".into(),
+                peer_address: ADDRESS.into(),
+                amount: 2_000_000_000,
+                comment: "c2VjcmV0".into(),
+                is_comment_encrypted: true,
+            })),
+        );
+        add_service(
+            app,
+            pending,
+            ServiceAction::TonConnectRequest(TonConnectRequest {
+                session_id: 1,
+                state: TonConnectRequestState::Pending { expiration_date: 0 },
+                dapp_name: "Fragment".into(),
+                topic: String::new(),
+            }),
+        );
+    });
+    frames(vcx);
+    assert!(find(vcx, &format!("ton-transfer-encrypted-{card}")));
+    assert!(!find(vcx, &format!("ton-transfer-encrypted-open-{card}")));
+    assert!(!find(vcx, &format!("ton-connect-review-{pending}")));
+}
+
+#[gpui_kit::test]
+fn a_bot_profile_has_no_send_money(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    let user_id = 4_243;
+    app.update_in(vcx, |app, window, cx| {
+        let session = app.demo_session.as_mut().unwrap();
+        let json = r#"{"@type":"updateUser","user":{"id":4243,"first_name":"Helper","type":{"@type":"userTypeBot"}}}"#;
+        let envelope = quill::telegram::envelope::parse_envelope(json).unwrap();
+        let seq = session.last_seq + 1;
+        session.apply(quill::telegram::OwnedEnvelope {
+            seq,
+            client_id: None,
+            envelope,
+        });
+        assert!(session.is_bot_user(user_id));
+        session.ton_wallet.set_can_use(true);
+        session
+            .ton_wallet
+            .profile_addresses
+            .insert(user_id, ProfileAddress::Found(ADDRESS.into()));
+        app.open_info_panel_target(InfoPanelTarget::User(user_id), window, cx);
+    });
+    frames(vcx);
+    assert!(find(vcx, "info-ton-wallet"));
+    assert!(!find(vcx, "info-ton-wallet-send"));
+}

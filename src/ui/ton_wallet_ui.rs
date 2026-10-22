@@ -1,11 +1,14 @@
-//! TON wallet, phase 1 (read-only): the TON address menu and the transfer
-//! card under a wallet-transfer service line. The data and wording live in
-//! `quill::ton_wallet`; Telegram Desktop has no wallet, so this follows the
-//! official iOS app (`ChatControllerOpenTonAddressContextMenu`,
-//! `ChatMessageTransferBubbleContentNode`) minus everything that acts on
-//! the wallet: no Send Money, no decrypting. A card click opens the
-//! transaction on the read-only Money page (`ton_wallet_money.rs`); the
-//! profile's wallet-address row lives here too.
+//! TON wallet surfaces in chats: the TON address menu, the transfer card
+//! under a wallet-transfer service line, the "Review request" button and
+//! the profile's wallet-address row. The data and wording live in
+//! `quill::ton_wallet`. Quill shows and reads, it never acts: Send Money,
+//! decrypting a comment and reviewing a TON Connect request open the shared
+//! "not supported" notice (`wallet_notice.rs`) while the wallet is on for
+//! the account. Telegram Desktop has a real wallet (`SourceFiles/wallet/`)
+//! that Quill deliberately does not build; the layout follows the official
+//! iOS app (`ChatControllerOpenTonAddressContextMenu`,
+//! `ChatMessageTransferBubbleContentNode`). A card click opens the
+//! transaction on the Money page (`ton_wallet_money.rs`).
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
@@ -93,13 +96,18 @@ impl QuillApp {
         let copy = address.clone();
         let owner = cx.entity().downgrade();
         let menu_address = address.clone();
-        let send = div().px_3().pb_2().child(notice_button(
-            "info-ton-wallet-send",
-            "info-ton-wallet-send".to_string(),
-            tr(keys::WALLET_PROFILE_SEND_MONEY),
-            WalletSurface::SendMoney,
-            cx,
-        ));
+        let can_send = self
+            .session()
+            .is_some_and(|session| !session.is_bot_user(user_id));
+        let send = can_send.then(|| {
+            div().px_3().pb_2().child(notice_button(
+                "info-ton-wallet-send",
+                "info-ton-wallet-send".to_string(),
+                tr(keys::WALLET_PROFILE_SEND_MONEY),
+                WalletSurface::SendMoney,
+                cx,
+            ))
+        });
         let row = div()
             .id("info-ton-wallet")
             .flex()
@@ -171,7 +179,7 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .child(row)
-                .child(send)
+                .children(send)
                 .into_any_element(),
         )
     }
@@ -241,6 +249,7 @@ pub(super) fn explorer_menu_row(
     .into_any_element()
 }
 
+/// The "Send Money" row of a TON address menu; it opens the shared notice.
 pub(super) fn send_money_menu_row(
     id: &'static str,
     on_open: impl Fn(&mut QuillApp) + 'static,
@@ -291,11 +300,17 @@ pub(super) fn transfer_of(content: &MessageContent) -> Option<&TonWalletTransfer
     }
 }
 
+/// "Review request" under a pending TON Connect request (tdesktop's "Click to
+/// review"), shown while the wallet is on; it opens the shared notice.
 pub(super) fn connect_review_button(
     row_id: u64,
     content: &MessageContent,
+    session: Option<&Session>,
     cx: &mut Context<QuillApp>,
 ) -> Option<AnyElement> {
+    if !session.is_some_and(|session| session.ton_wallet.can_use) {
+        return None;
+    }
     let MessageContent::Action(action) = content else {
         return None;
     };
@@ -437,14 +452,17 @@ pub(super) fn transfer_card(
         Some(
             div()
                 .id(("ton-transfer-encrypted-open", row_id))
-                .cursor_pointer()
-                .role(gpui_kit::Role::Button)
-                .tab_index(0)
                 .aria_label(tr(keys::Q_MONEY_ENCRYPTED_COMMENT))
-                .debug_selector(move || format!("ton-transfer-encrypted-open-{row_id}"))
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.show_wallet_notice(WalletSurface::EncryptedComment, cx);
-                }))
+                .when(wallet_on, |placeholder| {
+                    placeholder
+                        .cursor_pointer()
+                        .role(gpui_kit::Role::Button)
+                        .tab_index(0)
+                        .debug_selector(move || format!("ton-transfer-encrypted-open-{row_id}"))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.show_wallet_notice(WalletSurface::EncryptedComment, cx);
+                        }))
+                })
                 .child(
                     spoiler_surface(
                         row_id ^ 0x7701_0000_0000_0000,

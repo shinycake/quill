@@ -4,7 +4,8 @@
 //! the notice over it), `details` (a transaction with an encrypted
 //! comment), `chat` (a transfer card and a TON Connect request in the open
 //! chat), `address` (a TON address menu) or `profile` (a profile with the
-//! wallet address, balance and Send Money). The GPUI tests in
+//! wallet address, balance and Send Money), `notice-send-money` (the notice
+//! without a title) or `header` (the chat menu with Send Money). The GPUI tests in
 //! `wallet_notice_tests.rs` drive the same surfaces.
 #![deny(clippy::indexing_slicing)]
 
@@ -143,6 +144,15 @@ impl QuillApp {
             "notice" => {
                 self.open_money(cx);
                 self.show_wallet_notice(WalletSurface::Send, cx);
+            }
+            "notice-send-money" => self.show_wallet_notice(WalletSurface::SendMoney, cx),
+            "header" => {
+                if let Some(session) = self.demo_session.as_mut() {
+                    session
+                        .ton_wallet
+                        .profile_addresses
+                        .insert(OPEN.0, ProfileAddress::Found(ADDRESS.into()));
+                }
             }
             "details" => {
                 self.open_money(cx);

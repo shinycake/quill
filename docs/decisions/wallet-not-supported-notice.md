@@ -43,6 +43,9 @@ from these places, all of which Quill now covers:
 | Pending TON Connect request message | one service line | adds "Review request", opens the notice; answered requests get nothing |
 | Profile with a public wallet address | address row, copy, explorer | adds the card balance (`userFullInfo.ton_wallet_card`) and Send Money |
 | Gift transfer picker, unlocked gift, wallet on | "Send via Blockchain" went straight to the Fragment flow | the row reads "Move to My Wallet" (as tdesktop) and opens the notice; with the wallet off nothing changes |
+| Chat menu "Send Money" (`window_peer_menu.cpp` `AddSendMoneyAction`, in the profile actions) | absent | adds Send Money after Send a Gift in the private chat's menu, for a non-bot user with a known wallet address and the wallet on; opens the notice |
+| Profile balance pill opening the card view (`info_profile_top_bar.cpp`) | n/a | not mirrored: Quill shows the balance as text under the address; a conscious choice |
+| Encrypted comment and "Review request" while the wallet is off | n/a | not clickable / hidden, like every other surface |
 | Gift already in a TON wallet | "Action Locked" step with Fragment's page | unchanged: that is tdesktop's own `ShowActionLocked` |
 
 Checked and left alone, because Quill already shows something readable or
@@ -76,6 +79,7 @@ nothing appears:
   function of it.
 - `src/ton_wallet/links.rs`: `wallet_link` returns `Notice(surface)` or
   `Unavailable`; the chats reducer sets the notice (no banner string left).
+- The dialog carries the "Money" title only for actions on the Money page; elsewhere it has no title.
 - `src/ui/wallet_notice.rs`: the one kit `Dialog` (registered with
   `register_dialogs!`, priority 3790 so it opens over the Money page and the
   gift picker), `notice_button` for the surfaces, and

@@ -269,9 +269,9 @@ fn pick_view(
     }
 }
 
-/// the TON userpic, "Send via Blockchain" (or "Move
-/// to My Wallet" while the wallet is on for the account) and, while
-/// locked, "unlocks in ..." under it.
+/// tdesktop `ExportRow`: the TON userpic, "Send via Blockchain" (or "Move to
+/// My Wallet" while the wallet is on for the account) and, while locked,
+/// "unlocks in ..." under it.
 fn export_row(state: ExportState, to_wallet: bool, cx: &mut Context<QuillApp>) -> AnyElement {
     let status = match state {
         ExportState::Locked { hours } => Some(match UnlockIn::of(hours) {

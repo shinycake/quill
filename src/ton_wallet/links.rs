@@ -13,6 +13,7 @@ use crate::deep_link_types::InternalLink;
 pub const UNAVAILABLE: &str = "Wallet is currently unavailable.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What a wallet link does.
 pub enum WalletLink {
     /// The wallet is off for this account: say so.
     Unavailable,
@@ -20,6 +21,8 @@ pub enum WalletLink {
 }
 
 /// `can_use_wallet` is the `can_use_ton_wallet` option.
+/// The effect of an internal link: the notice, or "unavailable" while the
+/// wallet is off; `None` for a link that is not a wallet link.
 pub fn wallet_link(link: &InternalLink, can_use_wallet: bool) -> Option<WalletLink> {
     let InternalLink::Other(name) = link else {
         return None;

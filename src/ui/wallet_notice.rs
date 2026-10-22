@@ -13,6 +13,7 @@ use quill::ton_wallet::{OFFICIAL_APPS_URL, WalletSurface};
 use std::cell::RefCell;
 use std::rc::Rc;
 
+/// An outline button that opens the notice for `surface`; `selector` names it for tests.
 pub(in crate::ui) fn notice_button(
     id: impl Into<ElementId>,
     selector: String,
@@ -33,6 +34,7 @@ pub(in crate::ui) fn notice_button(
 }
 
 impl QuillApp {
+    /// Open the notice for `surface`.
     pub(in crate::ui) fn show_wallet_notice(
         &mut self,
         surface: WalletSurface,
@@ -44,6 +46,7 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Close the notice.
     pub(in crate::ui) fn dismiss_wallet_notice(&mut self, cx: &mut Context<Self>) {
         if let Some(wallet) = self.ton_wallet_mut() {
             wallet.dismiss_notice();
@@ -51,6 +54,7 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The notice is open: derived from `TonWalletState::notice`.
     pub(in crate::ui) fn wallet_notice_open(&self) -> bool {
         self.session()
             .is_some_and(|session| session.ton_wallet.notice.is_some())
@@ -66,6 +70,10 @@ impl QuillApp {
             QuillShell::on_close_kind(app, shell, DialogKind::WalletNotice, |this, _, cx| {
                 this.dismiss_wallet_notice(cx);
             });
+        let this_surface = app
+            .read(cx)
+            .session()
+            .and_then(|session| session.ton_wallet.notice);
         app.update(cx, |_, cx| {
             let body = div()
                 .id("wallet-notice")
@@ -75,6 +83,7 @@ impl QuillApp {
                 .child(
                     div()
                         .id("wallet-notice-text")
+                        .pr_6()
                         .text_sm()
                         .debug_selector(|| "wallet-notice-text".to_string())
                         .child(tr(keys::Q_MONEY_WALLET_NOT_SUPPORTED)),
@@ -122,9 +131,14 @@ impl QuillApp {
                 )
                 .into_any_element();
             let body = Rc::new(RefCell::new(Some(body)));
+            let on_money_page = this_surface.is_some_and(WalletSurface::on_money_page);
+            let dialog = dialog.overlay(true);
+            let dialog = if on_money_page {
+                dialog.title(crate::ui::shell::dialog_title(tr(keys::Q_MONEY_MONEY)))
+            } else {
+                dialog
+            };
             dialog
-                .overlay(true)
-                .title(crate::ui::shell::dialog_title(tr(keys::Q_MONEY_MONEY)))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
                         let body = body
