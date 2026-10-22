@@ -260,7 +260,7 @@ fn host(
                     if !allowed && nav_armed.load(Ordering::Acquire) {
                         let _ = nav_proxy.send_event(Wake::ForbiddenNavigation);
                     }
-                    allowed
+                    allowed || lockdown::CANCELS_NAVIGATIONS
                 })
         }
         None => builder.with_navigation_handler(|_| false),

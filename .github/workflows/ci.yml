@@ -175,6 +175,8 @@ jobs:
         if: steps.changed.outputs.run == 'true'
         env:
           CARRIER_SOAK_SECS: "130"
+          # The helper's path-free trace of what WebView2 refused or cancelled.
+          QUILL_WEBVIEW_DEBUG: "1"
         run: cargo test -p quill-webview --locked --test carrier_live -- --ignored --test-threads=1 --nocapture
       - name: carrier live tests (Quill's host)
         if: steps.changed.outputs.run == 'true'

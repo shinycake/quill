@@ -7,8 +7,10 @@
 //!   (the bridge script also replaces the functions). WKWebView shows none
 //!   without a UI delegate, and wry sets none.
 //! - The path prefix: WebView2 refuses every request outside it in its
-//!   request handler; WebKit (macOS and Linux) gets content rules that
-//!   block every load outside it, compiled before the page loads. The
+//!   request handler, navigations included (cancelling those would not
+//!   keep them off the network, see `Navigation`); WebKit (macOS and
+//!   Linux) gets content rules that block every load outside it, compiled
+//!   before the page loads. The
 //!   page's Content-Security-Policy stays as a second layer.
 //! - WebRTC: off in WebKitGTK's settings; removed by the bridge script
 //!   everywhere.
@@ -92,6 +94,40 @@ pub(super) fn lock_down(
     let locked = platform::lock_down(webview, scope, data_dir, events.clone());
     if !locked {
         let _ = events.send_event(Wake::LockedDown(false));
+    }
+}
+
+/// Whether the lockdown, not wry's navigation handler, cancels navigations
+/// that leave the scope. WebView2's does (see `Navigation`); the
+/// navigation handler still reports them.
+pub(super) const CANCELS_NAVIGATIONS: bool = cfg!(windows);
+
+/// What WebView2's `NavigationStarting` and `FrameNavigationStarting`
+/// handlers do with a navigation.
+#[cfg(any(windows, test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Navigation {
+    /// In the scope, or a blank frame.
+    Allow,
+    /// Outside the scope over HTTP: left to `WebResourceRequested`, which
+    /// answers it with a local 403. Cancelling it would not keep it off
+    /// the network: WebView2 may send a navigation's `GET` while the host
+    /// is still answering `NavigationStarting`, and a cancelled one never
+    /// reaches the request filter.
+    Filter,
+    /// Outside the scope and not a request the filter sees (a redirect
+    /// hop, another scheme): cancelled, the best WebView2 offers.
+    Cancel,
+}
+
+#[cfg(any(windows, test))]
+fn webview2_navigation(scope: &CarrierScope, uri: &str, redirected: bool) -> Navigation {
+    if uri == "about:blank" || uri == "about:srcdoc" || scope.allows_navigation(uri) {
+        Navigation::Allow
+    } else if !redirected && (uri.starts_with("http://") || uri.starts_with("https://")) {
+        Navigation::Filter
+    } else {
+        Navigation::Cancel
     }
 }
 
@@ -329,16 +365,61 @@ mod platform {
 #[cfg(windows)]
 mod platform {
     use super::super::Wake;
+    use super::{Navigation, webview2_navigation};
     use quill_webview_protocol::carrier::CarrierScope;
     use std::path::Path;
     use tao::event_loop::EventLoopProxy;
     use webview2_com::Microsoft::Web::WebView2::Win32::{
-        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL, COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL,
-        ICoreWebView2_22,
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
+        COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL, ICoreWebView2_22,
+        ICoreWebView2NavigationStartingEventHandler,
     };
-    use webview2_com::{WebResourceRequestedEventHandler, take_pwstr};
-    use windows::core::{HSTRING, Interface, PWSTR};
+    use webview2_com::{
+        NavigationStartingEventHandler, WebResourceRequestedEventHandler, take_pwstr,
+    };
+    use windows::core::{BOOL, HSTRING, Interface, PWSTR};
     use wry::{WebView, WebViewExtWindows};
+
+    /// Cancels what leaves `scope` and is not left to the request filter
+    /// ([`Navigation`]). Used for the page and for its frames.
+    fn navigation_guard(
+        scope: CarrierScope,
+        what: &'static str,
+    ) -> ICoreWebView2NavigationStartingEventHandler {
+        NavigationStartingEventHandler::create(Box::new(move |_, args| {
+            let Some(args) = args else {
+                return Ok(());
+            };
+            // SAFETY: plain COM calls on the event's arguments, on the web
+            // view's thread. A navigation that cannot be read is cancelled.
+            let decision = unsafe {
+                (|| -> windows::core::Result<Navigation> {
+                    let mut uri = PWSTR::null();
+                    args.Uri(&mut uri)?;
+                    let mut redirected = BOOL::default();
+                    args.IsRedirected(&mut redirected)?;
+                    Ok(webview2_navigation(
+                        &scope,
+                        &take_pwstr(uri),
+                        redirected.as_bool(),
+                    ))
+                })()
+                .unwrap_or(Navigation::Cancel)
+            };
+            match decision {
+                Navigation::Allow => {}
+                Navigation::Filter => crate::debug(|| {
+                    format!("{what} navigation outside the scope left to the request filter")
+                }),
+                Navigation::Cancel => {
+                    crate::debug(|| format!("{what} navigation outside the scope cancelled"));
+                    // SAFETY: as above.
+                    unsafe { args.SetCancel(true)? };
+                }
+            }
+            Ok(())
+        }))
+    }
 
     pub(super) fn lock_down(
         webview: &WebView,
@@ -348,6 +429,8 @@ mod platform {
     ) -> bool {
         let core = webview.webview();
         let environment = webview.environment();
+        let page_guard = navigation_guard(scope.clone(), "page");
+        let frame_guard = navigation_guard(scope.clone(), "frame");
         let scope = scope.clone();
         // SAFETY: plain COM calls on the live web view, on its own thread.
         let locked = unsafe {
@@ -388,6 +471,14 @@ mod platform {
                         })()
                         .unwrap_or(false);
                         if !allowed {
+                            crate::debug(|| {
+                                let mut context = COREWEBVIEW2_WEB_RESOURCE_CONTEXT::default();
+                                let _ = args.ResourceContext(&mut context);
+                                format!(
+                                    "refused a request outside the scope (resource context {})",
+                                    context.0
+                                )
+                            });
                             let refused = environment.CreateWebResourceResponse(
                                 None,
                                 403,
@@ -400,6 +491,8 @@ mod platform {
                     })),
                     &mut token,
                 )?;
+                core.add_NavigationStarting(&page_guard, &mut token)?;
+                core.add_FrameNavigationStarting(&frame_guard, &mut token)?;
                 Ok(())
             })()
             .is_ok()
@@ -426,5 +519,84 @@ mod platform {
         _events: EventLoopProxy<Wake>,
     ) -> bool {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scope() -> CarrierScope {
+        CarrierScope::new(
+            "https://proxy.example.com",
+            "/relay/",
+            "TelegramWebProxy",
+            false,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn webview2_lets_the_scope_and_blank_frames_through() {
+        for uri in [
+            "https://proxy.example.com/relay/",
+            "https://proxy.example.com/relay/page?x=1",
+            "about:blank",
+            "about:srcdoc",
+        ] {
+            assert_eq!(
+                webview2_navigation(&scope(), uri, false),
+                Navigation::Allow,
+                "{uri}"
+            );
+            assert_eq!(
+                webview2_navigation(&scope(), uri, true),
+                Navigation::Allow,
+                "{uri}"
+            );
+        }
+    }
+
+    /// Cancelling would not keep the `GET` off the network; the request
+    /// filter answers it locally instead.
+    #[test]
+    fn webview2_leaves_http_outside_the_scope_to_the_request_filter() {
+        for uri in [
+            "https://proxy.example.com/other/",
+            "https://evil.example/",
+            "http://proxy.example.com/relay/",
+        ] {
+            assert_eq!(
+                webview2_navigation(&scope(), uri, false),
+                Navigation::Filter,
+                "{uri}"
+            );
+        }
+    }
+
+    /// The request filter never sees a redirect hop or another scheme.
+    #[test]
+    fn webview2_cancels_what_the_request_filter_cannot_see() {
+        for uri in ["https://proxy.example.com/other/", "https://evil.example/"] {
+            assert_eq!(
+                webview2_navigation(&scope(), uri, true),
+                Navigation::Cancel,
+                "{uri}"
+            );
+        }
+        for uri in [
+            "file:///C:/Windows/win.ini",
+            "data:text/html,hi",
+            "javascript:alert(1)",
+            "ms-settings:",
+            "about:settings",
+            "",
+        ] {
+            assert_eq!(
+                webview2_navigation(&scope(), uri, false),
+                Navigation::Cancel,
+                "{uri}"
+            );
+        }
     }
 }

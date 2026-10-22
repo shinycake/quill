@@ -98,6 +98,16 @@ database and keys, and a crash there cannot take Quill down.
     redirect, say) fails the carrier as `LoadFailed`.
   - WebView2's handler refuses a request whose address it cannot read, so an error there fails
     closed. On WebView2 older than 1.0.2210 the handler cannot cover worker requests.
+  - WebView2 navigations go through that handler too, and are not cancelled in
+    `NavigationStarting`. Cancelling there does not keep the request off the network: WebView2 may
+    send a navigation's `GET` while the host is still answering, as its `put_Cancel` docs say, and
+    a cancelled navigation never reaches the request handler. CI showed it: the page set
+    `location.href` to a path outside the prefix, wry cancelled the navigation, and the test server
+    still got the request. So the lockdown's own `NavigationStarting` and
+    `FrameNavigationStarting` handlers (wry's navigation callback stays a reporter on Windows) let
+    an out-of-scope `http(s)` navigation through to the request handler, which answers it with a
+    local 403. They cancel what that handler cannot see: a redirect hop and every other scheme.
+    The carrier fails either way, because the navigation callback reports the attempt.
   - What stays best effort:
     - WebView2's request handler does not see WebSocket or WebTransport connections, or a
       redirect that its network stack follows on its own. On Windows, `connect-src` in the CSP
