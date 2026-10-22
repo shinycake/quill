@@ -12,6 +12,16 @@ use quill::state::{RequestPurpose, unix_ms_now};
 
 impl QuillApp {
     pub(super) fn pending_bot_reply(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        super::bot_stream::open_chat_draft(self.session()?)?;
+        self.pending_bot_reply_body(cx)
+    }
+
+    /// `pending_bot_reply` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
+    #[inline(never)]
+    fn pending_bot_reply_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         let chat_id = session.open_chat?;
         let (topic_id, draft) = super::bot_stream::open_chat_draft(session)?;

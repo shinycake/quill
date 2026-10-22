@@ -4,6 +4,7 @@
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::lean_buttons::ghost_text_button;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -356,15 +357,14 @@ impl QuillApp {
                 .flex()
                 .justify_end()
                 .gap_2()
-                .child(
-                    Button::new("b1-password-cancel")
-                        .label(tr(keys::CANCEL))
-                        .ghost()
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.close_callback_password_dialog(cx);
-                            this.close_kit_dialog_if_done(DialogKind::CallbackPassword, window, cx);
-                        })),
-                )
+                .child(ghost_text_button(
+                    "b1-password-cancel",
+                    tr(keys::CANCEL),
+                    cx.listener(|this, _, window, cx| {
+                        this.close_callback_password_dialog(cx);
+                        this.close_kit_dialog_if_done(DialogKind::CallbackPassword, window, cx);
+                    }),
+                ))
                 .child(
                     Button::new("b1-password-submit")
                         .label(tr(keys::Q_MEDIA_SEND))
@@ -436,16 +436,15 @@ impl QuillApp {
                 .flex()
                 .justify_end()
                 .gap_2()
-                .child(
-                    Button::new("b1-login-cancel")
-                        .label(tr(keys::CANCEL))
-                        .ghost()
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.links.login_url_confirm = None;
-                            cx.notify();
-                            this.close_kit_dialog_if_done(DialogKind::LoginUrlConfirm, window, cx);
-                        })),
-                )
+                .child(ghost_text_button(
+                    "b1-login-cancel",
+                    tr(keys::CANCEL),
+                    cx.listener(|this, _, window, cx| {
+                        this.links.login_url_confirm = None;
+                        cx.notify();
+                        this.close_kit_dialog_if_done(DialogKind::LoginUrlConfirm, window, cx);
+                    }),
+                ))
                 .child(
                     Button::new("b1-login-open")
                         .label(tr(keys::Q_MEDIA_OPEN))
@@ -491,6 +490,17 @@ impl QuillApp {
     /// 2414), and the similar-bots section (`getBotSimilarBots`, schema
     /// line 11640). Returns `None` for non-bot chats.
     pub(super) fn bot_info_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let session = self.session()?;
+        session.bot_user_id_for_chat(session.open_chat?)?;
+        self.bot_info_panel_body(cx)
+    }
+
+    /// `bot_info_panel` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
+    #[inline(never)]
+    fn bot_info_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         let open = session.open_chat?;
         let bot_id = session.bot_user_id_for_chat(open)?;
@@ -543,18 +553,7 @@ impl QuillApp {
                 } else {
                     format!("/{name} — {}", command.description)
                 };
-                // Ephemeral commands (schema 1.8.67 `botCommand`,
-                // line 826) carry the same eye-off icon as the `/` menu:
-                // their result is only visible to the sender.
-                let mut button = Button::new(format!("bot-command-{name}"))
-                    .label(label)
-                    .ghost();
-                if command.is_ephemeral {
-                    button = button.icon(Icon::new(IconName::EyeOff));
-                }
-                row = row.child(button.on_click(cx.listener(move |this, _, window, cx| {
-                    this.insert_bot_command(&name, window, cx);
-                })));
+                row = row.child(bot_command_button(name, label, command.is_ephemeral, cx));
             }
             panel = panel.child(row);
         }
@@ -570,13 +569,7 @@ impl QuillApp {
                 menu.text.clone()
             };
             let url = menu.url.clone();
-            panel = panel.child(
-                Button::new("bot-menu-button")
-                    .label(text)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.open_message_url(&url, cx);
-                    })),
-            );
+            panel = panel.child(bot_menu_link(text, url, cx));
         }
         // Slice bots-games: games seen in this bot's chat (`messageGame`,
         // schema 1.8.67 line 5234). Each offers Send → `inputMessageGame`
@@ -605,59 +598,52 @@ impl QuillApp {
                         .gap_2()
                         .child(div().text_sm().child("🎮"))
                         .child(div().text_sm().flex_1().child(title))
-                        .child(
-                            Button::new(format!("bot-send-game-{short_name}"))
-                                .label(tr(keys::Q_MEDIA_SEND))
-                                .ghost()
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.press_send_game(open, bot_id, &short_name, cx);
-                                })),
-                        ),
+                        .child(ghost_text_button(
+                            format!("bot-send-game-{short_name}"),
+                            tr(keys::Q_MEDIA_SEND),
+                            cx.listener(move |this, _, _, cx| {
+                                this.press_send_game(open, bot_id, &short_name, cx);
+                            }),
+                        )),
                 );
             }
             panel = panel.child(section);
         }
         // Slice B2: profile actions row.
         let mut actions = div().id("bot-actions").flex().flex_wrap().gap_1();
-        actions = actions.child(
-            Button::new("bot-restart")
-                .label(tr(keys::Q_MEDIA_RESTART_BOT))
-                .ghost()
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.open_group_confirm(open, GroupConfirmAction::RestartBot, cx);
-                })),
-        );
+        actions = actions.child(ghost_text_button(
+            "bot-restart",
+            tr(keys::Q_MEDIA_RESTART_BOT),
+            cx.listener(move |this, _, _, cx| {
+                this.open_group_confirm(open, GroupConfirmAction::RestartBot, cx);
+            }),
+        ));
         if !username.is_empty() {
             let link = format!("https://t.me/{username}");
-            actions = actions.child(
-                Button::new("bot-share")
-                    .label(tr(keys::Q_MEDIA_SHARE))
-                    .ghost()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
-                        this.set_status_note(
-                            StatusNote::info(tr(keys::Q_MEDIA_BOT_LINK_COPIED)),
-                            cx,
-                        );
-                    })),
-            );
+            actions = actions.child(ghost_text_button(
+                "bot-share",
+                tr(keys::Q_MEDIA_SHARE),
+                cx.listener(move |this, _, _, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
+                    this.set_status_note(StatusNote::info(tr(keys::Q_MEDIA_BOT_LINK_COPIED)), cx);
+                }),
+            ));
         }
-        actions = actions.child(
-            Button::new("bot-block")
-                .label(if blocked {
-                    tr(keys::Q_MEDIA_UNBLOCK_BOT)
-                } else {
-                    tr(keys::Q_MEDIA_BLOCK_BOT)
-                })
-                .ghost()
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.open_group_confirm(
-                        open,
-                        GroupConfirmAction::BlockUser { block: !blocked },
-                        cx,
-                    );
-                })),
-        );
+        actions = actions.child(ghost_text_button(
+            "bot-block",
+            if blocked {
+                tr(keys::Q_MEDIA_UNBLOCK_BOT)
+            } else {
+                tr(keys::Q_MEDIA_BLOCK_BOT)
+            },
+            cx.listener(move |this, _, _, cx| {
+                this.open_group_confirm(
+                    open,
+                    GroupConfirmAction::BlockUser { block: !blocked },
+                    cx,
+                );
+            }),
+        ));
         panel = panel.child(actions);
         // Slice B2: privacy policy. Schema line 2414: the link when the
         // bot published one; otherwise `/privacy` when the bot lists that
@@ -665,23 +651,21 @@ impl QuillApp {
         // client-side bot-privacy setting in the schema.
         if !info.privacy_policy_url.is_empty() {
             let url = info.privacy_policy_url.clone();
-            panel = panel.child(
-                Button::new("bot-privacy-policy")
-                    .label(tr(keys::Q_MEDIA_PRIVACY_POLICY))
-                    .ghost()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.open_message_url(&url, cx);
-                    })),
-            );
+            panel = panel.child(ghost_text_button(
+                "bot-privacy-policy",
+                tr(keys::Q_MEDIA_PRIVACY_POLICY),
+                cx.listener(move |this, _, _, cx| {
+                    this.open_message_url(&url, cx);
+                }),
+            ));
         } else if info.commands.iter().any(|c| c.command == "privacy") {
-            panel = panel.child(
-                Button::new("bot-privacy-command")
-                    .label(tr(keys::Q_MEDIA_PRIVACY_PRIVACY))
-                    .ghost()
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.insert_bot_command("privacy", window, cx);
-                    })),
-            );
+            panel = panel.child(ghost_text_button(
+                "bot-privacy-command",
+                tr(keys::Q_MEDIA_PRIVACY_PRIVACY),
+                cx.listener(move |this, _, window, cx| {
+                    this.insert_bot_command("privacy", window, cx);
+                }),
+            ));
         } else {
             panel = panel.child(
                 div()
@@ -711,26 +695,24 @@ impl QuillApp {
                         .unwrap_or_else(|| {
                             tr_with(keys::Q_MEDIA_BOT_2, &[("id", &id.to_string())])
                         });
-                    row = row.child(
-                        Button::new(format!("bot-similar-{id}"))
-                            .label(name)
-                            .ghost()
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.open_user_chat(id, window, cx);
-                            })),
-                    );
+                    row = row.child(ghost_text_button(
+                        format!("bot-similar-{id}"),
+                        name,
+                        cx.listener(move |this, _, window, cx| {
+                            this.open_user_chat(id, window, cx);
+                        }),
+                    ));
                 }
                 panel = panel.child(row);
             }
             _ => {
-                panel = panel.child(
-                    Button::new("bot-similar-fetch")
-                        .label(tr(keys::SIMILAR_BOTS_TITLE))
-                        .ghost()
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.fetch_similar_bots(bot_id, cx);
-                        })),
-                );
+                panel = panel.child(ghost_text_button(
+                    "bot-similar-fetch",
+                    tr(keys::SIMILAR_BOTS_TITLE),
+                    cx.listener(move |this, _, _, cx| {
+                        this.fetch_similar_bots(bot_id, cx);
+                    }),
+                ));
             }
         }
         Some(panel.into_any_element())
@@ -853,6 +835,39 @@ impl QuillApp {
         });
         self.sync_command_menu(cx);
     }
+}
+
+/// One command on the bot card. Ephemeral commands (schema 1.8.67
+/// `botCommand`, line 826) carry the same eye-off icon as the `/` menu:
+/// their result is only visible to the sender. Built in a frame of its own,
+/// like `lean_buttons`.
+fn bot_command_button(
+    name: String,
+    label: String,
+    ephemeral: bool,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let mut button = Button::new(format!("bot-command-{name}"))
+        .label(label)
+        .ghost();
+    if ephemeral {
+        button = button.icon(Icon::new(IconName::EyeOff));
+    }
+    button
+        .on_click(cx.listener(move |this, _, window, cx| {
+            this.insert_bot_command(&name, window, cx);
+        }))
+        .into_any_element()
+}
+
+/// The bot card's menu button; its URL opens in the OS browser.
+fn bot_menu_link(text: String, url: String, cx: &mut Context<QuillApp>) -> AnyElement {
+    Button::new("bot-menu-button")
+        .label(text)
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.open_message_url(&url, cx);
+        }))
+        .into_any_element()
 }
 
 crate::ui::shell::register_dialogs! {

@@ -23,6 +23,20 @@ impl QuillApp {
         chat_id: ChatId,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        self.session()?.business_bot_bar(chat_id)?;
+        self.business_bot_bar_view_body(chat_id, cx)
+    }
+
+    /// `business_bot_bar_view` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
+    #[inline(never)]
+    fn business_bot_bar_view_body(
+        &self,
+        chat_id: ChatId,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let session = self.session()?;
         let bar = session.business_bot_bar(chat_id)?.clone();
         let name = self.contact_display_name(bar.bot_user_id);

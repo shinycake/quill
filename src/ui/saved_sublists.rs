@@ -548,6 +548,19 @@ impl QuillApp {
     /// The tags bar above the messages: "All" plus one chip per tag.
     pub(super) fn saved_tags_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
+        if !session.is_saved_messages(session.open_chat?) {
+            return None;
+        }
+        self.saved_tags_bar_body(cx)
+    }
+
+    /// `saved_tags_bar` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
+    #[inline(never)]
+    fn saved_tags_bar_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let session = self.session()?;
         let chat_id = session.open_chat?;
         if !session.is_saved_messages(chat_id) || self.saved_mode() == Some(SavedMode::Sublists) {
             return None;
