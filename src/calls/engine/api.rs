@@ -53,14 +53,10 @@ pub trait CallEngine {
         let _ = callback;
     }
 
-    /// Phase C2e: app -> engine; toggle the local camera. `camera` doubles
-    /// as camera selection, `None` means the default device.
-    fn set_camera_enabled(
-        &mut self,
-        call_id: i32,
-        enabled: bool,
-        camera: Option<&str>,
-    ) -> Result<(), EngineError>;
+    /// Phase C2e: app -> engine; send `camera` (an enumerated device id)
+    /// or, for `None`, turn the camera off. ntgcalls opens only a named
+    /// device, so there is no "default camera" here: the driver picks one.
+    fn set_camera(&mut self, call_id: i32, camera: Option<&str>) -> Result<(), EngineError>;
 
     /// Phase C2i: app -> engine; toggle 1:1 screen-share send by
     /// re-issuing capture sources with the desktop description
@@ -85,14 +81,14 @@ pub trait CallEngine {
     ) -> Result<String, EngineError>;
 
     /// Phase C2g: app -> engine; finish the group handshake with the
-    /// `joinVideoChat` answer, then issue capture sources (camera only
-    /// when `video_enabled` — there is no group audio transport in this
-    /// slice). Idempotent per group call id.
+    /// `joinVideoChat` answer, then issue capture sources, sending
+    /// `camera` (a device id) when one is given. Idempotent per group
+    /// call id.
     fn connect_group_call(
         &mut self,
         group_call_id: i32,
         answer_payload: &str,
-        video_enabled: bool,
+        camera: Option<&str>,
     ) -> Result<(), EngineError>;
 
     /// Phase C2g: app -> engine; reconcile the engine's incoming-video
@@ -105,12 +101,12 @@ pub trait CallEngine {
         sources: &[GroupVideoSource],
     ) -> Result<(), EngineError>;
 
-    /// Phase C2g: app -> engine; toggle the outgoing group camera by
-    /// re-issuing capture sources (mirrors the 1:1 `set_camera_enabled`).
+    /// Phase C2g: app -> engine; send `camera` (a device id) in the group
+    /// call, or turn it off for `None`, by re-issuing capture sources
+    /// (mirrors the 1:1 `set_camera`).
     fn set_group_camera(
         &mut self,
         group_call_id: i32,
-        enabled: bool,
         camera: Option<&str>,
     ) -> Result<(), EngineError>;
 

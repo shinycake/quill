@@ -10,6 +10,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::calls::engine::EngineError;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::settings::CallPrefs;
@@ -224,8 +225,7 @@ impl QuillApp {
                 return;
             };
             let (call_id, want_on) = (call.id, !call.camera_on);
-            let ready = live.driver.call_video_ready();
-            let result = live.driver.set_call_camera(call_id, want_on && ready);
+            let result = live.driver.set_call_camera(call_id, want_on);
             let camera_on = live
                 .driver
                 .session
@@ -233,10 +233,8 @@ impl QuillApp {
                 .active_call
                 .as_ref()
                 .is_some_and(|call| call.camera_on);
-            self.connection.set_note(camera_toggle_note(
-                result.map_err(|e| e.to_string()),
-                camera_on,
-            ));
+            self.connection
+                .set_note(camera_toggle_note(result, camera_on));
         } else if let Some(call) = self
             .demo_session
             .as_mut()
@@ -939,13 +937,14 @@ mod stream_volume_tests;
 /// The status note after a camera toggle, read from the call's resulting
 /// `camera_on` rather than from what the toggle asked for: the driver may
 /// keep the camera off (video not ready), so the request is not the state.
-pub(super) fn camera_toggle_note(result: Result<(), String>, camera_on: bool) -> StatusNote {
+pub(super) fn camera_toggle_note(result: Result<(), EngineError>, camera_on: bool) -> StatusNote {
     match result {
         Ok(()) if camera_on => StatusNote::silent(tr(keys::Q_OPS_CAMERA_ON_2)),
         Ok(()) => StatusNote::silent(tr(keys::Q_OPS_CAMERA_OFF_2)),
+        Err(EngineError::NoCamera) => StatusNote::error(tr(keys::Q_OPS_NO_CAMERA_FOUND)),
         Err(err) => StatusNote::error(tr_with(
             keys::Q_OPS_COULD_NOT_CHANGE_CAMERA_STATE,
-            &[("err", &err)],
+            &[("err", &err.to_string())],
         )),
     }
 }

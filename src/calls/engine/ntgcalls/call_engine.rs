@@ -215,25 +215,18 @@ impl CallEngine for NtgcallsEngine {
         }
     }
 
-    fn set_camera_enabled(
-        &mut self,
-        call_id: i32,
-        enabled: bool,
-        camera: Option<&str>,
-    ) -> Result<(), EngineError> {
+    fn set_camera(&mut self, call_id: i32, camera: Option<&str>) -> Result<(), EngineError> {
         let config = self
             .call_media
             .get_mut(&call_id)
             .ok_or(EngineError::NoSuchCall(call_id))?;
-        let previous_enabled = config.camera_enabled;
         let previous_camera = config.camera.clone();
         let previous_screen_share = config.screen_share_on;
-        config.camera_enabled = enabled;
         config.camera = camera.map(str::to_owned);
         // Phase C2i: the camera replaces screen share — ntgcalls
         // rejects camera+screen in Capture mode
         // (`stream_manager.cpp:69`, v3.0.0).
-        if enabled {
+        if camera.is_some() {
             config.screen_share_on = false;
         }
         if let Err(err) = self.set_media_sources(call_id) {
@@ -243,7 +236,6 @@ impl CallEngine for NtgcallsEngine {
                 .call_media
                 .get_mut(&call_id)
                 .ok_or(EngineError::NoSuchCall(call_id))?;
-            config.camera_enabled = previous_enabled;
             config.camera = previous_camera;
             config.screen_share_on = previous_screen_share;
             return Err(err);
@@ -257,21 +249,21 @@ impl CallEngine for NtgcallsEngine {
             .get_mut(&call_id)
             .ok_or(EngineError::NoSuchCall(call_id))?;
         let previous_enabled = config.screen_share_on;
-        let previous_camera_enabled = config.camera_enabled;
+        let previous_camera = config.camera.clone();
         config.screen_share_on = enabled;
         if enabled {
-            config.camera_enabled = false;
+            config.camera = None;
         }
         if let Err(err) = self.set_media_sources(call_id) {
             // Restore the retained config so it can't desync from
             // ntgcalls when issuance fails (mirrors
-            // `set_camera_enabled`).
+            // `set_camera`).
             let config = self
                 .call_media
                 .get_mut(&call_id)
                 .ok_or(EngineError::NoSuchCall(call_id))?;
             config.screen_share_on = previous_enabled;
-            config.camera_enabled = previous_camera_enabled;
+            config.camera = previous_camera;
             return Err(err);
         }
         Ok(())
@@ -382,7 +374,7 @@ impl CallEngine for NtgcallsEngine {
         &mut self,
         group_call_id: i32,
         answer_payload: &str,
-        video_enabled: bool,
+        camera: Option<&str>,
     ) -> Result<(), EngineError> {
         let (chat_id, already) = {
             let media = self
@@ -425,7 +417,7 @@ impl CallEngine for NtgcallsEngine {
             .get_mut(&group_call_id)
             .ok_or(EngineError::NoSuchCall(group_call_id))?;
         media.connected = true;
-        media.camera_enabled = video_enabled;
+        media.camera = camera.map(str::to_owned);
         media.mode = mode;
         self.issue_group_sources(group_call_id)
     }
@@ -651,14 +643,12 @@ impl CallEngine for NtgcallsEngine {
     fn set_group_camera(
         &mut self,
         group_call_id: i32,
-        enabled: bool,
         camera: Option<&str>,
     ) -> Result<(), EngineError> {
         let media = self
             .group_calls
             .get_mut(&group_call_id)
             .ok_or(EngineError::NoSuchCall(group_call_id))?;
-        media.camera_enabled = enabled;
         media.camera = camera.map(str::to_owned);
         self.issue_group_sources(group_call_id)
     }

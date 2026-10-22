@@ -107,10 +107,8 @@ pub struct ConnectParams {
     pub p2p_allowed: bool,
     pub mic_input: Option<String>,
     pub speaker_input: Option<String>,
-    /// Phase C2e: enable the local camera during connect.
-    pub video_enabled: bool,
-    /// Phase C2e: camera device metadata used to select the device;
-    /// `None` means the engine default.
+    /// Phase C2e: the camera sent from the start, by enumerated device
+    /// id; `None` connects without video.
     pub camera_input: Option<String>,
 }
 
@@ -184,6 +182,9 @@ pub enum EngineError {
     /// screen-share send cannot start.
     #[error("no screen-capture source available")]
     NoScreenSource,
+    /// The engine lists no camera, so the camera cannot turn on.
+    #[error("no camera found")]
+    NoCamera,
 }
 
 impl EngineError {
@@ -278,7 +279,7 @@ impl CallbackShared {
 pub(crate) struct CallMediaConfig {
     pub(crate) mic: Option<String>,
     pub(crate) speaker: Option<String>,
-    pub(crate) camera_enabled: bool,
+    /// The camera being sent, by device id; `None` while it is off.
     pub(crate) camera: Option<String>,
     /// Phase C2i: screen-share send intent for the 1:1 call. When on,
     /// `set_media_sources` issues the desktop capture instead of the
@@ -299,7 +300,6 @@ pub(crate) fn retained_call_media(
     CallMediaConfig {
         mic: params.mic_input.clone(),
         speaker: params.speaker_input.clone(),
-        camera_enabled: params.video_enabled,
         camera: params.camera_input.clone(),
         screen_share_on: previous.is_some_and(|config| config.screen_share_on),
     }
@@ -322,7 +322,7 @@ pub(crate) struct GroupCallMedia {
     pub(crate) role: GroupCallRole,
     /// Your microphone is muted in this group call.
     pub(crate) muted: bool,
-    pub(crate) camera_enabled: bool,
+    /// The camera being sent, by device id; `None` while it is off.
     pub(crate) camera: Option<String>,
     /// endpoint -> full source, mirroring the engine's subscriptions.
     /// Storing the source (not just the user id) lets resubscription

@@ -264,9 +264,9 @@ pub struct ConnectDriver<S: JsonSender> {
     /// Every picture (group-call tracks, streams, 1:1 calls): one live
     /// feed each, newest frame only (`group_calls/live_feeds.rs`).
     pub(crate) live_feeds: super::group_calls::live_feeds::LiveFeeds,
-    /// Phase C2g: last camera-enabled value issued to the engine per
-    /// group call id; the engine is only re-issued on change.
-    pub(crate) group_camera_state: HashMap<i32, bool>,
+    /// Phase C2g: the camera last issued to the engine per group call id
+    /// (`None`: off); the engine is only re-issued on change.
+    pub(crate) group_camera_state: HashMap<i32, Option<String>>,
     /// Microphone mute state the group-call engine last applied, per call.
     pub(crate) group_mute_state: HashMap<i32, bool>,
     /// Stream-mode group calls: broadcast requests, feeders, pictures.
