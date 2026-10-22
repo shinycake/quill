@@ -1,6 +1,7 @@
 //! Methods moved out of `group_admin_panels.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::lean_buttons::{ghost_icon_button, ghost_text_button};
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -41,28 +42,22 @@ impl QuillApp {
                         .child(tr(keys::ADMIN_LOG_FILTER_INVITE_LINKS)),
                 )
                 .child(div().flex_1())
-                .child(
-                    Button::new("invite-links-refresh")
-                        .icon(gpui_kit::assets::IconName::RotateCcw)
-                        .ghost()
-                        .xsmall()
-                        .tooltip(tr(keys::Q_PEOPLE_REFRESH))
-                        .accessibility_label(tr(keys::Q_PEOPLE_REFRESH))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.refresh_invite_links(chat_id, cx);
-                        })),
-                )
-                .child(
-                    Button::new("invite-link-create")
-                        .icon(gpui_kit::assets::IconName::Plus)
-                        .xsmall()
-                        .tooltip(tr(keys::Q_PEOPLE_CREATE_INVITE_LINK))
-                        .accessibility_label(tr(keys::Q_PEOPLE_CREATE_INVITE_LINK))
-                        .ghost()
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.open_invite_link_dialog(chat_id, window, cx);
-                        })),
-                ),
+                .child(ghost_icon_button(
+                    "invite-links-refresh",
+                    gpui_kit::assets::IconName::RotateCcw,
+                    tr(keys::Q_PEOPLE_REFRESH),
+                    cx.listener(move |this, _, _, cx| {
+                        this.refresh_invite_links(chat_id, cx);
+                    }),
+                ))
+                .child(ghost_icon_button(
+                    "invite-link-create",
+                    gpui_kit::assets::IconName::Plus,
+                    tr(keys::Q_PEOPLE_CREATE_INVITE_LINK),
+                    cx.listener(move |this, _, window, cx| {
+                        this.open_invite_link_dialog(chat_id, window, cx);
+                    }),
+                )),
         );
         match fetch {
             None | Some(InviteLinkFetch::Loading) => {
@@ -91,14 +86,13 @@ impl QuillApp {
                                 .text_color(cx.theme().muted_foreground)
                                 .child(message),
                         )
-                        .child(
-                            Button::new("invite-links-retry")
-                                .label(tr(keys::Q_PEOPLE_RETRY))
-                                .ghost()
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.refresh_invite_links(chat_id, cx);
-                                })),
-                        ),
+                        .child(ghost_text_button(
+                            "invite-links-retry",
+                            tr(keys::Q_PEOPLE_RETRY),
+                            cx.listener(move |this, _, _, cx| {
+                                this.refresh_invite_links(chat_id, cx);
+                            }),
+                        )),
                 );
             }
             Some(InviteLinkFetch::Loaded(list)) => {
@@ -111,177 +105,7 @@ impl QuillApp {
                     );
                 } else {
                     for (index, link) in list.links.into_iter().enumerate() {
-                        let name = if !link.name.is_empty() {
-                            link.name.clone()
-                        } else if link.is_primary {
-                            tr(keys::Q_PEOPLE_PRIMARY_LINK).into()
-                        } else {
-                            tr(keys::CREATE_GROUP_INVITE_LINK).into()
-                        };
-                        let uses = if link.member_limit > 0 {
-                            tr_with(
-                                keys::Q_PEOPLE_USES,
-                                &[
-                                    ("member_count", &link.member_count.to_string()),
-                                    ("member_limit", &link.member_limit.to_string()),
-                                ],
-                            )
-                        } else {
-                            format!("{} uses", link.member_count)
-                        };
-                        let expiry = Self::invite_link_expiry(link.expiration_date);
-                        let copy_link = link.invite_link.clone();
-                        let revoke_link = link.invite_link.clone();
-                        let details_link = link.invite_link.clone();
-                        let rename_link = link.invite_link.clone();
-                        let rename_name = link.name.clone();
-                        let joined_count = link.member_count;
-                        let subscription = link.subscription_pricing.clone();
-                        let members_block =
-                            self.invite_link_members_block(chat_id, &link.invite_link, cx);
-                        let requests_block =
-                            self.link_requests_block(chat_id, &link.invite_link, cx);
-                        let requests_link = link.invite_link.clone();
-                        let qr_link = link.invite_link.clone();
-                        let pending_requests = link.pending_join_request_count;
-                        let mut row = div()
-                            .id(("invite-link-row", index as u64))
-                            .flex()
-                            .flex_col()
-                            .w_full()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .w_full()
-                                    .gap_1()
-                                    .child(div().flex_1().text_sm().child(name))
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child(format!("{uses} · {expiry}")),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(link.invite_link),
-                            );
-                        if let Some(pricing) = &subscription {
-                            row = row.child(
-                                div()
-                                    .text_xs()
-                                    .font_semibold()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(super::invite_admin_ui::subscription_price_label(
-                                        pricing,
-                                    )),
-                            );
-                        }
-                        if link.pending_join_request_count > 0 {
-                            row = row.child(
-                                div()
-                                    .text_xs()
-                                    .font_semibold()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(format!(
-                                        "{} pending requests",
-                                        link.pending_join_request_count
-                                    )),
-                            );
-                        }
-                        row = row.child(
-                            div()
-                                .flex()
-                                .flex_wrap()
-                                .items_center()
-                                .gap_1()
-                                .child(
-                                    Button::new(format!("invite-link-copy-{index}"))
-                                        .label(tr(keys::GROUP_INVITE_CONTEXT_COPY))
-                                        .ghost()
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.copy_invite_link(&copy_link, cx);
-                                        })),
-                                )
-                                .when(joined_count > 0, |actions| {
-                                    actions.child(
-                                        Button::new(format!("invite-link-joined-{index}"))
-                                            .label(tr_with(
-                                                keys::Q_PEOPLE_JOINED,
-                                                &[("joined_count", &joined_count.to_string())],
-                                            ))
-                                            .ghost()
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.toggle_invite_link_details(
-                                                    chat_id,
-                                                    &details_link,
-                                                    cx,
-                                                );
-                                            })),
-                                    )
-                                })
-                                .when(pending_requests > 0, |actions| {
-                                    actions.child(
-                                        Button::new(format!("invite-link-requests-{index}"))
-                                            .label(
-                                                super::invite_admin_more_ui::requests_button_label(
-                                                    pending_requests,
-                                                ),
-                                            )
-                                            .ghost()
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.toggle_link_requests(
-                                                    chat_id,
-                                                    &requests_link,
-                                                    cx,
-                                                );
-                                            })),
-                                    )
-                                })
-                                .child(
-                                    Button::new(format!("invite-link-qr-{index}"))
-                                        .label(tr(keys::GROUP_INVITE_CONTEXT_QR))
-                                        .ghost()
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.open_invite_link_qr(&qr_link, cx);
-                                        })),
-                                )
-                                .when(subscription.is_some(), |actions| {
-                                    actions.child(
-                                        Button::new(format!("invite-link-rename-{index}"))
-                                            .label(tr(keys::Q_PEOPLE_RENAME))
-                                            .ghost()
-                                            .on_click(cx.listener(move |this, _, window, cx| {
-                                                this.open_subscription_link_rename(
-                                                    chat_id,
-                                                    &rename_link,
-                                                    &rename_name,
-                                                    window,
-                                                    cx,
-                                                );
-                                            })),
-                                    )
-                                })
-                                .child(
-                                    Button::new(format!("invite-link-revoke-{index}"))
-                                        .label(tr(keys::GROUP_INVITE_CONTEXT_REVOKE))
-                                        .ghost()
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.revoke_invite_link(chat_id, &revoke_link, cx);
-                                        })),
-                                ),
-                        );
-                        if let Some(block) = members_block {
-                            row = row.child(block);
-                        }
-                        if let Some(block) = requests_block {
-                            row = row.child(block);
-                        }
-                        section = section.child(row);
+                        section = section.child(self.invite_link_row(chat_id, index, link, cx));
                     }
                 }
             }
@@ -291,6 +115,168 @@ impl QuillApp {
         }
         section = section.child(self.revoked_invite_links_block(chat_id, cx));
         section.into_any_element()
+    }
+
+    /// One invite link of `invite_links_section`: name, uses and expiry,
+    /// the link, its price and pending requests, then its actions. A
+    /// method of its own, so the section's frame does not also hold every
+    /// builder of a row (docs/decisions/main-thread-stack.md).
+    fn invite_link_row(
+        &self,
+        chat_id: ChatId,
+        index: usize,
+        link: quill::telegram::envelope::ParsedChatInviteLink,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let name = if !link.name.is_empty() {
+            link.name.clone()
+        } else if link.is_primary {
+            tr(keys::Q_PEOPLE_PRIMARY_LINK).into()
+        } else {
+            tr(keys::CREATE_GROUP_INVITE_LINK).into()
+        };
+        let uses = if link.member_limit > 0 {
+            tr_with(
+                keys::Q_PEOPLE_USES,
+                &[
+                    ("member_count", &link.member_count.to_string()),
+                    ("member_limit", &link.member_limit.to_string()),
+                ],
+            )
+        } else {
+            format!("{} uses", link.member_count)
+        };
+        let expiry = Self::invite_link_expiry(link.expiration_date);
+        let copy_link = link.invite_link.clone();
+        let revoke_link = link.invite_link.clone();
+        let details_link = link.invite_link.clone();
+        let rename_link = link.invite_link.clone();
+        let rename_name = link.name.clone();
+        let joined_count = link.member_count;
+        let subscription = link.subscription_pricing.clone();
+        let members_block = self.invite_link_members_block(chat_id, &link.invite_link, cx);
+        let requests_block = self.link_requests_block(chat_id, &link.invite_link, cx);
+        let requests_link = link.invite_link.clone();
+        let qr_link = link.invite_link.clone();
+        let pending_requests = link.pending_join_request_count;
+        let mut row = div()
+            .id(("invite-link-row", index as u64))
+            .flex()
+            .flex_col()
+            .w_full()
+            .gap_1()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .w_full()
+                    .gap_1()
+                    .child(div().flex_1().text_sm().child(name))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("{uses} · {expiry}")),
+                    ),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(link.invite_link),
+            );
+        if let Some(pricing) = &subscription {
+            row = row.child(
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(super::invite_admin_ui::subscription_price_label(pricing)),
+            );
+        }
+        if link.pending_join_request_count > 0 {
+            row = row.child(
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!(
+                        "{} pending requests",
+                        link.pending_join_request_count
+                    )),
+            );
+        }
+        row = row.child(
+            div()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap_1()
+                .child(ghost_text_button(
+                    format!("invite-link-copy-{index}"),
+                    tr(keys::GROUP_INVITE_CONTEXT_COPY),
+                    cx.listener(move |this, _, _, cx| {
+                        this.copy_invite_link(&copy_link, cx);
+                    }),
+                ))
+                .when(joined_count > 0, |actions| {
+                    actions.child(ghost_text_button(
+                        format!("invite-link-joined-{index}"),
+                        tr_with(
+                            keys::Q_PEOPLE_JOINED,
+                            &[("joined_count", &joined_count.to_string())],
+                        ),
+                        cx.listener(move |this, _, _, cx| {
+                            this.toggle_invite_link_details(chat_id, &details_link, cx);
+                        }),
+                    ))
+                })
+                .when(pending_requests > 0, |actions| {
+                    actions.child(ghost_text_button(
+                        format!("invite-link-requests-{index}"),
+                        super::invite_admin_more_ui::requests_button_label(pending_requests),
+                        cx.listener(move |this, _, _, cx| {
+                            this.toggle_link_requests(chat_id, &requests_link, cx);
+                        }),
+                    ))
+                })
+                .child(ghost_text_button(
+                    format!("invite-link-qr-{index}"),
+                    tr(keys::GROUP_INVITE_CONTEXT_QR),
+                    cx.listener(move |this, _, _, cx| {
+                        this.open_invite_link_qr(&qr_link, cx);
+                    }),
+                ))
+                .when(subscription.is_some(), |actions| {
+                    actions.child(ghost_text_button(
+                        format!("invite-link-rename-{index}"),
+                        tr(keys::Q_PEOPLE_RENAME),
+                        cx.listener(move |this, _, window, cx| {
+                            this.open_subscription_link_rename(
+                                chat_id,
+                                &rename_link,
+                                &rename_name,
+                                window,
+                                cx,
+                            );
+                        }),
+                    ))
+                })
+                .child(ghost_text_button(
+                    format!("invite-link-revoke-{index}"),
+                    tr(keys::GROUP_INVITE_CONTEXT_REVOKE),
+                    cx.listener(move |this, _, _, cx| {
+                        this.revoke_invite_link(chat_id, &revoke_link, cx);
+                    }),
+                )),
+        );
+        if let Some(block) = members_block {
+            row = row.child(block);
+        }
+        if let Some(block) = requests_block {
+            row = row.child(block);
+        }
+        row.into_any_element()
     }
 
     /// Phase D3a: join-request section. Approve/Decline per request;
@@ -339,17 +325,14 @@ impl QuillApp {
                     .child(pending_count.to_string()),
             );
         }
-        header = header.child(div().flex_1()).child(
-            Button::new("join-requests-refresh")
-                .icon(gpui_kit::assets::IconName::RotateCcw)
-                .ghost()
-                .xsmall()
-                .tooltip(tr(keys::Q_PEOPLE_REFRESH))
-                .accessibility_label(tr(keys::Q_PEOPLE_REFRESH))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.refresh_join_requests(chat_id, cx);
-                })),
-        );
+        header = header.child(div().flex_1()).child(ghost_icon_button(
+            "join-requests-refresh",
+            gpui_kit::assets::IconName::RotateCcw,
+            tr(keys::Q_PEOPLE_REFRESH),
+            cx.listener(move |this, _, _, cx| {
+                this.refresh_join_requests(chat_id, cx);
+            }),
+        ));
         let mut section = div().flex().flex_col().w_full().gap_1().child(header);
         match fetch {
             None | Some(JoinRequestFetch::Loading) => {
@@ -378,14 +361,13 @@ impl QuillApp {
                                 .text_color(cx.theme().muted_foreground)
                                 .child(message),
                         )
-                        .child(
-                            Button::new("join-requests-retry")
-                                .label(tr(keys::Q_PEOPLE_RETRY))
-                                .ghost()
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.refresh_join_requests(chat_id, cx);
-                                })),
-                        ),
+                        .child(ghost_text_button(
+                            "join-requests-retry",
+                            tr(keys::Q_PEOPLE_RETRY),
+                            cx.listener(move |this, _, _, cx| {
+                                this.refresh_join_requests(chat_id, cx);
+                            }),
+                        )),
                 );
             }
             Some(JoinRequestFetch::Loaded(list)) => {
@@ -433,22 +415,20 @@ impl QuillApp {
                                 .w_full()
                                 .gap_1()
                                 .child(details)
-                                .child(
-                                    Button::new(format!("join-request-approve-{user_id}"))
-                                        .label(tr(keys::Q_PEOPLE_APPROVE))
-                                        .ghost()
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.process_join_request(chat_id, user_id, true, cx);
-                                        })),
-                                )
-                                .child(
-                                    Button::new(format!("join-request-decline-{user_id}"))
-                                        .label(tr(keys::Q_PEOPLE_DECLINE))
-                                        .ghost()
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.process_join_request(chat_id, user_id, false, cx);
-                                        })),
-                                ),
+                                .child(ghost_text_button(
+                                    format!("join-request-approve-{user_id}"),
+                                    tr(keys::Q_PEOPLE_APPROVE),
+                                    cx.listener(move |this, _, _, cx| {
+                                        this.process_join_request(chat_id, user_id, true, cx);
+                                    }),
+                                ))
+                                .child(ghost_text_button(
+                                    format!("join-request-decline-{user_id}"),
+                                    tr(keys::Q_PEOPLE_DECLINE),
+                                    cx.listener(move |this, _, _, cx| {
+                                        this.process_join_request(chat_id, user_id, false, cx);
+                                    }),
+                                )),
                         );
                     }
                 }
@@ -495,28 +475,22 @@ impl QuillApp {
                         .child(tr(keys::Q_PEOPLE_ADMINISTRATORS)),
                 )
                 .child(div().flex_1())
-                .child(
-                    Button::new("admin-list-refresh")
-                        .icon(gpui_kit::assets::IconName::RotateCcw)
-                        .ghost()
-                        .xsmall()
-                        .tooltip(tr(keys::Q_PEOPLE_REFRESH))
-                        .accessibility_label(tr(keys::Q_PEOPLE_REFRESH))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.refresh_administrators(chat_id, cx);
-                        })),
-                )
-                .child(
-                    Button::new("admin-promote-open")
-                        .icon(gpui_kit::assets::IconName::Plus)
-                        .xsmall()
-                        .tooltip(tr(keys::CHANNEL_ADD_ADMIN))
-                        .accessibility_label(tr(keys::CHANNEL_ADD_ADMIN))
-                        .ghost()
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.open_promote_picker(chat_id, window, cx);
-                        })),
-                ),
+                .child(ghost_icon_button(
+                    "admin-list-refresh",
+                    gpui_kit::assets::IconName::RotateCcw,
+                    tr(keys::Q_PEOPLE_REFRESH),
+                    cx.listener(move |this, _, _, cx| {
+                        this.refresh_administrators(chat_id, cx);
+                    }),
+                ))
+                .child(ghost_icon_button(
+                    "admin-promote-open",
+                    gpui_kit::assets::IconName::Plus,
+                    tr(keys::CHANNEL_ADD_ADMIN),
+                    cx.listener(move |this, _, window, cx| {
+                        this.open_promote_picker(chat_id, window, cx);
+                    }),
+                )),
         );
         match fetch {
             None | Some(AdminListFetch::Loading) => {
@@ -545,14 +519,13 @@ impl QuillApp {
                                 .text_color(cx.theme().muted_foreground)
                                 .child(message),
                         )
-                        .child(
-                            Button::new("admin-list-retry")
-                                .label(tr(keys::Q_PEOPLE_RETRY))
-                                .ghost()
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.refresh_administrators(chat_id, cx);
-                                })),
-                        ),
+                        .child(ghost_text_button(
+                            "admin-list-retry",
+                            tr(keys::Q_PEOPLE_RETRY),
+                            cx.listener(move |this, _, _, cx| {
+                                this.refresh_administrators(chat_id, cx);
+                            }),
+                        )),
                 );
             }
             Some(AdminListFetch::Loaded(list)) => {
@@ -623,22 +596,20 @@ impl QuillApp {
         if entry.can_be_edited && !entry.is_owner {
             let user_id = entry.user_id;
             row = row
-                .child(
-                    Button::new(format!("admin-edit-{user_id}"))
-                        .label(tr(keys::GROUP_INVITE_CONTEXT_EDIT))
-                        .ghost()
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.open_rights_editor(chat_id, user_id, cx);
-                        })),
-                )
-                .child(
-                    Button::new(format!("admin-demote-{user_id}"))
-                        .label(tr(keys::BOX_REMOVE))
-                        .ghost()
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.open_demote_confirm(chat_id, user_id, cx);
-                        })),
-                );
+                .child(ghost_text_button(
+                    format!("admin-edit-{user_id}"),
+                    tr(keys::GROUP_INVITE_CONTEXT_EDIT),
+                    cx.listener(move |this, _, _, cx| {
+                        this.open_rights_editor(chat_id, user_id, cx);
+                    }),
+                ))
+                .child(ghost_text_button(
+                    format!("admin-demote-{user_id}"),
+                    tr(keys::BOX_REMOVE),
+                    cx.listener(move |this, _, _, cx| {
+                        this.open_demote_confirm(chat_id, user_id, cx);
+                    }),
+                ));
         }
         row.into_any_element()
     }

@@ -285,6 +285,20 @@ impl QuillApp {
     /// The bar above the list of a shared folder with new chats.
     pub(super) fn folder_new_chats_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let folder_id = self.folders.tab?;
+        let new_chats = &self.session()?.chat_list.folder_new_chats;
+        if new_chats.get(&folder_id).is_none_or(Vec::is_empty) {
+            return None;
+        }
+        self.folder_new_chats_bar_body(cx)
+    }
+
+    /// `folder_new_chats_bar` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
+    #[inline(never)]
+    fn folder_new_chats_bar_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let folder_id = self.folders.tab?;
         let count = self
             .session()?
             .chat_list

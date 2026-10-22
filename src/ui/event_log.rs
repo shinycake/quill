@@ -2,8 +2,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::lean_buttons::ghost_text_button;
 use crate::ui::status_note::StatusNote;
-use gpui_kit::component::button::*;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -127,14 +127,13 @@ impl QuillApp {
                             .child(tr(keys::Q_OPS_RECENT_ACTIONS)),
                     )
                     .child(div().flex_1())
-                    .child(
-                        Button::new("event-log-refresh")
-                            .label(tr(keys::Q_OPS_REFRESH))
-                            .ghost()
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.refresh_event_log(chat_id, cx);
-                            })),
-                    ),
+                    .child(ghost_text_button(
+                        "event-log-refresh",
+                        tr(keys::Q_OPS_REFRESH),
+                        cx.listener(move |this, _, _, cx| {
+                            this.refresh_event_log(chat_id, cx);
+                        }),
+                    )),
             );
         section = section.child(
             div()
@@ -161,14 +160,13 @@ impl QuillApp {
                 ),
             );
         }
-        controls = controls.child(
-            Button::new("event-log-search")
-                .label(tr(keys::Q_OPS_SEARCH))
-                .ghost()
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.apply_event_log_search(chat_id, cx);
-                })),
-        );
+        controls = controls.child(ghost_text_button(
+            "event-log-search",
+            tr(keys::Q_OPS_SEARCH),
+            cx.listener(move |this, _, _, cx| {
+                this.apply_event_log_search(chat_id, cx);
+            }),
+        ));
         section = section.child(controls);
         let active_filters = self
             .session()
@@ -210,14 +208,13 @@ impl QuillApp {
                                 .text_color(cx.theme().muted_foreground)
                                 .child(message),
                         )
-                        .child(
-                            Button::new("event-log-retry")
-                                .label(tr(keys::Q_OPS_RETRY))
-                                .ghost()
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.refresh_event_log(chat_id, cx);
-                                })),
-                        ),
+                        .child(ghost_text_button(
+                            "event-log-retry",
+                            tr(keys::Q_OPS_RETRY),
+                            cx.listener(move |this, _, _, cx| {
+                                this.refresh_event_log(chat_id, cx);
+                            }),
+                        )),
                 );
             }
             Some(ChatEventLogFetch::Loaded(page)) => {
@@ -237,14 +234,13 @@ impl QuillApp {
                         section = section.child(self.event_log_row(event, cx));
                     }
                     if page.has_more {
-                        section = section.child(
-                            Button::new("event-log-load-more")
-                                .label(tr(keys::Q_OPS_LOAD_MORE))
-                                .ghost()
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.load_more_event_log(chat_id, cx);
-                                })),
-                        );
+                        section = section.child(ghost_text_button(
+                            "event-log-load-more",
+                            tr(keys::Q_OPS_LOAD_MORE),
+                            cx.listener(move |this, _, _, cx| {
+                                this.load_more_event_log(chat_id, cx);
+                            }),
+                        ));
                     }
                 }
             }
@@ -298,17 +294,16 @@ impl QuillApp {
         } else {
             tr(keys::Q_OPS_ALL_ADMINS_2).to_string()
         };
-        chips = chips.child(
-            Button::new("event-log-admin-all")
-                .label(all_label)
-                .ghost()
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if let Some(live) = this.live.as_mut() {
-                        live.driver.clear_chat_event_log_users(chat_id);
-                    }
-                    this.refresh_event_log(chat_id, cx);
-                })),
-        );
+        chips = chips.child(ghost_text_button(
+            "event-log-admin-all",
+            all_label,
+            cx.listener(move |this, _, _, cx| {
+                if let Some(live) = this.live.as_mut() {
+                    live.driver.clear_chat_event_log_users(chat_id);
+                }
+                this.refresh_event_log(chat_id, cx);
+            }),
+        ));
         for user_id in admins.iter().copied() {
             let name = self.group_call_participant_name(&MessageSender::User { user_id });
             let label = if selected.contains(&user_id) {
@@ -316,17 +311,16 @@ impl QuillApp {
             } else {
                 name
             };
-            chips = chips.child(
-                Button::new(format!("event-log-admin-{user_id}"))
-                    .label(label)
-                    .ghost()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(live) = this.live.as_mut() {
-                            live.driver.toggle_chat_event_log_user(chat_id, user_id);
-                        }
-                        this.refresh_event_log(chat_id, cx);
-                    })),
-            );
+            chips = chips.child(ghost_text_button(
+                format!("event-log-admin-{user_id}"),
+                label,
+                cx.listener(move |this, _, _, cx| {
+                    if let Some(live) = this.live.as_mut() {
+                        live.driver.toggle_chat_event_log_user(chat_id, user_id);
+                    }
+                    this.refresh_event_log(chat_id, cx);
+                }),
+            ));
         }
         chips.into_any_element()
     }
@@ -445,24 +439,22 @@ impl QuillApp {
             } else {
                 label.to_string()
             };
-            chips = chips.child(
-                Button::new(format!("event-log-filter-{id}"))
-                    .label(label)
-                    .ghost()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.toggle_event_log_filter(chat_id, toggle, cx);
-                    })),
-            );
+            chips = chips.child(ghost_text_button(
+                format!("event-log-filter-{id}"),
+                label,
+                cx.listener(move |this, _, _, cx| {
+                    this.toggle_event_log_filter(chat_id, toggle, cx);
+                }),
+            ));
         }
         if active.any_enabled() {
-            chips = chips.child(
-                Button::new("event-log-filter-clear")
-                    .label(tr(keys::Q_OPS_CLEAR))
-                    .ghost()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.clear_event_log_filters(chat_id, cx);
-                    })),
-            );
+            chips = chips.child(ghost_text_button(
+                "event-log-filter-clear",
+                tr(keys::Q_OPS_CLEAR),
+                cx.listener(move |this, _, _, cx| {
+                    this.clear_event_log_filters(chat_id, cx);
+                }),
+            ));
         }
         chips.into_any_element()
     }

@@ -435,6 +435,16 @@ impl QuillApp {
 
     /// The menu of a phone number, card number, date or TON address.
     pub(super) fn link_popup_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.message_ui.link_popup.as_ref()?;
+        self.link_popup_overlay_body(cx)
+    }
+
+    /// `link_popup_overlay` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
+    #[inline(never)]
+    fn link_popup_overlay_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let popup = self.message_ui.link_popup.clone()?;
         let (label, text) = match &popup.link {
             LinkTarget::Phone(number) => (tr(keys::Q_OPS_COPY_PHONE_NUMBER), number.clone()),

@@ -166,6 +166,17 @@ impl QuillApp {
     /// The suggest bar above the field, in the reply bar's place.
     pub(super) fn suggest_bar_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let chat_id = self.open_chat_id()?;
+        self.session()?.suggest_bar(chat_id)?;
+        self.suggest_bar_panel_body(cx)
+    }
+
+    /// `suggest_bar_panel` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
+    #[inline(never)]
+    fn suggest_bar_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let chat_id = self.open_chat_id()?;
         let session = self.session()?;
         let bar = session.suggest_bar(chat_id)?;
         let admin = self.suggest_role(chat_id) == Some(DirectMessagesRole::Admin);

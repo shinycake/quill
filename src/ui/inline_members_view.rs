@@ -7,8 +7,8 @@ use super::app::QuillApp;
 use super::chat_row::chat_avatar;
 use super::inline_members::GroupShape;
 use super::inline_members_state::MembersSnapshot;
+use crate::ui::lean_buttons::{ghost_icon_button_untitled, ghost_text_button};
 use gpui_kit::assets::IconName;
-use gpui_kit::component::button::*;
 use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -80,28 +80,24 @@ impl QuillApp {
         );
         let mut buttons = div().flex().items_center().gap_1();
         if search_available(group_total) && !admins_only {
-            buttons = buttons.child(
-                Button::new("inline-members-search")
-                    .icon(IconName::Search)
-                    .ghost()
-                    .xsmall()
-                    .accessibility_label(tr(keys::Q_MEDIA_SEARCH_MEMBERS))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.inline_members_search(chat_id, window, cx);
-                    })),
-            );
+            buttons = buttons.child(ghost_icon_button_untitled(
+                "inline-members-search",
+                IconName::Search,
+                tr(keys::Q_MEDIA_SEARCH_MEMBERS),
+                cx.listener(move |this, _, window, cx| {
+                    this.inline_members_search(chat_id, window, cx);
+                }),
+            ));
         }
         if can_add {
-            buttons = buttons.child(
-                Button::new("inline-members-add")
-                    .icon(IconName::UserPlus)
-                    .ghost()
-                    .xsmall()
-                    .accessibility_label(tr(keys::CHANNEL_ADD_MEMBERS))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.inline_members_add(chat_id, window, cx);
-                    })),
-            );
+            buttons = buttons.child(ghost_icon_button_untitled(
+                "inline-members-add",
+                IconName::UserPlus,
+                tr(keys::CHANNEL_ADD_MEMBERS),
+                cx.listener(move |this, _, window, cx| {
+                    this.inline_members_add(chat_id, window, cx);
+                }),
+            ));
         }
         header = header.child(buttons);
 
@@ -136,14 +132,13 @@ impl QuillApp {
                 .into_any_element()
         };
         if let Some(message) = view.failed.clone().filter(|_| view.rows.is_empty()) {
-            list = list.child(hint(message)).child(
-                Button::new("inline-members-retry")
-                    .label(tr(keys::Q_MEDIA_RETRY))
-                    .ghost()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.inline_members_stale(&[chat_id.0], cx);
-                    })),
-            );
+            list = list.child(hint(message)).child(ghost_text_button(
+                "inline-members-retry",
+                tr(keys::Q_MEDIA_RETRY),
+                cx.listener(move |this, _, _, cx| {
+                    this.inline_members_stale(&[chat_id.0], cx);
+                }),
+            ));
         } else if view.rows.is_empty() {
             list = list.child(hint(if view.loading {
                 tr(keys::Q_MEDIA_LOADING_MEMBERS).to_string()

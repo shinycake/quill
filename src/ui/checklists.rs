@@ -287,6 +287,16 @@ impl QuillApp {
     /// The checklist composer / "Add Tasks" panel above the composer
     /// (tdesktop `EditTodoListBox`).
     pub(super) fn checklist_dialog_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.composer_ui.checklist_dialog.as_ref()?;
+        self.checklist_dialog_panel_body(cx)
+    }
+
+    /// `checklist_dialog_panel` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
+    #[inline(never)]
+    fn checklist_dialog_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.composer_ui.checklist_dialog.as_ref()?;
         let adding = dialog.add_to.is_some();
         let remaining = match dialog.add_to {
@@ -571,6 +581,16 @@ impl QuillApp {
     }
 
     pub(super) fn poll_add_option_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.message_ui.poll_add_option.as_ref()?;
+        self.poll_add_option_panel_body(cx)
+    }
+
+    /// `poll_add_option_panel` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
+    #[inline(never)]
+    fn poll_add_option_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let panel = self.message_ui.poll_add_option.as_ref()?;
         let mut body = div()
             .id("poll-add-option-panel")

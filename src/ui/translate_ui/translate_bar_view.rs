@@ -11,6 +11,20 @@ impl QuillApp {
         chat_id: ChatId,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        self.translate_bar_model(chat_id)?;
+        self.translate_bar_view_body(chat_id, cx)
+    }
+
+    /// `translate_bar_view` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
+    #[inline(never)]
+    fn translate_bar_view_body(
+        &self,
+        chat_id: ChatId,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let model = self.translate_bar_model(chat_id)?;
         let label = bar_label_for(model.translated, model.to, model.automatic, model.from);
         let to = model.to;
@@ -114,6 +128,24 @@ impl QuillApp {
     }
 
     pub(super) fn translate_toast_view(
+        &self,
+        chat_id: ChatId,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        self.settings
+            .translate
+            .toast
+            .as_ref()
+            .filter(|toast| toast.chat_id == chat_id)?;
+        self.translate_toast_view_body(chat_id, cx)
+    }
+
+    /// `translate_toast_view` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
+    #[inline(never)]
+    fn translate_toast_view_body(
         &self,
         chat_id: ChatId,
         cx: &mut Context<Self>,
