@@ -542,6 +542,7 @@ pub(in crate::ui) fn video_attachment(
                 .flatten();
             div()
                 .id(("video-visual", row_id))
+                .debug_selector(move || format!("video-{row_id}"))
                 .relative()
                 .when_some(viewer_open, |this, (chat_id, message_id)| {
                     this.role(gpui_kit::Role::Button)

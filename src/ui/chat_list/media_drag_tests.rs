@@ -57,8 +57,8 @@ fn dragging(vcx: &mut VisualTestContext) -> bool {
 }
 
 /// Receives one more message (id 901, incoming, chat 11) with `content` (the
-/// JSON of a TDLib `MessageContent`) and returns a point on its media (the
-/// row's left, under its top).
+/// JSON of a TDLib `MessageContent`) and returns a point on its media (low in the
+/// row, clear of the hover toolbar).
 fn inject(
     app: &Entity<QuillApp>,
     vcx: &mut VisualTestContext,
@@ -83,18 +83,30 @@ fn inject(
         cx.notify();
     });
     frames(vcx);
+    // A taller history (other fonts) leaves the new row below the fold:
+    // scroll to it so its media is where the press lands.
+    app.update(vcx, |app, cx| app.jump_to_latest_messages(cx));
+    frames(vcx);
     // The incoming bubble's media sits at the row's left edge.
-    app.read_with(vcx, |app, _| {
+    let (row, at) = app.read_with(vcx, |app, _| {
         let hits = app.history.hit_rows.borrow();
         hits.iter()
             .find_map(|(ix, bounds)| match app.history.rows.get(*ix) {
-                Some(HistoryRow::Single(inputs)) if inputs.message.id == MessageId(901) => {
-                    Some(point(bounds.left() + px(90.), bounds.top() + px(50.)))
-                }
+                Some(HistoryRow::Single(inputs)) if inputs.message.id == MessageId(901) => Some((
+                    *bounds,
+                    point(bounds.left() + px(90.), bounds.bottom() - px(35.)),
+                )),
                 _ => None,
             })
             .expect("the injected row is painted")
-    })
+    });
+    // The composer takes the bottom of the window.
+    let window = vcx.update(|window, _| window.viewport_size());
+    assert!(
+        at.y > px(60.) && at.y < window.height - px(120.),
+        "the press point {at:?} (row {row:?}) is off the history of a {window:?} window"
+    );
+    at
 }
 
 fn file() -> String {
@@ -141,7 +153,10 @@ fn paid_content() -> String {
 }
 
 fn photo(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Point<gpui_kit::Pixels> {
-    inject(app, vcx, &photo_content())
+    let fallback = inject(app, vcx, &photo_content());
+    vcx.debug_bounds("photo-901").map_or(fallback, |frame| {
+        point(frame.center().x, frame.bottom() - px(30.))
+    })
 }
 
 fn viewer_open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
@@ -368,8 +383,9 @@ fn a_paid_media_card_does_not_lift(cx: &mut TestAppContext) {
 /// A point on the play disc of the injected video (message 901): a press
 /// the disc swallowed would not lift the video.
 fn video_disc(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Point<gpui_kit::Pixels> {
-    let base = inject(app, vcx, &video_content());
-    point(base.x + px(35.), base.y + px(30.))
+    let fallback = inject(app, vcx, &video_content());
+    vcx.debug_bounds("video-901")
+        .map_or(fallback, |frame| frame.center())
 }
 
 #[gpui_kit::test]
