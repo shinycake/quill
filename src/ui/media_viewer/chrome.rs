@@ -147,6 +147,7 @@ impl QuillApp {
         // without it the backdrop below also gets the click and closes.
         let over_controls = Self::over_controls_listener;
         let hdr_badge = self.viewer_hdr_badge();
+        let traffic_lights = crate::ui::window_frame::traffic_light_inset(window);
         let top_bar = div()
             .id("media-viewer-top-bar")
             .on_mouse_move(over_controls(cx))
@@ -157,6 +158,7 @@ impl QuillApp {
             .right_0()
             .h(px(VIEWER_TOP_BAR))
             .px_4()
+            .when(traffic_lights > px(16.), |this| this.pl(traffic_lights))
             .flex()
             .items_center()
             .justify_between()

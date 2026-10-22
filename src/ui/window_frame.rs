@@ -145,6 +145,19 @@ pub(crate) fn titlebar_hidden() -> bool {
     !use_native()
 }
 
+/// How far content drawn over the window's top edge (the media viewer's
+/// top bar) must start from the left to clear the macOS traffic lights: the
+/// kit `TitleBar`'s own left padding. Zero full screen, where macOS hides
+/// them, and on Linux and Windows, whose caption buttons are drawn by the
+/// title bar under that content.
+pub(crate) fn traffic_light_inset(window: &Window) -> Pixels {
+    if cfg!(target_os = "macos") && !window.is_fullscreen() {
+        px(80.)
+    } else {
+        px(0.)
+    }
+}
+
 /// The bar above the window content: the kit `TitleBar` with Quill's own
 /// frame, or, with the system frame, a slim action row that drops the caption
 /// and the caption buttons (the OS draws both) and the drag area.
