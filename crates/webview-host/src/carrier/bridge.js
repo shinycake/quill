@@ -3,36 +3,16 @@
 // Its one argument, at the very end, is a JSON object filled in by
 // script.rs.
 //
-// Every frame first loses what a relay page has no use for and an
-// untrusted page could abuse: native dialogs, printing, WebRTC (which a
-// content policy does not cover), WebTransport and WebAssembly (as
-// Telegram Desktop's web proxy view does). The bridge itself exists only
+// Every frame, and every worker the page starts, first loses what a relay
+// page has no use for and an untrusted page could abuse: native dialogs,
+// printing, WebRTC (which a content policy does not cover), WebTransport
+// and WebAssembly (as Telegram Desktop's web proxy view does), and service
+// workers. The bridge itself exists only
 // in the top-level document of the carrier's origin, and every message to
 // the helper starts with a token only this closure knows.
 (function (config) {
   'use strict';
-  var lock = function (name, value) {
-    try {
-      Object.defineProperty(window, name, {
-        value: value,
-        writable: false,
-        configurable: false,
-        enumerable: false,
-      });
-    } catch (error) {
-      // Already locked in this frame.
-    }
-  };
-  lock('alert', function () {});
-  lock('confirm', function () {
-    return false;
-  });
-  lock('prompt', function () {
-    return null;
-  });
-  lock('print', function () {});
-  lock('onbeforeunload', null);
-  [
+  var REMOVED = [
     'RTCPeerConnection',
     'webkitRTCPeerConnection',
     'RTCDataChannel',
@@ -40,9 +20,128 @@
     'RTCRtpReceiver',
     'WebTransport',
     'WebAssembly',
-  ].forEach(function (name) {
-    lock(name, undefined);
-  });
+  ];
+  var lockIn = function (scope, name, value) {
+    try {
+      Object.defineProperty(scope, name, {
+        value: value,
+        writable: false,
+        configurable: false,
+        enumerable: false,
+      });
+    } catch (error) {
+      // Already locked there, or another origin's window.
+    }
+  };
+
+  // What runs first in every worker this page starts: the same removals,
+  // and no workers of its own. Engines run the bridge script in documents
+  // only, so a worker is started from a small script of ours that then
+  // loads the page's own.
+  var workerPrelude =
+    '(function(){var l=function(n){try{Object.defineProperty(self,n,{value:undefined,' +
+    'writable:false,configurable:false,enumerable:false})}catch(e){}};' +
+    JSON.stringify(REMOVED.concat(['Worker', 'SharedWorker'])) +
+    '.forEach(l)})();';
+  var wrapWorker = function (scope, name) {
+    var Original = scope[name];
+    if (typeof Original !== 'function') {
+      return;
+    }
+    var Wrapped = function (url, options) {
+      if (!new.target) {
+        throw new TypeError(name + ' must be called with new');
+      }
+      var target = new scope.URL(String(url), scope.document.baseURI).href;
+      var load =
+        options && options.type === 'module'
+          ? 'await import(' + JSON.stringify(target) + ');'
+          : 'importScripts(' + JSON.stringify(target) + ');';
+      var blob = new scope.Blob([workerPrelude + load], { type: 'text/javascript' });
+      return Reflect.construct(Original, [scope.URL.createObjectURL(blob), options], new.target);
+    };
+    Wrapped.prototype = Original.prototype;
+    lockIn(scope, name, Wrapped);
+  };
+
+  // Strip one window: no native dialogs or printing, none of the removed
+  // interfaces, workers only through the prelude, no service workers.
+  var stripped = new WeakSet();
+  var strip = function (scope) {
+    try {
+      if (stripped.has(scope)) {
+        return scope;
+      }
+      stripped.add(scope);
+      lockIn(scope, 'alert', function () {});
+      lockIn(scope, 'confirm', function () {
+        return false;
+      });
+      lockIn(scope, 'prompt', function () {
+        return null;
+      });
+      lockIn(scope, 'print', function () {});
+      lockIn(scope, 'onbeforeunload', null);
+      REMOVED.forEach(function (name) {
+        lockIn(scope, name, undefined);
+      });
+      wrapWorker(scope, 'Worker');
+      wrapWorker(scope, 'SharedWorker');
+      if (scope.navigator) {
+        lockIn(scope.navigator, 'serviceWorker', undefined);
+      }
+      guardFrames(scope);
+    } catch (error) {
+      // Another origin's window: the engine keeps it apart anyway.
+    }
+    return scope;
+  };
+
+  // A frame's window reached through its element is stripped before the
+  // page gets it. Engines inject this script into frames too, but not
+  // always into the empty document a new frame starts with.
+  var guardFrames = function (scope) {
+    ['HTMLIFrameElement', 'HTMLFrameElement', 'HTMLObjectElement'].forEach(function (type) {
+      var proto = scope[type] && scope[type].prototype;
+      if (!proto) {
+        return;
+      }
+      try {
+        guardFrame(proto);
+      } catch (error) {
+        // Already guarded by this window's own copy of the script.
+      }
+    });
+  };
+  var guardFrame = function (proto) {
+    var windowOf = Object.getOwnPropertyDescriptor(proto, 'contentWindow');
+    var documentOf = Object.getOwnPropertyDescriptor(proto, 'contentDocument');
+    if (windowOf && windowOf.get) {
+      Object.defineProperty(proto, 'contentWindow', {
+        configurable: false,
+        enumerable: windowOf.enumerable,
+        get: function () {
+          var child = windowOf.get.call(this);
+          return child ? strip(child) : child;
+        },
+      });
+    }
+    if (documentOf && documentOf.get) {
+      Object.defineProperty(proto, 'contentDocument', {
+        configurable: false,
+        enumerable: documentOf.enumerable,
+        get: function () {
+          var child = documentOf.get.call(this);
+          if (child && child.defaultView) {
+            strip(child.defaultView);
+          }
+          return child;
+        },
+      });
+    }
+  };
+
+  strip(window);
 
   if (window !== window.top || window.location.origin !== config.origin) {
     return;

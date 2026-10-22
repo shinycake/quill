@@ -45,7 +45,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Div {
         let id = entry.id;
-        // A build without a carrier host cannot switch to a web proxy.
+        // Without a carrier host (no helper, or this system cannot run a
+        // web view) a web proxy cannot be switched to, and one already in
+        // use says why it cannot connect.
         let switchable = self
             .session()
             .is_none_or(|s| s.settings.proxy.can_enable(entry.proxy.kind));
@@ -112,7 +114,7 @@ impl QuillApp {
                                     .text_color(status_color)
                                     .child(row_subtitle(entry, ping, web)),
                             )
-                            .when(!switchable && !entry.is_enabled, |this| {
+                            .when(!switchable, |this| {
                                 this.child(
                                     div()
                                         .text_xs()

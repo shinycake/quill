@@ -8,8 +8,10 @@ use std::process::Child;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// Kill `child` and reap it on a detached thread.
-pub fn kill_and_reap(child: Child) {
+/// Kill `child` now (sending the signal does not block) and reap it on a
+/// detached thread.
+pub fn kill_and_reap(mut child: Child) {
+    let _ = child.kill();
     reap_after(child, Duration::ZERO);
 }
 

@@ -34,14 +34,20 @@ pub(super) fn configure(builder: WebViewBuilder<'_>) -> WebViewBuilder<'_> {
     let builder = {
         use wry::WebViewBuilderExtWindows;
         // wry's own defaults, plus: no occlusion tracking and no
-        // throttling of a window that is never shown.
+        // throttling of a window that is never shown; no WebAssembly and no
+        // WebTransport in any frame or worker (the bridge script only
+        // reaches documents); WebRTC, should a page get at it, never sends
+        // UDP around the proxy.
         builder
             .with_additional_browser_args(
                 "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,\
                  CalculateNativeWinOcclusion \
                  --disable-background-timer-throttling \
                  --disable-renderer-backgrounding \
-                 --disable-backgrounding-occluded-windows",
+                 --disable-backgrounding-occluded-windows \
+                 --js-flags=--noexpose-wasm \
+                 --disable-blink-features=WebTransport \
+                 --force-webrtc-ip-handling-policy=disable_non_proxied_udp",
             )
             .with_default_context_menus(false)
             .with_browser_accelerator_keys(false)
@@ -286,19 +292,37 @@ mod platform {
                 ffi::webkit_user_content_filter_unref(filter);
             }
         }
-        // SAFETY: the store and identifier are still owned by `save`; the
-        // removal needs no callback, and the store reference is ours.
+        // SAFETY: the store and identifier are still owned by `save` (WebKit
+        // copies the identifier and keeps the store alive for the removal);
+        // WebKit requires a callback, which finishes the removal. The store
+        // reference is ours.
         unsafe {
             ffi::webkit_user_content_filter_store_remove(
                 save.store,
                 save.identifier.as_ptr(),
                 std::ptr::null_mut(),
-                None,
+                Some(removed),
                 std::ptr::null_mut(),
             );
             glib::gobject_ffi::g_object_unref(save.store.cast());
         }
         let _ = save.events.send_event(Wake::LockedDown(locked));
+    }
+
+    unsafe extern "C" fn removed(
+        source: *mut glib::gobject_ffi::GObject,
+        result: *mut gio::ffi::GAsyncResult,
+        _data: glib::ffi::gpointer,
+    ) {
+        let mut error = std::ptr::null_mut();
+        // SAFETY: `source` is the store the removal ran on and `result` its
+        // result; `error` is an out pointer WebKit may fill.
+        unsafe {
+            ffi::webkit_user_content_filter_store_remove_finish(source.cast(), result, &mut error);
+            if !error.is_null() {
+                glib::ffi::g_error_free(error);
+            }
+        }
     }
 }
 
@@ -340,10 +364,15 @@ mod platform {
                         COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
                         COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL,
                     )?,
-                    Err(_) => core.AddWebResourceRequestedFilter(
-                        &every,
-                        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
-                    )?,
+                    Err(_) => {
+                        crate::debug(|| {
+                            "WebView2 before 1.0.2210: worker requests are not filtered".into()
+                        });
+                        core.AddWebResourceRequestedFilter(
+                            &every,
+                            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
+                        )?
+                    }
                 }
                 let mut token = 0i64;
                 core.add_WebResourceRequested(
@@ -351,9 +380,14 @@ mod platform {
                         let Some(args) = args else {
                             return Ok(());
                         };
-                        let mut uri = PWSTR::null();
-                        args.Request()?.Uri(&mut uri)?;
-                        if !scope.allows_request(&take_pwstr(uri)) {
+                        // A request whose address cannot be read is refused.
+                        let allowed = (|| -> windows::core::Result<bool> {
+                            let mut uri = PWSTR::null();
+                            args.Request()?.Uri(&mut uri)?;
+                            Ok(scope.allows_request(&take_pwstr(uri)))
+                        })()
+                        .unwrap_or(false);
+                        if !allowed {
                             let refused = environment.CreateWebResourceResponse(
                                 None,
                                 403,

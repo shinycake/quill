@@ -30,4 +30,9 @@ regexes = [
     # xorshift output, commented NOT a real key (src/ui screenshot demo and
     # the same fixture in a src/state.rs test)
     '''GUYMUT5VLuA6j7l7taiDAR9tM\+Y30on50Cklur/t\+/w57sWo''',
+    # synthetic web proxy carrier bridge token and hook key: counting hex
+    # digits up and down, never a real value (crates/webview-host
+    # src/carrier/script.rs tests)
+    '''00112233445566778899aabbccddeeff''',
+    '''ffeeddccbbaa99887766554433221100''',
 ]

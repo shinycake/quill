@@ -70,6 +70,33 @@ b.postMessage('rtc:' + (typeof window.RTCPeerConnection) + ',' + (typeof window.
 b.postMessage('open:' + String(window.open('https://evil.example/')));
 </script></head><body></body></html>"#;
 
+/// Telegram Desktop's restrictions probe (`web_proxy_webview.cpp`,
+/// `RestrictionsProbeScript`): no WebRTC, WebTransport or WebAssembly in
+/// the page or in a fresh frame. Then the same for a frame reached by
+/// index (no element getter in the way), a worker and service workers.
+const RESTRICTIONS_PAGE: &str = r#"<!doctype html><html><head><script>
+const b = window.TelegramWebProxy;
+b.onmessage = (e) => b.postMessage(new Uint8Array(e.data).slice().reverse());
+const probe = (w) => typeof w.RTCPeerConnection === 'undefined' && typeof w.WebTransport === 'undefined' && typeof w.WebAssembly === 'undefined';
+let ok = probe(window);
+const frame = document.createElement('iframe');
+(document.documentElement || document).appendChild(frame);
+try { ok = ok && !!frame.contentWindow && probe(frame.contentWindow); } finally { frame.remove(); }
+b.postMessage('tdesktop:' + (ok ? '1' : '0'));
+const second = document.createElement('iframe');
+document.documentElement.appendChild(second);
+b.postMessage('indexed:' + (probe(window[0]) ? '1' : '0'));
+second.remove();
+b.postMessage('sw:' + (typeof navigator.serviceWorker));
+try {
+  const worker = new Worker('/restrict/worker.js');
+  worker.onmessage = (e) => b.postMessage('worker:' + e.data);
+  worker.onerror = () => b.postMessage('worker:error');
+} catch (error) { b.postMessage('worker:threw'); }
+</script></head><body></body></html>"#;
+
+const RESTRICTIONS_WORKER: &str = "postMessage([typeof WebAssembly, typeof WebTransport, typeof RTCPeerConnection, typeof Worker].join(','));";
+
 const NAVIGATING_PAGE: &str = r#"<!doctype html><html><head><script>
 window.TelegramWebProxy.postMessage('leaving');
 setTimeout(() => { window.location.href = '/other/'; }, 100);
@@ -119,6 +146,8 @@ fn serve() -> (u16, Arc<Mutex<Vec<String>>>) {
                 "/echo/" => ("200 OK", "", ECHO_PAGE),
                 "/late/" => ("200 OK", "", LATE_PAGE),
                 "/dialogs/" => ("200 OK", "", DIALOG_PAGE),
+                "/restrict/" => ("200 OK", "", RESTRICTIONS_PAGE),
+                "/restrict/worker.js" => ("200 OK", "", RESTRICTIONS_WORKER),
                 "/nav/" => ("200 OK", "", NAVIGATING_PAGE),
                 "/blank/" => ("200 OK", "", BLANK_PAGE),
                 "/redirect/" => ("200 OK", "", REDIRECT_PAGE),
@@ -131,9 +160,14 @@ fn serve() -> (u16, Arc<Mutex<Vec<String>>>) {
                     "<!doctype html><title>404</title>not here",
                 ),
             };
+            let kind = if bare.ends_with(".js") {
+                "text/javascript"
+            } else {
+                "text/html"
+            };
             let _ = write!(
                 stream,
-                "HTTP/1.1 {status}\r\nContent-Type: text/html\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                "HTTP/1.1 {status}\r\nContent-Type: {kind}\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len()
             );
             let _ = stream.flush();
@@ -374,6 +408,22 @@ fn dialogs_printing_and_webrtc_never_reach_the_page() {
         "rtc:undefined,undefined"
     );
     assert_eq!(helper.text(Duration::from_secs(5)), "open:null");
+    helper.echoes();
+}
+
+#[test]
+#[ignore = "needs a desktop session and a system web view"]
+fn no_webrtc_webtransport_or_webassembly_in_frames_or_workers() {
+    let (port, _) = serve();
+    let mut helper = Helper::open(port, "/restrict/");
+    helper.ready();
+    assert_eq!(helper.text(Duration::from_secs(15)), "tdesktop:1");
+    assert_eq!(helper.text(Duration::from_secs(5)), "indexed:1");
+    assert_eq!(helper.text(Duration::from_secs(5)), "sw:undefined");
+    assert_eq!(
+        helper.text(Duration::from_secs(10)),
+        "worker:undefined,undefined,undefined,undefined"
+    );
     helper.echoes();
 }
 

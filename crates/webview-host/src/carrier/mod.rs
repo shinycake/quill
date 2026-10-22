@@ -35,7 +35,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
-use tao::event::{Event, StartCause};
+use tao::event::Event;
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tao::window::WindowBuilder;
 use wry::{NewWindowResponse, PageLoadEvent, PermissionResponse, WebViewBuilder};
@@ -74,6 +74,8 @@ enum Wake {
     /// macOS: WebKit's content process died.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     RendererGone,
+    /// Time to look at the timers ([`TICK`], or the close grace ending).
+    Tick,
 }
 
 /// The page a carrier loads.
@@ -298,6 +300,15 @@ fn host(
         event_loop.create_proxy(),
     );
 
+    // The timers run on threads of their own (`watchdog::tick_every`).
+    let ticks = event_loop.create_proxy();
+    if watchdog::tick_every(TICK, move || ticks.send_event(Wake::Tick).is_ok()).is_err() {
+        emit(&CarrierEvent::Failed {
+            failure: CarrierFailure::Terminated,
+        });
+        return;
+    }
+    let close_timer = event_loop.create_proxy();
     let status_proxy = event_loop.create_proxy();
     let mut relay = Relay::new(Instant::now());
     let mut next_tick = Instant::now() + TICK;
@@ -306,20 +317,20 @@ fn host(
         #[cfg(windows)]
         let _context = &context;
         let now = Instant::now();
+        *control_flow = ControlFlow::Wait;
         if let Some(at) = relay.closing_at {
-            *control_flow = if now >= at {
-                ControlFlow::Exit
-            } else {
-                ControlFlow::WaitUntil(at)
-            };
+            // Only the end of the close grace matters now.
+            if now >= at {
+                *control_flow = ControlFlow::Exit;
+            }
             return;
         }
-        *control_flow = ControlFlow::WaitUntil(next_tick);
         let loading = armed.load(Ordering::Acquire);
         match event {
-            Event::NewEvents(StartCause::ResumeTimeReached { .. }) if now >= next_tick => {
+            // Ticks may bunch up behind a busy loop; about one per `TICK`
+            // counts (the thread's clock and this one differ a little).
+            Event::UserEvent(Wake::Tick) if now + TICK / 2 >= next_tick => {
                 next_tick = now + TICK;
-                *control_flow = ControlFlow::WaitUntil(next_tick);
                 if loading {
                     if let Some(failure) = relay.failure(now) {
                         return fail(failure, control_flow);
@@ -368,7 +379,12 @@ fn host(
                             &format!("0, 't', {close}"),
                         ));
                         relay.closing_at = Some(now + CLOSE_GRACE);
-                        *control_flow = ControlFlow::WaitUntil(now + CLOSE_GRACE);
+                        let timer = close_timer.clone();
+                        if !watchdog::wake_after(CLOSE_GRACE, move || {
+                            let _ = timer.send_event(Wake::Tick);
+                        }) {
+                            *control_flow = ControlFlow::Exit;
+                        }
                     }
                     _ => *control_flow = ControlFlow::Exit,
                 }

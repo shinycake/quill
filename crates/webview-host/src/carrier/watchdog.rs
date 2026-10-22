@@ -61,6 +61,39 @@ pub(super) fn end_process() -> ! {
     std::process::abort()
 }
 
+/// Call `wake` every `every` from a thread of its own until it returns
+/// `false` (the loop is gone). The loop's own timers are not enough: tao's
+/// GTK loop treats `ControlFlow::WaitUntil` like `Wait`, so an idle Linux
+/// view would never tick.
+pub(super) fn tick_every(
+    every: Duration,
+    mut wake: impl FnMut() -> bool + Send + 'static,
+) -> std::io::Result<()> {
+    std::thread::Builder::new()
+        .name("quill-carrier-ticks".into())
+        .spawn(move || {
+            loop {
+                std::thread::sleep(every);
+                if !wake() {
+                    return;
+                }
+            }
+        })
+        .map(drop)
+}
+
+/// Call `wake` once, `after` from now, from a thread of its own; `false`
+/// when no thread could be started.
+pub(super) fn wake_after(after: Duration, wake: impl FnOnce() + Send + 'static) -> bool {
+    std::thread::Builder::new()
+        .name("quill-carrier-timer".into())
+        .spawn(move || {
+            std::thread::sleep(after);
+            wake();
+        })
+        .is_ok()
+}
+
 /// Linux: die with the thread that started us, and leave at once if that
 /// already happened.
 pub(super) fn follow_parent() {

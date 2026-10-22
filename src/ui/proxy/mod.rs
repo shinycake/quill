@@ -729,7 +729,8 @@ impl QuillApp {
                     quill::proxy_web::WebRowState::for_entry(
                         entry.is_enabled,
                         connected,
-                        state.carrier_failed == Some(entry.id),
+                        state.carrier_failed == Some(entry.id)
+                            || !state.can_enable(entry.proxy.kind),
                     )
                 });
                 rows = rows.child(this.proxy_row(entry, ping, web, cx));

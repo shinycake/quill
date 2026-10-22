@@ -1,5 +1,6 @@
 //! Screenshot demos of web proxies (injected, no live Telegram): the proxy
-//! list with a web proxy in use, and the add box with the WEB type chosen.
+//! list with a web proxy in use, the same list on a system that cannot
+//! host carriers, and the add box with the WEB type chosen.
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
@@ -12,6 +13,11 @@ register_demos![
         "screenshot demo — the proxy list with a web proxy in use"
     )
     .setup(QuillApp::demo_proxy_web_list),
+    DemoSpec::chats(
+        "ready-proxy-web-unhosted",
+        "screenshot demo — a web proxy in use where no web view can run"
+    )
+    .setup(QuillApp::demo_proxy_web_unhosted),
     DemoSpec::chats(
         "ready-proxy-web-form",
         "screenshot demo — the proxy box with the WEB type"
@@ -36,6 +42,14 @@ fn entry(id: i32, enabled: bool, draft: ProxyDraft) -> ProxyEntry {
 
 impl QuillApp {
     fn demo_proxy_web_list(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.demo_proxy_web_rows(true, cx);
+    }
+
+    fn demo_proxy_web_unhosted(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.demo_proxy_web_rows(false, cx);
+    }
+
+    fn demo_proxy_web_rows(&mut self, hosting: bool, cx: &mut Context<Self>) {
         let mut socks = ProxyDraft::empty(ProxyKind::Socks5);
         socks.server = "socks.example.org".into();
         socks.port = 1080;
@@ -55,7 +69,7 @@ impl QuillApp {
                 ]),
                 // The live client gets this from its carrier host.
                 carriers: quill::proxy_carrier::Carriers {
-                    hosting: true,
+                    hosting,
                     ..Default::default()
                 },
                 ..ProxyState::default()

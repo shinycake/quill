@@ -296,6 +296,11 @@ impl CarrierHost for HelperCarrierHost {
         self.program.is_some() && !self.capability.ruled_out()
     }
 
+    /// Must run on a thread that lives as long as the carrier: on Linux the
+    /// helper asks the kernel to kill it when the thread that started it
+    /// ends (`PR_SET_PDEATHSIG`, `crates/webview-host/src/carrier/watchdog.rs`).
+    /// Today that is always the UI thread (the poll loops and `ingest`); a
+    /// short-lived or pooled thread here would kill every carrier it starts.
     fn open(&mut self, request: &CarrierRequest) -> Result<(), CarrierError> {
         if !self.available() {
             return Err(CarrierError::Unsupported);

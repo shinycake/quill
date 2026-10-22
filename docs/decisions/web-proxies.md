@@ -77,18 +77,34 @@ database and keys, and a crash there cannot take Quill down.
     bar and browser accelerator keys turned off. A live test checks that all four calls return
     at once and that the page keeps running.
   - The safe mode tdesktop uses: `RTCPeerConnection` (and its prefixed and helper classes),
-    `WebTransport` and `WebAssembly` are removed in every frame, and WebRTC is turned off in
-    WebKitGTK's settings.
+    `WebTransport` and `WebAssembly` are removed. The bridge script does it in every frame the
+    engine injects it into, and also strips a frame's window the first time the page reaches it
+    through `contentWindow` or `contentDocument`, since engines do not always inject into the
+    empty document a new frame starts with. Workers get the same: the page's `new Worker(url)`
+    starts a small script of ours that removes them (and nested workers) and then loads the
+    page's script with `importScripts` or `import()`. One difference a page could notice: the
+    worker's `self.location` is a `blob:` address. Service workers are removed. Natively, WebRTC
+    is off in WebKitGTK's settings. WebView2 gets `--js-flags=--noexpose-wasm` (no WebAssembly in
+    any frame or worker), `--disable-blink-features=WebTransport`, and
+    `--force-webrtc-ip-handling-policy=disable_non_proxied_udp` (no UDP around the proxy, should a
+    page reach WebRTC anyway). WKWebView has no public switch for any of these. A live test runs
+    tdesktop's restrictions probe (`web_proxy_webview.cpp`, `RestrictionsProbeScript`) on the
+    page and a fresh frame, then checks a frame reached by index, a worker and service workers.
   - The path prefix is enforced natively, not only by the Content-Security-Policy. On macOS a
     `WKContentRuleList` blocks every load except the carrier's origin under its prefix (and its
     `wss:` form, `data:` and its own `blob:`). WebKitGTK gets the same rules as a
     `WebKitUserContentFilter`. WebView2 answers every request outside the scope with a 403 from a
     `WebResourceRequested` handler. A top-level page that ends up outside the scope (after a
     redirect, say) fails the carrier as `LoadFailed`.
-  - What stays best effort: WebView2's request handler does not see a redirect that its network
-    stack follows on its own, so a redirect out of the prefix is caught only by the CSP and the
-    top-level check there. DNS prefetching of links in the page is not covered by any of the
-    three platforms' filters.
+  - WebView2's handler refuses a request whose address it cannot read, so an error there fails
+    closed. On WebView2 older than 1.0.2210 the handler cannot cover worker requests.
+  - What stays best effort:
+    - WebView2's request handler does not see WebSocket or WebTransport connections, or a
+      redirect that its network stack follows on its own. On Windows, `connect-src` in the CSP
+      (and the top-level check, for redirects) is the only rule for those. A worker started from
+      the prefix is outside the document's CSP, but it gets the removals above.
+    - DNS prefetching of links in the page is not covered by any of the three platforms'
+      filters.
 - **The bridge** (`crates/webview-host/src/carrier/bridge.js`) defines the read-only, frozen
   `TelegramWebProxy` (the name TDLib sends, checked to be a plain identifier) with exactly
   `postMessage` and `onmessage`, only when `window === window.top` and `location.origin` is the
@@ -112,8 +128,10 @@ database and keys, and a crash there cannot take Quill down.
   already are. `updateWebProxyCarrierData` goes to the helper as is and the page gets an
   `ArrayBuffer`. What the page posts goes from the helper's reader thread straight to TDLib
   (`td_send` is thread-safe) as `processWebProxyCarrierMessage`, tagged with a reserved `@extra`
-  whose answers the driver drops. So page traffic never crosses the UI thread and never queues in
-  Quill; the UI thread only hands TDLib's data to a bounded queue.
+  whose answers the driver drops. No page message waits in a queue of Quill's. The UI thread
+  sees only TDLib's tiny `ok` for each one, dropped first thing in `ingest`, so a page that posts
+  many small messages still costs one cheap envelope each on the receive path. The UI thread also
+  hands TDLib's data to a bounded queue.
 - **Backpressure and limits.** The helper hands the page one delivery at a time and waits for the
   page's acknowledgement (tdesktop does the same). It queues at most 1,024 deliveries or 16 MiB, a
   delivery may be at most 1 MiB plus slack (TDLib's own cap), and a page message at most 2 MiB
@@ -123,17 +141,22 @@ database and keys, and a crash there cannot take Quill down.
 - **No helper outlives Quill.** The helper reads its commands on a thread of its own, started
   before the web view. When stdin ends (Quill quit or crashed) or a line is broken, that thread
   ends the process 300 ms later even if the main loop is stuck. On Linux the kernel also kills the
-  helper when Quill dies (`PR_SET_PDEATHSIG`). On Quill's side the host keeps each child itself.
-  Quitting, logging out, a closed client and dropping the host kill every child from the calling
-  thread. TDLib's close gives the page 1 s to receive `{"t":"close"}` before the kill. A watchdog
+  helper when Quill dies (`PR_SET_PDEATHSIG`). The kernel ties that to the thread that started the
+  helper, not the process, so `HelperCarrierHost::open` must run on a thread that lives as long as
+  the carrier; today that is always the UI thread. On Quill's side the host keeps each child
+  itself. Quitting, logging out, a closed client and dropping the host kill every child from the
+  calling thread (the signal is sent there; only the reaping happens on a thread of its own). TDLib's close gives the page 1 s to receive `{"t":"close"}` before the kill. A watchdog
   on every poll and on every writer turn (so steady deliveries cannot hide it) kills a helper
   that has not said `ready` within 60 s or has sent nothing for 15 s since.
 - **Hidden and idle.** The view is never shown, so the platforms would throttle it. macOS gets
   `with_background_throttling(Disabled)` and an `NSProcessInfo` activity that keeps App Nap
   away. WebView2 gets the flags that turn off occlusion and background timer throttling. WebKitGTK
-  has no switch for this; the 3 s probe runs from the helper's own timer, not from page timers, so
-  only the page's answer can be late. A 130 s idle soak with the window hidden passes on macOS:
-  44 `alive` lines, one every 3 s, and the carrier never failed.
+  has no switch for this. The helper's own 3 s tick (the `alive` line, the page probe, the load
+  and silence timeouts, and the end of the close grace) comes from a thread of its own through
+  the event loop proxy, not from the loop's timer: tao's GTK loop treats `WaitUntil` like
+  `Wait`, so on Linux an idle view never ticked, and Quill killed every idle carrier after 15 s.
+  Only the page's answer can be late. The 130 s idle soak with the window hidden runs on macOS
+  and in both CI jobs.
 - **Errors follow the schema.** `Unsupported` means this system cannot run a web view, and TDLib
   then stops asking until the proxy is enabled again, so Quill sends it only when that is shown:
   the helper says so, or it exits before `ready` the way the dynamic loader does when a library is
@@ -167,7 +190,11 @@ per-poll work for both UI loops is one call, `ConnectDriver::poll_ticks` (`src/c
 ### Enabling a web proxy
 A client whose host can run carriers enables web proxies like any other. Without the helper, or
 once the capability check failed, the driver refuses `enableProxy`, saves an added or edited web
-proxy disabled, and the row says "Web proxies aren't supported in this version yet".
+proxy disabled, and the row says "Web proxies aren't supported in this version yet". A web proxy
+that was already in use when hosting turned off stays enabled (Quill does not change the user's
+choice behind their back), but its row shows "not available" and the same note, so the reason
+the connection is down is on screen next to the "Disable proxy" choice
+(`ready-proxy-web-unhosted`).
 
 ### Cost
 Measured on macOS 27 (Apple M-series, debug helper build, local relay page):
@@ -207,10 +234,11 @@ Carrier hosting:
   sink with the reserved `@extra`; data for an unknown carrier fails it; shutdown ends every child.
 - The real helper with WKWebView on macOS against a local relay page
   (`crates/webview-host/tests/carrier_live.rs`, ignored by default, run with
-  `cargo test -p quill-webview --test carrier_live -- --ignored --test-threads=1`), 12 tests, all
+  `cargo test -p quill-webview --test carrier_live -- --ignored --test-threads=1`), 13 tests, all
   passing: bytes go both ways in order and the page hears `{"t":"close"}`; data sent before the
   page listens waits for it; `alert`, `confirm`, `prompt` and `print` return at once and WebRTC is
-  gone, in frames too; leaving the scope by navigation or `about:blank` fails as `LoadFailed`; a
+  gone, in frames too; tdesktop's restrictions probe passes on the page and a fresh frame, and
+  a frame reached by index, a worker and service workers have none of the removed interfaces; leaving the scope by navigation or `about:blank` fails as `LoadFailed`; a
   redirect out of the prefix is blocked by the content rules; a 404 page and an unreachable page
   fail as `LoadFailed`; a page that hangs fails as `Terminated`; the helper exits when Quill hangs
   up; the probe starts the view and exits; a plain-`http` origin is refused before loading; and
@@ -220,9 +248,13 @@ Carrier hosting:
   sent before the page listens comes back after its hello, 20 more come back reversed and in
   order, nothing fails, and shutdown removes the data folder. The capability check passes.
 - CI: the `carrier-live-linux` job runs the helper's clippy and both live suites under Xvfb with
-  WebKitGTK on every PR; `carrier-live-windows` runs them with WebView2 on pushes to main and
-  `cursor/` branches. Neither is a required check.
-- Light and dark captures of the proxy list with the web proxy enabled (`ready-proxy-web-list`).
+  WebKitGTK on every PR. `carrier-live-windows` runs them with WebView2 on pushes, and on PRs that
+  change the carrier code (the helper, the protocol crate, `src/proxy_carrier` or the workflow).
+  Neither is a required check. The first Linux run found the idle-tick bug above: the soak failed
+  after 6 s without an `alive` line.
+- Light and dark captures of the proxy list with the web proxy enabled (`ready-proxy-web-list`),
+  and of the same list where no web view can run (`ready-proxy-web-unhosted`): the enabled row
+  says "not available" and why.
 - Not run here: Linux and Windows run only in those CI jobs; Wayland is not covered by CI. No
   public web proxy was found to try, so a real relay page and real traffic are untested.
 
