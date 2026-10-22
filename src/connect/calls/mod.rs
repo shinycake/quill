@@ -262,6 +262,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             });
         }
         let camera = if enabled {
+            // Without the call library there is no device list to read,
+            // which is not the same as having no camera.
+            if !self
+                .call_engine
+                .as_ref()
+                .is_some_and(|engine| engine.is_available())
+            {
+                return Err(EngineError::Unavailable);
+            }
             self.refresh_call_devices();
             Some(self.call_camera_device().ok_or(EngineError::NoCamera)?)
         } else {
