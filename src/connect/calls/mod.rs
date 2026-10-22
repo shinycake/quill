@@ -236,6 +236,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.selected_camera.as_deref()
     }
 
+    /// The camera a call would turn on now, from a fresh device list:
+    /// `Unavailable` without the call library (no list to read, which is
+    /// not the same as no camera), `NoCamera` when none is listed.
+    pub fn camera_to_turn_on(&mut self) -> Result<String, EngineError> {
+        if !self
+            .call_engine
+            .as_ref()
+            .is_some_and(|engine| engine.is_available())
+        {
+            return Err(EngineError::Unavailable);
+        }
+        self.refresh_call_devices();
+        self.call_camera_device().ok_or(EngineError::NoCamera)
+    }
+
     /// The camera calls send from now, by device id, from the cached
     /// device list (`pick_camera`).
     pub(crate) fn call_camera_device(&self) -> Option<String> {
@@ -265,17 +280,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             });
         }
         let camera = if enabled {
-            // Without the call library there is no device list to read,
-            // which is not the same as having no camera.
-            if !self
-                .call_engine
-                .as_ref()
-                .is_some_and(|engine| engine.is_available())
-            {
-                return Err(EngineError::Unavailable);
-            }
-            self.refresh_call_devices();
-            Some(self.call_camera_device().ok_or(EngineError::NoCamera)?)
+            Some(self.camera_to_turn_on()?)
         } else {
             None
         };
@@ -354,8 +359,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             && let Some(engine) = self.call_engine.as_deref_mut()
             && engine.is_available()
         {
-            let device = pick_camera(camera.as_deref(), &self.call_devices_cache);
-            engine.set_camera(call_id, device.as_deref())?;
+            // An empty list must not switch a running camera off while the
+            // call still says it is on.
+            let device = pick_camera(camera.as_deref(), &self.call_devices_cache)
+                .ok_or(EngineError::NoCamera)?;
+            engine.set_camera(call_id, Some(&device))?;
         }
         self.selected_camera = camera;
         Ok(())

@@ -250,6 +250,25 @@ fn the_camera_always_goes_out_by_id() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A menu pick with no camera listed keeps the running camera on
+/// instead of switching it off under a call that says it is on.
+#[test]
+fn a_camera_pick_with_no_camera_listed_keeps_the_camera() {
+    let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+    ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+    handle.set_devices(vec![camera("usb-cam")]);
+    assert!(driver.set_call_camera(77, true).is_ok());
+    handle.set_devices(Vec::new());
+    driver.refresh_call_devices();
+    assert_eq!(
+        driver.select_call_camera(Some("gone".into())),
+        Err(crate::calls::engine::EngineError::NoCamera)
+    );
+    assert_eq!(handle.camera_changes(), vec![(77, Some("usb-cam".into()))]);
+    assert!(driver.session.calls.active_call.as_ref().unwrap().camera_on);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A voice call whose camera was turned on while ringing connects
 /// with that camera.
 #[test]
