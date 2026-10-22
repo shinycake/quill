@@ -181,19 +181,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         let outbox = self.video_state_outbox.clone();
         engine.set_remote_video_state_callback(Arc::new(move |call_id, state| {
             outbox.lock_or_recover().push_back((call_id, state));
+            crate::wake::UPDATES.poke();
         }));
         let outbox = self.screen_state_outbox.clone();
         engine.set_remote_screen_state_callback(Arc::new(move |call_id, state| {
             outbox.lock_or_recover().push_back((call_id, state));
+            crate::wake::UPDATES.poke();
         }));
         let outbox = self.audio_state_outbox.clone();
         engine.set_remote_audio_state_callback(Arc::new(move |call_id, muted| {
             outbox.lock_or_recover().push_back((call_id, muted));
+            crate::wake::UPDATES.poke();
         }));
     }
 
     /// Apply the peer's microphone state to the active 1:1 call.
-    fn drain_remote_audio_state(&mut self) {
+    pub(crate) fn drain_remote_audio_state(&mut self) {
         loop {
             let update = self.audio_state_outbox.lock_or_recover().pop_front();
             let Some((call_id, muted)) = update else {

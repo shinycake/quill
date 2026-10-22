@@ -69,7 +69,6 @@ fn mock_engine_lifecycle_and_protocol() {
         p2p_allowed: true,
         mic_input: Some("mic-1".into()),
         speaker_input: Some("speaker-1".into()),
-        video_enabled: false,
         camera_input: None,
     };
     engine.connect(77, &params).unwrap();
@@ -193,7 +192,6 @@ fn mock_engine_connect_and_device_selection_need_known_call() {
         p2p_allowed: false,
         mic_input: None,
         speaker_input: None,
-        video_enabled: false,
         camera_input: None,
     };
     assert_eq!(
@@ -246,7 +244,6 @@ fn retained_call_media_preserves_screen_share_across_reconnect() {
         p2p_allowed: true,
         mic_input: Some("mic-1".into()),
         speaker_input: Some("speaker-1".into()),
-        video_enabled: true,
         camera_input: Some("cam-1".into()),
     };
     // Fresh connect: no prior entry, share starts off.
@@ -256,11 +253,11 @@ fn retained_call_media_preserves_screen_share_across_reconnect() {
     // Mid-call the user starts sharing, then the transport drops
     // and `connect` re-runs with the same retained params: the
     // share intent must survive so `set_media_sources` re-issues
-    // screen-only (`camera_enabled && !screen_share_on` stays
+    // screen-only (`camera.is_some() && !screen_share_on` stays
     // false for the camera).
     let mut sharing = fresh;
     sharing.screen_share_on = true;
-    sharing.camera_enabled = false;
+    sharing.camera = None;
     let reconnected = retained_call_media(&params, Some(&sharing));
     assert!(reconnected.screen_share_on);
     // Stopping share before the drop must not stick the flag on
@@ -275,20 +272,20 @@ fn retained_call_media_preserves_screen_share_across_reconnect() {
 fn mock_camera_toggle_state_machine() {
     let mut engine = MockEngine::new();
     engine.start_call(77, 41, false).unwrap();
-    engine.set_camera_enabled(77, true, Some("cam-1")).unwrap();
-    engine.set_camera_enabled(77, false, None).unwrap();
+    engine.set_camera(77, Some("cam-1")).unwrap();
+    engine.set_camera(77, None).unwrap();
     assert_eq!(
         engine.camera_changes(),
-        vec![(77, true, Some("cam-1".to_string())), (77, false, None)]
+        vec![(77, Some("cam-1".to_string())), (77, None)]
     );
     assert_eq!(
-        engine.set_camera_enabled(99, true, None),
+        engine.set_camera(99, Some("cam-1")),
         Err(EngineError::NoSuchCall(99))
     );
 
     let mut unavailable = MockEngine::unavailable();
     assert_eq!(
-        unavailable.set_camera_enabled(77, true, None),
+        unavailable.set_camera(77, Some("cam-1")),
         Err(EngineError::Unavailable)
     );
 }
@@ -431,23 +428,34 @@ fn remote_video_state_mapping() {
     );
 }
 
-/// Phase C2e: validates the honest no-camera decision the driver will use.
+/// The camera a call sends from: the menu pick while it is listed, else
+/// the first camera; nothing without a camera.
 #[test]
-fn video_wanted_requires_camera() {
-    let camera = MediaDevice {
-        id: "cam-1".into(),
-        name: "Cam".into(),
-        kind: MediaDeviceKind::Camera,
+fn pick_camera_prefers_the_listed_pick() {
+    let device = |id: &str, kind| MediaDevice {
+        id: id.into(),
+        name: id.into(),
+        kind,
     };
-    let mic = MediaDevice {
-        id: "mic-1".into(),
-        name: "Mic".into(),
-        kind: MediaDeviceKind::Microphone,
-    };
+    let devices = [
+        device("mic-1", MediaDeviceKind::Microphone),
+        device("cam-1", MediaDeviceKind::Camera),
+        device("cam-2", MediaDeviceKind::Camera),
+    ];
+    assert_eq!(pick_camera(None, &devices), Some("cam-1".to_string()));
     assert_eq!(
-        video_wanted(true, &[camera.clone(), mic]),
-        (true, Some("cam-1".to_string()))
+        pick_camera(Some("cam-2"), &devices),
+        Some("cam-2".to_string())
     );
-    assert_eq!(video_wanted(true, &[]), (false, None));
-    assert_eq!(video_wanted(false, &[camera]), (false, None));
+    // An unplugged pick falls back to the first camera, never to a
+    // microphone with the same id.
+    assert_eq!(
+        pick_camera(Some("gone"), &devices),
+        Some("cam-1".to_string())
+    );
+    assert_eq!(
+        pick_camera(Some("mic-1"), &devices),
+        Some("cam-1".to_string())
+    );
+    assert_eq!(pick_camera(Some("cam-1"), &devices[..1]), None);
 }

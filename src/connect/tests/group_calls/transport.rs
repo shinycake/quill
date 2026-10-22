@@ -33,7 +33,7 @@ fn group_join_answer_connects_native_transport() {
     );
     assert_eq!(
         handle.group_connects(),
-        vec![(555, "join-answer".to_string(), false)]
+        vec![(555, "join-answer".to_string(), None)]
     );
     assert!(
         driver

@@ -253,7 +253,6 @@ mod tests {
                 mic: None,
                 speaker: None,
                 camera: None,
-                camera_enabled: false,
                 screen_share_on: false,
             },
         );

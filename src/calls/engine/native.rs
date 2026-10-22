@@ -384,17 +384,18 @@ pub(crate) fn remote_video_state_from(status: ntg_stream_status) -> RemoteVideoS
     }
 }
 
-/// Phase C2e: honest no-camera decision for the driver (session 2): a video
-/// call is only wanted when a camera exists; otherwise video stays off.
-pub fn video_wanted(is_video_call: bool, devices: &[MediaDevice]) -> (bool, Option<String>) {
-    if !is_video_call {
-        return (false, None);
-    }
-    devices
+/// The camera a call sends from: the one picked in the call menu while
+/// the engine still lists it, else the first camera listed. `None` when
+/// there is no camera (ntgcalls opens only a listed device, by its id).
+pub fn pick_camera(selected: Option<&str>, devices: &[MediaDevice]) -> Option<String> {
+    let mut cameras = devices
         .iter()
-        .find(|device| device.kind == MediaDeviceKind::Camera)
-        .map(|camera| (true, Some(camera.id.clone())))
-        .unwrap_or((false, None))
+        .filter(|device| device.kind == MediaDeviceKind::Camera);
+    let first = cameras.clone().next();
+    cameras
+        .find(|device| Some(device.id.as_str()) == selected)
+        .or(first)
+        .map(|device| device.id.clone())
 }
 
 pub(crate) fn c_strings(values: &[String]) -> Result<Vec<CString>, EngineError> {
