@@ -308,7 +308,31 @@ fn a_click_on_a_photo_still_opens_the_viewer(cx: &mut TestAppContext) {
     let at = photo(&app, vcx);
     vcx.simulate_click(at, Modifiers::default());
     frames(vcx);
-    assert!(viewer_open(&app, vcx));
+    if !viewer_open(&app, vcx) {
+        // TEMP diagnostics: where does a click open the viewer?
+        let mut hits = Vec::new();
+        for dy in (-60..260).step_by(20) {
+            for dx in (-60..520).step_by(30) {
+                let p = point(at.x + px(dx as f32), at.y + px(dy as f32));
+                vcx.simulate_click(p, Modifiers::default());
+                frames(vcx);
+                if viewer_open(&app, vcx) {
+                    hits.push((dx, dy));
+                    app.update(vcx, |app, cx| app.close_media_viewer(cx));
+                }
+            }
+        }
+        let rows: Vec<String> = app.read_with(vcx, |app, _| {
+            app.history
+                .hit_rows
+                .borrow()
+                .iter()
+                .map(|(ix, b)| format!("{ix}:{b:?}"))
+                .collect()
+        });
+        let sel = vcx.debug_bounds("photo-901");
+        panic!("DIAG at {at:?} photo {sel:?} hits {hits:?} rows {rows:?}");
+    }
 }
 
 #[gpui_kit::test]
