@@ -341,14 +341,12 @@ html { scrollbar-color: color-mix(in srgb, var(--accent) 35%, var(--surface)) va
 .hdr-list div { padding: 14px 16px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); }
 .hdr-list dt { font-weight: 650; font-size: 15px; }
 .hdr-list dd { margin: 4px 0 0; color: var(--muted); font-size: 15px; }
-.hdr-shots { margin: 0; position: relative; padding-bottom: 40px; }
+.hdr-shots { margin: 0; position: relative; padding-bottom: 56px; }
 .hdr-viewer { width: 100%; border-radius: 14px; box-shadow: var(--shadow); }
-.hdr-bubble { position: absolute; right: -12px; bottom: 54px; width: 36%; border-radius: 14px; box-shadow: var(--shadow); }
-.hdr-shots figcaption { margin-top: 14px; max-width: 60%; font-size: 13px; color: var(--faint); }
+.hdr-bubble { position: absolute; right: -12px; bottom: 0; width: 36%; border-radius: 14px; box-shadow: var(--shadow); }
 @media (max-width: 600px) {
   .hdr-shots { padding-bottom: 0; }
   .hdr-bubble { position: static; width: 70%; margin: -40px 0 0 auto; }
-  .hdr-shots figcaption { max-width: none; }
 }
 
 /* Measurements */
@@ -369,3 +367,12 @@ html { scrollbar-color: color-mix(in srgb, var(--accent) 35%, var(--surface)) va
 .card p { grid-column: 1 / -1; }
 .ico { width: auto; height: auto; background: none; border-radius: 0; }
 .ico svg { width: 22px; height: 22px; }
+
+/* The quill that writes the headline on load. Without script, or with
+   reduced motion, the headline is simply there. */
+.quill-pen { position: absolute; left: 0; top: 0; z-index: 2; pointer-events: none; opacity: 0; transition: opacity .35s ease-out; filter: drop-shadow(0 8px 10px rgba(0, 0, 0, .28)); will-change: transform; }
+.quill-pen.writing { opacity: 1; }
+h1 .word { white-space: nowrap; }
+h1 .ink { opacity: 0; filter: blur(5px); transition: opacity .4s ease-out, filter .4s ease-out; }
+h1 .ink.on { opacity: 1; filter: none; }
+@media (max-width: 600px) { .quill-pen { width: 40px; height: 40px; } }

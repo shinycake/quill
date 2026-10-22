@@ -11,13 +11,14 @@ A from-scratch redesign (a "QSL card" look with ultramarine, vermilion and Archi
 
 ## Content changes
 
-- **Measured numbers.** A line under the hero buttons states memory and launch time against Telegram Desktop and links to a "Lighter and quicker, measured" section with the machine, versions, dates and method.
+- **Measured numbers.** A line under the hero buttons states memory and launch time against Telegram Desktop and links to a "Lighter and faster, measured" section with the machine, versions, dates and method.
   - Memory: `quill-tools/bench/RESULTS.md`, 8 October 2026, Telegram Desktop 7.2.9, median of three runs.
   - Launch: the outside-in window timer from 18 October 2026, Telegram Desktop 7.3.1.
   - The page leaves out CPU, because Quill's idle CPU is higher, and it says Windows and Linux haven't been measured.
-- **An HDR section** covers HDR photos sent as files, with the platform and format details from `hdr-viewer-macos.md` and `hdr-viewer-windows.md`. Its captures come from the `ready-hdr-file-viewer` and `ready-hdr-files` demos. The caption says a web page can't show the extra brightness.
+- **An HDR section** covers HDR photos sent as files, with the platform and format details from `hdr-viewer-macos.md` and `hdr-viewer-windows.md`. Its captures come from the `ready-hdr-file-viewer` and `ready-hdr-files` demos.
 - **"What's missing" is gone**, along with `site/data/missing.json` and its nav link.
 - **New screenshots** come from the screenshot demos in light and dark: chat (both themes), channel, polls, reactions, player, accent colour, Appearance settings and the media viewer, as 2000 px WebP files in the existing gallery tabs.
+- **Headline animation:** on load a quill drawn in the icon's blues writes the headline, inking each letter as the nib passes (about 2 s). It skips with reduced motion or a window resize, and the heading keeps its full text for search and screen readers.
 - **Questions** gain "How is Quill different from Telegram Desktop?" and "Is Quill free?".
 
 ## Search and AI search

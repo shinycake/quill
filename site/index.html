@@ -7,7 +7,8 @@
   <meta name="description" content="Quill is a free, open-source Telegram client written in Rust. It uses about a third of Telegram Desktop's memory and opens about four times sooner.">
   <link rel="canonical" href="https://shinycake.github.io/quill/">
   <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#0b0f17">
+  <meta name="theme-color" content="#0b0f17" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f7f9fc" media="(prefers-color-scheme: light)">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Quill">
   <meta property="og:url" content="https://shinycake.github.io/quill/">
@@ -110,7 +111,14 @@
     <section class="hero">
       <div class="glow" aria-hidden="true"></div>
       <div class="wrap hero-inner">
-                <h1>A native Telegram client for your desktop, <span class="accent">lighter and quicker than the official app.</span></h1>
+        <h1 id="hero-title">A native Telegram client for your desktop, <span class="accent">lighter and faster than the official app.</span></h1>
+        <svg class="quill-pen" id="quill-pen" viewBox="0 0 64 64" width="56" height="56" aria-hidden="true" focusable="false">
+          <defs><linearGradient id="quill-vane" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#0a6fb8"/><stop offset=".55" stop-color="#099dda"/><stop offset="1" stop-color="#5fc7fb"/></linearGradient></defs>
+          <path d="M9 55 C16 38 30 18 60 3 C55 20 42 38 20 50 L13 53 Z" fill="url(#quill-vane)"/>
+          <path d="M26 38 L33 33 M31 31 L39 25 M37 23 L45 17" stroke="#ffffff" stroke-opacity=".45" stroke-width="1.6" stroke-linecap="round"/>
+          <path d="M3 61 L50 12" stroke="#e8f6ff" stroke-width="1.6" stroke-linecap="round"/>
+          <path d="M3 61 L9 53 L12 56 Z" fill="#03263f"/>
+        </svg>
         <p class="lede">Quill is written from scratch in Rust and draws its whole interface on the GPU. It runs on macOS, Windows and Linux and talks to Telegram through Telegram's own TDLib library, so your chats, contacts and account are the real thing. It's free and open source.</p>
         <div class="cta">
           <a class="btn primary" id="hero-download" href="#download">
@@ -197,13 +205,12 @@
         <figure class="hdr-shots">
           <img class="hdr-viewer" src="img/hdr-viewer.webp" width="1600" height="1017" loading="lazy" alt="Quill's media viewer showing a sunset photo, with an HDR tag in the toolbar">
           <img class="hdr-bubble" src="img/hdr-bubble.webp" width="665" height="504" loading="lazy" alt="A HEIC photo sent as a file in a chat, labelled HDR">
-          <figcaption>A web page can't show the extra brightness, so this capture of the viewer is in standard range.</figcaption>
         </figure>
       </div>
     </section>
 
     <section class="measured wrap" id="measured" aria-labelledby="measured-title">
-      <h2 class="section-title" id="measured-title">Lighter and quicker, measured</h2>
+      <h2 class="section-title" id="measured-title">Lighter and faster, measured</h2>
       <p class="section-lede">Both apps ran on the same Mac, signed in to the same Telegram account, each with its own local cache.</p>
       <div class="table-card">
         <table class="report">

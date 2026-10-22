@@ -224,6 +224,101 @@ function setupInstallTabs() {
   return fromHash;
 }
 
+// On load, a quill writes the headline: each letter inks in as the nib
+// passes it. Reduced motion, or no script, shows the headline as it is.
+function setupTitleQuill() {
+  const title = document.getElementById("hero-title");
+  const pen = document.getElementById("quill-pen");
+  if (!title || !pen) return;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    pen.remove();
+    return;
+  }
+  title.setAttribute("aria-label", title.textContent.replace(/\s+/g, " ").trim());
+  const letters = [];
+  const walker = document.createTreeWalker(title, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  for (const node of nodes) {
+    const parts = node.textContent.split(/(\s+)/);
+    const frag = document.createDocumentFragment();
+    for (const part of parts) {
+      if (!part) continue;
+      if (/^\s+$/.test(part)) {
+        frag.append(" ");
+        continue;
+      }
+      const word = document.createElement("span");
+      word.className = "word";
+      for (const ch of part) {
+        const ink = document.createElement("span");
+        ink.className = "ink";
+        ink.setAttribute("aria-hidden", "true");
+        ink.textContent = ch;
+        word.append(ink);
+        letters.push(ink);
+      }
+      frag.append(word);
+    }
+    node.replaceWith(frag);
+  }
+
+  const box = pen.parentElement;
+  const size = pen.getBoundingClientRect().width;
+  // The nib's tip sits at (3, 61) in the 64-unit drawing.
+  const tipX = (3 / 64) * size;
+  const tipY = (61 / 64) * size;
+  let spots = [];
+  const measure = () => {
+    const origin = box.getBoundingClientRect();
+    spots = letters.map((ink) => {
+      const r = ink.getBoundingClientRect();
+      return { x: r.right - origin.left, y: r.bottom - origin.top - r.height * 0.22 };
+    });
+  };
+  measure();
+
+  const step = 30;
+  const start = performance.now() + 300;
+  let shown = 0;
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    letters.forEach((ink) => ink.classList.add("on"));
+    pen.classList.remove("writing");
+    setTimeout(() => pen.remove(), 500);
+  };
+  window.addEventListener("resize", finish, { once: true });
+
+  function frame(now) {
+    if (done) return;
+    const t = now - start;
+    if (t < 0) return requestAnimationFrame(frame);
+    pen.classList.add("writing");
+    const target = Math.min(letters.length, Math.floor(t / step) + 1);
+    while (shown < target) letters[shown++].classList.add("on");
+    // Glide the nib between letters, with a small writing wobble.
+    const i = Math.min(letters.length - 1, Math.floor(t / step));
+    const next = spots[Math.min(letters.length - 1, i + 1)];
+    const here = spots[i];
+    const f = (t % step) / step;
+    const sameLine = Math.abs(next.y - here.y) < 4;
+    const x = sameLine ? here.x + (next.x - here.x) * f : here.x;
+    const y = (sameLine ? here.y : here.y) - Math.abs(Math.sin(t / 55)) * 4;
+    const tilt = Math.sin(t / 90) * 5;
+    pen.style.transform = `translate(${x - tipX}px, ${y - tipY}px) rotate(${tilt}deg)`;
+    pen.style.transformOrigin = `${tipX}px ${tipY}px`;
+    if (shown >= letters.length) {
+      setTimeout(finish, 350);
+      return;
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
+setupTitleQuill();
 setupCopy();
 const showInstallFromHash = setupInstallTabs();
 setupHeroVideo();
