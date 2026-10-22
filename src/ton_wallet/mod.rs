@@ -25,6 +25,7 @@ pub mod amount;
 pub mod fiat;
 pub mod links;
 pub mod message;
+pub mod notice;
 pub mod own;
 pub mod payload;
 pub mod push;
@@ -32,6 +33,7 @@ pub mod push;
 pub use address::{explorer_url, group_address, is_valid_ton_address, transaction_explorer_url};
 pub use amount::{format_gram_amount, format_gram_amount_with, format_grams, signed_gram_amount};
 pub use message::{TonConnectRequest, TonConnectRequestState, TonWalletTransfer};
+pub use notice::{OFFICIAL_APPS_URL, WalletSurface};
 pub use own::{NftPage, OwnWallet, TxKind, TxPage, WalletNft, WalletTx};
 pub use payload::{TonWalletPayload, TonWalletPurpose, parse_payload};
 
@@ -211,6 +213,7 @@ pub struct TonWalletState {
     pub money: MoneyPage,
     /// Public addresses of profiles opened this session.
     pub profile_addresses: HashMap<i64, ProfileAddress>,
+    pub notice: Option<WalletSurface>,
 }
 
 impl TonWalletState {

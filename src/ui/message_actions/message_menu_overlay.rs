@@ -335,6 +335,22 @@ impl QuillApp {
                     ),
                 ));
             }
+            if matches!(link, quill::text::LinkTarget::TonAddress(_))
+                && self.session().is_some_and(|s| s.ton_wallet.can_use)
+            {
+                rows.push((
+                    order::TON_SEND_MONEY,
+                    super::super::ton_wallet_ui::send_money_menu_row(
+                        "menu-ton-send-money",
+                        |this| this.message_ui.menu = None,
+                        Some((
+                            &self.frame.context_menu_items,
+                            row_key(order::TON_SEND_MONEY),
+                        )),
+                        cx,
+                    ),
+                ));
+            }
             if let (Some(label), Some(text)) = (link.copy_label(), link.copy_text())
                 && !protected
             {

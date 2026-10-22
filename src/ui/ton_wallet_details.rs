@@ -7,6 +7,7 @@
 use super::app::QuillApp;
 use super::message_media::{MediaCorners, spoiler_surface};
 use super::message_text::{MONO_FONT, format_unix_date_time};
+use super::wallet_notice::notice_button;
 use gpui_kit::component::button::*;
 use gpui_kit::component::description_list::DescriptionList;
 use gpui_kit::component::*;
@@ -16,8 +17,8 @@ use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::state::Session;
 use quill::ton_wallet::{
-    TonWalletState, WalletNft, WalletTx, format_gram_amount_with, group_address, own,
-    transaction_explorer_url,
+    TonWalletState, WalletNft, WalletSurface, WalletTx, format_gram_amount_with, group_address,
+    own, transaction_explorer_url,
 };
 use std::path::PathBuf;
 
@@ -244,25 +245,29 @@ pub(super) fn tx_details(
                     .child(tr(keys::Q_MONEY_THE_COMMENT_IS_VISIBLE_TO)),
             );
     } else if tx.has_encrypted_comment() {
-        col = col
-            .child(
-                spoiler_surface(
-                    0x7702_0000_0000_0000,
-                    None,
-                    px(160.),
-                    px(16.),
-                    MediaCorners::small(),
-                )
-                .role(gpui_kit::Role::Image)
+        col = col.child(
+            div()
+                .id("money-tx-encrypted-open")
+                .cursor_pointer()
+                .role(gpui_kit::Role::Button)
+                .tab_index(0)
                 .aria_label(tr(keys::Q_MONEY_ENCRYPTED_COMMENT))
-                .debug_selector(|| "money-tx-encrypted".to_string()),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(muted)
-                    .child(tr(keys::Q_MONEY_ENCRYPTED_COMMENT_OPEN_IT_IN)),
-            );
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.show_wallet_notice(WalletSurface::EncryptedComment, cx);
+                }))
+                .child(
+                    spoiler_surface(
+                        0x7702_0000_0000_0000,
+                        None,
+                        px(160.),
+                        px(16.),
+                        MediaCorners::small(),
+                    )
+                    .role(gpui_kit::Role::Image)
+                    .aria_label(tr(keys::Q_MONEY_ENCRYPTED_COMMENT))
+                    .debug_selector(|| "money-tx-encrypted".to_string()),
+                ),
+        );
     }
     let party = super::ton_wallet_money::tx_title(session, tx);
     let has_peer = tx.peer_user_id != 0 || !tx.peer_domain.is_empty();
@@ -375,7 +380,14 @@ pub(super) fn nft_details(
             cx,
         ));
     }
-    col.into_any_element()
+    col.child(notice_button(
+        "money-nft-send",
+        "money-nft-send".to_string(),
+        tr_with(keys::WALLET_COLLECTIBLE_SEND, &[("name", nft.title())]),
+        WalletSurface::SendNft,
+        cx,
+    ))
+    .into_any_element()
 }
 
 /// "Your first Grams!": shown once, when the first incoming transfer's
@@ -413,12 +425,26 @@ pub(super) fn first_grams_hint(wallet: &TonWalletState, cx: &mut Context<QuillAp
         )
         .child(
             div()
-                .debug_selector(|| "money-hint-got-it".to_string())
+                .flex()
+                .gap_2()
+                .child(notice_button(
+                    "money-hint-send",
+                    "money-hint-send".to_string(),
+                    tr(keys::WALLET_FIRST_SEND_TITLE),
+                    WalletSurface::Send,
+                    cx,
+                ))
                 .child(
-                    Button::new("money-hint-got-it")
-                        .label(tr(keys::CHANNEL_EARN_LEARN_CLOSE))
-                        .primary()
-                        .on_click(cx.listener(|this, _, _, cx| this.dismiss_first_grams_hint(cx))),
+                    div()
+                        .debug_selector(|| "money-hint-got-it".to_string())
+                        .child(
+                            Button::new("money-hint-got-it")
+                                .label(tr(keys::CHANNEL_EARN_LEARN_CLOSE))
+                                .primary()
+                                .on_click(
+                                    cx.listener(|this, _, _, cx| this.dismiss_first_grams_hint(cx)),
+                                ),
+                        ),
                 ),
         )
         .into_any_element()

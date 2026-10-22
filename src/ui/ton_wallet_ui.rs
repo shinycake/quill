@@ -12,6 +12,7 @@ use super::app::QuillApp;
 use super::entity_links::LinkPopup;
 use super::message_media::{MediaCorners, spoiler_surface};
 use super::message_text::MONO_FONT;
+use super::wallet_notice::notice_button;
 use super::*;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
@@ -23,8 +24,8 @@ use quill::state::{HistoryMessage, Session};
 use quill::telegram::envelope::{MessageContent, ServiceAction};
 use quill::text::LinkTarget;
 use quill::ton_wallet::{
-    SERVICE_NOTIFICATIONS_CHAT_ID, TonWalletTransfer, explorer_url, group_address,
-    signed_gram_amount,
+    SERVICE_NOTIFICATIONS_CHAT_ID, TonConnectRequestState, TonWalletTransfer, WalletSurface,
+    explorer_url, format_gram_amount_with, group_address, signed_gram_amount,
 };
 
 /// The card's width (iOS `cardSize`).
@@ -85,64 +86,92 @@ impl QuillApp {
             .to_string();
         let muted = cx.theme().muted_foreground;
         let hover = cx.theme().secondary;
+        let balance = self
+            .session()
+            .and_then(|session| session.user_full_info(user_id))
+            .and_then(|info| info.extras.ton_wallet_card_balance);
         let copy = address.clone();
         let owner = cx.entity().downgrade();
         let menu_address = address.clone();
-        Some(
-            div()
-                .id("info-ton-wallet")
-                .flex()
-                .flex_col()
-                .px_3()
-                .py_2()
-                .border_t_1()
-                .border_color(cx.theme().border)
-                .cursor_pointer()
-                .role(gpui_kit::Role::Button)
-                .aria_label(tr_with(
-                    keys::Q_MONEY_WALLET_ADDRESS,
-                    &[("address", &address.to_string())],
-                ))
-                .tab_index(0)
-                .hover(move |style| style.bg(hover))
-                .debug_selector(|| "info-ton-wallet".to_string())
-                .child(
-                    div()
-                        .text_sm()
-                        .font_family(MONO_FONT)
-                        .child(group_address(&address)),
-                )
-                .child(
+        let send = div().px_3().pb_2().child(notice_button(
+            "info-ton-wallet-send",
+            "info-ton-wallet-send".to_string(),
+            tr(keys::WALLET_PROFILE_SEND_MONEY),
+            WalletSurface::SendMoney,
+            cx,
+        ));
+        let row = div()
+            .id("info-ton-wallet")
+            .flex()
+            .flex_col()
+            .px_3()
+            .py_2()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .cursor_pointer()
+            .role(gpui_kit::Role::Button)
+            .aria_label(tr_with(
+                keys::Q_MONEY_WALLET_ADDRESS,
+                &[("address", &address.to_string())],
+            ))
+            .tab_index(0)
+            .hover(move |style| style.bg(hover))
+            .debug_selector(|| "info-ton-wallet".to_string())
+            .child(
+                div()
+                    .text_sm()
+                    .font_family(MONO_FONT)
+                    .child(group_address(&address)),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(muted)
+                    .child(tr(keys::Q_MONEY_WALLET_ADDRESS_2)),
+            )
+            .when_some(balance, |row, nanos| {
+                row.child(
                     div()
                         .text_xs()
                         .text_color(muted)
-                        .child(tr(keys::Q_MONEY_WALLET_ADDRESS_2)),
+                        .debug_selector(|| "info-ton-wallet-balance".to_string())
+                        .child(tr_with(
+                            keys::WALLET_SEND_BALANCE,
+                            &[("amount", &format_gram_amount_with(nanos, 2))],
+                        )),
                 )
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.copy_ton_address(copy.clone(), cx);
-                }))
-                .context_menu(move |menu, _, _| {
-                    let copy_owner = owner.clone();
-                    let open_owner = owner.clone();
-                    let copy = menu_address.clone();
-                    let open = menu_address.clone();
-                    menu.item(PopupMenuItem::new(tr(keys::Q_MONEY_COPY_ADDRESS)).on_click(
+            })
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.copy_ton_address(copy.clone(), cx);
+            }))
+            .context_menu(move |menu, _, _| {
+                let copy_owner = owner.clone();
+                let open_owner = owner.clone();
+                let copy = menu_address.clone();
+                let open = menu_address.clone();
+                menu.item(PopupMenuItem::new(tr(keys::Q_MONEY_COPY_ADDRESS)).on_click(
+                    move |_, _, cx| {
+                        let _ = copy_owner.update(cx, |this, cx| {
+                            this.copy_ton_address(copy.clone(), cx);
+                        });
+                    },
+                ))
+                .item(
+                    PopupMenuItem::new(tr(keys::Q_MONEY_VIEW_IN_EXPLORER)).on_click(
                         move |_, _, cx| {
-                            let _ = copy_owner.update(cx, |this, cx| {
-                                this.copy_ton_address(copy.clone(), cx);
+                            let _ = open_owner.update(cx, |this, cx| {
+                                this.open_ton_explorer(&open, cx);
                             });
                         },
-                    ))
-                    .item(
-                        PopupMenuItem::new(tr(keys::Q_MONEY_VIEW_IN_EXPLORER)).on_click(
-                            move |_, _, cx| {
-                                let _ = open_owner.update(cx, |this, cx| {
-                                    this.open_ton_explorer(&open, cx);
-                                });
-                            },
-                        ),
-                    )
-                })
+                    ),
+                )
+            });
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .child(row)
+                .child(send)
                 .into_any_element(),
         )
     }
@@ -212,6 +241,45 @@ pub(super) fn explorer_menu_row(
     .into_any_element()
 }
 
+pub(super) fn send_money_menu_row(
+    id: &'static str,
+    on_open: impl Fn(&mut QuillApp) + 'static,
+    key_target: Option<(&super::context_menu_keys::ContextMenuItems, u32)>,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let row_hover = cx.theme().accent;
+    let label = tr(keys::WALLET_PROFILE_SEND_MONEY);
+    let row = div()
+        .id(id)
+        .flex()
+        .items_center()
+        .gap_3()
+        .px_3()
+        .py_1p5()
+        .rounded_md()
+        .cursor_pointer()
+        .text_sm()
+        .text_color(text_menu())
+        .hover(|style| style.bg(row_hover))
+        .role(gpui_kit::Role::MenuItem)
+        .aria_label(label)
+        .debug_selector(move || id.to_string())
+        .child(Icon::new(gpui_kit::assets::IconName::ArrowUp).size(px(16.)))
+        .child(label)
+        .on_click(cx.listener(move |this, _, _, cx| {
+            on_open(this);
+            this.show_wallet_notice(WalletSurface::SendMoney, cx);
+        }));
+    match key_target {
+        Some((items, key)) => {
+            use super::context_menu_keys::MenuKeyTarget;
+            row.menu_key_target(key, items, cx)
+        }
+        None => row,
+    }
+    .into_any_element()
+}
+
 /// The transfer of a wallet-transfer service message, if it is one.
 pub(super) fn transfer_of(content: &MessageContent) -> Option<&TonWalletTransfer> {
     match content {
@@ -221,6 +289,29 @@ pub(super) fn transfer_of(content: &MessageContent) -> Option<&TonWalletTransfer
         },
         _ => None,
     }
+}
+
+pub(super) fn connect_review_button(
+    row_id: u64,
+    content: &MessageContent,
+    cx: &mut Context<QuillApp>,
+) -> Option<AnyElement> {
+    let MessageContent::Action(action) = content else {
+        return None;
+    };
+    let ServiceAction::TonConnectRequest(request) = action.as_ref() else {
+        return None;
+    };
+    if !matches!(request.state, TonConnectRequestState::Pending { .. }) {
+        return None;
+    }
+    Some(notice_button(
+        ("ton-connect-review", row_id),
+        format!("ton-connect-review-{row_id}"),
+        tr(keys::Q_MONEY_REVIEW_REQUEST),
+        WalletSurface::ConnectRequest,
+        cx,
+    ))
 }
 
 /// The card under the "Dana sent you 5 Grams" line: the direction ribbon,
@@ -344,17 +435,29 @@ pub(super) fn transfer_card(
         )
     } else if transfer.has_encrypted_comment() {
         Some(
-            spoiler_surface(
-                row_id ^ 0x7701_0000_0000_0000,
-                None,
-                px(ENCRYPTED_COMMENT_WIDTH),
-                px(16.),
-                MediaCorners::small(),
-            )
-            .role(gpui_kit::Role::Image)
-            .aria_label(tr(keys::Q_MONEY_ENCRYPTED_COMMENT))
-            .debug_selector(move || format!("ton-transfer-encrypted-{row_id}"))
-            .into_any_element(),
+            div()
+                .id(("ton-transfer-encrypted-open", row_id))
+                .cursor_pointer()
+                .role(gpui_kit::Role::Button)
+                .tab_index(0)
+                .aria_label(tr(keys::Q_MONEY_ENCRYPTED_COMMENT))
+                .debug_selector(move || format!("ton-transfer-encrypted-open-{row_id}"))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.show_wallet_notice(WalletSurface::EncryptedComment, cx);
+                }))
+                .child(
+                    spoiler_surface(
+                        row_id ^ 0x7701_0000_0000_0000,
+                        None,
+                        px(ENCRYPTED_COMMENT_WIDTH),
+                        px(16.),
+                        MediaCorners::small(),
+                    )
+                    .role(gpui_kit::Role::Image)
+                    .aria_label(tr(keys::Q_MONEY_ENCRYPTED_COMMENT))
+                    .debug_selector(move || format!("ton-transfer-encrypted-{row_id}")),
+                )
+                .into_any_element(),
         )
     } else {
         None
