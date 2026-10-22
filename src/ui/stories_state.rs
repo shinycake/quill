@@ -51,10 +51,9 @@ pub(crate) struct StoryUi {
     /// Phase 9.7: the chat story page overlay (albums / chat-page
     /// stories / archive); `None` when closed.
     pub(super) page: Option<StoryPage>,
-    /// Phase 9.3: story posting composer state (pure) + its path /
-    /// caption / user-search inputs.
+    /// Phase 9.3: story posting composer state (pure) + its caption /
+    /// user-search inputs.
     pub(super) composer: StoryComposer,
-    pub(super) composer_path: Entity<TextareaState>,
     pub(super) composer_caption: Entity<TextareaState>,
     pub(super) composer_user_search: Entity<TextareaState>,
     /// Phase 9.4: story areas — link URL + suggested-reaction emoji
@@ -109,15 +108,8 @@ impl StoryUi {
                 .auto_grow(1, 3)
                 .submit_on_enter(true)
         });
-        // Phase 9.3: story composer inputs — media path (path entry; no
-        // native file-picker infrastructure yet), caption, and the
+        // Phase 9.3: story composer inputs — caption and the
         // selected-users search.
-        let story_composer_path = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("/path/to/photo.jpg")
-                .auto_grow(1, 1)
-                .submit_on_enter(false)
-        });
         let story_composer_caption = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder(tr(keys::Q_MEDIA_CAPTION_BOLD_MARKUP_SUPPORTED))
@@ -175,7 +167,6 @@ impl StoryUi {
             report_text_input: story_report_text_input,
             page: None,
             composer: StoryComposer::default(),
-            composer_path: story_composer_path,
             composer_caption: story_composer_caption,
             composer_user_search: story_composer_user_search,
             composer_link: story_composer_link,

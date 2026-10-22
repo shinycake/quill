@@ -3,7 +3,9 @@
 //! (injected, no live Telegram). `QUILL_DEMO_STORY=gone` instead opens a
 //! linked story the server no longer has, which shows the broken-link
 //! toast, and `QUILL_DEMO_STORY=card` opens Leo's story the way a story
-//! card in a message does: alone, with no neighbours.
+//! card in a message does: alone, with no neighbours. `composer` opens the
+//! story composer instead, and `composer-picked` opens it with a photo
+//! already picked.
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
@@ -38,7 +40,7 @@ register_demos![
 ];
 
 impl QuillApp {
-    fn demo_story_viewer(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn demo_story_viewer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let variant = std::env::var("QUILL_DEMO_STORY").unwrap_or_default();
         let Some(session) = self.demo_session.as_mut() else {
             return;
@@ -69,6 +71,13 @@ impl QuillApp {
                 self.open_story_viewer(ChatId(LEO), 99, StoryOpenScope::Link, cx);
             }
             "card" => self.open_story_viewer(ChatId(LEO), 3, StoryOpenScope::Single, cx),
+            "composer" | "composer-picked" => {
+                self.open_story_composer(window, cx);
+                if variant == "composer-picked" {
+                    let photo = demo_media_allowlist().join("showcase").join("p3.jpg");
+                    self.take_story_media(&[photo], cx);
+                }
+            }
             _ => self.open_story_viewer(ChatId(LEO), 3, StoryOpenScope::Tray, cx),
         }
     }

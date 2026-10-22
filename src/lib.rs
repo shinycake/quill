@@ -131,7 +131,6 @@ pub mod paid_reaction;
 pub mod passcode;
 pub mod passkey_probe;
 pub mod passkeys;
-pub mod path_expand;
 pub mod payment_invoice;
 pub mod peer_badge;
 pub mod peer_color;

@@ -410,8 +410,8 @@ impl QuillApp {
                 "g8-edit-photo",
                 I::Camera,
                 tr(keys::Q_PEOPLE_CHANGE_PHOTO),
-                |this, window, cx| {
-                    this.open_group_photo_dialog(chat_id, window, cx);
+                |this, _window, cx| {
+                    this.choose_group_photo(chat_id, cx);
                 }
             );
         }

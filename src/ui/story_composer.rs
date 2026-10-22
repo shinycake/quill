@@ -14,7 +14,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{StoryPostOutcome, StoryPostState};
-use quill::story_composer::{StoryComposer, StoryExpiry, StoryMediaKind, StoryPrivacy};
+use quill::story_composer::{StoryComposer, StoryExpiry, StoryMedia, StoryMediaKind, StoryPrivacy};
 use quill::telegram::requests::input_story_content;
 
 impl QuillApp {
@@ -24,9 +24,6 @@ impl QuillApp {
     /// `getChatsToPostStories` for the "post as" picker.
     pub(super) fn open_story_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.stories.composer = StoryComposer::open();
-        self.stories
-            .composer_path
-            .update(cx, |input, cx| input.set_value("", window, cx));
         self.stories
             .composer_caption
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -74,9 +71,6 @@ impl QuillApp {
             })
             .unwrap_or_default();
         self.stories
-            .composer_path
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.stories
             .composer_caption
             .update(cx, |input, cx| input.set_value(&caption, window, cx));
         self.stories
@@ -98,9 +92,6 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.stories.composer = StoryComposer::open_repost(poster_chat_id, story_id);
-        self.stories
-            .composer_path
-            .update(cx, |input, cx| input.set_value("", window, cx));
         self.stories
             .composer_caption
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -142,14 +133,7 @@ impl QuillApp {
         if self.stories.composer.post_sent || self.stories.composer.save_sent {
             return;
         }
-        let path = self
-            .stories
-            .composer_path
-            .read(cx)
-            .value()
-            .trim()
-            .to_string();
-        let kind = StoryMediaKind::detect(&path);
+        let media = self.stories.composer.media.clone();
         // Phase 9.4: sync the area inputs into composer state before
         // validating — the link URL check runs up front so a typo
         // surfaces locally instead of failing the post.
@@ -168,12 +152,13 @@ impl QuillApp {
             .trim()
             .to_string();
         let is_edit = self.stories.composer.is_edit();
-        let error = if !is_edit && path.is_empty() {
-            Some(tr(keys::Q_MEDIA_ENTER_A_PHOTO_OR_VIDEO))
-        } else if !path.is_empty() && kind == StoryMediaKind::Unknown {
-            Some(tr(keys::Q_MEDIA_NOT_A_PHOTO_OR_VIDEO))
-        } else if !path.is_empty() && !std::path::Path::new(&path).is_file() {
-            Some(tr(keys::Q_MEDIA_FILE_NOT_FOUND_CHECK_THE))
+        let error = if !is_edit && media.is_none() {
+            Some(tr(keys::Q_MEDIA_CHOOSE_A_PHOTO_OR_VIDEO))
+        } else if media
+            .as_ref()
+            .is_some_and(|media| !std::path::Path::new(&media.path).is_file())
+        {
+            Some(tr(keys::Q_MEDIA_FILE_MOVED_CHOOSE_AGAIN))
         } else if !is_edit && self.stories.composer.needs_users() {
             Some(tr(keys::Q_MEDIA_PICK_AT_LEAST_ONE_USER))
         } else {
@@ -185,7 +170,7 @@ impl QuillApp {
             return;
         }
         if is_edit {
-            self.story_composer_save_edit(cx, &path, kind);
+            self.story_composer_save_edit(cx, media.as_ref());
             return;
         }
         // Phase 9.5: the check runs on the "post as" chat — own stories
@@ -222,19 +207,18 @@ impl QuillApp {
     }
 
     /// Phase 9.5: Save pressed in edit mode — send `editStory` with
-    /// `null` for every unchanged field (media empty = keep; areas
+    /// `null` for every unchanged field (no new media = keep; areas
     /// only change together with new media, per `td_api.tl:13732`).
     pub(super) fn story_composer_save_edit(
         &mut self,
         cx: &mut Context<Self>,
-        path: &str,
-        kind: StoryMediaKind,
+        media: Option<&StoryMedia>,
     ) {
         let Some((poster_chat_id, story_id)) = self.stories.composer.edit_target else {
             return;
         };
         let caption = self.stories.composer_caption.read(cx).value().to_string();
-        let content = (!path.is_empty()).then(|| input_story_content(kind, path));
+        let content = media.map(|media| input_story_content(media.kind, &media.path));
         // Areas can't be edited unless the content changes — keep them
         // untouched when the media is kept.
         let areas = content.as_ref().map(|_| self.stories.composer.areas_json());
@@ -284,16 +268,9 @@ impl QuillApp {
                 // Hoisted before the mutable `live` borrow below.
                 let target = self.story_composer_target_chat();
                 let from_story = self.stories.composer.repost_source;
-                if let Some(live) = self.live.as_mut() {
-                    let path = self
-                        .stories
-                        .composer_path
-                        .read(cx)
-                        .value()
-                        .trim()
-                        .to_string();
+                let media = self.stories.composer.media.clone();
+                if let (Some(live), Some(media)) = (self.live.as_mut(), media) {
                     let caption = self.stories.composer_caption.read(cx).value().to_string();
-                    let kind = StoryMediaKind::detect(&path);
                     let privacy = self.stories.composer.privacy;
                     let user_ids = self.stories.composer.selected_user_ids.clone();
                     // Phase 9.4: areas + options are read from composer state
@@ -305,8 +282,8 @@ impl QuillApp {
                     let protect_content = self.stories.composer.protect_content;
                     match live.driver.post_story(
                         target,
-                        kind,
-                        &path,
+                        media.kind,
+                        &media.path,
                         &caption,
                         privacy,
                         &user_ids,
@@ -331,11 +308,44 @@ impl QuillApp {
                                 Some(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_POST).into());
                         }
                     }
-                } else {
+                } else if self.live.is_none() {
                     self.stories.composer.local_error =
                         Some(tr(keys::Q_MEDIA_DEMO_POSTING_RUNS_WITH_LIVE).into());
                 }
             }
+        }
+        cx.notify();
+    }
+
+    /// "Choose a file": the native file dialog for the story's photo or
+    /// video.
+    pub(super) fn choose_story_media(&mut self, cx: &mut Context<Self>) {
+        let picker = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some(tr(keys::ATTACH_PHOTO_OR_VIDEO).into()),
+        });
+        cx.spawn(async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = picker.await
+                && let Some(path) = paths.into_iter().next()
+            {
+                let _ = this.update(cx, |this, cx| this.take_story_media(&[path], cx));
+            }
+        })
+        .detach();
+    }
+
+    /// A pick or a drop: the first photo or video among `paths` becomes
+    /// the story's media.
+    pub(super) fn take_story_media(
+        &mut self,
+        paths: &[std::path::PathBuf],
+        cx: &mut Context<Self>,
+    ) {
+        let composer = &mut self.stories.composer;
+        if !paths.iter().any(|path| composer.pick_media(path)) {
+            composer.local_error = Some(tr(keys::Q_MEDIA_ONLY_PHOTOS_AND_VIDEOS_STORIES).into());
         }
         cx.notify();
     }
@@ -384,21 +394,13 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Phase 9.3: the story composer overlay — path entry (no native file
-    /// picker yet), photo preview, caption, the 4-way privacy selector
+    /// Phase 9.3: the story composer overlay — the media drop area (click
+    /// for the native file dialog), caption, the 4-way privacy selector
     /// with a contact picker for "Selected users", and the Post button.
     /// `canPostStory` is checked on every Post press; the status line
     /// shows the honest pending / succeeded / failed states.
     pub(super) fn story_composer_overlay(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let path = self
-            .stories
-            .composer_path
-            .read(cx)
-            .value()
-            .trim()
-            .to_string();
-        let kind = StoryMediaKind::detect(&path);
-        let file_exists = !path.is_empty() && std::path::Path::new(&path).is_file();
+        let media = self.stories.composer.media.clone();
         // Phase 9.5: edit / repost modes reshape the composer — edit
         // hides privacy + expiry + toggles (`editStory` has no such
         // fields); the areas are only editable when the media is being
@@ -406,7 +408,7 @@ impl QuillApp {
         let is_edit = self.stories.composer.is_edit();
         let is_repost = self.stories.composer.repost_source.is_some();
         let show_privacy = !is_edit && self.stories.composer.as_chat_id.is_none();
-        let areas_editable = !is_edit || !path.is_empty();
+        let areas_editable = !is_edit || media.is_some();
         let title = if is_edit {
             tr(keys::Q_MEDIA_EDIT_STORY)
         } else if is_repost {
@@ -415,56 +417,96 @@ impl QuillApp {
             tr(keys::Q_MEDIA_NEW_STORY)
         };
 
-        let preview: AnyElement = match (kind, file_exists) {
-            (StoryMediaKind::Photo, true) => img(std::path::Path::new(&path))
-                .id("story-composer-preview")
-                .w(px(180.))
-                .h(px(240.))
-                .aspect_ratio(px(180.) / px(240.))
-                .rounded_md()
-                .object_fit(ObjectFit::Contain)
-                .bg(bg_deep())
-                .with_fallback(|| {
+        let hint = |text: &'static str, color: Rgba| {
+            div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .justify_center()
+                .p_3()
+                .child(
                     div()
-                        .w(px(180.))
-                        .h(px(240.))
-                        .rounded_md()
-                        .bg(bg_deep())
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_color(text_bright())
-                        .child(tr(keys::Q_MEDIA_COULD_NOT_RENDER))
-                        .into_any_element()
-                })
-                .into_any_element(),
-            (StoryMediaKind::Video, true) => div()
-                .id("story-composer-preview")
-                .w(px(180.))
-                .h(px(240.))
-                .rounded_md()
-                .bg(bg_deep())
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_sm()
-                .text_color(text_bright())
-                .child(tr(keys::Q_MEDIA_VIDEO_UPLOADS_THE_FULL_FILE))
-                .into_any_element(),
-            _ => div()
-                .id("story-composer-preview")
-                .w(px(180.))
-                .h(px(240.))
-                .rounded_md()
-                .bg(bg_deep())
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_sm()
-                .text_color(text_muted())
-                .child(tr(keys::Q_MEDIA_PHOTO_VIDEO_PREVIEW))
-                .into_any_element(),
+                        .w_full()
+                        .text_center()
+                        .text_sm()
+                        .text_color(color)
+                        .child(text),
+                )
+                .into_any_element()
         };
+        let preview_body = match &media {
+            Some(media) if media.kind == StoryMediaKind::Photo => {
+                img(std::path::Path::new(&media.path))
+                    .size_full()
+                    .object_fit(ObjectFit::Contain)
+                    .with_fallback(move || hint(tr(keys::Q_MEDIA_COULD_NOT_RENDER), text_bright()))
+                    .into_any_element()
+            }
+            Some(_) => hint(tr(keys::Q_MEDIA_VIDEO_UPLOADS_THE_FULL_FILE), text_bright()),
+            None if is_edit => hint(tr(keys::Q_MEDIA_STORY_KEEPS_CURRENT_MEDIA), text_muted()),
+            None => hint(tr(keys::Q_MEDIA_DROP_OR_CLICK_STORY_MEDIA), text_muted()),
+        };
+        // Click for the file dialog, or drop a file from the desktop.
+        let preview = div()
+            .id("story-composer-preview")
+            .role(gpui_kit::Role::Button)
+            .aria_label(tr(keys::ATTACH_PHOTO_OR_VIDEO))
+            .tab_index(0)
+            .cursor_pointer()
+            .w(px(180.))
+            .h(px(240.))
+            .rounded_md()
+            .overflow_hidden()
+            .border_1()
+            .border_color(transparent_black())
+            .bg(bg_deep())
+            .drag_over::<ExternalPaths>(|style, _, _, _| style.border_color(accent()))
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
+                this.take_story_media(paths.paths(), cx);
+            }))
+            .on_click(cx.listener(|this, _, _, cx| this.choose_story_media(cx)))
+            .child(preview_body);
+        let file_name = media.as_ref().and_then(|media| {
+            std::path::Path::new(&media.path)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        });
+        let media_row = div()
+            .w_full()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_sm()
+                    .text_color(text_muted())
+                    .when_some(file_name, |this, name| this.child(name)),
+            )
+            .when(is_edit && media.is_some(), |this| {
+                this.child(
+                    Button::new("story-composer-keep-media")
+                        .ghost()
+                        .small()
+                        .label(tr(keys::Q_MEDIA_KEEP_CURRENT_MEDIA))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.stories.composer.media = None;
+                            cx.notify();
+                        })),
+                )
+            })
+            .child(
+                Button::new("story-composer-choose-media")
+                    .small()
+                    .label(if media.is_some() || is_edit {
+                        tr(keys::Q_MEDIA_REPLACE)
+                    } else {
+                        tr(keys::CHOOSE_FILE)
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| this.choose_story_media(cx))),
+            );
 
         // Phase 6: kit RadioGroup (was: buttons with a ☑/☐ prefix).
         // Controlled: the chosen index writes the value.
@@ -739,25 +781,7 @@ impl QuillApp {
                                     .flex()
                                     .flex_col()
                                     .gap_1()
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(text_muted())
-                                            // Phase 9.5: in edit mode the
-                                            // path is optional — empty
-                                            // keeps the current media.
-                                            .child(if is_edit {
-                                                tr(keys::Q_MEDIA_REPLACE_MEDIA_OPTIONAL_EMPTY_KEEPS)
-                                                    .to_string()
-                                            } else {
-                                                format!("{} file", kind.label())
-                                            }),
-                                    )
-                                    .child(
-                                        Textarea::new(&self.stories.composer_path)
-                                            .aria_label(tr(keys::Q_MEDIA_STORY_MEDIA_FILE_PATH))
-                                            .h(px(40.)),
-                                    )
+                                    .child(media_row)
                                     .child(
                                         div()
                                             .text_xs()
