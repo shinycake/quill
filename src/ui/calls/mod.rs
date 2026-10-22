@@ -109,6 +109,23 @@ impl QuillApp {
     /// Slice parity:platform-offline-errors — a call can't be queued
     /// like a message, so refuse while offline with an honest note.
     pub(super) fn dial_user(&mut self, user_id: i64, is_video: bool, cx: &mut Context<Self>) {
+        // tdesktop asks for the microphone (and the camera for video)
+        // before calling, so a refusal never becomes a silent call.
+        if self.live.is_some() {
+            self.calls.dialing = Some((user_id, is_video));
+            self.with_capture_access(is_video, Self::dial_allowed, cx);
+            return;
+        }
+        self.send_dial(user_id, is_video, cx);
+    }
+
+    fn dial_allowed(&mut self, cx: &mut Context<Self>) {
+        if let Some((user_id, is_video)) = self.calls.dialing.take() {
+            self.send_dial(user_id, is_video, cx);
+        }
+    }
+
+    fn send_dial(&mut self, user_id: i64, is_video: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.session.is_offline() {
                 self.connection.set_note(StatusNote::error(tr(
@@ -383,6 +400,23 @@ impl QuillApp {
 
     /// Phase C1: `acceptCall` for the ringing incoming call.
     pub(super) fn accept_incoming_call(&mut self, cx: &mut Context<Self>) {
+        // As for dialing: the microphone, and the camera for a video call
+        // that will send it, are allowed before answering.
+        let camera = self.live.as_ref().and_then(|live| {
+            live.driver
+                .session
+                .calls
+                .active_call
+                .as_ref()
+                .map(|call| call.camera_on)
+        });
+        match camera {
+            Some(camera) => self.with_capture_access(camera, Self::answer_call, cx),
+            None => self.answer_call(cx),
+        }
+    }
+
+    fn answer_call(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.accept_call();
             self.connection.set_note(match result {
