@@ -274,3 +274,19 @@ fn update_user_parses_is_premium() {
         other => panic!("{other:?}"),
     }
 }
+
+// The TON wallet card on a profile (`userFullInfo.ton_wallet_card`) gives
+// the profile a balance; without a card there is none.
+#[test]
+fn a_wallet_card_gives_the_profile_a_balance() {
+    let with_card = serde_json::json!({"ton_wallet_card": {
+        "@type": "tonWalletCard", "address": "EQabc", "gram_amount": 1_500_000_000i64,
+        "stickers": [], "background_nft_address": ""}});
+    let extras = envelope_types::parse_user_profile_extras(Some(&with_card));
+    assert_eq!(extras.ton_wallet_card_balance, Some(1_500_000_000));
+    let none = serde_json::json!({"ton_wallet_card": null});
+    let extras = envelope_types::parse_user_profile_extras(Some(&none));
+    assert_eq!(extras.ton_wallet_card_balance, None);
+    let extras = envelope_types::parse_user_profile_extras(None);
+    assert_eq!(extras.ton_wallet_card_balance, None);
+}

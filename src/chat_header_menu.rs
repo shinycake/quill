@@ -34,6 +34,8 @@ pub enum HeaderEntry {
     AutoDelete,
     ReceivedGifts,
     Gift,
+    /// `lng_wallet_profile_send_money`: opens the shared wallet notice.
+    SendMoney,
     NewWindow,
     CloseSecretChat,
 }
@@ -63,6 +65,9 @@ pub struct HeaderFacts<'a> {
     pub has_discussion: bool,
     pub auto_delete_ready: bool,
     pub gifts_ok: bool,
+    /// The wallet is on and this user has a known public wallet address
+    /// (tdesktop `CanOfferSendMoney`; never for bots).
+    pub can_send_money: bool,
     pub new_window: bool,
 }
 
@@ -135,6 +140,9 @@ pub fn header_entries(facts: &HeaderFacts<'_>) -> Vec<HeaderEntry> {
         out.push(HeaderEntry::ReceivedGifts);
     }
     out.push(HeaderEntry::Gift);
+    if facts.can_send_money && matches!(facts.kind, ChatKind::Private { .. }) && !facts.is_bot {
+        out.push(HeaderEntry::SendMoney);
+    }
     if facts.new_window {
         out.push(HeaderEntry::NewWindow);
     }
@@ -170,6 +178,7 @@ mod tests {
             has_discussion: false,
             auto_delete_ready: false,
             gifts_ok: false,
+            can_send_money: false,
             new_window: false,
         }
     }
@@ -193,6 +202,20 @@ mod tests {
         assert!(entries.contains(&E::ViewProfile("View profile")));
         assert!(!entries.contains(&E::CreatePoll));
         assert!(!entries.iter().any(|e| matches!(e, E::Boost(_))));
+    }
+
+    #[test]
+    fn send_money_follows_gift_for_a_user_with_a_wallet_address() {
+        let kind = user();
+        let mut f = facts(&kind);
+        assert!(!header_entries(&f).contains(&E::SendMoney));
+        f.can_send_money = true;
+        let entries = header_entries(&f);
+        let gift = entries.iter().position(|e| *e == E::Gift);
+        let send = entries.iter().position(|e| *e == E::SendMoney);
+        assert_eq!(send, gift.map(|at| at + 1));
+        f.is_bot = true;
+        assert!(!header_entries(&f).contains(&E::SendMoney));
     }
 
     #[test]

@@ -511,6 +511,8 @@ mod video_editor_set;
 mod video_editor_timeline;
 mod video_editor_tools;
 mod video_player;
+mod wallet_notice;
+mod wallet_notice_demo;
 mod wallpaper;
 mod wallpaper_cache;
 mod wallpaper_preview;

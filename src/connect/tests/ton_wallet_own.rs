@@ -3,7 +3,9 @@
 //! `can_use_ton_wallet`, and only read-only methods go out.
 use super::ton_wallet::Rig;
 use crate::state::DeepLinkState;
-use crate::ton_wallet::{FIRST_TRANSFER_HINT, MoneyTab, ProfileAddress, READ_ONLY_METHODS};
+use crate::ton_wallet::{
+    FIRST_TRANSFER_HINT, MoneyTab, ProfileAddress, READ_ONLY_METHODS, WalletSurface,
+};
 use serde_json::{Value, json};
 
 const ADDRESS: &str = "EQAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFwxyz";
@@ -265,18 +267,17 @@ fn wallet_links_show_a_notice_instead_of_acting() {
         "tg://sendgrams?to=EQabc&amount=5",
         "internalLinkTypeTonWalletTransfer",
     );
+    assert_eq!(on, None, "the notice replaces the link banner");
     assert_eq!(
-        on,
-        Some(DeepLinkState::ShowText(
-            crate::ton_wallet::links::TRANSFER_NOTICE.into()
-        ))
+        rig.driver.session.ton_wallet.notice,
+        Some(WalletSurface::TransferLink)
     );
+    rig.driver.session.ton_wallet.dismiss_notice();
     let connect = resolve_link(&mut rig, "tg://ton?connect=x", "internalLinkTypeTonConnect");
+    assert_eq!(connect, None);
     assert_eq!(
-        connect,
-        Some(DeepLinkState::ShowText(
-            crate::ton_wallet::links::TON_CONNECT_NOTICE.into()
-        ))
+        rig.driver.session.ton_wallet.notice,
+        Some(WalletSurface::ConnectLink)
     );
     // Only the three lookups went out: nothing was prefilled or sent.
     assert_eq!(rig.recorder.snapshot().len(), before + 3);

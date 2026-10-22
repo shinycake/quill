@@ -107,7 +107,8 @@ impl QuillApp {
         self.edit_transfer(cx, |picker| picker.choose(user_id, name));
     }
 
-    /// "Send via Blockchain".
+    /// "Send via Blockchain", or "Move to My Wallet" (the shared notice)
+    /// while the wallet is on.
     pub(super) fn tap_transfer_export(&mut self, cx: &mut Context<Self>) {
         let now = now_unix();
         let state = self.session().and_then(|s| {
@@ -115,8 +116,13 @@ impl QuillApp {
             let gift = s.payments.hub.gifts.iter().find(|g| g.id == *id)?;
             Some(gift.export_state(now))
         });
+        let to_wallet = self.session().is_some_and(|s| s.ton_wallet.can_use);
         if let Some(state) = state {
-            self.edit_transfer(cx, |picker| picker.tap_export(state));
+            if to_wallet && state == quill::gift_manage::ExportState::Ready {
+                self.show_wallet_notice(quill::ton_wallet::WalletSurface::GiftToWallet, cx);
+            } else {
+                self.edit_transfer(cx, |picker| picker.tap_export(state));
+            }
         }
     }
 

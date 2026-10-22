@@ -482,11 +482,18 @@ impl Session {
                 {
                     use crate::deep_link_types::{LinkRoute, route};
                     let original = std::mem::take(&mut self.chats_state.deep_link_original);
-                    let wallet_notice =
-                        crate::ton_wallet::links::link_notice(&link, self.ton_wallet.can_use);
-                    self.chats_state.deep_link = Some(match wallet_notice {
-                        Some(text) => DeepLinkState::ShowText(text.into()),
-                        None => match route(&link, &original) {
+                    let wallet_link =
+                        crate::ton_wallet::links::wallet_link(&link, self.ton_wallet.can_use);
+                    if let Some(crate::ton_wallet::links::WalletLink::Notice(surface)) = wallet_link
+                    {
+                        self.ton_wallet.show_notice(surface);
+                    }
+                    self.chats_state.deep_link = match wallet_link {
+                        Some(crate::ton_wallet::links::WalletLink::Notice(_)) => None,
+                        Some(crate::ton_wallet::links::WalletLink::Unavailable) => Some(
+                            DeepLinkState::ShowText(crate::ton_wallet::links::UNAVAILABLE.into()),
+                        ),
+                        None => Some(match route(&link, &original) {
                             LinkRoute::Resolve(action) => DeepLinkState::Info {
                                 text: String::new(),
                                 need_update: false,
@@ -496,8 +503,8 @@ impl Session {
                             LinkRoute::Ui(ui) => DeepLinkState::Ui(ui),
                             LinkRoute::Unknown(link) => DeepLinkState::Unknown { link },
                             LinkRoute::Message(text) => DeepLinkState::ShowText(text),
-                        },
-                    });
+                        }),
+                    };
                 }
             }
             ChatsPayload::MessageLinkInfo {

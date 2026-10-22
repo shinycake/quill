@@ -1,6 +1,7 @@
 //! TON wallet, the own side: parsing the state, history and NFTs, the
 //! fiat value, wallet links and the read-only method allowlist.
-use super::links::{TON_CONNECT_NOTICE, TRANSFER_NOTICE, UNAVAILABLE, link_notice};
+use super::WalletSurface;
+use super::links::{WalletLink, wallet_link};
 use super::*;
 use crate::deep_link_types::InternalLink;
 use serde_json::json;
@@ -229,12 +230,18 @@ fn transaction_explorer_link_uses_the_hash_in_hex() {
 fn wallet_links_show_a_notice_and_never_act() {
     let transfer = InternalLink::Other("TonWalletTransfer".into());
     let connect = InternalLink::Other("TonConnect".into());
-    assert_eq!(link_notice(&transfer, true), Some(TRANSFER_NOTICE));
-    assert_eq!(link_notice(&connect, true), Some(TON_CONNECT_NOTICE));
-    assert_eq!(link_notice(&transfer, false), Some(UNAVAILABLE));
-    assert_eq!(link_notice(&connect, false), Some(UNAVAILABLE));
     assert_eq!(
-        link_notice(&InternalLink::Other("QrCodeAuthentication".into()), true),
+        wallet_link(&transfer, true),
+        Some(WalletLink::Notice(WalletSurface::TransferLink))
+    );
+    assert_eq!(
+        wallet_link(&connect, true),
+        Some(WalletLink::Notice(WalletSurface::ConnectLink))
+    );
+    assert_eq!(wallet_link(&transfer, false), Some(WalletLink::Unavailable));
+    assert_eq!(wallet_link(&connect, false), Some(WalletLink::Unavailable));
+    assert_eq!(
+        wallet_link(&InternalLink::Other("QrCodeAuthentication".into()), true),
         None
     );
 }
