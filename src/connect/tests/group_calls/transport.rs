@@ -797,3 +797,15 @@ fn group_call_unanswered_mute_toggle_is_swept_and_settling_resumes() {
     assert!(!is_muted_self(&driver), "settled after the sweep");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Others' video opens its feed as soon as TDLib reports it on, so a
+/// static screen share's only frame is kept until its tile draws.
+#[test]
+fn a_frame_before_the_tile_asks_is_kept() {
+    let (dir, mut driver, _recorder, handle, sink, seq) = ready_group_call_driver();
+    turn_videos_on(&mut driver, &seq, &sink);
+    handle.emit_live_frame(video(42, true), planes());
+    let screen = driver.live_sink(video(42, true)).expect("screen feed");
+    assert!(screen.latest().is_some());
+    let _ = std::fs::remove_dir_all(&dir);
+}
