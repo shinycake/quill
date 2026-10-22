@@ -61,38 +61,68 @@ database and keys, and a crash there cannot take Quill down.
   processes use it) prints a placeholder in `Debug`. On Windows the helper is a GUI-subsystem
   binary and Quill starts it with `CREATE_NO_WINDOW`, so no console window flashes up; the
   mini-app helper had the same bug and gets the same flag.
-- **Each account's files stay in its own folder.** The helper gets
-  `accounts/<key>/webview-carrier`, which Quill empties when the account's client starts and when
-  it shuts down. WebView2 keeps its profile in `webview2/` there (without one it would write next
-  to the executable, which is read-only in an installed app). The macOS content rules and the
-  WebKitGTK filter are compiled into `rules/` and `filters/` and removed once loaded. All the
-  carriers of one account share WebView2's browser process, because WebView2 shares it per data
-  folder. They still get one renderer each.
-- **The folder goes when the client does, without blocking the window**
-  (`src/proxy_carrier/helper/data_folder.rs`). It holds the cookies the pages set, so it should
-  not outlive the account's client. On Windows, WebView2's browser process outlives the helper and
-  holds the whole profile (`lockfile`, `Local State`, `History`, `Login Data`, caches) until it
-  exits. On the `carrier-live-windows` runner that took 173 to 762 ms after the web view was
-  dropped, and more than 1.3 s once (run 39712613845), so a delete right after the helper exits
-  can fail. In order:
-  - A closing helper on Windows drops its web view, then waits up to 2 s for that browser
-    process (`BrowserProcessId`) before it exits. Quill's kill deadline for a closed helper is 3 s.
-  - Shutdown (logout, quit, a closed client) sends every running helper `close`, then waits for
-    the helpers still exiting, 2.5 s at most in all, then deletes the folder. With nothing running
-    or exiting it does not wait at all. The driver, which runs on the UI thread, asks
-    `CarrierHost::shutdown_waits` first. When there is something to wait for, it hands the host to
-    a `quill-carrier-teardown` thread that runs the shutdown, so the window never waits. If that
-    thread cannot start, the host is dropped instead: its helpers are killed and the folder is left
-    to the next two steps.
-  - A folder that still cannot be deleted is renamed to `webview-carrier.stale-<pid>-<nanos>` and
-    deleted on a background thread, which retries for about 2 s. WebView2's open files can block
-    the rename too.
-  - When an account's client starts, the last run's folder is renamed aside the same way. It and
-    every older `.stale-` folder are deleted in the background, which covers killed helpers and
-    anything else that held on. If the rename fails, the folder is deleted on the spot, so a new
-    run never starts on the last run's cookies.
-  - With `QUILL_WEBVIEW_DEBUG` set, a folder that survives the delete at shutdown is listed (up to
-    50 relative paths with sizes), and the helper logs how long it waited for its browser process.
+- **Each host's files stay in a folder of its own.** An account's carriers live under
+  `accounts/<key>/webview-carrier/`. Each host (one per client run of the account) claims a new
+  generation there, `<pid>-<n>`, and the helper gets that folder. WebView2 keeps its profile in
+  `webview2/` there (without one it would write next to the executable, which is read-only in an
+  installed app). The macOS content rules and the WebKitGTK filter are compiled into `rules/` and
+  `filters/` and removed once loaded. All the carriers of one host share WebView2's browser
+  process, because WebView2 shares it per data folder. They still get one renderer each.
+- **A generation is in use while its lock is held** (`src/proxy_carrier/helper/data_folder.rs`).
+  The host holds a lock on `<pid>-<n>.lock` (`File::try_lock`) from the moment it claims the folder
+  until its teardown has deleted it. The lock file is created with `create_new`, so a name left by
+  an earlier process with the same pid is never reused. Only two things delete a generation:
+  - its own host's teardown, once its helpers are gone;
+  - the sweep a new host starts, which deletes every generation whose lock it can take, any lock
+    file whose folder went, and anything else in there. A lock held by another host, in this
+    process or another Quill on the same account root, keeps its folder.
+
+  A sweep only opens lock files that exist; it never creates one. So a claim that holds its lock
+  and still finds the file knows the file is its own, and a folder without a lock file is never in
+  use (a claim makes the lock first, a teardown deletes it last). A host whose claim fails (the
+  account folder cannot be written) tries again on the next `open`, and until it has a folder it
+  opens no carrier (`Terminated`, so TDLib may retry): no helper ever runs on WebView2's default
+  folder next to the executable.
+
+  So a teardown that runs late, after the account's next client has started, never touches the
+  new host's folder (`a_late_teardown_leaves_the_next_hosts_folder_alone`). Before this, both hosts
+  used `webview-carrier` itself. The old teardown could delete, or on Windows rename away, the
+  profile a new host's WebView2 was running on.
+- **The folder goes when the client does, never on the UI thread.** It holds the cookies the pages
+  set, so it should not outlive the account's client. On Windows, WebView2's browser process
+  outlives the helper and holds the whole profile (`lockfile`, `Local State`, `History`,
+  `Login Data`, caches) until it exits. On the `carrier-live-windows` runner that took 173 to
+  822 ms after the web view was dropped, and more than 1.3 s once (run 39712613845), so a delete
+  right after the helper exits can fail. In order:
+  - Logout, quit or a closed client takes the host from the driver and runs its shutdown once,
+    on a `quill-carrier-teardown` thread. The driver runs on the UI thread, so nothing there
+    waits or deletes files. The session then says carriers cannot be hosted, so a later `open` is
+    refused in one place rather than failing as `Unsupported` per carrier. If the thread cannot
+    start, the host is dropped: its helpers are killed and its folder is deleted on a background
+    thread.
+  - Shutdown sends every running helper `close` with `last`, waits for the helpers still exiting
+    (`SHUTDOWN_WAIT`, 3 s at most in all), then deletes its generation, retrying for 2 s.
+  - A closing helper on Windows drops its web view and its environment. If Quill said this was
+    the host's last carrier (`close` with `last`), it then waits up to `BROWSER_EXIT_WAIT` (2 s)
+    for the browser process before it exits. Closing one carrier while another is open does not
+    wait: the other's view keeps the shared browser process alive anyway, so the wait could only
+    run out. All the deadlines come from `BROWSER_EXIT_WAIT`, in one order: the helper's wait
+    (2 s), then the helper ending itself after Quill hangs up (2.5 s, below), then Quill killing
+    a closed helper (`CLOSE_GRACE`, 3 s). Shutdown gives each helper the same 3 s as a last close,
+    since every helper it closes is told it is the last.
+  - Quill always hangs up (closes the helper's input) right after `close`. A hangup ends the
+    helper 300 ms later, so a stuck loop cannot keep it alive, but after a `close` that grace is
+    2.5 s (`CLOSED_GRACE` in `crates/webview-host/src/carrier/watchdog.rs`). Before this, the
+    300 ms grace cut the browser wait short whenever Quill, not a test, ran the helper: the
+    Quill-host live test on Windows never logged the wait, and at b8b8d837 it left the profile
+    behind (run 39719957861).
+  - What a teardown could not delete, and whatever a killed run left, the next host's sweep
+    deletes on a thread of its own.
+  - With `QUILL_WEBVIEW_DEBUG` set, a folder that survives its teardown is listed (up to 50
+    relative paths with sizes). The helper logs whether the browser process exited and when: in
+    the helper's live tests on Windows (runs of 70f176f and b8b8d837) every wait ended with
+    `WAIT_OBJECT_0` (exited), after 156 ms to 1.2 s.
+    Quit can end the process before the teardown thread is done; the next start sweeps the rest.
 - **Locked down before the page runs.** The page is loaded only after the platform lockdown has
   succeeded, and the helper says `ready` only then:
   - Script dialogs and printing: `alert`, `confirm`, `prompt`, `print` and `onbeforeunload` are
@@ -102,19 +132,40 @@ database and keys, and a crash there cannot take Quill down.
     bar and browser accelerator keys turned off. A live test checks that all four calls return
     at once and that the page keeps running.
   - The safe mode tdesktop uses: `RTCPeerConnection` (and its prefixed and helper classes),
-    `WebTransport` and `WebAssembly` are removed. The bridge script does it in every frame the
-    engine injects it into, and also strips a frame's window the first time the page reaches it
-    through `contentWindow` or `contentDocument`, since engines do not always inject into the
-    empty document a new frame starts with. Workers get the same: the page's `new Worker(url)`
+    `WebTransport` and `WebAssembly` are removed. The bridge script does it in every frame at
+    document start (wry's `with_initialization_script_for_main_only(…, false)`).
+  - Frames are not refused, because no engine lets the host refuse one: `frame-src 'none'`
+    keeps every other origin out, but `about:blank` and `srcdoc` frames still get a realm of
+    their own, and a page reaches it without any getter Quill could wrap (`window[0]`,
+    `frames.name`, `event.source`). So the guarantee is the engines' own injection: all three
+    run the bridge in every frame, the empty document a new frame starts with included, before
+    the page can touch it. `no_webrtc_webtransport_or_webassembly_in_frames_or_workers` checks,
+    synchronously after each frame appears, frames reached by index, inside another frame, made
+    by the parser (`innerHTML`), after a load and through `event.source`, and a sandboxed
+    `srcdoc` frame (an opaque origin) reports on itself. It runs on WKWebView locally and on
+    WebKitGTK and WebView2 in `carrier-live-linux` and `carrier-live-windows`. With the script
+    injected into the main frame only, it fails at the first indexed frame. As a second layer
+    the bridge strips a frame's window the first time the page reaches it through
+    `contentWindow` or `contentDocument`.
+  - Workers get the same: the page's `new Worker(url)`
     starts a small script of ours that removes them (and nested workers) and then loads the
     page's script with `importScripts` or `import()`. One difference a page could notice: the
-    worker's `self.location` is a `blob:` address. Service workers are removed. Natively, WebRTC
+    worker's `self.location` is a `blob:` address.
+  - No service workers. A service worker's fetches would be outside the page's policy. The
+    bridge replaces `navigator.serviceWorker`, the `Navigator.prototype` getter behind it and
+    `ServiceWorkerContainer.prototype.register` in every frame, and the getter in workers too.
+    The content policy's `worker-src blob:` refuses any service worker on its own, because one
+    needs an `http(s)` script. `no_service_worker_through_the_prototype` calls `register()`
+    through the prototype's getter and checks it fails and the script is never fetched. On
+    WKWebView, each layer alone keeps the worker out; with both off it registers. WebView2's
+    request filter also refuses any request marked `Service-Worker: script`, wherever it points.
+  - Natively, WebRTC
     is off in WebKitGTK's settings. WebView2 gets `--js-flags=--noexpose-wasm` (no WebAssembly in
     any frame or worker), `--disable-blink-features=WebTransport`, and
     `--force-webrtc-ip-handling-policy=disable_non_proxied_udp` (no UDP around the proxy, should a
     page reach WebRTC anyway). WKWebView has no public switch for any of these. A live test runs
     tdesktop's restrictions probe (`web_proxy_webview.cpp`, `RestrictionsProbeScript`) on the
-    page and a fresh frame, then checks a frame reached by index, a worker and service workers.
+    page and a fresh frame, then checks the frames above, a worker and service workers.
   - The path prefix is enforced natively, not only by the Content-Security-Policy. On macOS a
     `WKContentRuleList` blocks every load except the carrier's origin under its prefix (and its
     `wss:` form, `data:` and its own `blob:`). WebKitGTK gets the same rules as a
@@ -138,9 +189,12 @@ database and keys, and a crash there cannot take Quill down.
     `preventDefault()` for any destination outside the scope (the rule of
     `CarrierScope::allows_navigation`, with blank documents allowed in frames only). It then sends
     `n` to the helper, which fails the carrier. The listener only uses natives taken before the
-    page's script runs, so a page that swaps out `preventDefault`, `String.prototype.startsWith`,
-    `URL`, `Function.prototype.call` or `addEventListener`, or stops propagation in its own
-    listener, still cannot leave (`a_page_that_tampers_still_cannot_leave`).
+    page's script runs, so a page that swaps out `preventDefault`, the `String` methods,
+    `RegExp.prototype.test` or `exec`, `URL`, `Function.prototype.call` or `addEventListener`, or
+    stops propagation in its own listener, still cannot leave
+    (`a_page_that_tampers_still_cannot_leave`, which leaves through `..%2F` under its own prefix).
+    The encoded-separator check uses captured `indexOf` and `toLowerCase`, not a regular
+    expression: `RegExp.prototype.test` reads `exec` from the regex at call time.
   - Behind the bridge, wry's handler cancels the page's navigations out of the scope and the
     lockdown's `FrameNavigationStarting` handler cancels its frames'. On WebView2 those cancels
     come too late to stop the request.
@@ -287,7 +341,12 @@ Carrier hosting:
 - The live host against stand-in helpers (`src/proxy_carrier/helper/tests.rs`): a missing program
   and an exit before `ready` are `Terminated` and keep hosting on; an exit with 127 and a helper
   that says `unsupported` are `Unsupported` and turn hosting off; page messages go to the relay
-  sink with the reserved `@extra`; data for an unknown carrier fails it; shutdown ends every child.
+  sink with the reserved `@extra`; data for an unknown carrier fails it; shutdown ends every child;
+  a late teardown leaves the next host's folder alone; a host without a folder of its own opens
+  no carrier until it can claim one. The data folder's own tests
+  (`data_folder/tests.rs`): claims are new and empty, never a leftover's name; a sweep keeps held
+  generations and removes the rest; a teardown leaves nothing. The driver's tests check the host
+  shuts down once over many ticks of a closing client, and hosting is off after it.
   The close and shutdown tests once used `/bin/cat` as a helper that stays up. It does not:
   the host passes `--carrier`, cat rejects it and exits 1 about 2 ms after it starts, so those
   tests passed only when the close came first. Under CPU load (2 burner processes per core,
@@ -307,7 +366,10 @@ Carrier hosting:
   passing: bytes go both ways in order and the page hears `{"t":"close"}`; data sent before the
   page listens waits for it; `alert`, `confirm`, `prompt` and `print` return at once and WebRTC is
   gone, in frames too; tdesktop's restrictions probe passes on the page and a fresh frame, and
-  a frame reached by index, a worker and service workers have none of the removed interfaces; leaving the scope by navigation or `about:blank` fails as `LoadFailed`; a
+  frames reached by index, nesting, the parser, a load, `event.source` and a sandbox, and a
+  worker, have none of the removed interfaces and no service workers; `register()` through the
+  prototype's getter fails and its script is never fetched; leaving the scope by navigation or
+  `about:blank` fails as `LoadFailed`; a
   redirect out of the prefix is blocked by the content rules; a 404 page and an unreachable page
   fail as `LoadFailed`; a page that hangs fails as `Terminated`; the helper exits when Quill hangs
   up; the probe starts the view and exits; a plain-`http` origin is refused before loading; and
@@ -315,7 +377,7 @@ Carrier hosting:
   when `QUILL_WEBVIEW_CARRIER_LOOPBACK` is set; release builds never do.
 - Quill's live host against the real helper (`src/proxy_carrier/helper_live_tests.rs`): a delivery
   sent before the page listens comes back after its hello, 20 more come back reversed and in
-  order, nothing fails, and shutdown removes the data folder. The capability check passes.
+  order, nothing fails, and shutdown leaves the data folder empty. The capability check passes.
 - CI: the `carrier-live-linux` job runs the helper's clippy and both live suites under Xvfb with
   WebKitGTK on every PR. `carrier-live-windows` runs them with WebView2 on pushes, and on PRs that
   change the carrier code (the helper, the protocol crate, `src/proxy_carrier` or the workflow).
