@@ -98,16 +98,37 @@ database and keys, and a crash there cannot take Quill down.
     redirect, say) fails the carrier as `LoadFailed`.
   - WebView2's handler refuses a request whose address it cannot read, so an error there fails
     closed. On WebView2 older than 1.0.2210 the handler cannot cover worker requests.
-  - WebView2 navigations go through that handler too, and are not cancelled in
-    `NavigationStarting`. Cancelling there does not keep the request off the network: WebView2 may
-    send a navigation's `GET` while the host is still answering, as its `put_Cancel` docs say, and
-    a cancelled navigation never reaches the request handler. CI showed it: the page set
-    `location.href` to a path outside the prefix, wry cancelled the navigation, and the test server
-    still got the request. So the lockdown's own `NavigationStarting` and
-    `FrameNavigationStarting` handlers (wry's navigation callback stays a reporter on Windows) let
-    an out-of-scope `http(s)` navigation through to the request handler, which answers it with a
-    local 403. They cancel what that handler cannot see: a redirect hop and every other scheme.
-    The carrier fails either way, because the navigation callback reports the attempt.
+  - WebView2 does not run a navigation's own request through that handler, and cancelling the
+    navigation does not keep the request off the network. Measured on the `carrier-live-windows`
+    runner, with the helper's debug trace on:
+    - wry cancelled `location.href = '/other/'` in `NavigationStarting`, and the test server still
+      got `GET /other/` (run 39701724561).
+    - Not cancelled, the navigation never reached the request handler either. The handler logged
+      every other document, fetch and worker request of the run, and nothing for `/other/`; the
+      server got the request again (run 39708367632). WebView2's `put_Cancel` docs allow this: a
+      `GET` may go out while the host is answering, and its answer may be used for the
+      navigation.
+  - So the bridge cancels navigations in the page itself, before the engine starts them. It adds
+    the first `navigate` listener to each window's `navigation` it reaches and calls
+    `preventDefault()` for any destination outside the scope (the rule of
+    `CarrierScope::allows_navigation`, with blank documents allowed in frames only). It then sends
+    `n` to the helper, which fails the carrier. The listener only uses natives taken before the
+    page's script runs, so a page that swaps out `preventDefault`, `String.prototype.startsWith`,
+    `URL`, `Function.prototype.call` or `addEventListener`, or stops propagation in its own
+    listener, still cannot leave (`a_page_that_tampers_still_cannot_leave`).
+  - Behind the bridge, wry's handler cancels the page's navigations out of the scope and the
+    lockdown's `FrameNavigationStarting` handler cancels its frames'. On WebView2 those cancels
+    come too late to stop the request.
+  - What is left on WebView2 is a navigation the page cannot cancel from script: the Navigation
+    API makes a navigation started from a cross-origin document not cancelable. The only such
+    document a page can make is an opaque-origin sandboxed `srcdoc` frame with
+    `allow-top-navigation`, since `frame-src 'none'` keeps other origins out. For that one case the
+    exposure is a single `GET` to an `http(s)` URL the page chose, sent from the helper's
+    incognito profile. The answer is never shown or readable, because the navigation is
+    cancelled and the current page stays. The carrier fails on the attempt. The page can use it
+    to send data to a host of its choice, and that host learns the user's address, which the
+    carrier's own server already knows. Cookies set by the answer stay in the helper's
+    per-account profile.
   - What stays best effort:
     - WebView2's request handler does not see WebSocket or WebTransport connections, or a
       redirect that its network stack follows on its own. On Windows, `connect-src` in the CSP

@@ -60,6 +60,7 @@ pub(super) fn js_string(text: &str) -> String {
 pub(super) fn bridge_script(scope: &CarrierScope, keys: &BridgeKeys) -> String {
     let config = serde_json::json!({
         "origin": scope.origin(),
+        "page": scope.page_source(),
         "token": keys.token,
         "policy": content_policy(scope),
         "name": scope.bridge_object_name(),
@@ -145,6 +146,7 @@ mod tests {
         let script = bridge_script(&scope("/relay/"), &keys());
         assert!(!script.contains("__CONFIG__"));
         assert!(script.contains(r#""origin":"https://proxy.example.com""#));
+        assert!(script.contains(r#""page":"https://proxy.example.com/relay/""#));
         assert!(script.contains(r#""name":"TelegramWebProxy""#));
         assert!(script.contains(r#""token":"00112233445566778899aabbccddeeff""#));
         assert!(script.contains(r#""key":"ffeeddccbbaa99887766554433221100""#));

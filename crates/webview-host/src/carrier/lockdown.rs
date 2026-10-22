@@ -7,11 +7,11 @@
 //!   (the bridge script also replaces the functions). WKWebView shows none
 //!   without a UI delegate, and wry sets none.
 //! - The path prefix: WebView2 refuses every request outside it in its
-//!   request handler, navigations included (cancelling those would not
-//!   keep them off the network, see `Navigation`); WebKit (macOS and
-//!   Linux) gets content rules that block every load outside it, compiled
-//!   before the page loads. The
-//!   page's Content-Security-Policy stays as a second layer.
+//!   request handler and cancels navigations outside it, the page's and
+//!   its frames'; WebKit (macOS and Linux) gets content rules that block
+//!   every load outside it, compiled before the page loads. The page's
+//!   Content-Security-Policy, and the bridge's cancelling of navigations
+//!   in the page itself, stay as further layers.
 //! - WebRTC: off in WebKitGTK's settings; removed by the bridge script
 //!   everywhere.
 //! - Throttling of hidden views: off where the engine has a switch (macOS
@@ -97,38 +97,11 @@ pub(super) fn lock_down(
     }
 }
 
-/// Whether the lockdown, not wry's navigation handler, cancels navigations
-/// that leave the scope. WebView2's does (see `Navigation`); the
-/// navigation handler still reports them.
-pub(super) const CANCELS_NAVIGATIONS: bool = cfg!(windows);
-
-/// What WebView2's `NavigationStarting` and `FrameNavigationStarting`
-/// handlers do with a navigation.
-#[cfg(any(windows, test))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Navigation {
-    /// In the scope, or a blank frame.
-    Allow,
-    /// Outside the scope over HTTP: left to `WebResourceRequested`, which
-    /// answers it with a local 403. Cancelling it would not keep it off
-    /// the network: WebView2 may send a navigation's `GET` while the host
-    /// is still answering `NavigationStarting`, and a cancelled one never
-    /// reaches the request filter.
-    Filter,
-    /// Outside the scope and not a request the filter sees (a redirect
-    /// hop, another scheme): cancelled, the best WebView2 offers.
-    Cancel,
-}
-
-#[cfg(any(windows, test))]
-fn webview2_navigation(scope: &CarrierScope, uri: &str, redirected: bool) -> Navigation {
-    if uri == "about:blank" || uri == "about:srcdoc" || scope.allows_navigation(uri) {
-        Navigation::Allow
-    } else if !redirected && (uri.starts_with("http://") || uri.starts_with("https://")) {
-        Navigation::Filter
-    } else {
-        Navigation::Cancel
-    }
+/// Whether a frame may load `url`: the scope, or a blank document (a
+/// frame's start; at the top level the load handler fails the carrier).
+/// The bridge script applies the same rule in the page.
+pub(super) fn may_load(scope: &CarrierScope, url: &str) -> bool {
+    url == "about:blank" || url == "about:srcdoc" || scope.allows_navigation(url)
 }
 
 #[cfg(target_os = "macos")]
@@ -365,7 +338,7 @@ mod platform {
 #[cfg(windows)]
 mod platform {
     use super::super::Wake;
-    use super::{Navigation, webview2_navigation};
+    use super::may_load;
     use quill_webview_protocol::carrier::CarrierScope;
     use std::path::Path;
     use tao::event_loop::EventLoopProxy;
@@ -377,45 +350,34 @@ mod platform {
     use webview2_com::{
         NavigationStartingEventHandler, WebResourceRequestedEventHandler, take_pwstr,
     };
-    use windows::core::{BOOL, HSTRING, Interface, PWSTR};
+    use windows::core::{HSTRING, Interface, PWSTR};
     use wry::{WebView, WebViewExtWindows};
 
-    /// Cancels what leaves `scope` and is not left to the request filter
-    /// ([`Navigation`]). Used for the page and for its frames.
-    fn navigation_guard(
-        scope: CarrierScope,
-        what: &'static str,
-    ) -> ICoreWebView2NavigationStartingEventHandler {
+    /// Cancels a frame's navigation out of `scope` (wry's navigation
+    /// handler covers the page's). Cancelling does not keep the request
+    /// off the network: WebView2 may send a navigation's `GET` while this
+    /// runs and use that answer, and the request handler never sees it
+    /// (docs/decisions/web-proxies.md). The bridge cancels in the page
+    /// first, before the engine starts the navigation.
+    fn frame_guard(scope: CarrierScope) -> ICoreWebView2NavigationStartingEventHandler {
         NavigationStartingEventHandler::create(Box::new(move |_, args| {
             let Some(args) = args else {
                 return Ok(());
             };
             // SAFETY: plain COM calls on the event's arguments, on the web
             // view's thread. A navigation that cannot be read is cancelled.
-            let decision = unsafe {
-                (|| -> windows::core::Result<Navigation> {
+            let allowed = unsafe {
+                (|| -> windows::core::Result<bool> {
                     let mut uri = PWSTR::null();
                     args.Uri(&mut uri)?;
-                    let mut redirected = BOOL::default();
-                    args.IsRedirected(&mut redirected)?;
-                    Ok(webview2_navigation(
-                        &scope,
-                        &take_pwstr(uri),
-                        redirected.as_bool(),
-                    ))
+                    Ok(may_load(&scope, &take_pwstr(uri)))
                 })()
-                .unwrap_or(Navigation::Cancel)
+                .unwrap_or(false)
             };
-            match decision {
-                Navigation::Allow => {}
-                Navigation::Filter => crate::debug(|| {
-                    format!("{what} navigation outside the scope left to the request filter")
-                }),
-                Navigation::Cancel => {
-                    crate::debug(|| format!("{what} navigation outside the scope cancelled"));
-                    // SAFETY: as above.
-                    unsafe { args.SetCancel(true)? };
-                }
+            if !allowed {
+                crate::debug(|| "frame navigation outside the scope cancelled".into());
+                // SAFETY: as above.
+                unsafe { args.SetCancel(true)? };
             }
             Ok(())
         }))
@@ -429,8 +391,7 @@ mod platform {
     ) -> bool {
         let core = webview.webview();
         let environment = webview.environment();
-        let page_guard = navigation_guard(scope.clone(), "page");
-        let frame_guard = navigation_guard(scope.clone(), "frame");
+        let frames = frame_guard(scope.clone());
         let scope = scope.clone();
         // SAFETY: plain COM calls on the live web view, on its own thread.
         let locked = unsafe {
@@ -440,13 +401,21 @@ mod platform {
                 settings.SetAreDefaultContextMenusEnabled(false)?;
                 settings.SetAreDevToolsEnabled(false)?;
                 settings.SetIsStatusBarEnabled(false)?;
+                crate::debug(|| {
+                    let mut version = PWSTR::null();
+                    let _ = environment.BrowserVersionString(&mut version);
+                    format!("WebView2 runtime {}", take_pwstr(version))
+                });
                 let every = HSTRING::from("*");
                 match core.cast::<ICoreWebView2_22>() {
-                    Ok(core) => core.AddWebResourceRequestedFilterWithRequestSourceKinds(
-                        &every,
-                        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
-                        COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL,
-                    )?,
+                    Ok(core) => {
+                        crate::debug(|| "request filter: every source kind".into());
+                        core.AddWebResourceRequestedFilterWithRequestSourceKinds(
+                            &every,
+                            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
+                            COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL,
+                        )?
+                    }
                     Err(_) => {
                         crate::debug(|| {
                             "WebView2 before 1.0.2210: worker requests are not filtered".into()
@@ -489,8 +458,7 @@ mod platform {
                     })),
                     &mut token,
                 )?;
-                core.add_NavigationStarting(&page_guard, &mut token)?;
-                core.add_FrameNavigationStarting(&frame_guard, &mut token)?;
+                core.add_FrameNavigationStarting(&frames, &mut token)?;
                 Ok(())
             })()
             .is_ok()
@@ -535,66 +503,31 @@ mod tests {
     }
 
     #[test]
-    fn webview2_lets_the_scope_and_blank_frames_through() {
-        for uri in [
+    fn frames_may_load_the_scope_and_blank_documents() {
+        for url in [
             "https://proxy.example.com/relay/",
             "https://proxy.example.com/relay/page?x=1",
             "about:blank",
             "about:srcdoc",
         ] {
-            assert_eq!(
-                webview2_navigation(&scope(), uri, false),
-                Navigation::Allow,
-                "{uri}"
-            );
-            assert_eq!(
-                webview2_navigation(&scope(), uri, true),
-                Navigation::Allow,
-                "{uri}"
-            );
+            assert!(may_load(&scope(), url), "{url}");
         }
     }
 
-    /// Cancelling would not keep the `GET` off the network; the request
-    /// filter answers it locally instead.
     #[test]
-    fn webview2_leaves_http_outside_the_scope_to_the_request_filter() {
-        for uri in [
+    fn nothing_else_may_load() {
+        for url in [
             "https://proxy.example.com/other/",
+            "https://proxy.example.com/relay",
             "https://evil.example/",
             "http://proxy.example.com/relay/",
-        ] {
-            assert_eq!(
-                webview2_navigation(&scope(), uri, false),
-                Navigation::Filter,
-                "{uri}"
-            );
-        }
-    }
-
-    /// The request filter never sees a redirect hop or another scheme.
-    #[test]
-    fn webview2_cancels_what_the_request_filter_cannot_see() {
-        for uri in ["https://proxy.example.com/other/", "https://evil.example/"] {
-            assert_eq!(
-                webview2_navigation(&scope(), uri, true),
-                Navigation::Cancel,
-                "{uri}"
-            );
-        }
-        for uri in [
             "file:///C:/Windows/win.ini",
             "data:text/html,hi",
             "javascript:alert(1)",
-            "ms-settings:",
             "about:settings",
             "",
         ] {
-            assert_eq!(
-                webview2_navigation(&scope(), uri, false),
-                Navigation::Cancel,
-                "{uri}"
-            );
+            assert!(!may_load(&scope(), url), "{url}");
         }
     }
 }

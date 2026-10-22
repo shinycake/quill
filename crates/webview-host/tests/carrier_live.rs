@@ -102,6 +102,20 @@ window.TelegramWebProxy.postMessage('leaving');
 setTimeout(() => { window.location.href = '/other/'; }, 100);
 </script></head><body></body></html>"#;
 
+const TAMPERING_PAGE: &str = r#"<!doctype html><html><head><script>
+window.TelegramWebProxy.postMessage('leaving');
+Event.prototype.preventDefault = function () {};
+String.prototype.startsWith = function () { return true; };
+RegExp.prototype.test = function () { return false; };
+Function.prototype.call = function () {};
+window.URL = function () { return { href: location.href, pathname: '/tamper/' }; };
+if (window.navigation) {
+  navigation.addEventListener('navigate', (e) => e.stopImmediatePropagation(), true);
+  EventTarget.prototype.addEventListener = function () {};
+}
+setTimeout(() => { window.location.href = '/other/tampered'; }, 100);
+</script></head><body></body></html>"#;
+
 const BLANK_PAGE: &str = r#"<!doctype html><html><head><script>
 window.TelegramWebProxy.postMessage('leaving');
 setTimeout(() => { window.location.href = 'about:blank'; }, 100);
@@ -150,6 +164,7 @@ fn serve() -> (u16, Arc<Mutex<Vec<String>>>) {
                 "/restrict/worker.js" => ("200 OK", "", RESTRICTIONS_WORKER),
                 "/nav/" => ("200 OK", "", NAVIGATING_PAGE),
                 "/blank/" => ("200 OK", "", BLANK_PAGE),
+                "/tamper/" => ("200 OK", "", TAMPERING_PAGE),
                 "/redirect/" => ("200 OK", "", REDIRECT_PAGE),
                 "/redirect/out" => ("302 Found", "Location: /other/redirected\r\n", ""),
                 "/hang/" => ("200 OK", "", HANGING_PAGE),
@@ -446,6 +461,34 @@ fn leaving_the_scope_fails_the_carrier() {
         );
     }
     assert!(!seen.lock().unwrap().iter().any(|path| path == "/other/"));
+}
+
+/// The bridge's navigation guard holds against a page that swaps out the
+/// natives it would use and listens for navigations itself.
+#[test]
+#[ignore = "needs a desktop session and a system web view"]
+fn a_page_that_tampers_still_cannot_leave() {
+    let (port, seen) = serve();
+    let mut helper = Helper::open(port, "/tamper/");
+    helper.ready();
+    assert_eq!(helper.text(Duration::from_secs(15)), "leaving");
+    assert_eq!(
+        helper.next(Duration::from_secs(5)),
+        CarrierEvent::Failed {
+            failure: CarrierFailure::LoadFailed {
+                message: "the page tried to leave its origin".into()
+            }
+        }
+    );
+    assert!(
+        !seen
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|path| path.starts_with("/other/")),
+        "{:?}",
+        seen.lock().unwrap()
+    );
 }
 
 /// WebKit's content rules hold after a redirect; WebView2's request

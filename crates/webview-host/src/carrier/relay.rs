@@ -35,6 +35,8 @@ pub(super) enum PageMessage {
     Binary(String),
     /// `t<text>`: a string message.
     Text(String),
+    /// `n`: the bridge cancelled a navigation out of the scope.
+    LeftScope,
     /// `f`: the bridge failed (no `onmessage`, the page's handler threw).
     Failed,
     /// Too long, not base64, or unknown: treated as a broken relay.
@@ -58,6 +60,7 @@ pub(super) fn page_message(body: &str, token: &str) -> Option<PageMessage> {
             PageMessage::Binary(value.to_string())
         }
         't' if value.len() <= MAX_PAGE_TEXT_BYTES => PageMessage::Text(value.to_string()),
+        'n' if value.is_empty() => PageMessage::LeftScope,
         'f' => PageMessage::Failed,
         _ => PageMessage::Invalid,
     })
@@ -152,7 +155,7 @@ impl Relay {
                 self.started = true;
                 self.posted = true;
             }
-            PageMessage::Failed | PageMessage::Invalid => return Err(()),
+            PageMessage::LeftScope | PageMessage::Failed | PageMessage::Invalid => return Err(()),
         }
         Ok(())
     }
@@ -238,6 +241,8 @@ mod tests {
             message(r#"t{"t":"x"}"#),
             Some(PageMessage::Text(r#"{"t":"x"}"#.into()))
         );
+        assert_eq!(message("n"), Some(PageMessage::LeftScope));
+        assert_eq!(message("nx"), Some(PageMessage::Invalid));
         assert_eq!(message("f"), Some(PageMessage::Failed));
         assert_eq!(message("ox"), Some(PageMessage::Invalid));
         assert_eq!(message("z"), Some(PageMessage::Invalid));

@@ -21,6 +21,20 @@
     'WebTransport',
     'WebAssembly',
   ];
+  // Natives taken before the page's own script runs, so it cannot swap
+  // them out from under the navigation guard below.
+  var uncurry = Function.prototype.bind.bind(Function.prototype.call);
+  var startsWith = uncurry(String.prototype.startsWith);
+  var matches = uncurry(RegExp.prototype.test);
+  var NativeURL = URL;
+  var hrefOf = uncurry(Object.getOwnPropertyDescriptor(URL.prototype, 'href').get);
+  var pathOf = uncurry(Object.getOwnPropertyDescriptor(URL.prototype, 'pathname').get);
+  var encodedSeparator = /%2f|%5c/i;
+  var token = config.token;
+  var send = function (body) {
+    window.ipc.postMessage(token + body);
+  };
+
   var lockIn = function (scope, name, value) {
     try {
       Object.defineProperty(scope, name, {
@@ -91,6 +105,7 @@
         lockIn(scope.navigator, 'serviceWorker', undefined);
       }
       guardFrames(scope);
+      guardNavigation(scope);
     } catch (error) {
       // Another origin's window: the engine keeps it apart anyway.
     }
@@ -141,15 +156,61 @@
     }
   };
 
+  // The same rule as the helper's (`CarrierScope::allows_navigation`): a
+  // document under the prefix; inside a frame, also a blank one.
+  var allowedDestination = function (url, isTop) {
+    if (!isTop && (url === 'about:blank' || url === 'about:srcdoc')) {
+      return true;
+    }
+    try {
+      var parsed = new NativeURL(url);
+      return startsWith(hrefOf(parsed), config.page) && !matches(encodedSeparator, pathOf(parsed));
+    } catch (error) {
+      return false;
+    }
+  };
+
+  // A navigation out of the scope is cancelled in the page, before the
+  // engine starts it: WebView2 may send a navigation's request while the
+  // helper is still deciding whether to cancel it. The listener is the
+  // first on the window's `navigation` and holds only natives taken
+  // above, so the page can neither remove nor fool it. The helper is told,
+  // and fails the carrier.
+  var guardNavigation = function (scope) {
+    var navigation = scope.navigation;
+    var Navigate = scope.NavigateEvent;
+    var Destination = scope.NavigationDestination;
+    if (!navigation || !Navigate || !Destination) {
+      return;
+    }
+    var listen = uncurry(scope.EventTarget.prototype.addEventListener);
+    var destinationOf = uncurry(Object.getOwnPropertyDescriptor(Navigate.prototype, 'destination').get);
+    var urlOf = uncurry(Object.getOwnPropertyDescriptor(Destination.prototype, 'url').get);
+    var cancel = uncurry(scope.Event.prototype.preventDefault);
+    var isTop = scope === scope.top;
+    listen(navigation, 'navigate', function (event) {
+      var url = '';
+      try {
+        url = urlOf(destinationOf(event));
+      } catch (error) {
+        // Unreadable: refused below.
+      }
+      if (!allowedDestination(url, isTop)) {
+        cancel(event);
+        try {
+          send('n');
+        } catch (error) {
+          // The helper's own checks still catch the attempt.
+        }
+      }
+    });
+  };
+
   strip(window);
 
   if (window !== window.top || window.location.origin !== config.origin) {
     return;
   }
-  var token = config.token;
-  var send = function (body) {
-    window.ipc.postMessage(token + body);
-  };
 
   // The page may load from and talk to its path prefix only. A policy in a
   // <meta> only counts inside <head> and only for what loads after it, so

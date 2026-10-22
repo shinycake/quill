@@ -246,21 +246,20 @@ fn host(
                     // Anything without the token or from another origin is
                     // not the carrier's bridge and is dropped.
                     if let Some(message) = message {
-                        let _ = ipc_proxy.send_event(Wake::Page(message));
+                        let _ = ipc_proxy.send_event(match message {
+                            PageMessage::LeftScope => Wake::ForbiddenNavigation,
+                            message => Wake::Page(message),
+                        });
                     }
                 })
                 .with_navigation_handler(move |url| {
-                    // Engines ask for frames too. A blank frame loads
-                    // nothing; anything else outside the scope is the page
-                    // trying to leave.
-                    if url == "about:blank" || url == "about:srcdoc" {
-                        return true;
-                    }
-                    let allowed = nav_scope.allows_navigation(&url);
+                    // Some engines ask for frames too (WebView2's frames
+                    // go through the lockdown's own handler).
+                    let allowed = lockdown::may_load(&nav_scope, &url);
                     if !allowed && nav_armed.load(Ordering::Acquire) {
                         let _ = nav_proxy.send_event(Wake::ForbiddenNavigation);
                     }
-                    allowed || lockdown::CANCELS_NAVIGATIONS
+                    allowed
                 })
         }
         None => builder.with_navigation_handler(|_| false),
