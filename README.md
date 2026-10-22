@@ -69,16 +69,16 @@ Quill isn't signed with a paid Apple or Microsoft certificate yet. A zip downloa
 
 Both apps ran on the same Mac, signed in to the same Telegram account, each with its own local cache.
 
-| Measurement | Quill | Telegram Desktop |
-| --- | --- | --- |
-| Memory 60 seconds after launch | **215 MB** | 642 MB |
-| Memory after opening five chats | **297 MB** | 771 MB |
-| Window on screen, warm launch | **0.36 s** | 1.52 s |
-| Window on screen, cold launch | **1.24 s** | 2.40 s |
+| Measurement | Quill compared with Telegram Desktop |
+| --- | --- |
+| Memory a minute after launch | About a third as much |
+| Memory after opening five chats | About 40% as much |
+| Window on screen, warm launch | About 4× sooner |
+| Window on screen, cold launch | About 2× sooner |
 
 The machine was an Apple M1 Pro with 16 GB running macOS 27.0.1.
 
-- **Memory:** physical footprint from macOS `footprint`, which includes GPU memory. Each number is the median of three runs per app. Measured on 8 October 2026 against Telegram Desktop 7.2.9.
+- **Memory:** physical footprint from macOS `footprint`, which includes GPU memory. Each comparison uses the median of three runs per app. Measured on 8 October 2026 against Telegram Desktop 7.2.9.
 - **Launch:** the time until the window is on screen. A cold launch empties the file cache first. Measured on 18 October 2026 against Telegram Desktop 7.3.1.
 
 Windows and Linux haven't been measured yet.
