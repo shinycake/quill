@@ -513,6 +513,7 @@ impl QuillApp {
     /// `edit_replacement_chip` past its cheap check. A debug build reserves this
     /// builder's whole frame on entry, so frames that show nothing skip
     /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn edit_replacement_chip_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let edit = self.composer_ui.pending_edit.as_ref()?;

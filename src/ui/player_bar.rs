@@ -396,6 +396,7 @@ impl QuillApp {
     /// `player_bar` past its cheap check. A debug build reserves this
     /// builder's whole frame on entry, so frames that show nothing skip
     /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn player_bar_body(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let id = self.active_playback_id()?;

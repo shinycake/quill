@@ -157,6 +157,7 @@ impl QuillApp {
     /// `earn_layer` past its cheap check. A debug build reserves this
     /// builder's whole frame on entry, so frames that show nothing skip
     /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn earn_layer_body(&self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let Some(InfoPanelTarget::Earn(panel)) =

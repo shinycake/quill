@@ -294,6 +294,7 @@ impl QuillApp {
     /// `checklist_dialog_panel` past its cheap check. A debug build reserves this
     /// builder's whole frame on entry, so frames that show nothing skip
     /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn checklist_dialog_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.composer_ui.checklist_dialog.as_ref()?;
@@ -587,6 +588,7 @@ impl QuillApp {
     /// `poll_add_option_panel` past its cheap check. A debug build reserves this
     /// builder's whole frame on entry, so frames that show nothing skip
     /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn poll_add_option_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let panel = self.message_ui.poll_add_option.as_ref()?;

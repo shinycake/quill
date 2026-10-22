@@ -19,6 +19,7 @@ impl QuillApp {
     /// `pending_bot_reply` past its cheap check. A debug build reserves this
     /// builder's whole frame on entry, so frames that show nothing skip
     /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn pending_bot_reply_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;

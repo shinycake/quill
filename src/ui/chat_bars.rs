@@ -135,6 +135,7 @@ impl QuillApp {
     /// `chat_action_bar_view` past its cheap check. A debug build reserves this
     /// builder's whole frame on entry, so frames that show nothing skip
     /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn chat_action_bar_view_body(
         &self,
@@ -583,6 +584,7 @@ impl QuillApp {
     /// `voice_chat_bar` past its cheap check. A debug build reserves this
     /// builder's whole frame on entry, so frames that show nothing skip
     /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn voice_chat_bar_body(&self, chat_id: ChatId, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;

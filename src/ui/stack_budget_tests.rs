@@ -72,31 +72,48 @@ fn app_builds_within_the_stack_budget() {
     );
 }
 
-/// Demos whose first frame must draw within `FIRST_FRAME_STACK_BUDGET`: the
-/// chat list with an open chat, plus the busier ones (bot card, media, group
-/// info panel).
+/// Demos whose first frame must draw within `FIRST_FRAME_STACK_BUDGET`, each
+/// with an element its main window must have laid out: the chat list with
+/// an open chat, the busier chats (bot card, media, group info panel) and
+/// the settings page.
 #[cfg(feature = "demo-capture")]
-const FIRST_FRAME_DEMOS: [&str; 5] = [
-    "ready-chats",
-    "ready-showcase",
-    "ready-bot-chat",
-    "ready-media",
-    "ready-info-group",
+const FIRST_FRAME_DEMOS: [(&str, &str); 6] = [
+    ("ready-chats", "conversation-slot"),
+    ("ready-showcase", "conversation-slot"),
+    ("ready-bot-chat", "conversation-slot"),
+    ("ready-media", "conversation-slot"),
+    ("ready-info-group", "conversation-slot"),
+    ("ready-settings", "settings-window"),
 ];
 
-/// The first frame of these demos needs 688 KB to 704 KB of a debug test
-/// thread's stack on macOS (`ready-info-group` is the deepest). Before the render builders were split it needed 864 KB
-/// for `ready-chats`, most of it in `folder_tabs` (315 KB) and `sidebar`
-/// (187 KB). What is left is GPUI's layout recursion and the kit's
-/// `Button::render`, not Quill's builders
-/// (docs/decisions/main-thread-stack.md). An overflow aborts the whole test
-/// binary.
+/// Smallest debug test-thread stack each demo's first frame drew with on
+/// macOS arm64, in 16 KB steps (2026-10-21):
+///
+/// | Demo               | Stack  |
+/// |--------------------|--------|
+/// | `ready-chats`      | 688 KB |
+/// | `ready-showcase`   | 688 KB |
+/// | `ready-bot-chat`   | 688 KB |
+/// | `ready-media`      | 688 KB |
+/// | `ready-info-group` | 704 KB |
+/// | `ready-settings`   | 608 KB |
+///
+/// `ready-chats` needed 864 KB before the render builders were split, most
+/// of it in `folder_tabs` (315 KB) and `sidebar` (187 KB). What is left is
+/// GPUI's layout recursion and the kit's `Button::render`
+/// (docs/decisions/main-thread-stack.md).
+///
+/// A stack overflow here aborts the whole test binary with no test name
+/// and no assertion message. If `cargo test --bin quill` dies with "has
+/// overflowed its stack" on a `first-frame-<demo>` thread, a render builder
+/// on that demo's first frame grew: split it rather than raise this budget.
 #[cfg(feature = "demo-capture")]
 const FIRST_FRAME_STACK_BUDGET: usize = 768 * 1024;
 
-/// Opens the main window on `kind` and draws one frame.
+/// Opens the main window on `kind`, draws one frame and checks that
+/// `selector` was laid out.
 #[cfg(feature = "demo-capture")]
-fn first_frame(kind: &'static str) {
+fn first_frame(kind: &'static str, selector: &'static str) {
     use super::screenshot_demo::ScreenshotDemo;
     use super::shell::QuillShell;
     use gpui_kit::component::Root;
@@ -118,8 +135,8 @@ fn first_frame(kind: &'static str) {
     vcx.run_until_parked();
     vcx.update(|window, cx| window.render_frame(cx));
     assert!(
-        vcx.debug_bounds("conversation-slot").is_some(),
-        "{kind} drew the main window"
+        vcx.debug_bounds(selector).is_some(),
+        "{kind} drew {selector} in the main window"
     );
     drop(vcx);
     cx.quit();
@@ -128,11 +145,11 @@ fn first_frame(kind: &'static str) {
 #[test]
 #[cfg(feature = "demo-capture")]
 fn the_first_frame_draws_within_the_stack_budget() {
-    for kind in FIRST_FRAME_DEMOS {
+    for (kind, selector) in FIRST_FRAME_DEMOS {
         let run = std::thread::Builder::new()
             .name(format!("first-frame-{kind}"))
             .stack_size(FIRST_FRAME_STACK_BUDGET)
-            .spawn(move || first_frame(kind))
+            .spawn(move || first_frame(kind, selector))
             .expect("spawn the first-frame thread");
         assert!(
             run.join().is_ok(),

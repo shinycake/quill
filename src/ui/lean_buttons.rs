@@ -1,11 +1,15 @@
-//! Kit buttons built and erased in a frame of their own.
+//! Wrappers that build the kit's `Button` in a stack frame of their own.
 //!
-//! A debug build gives every by-value step of a `Button` chain its own
-//! 6.7 KB stack slot in the function that writes the chain, for the life of
-//! that function. A panel with ten buttons written inline reserves several
-//! hundred KB before it draws anything. Calling one of these instead keeps
-//! the chain in a short frame that is gone before the caller's next child
-//! (docs/decisions/main-thread-stack.md). Release builds are unaffected.
+//! Each function here builds an ordinary `gpui_kit` `Button` with the usual
+//! builder chain and returns it as an `AnyElement`. It is the same widget
+//! with the same focus, hover, tooltip and accessibility behavior; only the
+//! function that writes the chain changes. A debug build gives every
+//! by-value step of a `Button` chain its own 6.7 KB stack slot for the life
+//! of the function that writes it, so a panel with ten buttons written
+//! inline reserves several hundred KB before it draws anything. Called
+//! through these wrappers, each chain lives in a short frame that is gone
+//! before the caller's next child (docs/decisions/main-thread-stack.md).
+//! Release builds are unaffected.
 #![deny(clippy::indexing_slicing)]
 
 use gpui_kit::assets::IconName;

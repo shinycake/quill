@@ -233,6 +233,7 @@ impl QuillApp {
     /// `privacy_exceptions_overlay` past its cheap check. A debug build reserves this
     /// builder's whole frame on entry, so frames that show nothing skip
     /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn privacy_exceptions_overlay_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (target, kind) = self.privacy.exceptions?;

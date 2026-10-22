@@ -303,6 +303,7 @@ impl QuillApp {
     /// `reply_elsewhere_panel` past its cheap check. A debug build reserves this
     /// builder's whole frame on entry, so frames that show nothing skip
     /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn reply_elsewhere_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         if !self.share.reply_elsewhere_open {
@@ -443,6 +444,7 @@ impl QuillApp {
     /// `reply_quote_panel` past its cheap check. A debug build reserves this
     /// builder's whole frame on entry, so frames that show nothing skip
     /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn reply_quote_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         if !self.share.reply_quote_open {

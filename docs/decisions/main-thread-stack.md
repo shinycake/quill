@@ -121,7 +121,7 @@ Captures of all six demos, light and dark, decode to the same pixels before and 
 
 ### The regression test
 
-`the_first_frame_draws_within_the_stack_budget` (`src/ui/stack_budget_tests.rs`) opens the main window on five demos (`ready-chats`, `ready-showcase`, `ready-bot-chat`, `ready-media`, `ready-info-group`). Each runs on a 768 KB thread, draws one frame, and checks that the conversation slot was laid out. The build before this change overflows that thread on `ready-chats`. When the test fails, split the builder that grew; don't raise the budget.
+`the_first_frame_draws_within_the_stack_budget` (`src/ui/stack_budget_tests.rs`) opens the main window on six demos (`ready-chats`, `ready-showcase`, `ready-bot-chat`, `ready-media`, `ready-info-group`, `ready-settings`). Each runs on a 768 KB thread, draws one frame, and checks that the conversation slot (the settings window for `ready-settings`) was laid out. The build before this change overflows that thread on `ready-chats`. The margin over the measured 608 to 704 KB is 64 KB at its thinnest, measured on macOS arm64 only. An overflow aborts the whole test binary rather than failing one test, so the failure names only the `first-frame-<demo>` thread. When that happens, split the builder that grew; don't raise the budget.
 
 ### What is left
 
@@ -133,7 +133,7 @@ On `ready-chats` the deepest point is no longer in Quill code. It is in GPUI and
 
 Two ways to go lower, neither taken here:
 
-- Build dependencies at opt-level 1 in dev. Tried with a test profile: GPUI's per-level cost dropped by about 40% (the conversation pane's render started 125 KB down instead of 205 KB), and the deepest point of the unchanged code fell from 872 KB to 704 KB. A clean debug build went from 4:25 to 5:43. Incremental builds are not affected, but the change touches every developer's setup, so it is a project decision of its own.
+- Build dependencies at opt-level 1 in dev. Tried with a test profile: GPUI's per-level cost dropped by about 40% (the conversation pane's render started 125 KB down instead of 205 KB), and the deepest point of the unchanged code fell from 872 KB to 704 KB. A clean debug build went from 4:25 to 5:43. Incremental builds are not affected. It stays a possible later option and is not being done for now: the first frame already fits in 736 KB, release builds run on the 8 MB Windows main stack that `build.rs` sets, and every clean build would cost 78 s more. It also changes every developer's setup, so the owner decides it separately.
 - Split the kit's `Button::render` in the vendored `third_party/gpui-component`. This would save up to about 150 KB per button. It would be one more patch to carry in `QUILL-CHANGES.md` on every kit update.
 
 Frames that only run when something opens were left alone: `message_menu_overlay` (784 KB) and `story_page_overlay` (734 KB) run only while a menu or a story is open, on an 8 MB main thread. `session_chat_row` (142 KB per chat row) is a per-row builder, so it was left as it is rather than broken into more calls.

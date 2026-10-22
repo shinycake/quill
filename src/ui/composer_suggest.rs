@@ -304,6 +304,7 @@ impl QuillApp {
     /// `suggest_menu_dropdown` past its cheap check. A debug build reserves this
     /// builder's whole frame on entry, so frames that show nothing skip
     /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn suggest_menu_dropdown_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let active = self.composer_ui.suggest.active.as_ref()?;

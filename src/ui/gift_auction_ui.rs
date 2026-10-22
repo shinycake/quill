@@ -692,6 +692,7 @@ impl QuillApp {
     /// `gift_auction_bar` past its cheap check. A debug build reserves this
     /// builder's whole frame on entry, so frames that show nothing skip
     /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn gift_auction_bar_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;

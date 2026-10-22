@@ -18,6 +18,7 @@ impl QuillApp {
     /// `translate_bar_view` past its cheap check. A debug build reserves this
     /// builder's whole frame on entry, so frames that show nothing skip
     /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn translate_bar_view_body(
         &self,
@@ -142,6 +143,7 @@ impl QuillApp {
     /// `translate_toast_view` past its cheap check. A debug build reserves this
     /// builder's whole frame on entry, so frames that show nothing skip
     /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn translate_toast_view_body(
         &self,
