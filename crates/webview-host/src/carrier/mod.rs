@@ -303,6 +303,8 @@ fn host(
     #[cfg(windows)]
     let mut browser = browser_exit::BrowserProcess::of(&webview);
     let mut view = Some(webview);
+    #[cfg(windows)]
+    let mut context = Some(context);
 
     // The timers run on threads of their own (`watchdog::tick_every`).
     let ticks = event_loop.create_proxy();
@@ -312,21 +314,28 @@ fn host(
         });
         return;
     }
+    // Set by a `close` that says no other carrier shares the data folder.
+    #[cfg(windows)]
+    let mut wait_for_browser = false;
     let close_timer = event_loop.create_proxy();
     let status_proxy = event_loop.create_proxy();
     let mut relay = Relay::new(Instant::now());
     let mut next_tick = Instant::now() + TICK;
     event_loop.run(move |event, _, control_flow| {
         let _keep = (&window, &awake);
-        #[cfg(windows)]
-        let _context = &context;
         if let Event::LoopDestroyed = event {
-            // The web view goes first, then (on Windows) the helper waits
-            // for its browser process to let go of the data folder.
+            // The web view and its environment go first, then (on Windows,
+            // for the last carrier) the helper waits for the browser
+            // process to let go of the data folder.
             drop(view.take());
             #[cfg(windows)]
-            if let Some(browser) = browser.take() {
-                browser.wait();
+            {
+                drop(context.take());
+                if let Some(browser) = browser.take()
+                    && wait_for_browser
+                {
+                    browser.wait();
+                }
             }
             return;
         }
@@ -386,7 +395,13 @@ fn host(
                     return fail(CarrierFailure::Terminated, control_flow);
                 }
             }
-            Event::UserEvent(Wake::Command(CarrierCommand::Close { notify_page })) => {
+            Event::UserEvent(Wake::Command(CarrierCommand::Close { notify_page, last })) => {
+                #[cfg(windows)]
+                {
+                    wait_for_browser = last;
+                }
+                #[cfg(not(windows))]
+                let _ = last;
                 match &page {
                     Some(page) if notify_page && relay.posted => {
                         let close = js_string(r#"{"t":"close"}"#);

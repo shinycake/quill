@@ -33,14 +33,16 @@ fn random_hex(bytes: usize) -> Option<String> {
 }
 
 /// The page's Content-Security-Policy: everything from the carrier's path
-/// prefix, nothing from anywhere else, no frames, no forms.
+/// prefix, nothing from anywhere else, no frames, no forms. Workers only
+/// from `blob:`, which is how the bridge starts every worker; a service
+/// worker needs an `https` script, so none can be registered.
 pub(super) fn content_policy(scope: &CarrierScope) -> String {
     let page = scope.page_source();
     let socket = scope.socket_source();
     format!(
         "default-src {page}; script-src {page} 'unsafe-inline' 'unsafe-eval' blob:; \
          style-src {page} 'unsafe-inline'; img-src {page} data: blob:; font-src {page} data:; \
-         media-src {page} blob:; connect-src {page} {socket}; worker-src {page} blob:; \
+         media-src {page} blob:; connect-src {page} {socket}; worker-src blob:; \
          frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; \
          base-uri 'none'"
     )
@@ -181,6 +183,7 @@ mod tests {
             "connect-src https://proxy.example.com/relay/ wss://proxy.example.com/relay/;"
         ));
         assert!(policy.contains("frame-src 'none'"));
+        assert!(policy.contains("worker-src blob:;"));
         assert!(!policy.contains("'self'"));
         assert!(!policy.contains('*'));
     }

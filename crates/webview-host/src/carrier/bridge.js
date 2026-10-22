@@ -7,7 +7,11 @@
 // page has no use for and an untrusted page could abuse: native dialogs,
 // printing, WebRTC (which a content policy does not cover), WebTransport
 // and WebAssembly (as Telegram Desktop's web proxy view does), and service
-// workers. The bridge itself exists only
+// workers (which the content policy also refuses). Every engine Quill
+// runs on injects this script into every frame, a new frame's first
+// empty document included; the live tests check frames reached by
+// element, index, name of a nested frame and after a load. The bridge
+// itself exists only
 // in the top-level document of the carrier's origin, and every message to
 // the helper starts with a token only this closure knows.
 (function (config) {
@@ -25,11 +29,18 @@
   // them out from under the navigation guard below.
   var uncurry = Function.prototype.bind.bind(Function.prototype.call);
   var startsWith = uncurry(String.prototype.startsWith);
-  var matches = uncurry(RegExp.prototype.test);
+  var indexOf = uncurry(String.prototype.indexOf);
+  var lowerCase = uncurry(String.prototype.toLowerCase);
   var NativeURL = URL;
   var hrefOf = uncurry(Object.getOwnPropertyDescriptor(URL.prototype, 'href').get);
   var pathOf = uncurry(Object.getOwnPropertyDescriptor(URL.prototype, 'pathname').get);
-  var encodedSeparator = /%2f|%5c/i;
+  var refuse = Promise.reject.bind(Promise);
+  var NativeTypeError = TypeError;
+  // An encoded `/` or `\` could step out of the prefix on the server.
+  var hasEncodedSeparator = function (path) {
+    var lower = lowerCase(path);
+    return indexOf(lower, '%2f') !== -1 || indexOf(lower, '%5c') !== -1;
+  };
   var token = config.token;
   var send = function (body) {
     window.ipc.postMessage(token + body);
@@ -53,10 +64,14 @@
   // only, so a worker is started from a small script of ours that then
   // loads the page's own.
   var workerPrelude =
-    '(function(){var l=function(n){try{Object.defineProperty(self,n,{value:undefined,' +
+    '(function(){var l=function(o,n){try{Object.defineProperty(o,n,{value:undefined,' +
     'writable:false,configurable:false,enumerable:false})}catch(e){}};' +
     JSON.stringify(REMOVED.concat(['Worker', 'SharedWorker'])) +
-    '.forEach(l)})();';
+    '.forEach(function(n){l(self,n)});' +
+    'if(self.navigator){l(self.navigator,"serviceWorker")}' +
+    'var p=self.WorkerNavigator&&self.WorkerNavigator.prototype;' +
+    'if(p){try{Object.defineProperty(p,"serviceWorker",{get:function(){},' +
+    'configurable:false,enumerable:true})}catch(e){}}})();';
   var wrapWorker = function (scope, name) {
     var Original = scope[name];
     if (typeof Original !== 'function') {
@@ -101,9 +116,7 @@
       });
       wrapWorker(scope, 'Worker');
       wrapWorker(scope, 'SharedWorker');
-      if (scope.navigator) {
-        lockIn(scope.navigator, 'serviceWorker', undefined);
-      }
+      noServiceWorkers(scope);
       guardFrames(scope);
       guardNavigation(scope);
     } catch (error) {
@@ -112,9 +125,37 @@
     return scope;
   };
 
+  // No service worker, whichever way the page asks: the navigator's own
+  // property, the prototype's getter called on it, or the container's
+  // `register`.
+  var noServiceWorkers = function (scope) {
+    if (scope.navigator) {
+      lockIn(scope.navigator, 'serviceWorker', undefined);
+    }
+    var navigatorProto = scope.Navigator && scope.Navigator.prototype;
+    if (navigatorProto) {
+      try {
+        Object.defineProperty(navigatorProto, 'serviceWorker', {
+          get: function () {
+            return undefined;
+          },
+          configurable: false,
+          enumerable: true,
+        });
+      } catch (error) {
+        // Already replaced by this window's own copy of the script.
+      }
+    }
+    var containerProto = scope.ServiceWorkerContainer && scope.ServiceWorkerContainer.prototype;
+    if (containerProto) {
+      lockIn(containerProto, 'register', function () {
+        return refuse(new NativeTypeError('no service workers'));
+      });
+    }
+  };
+
   // A frame's window reached through its element is stripped before the
-  // page gets it. Engines inject this script into frames too, but not
-  // always into the empty document a new frame starts with.
+  // page gets it, a second layer under the engine's own injection.
   var guardFrames = function (scope) {
     ['HTMLIFrameElement', 'HTMLFrameElement', 'HTMLObjectElement'].forEach(function (type) {
       var proto = scope[type] && scope[type].prototype;
@@ -164,7 +205,7 @@
     }
     try {
       var parsed = new NativeURL(url);
-      return startsWith(hrefOf(parsed), config.page) && !matches(encodedSeparator, pathOf(parsed));
+      return startsWith(hrefOf(parsed), config.page) && !hasEncodedSeparator(pathOf(parsed));
     } catch (error) {
       return false;
     }

@@ -3,14 +3,11 @@
 //! folder (cookies the page set included) when the carrier closed. The
 //! helper waits for that process, a bounded time, before it exits.
 
-use std::time::{Duration, Instant};
-use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use quill_webview_protocol::carrier::BROWSER_EXIT_WAIT;
+use std::time::Instant;
+use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
 use wry::{WebView, WebViewExtWindows};
-
-/// How long the helper waits; Quill kills it later than this
-/// (`CLOSE_GRACE` in `src/proxy_carrier/helper.rs`).
-pub(super) const WAIT: Duration = Duration::from_secs(2);
 
 pub(super) struct BrowserProcess(HANDLE);
 
@@ -29,16 +26,22 @@ impl BrowserProcess {
         }
     }
 
-    /// Wait until the process is gone, at most `WAIT`. Call it once the
-    /// web view is dropped.
+    /// Wait until the process is gone, at most [`BROWSER_EXIT_WAIT`]
+    /// (Quill kills the helper later than that). Call it once the web
+    /// view and its environment are dropped.
     pub(super) fn wait(self) {
         let started = Instant::now();
-        let millis = u32::try_from(WAIT.as_millis()).unwrap_or(u32::MAX);
+        let millis = u32::try_from(BROWSER_EXIT_WAIT.as_millis()).unwrap_or(u32::MAX);
         // SAFETY: the handle is open until `Drop`.
         let result = unsafe { WaitForSingleObject(self.0, millis) };
         crate::debug(|| {
+            let outcome = if result == WAIT_OBJECT_0 {
+                "exited"
+            } else {
+                "still running"
+            };
             format!(
-                "browser process wait ended after {:?} ({:#x})",
+                "browser process {outcome} after {:?} (wait result {:#x})",
                 started.elapsed(),
                 result.0
             )

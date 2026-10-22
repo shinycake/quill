@@ -72,8 +72,11 @@ b.postMessage('open:' + String(window.open('https://evil.example/')));
 
 /// Telegram Desktop's restrictions probe (`web_proxy_webview.cpp`,
 /// `RestrictionsProbeScript`): no WebRTC, WebTransport or WebAssembly in
-/// the page or in a fresh frame. Then the same for a frame reached by
-/// index (no element getter in the way), a worker and service workers.
+/// the page or in a fresh frame. Then the same, and no service workers,
+/// in frames the page reaches with no element getter in the way: by
+/// index, inside another frame, made by the parser, after a load, through
+/// `event.source`, and a sandboxed one with an opaque origin. Then a
+/// worker.
 const RESTRICTIONS_PAGE: &str = r#"<!doctype html><html><head><script>
 const b = window.TelegramWebProxy;
 b.onmessage = (e) => b.postMessage(new Uint8Array(e.data).slice().reverse());
@@ -83,37 +86,107 @@ const frame = document.createElement('iframe');
 (document.documentElement || document).appendChild(frame);
 try { ok = ok && !!frame.contentWindow && probe(frame.contentWindow); } finally { frame.remove(); }
 b.postMessage('tdesktop:' + (ok ? '1' : '0'));
+const noWorkers = (w) => {
+  if (typeof w.navigator.serviceWorker !== 'undefined') { return false; }
+  const d = w.Navigator && Object.getOwnPropertyDescriptor(w.Navigator.prototype, 'serviceWorker');
+  return !d || !d.get || d.get.call(w.navigator) === undefined;
+};
+const strict = (w) => !!w && probe(w) && noWorkers(w);
+const report = (name, w) => b.postMessage(name + ':' + (strict(w) ? '1' : '0'));
 const second = document.createElement('iframe');
 document.documentElement.appendChild(second);
-b.postMessage('indexed:' + (probe(window[0]) ? '1' : '0'));
+report('indexed', window[0]);
+const inner = window[0].document;
+inner.documentElement.appendChild(inner.createElement('iframe'));
+report('nested', window[0][0]);
 second.remove();
-b.postMessage('sw:' + (typeof navigator.serviceWorker));
+const holder = document.createElement('div');
+holder.innerHTML = '<iframe name="parsed"></iframe>';
+document.documentElement.appendChild(holder);
+report('parsed', window.frames.parsed);
+holder.remove();
+b.postMessage('sw:' + (typeof navigator.serviceWorker) + ',' + (noWorkers(window) ? '1' : '0'));
+// A frame that speaks first is reached through `event.source`; a
+// sandboxed one has an opaque origin, so it reports on itself.
+let heard = null;
+window.addEventListener('message', (e) => { if (heard) { heard(e); } });
+const fromFrame = (sandboxed, script) => new Promise((resolve) => {
+  const f = document.createElement('iframe');
+  if (sandboxed) { f.setAttribute('sandbox', 'allow-scripts'); }
+  const timer = setTimeout(() => { heard = null; resolve(null); }, 3000);
+  heard = (e) => { clearTimeout(timer); heard = null; resolve(e); };
+  f.srcdoc = '<script>' + script + '<\/script>';
+  document.documentElement.appendChild(f);
+});
+const selfProbe = "const d=Object.getOwnPropertyDescriptor(Navigator.prototype,'serviceWorker');" +
+  "const ok=typeof RTCPeerConnection==='undefined'&&typeof WebTransport==='undefined'&&" +
+  "typeof WebAssembly==='undefined'&&typeof navigator.serviceWorker==='undefined'&&" +
+  "(!d||!d.get||d.get.call(navigator)===undefined);parent.postMessage(ok?'1':'0','*');";
+const srcdocs = async () => {
+  const same = await fromFrame(false, "parent.postMessage('hi','*');");
+  b.postMessage('source:' + (same ? (strict(same.source) ? '1' : '0') : 'silent'));
+  const opaque = await fromFrame(true, selfProbe);
+  b.postMessage('sandboxed:' + (opaque ? String(opaque.data) : 'silent'));
+};
+const loaded = () => {
+  const late = document.createElement('iframe');
+  late.name = 'loaded';
+  late.onload = () => { report('loaded', window.frames.loaded); srcdocs(); };
+  late.src = 'about:blank';
+  document.documentElement.appendChild(late);
+};
 try {
   const worker = new Worker('/restrict/worker.js');
-  worker.onmessage = (e) => b.postMessage('worker:' + e.data);
-  worker.onerror = () => b.postMessage('worker:error');
-} catch (error) { b.postMessage('worker:threw'); }
+  worker.onmessage = (e) => { b.postMessage('worker:' + e.data); loaded(); };
+  worker.onerror = () => { b.postMessage('worker:error'); loaded(); };
+} catch (error) { b.postMessage('worker:threw'); loaded(); }
 </script></head><body></body></html>"#;
 
-const RESTRICTIONS_WORKER: &str = "postMessage([typeof WebAssembly, typeof WebTransport, typeof RTCPeerConnection, typeof Worker].join(','));";
+const RESTRICTIONS_WORKER: &str = "postMessage([typeof WebAssembly, typeof WebTransport, typeof RTCPeerConnection, typeof Worker, typeof navigator.serviceWorker].join(','));";
+
+/// Asks for a service worker the long way round: the prototype's getter
+/// called on the navigator, else the container prototype's `register`.
+const SERVICE_WORKER_PAGE: &str = r#"<!doctype html><html><head><script>
+const b = window.TelegramWebProxy;
+b.onmessage = (e) => b.postMessage(new Uint8Array(e.data).slice().reverse());
+let container;
+try {
+  const d = Object.getOwnPropertyDescriptor(Navigator.prototype, 'serviceWorker');
+  container = d && d.get ? d.get.call(navigator) : undefined;
+} catch (error) {}
+const proto = window.ServiceWorkerContainer && ServiceWorkerContainer.prototype;
+const attempt = container
+  ? container.register('/sw/worker.js')
+  : proto
+    ? Promise.resolve().then(() => proto.register.call(Object.create(proto), '/sw/worker.js'))
+    : Promise.reject(new Error('no container'));
+attempt.then(() => b.postMessage('sw:registered'), () => b.postMessage('sw:refused'));
+</script></head><body></body></html>"#;
+
+const SERVICE_WORKER_SCRIPT: &str = "self.addEventListener('fetch', () => {});";
 
 const NAVIGATING_PAGE: &str = r#"<!doctype html><html><head><script>
 window.TelegramWebProxy.postMessage('leaving');
 setTimeout(() => { window.location.href = '/other/'; }, 100);
 </script></head><body></body></html>"#;
 
+/// Leaves through an encoded `/` under its own prefix, which only the
+/// bridge's guard sees before WebView2 sends the request.
 const TAMPERING_PAGE: &str = r#"<!doctype html><html><head><script>
 window.TelegramWebProxy.postMessage('leaving');
 Event.prototype.preventDefault = function () {};
 String.prototype.startsWith = function () { return true; };
+String.prototype.indexOf = function () { return -1; };
+String.prototype.toLowerCase = function () { return ''; };
 RegExp.prototype.test = function () { return false; };
+RegExp.prototype.exec = function () { return null; };
 Function.prototype.call = function () {};
 window.URL = function () { return { href: location.href, pathname: '/tamper/' }; };
 if (window.navigation) {
   navigation.addEventListener('navigate', (e) => e.stopImmediatePropagation(), true);
   EventTarget.prototype.addEventListener = function () {};
 }
-setTimeout(() => { window.location.href = '/other/tampered'; }, 100);
+setTimeout(() => { window.location.href = '/tamper/..%2Fother/tampered'; }, 100);
 </script></head><body></body></html>"#;
 
 const BLANK_PAGE: &str = r#"<!doctype html><html><head><script>
@@ -162,6 +235,8 @@ fn serve() -> (u16, Arc<Mutex<Vec<String>>>) {
                 "/dialogs/" => ("200 OK", "", DIALOG_PAGE),
                 "/restrict/" => ("200 OK", "", RESTRICTIONS_PAGE),
                 "/restrict/worker.js" => ("200 OK", "", RESTRICTIONS_WORKER),
+                "/sw/" => ("200 OK", "", SERVICE_WORKER_PAGE),
+                "/sw/worker.js" => ("200 OK", "", SERVICE_WORKER_SCRIPT),
                 "/nav/" => ("200 OK", "", NAVIGATING_PAGE),
                 "/blank/" => ("200 OK", "", BLANK_PAGE),
                 "/tamper/" => ("200 OK", "", TAMPERING_PAGE),
@@ -364,8 +439,11 @@ fn relays_both_ways_inside_its_scope_and_closes() {
 
     // The page hears the close before the view goes (and nothing it says
     // after that is passed on, so the server is the witness).
-    helper.send(&CarrierCommand::Close { notify_page: true });
-    assert!(helper.exits_within(Duration::from_secs(2)));
+    helper.send(&CarrierCommand::Close {
+        notify_page: true,
+        last: true,
+    });
+    assert!(helper.exits_within(Duration::from_secs(4)));
     let closed = "/relay/got?%7B%22t%22%3A%22close%22%7D".to_string();
     assert!(
         seen.lock().unwrap().contains(&closed),
@@ -434,12 +512,36 @@ fn no_webrtc_webtransport_or_webassembly_in_frames_or_workers() {
     helper.ready();
     assert_eq!(helper.text(Duration::from_secs(15)), "tdesktop:1");
     assert_eq!(helper.text(Duration::from_secs(5)), "indexed:1");
-    assert_eq!(helper.text(Duration::from_secs(5)), "sw:undefined");
+    assert_eq!(helper.text(Duration::from_secs(5)), "nested:1");
+    assert_eq!(helper.text(Duration::from_secs(5)), "parsed:1");
+    assert_eq!(helper.text(Duration::from_secs(5)), "sw:undefined,1");
     assert_eq!(
         helper.text(Duration::from_secs(10)),
-        "worker:undefined,undefined,undefined,undefined"
+        "worker:undefined,undefined,undefined,undefined,undefined"
     );
+    assert_eq!(helper.text(Duration::from_secs(10)), "loaded:1");
+    assert_eq!(helper.text(Duration::from_secs(10)), "source:1");
+    assert_eq!(helper.text(Duration::from_secs(10)), "sandboxed:1");
     helper.echoes();
+}
+
+#[test]
+#[ignore = "needs a desktop session and a system web view"]
+fn no_service_worker_through_the_prototype() {
+    let (port, seen) = serve();
+    let mut helper = Helper::open(port, "/sw/");
+    helper.ready();
+    assert_eq!(helper.text(Duration::from_secs(15)), "sw:refused");
+    helper.echoes();
+    assert!(
+        !seen
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|path| path == "/sw/worker.js"),
+        "{:?}",
+        seen.lock().unwrap()
+    );
 }
 
 #[test]
@@ -485,7 +587,7 @@ fn a_page_that_tampers_still_cannot_leave() {
             .lock()
             .unwrap()
             .iter()
-            .any(|path| path.starts_with("/other/")),
+            .any(|path| path.starts_with("/other/") || path.to_lowercase().contains("%2f")),
         "{:?}",
         seen.lock().unwrap()
     );

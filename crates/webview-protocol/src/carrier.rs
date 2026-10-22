@@ -14,6 +14,11 @@
 //! sources a bridge message may come from.
 
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
+
+/// The most a closing helper waits for WebView2's browser process to exit
+/// (`CarrierCommand::Close::last`). On CI it took 175 to 822 ms.
+pub const BROWSER_EXIT_WAIT: Duration = Duration::from_secs(2);
 
 /// Longest binary message the page may post, decoded. TDLib coalesces at
 /// most 1 MiB per update (`MAX_CARRIER_DATA_SIZE`); the page's frames are
@@ -111,7 +116,15 @@ pub enum CarrierCommand {
     Deliver { data: String },
     /// TDLib closed the carrier. With `notify_page` the page first gets
     /// the string `{"t":"close"}` and the view goes about 200 ms later.
-    Close { notify_page: bool },
+    /// With `last` no other carrier shares the web views' files, so on
+    /// Windows the helper waits, at most [`BROWSER_EXIT_WAIT`], for
+    /// WebView2's browser process to let go of them before it exits.
+    /// Another carrier's view would keep that process alive.
+    Close {
+        notify_page: bool,
+        #[serde(default)]
+        last: bool,
+    },
 }
 
 /// Helper → Quill, one JSON line each.

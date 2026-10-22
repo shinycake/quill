@@ -432,11 +432,19 @@ mod platform {
                         let Some(args) = args else {
                             return Ok(());
                         };
-                        // A request whose address cannot be read is refused.
+                        // A request whose address cannot be read is refused,
+                        // and so is a service worker's script (Chromium
+                        // marks it `Service-Worker: script`), wherever it
+                        // is: no service worker can start.
                         let allowed = (|| -> windows::core::Result<bool> {
+                            let request = args.Request()?;
+                            let mut service_worker = windows::core::BOOL::default();
+                            request
+                                .Headers()?
+                                .Contains(&HSTRING::from("Service-Worker"), &mut service_worker)?;
                             let mut uri = PWSTR::null();
-                            args.Request()?.Uri(&mut uri)?;
-                            Ok(scope.allows_request(&take_pwstr(uri)))
+                            request.Uri(&mut uri)?;
+                            Ok(!service_worker.as_bool() && scope.allows_request(&take_pwstr(uri)))
                         })()
                         .unwrap_or(false);
                         crate::debug(|| {
