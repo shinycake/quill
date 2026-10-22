@@ -102,38 +102,6 @@ async function renderRelease() {
   }
 }
 
-async function renderMissing() {
-  const list = document.getElementById("missing-list");
-  let data;
-  try {
-    data = await loadJSON("data/missing.json");
-  } catch {
-    list.replaceChildren(el("p", { class: "loading" }, "Couldn't load the list. It's also in the repository README."));
-    return;
-  }
-  document.getElementById("tdlib-version").textContent = `TDLib ${data.tdlib}`;
-  const legend = document.getElementById("missing-legend");
-  for (const [kind, name] of Object.entries(data.kinds)) {
-    legend.append(el("span", { class: `chip k-${kind}` }, name));
-  }
-  list.replaceChildren(
-    ...data.items.map((item) =>
-      el(
-        "article",
-        { class: "miss" },
-        el(
-          "div",
-          { class: "row" },
-          el("span", { class: "cat" }, item.category),
-          el("span", { class: `chip k-${item.kind}` }, data.kinds[item.kind] || item.kind),
-        ),
-        el("h3", {}, item.title),
-        el("p", {}, item.reason),
-      ),
-    ),
-  );
-}
-
 function setupGallery() {
   const tabs = [...document.querySelectorAll(".tabs [role=tab]")];
   const img = document.getElementById("gallery-img");
@@ -260,13 +228,13 @@ setupCopy();
 const showInstallFromHash = setupInstallTabs();
 setupHeroVideo();
 setupGallery();
-// The release cards and the missing list arrive late and push the install
+// The release cards and notes arrive late and push the install
 // panels down, so a link straight to one scrolls again once they're in,
 // unless the visitor has started scrolling on their own.
 let scrolledByHand = false;
 for (const type of ["wheel", "touchstart", "keydown"]) {
   window.addEventListener(type, () => { scrolledByHand = true; }, { once: true, passive: true });
 }
-Promise.allSettled([renderMissing(), renderRelease()]).then(() => {
+renderRelease().then(() => {
   if (showInstallFromHash && !scrolledByHand) showInstallFromHash(true);
 });
