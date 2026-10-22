@@ -470,15 +470,13 @@ mod platform {
                             Ok(scope.allows_request(&take_pwstr(uri)))
                         })()
                         .unwrap_or(false);
+                        crate::debug(|| {
+                            let mut context = COREWEBVIEW2_WEB_RESOURCE_CONTEXT::default();
+                            let _ = args.ResourceContext(&mut context);
+                            let verdict = if allowed { "allowed" } else { "refused" };
+                            format!("request filter {verdict} (resource context {})", context.0)
+                        });
                         if !allowed {
-                            crate::debug(|| {
-                                let mut context = COREWEBVIEW2_WEB_RESOURCE_CONTEXT::default();
-                                let _ = args.ResourceContext(&mut context);
-                                format!(
-                                    "refused a request outside the scope (resource context {})",
-                                    context.0
-                                )
-                            });
                             let refused = environment.CreateWebResourceResponse(
                                 None,
                                 403,
