@@ -474,6 +474,7 @@ pub(super) fn album_tile(
     // (kit buttons do not).
     let frame = div()
         .id(("album-tile", row_id))
+        .test_support()
         .w(px(part.width as f32))
         .h(px(part.height as f32))
         .map(|this| corners.round(this))
@@ -606,16 +607,36 @@ pub(super) fn album_tile(
                             )),
                     )
                     .child(
-                        Button::new(format!("album-play-{row_id}"))
-                            .label(tr(keys::Q_MEDIA_PLAY))
-                            .ghost()
-                            // The press bubbles, so the tile's drag can start from
-                            // the button; a click stops here instead of also
-                            // opening the viewer through the tile's own click.
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                cx.stop_propagation();
-                                this.open_media_viewer_at(chat_id, message_id, item_offset, cx);
-                            })),
+                        // Laid over the whole tile and centred, so the button
+                        // never joins the flow below the picture (where the
+                        // tile's clip hid it).
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .size_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                div().id(("album-play-slot", row_id)).test_support().child(
+                                    Button::new(format!("album-play-{row_id}"))
+                                        .label(tr(keys::Q_MEDIA_PLAY))
+                                        // The press bubbles, so the tile's drag can start
+                                        // from the button; a click stops here instead of
+                                        // also opening the viewer through the tile's own
+                                        // click.
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            cx.stop_propagation();
+                                            this.open_media_viewer_at(
+                                                chat_id,
+                                                message_id,
+                                                item_offset,
+                                                cx,
+                                            );
+                                        })),
+                                ),
+                            ),
                     )
                     .into_any_element()
             }
