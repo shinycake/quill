@@ -398,6 +398,16 @@ impl QuillApp {
 
     /// The editor overlay: canvas in the middle, tools below.
     pub(super) fn photo_editor_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.viewer.photo_editor.as_ref()?;
+        self.photo_editor_overlay_body(cx)
+    }
+
+    /// `photo_editor_overlay` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
+    #[inline(never)]
+    fn photo_editor_overlay_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let editor = self.viewer.photo_editor.as_ref()?;
         let app = cx.entity().downgrade();
         let preview = editor.preview.clone();

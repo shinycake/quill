@@ -8,7 +8,6 @@
 use super::app::QuillApp;
 use super::motion;
 use crate::ui::status_note::StatusNote;
-use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -196,118 +195,7 @@ impl QuillApp {
         if slide <= 0. {
             return header.into_any_element();
         }
-        let count = self.frame.motion.selection.borrow().last_count;
-        let bar = div()
-            .id("selection-bar")
-            .absolute()
-            .left_0()
-            .right_0()
-            .h_full()
-            .top(relative(-(1. - slide)))
-            .occlude()
-            .px_4()
-            .flex()
-            .items_center()
-            .gap_2()
-            .bg(cx.theme().background)
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .child(
-                Button::new("selection-forward")
-                    .label(tr_with(
-                        keys::Q_CHAT_FORWARD_2,
-                        &[("count", &count.to_string())],
-                    ))
-                    .primary()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.open_forward_picker(window, cx);
-                    })),
-            )
-            .child(
-                Button::new("selection-delete")
-                    .label(tr_with(
-                        keys::Q_CHAT_DELETE,
-                        &[("count", &count.to_string())],
-                    ))
-                    .primary()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.confirm_delete_selection(window, cx);
-                    })),
-            )
-            .child(
-                Button::new("selection-copy")
-                    .label(tr(keys::Q_CHAT_COPY_AS_TEXT))
-                    .ghost()
-                    .tooltip(tr(keys::CONTEXT_COPY_SELECTED_ITEMS))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.copy_selection_text(cx);
-                    })),
-            )
-            .when(!self.selection_missing_files(chat_id).is_empty(), |bar| {
-                bar.child(
-                    Button::new("selection-download")
-                        .label(tr(keys::Q_CHAT_DOWNLOAD))
-                        .ghost()
-                        .tooltip(tr(keys::Q_CHAT_DOWNLOAD_SELECTED))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.download_selection(cx);
-                        })),
-                )
-            })
-            .when(self.selection_has_media(chat_id), |bar| {
-                bar.child(
-                    Button::new("selection-save")
-                        .label(tr(keys::SETTINGS_SAVE))
-                        .ghost()
-                        .tooltip(tr(keys::Q_CHAT_SAVE_SELECTED))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.save_selection(cx);
-                        })),
-                )
-            })
-            .when(self.selection_html_target(chat_id).is_some(), |bar| {
-                bar.child(self.selection_html_button(cx))
-            })
-            .when(self.selection_unpinnable(chat_id), |bar| {
-                bar.child(
-                    Button::new("selection-unpin")
-                        .label(tr(keys::CONTEXT_UNPIN_FROM_TOP))
-                        .ghost()
-                        .tooltip(tr(keys::Q_CHAT_UNPIN_SELECTED))
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            if let Some(draft) = this.forward_draft() {
-                                this.confirm_unpin(
-                                    draft.from_chat_id,
-                                    draft.message_ids,
-                                    window,
-                                    cx,
-                                );
-                            }
-                        })),
-                )
-            })
-            .when(self.selection_reportable(chat_id), |bar| {
-                bar.child(
-                    Button::new("selection-report")
-                        .label(tr_with(
-                            keys::Q_CHAT_REPORT_2,
-                            &[("count", &count.to_string())],
-                        ))
-                        .ghost()
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.report_selection(window, cx);
-                        })),
-                )
-            })
-            .child(div().flex_1())
-            .child(
-                Button::new("selection-cancel")
-                    .label(tr(keys::CANCEL))
-                    .ghost()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.clear_forward(window, cx);
-                    })),
-            );
+        let bar = self.selection_bar(chat_id, slide, cx);
         div()
             .relative()
             .overflow_hidden()
@@ -393,7 +281,7 @@ impl QuillApp {
     }
 
     /// "Copy Selected as Text" (Cmd/Ctrl+C does the same).
-    fn copy_selection_text(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn copy_selection_text(&mut self, cx: &mut Context<Self>) {
         let Some((chat_id, text)) = self.selected_messages_text() else {
             return;
         };
@@ -432,12 +320,12 @@ impl QuillApp {
     }
 
     /// Whether the selection holds anything to save.
-    fn selection_has_media(&self, chat_id: ChatId) -> bool {
+    pub(super) fn selection_has_media(&self, chat_id: ChatId) -> bool {
         self.selecting_in(chat_id) && !self.selected_media().is_empty()
     }
 
     /// Files of the selected media that are not on disk yet.
-    fn selection_missing_files(&self, chat_id: ChatId) -> Vec<quill::ids::FileId> {
+    pub(super) fn selection_missing_files(&self, chat_id: ChatId) -> Vec<quill::ids::FileId> {
         if !self.selecting_in(chat_id) {
             return Vec::new();
         }
@@ -450,7 +338,7 @@ impl QuillApp {
 
     /// "Download Selected": start the downloads of every selected media
     /// message that is not on disk yet (Save then copies them out).
-    fn download_selection(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn download_selection(&mut self, cx: &mut Context<Self>) {
         let Some(chat_id) = self.forward_draft().map(|d| d.from_chat_id) else {
             return;
         };
@@ -473,7 +361,7 @@ impl QuillApp {
 
     /// "Save Selected": pick a folder and copy the downloaded media of the
     /// selection into it; media still downloading is requested first.
-    fn save_selection(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn save_selection(&mut self, cx: &mut Context<Self>) {
         let Some(chat_id) = self.forward_draft().map(|d| d.from_chat_id) else {
             return;
         };

@@ -4,6 +4,7 @@
 use super::app::QuillApp;
 use super::pressable::action_row;
 use super::*;
+use crate::ui::lean_buttons::ghost_text_button;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
@@ -193,14 +194,13 @@ impl QuillApp {
                                     &[("level", &level.to_string())],
                                 )),
                         )
-                        .child(
-                            Button::new("g2-boost-channel")
-                                .label(tr(keys::Q_PEOPLE_BOOST_CHANNEL))
-                                .ghost()
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.boost_channel(chat_id, cx);
-                                })),
-                        ),
+                        .child(ghost_text_button(
+                            "g2-boost-channel",
+                            tr(keys::Q_PEOPLE_BOOST_CHANNEL),
+                            cx.listener(move |this, _, _, cx| {
+                                this.boost_channel(chat_id, cx);
+                            }),
+                        )),
                 );
             }
             None if in_flight => {
@@ -225,14 +225,13 @@ impl QuillApp {
                                 .text_color(cx.theme().muted_foreground)
                                 .child(tr(keys::Q_PEOPLE_BOOST_STATUS_UNAVAILABLE)),
                         )
-                        .child(
-                            Button::new("g2-boost-retry")
-                                .label(tr(keys::Q_PEOPLE_RETRY))
-                                .ghost()
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.refresh_boost_status(chat_id, cx);
-                                })),
-                        ),
+                        .child(ghost_text_button(
+                            "g2-boost-retry",
+                            tr(keys::Q_PEOPLE_RETRY),
+                            cx.listener(move |this, _, _, cx| {
+                                this.refresh_boost_status(chat_id, cx);
+                            }),
+                        )),
                 );
             }
         }
@@ -335,39 +334,43 @@ impl QuillApp {
                 }),
         );
         use gpui_kit::assets::IconName as I;
+        // Each row is built by a function of its own, so this section's
+        // frame does not hold every row's builder chain at once
+        // (docs/decisions/main-thread-stack.md).
         macro_rules! row {
             ($id:expr, $icon:expr, $label:expr, |$this:ident, $window:ident, $cx:ident| $action:block) => {
-                section = section.child(
-                    action_row($id, Some($icon), $label, false, cx)
-                        .on_click(cx.listener(move |$this, _, $window, $cx| $action)),
-                );
+                section = section.child(management_row(
+                    $id,
+                    $icon,
+                    $label,
+                    false,
+                    cx.listener(move |$this, _, $window, $cx| $action),
+                    cx,
+                ));
             };
         }
         macro_rules! danger_row {
             ($id:expr, $icon:expr, $label:expr, |$this:ident, $window:ident, $cx:ident| $action:block) => {
-                section = section.child(
-                    action_row($id, Some($icon), $label, true, cx)
-                        .on_click(cx.listener(move |$this, _, $window, $cx| $action)),
-                );
+                section = section.child(management_row(
+                    $id,
+                    $icon,
+                    $label,
+                    true,
+                    cx.listener(move |$this, _, $window, $cx| $action),
+                    cx,
+                ));
             };
         }
-        // An on/off setting: the row toggles it; the trailing switch shows
-        // the state (it carries no handler of its own, so the click reaches
-        // the row).
         macro_rules! toggle_row {
             ($id:expr, $icon:expr, $label:expr, $on:expr, |$this:ident, $window:ident, $cx:ident| $action:block) => {
-                section = section.child(
-                    action_row($id, Some($icon), $label, false, cx)
-                        .aria_selected($on)
-                        .child(div().flex_1())
-                        .child(
-                            gpui_kit::component::switch::Switch::new(($id, 1u64))
-                                .checked($on)
-                                .accessibility_label($label)
-                                .small(),
-                        )
-                        .on_click(cx.listener(move |$this, _, $window, $cx| $action)),
-                );
+                section = section.child(management_toggle_row(
+                    $id,
+                    $icon,
+                    $label,
+                    $on,
+                    cx.listener(move |$this, _, $window, $cx| $action),
+                    cx,
+                ));
             };
         }
         // Slice G8: title / description / photo editing — same gate as
@@ -737,6 +740,45 @@ impl QuillApp {
             )
         }
     }
+}
+
+/// One action of the manage section (`action_row` plus its handler).
+fn management_row(
+    id: &'static str,
+    icon: gpui_kit::assets::IconName,
+    label: impl Into<SharedString>,
+    destructive: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> AnyElement {
+    action_row(id, Some(icon), label, destructive, cx)
+        .on_click(on_click)
+        .into_any_element()
+}
+
+/// An on/off setting of the manage section: the row toggles it; the
+/// trailing switch shows the state (it carries no handler of its own, so
+/// the click reaches the row).
+fn management_toggle_row(
+    id: &'static str,
+    icon: gpui_kit::assets::IconName,
+    label: impl Into<SharedString>,
+    on: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> AnyElement {
+    let label = label.into();
+    action_row(id, Some(icon), label.clone(), false, cx)
+        .aria_selected(on)
+        .child(div().flex_1())
+        .child(
+            gpui_kit::component::switch::Switch::new((id, 1u64))
+                .checked(on)
+                .accessibility_label(label)
+                .small(),
+        )
+        .on_click(on_click)
+        .into_any_element()
 }
 
 mod invite_links_section;

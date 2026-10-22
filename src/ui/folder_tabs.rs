@@ -125,6 +125,122 @@ fn folder_badge_pill(badge: FolderBadge, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
+/// One folder tab. The kit draws an icon tab as the icon alone and names
+/// it by its label in the overflow menu, so icons-only tabs keep the folder
+/// name as their label. Icon plus text puts the icon in the tab's prefix
+/// instead.
+fn folder_tab(
+    slot: &FolderSlot,
+    show_icon: bool,
+    show_text: bool,
+    weak: &WeakEntity<QuillApp>,
+    cx: &App,
+) -> Tab {
+    let mut tab = Tab::new().label(slot.name.clone());
+    tab = match (show_icon, show_text) {
+        (true, false) => tab.icon(slot.glyph).aria_label(slot.name.clone()),
+        (true, true) => tab.prefix(
+            Icon::new(slot.glyph)
+                .size(px(14.))
+                .text_color(cx.theme().muted_foreground),
+        ),
+        _ => tab,
+    };
+    if let Some(badge) = slot.badge {
+        tab = tab.suffix(folder_badge_pill(badge, cx));
+    }
+    // Right-click: Edit / Mark as read / Remove (the All tab:
+    // Mark all as read / Edit folders).
+    let menu_folder = match slot.kind {
+        FolderSlotKind::All => Some(None),
+        FolderSlotKind::Folder(id) => Some(Some(id)),
+        FolderSlotKind::Unread | FolderSlotKind::Archived => None,
+    };
+    if let Some(folder) = menu_folder {
+        let menu_weak = weak.clone();
+        tab = tab.on_mouse_down(MouseButton::Right, move |event, _, cx| {
+            let position = event.position;
+            let _ = menu_weak.update(cx, |this, cx| {
+                this.open_folder_tab_menu(folder, position, cx)
+            });
+        });
+    }
+    tab
+}
+
+/// The fade over an edge of the strip that hides tabs.
+fn folder_tabs_fade(start: bool, color: Hsla) -> Div {
+    let (from, to) = (color, color.opacity(0.));
+    let (left, right) = if start { (from, to) } else { (to, from) };
+    div()
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .w(px(FADE_WIDTH))
+        .when(start, |this| this.left_0())
+        .when(!start, |this| this.right_0())
+        .bg(linear_gradient(
+            90.,
+            linear_color_stop(left, 0.),
+            linear_color_stop(right, 1.),
+        ))
+}
+
+/// The chevron beside the strip: every tab in a menu, the selected one
+/// checked.
+#[inline(never)]
+fn folder_tabs_more(
+    slots: &[FolderSlot],
+    selected: usize,
+    weak: &WeakEntity<QuillApp>,
+) -> AnyElement {
+    let menu_kinds: Vec<FolderSlotKind> = slots.iter().map(|s| s.kind).collect();
+    let menu_labels: Vec<SharedString> = slots
+        .iter()
+        .map(|s| SharedString::from(s.name.clone()))
+        .collect();
+    let menu_weak = weak.clone();
+    Button::new("folder-tabs-more")
+        .xsmall()
+        .ghost()
+        .dropdown_caret(true)
+        .dropdown_menu(move |mut menu, _, _| {
+            menu = menu.scrollable(true);
+            for (ix, label) in menu_labels.iter().enumerate() {
+                let weak = menu_weak.clone();
+                let kind = menu_kinds.get(ix).copied();
+                menu = menu.item(
+                    PopupMenuItem::new(label.clone())
+                        .checked(ix == selected)
+                        .on_click(move |_, _, cx| {
+                            if let Some(kind) = kind {
+                                let _ =
+                                    weak.update(cx, |this, cx| this.select_folder_slot(kind, cx));
+                            }
+                        }),
+                );
+            }
+            menu
+        })
+        .anchor(Anchor::TopRight)
+        .into_any_element()
+}
+
+/// The gear that opens Settings > Folders.
+#[inline(never)]
+fn folder_manage_button(weak: WeakEntity<QuillApp>) -> AnyElement {
+    Button::new("folder-manage")
+        .icon(IconName::Settings)
+        .small()
+        .tooltip(tr(keys::Q_CHATLIST_CHAT_FOLDERS))
+        .accessibility_label(tr(keys::Q_CHATLIST_MANAGE_CHAT_FOLDERS))
+        .ghost()
+        .on_click(move |_, _, cx| {
+            let _ = weak.update(cx, |this, cx| this.open_folder_manage(cx));
+        })
+        .into_any_element()
+}
+
 impl QuillApp {
     pub(super) fn folder_slots(&self) -> Vec<FolderSlot> {
         let folders: Vec<(i32, String, String)> = self
@@ -202,53 +318,15 @@ impl QuillApp {
     /// folder tab. The manage entry stays always present so folders can be
     /// created even when the account has none yet. Tabs show text, icons
     /// or both per the "Tabs appearance" setting.
+    ///
+    /// The tab bar, the chevron menu and the gear are built in their own
+    /// functions: a debug build gives every by-value builder step its own
+    /// stack slot (`TabBar` is 11 KB, `Button` 7 KB), and one function
+    /// building all three took 315 KB of the main thread's stack
+    /// (docs/decisions/main-thread-stack.md).
     pub(super) fn folder_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let slots = self.folder_slots();
-        let (show_icon, show_text) = self
-            .appearance
-            .folder_tabs_mode
-            .resolved(self.appearance.folder_tabs_view);
-        let weak = cx.weak_entity();
-        let mut bar = TabBar::new("folder-tabs");
-        for slot in &slots {
-            // The kit draws an icon tab as the icon alone and names it by
-            // its label in the overflow menu, so icons-only tabs keep the
-            // folder name as their label. Icon plus text puts the icon in
-            // the tab's prefix instead.
-            let mut tab = Tab::new().label(slot.name.clone());
-            tab = match (show_icon, show_text) {
-                (true, false) => tab.icon(slot.glyph).aria_label(slot.name.clone()),
-                (true, true) => tab.prefix(
-                    Icon::new(slot.glyph)
-                        .size(px(14.))
-                        .text_color(cx.theme().muted_foreground),
-                ),
-                _ => tab,
-            };
-            if let Some(badge) = slot.badge {
-                tab = tab.suffix(folder_badge_pill(badge, cx));
-            }
-            // Right-click: Edit / Mark as read / Remove (the All tab:
-            // Mark all as read / Edit folders).
-            let menu_folder = match slot.kind {
-                FolderSlotKind::All => Some(None),
-                FolderSlotKind::Folder(id) => Some(Some(id)),
-                FolderSlotKind::Unread | FolderSlotKind::Archived => None,
-            };
-            if let Some(folder) = menu_folder {
-                let menu_weak = weak.clone();
-                tab = tab.on_mouse_down(MouseButton::Right, move |event, _, cx| {
-                    let position = event.position;
-                    let _ = menu_weak.update(cx, |this, cx| {
-                        this.open_folder_tab_menu(folder, position, cx)
-                    });
-                });
-            }
-            bar = bar.child(tab);
-        }
         let selected = selected_slot(&slots, self.chat_list.filter, self.folders.tab);
-        let kinds: Vec<FolderSlotKind> = slots.iter().map(|s| s.kind).collect();
-        let manage_weak = weak.clone();
         let scroll = self.folders.tabs_scroll.clone();
         let key = RevealKey {
             selected,
@@ -264,62 +342,7 @@ impl QuillApp {
             f32::from(scroll.max_offset().x),
         );
         let fade_color = cx.theme().sidebar;
-        let fade = |start: bool| {
-            let (from, to) = (fade_color, fade_color.opacity(0.));
-            let (left, right) = if start { (from, to) } else { (to, from) };
-            div()
-                .absolute()
-                .top_0()
-                .bottom_0()
-                .w(px(FADE_WIDTH))
-                .when(start, |this| this.left_0())
-                .when(!start, |this| this.right_0())
-                .bg(linear_gradient(
-                    90.,
-                    linear_color_stop(left, 0.),
-                    linear_color_stop(right, 1.),
-                ))
-        };
-        let menu_kinds = kinds.clone();
-        let menu_labels: Vec<SharedString> = slots
-            .iter()
-            .map(|s| SharedString::from(s.name.clone()))
-            .collect();
-        let menu_weak = weak.clone();
-        let more = Button::new("folder-tabs-more")
-            .xsmall()
-            .ghost()
-            .dropdown_caret(true)
-            .dropdown_menu(move |mut menu, _, _| {
-                menu = menu.scrollable(true);
-                for (ix, label) in menu_labels.iter().enumerate() {
-                    let weak = menu_weak.clone();
-                    let kind = menu_kinds.get(ix).copied();
-                    menu = menu.item(
-                        PopupMenuItem::new(label.clone())
-                            .checked(ix == selected)
-                            .on_click(move |_, _, cx| {
-                                if let Some(kind) = kind {
-                                    let _ = weak
-                                        .update(cx, |this, cx| this.select_folder_slot(kind, cx));
-                                }
-                            }),
-                    );
-                }
-                menu
-            })
-            .anchor(Anchor::TopRight);
-        let bar = bar
-            .selected_index(selected)
-            .underline()
-            .max_width(px(140.))
-            .track_scroll(&scroll)
-            .w_full()
-            .on_click(move |ix, _window, cx| {
-                if let Some(kind) = kinds.get(*ix).copied() {
-                    let _ = weak.update(cx, |this, cx| this.select_folder_slot(kind, cx));
-                }
-            });
+        let weak = cx.weak_entity();
         // The strip clips at its own edge, so the chevron and the gear sit
         // beside it as flex_none siblings and can never overlap a tab. A
         // fade marks an edge that hides tabs; wheel and trackpad scroll it.
@@ -338,24 +361,54 @@ impl QuillApp {
                     .min_w_0()
                     .overflow_hidden()
                     .on_scroll_wheel(cx.listener(|_, _, _, cx| cx.notify()))
-                    .child(bar)
-                    .when(fades.start, |this| this.child(fade(true)))
-                    .when(fades.end, |this| this.child(fade(false))),
+                    .child(self.folder_tab_bar(&slots, selected, &scroll, cx))
+                    .when(fades.start, |this| {
+                        this.child(folder_tabs_fade(true, fade_color))
+                    })
+                    .when(fades.end, |this| {
+                        this.child(folder_tabs_fade(false, fade_color))
+                    }),
             )
-            .child(div().flex_none().child(more))
             .child(
-                div().flex_none().child(
-                    Button::new("folder-manage")
-                        .icon(IconName::Settings)
-                        .small()
-                        .tooltip(tr(keys::Q_CHATLIST_CHAT_FOLDERS))
-                        .accessibility_label(tr(keys::Q_CHATLIST_MANAGE_CHAT_FOLDERS))
-                        .ghost()
-                        .on_click(move |_, _, cx| {
-                            let _ = manage_weak.update(cx, |this, cx| this.open_folder_manage(cx));
-                        }),
-                ),
+                div()
+                    .flex_none()
+                    .child(folder_tabs_more(&slots, selected, &weak)),
             )
+            .child(div().flex_none().child(folder_manage_button(weak)))
+            .into_any_element()
+    }
+
+    /// The kit `TabBar` of the folder strip.
+    #[inline(never)]
+    fn folder_tab_bar(
+        &self,
+        slots: &[FolderSlot],
+        selected: usize,
+        scroll: &ScrollHandle,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let (show_icon, show_text) = self
+            .appearance
+            .folder_tabs_mode
+            .resolved(self.appearance.folder_tabs_view);
+        let weak = cx.weak_entity();
+        let tabs: Vec<Tab> = slots
+            .iter()
+            .map(|slot| folder_tab(slot, show_icon, show_text, &weak, cx))
+            .collect();
+        let kinds: Vec<FolderSlotKind> = slots.iter().map(|s| s.kind).collect();
+        TabBar::new("folder-tabs")
+            .children(tabs)
+            .selected_index(selected)
+            .underline()
+            .max_width(px(140.))
+            .track_scroll(scroll)
+            .w_full()
+            .on_click(move |ix, _window, cx| {
+                if let Some(kind) = kinds.get(*ix).copied() {
+                    let _ = weak.update(cx, |this, cx| this.select_folder_slot(kind, cx));
+                }
+            })
             .into_any_element()
     }
 

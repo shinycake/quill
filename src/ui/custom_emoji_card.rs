@@ -52,6 +52,16 @@ impl QuillApp {
     /// The card, while a tapped emoji's pack is known. A new card starts
     /// its own timer.
     pub(super) fn custom_emoji_card(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.session()?.stickers.custom_emoji_preview.as_ref()?;
+        self.custom_emoji_card_body(cx)
+    }
+
+    /// `custom_emoji_card` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
+    #[inline(never)]
+    fn custom_emoji_card_body(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let preview: CustomEmojiPreview = self.session()?.stickers.custom_emoji_preview.clone()?;
         if self.message_ui.custom_emoji_card_seen.as_ref() != Some(&preview) {
             self.message_ui.custom_emoji_card_seen = Some(preview.clone());

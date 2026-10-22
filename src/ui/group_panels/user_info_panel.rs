@@ -377,6 +377,135 @@ impl QuillApp {
             .map(|i| i.description.clone())
             .unwrap_or_default();
         let members = info.as_ref().map(|i| i.member_count).unwrap_or(0);
+        let mut body =
+            self.supergroup_identity(supergroup_id, chat_id, title, is_channel, members, cx);
+        if !description.is_empty() {
+            // tdesktop strips external links from a group's description.
+            let entities = info
+                .as_ref()
+                .map(|i| i.description_entities.clone())
+                .unwrap_or_default();
+            let entities = if is_channel {
+                entities
+            } else {
+                quill::text::about::strip_external_links(&description, &entities)
+            };
+            body = body.child(self.about_text_block(chat_id, &description, &entities, cx));
+        }
+        if let Some(verification) =
+            session.and_then(|s| s.supergroup_bot_verification(supergroup_id))
+            && let Some(text) =
+                quill::bot_verification::profile_description(Some(verification), false)
+        {
+            body =
+                body.child(self.bot_verification_row(text, verification.icon_custom_emoji_id, cx));
+        }
+        // Phase A1: slow-mode admin control (`setChatSlowModeDelay`,
+        // schema 1.8.67 line 13551 — allowed values 0/5/10/30/60/300/900/
+        // 3600, supergroups only, requires `can_restrict_members`).
+        // Creators hold all rights implicitly; administrators need the
+        // explicit `can_restrict_members` right (lines 2500/1092). The new
+        // delay arrives via `updateSupergroupFullInfo`.
+        if !is_channel && self.can_change_slow_mode(supergroup_id) {
+            let current_delay = info.as_ref().map(|i| i.slow_mode_delay).unwrap_or(0);
+            let app = cx.entity().downgrade();
+            let slider = SlowModeSlider::new(chat_id.0, current_delay, move |delay, cx| {
+                app.update(cx, |this, cx| this.set_slow_mode_delay(chat_id, delay, cx))
+                    .ok();
+            });
+            body = body.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .w_full()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(tr(keys::Q_PEOPLE_SLOW_MODE)),
+                    )
+                    .child(slider),
+            );
+        }
+        // Phase D2: statistics entry point — shown only when
+        // `supergroupFullInfo.can_get_statistics` is true (schema 1.8.67,
+        // line 2792); `getChatStatistics` errors when it is false.
+        if info.as_ref().is_some_and(|i| i.can_get_statistics) {
+            let stats_chat_id = chat_id;
+            body = body.child(
+                Button::new("open-channel-statistics")
+                    .label(tr(keys::Q_PEOPLE_STATISTICS))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open_info_panel_target(
+                            InfoPanelTarget::Statistics(stats_chat_id.0),
+                            window,
+                            cx,
+                        );
+                    })),
+            );
+        }
+        if let Some(section) = self.media_counts_section(0, cx) {
+            body = body.child(section);
+        }
+        // B10: channels similar to this one (`getChatSimilarChats`).
+        if is_channel && let Some(section) = self.similar_channels_section(chat_id, cx) {
+            body = body.child(section);
+        }
+        // Phase D3a: invite-link + join-request management (admins with
+        // `can_invite_users` only; the sections no-op otherwise).
+        body = body.child(self.invite_links_section(chat_id, cx));
+        body = body.child(self.join_requests_section(chat_id, cx));
+        // Phase D3b: administrator management (owner / admins with
+        // `can_promote_members` only; the section no-ops otherwise).
+        body = body.child(self.administrators_section(chat_id, cx));
+        body = body.children(self.channel_balance_row(chat_id, cx));
+        // Slice G1: group/channel management — members, permissions,
+        // invite link, join requests, username, broadcast upgrade,
+        // leave/delete. Every row is capability-gated inside.
+        // tdesktop's channel actions: Join Channel, Leave channel (in the
+        // management section), then Report for a channel the viewer does
+        // not own.
+        let join_row = if is_channel {
+            self.channel_join_row(chat_id, cx)
+        } else {
+            None
+        };
+        // A channel the viewer has not joined has nothing to manage, so the
+        // section (an empty header) is left out.
+        let not_joined = join_row.is_some();
+        body = body.children(join_row);
+        if !not_joined {
+            body = body.child(self.group_management_section(chat_id, is_channel, false, cx));
+        }
+        if is_channel {
+            body = body.children(self.channel_report_row(chat_id, cx));
+        }
+        // Phase D3c: recent-actions admin log (administrators and the
+        // creator only; the section no-ops otherwise).
+        body = body.child(self.event_log_section(chat_id, cx));
+        // Slice G2: channel boost status + boost action.
+        body = body.child(self.boost_section(chat_id, cx));
+        body = body
+            .children(self.inline_members_block(InfoPanelTarget::Supergroup(supergroup_id), cx));
+        body.into_any_element()
+    }
+
+    /// The top of `supergroup_info_panel`: avatar, title with badges,
+    /// member count and username. A method of its own, so the panel's
+    /// frame does not also hold this builder chain
+    /// (docs/decisions/main-thread-stack.md).
+    fn supergroup_identity(
+        &self,
+        supergroup_id: i64,
+        chat_id: ChatId,
+        title: String,
+        is_channel: bool,
+        members: i32,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let session = self.session();
         let username = session
             .and_then(|s| s.supergroup_username(supergroup_id))
             .filter(|name| !name.is_empty())
@@ -400,7 +529,7 @@ impl QuillApp {
             })
             .unwrap_or_default();
         let badges = self.info_header_badges(badges, chat_id.0, cx);
-        let mut body = div()
+        div()
             .flex()
             .flex_col()
             .items_center()
@@ -514,118 +643,7 @@ impl QuillApp {
                                 )),
                         )
                     }),
-            );
-        if !description.is_empty() {
-            // tdesktop strips external links from a group's description.
-            let entities = info
-                .as_ref()
-                .map(|i| i.description_entities.clone())
-                .unwrap_or_default();
-            let entities = if is_channel {
-                entities
-            } else {
-                quill::text::about::strip_external_links(&description, &entities)
-            };
-            body = body.child(self.about_text_block(chat_id, &description, &entities, cx));
-        }
-        if let Some(verification) =
-            session.and_then(|s| s.supergroup_bot_verification(supergroup_id))
-            && let Some(text) =
-                quill::bot_verification::profile_description(Some(verification), false)
-        {
-            body =
-                body.child(self.bot_verification_row(text, verification.icon_custom_emoji_id, cx));
-        }
-        // Phase A1: slow-mode admin control (`setChatSlowModeDelay`,
-        // schema 1.8.67 line 13551 — allowed values 0/5/10/30/60/300/900/
-        // 3600, supergroups only, requires `can_restrict_members`).
-        // Creators hold all rights implicitly; administrators need the
-        // explicit `can_restrict_members` right (lines 2500/1092). The new
-        // delay arrives via `updateSupergroupFullInfo`.
-        if !is_channel && self.can_change_slow_mode(supergroup_id) {
-            let current_delay = info.as_ref().map(|i| i.slow_mode_delay).unwrap_or(0);
-            let app = cx.entity().downgrade();
-            let slider = SlowModeSlider::new(chat_id.0, current_delay, move |delay, cx| {
-                app.update(cx, |this, cx| this.set_slow_mode_delay(chat_id, delay, cx))
-                    .ok();
-            });
-            body = body.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .w_full()
-                    .gap_1()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_semibold()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(tr(keys::Q_PEOPLE_SLOW_MODE)),
-                    )
-                    .child(slider),
-            );
-        }
-        // Phase D2: statistics entry point — shown only when
-        // `supergroupFullInfo.can_get_statistics` is true (schema 1.8.67,
-        // line 2792); `getChatStatistics` errors when it is false.
-        if info.as_ref().is_some_and(|i| i.can_get_statistics) {
-            let stats_chat_id = chat_id;
-            body = body.child(
-                Button::new("open-channel-statistics")
-                    .label(tr(keys::Q_PEOPLE_STATISTICS))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_info_panel_target(
-                            InfoPanelTarget::Statistics(stats_chat_id.0),
-                            window,
-                            cx,
-                        );
-                    })),
-            );
-        }
-        if let Some(section) = self.media_counts_section(0, cx) {
-            body = body.child(section);
-        }
-        // B10: channels similar to this one (`getChatSimilarChats`).
-        if is_channel && let Some(section) = self.similar_channels_section(chat_id, cx) {
-            body = body.child(section);
-        }
-        // Phase D3a: invite-link + join-request management (admins with
-        // `can_invite_users` only; the sections no-op otherwise).
-        body = body.child(self.invite_links_section(chat_id, cx));
-        body = body.child(self.join_requests_section(chat_id, cx));
-        // Phase D3b: administrator management (owner / admins with
-        // `can_promote_members` only; the section no-ops otherwise).
-        body = body.child(self.administrators_section(chat_id, cx));
-        body = body.children(self.channel_balance_row(chat_id, cx));
-        // Slice G1: group/channel management — members, permissions,
-        // invite link, join requests, username, broadcast upgrade,
-        // leave/delete. Every row is capability-gated inside.
-        // tdesktop's channel actions: Join Channel, Leave channel (in the
-        // management section), then Report for a channel the viewer does
-        // not own.
-        let join_row = if is_channel {
-            self.channel_join_row(chat_id, cx)
-        } else {
-            None
-        };
-        // A channel the viewer has not joined has nothing to manage, so the
-        // section (an empty header) is left out.
-        let not_joined = join_row.is_some();
-        body = body.children(join_row);
-        if !not_joined {
-            body = body.child(self.group_management_section(chat_id, is_channel, false, cx));
-        }
-        if is_channel {
-            body = body.children(self.channel_report_row(chat_id, cx));
-        }
-        // Phase D3c: recent-actions admin log (administrators and the
-        // creator only; the section no-ops otherwise).
-        body = body.child(self.event_log_section(chat_id, cx));
-        // Slice G2: channel boost status + boost action.
-        body = body.child(self.boost_section(chat_id, cx));
-        body = body
-            .children(self.inline_members_block(InfoPanelTarget::Supergroup(supergroup_id), cx));
-        body.into_any_element()
+            )
     }
 
     /// Slice G1: basic-group info panel. Basic groups have no

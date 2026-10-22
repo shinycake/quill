@@ -297,6 +297,18 @@ impl QuillApp {
         if !self.share.reply_elsewhere_open {
             return None;
         }
+        self.reply_elsewhere_panel_body(cx)
+    }
+
+    /// `reply_elsewhere_panel` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
+    #[inline(never)]
+    fn reply_elsewhere_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.share.reply_elsewhere_open {
+            return None;
+        }
         let reply = self.composer_ui.reply()?;
         let session = self.session()?;
         let query = self.share.search_input.read(cx).value().to_string();
@@ -423,6 +435,18 @@ impl QuillApp {
 
     /// The quote picker: the parts of the message, one click each.
     pub(super) fn reply_quote_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.share.reply_quote_open {
+            return None;
+        }
+        self.reply_quote_panel_body(cx)
+    }
+
+    /// `reply_quote_panel` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
+    #[inline(never)]
+    fn reply_quote_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         if !self.share.reply_quote_open {
             return None;
         }

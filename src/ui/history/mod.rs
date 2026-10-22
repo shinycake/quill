@@ -272,7 +272,7 @@ pub(super) fn album_history_row(
     chrome.media_led = true;
     chrome.media_width = Some(media_content_width(px(box_w as f32), px(0.), media_max));
     chrome.footer_overlay = !has_caption;
-    chrome.actions = Some(message_actions_button(first.chat_id, first.id, cx).into_any_element());
+    chrome.actions = Some(message_actions_button(first.chat_id, first.id, cx));
     let revealed = std::collections::HashSet::new();
     let emoji: HashMap<i64, ImageSource> = HashMap::new();
     let layered: HashMap<i64, super::anim_layer::LayeredClip> = HashMap::new();
@@ -318,13 +318,17 @@ pub(super) fn album_history_row(
     )
 }
 
-/// A round button shown beside a bubble on hover.
+/// A round button shown beside a bubble on hover. It is built and turned
+/// into an element here, so the row that holds it never keeps a `Button`
+/// (7 KB per builder step in a debug build) in its own frame
+/// (docs/decisions/main-thread-stack.md).
 fn corner_button(
     id: String,
     icon: gpui_kit::assets::IconName,
     label: &'static str,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &mut Context<QuillApp>,
-) -> Button {
+) -> AnyElement {
     Button::new(id)
         .icon(icon)
         .xsmall()
@@ -337,6 +341,8 @@ fn corner_button(
         )
         .tooltip(label)
         .accessibility_label(label)
+        .on_click(on_click)
+        .into_any_element()
 }
 
 /// The hover buttons beside a bubble: reply and react (Settings, "Reply
@@ -364,10 +370,7 @@ fn message_corner_actions(
         message.can_react(),
     );
     if !reply && !react && fast_share.is_none() {
-        return (
-            more.into_any_element(),
-            px(quill::corner_buttons::span(false, false, false)),
-        );
+        return (more, px(quill::corner_buttons::span(false, false, false)));
     }
     let mut row = div().flex().items_center().gap_1();
     if let Some(what) = fast_share {
@@ -380,27 +383,22 @@ fn message_corner_actions(
         ));
     }
     if reply {
-        row = row.child(
-            corner_button(
-                format!("message-reply-{}", message_id.0),
-                gpui_kit::assets::IconName::Reply,
-                tr(keys::Q_MEDIA_REPLY),
-                cx,
-            )
-            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+        row = row.child(corner_button(
+            format!("message-reply-{}", message_id.0),
+            gpui_kit::assets::IconName::Reply,
+            tr(keys::Q_MEDIA_REPLY),
+            cx.listener(move |this, _: &ClickEvent, window, cx| {
                 this.begin_reply_from_message(chat_id, message_id, window, cx);
-            })),
-        );
+            }),
+            cx,
+        ));
     }
     if react {
-        row = row.child(
-            corner_button(
-                format!("message-react-{}", message_id.0),
-                gpui_kit::assets::IconName::FaceSlightlySmilingPlus,
-                tr(keys::Q_MEDIA_REACT_2),
-                cx,
-            )
-            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+        row = row.child(corner_button(
+            format!("message-react-{}", message_id.0),
+            gpui_kit::assets::IconName::FaceSlightlySmilingPlus,
+            tr(keys::Q_MEDIA_REACT_2),
+            cx.listener(move |this, event: &ClickEvent, window, cx| {
                 // The menu leads with the reaction strip.
                 this.open_message_menu(
                     MessageMenuState {
@@ -411,8 +409,9 @@ fn message_corner_actions(
                     window,
                     cx,
                 );
-            })),
-        );
+            }),
+            cx,
+        ));
     }
     let span = quill::corner_buttons::span(fast_share.is_some(), reply, react);
     (row.child(more).into_any_element(), px(span))
@@ -423,24 +422,24 @@ fn message_actions_button(
     chat_id: ChatId,
     message_id: MessageId,
     cx: &mut Context<QuillApp>,
-) -> Button {
+) -> AnyElement {
     corner_button(
         format!("message-actions-{}", message_id.0),
         gpui_kit::assets::IconName::Ellipsis,
         tr(keys::Q_MEDIA_MESSAGE_ACTIONS),
+        cx.listener(move |this, event: &ClickEvent, window, cx| {
+            this.open_message_menu(
+                MessageMenuState {
+                    chat_id,
+                    message_id,
+                    position: event.position(),
+                },
+                window,
+                cx,
+            );
+        }),
         cx,
     )
-    .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-        this.open_message_menu(
-            MessageMenuState {
-                chat_id,
-                message_id,
-                position: event.position(),
-            },
-            window,
-            cx,
-        );
-    }))
 }
 
 pub(super) fn album_tile(
