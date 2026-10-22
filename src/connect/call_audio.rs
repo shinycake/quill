@@ -180,16 +180,23 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub(crate) fn install_remote_state_hooks(&self, engine: &mut dyn CallEngine) {
         let outbox = self.video_state_outbox.clone();
         engine.set_remote_video_state_callback(Arc::new(move |call_id, state| {
+            crate::advanced::debug_mode::debug_log(&format!(
+                "[call] {call_id} peer video {state:?}"
+            ));
             outbox.lock_or_recover().push_back((call_id, state));
             crate::wake::UPDATES.poke();
         }));
         let outbox = self.screen_state_outbox.clone();
         engine.set_remote_screen_state_callback(Arc::new(move |call_id, state| {
+            crate::advanced::debug_mode::debug_log(&format!(
+                "[call] {call_id} peer screen {state:?}"
+            ));
             outbox.lock_or_recover().push_back((call_id, state));
             crate::wake::UPDATES.poke();
         }));
         let outbox = self.audio_state_outbox.clone();
         engine.set_remote_audio_state_callback(Arc::new(move |call_id, muted| {
+            crate::advanced::debug_mode::debug_log(&format!("[call] {call_id} peer muted {muted}"));
             outbox.lock_or_recover().push_back((call_id, muted));
             crate::wake::UPDATES.poke();
         }));

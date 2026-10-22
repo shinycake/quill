@@ -151,6 +151,12 @@ impl CallEngine for NtgcallsEngine {
                     .map_or(std::ptr::null(), |value| value.as_ptr()),
             )
         };
+        crate::advanced::debug_mode::debug_log(&format!(
+            "[call] {call_id} connect p2p versions {:?} servers {} p2p {} -> {rc}",
+            params.library_versions,
+            servers.raw.len(),
+            params.p2p_allowed
+        ));
         if rc != NTG_OK {
             return Err(EngineError::Engine {
                 op: "ntg_connect_p2p",

@@ -59,13 +59,15 @@ impl<'a> I420<'a> {
 }
 
 /// Where the pixel at `(x, y)` of a `w × h` plane lands once turned, as
-/// the engine turns RGBA (`rotate_rgba`): 90 moves the right column to
-/// the top row.
+/// the engine turns RGBA (`rotate_rgba`). WebRTC's rotation is the
+/// clockwise turn that shows the frame upright (libyuv's `kRotate90`;
+/// tdesktop draws it with `QTransform::rotate`), so 90 moves the left
+/// column to the top row.
 fn turned(x: usize, y: usize, w: usize, h: usize, rotation: LiveRotation) -> (usize, usize) {
     match rotation {
-        LiveRotation::R90 => (y, w.saturating_sub(1 + x)),
+        LiveRotation::R90 => (h.saturating_sub(1 + y), x),
         LiveRotation::R180 => (w.saturating_sub(1 + x), h.saturating_sub(1 + y)),
-        LiveRotation::R270 => (h.saturating_sub(1 + y), x),
+        LiveRotation::R270 => (y, w.saturating_sub(1 + x)),
         LiveRotation::None => (x, y),
     }
 }
@@ -426,9 +428,9 @@ pub fn paused_raster(src: &I420, rotation: LiveRotation) -> Option<Raster> {
 /// of [`turned`]).
 fn source_of(x: usize, y: usize, w: usize, h: usize, rotation: LiveRotation) -> (usize, usize) {
     let (sx, sy) = match rotation {
-        LiveRotation::R90 => (w.saturating_sub(1 + y), x),
+        LiveRotation::R90 => (y, h.saturating_sub(1 + x)),
         LiveRotation::R180 => (w.saturating_sub(1 + x), h.saturating_sub(1 + y)),
-        LiveRotation::R270 => (y, h.saturating_sub(1 + x)),
+        LiveRotation::R270 => (w.saturating_sub(1 + y), x),
         LiveRotation::None => (x, y),
     };
     (sx.min(w.saturating_sub(1)), sy.min(h.saturating_sub(1)))
