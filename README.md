@@ -7,7 +7,7 @@
 
 Quill is a free, open-source Telegram desktop client written from scratch in Rust. You sign in with your normal Telegram account and get your real chats, groups, channels and calls. It talks to Telegram through [TDLib](https://core.telegram.org/tdlib), Telegram's own client library, and draws its whole interface on the GPU with [GPUI](https://www.gpui.rs), the UI framework from the Zed editor. There's no browser engine or web view inside.
 
-On the same Mac, Quill used about a third of Telegram Desktop's memory and put its window on screen about four times sooner on a warm launch ([numbers below](#how-it-compares-with-telegram-desktop)).
+On the same Mac, Quill used about a third of Telegram Desktop's memory and put its window on screen about four times faster on a warm launch ([numbers below](#how-it-compares-with-telegram-desktop)).
 
 **Website and install:** [shinycake.github.io/quill](https://shinycake.github.io/quill/)
 
@@ -73,8 +73,8 @@ Both apps ran on the same Mac, signed in to the same Telegram account, each with
 | --- | --- |
 | Memory a minute after launch | About a third as much |
 | Memory after opening five chats | About 40% as much |
-| Window on screen, warm launch | About 4× sooner |
-| Window on screen, cold launch | About 2× sooner |
+| Window on screen, warm launch | About 4× faster |
+| Window on screen, cold launch | About 2× faster |
 
 The machine was an Apple M1 Pro with 16 GB running macOS 27.0.1.
 
