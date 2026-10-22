@@ -45,8 +45,10 @@ const HELPER_SILENCE: Duration = Duration::from_secs(15);
 /// How often a writer thread looks at the clocks when nothing is queued.
 const WATCH_TICK: Duration = Duration::from_secs(1);
 /// How long a closed helper gets to send the page `{"t":"close"}` and go
-/// before it is killed.
-const CLOSE_GRACE: Duration = Duration::from_secs(1);
+/// before it is killed. On Windows it first waits up to 2 s for WebView2's
+/// browser process to let go of the data folder (`browser_exit.rs` in the
+/// helper), so this is longer than that.
+const CLOSE_GRACE: Duration = Duration::from_secs(3);
 /// How long a reader waits for the exit status of a helper whose output
 /// ended, to tell a missing library from a crash.
 const EXIT_WAIT: Duration = Duration::from_millis(500);
@@ -253,7 +255,7 @@ impl HelperCarrierHost {
     pub fn new(config: HelperConfig) -> Self {
         if let Some(dir) = &config.data_dir {
             // Whatever the last run left (it may have been killed).
-            let _ = std::fs::remove_dir_all(dir);
+            data_folder::clear_for_start(dir);
         }
         if let (Some(program), Some(cache)) = (&config.program, &config.probe_cache) {
             start_probe(program.clone(), cache.clone(), config.capability.clone());
@@ -414,48 +416,9 @@ impl CarrierHost for HelperCarrierHost {
             running.shared.kill();
         }
         if let Some(dir) = &self.data_dir {
-            // Best effort: a web view still exiting may hold files, and the
-            // next start empties the folder anyway.
-            let _ = std::fs::remove_dir_all(dir);
-            if dir.exists() && std::env::var_os("QUILL_WEBVIEW_DEBUG").is_some() {
-                for line in leftovers(dir, 50) {
-                    eprintln!("carrier data left: {line}");
-                }
-            }
+            data_folder::clear_at_shutdown(dir);
         }
     }
-}
-
-/// Up to `limit` entries still under `dir`, as relative paths with sizes,
-/// for the debug trace of a folder that would not go away.
-fn leftovers(dir: &Path, limit: usize) -> Vec<String> {
-    let mut found = Vec::new();
-    let mut pending = vec![dir.to_path_buf()];
-    while let Some(folder) = pending.pop() {
-        let Ok(entries) = std::fs::read_dir(&folder) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            if found.len() >= limit {
-                return found;
-            }
-            let path = entry.path();
-            let relative = path
-                .strip_prefix(dir)
-                .unwrap_or(&path)
-                .display()
-                .to_string();
-            match entry.metadata() {
-                Ok(meta) if meta.is_dir() => {
-                    found.push(format!("{relative}/"));
-                    pending.push(path);
-                }
-                Ok(meta) => found.push(format!("{relative} ({} bytes)", meta.len())),
-                Err(_) => found.push(format!("{relative} (unreadable)")),
-            }
-        }
-    }
-    found
 }
 
 impl Drop for HelperCarrierHost {
@@ -713,6 +676,8 @@ fn finish_probe(mut child: Child, verdict: Option<bool>) -> Option<bool> {
             .map(|_| false)
     })
 }
+
+mod data_folder;
 
 #[cfg(test)]
 #[cfg(unix)]

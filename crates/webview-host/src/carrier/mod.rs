@@ -17,6 +17,8 @@
 //! fills a bounded queue and fails instead of growing one. The process ends
 //! with Quill ([`watchdog`]).
 
+#[cfg(windows)]
+mod browser_exit;
 mod lockdown;
 mod relay;
 mod script;
@@ -298,6 +300,9 @@ fn host(
         data_dir.as_deref(),
         event_loop.create_proxy(),
     );
+    #[cfg(windows)]
+    let mut browser = browser_exit::BrowserProcess::of(&webview);
+    let mut view = Some(webview);
 
     // The timers run on threads of their own (`watchdog::tick_every`).
     let ticks = event_loop.create_proxy();
@@ -315,6 +320,19 @@ fn host(
         let _keep = (&window, &awake);
         #[cfg(windows)]
         let _context = &context;
+        if let Event::LoopDestroyed = event {
+            // The web view goes first, then (on Windows) the helper waits
+            // for its browser process to let go of the data folder.
+            drop(view.take());
+            #[cfg(windows)]
+            if let Some(browser) = browser.take() {
+                browser.wait();
+            }
+            return;
+        }
+        let Some(webview) = view.as_ref() else {
+            return;
+        };
         let now = Instant::now();
         *control_flow = ControlFlow::Wait;
         if let Some(at) = relay.closing_at {
