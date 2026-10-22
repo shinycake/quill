@@ -60,6 +60,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         }));
         let transport_outbox = self.transport_outbox.clone();
         engine.set_transport_state_callback(Arc::new(move |call_id, state| {
+            crate::advanced::debug_mode::debug_log(&format!(
+                "[call] {call_id} transport {state:?}"
+            ));
             transport_outbox
                 .lock_or_recover()
                 .push_back((call_id, state));

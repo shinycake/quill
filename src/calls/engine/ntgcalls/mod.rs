@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 mod call_engine;
 mod external;
+mod log;
 mod stream_audio;
 
 /// Phase C2b: safe driver-thread adapter over the runtime-loaded C ABI.
@@ -75,6 +76,7 @@ impl NtgcallsEngine {
         // SAFETY: ntgcalls allocated the successful protocol output and its
         // matching free function accepts the same stack wrapper by pointer.
         unsafe { (api.ntg_protocol_free)(&mut raw) };
+        log::install(&api);
 
         Ok(Self {
             api,
@@ -546,6 +548,10 @@ impl NtgcallsEngine {
                 capture,
             )
         };
+        crate::advanced::debug_mode::debug_log(&format!(
+            "[call] {call_id} capture camera {:?} screen {} -> {rc}",
+            config.camera, config.screen_share_on
+        ));
         if rc != NTG_OK {
             return Err(EngineError::Engine {
                 op: "ntg_set_stream_sources",
