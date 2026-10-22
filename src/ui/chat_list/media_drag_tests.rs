@@ -57,8 +57,8 @@ fn dragging(vcx: &mut VisualTestContext) -> bool {
 }
 
 /// Receives one more message (id 901, incoming, chat 11) with `content` (the
-/// JSON of a TDLib `MessageContent`) and returns a point on its media (the
-/// row's left, under its top).
+/// JSON of a TDLib `MessageContent`) and returns a point on its media (low in the
+/// row, clear of the hover toolbar).
 fn inject(
     app: &Entity<QuillApp>,
     vcx: &mut VisualTestContext,
@@ -94,7 +94,7 @@ fn inject(
             .find_map(|(ix, bounds)| match app.history.rows.get(*ix) {
                 Some(HistoryRow::Single(inputs)) if inputs.message.id == MessageId(901) => Some((
                     *bounds,
-                    point(bounds.left() + px(90.), bounds.top() + px(50.)),
+                    point(bounds.left() + px(90.), bounds.bottom() - px(35.)),
                 )),
                 _ => None,
             })
