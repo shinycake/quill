@@ -12,6 +12,7 @@ mod composer;
 mod derived_state;
 mod dice;
 mod group_call_bar;
+pub(in crate::ui) mod group_photos;
 mod groups_admin;
 mod info_actions;
 mod info_panels;

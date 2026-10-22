@@ -467,3 +467,6 @@ mod about_text_tests;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod common_groups_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod photo_viewer_tests;

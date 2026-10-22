@@ -33,6 +33,7 @@ impl QuillApp {
                 this.open_peer_photos(quill::state::PhotoOwner::Chat(chat_id), cx)
             }))
             .child(avatar)
+            .test_support()
             .into_any_element()
     }
 

@@ -9,9 +9,9 @@ use quill::state::{GalleryPhoto, PhotoActions, PhotoDelete, PhotoGallery, PhotoO
 use quill::telegram::envelope::ChatKind;
 
 /// The header and actions of the photo on screen.
-pub(super) struct ProfilePhotoFacts {
-    pub(super) header: String,
-    pub(super) actions: PhotoActions,
+pub(in crate::ui) struct ProfilePhotoFacts {
+    pub(in crate::ui) header: String,
+    pub(in crate::ui) actions: PhotoActions,
     /// An earlier group or channel photo goes for everyone (basic groups;
     /// supergroups always delete for everyone).
     revoke: bool,
@@ -34,7 +34,7 @@ impl QuillApp {
         Some((gallery, photo))
     }
 
-    pub(super) fn profile_photo_facts(&self) -> Option<ProfilePhotoFacts> {
+    pub(in crate::ui) fn profile_photo_facts(&self) -> Option<ProfilePhotoFacts> {
         let (gallery, photo) = self.viewer_gallery_photo()?;
         let session = self.session()?;
         let header_owner = match gallery.owner {

@@ -139,3 +139,27 @@ fn report_photo_carries_file_reason_and_text() {
     assert_eq!(v["file_id"], 904);
     assert_eq!(v["reason"]["@type"], "reportReasonSpam");
 }
+
+#[test]
+fn chat_photo_history_and_set_main_match_the_schema() {
+    use crate::telegram::requests::{search_chat_photos, set_chat_photo_from_file};
+    let v = parse(&search_chat_photos(
+        RequestId(20),
+        ChatId(-1009),
+        crate::ids::MessageId(40),
+        100,
+    ));
+    assert_eq!(v["@type"], "searchChatMessages");
+    assert_eq!(v["chat_id"], -1009);
+    assert_eq!(v["query"], "");
+    assert_eq!(v["from_message_id"], 40);
+    assert_eq!(v["offset"], 0);
+    assert_eq!(v["limit"], 100);
+    assert_eq!(v["filter"]["@type"], "searchMessagesFilterChatPhoto");
+    let v = parse(&set_chat_photo_from_file(RequestId(21), ChatId(-1009), 77));
+    assert_eq!(v["@type"], "setChatPhoto");
+    assert_eq!(v["chat_id"], -1009);
+    assert_eq!(v["photo"]["@type"], "inputChatPhotoStatic");
+    assert_eq!(v["photo"]["photo"]["@type"], "inputFileId");
+    assert_eq!(v["photo"]["photo"]["id"], 77);
+}
