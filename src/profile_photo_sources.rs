@@ -135,6 +135,80 @@ pub fn set_profile_photo_animation(
     .to_string()
 }
 
+/// A new photo for a group or channel (`InputChatPhoto`, schema lines
+/// 1062-1073): a cropped still, an encoded clip, or the emoji builder's
+/// sticker on a background.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ChatPhotoInput {
+    Static {
+        path: String,
+    },
+    Animation {
+        path: String,
+        main_frame_timestamp: f64,
+    },
+    Sticker {
+        sticker: PhotoSticker,
+        colors: Vec<u32>,
+    },
+}
+
+impl ChatPhotoInput {
+    /// Whether TDLib can take it as it is: a file path, a finite main
+    /// frame, a real sticker on at least one color.
+    pub fn is_valid(&self) -> bool {
+        match self {
+            Self::Static { path } => !path.is_empty(),
+            Self::Animation {
+                path,
+                main_frame_timestamp,
+            } => !path.is_empty() && main_frame_timestamp.is_finite(),
+            Self::Sticker { sticker, colors } => {
+                !colors.is_empty()
+                    && match *sticker {
+                        PhotoSticker::CustomEmoji { custom_emoji_id } => custom_emoji_id > 0,
+                        PhotoSticker::RegularOrMask {
+                            sticker_set_id,
+                            sticker_id,
+                        } => sticker_set_id > 0 && sticker_id > 0,
+                    }
+            }
+        }
+    }
+
+    /// The `InputChatPhoto` object.
+    pub fn to_json(&self) -> Value {
+        match self {
+            Self::Static { path } => json!({
+                "@type": "inputChatPhotoStatic",
+                "photo": { "@type": "inputFileLocal", "path": path },
+            }),
+            Self::Animation {
+                path,
+                main_frame_timestamp,
+            } => json!({
+                "@type": "inputChatPhotoAnimation",
+                "animation": { "@type": "inputFileLocal", "path": path },
+                "main_frame_timestamp": main_frame_timestamp.max(0.0),
+            }),
+            Self::Sticker { sticker, colors } => json!({
+                "@type": "inputChatPhotoSticker",
+                "sticker": chat_photo_sticker(*sticker, colors),
+            }),
+        }
+    }
+}
+
+/// `getDefaultChatPhotoCustomEmojiStickers = Stickers;` (schema line
+/// 15802): the custom emoji the builder offers for a group or channel.
+pub fn get_default_chat_photo_custom_emoji_stickers(extra: RequestId) -> String {
+    json!({
+        "@type": "getDefaultChatPhotoCustomEmojiStickers",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
 /// `getDefaultProfilePhotoCustomEmojiStickers = Stickers;` (schema line
 /// 15151): the custom emoji the builder offers.
 pub fn get_default_profile_photo_custom_emoji_stickers(extra: RequestId) -> String {
@@ -238,6 +312,51 @@ mod tests {
         assert_eq!(
             v["photo"]["sticker"]["background_fill"]["@type"],
             "backgroundFillSolid"
+        );
+    }
+
+    #[test]
+    fn chat_photo_inputs_match_the_schema() {
+        use super::ChatPhotoInput;
+        let still = ChatPhotoInput::Static {
+            path: "/tmp/a.png".into(),
+        };
+        assert_eq!(
+            still.to_json(),
+            json!({
+                "@type": "inputChatPhotoStatic",
+                "photo": { "@type": "inputFileLocal", "path": "/tmp/a.png" },
+            })
+        );
+        let clip = ChatPhotoInput::Animation {
+            path: "/tmp/a.mp4".into(),
+            main_frame_timestamp: -1.0,
+        };
+        assert_eq!(clip.to_json()["main_frame_timestamp"], 0.0);
+        assert_eq!(clip.to_json()["animation"]["path"], "/tmp/a.mp4");
+        let emoji = ChatPhotoInput::Sticker {
+            sticker: PhotoSticker::CustomEmoji { custom_emoji_id: 9 },
+            colors: vec![0x112233],
+        };
+        assert_eq!(emoji.to_json()["@type"], "inputChatPhotoSticker");
+        assert_eq!(
+            emoji.to_json()["sticker"]["type"]["custom_emoji_id"],
+            9
+        );
+        assert!(still.is_valid() && clip.is_valid() && emoji.is_valid());
+        assert!(
+            !ChatPhotoInput::Sticker {
+                sticker: PhotoSticker::CustomEmoji { custom_emoji_id: 9 },
+                colors: Vec::new(),
+            }
+            .is_valid()
+        );
+        assert!(
+            !ChatPhotoInput::Animation {
+                path: "/tmp/a.mp4".into(),
+                main_frame_timestamp: f64::NAN,
+            }
+            .is_valid()
         );
     }
 

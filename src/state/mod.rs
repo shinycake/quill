@@ -111,6 +111,7 @@ mod session_video_chat_caps;
 pub use session_forum::{FORUM_COLUMN_COLLAPSE_BELOW, FORUM_COLUMN_WIDTH, ForumColumn};
 mod session_forward;
 mod session_group_admin;
+mod session_group_edit;
 mod session_history_window;
 mod session_links_boosts;
 mod session_members;

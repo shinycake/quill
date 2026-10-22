@@ -392,6 +392,7 @@ pub(crate) fn parse_groups_payload(
         "updateBasicGroupFullInfo" => Ok(EnvelopePayload::Groups(
             GroupsPayload::UpdateBasicGroupFullInfo {
                 basic_group_id: int53(value.get("basic_group_id"))?,
+                description: basic_group_description(value.get("basic_group_full_info")),
                 bot_commands: parse_group_bot_commands(
                     value
                         .get("basic_group_full_info")
@@ -651,6 +652,7 @@ pub(crate) fn parse_groups_payload(
         })),
         // Slice G1: `basicGroupFullInfo` (schema 1.8.67, line 2714).
         "basicGroupFullInfo" => Ok(EnvelopePayload::Groups(GroupsPayload::BasicGroupFullInfo {
+            description: basic_group_description(Some(value)),
             members: value
                 .get("members")
                 .and_then(Value::as_array)
@@ -722,4 +724,12 @@ fn direct_messages_role(supergroup: &Value) -> Option<crate::suggested_posts::Di
         flag("is_direct_messages_group"),
         flag("is_administered_direct_messages_group"),
     )
+}
+
+/// `basicGroupFullInfo.description` (schema line 3130), empty when absent.
+fn basic_group_description(info: Option<&Value>) -> String {
+    info.and_then(|info| info.get("description"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
 }

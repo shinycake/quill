@@ -4,7 +4,7 @@
 //! stickers tab.
 
 use super::gradient_editor::GradientEditor;
-use super::{PhotoSources, QuillApp, render_rgba, replace_image};
+use super::{ChosenPhoto, PhotoPreview, PhotoSources, QuillApp, render_rgba, replace_image};
 use crate::ui::pressable::PressableDiv;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -12,7 +12,7 @@ use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::profile_photo_gradient::render_background;
-use quill::profile_photo_sources::{PRESET_COUNT, PhotoSticker, gradient_preset};
+use quill::profile_photo_sources::{ChatPhotoInput, PRESET_COUNT, PhotoSticker, gradient_preset};
 use quill::telegram::envelope::{StickerFormat, StickerItem};
 use std::sync::Arc;
 
@@ -139,7 +139,7 @@ impl QuillApp {
                 return;
             };
             let items: Vec<StickerItem> = match sources.emoji.tab {
-                Tab::Emoji => session.users_state.profile_photo_emoji_icons.clone(),
+                Tab::Emoji => self.photo_emoji_icons().0.to_vec(),
                 Tab::Stickers => Self::avatar_stickers(session),
             };
             items
@@ -197,9 +197,9 @@ impl QuillApp {
     fn picked_item(&self, pick: Pick) -> Option<StickerItem> {
         let session = self.session()?;
         match pick {
-            Pick::Emoji(id) => session
-                .users_state
-                .profile_photo_emoji_icons
+            Pick::Emoji(id) => self
+                .photo_emoji_icons()
+                .0
                 .iter()
                 .find(|item| item.custom_emoji_id == Some(id))
                 .cloned(),
@@ -210,16 +210,30 @@ impl QuillApp {
     }
 
     fn use_emoji_avatar(&mut self, cx: &mut Context<Self>) {
+        let Some(target) = self.photo_target() else {
+            return;
+        };
         let Some((pick, colors)) = self
             .sources()
             .and_then(|s| Some((s.emoji.pick?, s.emoji.colors())))
         else {
             return;
         };
-        self.finish_photo_source(
-            |driver| driver.set_profile_photo_sticker(pick.as_photo_sticker(), &colors),
-            cx,
-        );
+        let preview = self
+            .picked_item(pick)
+            .zip(draw(&colors, (PREVIEW_PX * 2.0) as u32))
+            .map(|(sticker, background)| PhotoPreview::Sticker {
+                background,
+                sticker,
+            });
+        let photo = ChosenPhoto {
+            input: ChatPhotoInput::Sticker {
+                sticker: pick.as_photo_sticker(),
+                colors,
+            },
+            preview,
+        };
+        self.finish_photo_source(target, photo, cx);
     }
 
     fn choose_background(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -349,19 +363,11 @@ impl QuillApp {
         let session = self.session();
         let (items, empty): (Vec<(Pick, StickerItem)>, Option<&str>) = match builder.tab {
             Tab::Emoji => {
-                let failed =
-                    session.is_some_and(|s| s.users_state.profile_photo_emoji_icons_failed);
-                let items: Vec<_> = session
-                    .map(|s| {
-                        s.users_state
-                            .profile_photo_emoji_icons
-                            .iter()
-                            .filter_map(|item| {
-                                Some((Pick::Emoji(item.custom_emoji_id?), item.clone()))
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let (icons, failed) = self.photo_emoji_icons();
+                let items: Vec<_> = icons
+                    .iter()
+                    .filter_map(|item| Some((Pick::Emoji(item.custom_emoji_id?), item.clone())))
+                    .collect();
                 let empty = if failed {
                     Some(tr(keys::Q_PEOPLE_COULDNT_LOAD_THE_EMOJI_GO))
                 } else if items.is_empty() {

@@ -1,10 +1,12 @@
-//! Profile photo sources in the edit-profile dialog (tdesktop
-//! `UserpicButton` menu): the camera with a live preview, the emoji and
-//! sticker avatar builder with its gradient editor, and a video avatar.
-//! The camera and the emoji open a panel in place of the dialog's normal
-//! body; the video opens the full video editor over the dialog. The
-//! request bodies, the gradient drawing and the ffmpeg command lines are
-//! in `quill::profile_photo_*`.
+//! Photo sources (tdesktop `UserpicButton` menu) for the edit-profile
+//! dialog and the group and channel Edit box: the camera with a live
+//! preview, the emoji and sticker builder with its gradient editor, and a
+//! video. The camera and the emoji open a panel in place of the dialog's
+//! normal body; the video opens the full video editor over the dialog and
+//! a picked or taken photo opens the crop (`photo_editor_profile.rs`). The
+//! own profile photo is set at once; a group's waits for the box's Save.
+//! The request bodies, the gradient drawing and the ffmpeg command lines
+//! are in `quill::profile_photo_*`.
 #![deny(clippy::indexing_slicing)]
 
 mod camera;
@@ -25,6 +27,47 @@ use std::sync::Arc;
 use crate::ui::status_note::StatusNote;
 pub(crate) use camera::CameraDraft;
 pub(crate) use emoji::EmojiBuilder;
+use quill::ids::ChatId;
+use quill::profile_photo_sources::ChatPhotoInput;
+use quill::telegram::envelope::StickerItem;
+
+/// Whose photo the sources make.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PhotoTarget {
+    /// The viewer's own profile photo, set at once.
+    Profile,
+    /// A group's or channel's photo, kept in its Edit box until Save.
+    Chat(ChatId),
+}
+
+/// How a chosen photo looks before it is sent.
+#[derive(Clone)]
+pub(crate) enum PhotoPreview {
+    Image(Arc<RenderImage>),
+    /// The emoji builder's background with the sticker drawn over it.
+    Sticker {
+        background: Arc<RenderImage>,
+        sticker: StickerItem,
+    },
+}
+
+/// A photo a source produced: what `setChatPhoto` sends and its preview.
+pub(crate) struct ChosenPhoto {
+    pub(crate) input: ChatPhotoInput,
+    pub(crate) preview: Option<PhotoPreview>,
+}
+
+impl Drop for ChosenPhoto {
+    fn drop(&mut self) {
+        match self.preview.take() {
+            Some(PhotoPreview::Image(image)) => super::image_budget::retire_all([image]),
+            Some(PhotoPreview::Sticker { background, .. }) => {
+                super::image_budget::retire_all([background]);
+            }
+            None => {}
+        }
+    }
+}
 
 /// Which source panel the dialog shows.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -108,18 +151,57 @@ fn replace_image(slot: &mut Option<Arc<RenderImage>>, new: Option<Arc<RenderImag
 }
 
 impl QuillApp {
-    fn sources_mut(&mut self) -> Option<&mut PhotoSources> {
-        self.dialogs
-            .edit_profile_dialog
-            .as_mut()
-            .map(|dialog| &mut dialog.sources)
-    }
-
-    fn sources(&self) -> Option<&PhotoSources> {
+    /// Where the sources' result goes: the open group Edit box, else the
+    /// edit-profile dialog.
+    pub(super) fn photo_target(&self) -> Option<PhotoTarget> {
+        if let Some(edit) = self.group_edit_box() {
+            return Some(PhotoTarget::Chat(edit.chat_id));
+        }
         self.dialogs
             .edit_profile_dialog
             .as_ref()
-            .map(|dialog| &dialog.sources)
+            .map(|_| PhotoTarget::Profile)
+    }
+
+    fn sources_mut(&mut self) -> Option<&mut PhotoSources> {
+        match self.photo_target()? {
+            PhotoTarget::Chat(_) => self.group_edit_box_mut().map(|edit| &mut edit.sources),
+            PhotoTarget::Profile => self
+                .dialogs
+                .edit_profile_dialog
+                .as_mut()
+                .map(|dialog| &mut dialog.sources),
+        }
+    }
+
+    fn sources(&self) -> Option<&PhotoSources> {
+        match self.photo_target()? {
+            PhotoTarget::Chat(_) => self.group_edit_box().map(|edit| &edit.sources),
+            PhotoTarget::Profile => self
+                .dialogs
+                .edit_profile_dialog
+                .as_ref()
+                .map(|dialog| &dialog.sources),
+        }
+    }
+
+    /// The custom emoji the builder offers for the current target (tdesktop
+    /// `EmojiListType::Profile` / `Group`).
+    fn photo_emoji_icons(&self) -> (&[StickerItem], bool) {
+        let Some(session) = self.session() else {
+            return (&[], false);
+        };
+        let users = &session.users_state;
+        match self.photo_target() {
+            Some(PhotoTarget::Chat(_)) => (
+                &users.chat_photo_emoji_icons,
+                users.chat_photo_emoji_icons_failed,
+            ),
+            _ => (
+                &users.profile_photo_emoji_icons,
+                users.profile_photo_emoji_icons_failed,
+            ),
+        }
     }
 
     /// Called as the dialog renders: fetch thumbnails the open panel needs
@@ -138,10 +220,15 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let for_chat = matches!(self.photo_target(), Some(PhotoTarget::Chat(_)));
         if mode == SourceMode::Emoji
             && let Some(live) = self.live.as_mut()
         {
-            let _ = live.driver.load_profile_photo_emoji_icons();
+            let _ = if for_chat {
+                live.driver.load_chat_photo_emoji_icons()
+            } else {
+                live.driver.load_profile_photo_emoji_icons()
+            };
             let _ = live.driver.fetch_editor_stickers();
         }
         if let Some(sources) = self.sources_mut() {
@@ -175,30 +262,66 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Send a request and close the panel; a failure stays on the panel.
-    fn finish_photo_source(
+    /// A source's photo: the own profile photo is sent at once, a group's
+    /// goes into its Edit box for Save. Closes the panel; a failure stays
+    /// on it.
+    pub(super) fn finish_photo_source(
         &mut self,
-        send: impl FnOnce(
-            &mut quill::connect::ConnectDriver<quill::connect::LiveSender>,
-        ) -> Result<quill::ids::RequestId, quill::connect::ConnectSendError>,
+        target: PhotoTarget,
+        photo: ChosenPhoto,
         cx: &mut Context<Self>,
     ) {
-        let Some(live) = self.live.as_mut() else {
-            self.photo_source_note(tr(keys::Q_PEOPLE_PROFILE_EDITS_NEED_A_SIGNED), cx);
-            return;
-        };
-        live.driver.session.users_state.profile_edit_error = None;
-        match send(&mut live.driver) {
-            Ok(_) => {
+        match self.take_chosen_photo(target, photo) {
+            Ok(()) => self.close_photo_source(cx),
+            Err(note) => self.photo_source_note(note, cx),
+        }
+    }
+
+    /// Send the own profile photo, or keep a group's in its Edit box. The
+    /// error is the note to show.
+    pub(in crate::ui) fn take_chosen_photo(
+        &mut self,
+        target: PhotoTarget,
+        photo: ChosenPhoto,
+    ) -> Result<(), String> {
+        match target {
+            PhotoTarget::Chat(chat_id) => match self.group_edit_box_mut() {
+                Some(edit) if edit.chat_id == chat_id => {
+                    edit.photo = Some(photo);
+                    Ok(())
+                }
+                _ => Err(tr(keys::Q_NOTES_FAILED_SET_PHOTO).to_string()),
+            },
+            PhotoTarget::Profile => {
+                self.send_profile_photo(&photo.input)?;
                 self.connection.set_note(StatusNote::silent(tr(
                     keys::Q_PEOPLE_PHOTO_UPDATE_REQUESTED,
                 )));
-                self.close_photo_source(cx);
-            }
-            Err(err) => {
-                self.photo_source_note(user_error_for(keys::Q_NOTES_FAILED_SET_PHOTO, &err), cx)
+                Ok(())
             }
         }
+    }
+
+    /// `setProfilePhoto` with the source's photo.
+    fn send_profile_photo(&mut self, input: &ChatPhotoInput) -> Result<(), String> {
+        let Some(live) = self.live.as_mut() else {
+            return Err(tr(keys::Q_PEOPLE_PROFILE_EDITS_NEED_A_SIGNED).to_string());
+        };
+        live.driver.session.users_state.profile_edit_error = None;
+        let sent = match input {
+            ChatPhotoInput::Static { path } => live.driver.set_profile_photo(path),
+            ChatPhotoInput::Animation {
+                path,
+                main_frame_timestamp,
+            } => live
+                .driver
+                .set_profile_photo_video(path, *main_frame_timestamp),
+            ChatPhotoInput::Sticker { sticker, colors } => {
+                live.driver.set_profile_photo_sticker(*sticker, colors)
+            }
+        };
+        sent.map(|_| ())
+            .map_err(|err| user_error_for(keys::Q_NOTES_FAILED_SET_PHOTO, &err))
     }
 
     /// The panel for the open source, or `None` for the normal body.

@@ -34,6 +34,9 @@ impl Session {
             Some(RequestPurpose::GetProfilePhotoEmojiIcons) => {
                 self.users_state.profile_photo_emoji_icons_failed = true;
             }
+            Some(RequestPurpose::GetChatPhotoEmojiIcons) => {
+                self.users_state.chat_photo_emoji_icons_failed = true;
+            }
             Some(RequestPurpose::GetProfileShareThemeBackdrops) => {
                 self.users_state.peer_qr.backdrops.fail();
             }

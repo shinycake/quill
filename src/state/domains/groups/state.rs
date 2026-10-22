@@ -190,6 +190,12 @@ pub struct GroupsState {
     /// basic groups), keyed by chat id. Reuses `SupergroupMembersFetch`
     /// (Loading / Loaded / Failed).
     pub basic_group_members: HashMap<i64, SupergroupMembersFetch>,
+    /// `basicGroupFullInfo.description`, keyed by basic group id.
+    pub basic_group_descriptions: HashMap<i64, String>,
+    /// The last refused `setChatTitle` / `setChatDescription` /
+    /// `setChatPhoto` of the Edit box, keyed by chat id; cleared when the
+    /// box saves again.
+    pub info_edit_errors: HashMap<i64, GroupInfoEditError>,
     /// Slice G1: `supergroup.join_by_request` (schema 1.8.67, lines
     /// 2733/2746), keyed by supergroup id. Drives the "Approve new
     /// members" toggle.
@@ -315,6 +321,8 @@ impl GroupsState {
             admin_lists: HashMap::new(),
             supergroup_members: HashMap::new(),
             basic_group_members: HashMap::new(),
+            basic_group_descriptions: HashMap::new(),
+            info_edit_errors: HashMap::new(),
             supergroup_join_by_request: HashMap::new(),
             supergroup_join_to_send: HashMap::new(),
             supergroup_restricted: HashSet::new(),
@@ -333,4 +341,19 @@ impl GroupsState {
             supergroup_manage_tags_right: HashMap::new(),
         }
     }
+}
+
+/// Which Edit box request TDLib refused, and why.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GroupInfoEditError {
+    pub field: GroupInfoField,
+    /// TDLib's error class, readable (`error_reason`).
+    pub reason: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GroupInfoField {
+    Title,
+    Description,
+    Photo,
 }

@@ -1,18 +1,17 @@
-//! The edit-profile form's single Save: which fields changed, the bio
-//! counter, and the native photo picker.
+//! The edit-profile form's single Save: which fields changed and the bio
+//! counter.
 //!
 //! tdesktop (`settings/settings_information.cpp`) keeps one form: the
-//! name and bio fields are saved together (only what changed), the photo
-//! is chosen with the file dialog and uploaded at once.
+//! name and bio fields are saved together (only what changed); the photo
+//! goes through the file dialog and the crop (`photo_editor_profile.rs`)
+//! and is uploaded at once.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-
 use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
-use std::path::Path;
 
 /// TDLib's compiled default for `bio_length_max` (Premium raises it).
 pub(crate) const DEFAULT_BIO_LENGTH_MAX: usize = 70;
@@ -123,51 +122,6 @@ impl QuillApp {
         self.connection
             .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_NAME_UPDATE_REQUESTED)));
         self.close_edit_profile_dialog(cx);
-    }
-
-    /// "Set Photo": the native file dialog, then `setProfilePhoto` (the
-    /// photo is not part of Save, as in tdesktop).
-    pub(super) fn choose_profile_photo(&mut self, cx: &mut Context<Self>) {
-        let picker = cx.prompt_for_paths(PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: false,
-            prompt: Some(tr(keys::PROFILE_SET_PHOTO_BUTTON).into()),
-        });
-        cx.spawn(async move |this, cx| {
-            if let Ok(Ok(Some(paths))) = picker.await
-                && let Some(path) = paths.first().cloned()
-            {
-                let _ = this.update(cx, |this, cx| this.submit_profile_photo(&path, cx));
-            }
-        })
-        .detach();
-    }
-
-    /// `setProfilePhoto` from a local path (`inputChatPhotoStatic`); sets
-    /// the main profile photo (`is_public=false`).
-    pub(super) fn submit_profile_photo(&mut self, path: &Path, cx: &mut Context<Self>) {
-        let Some(path) = path.to_str() else {
-            return;
-        };
-        let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
-                keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED,
-            )));
-            cx.notify();
-            return;
-        };
-        live.driver.session.users_state.profile_edit_error = None;
-        match live.driver.set_profile_photo(path) {
-            Ok(_) => self.connection.set_note(StatusNote::silent(tr(
-                keys::Q_PEOPLE_PHOTO_UPDATE_REQUESTED,
-            ))),
-            Err(err) => self.connection.set_note(StatusNote::error(user_error_for(
-                keys::Q_NOTES_FAILED_SET_PHOTO,
-                &err,
-            ))),
-        }
-        cx.notify();
     }
 }
 

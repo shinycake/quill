@@ -408,10 +408,12 @@ pub enum GroupsPayload {
     /// `basicGroupFullInfo photo:chatPhoto description:string
     /// creator_user_id:int53 members:vector<chatMember> ... =
     /// BasicGroupFullInfo;`
-    /// Only the member list is kept (the basic-group member dialog);
-    /// correlated to the chat by the request's `PendingRequest::chat_id`.
-    /// `bot_commands` feeds the composer's `/` menu in groups.
+    /// The member list (the basic-group member dialog) and the
+    /// description (info panel, Edit box) are kept; correlated to the chat
+    /// by the request's `PendingRequest::chat_id`. `bot_commands` feeds the
+    /// composer's `/` menu in groups.
     BasicGroupFullInfo {
+        description: String,
         members: Vec<ParsedChatMember>,
         bot_commands: Vec<GroupBotCommands>,
     },
@@ -486,10 +488,11 @@ pub enum GroupsPayload {
         /// `share_theme`: the QR box's saved theme.
         share_theme: crate::peer_qr::theme::ShareTheme,
     },
-    /// `updateBasicGroupFullInfo` (schema 1.8.67): only the commands of the
-    /// group's bots are kept.
+    /// `updateBasicGroupFullInfo` (schema 1.8.67): the description and the
+    /// commands of the group's bots are kept.
     UpdateBasicGroupFullInfo {
         basic_group_id: i64,
+        description: String,
         bot_commands: Vec<GroupBotCommands>,
     },
     /// `ChatJoinResult` — `joinChat` response.

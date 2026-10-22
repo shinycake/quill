@@ -168,8 +168,12 @@ impl QuillApp {
         else {
             return;
         };
-        let path = path.to_string_lossy().into_owned();
-        self.finish_photo_source(|driver| driver.set_profile_photo(&path), cx);
+        let Some(target) = self.photo_target() else {
+            return;
+        };
+        // The shot goes through the crop, as in tdesktop's camera box.
+        self.close_photo_source(cx);
+        self.open_profile_photo_crop_file(target, path, cx);
     }
 
     pub(super) fn camera_panel(

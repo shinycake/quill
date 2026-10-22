@@ -1,17 +1,17 @@
 //! The video avatar (tdesktop `PrepareProfileVideo`): "Video…" picks a
 //! clip and opens the full video editor on it with a square crop and 1 to
-//! 9.6 s; its "Done" encodes the 800 x 800 clip and sets it with the cover
-//! as the main frame (`inputChatPhotoAnimation`). The editor is
+//! 9.6 s; its "Done" encodes the 800 x 800 clip and sets it (or, for a
+//! group, keeps it for the Edit box's Save) with the cover as the main
+//! frame (`inputChatPhotoAnimation`). The editor is
 //! `ui::video_editor`, the limits and the ffmpeg line
 //! `quill::profile_photo_video`.
 
-use super::{QuillApp, run_ffmpeg, work_dir};
+use super::{ChosenPhoto, PhotoPreview, QuillApp, run_ffmpeg, work_dir};
 use crate::ui::shell::DialogKind;
-use crate::ui::status_note::StatusNote;
-use crate::ui::user_error::user_error_for;
 use crate::ui::video_editor::EditorTarget;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
+use quill::profile_photo_sources::ChatPhotoInput;
 use quill::profile_photo_video::{encode_args, main_frame_secs};
 
 impl QuillApp {
@@ -27,7 +27,7 @@ impl QuillApp {
                 && let Some(path) = paths.into_iter().next()
             {
                 let _ = this.update_in(cx, |this, window, cx| {
-                    if this.dialogs.edit_profile_dialog.is_some() {
+                    if this.photo_target().is_some() {
                         this.open_video_editor(EditorTarget::Avatar, path, None, window, cx);
                     }
                 });
@@ -45,6 +45,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        let Some(target) = self.photo_target() else {
+            return true;
+        };
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return true;
         };
@@ -74,21 +77,24 @@ impl QuillApp {
                     let _ = std::fs::remove_file(&output);
                     return;
                 }
+                let still = this
+                    .composer_ui
+                    .send_box
+                    .video_editor
+                    .as_ref()
+                    .and_then(|editor| editor.still.clone());
                 let sent = result.and_then(|()| {
-                    let path = output.to_string_lossy().into_owned();
-                    let Some(live) = this.live.as_mut() else {
-                        return Err(tr(keys::Q_AV_PROFILE_EDITS_NEED_A_SIGNED).to_string());
+                    let photo = ChosenPhoto {
+                        input: ChatPhotoInput::Animation {
+                            path: output.to_string_lossy().into_owned(),
+                            main_frame_timestamp: main_frame_secs(&edits),
+                        },
+                        preview: still.map(PhotoPreview::Image),
                     };
-                    live.driver.session.users_state.profile_edit_error = None;
-                    live.driver
-                        .set_profile_photo_video(&path, main_frame_secs(&edits))
-                        .map(|_| ())
-                        .map_err(|err| user_error_for(keys::Q_NOTES_FAILED_SET_PHOTO, &err))
+                    this.take_chosen_photo(target, photo)
                 });
                 match sent {
                     Ok(()) => {
-                        this.connection
-                            .set_note(StatusNote::silent(tr(keys::Q_AV_PHOTO_UPDATE_REQUESTED)));
                         this.close_video_editor(cx);
                         this.close_kit_dialog_if_done(DialogKind::VideoEditor, window, cx);
                     }

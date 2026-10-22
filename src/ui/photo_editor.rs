@@ -60,6 +60,10 @@ pub(super) enum EditorPurpose {
     /// fitted to the set's side (tdesktop's `fixedCrop` editor from
     /// `StickerCreatorBox`; `photo_editor_set.rs`).
     Set { set_id: i64, kind: SetKind },
+    /// A profile, group or channel photo: a square crop shown as a circle,
+    /// confirmed with "Set Photo" (tdesktop `PrepareProfilePhoto`;
+    /// `photo_editor_profile.rs`).
+    Profile(super::profile_photo_sources::PhotoTarget),
 }
 
 #[derive(Clone, Copy)]
@@ -122,7 +126,7 @@ pub(super) fn preview_of(image: &RgbaImage) -> Arc<RenderImage> {
 }
 
 impl PhotoEditor {
-    fn new(purpose: EditorPurpose, working: RgbaImage) -> Self {
+    pub(super) fn new(purpose: EditorPurpose, working: RgbaImage) -> Self {
         Self {
             purpose,
             preview: preview_of(&working),
@@ -269,6 +273,9 @@ impl PhotoEditor {
                 }
                 .clamped();
             }
+            Some(CropDrag::Corner(corner)) if self.square_crop() => {
+                self.crop = self.square_corner_drag(corner, (x, y));
+            }
             Some(CropDrag::Corner(corner)) => {
                 let crop = self.crop;
                 let (mut left, mut top) = (crop.x, crop.y);
@@ -342,6 +349,11 @@ impl QuillApp {
         };
         let item = match &editor.purpose {
             EditorPurpose::Attachment(item) => item.clone(),
+            EditorPurpose::Profile(target) => {
+                let target = *target;
+                self.finish_profile_crop(editor, target, cx);
+                return;
+            }
             EditorPurpose::MessageEdit => {
                 let placed: Vec<Placed> =
                     editor.placed.iter().map(|(item, _)| item.clone()).collect();
@@ -398,7 +410,11 @@ impl QuillApp {
 
     /// The editor overlay: canvas in the middle, tools below.
     pub(super) fn photo_editor_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.viewer.photo_editor.as_ref()?;
+        // A profile photo crop opens over the dialog it came from, in a
+        // dialog of its own (`photo_editor_profile.rs`).
+        if self.viewer.photo_editor.as_ref()?.is_profile() {
+            return None;
+        }
         self.photo_editor_overlay_body(cx)
     }
 
@@ -407,7 +423,7 @@ impl QuillApp {
     /// it (docs/decisions/main-thread-stack.md).
     /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
-    fn photo_editor_overlay_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn photo_editor_overlay_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let editor = self.viewer.photo_editor.as_ref()?;
         let app = cx.entity().downgrade();
         let preview = editor.preview.clone();
@@ -432,6 +448,7 @@ impl QuillApp {
             mode == EditorMode::Stickers || (mode == EditorMode::Crop && editor.base_item)
         });
         let base_item = editor.base_item;
+        let round_crop = editor.is_profile();
         let corner_multiplier = editor.corners.multiplier();
         let surface = canvas(
             move |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
@@ -536,6 +553,17 @@ impl QuillApp {
                         ),
                     ] {
                         window.paint_quad(fill(band, shade));
+                    }
+                    if round_crop {
+                        // The photo is shown round (`CropType::Ellipse`).
+                        window.paint_quad(quad(
+                            crop_bounds,
+                            Corners::all(crop_bounds.size.width / 2.),
+                            gpui_kit::transparent_black(),
+                            px(1.5),
+                            gpui_kit::white().opacity(0.9),
+                            BorderStyle::Solid,
+                        ));
                     }
                     if base_item {
                         // The fixed sticker frame, rounded like the corners
@@ -687,7 +715,7 @@ impl QuillApp {
                         .small()
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.photo_editor_mut(|editor| editor.crop = CropRect::FULL, cx);
+                            this.photo_editor_mut(|editor| editor.crop = editor.initial_crop(), cx);
                         })),
                 ),
             EditorMode::Draw => {
@@ -786,7 +814,11 @@ impl QuillApp {
                         .child(div().font_semibold().child(tr(keys::Q_MISC_EDIT_PHOTO)))
                         .child(
                             Button::new("photo-editor-done")
-                                .label(tr(keys::BOX_DONE))
+                                .label(if round_crop {
+                                    tr(keys::PROFILE_SET_PHOTO_BUTTON)
+                                } else {
+                                    tr(keys::BOX_DONE)
+                                })
                                 .primary()
                                 .on_click(cx.listener(|this, _, _, cx| this.save_photo_editor(cx))),
                         ),

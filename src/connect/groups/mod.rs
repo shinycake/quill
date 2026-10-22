@@ -11,8 +11,8 @@ use crate::telegram::requests::{
     get_available_chat_boost_slots, get_chat_boost_status, get_chat_history, get_chat_member,
     get_chat_statistics, get_community_full_info, get_forum_topics, get_me, get_supergroup,
     get_supergroup_full_info, join_chat, leave_chat, load_chat_welcome_messages,
-    search_chat_messages, set_chat_description, set_chat_member_tag,
-    set_chat_message_auto_delete_time, set_chat_photo, set_chat_slow_mode_delay, set_chat_title,
+    search_chat_messages, set_chat_member_tag, set_chat_message_auto_delete_time,
+    set_chat_slow_mode_delay,
     set_community_name, set_community_permissions, set_community_photo, toggle_forum_topic_closed,
     toggle_forum_topic_pinned, toggle_general_forum_topic_hidden,
     toggle_supergroup_aggressive_anti_spam, toggle_supergroup_is_broadcast_group,
@@ -26,6 +26,7 @@ mod boost_flow;
 mod boosts;
 mod community;
 mod forum;
+mod info_edit;
 mod supergroup;
 mod welcome;
 
@@ -475,144 +476,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             .supergroup_is_broadcast
             .insert(supergroup_id, true);
         Ok(Some(extra))
-    }
-
-    /// Slice: group/channel title edit — `setChatTitle` (schema 1.8.67,
-    /// line 13430). Basic groups, supergroups and channels, gated on
-    /// `can_change_info`. Title length is validated client-side (1–128
-    /// characters per the schema); invalid input is refused with
-    /// `InvalidRequest` before anything is sent. Not optimistic — the
-    /// server's `updateChatTitle` carries the new title; a TDLib error is
-    /// surfaced to the caller unchanged.
-    pub fn set_group_title(
-        &mut self,
-        chat_id: ChatId,
-        title: &str,
-    ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        let len = title.chars().count();
-        if len == 0 || len > 128 {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        if !self.group_info_edit_allowed(chat_id) {
-            return Ok(None);
-        }
-        let purpose = RequestPurpose::SetChatTitle;
-        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
-            return Ok(None);
-        }
-        let extra = self.session.request(purpose, Some(chat_id));
-        let json = set_chat_title(extra, chat_id, title);
-        match self.sender.send_json(&json) {
-            Ok(()) => Ok(Some(extra)),
-            Err(err) => {
-                self.session.requests.take(extra);
-                Err(err)
-            }
-        }
-    }
-
-    /// Slice: group/channel description edit — `setChatDescription`
-    /// (schema 1.8.67, line 13533). Same gating as title; description is
-    /// 0–255 characters, empty clears it. Not optimistic and not
-    /// refetched: TDLib has no `updateChatDescription` broadcast, so the
-    /// new description arrives on the next `getSupergroupFullInfo` /
-    /// `getBasicGroupFullInfo` pull; errors are surfaced unchanged.
-    pub fn set_group_description(
-        &mut self,
-        chat_id: ChatId,
-        description: &str,
-    ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        if description.chars().count() > 255 {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        if !self.group_info_edit_allowed(chat_id) {
-            return Ok(None);
-        }
-        let purpose = RequestPurpose::SetChatDescription;
-        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
-            return Ok(None);
-        }
-        let extra = self.session.request(purpose, Some(chat_id));
-        let json = set_chat_description(extra, chat_id, description);
-        match self.sender.send_json(&json) {
-            Ok(()) => Ok(Some(extra)),
-            Err(err) => {
-                self.session.requests.take(extra);
-                Err(err)
-            }
-        }
-    }
-
-    /// Slice: group/channel photo edit — `setChatPhoto` (schema 1.8.67,
-    /// line 13435). Same gating as title. `photo_path` is a local JPEG
-    /// file (`inputChatPhotoStatic` / `inputFileLocal`); `None` deletes
-    /// the photo (a null top-level `photo` per the schema — "pass null to
-    /// delete the chat photo"). Not optimistic — the server's
-    /// `updateChatPhoto` carries the new photo; errors are surfaced
-    /// unchanged.
-    pub fn set_group_photo(
-        &mut self,
-        chat_id: ChatId,
-        photo_path: Option<&str>,
-    ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        if !self.group_info_edit_allowed(chat_id) {
-            return Ok(None);
-        }
-        let purpose = RequestPurpose::SetChatPhoto;
-        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
-            return Ok(None);
-        }
-        let extra = self.session.request(purpose, Some(chat_id));
-        let photo_json = match photo_path {
-            Some(path) => serde_json::json!({
-                "@type": "inputChatPhotoStatic",
-                "photo": { "@type": "inputFileLocal", "path": path },
-            }),
-            None => serde_json::Value::Null,
-        };
-        let json = set_chat_photo(extra, chat_id, photo_json);
-        match self.sender.send_json(&json) {
-            Ok(()) => Ok(Some(extra)),
-            Err(err) => {
-                self.session.requests.take(extra);
-                Err(err)
-            }
-        }
-    }
-
-    /// Shared gate for the three group/channel info-edit drivers
-    /// (`setChatTitle` / `setChatDescription` / `setChatPhoto`, all
-    /// schema-limited to basic groups, supergroups and channels). Basic
-    /// groups are democratic — every member may change the title,
-    /// photo and description (telegram.org/blog/supergroups: "Everyone
-    /// can invite new members and change the group's name and photo"),
-    /// so no right is required there. Supergroups and channels need
-    /// the `can_change_info` right: creator, an admin with the right
-    /// (`Session::chat_can_change_info`), or a plain member with the
-    /// default `permissions.can_change_info` permission (schema 1.8.67,
-    /// line 1066 — "True, if the user can change the chat title, photo,
-    /// and other settings"), mirroring `Session::chat_can_add_members`.
-    fn group_info_edit_allowed(&self, chat_id: ChatId) -> bool {
-        let Some(chat) = self.session.chats.get(&chat_id.0) else {
-            return false;
-        };
-        match chat.kind {
-            ChatKind::BasicGroup { .. } => true,
-            ChatKind::Supergroup { .. } => {
-                self.session.chat_can_change_info(chat_id)
-                    || chat.permissions.as_ref().is_some_and(|p| p.can_change_info)
-            }
-            _ => false,
-        }
     }
 
     /// Slice CL: `getChatHistory` (schema 1.8.67, line 11829) for the
