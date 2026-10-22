@@ -25,7 +25,7 @@ with tempfile.TemporaryDirectory(prefix="quill-parity-check-") as scratch:
     for name in ["apply-parity-fragment.sh", "check-parity-fragments.sh"]:
         shutil.copy(source / name, root / "scripts" / name)
     (root / "parity-fragments").mkdir()
-    (root / "README.md").write_text("- [ ] Fixture <!-- parity:fixture-one -->\n")
+    (root / "STATUS.md").write_text("- [ ] Fixture <!-- parity:fixture-one -->\n")
     (root / "parity-fragments/done.txt").write_text("parity:fixture-one\n")
     commit()
     base = run("git", "rev-parse", "HEAD")
@@ -33,7 +33,7 @@ with tempfile.TemporaryDirectory(prefix="quill-parity-check-") as scratch:
     commit()
     generated = run("git", "rev-parse", "HEAD")
     run("bash", "scripts/check-parity-fragments.sh", base)
-    (root / "README.md").write_text((root / "README.md").read_text() + "Manual claim\n")
+    (root / "STATUS.md").write_text((root / "STATUS.md").read_text() + "Manual claim\n")
     commit()
     run("bash", "scripts/check-parity-fragments.sh", base, success=False)
     run("git", "reset", "--hard", generated)
