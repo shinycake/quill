@@ -69,20 +69,17 @@ Frames only add up along one call chain. A helper that builds part of an element
 
 ### What changed
 
-Three patterns, all in Quill code. Nothing drawn changed.
+All three changes are in Quill code, and nothing drawn changed.
 
-- **Split builders.** `folder_tabs` builds its `TabBar` in `folder_tab_bar` and its menu and manage buttons in their own functions. `sidebar` (moved to `chat_list/sidebar.rs`) hands each mode to its own builder. The conversation header's identity and actions live in `conversation/header_view.rs`. The selection bar builds each button in `selection_bar.rs`. The composer's option chips, the group panel's identity block and invite-link rows, the bot card's command buttons and the pinned bar's buttons are also split out.
-- **Guard splits.** A builder that usually shows nothing (a dialog, an overlay, a bar) keeps its cheap check in the outer function and does its building in `<name>_body`, marked `#[inline(never)]`. That marking is only on per-frame builders, never on per-row ones. Frames where the dialog is closed skip the big frame. This was applied to 43 builders, among them `photo_editor_overlay` (349 KB), `poll_dialog_panel` (298 KB), `bot_info_panel` (419 KB) and `share_content_panel` (176 KB).
-- **Button helpers.** `ui/lean_buttons.rs` builds the common ghost buttons (text, icon with tooltip, icon without) and returns an `AnyElement`. The group admin sections, the event log, the bot card and the pinned list use them, and `group_management_section` builds each of its rows in `management_row` / `management_toggle_row`. These helpers and the per-message corner buttons carry no `#[inline(never)]`. A debug build never inlines them anyway, and a release build may inline them as before, so per-row code costs the same in release.
+- Builders are split. `folder_tabs` builds its `TabBar` in `folder_tab_bar` and its menu and manage buttons in their own functions. `sidebar` (moved to `chat_list/sidebar.rs`) hands each mode to its own builder. The conversation header's identity and actions live in `conversation/header_view.rs`. The selection bar builds each button in `selection_bar.rs`. The composer's option chips, the group panel's identity block and invite-link rows, the bot card's command buttons and the pinned bar's buttons are also split out.
+- A builder that usually shows nothing (a dialog, an overlay, a bar) keeps its cheap check in the outer function and does its building in `<name>_body`, marked `#[inline(never)]`. That marking is only on per-frame builders, never on per-row ones. Frames where the dialog is closed skip the big frame. 43 builders are split this way, among them `photo_editor_overlay` (349 KB), `poll_dialog_panel` (298 KB), `bot_info_panel` (419 KB) and `share_content_panel` (176 KB).
+- `ui/lean_buttons.rs` builds the common ghost buttons (text, icon with tooltip, icon without) and returns an `AnyElement`. The group admin sections, the event log, the bot card and the pinned list use them, and `group_management_section` builds each of its rows in `management_row` / `management_toggle_row`. These helpers and the per-message corner buttons carry no `#[inline(never)]`. A debug build never inlines them anyway, and a release build may inline them as before, so per-row code costs the same in release.
 
 ### Numbers
 
 All numbers are from macOS arm64, a debug `demo-capture` build, at 1200x800.
 
-- **Frame sizes:** read from each function's prologue (`sub sp`), the same in every run.
-- **Main-thread stack:** the smallest `RLIMIT_STACK` that still launches the demo and writes its capture, bisected in 16 KB steps. macOS sizes the main thread's stack from `RLIMIT_STACK` at exec.
-- **Test thread:** the smallest stack the new test passes with.
-- **Deepest chains:** found with lldb breakpoints on every function entry over 16 KB, recording `sp`. They were measured before the changes and during them, but not on the final build, because lldb could no longer attach.
+Frame sizes are read from each function's prologue (`sub sp`), so they are the same in every run. The main-thread figure is the smallest `RLIMIT_STACK` that still launches the demo and writes its capture, bisected in 16 KB steps; macOS sizes the main thread's stack from `RLIMIT_STACK` at exec. The test-thread figure is the smallest stack the new test passes with. The deepest chains came from lldb breakpoints on every function entry over 16 KB, recording `sp`. Those walks ran before and during the change but not on the final build, because lldb could no longer attach.
 
 Own frame of each builder (KB):
 
@@ -136,7 +133,7 @@ On `ready-chats` the deepest point is no longer in Quill code. It is in GPUI and
 
 Two ways to go lower, neither taken here:
 
-- **Build dependencies at opt-level 1 in dev.** Tried with a test profile: GPUI's per-level cost dropped by about 40% (the conversation pane's render started 125 KB down instead of 205 KB), and the deepest point of the unchanged code fell from 872 KB to 704 KB. A clean debug build went from 4:25 to 5:43. Incremental builds are not affected, but the change touches every developer's setup, so it is a project decision of its own.
-- **Split the kit's `Button::render`** in the vendored `third_party/gpui-component`. This would save up to about 150 KB per button. It would be one more patch to carry in `QUILL-CHANGES.md` on every kit update.
+- Build dependencies at opt-level 1 in dev. Tried with a test profile: GPUI's per-level cost dropped by about 40% (the conversation pane's render started 125 KB down instead of 205 KB), and the deepest point of the unchanged code fell from 872 KB to 704 KB. A clean debug build went from 4:25 to 5:43. Incremental builds are not affected, but the change touches every developer's setup, so it is a project decision of its own.
+- Split the kit's `Button::render` in the vendored `third_party/gpui-component`. This would save up to about 150 KB per button. It would be one more patch to carry in `QUILL-CHANGES.md` on every kit update.
 
 Frames that only run when something opens were left alone: `message_menu_overlay` (784 KB) and `story_page_overlay` (734 KB) run only while a menu or a story is open, on an 8 MB main thread. `session_chat_row` (142 KB per chat row) is a per-row builder, so it was left as it is rather than broken into more calls.
