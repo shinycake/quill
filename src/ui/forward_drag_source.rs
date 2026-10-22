@@ -11,6 +11,7 @@ use gpui_kit::*;
 use quill::forward_drag::ForwardDrag;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, trn};
+use quill::selection_drag::START_DRAG_DISTANCE;
 use quill::state::{HistoryMessage, Session};
 
 /// Whether the message can be forwarded as far as the session knows:
@@ -75,6 +76,53 @@ pub(super) fn drag_for_message(
             .unwrap_or_default()
     };
     drag_for(session, message.chat_id, message.id, &group)
+}
+
+/// The drag of a press on a message's media (`dragItemByHandler`, or an
+/// album part): that one message, never the album and never a selection.
+pub(super) fn drag_for_media(
+    session: Option<&Session>,
+    message: &HistoryMessage,
+) -> Option<ForwardDrag> {
+    let session = session?;
+    if !quill::forward_drag::media_press_drags(&message.content) {
+        return None;
+    }
+    drag_for(session, message.chat_id, message.id, &[])
+}
+
+/// `media` made a source of the message's drag: a press on the picture that
+/// moves picks the message up, while a press that stays a click still opens
+/// it. The click lives on the media, inside; the drag on this wrapper, so a
+/// lift does not take the click with it.
+pub(super) fn media_draggable(
+    id: impl Into<ElementId>,
+    media: AnyElement,
+    drag: Option<ForwardDrag>,
+) -> AnyElement {
+    match drag {
+        None => media,
+        Some(drag) => draggable(div().id(id).child(media), Some(drag)).into_any_element(),
+    }
+}
+
+/// The message's picture, video, sticker or file as the bubble shows it:
+/// pressing it and moving picks the message up for a chat row
+/// (`dragItemByHandler`), and media that does not lead the bubble sits below
+/// a gap.
+pub(super) fn media_block(
+    session: Option<&Session>,
+    message: &HistoryMessage,
+    media: AnyElement,
+    media_led: bool,
+) -> AnyElement {
+    let drag = drag_for_media(session, message);
+    let media = media_draggable(("media-drag", message.id.0 as u64), media, drag);
+    if media_led {
+        media
+    } else {
+        div().mt_2().child(media).into_any_element()
+    }
 }
 
 /// Set while a lifted message drag is in flight, so the history can tell it
@@ -158,10 +206,14 @@ where
     E: StatefulInteractiveElement,
 {
     match drag {
-        Some(drag) => element.on_drag(drag, |drag: &ForwardDrag, _, _, cx| {
-            cx.set_global(ForwardLift(true));
-            cx.new(|_| ForwardGhost::new(drag))
-        }),
+        Some(drag) => element
+            .on_drag(drag, |drag: &ForwardDrag, _, _, cx| {
+                cx.set_global(ForwardLift(true));
+                cx.new(|_| ForwardGhost::new(drag))
+            })
+            // tdesktop starts a drag after `QApplication::startDragDistance`;
+            // a press that moves less is still the click it was.
+            .drag_start_distance(px(START_DRAG_DISTANCE)),
         None => element,
     }
 }
