@@ -189,7 +189,7 @@ fn pick_view(
         .child(Input::new(&app.payments.pick_search).aria_label(tr(keys::Q_MONEY_SEARCH)));
     let export = gift.map_or(ExportState::Unavailable, |g| g.export_state(now_unix()));
     if export != ExportState::Unavailable && query.trim().is_empty() {
-        body = body.child(export_row(export, cx));
+        body = body.child(export_row(export, session.ton_wallet.can_use, cx));
     }
     body = body.child(
         div()
@@ -269,9 +269,10 @@ fn pick_view(
     }
 }
 
-/// tdesktop `ExportRow`: the TON userpic, "Send via Blockchain" and, while
-/// locked, "unlocks in ..." under it.
-fn export_row(state: ExportState, cx: &mut Context<QuillApp>) -> AnyElement {
+/// tdesktop `ExportRow`: the TON userpic, "Send via Blockchain" (or "Move to
+/// My Wallet" while the wallet is on for the account) and, while locked,
+/// "unlocks in ..." under it.
+fn export_row(state: ExportState, to_wallet: bool, cx: &mut Context<QuillApp>) -> AnyElement {
     let status = match state {
         ExportState::Locked { hours } => Some(match UnlockIn::of(hours) {
             UnlockIn::Days(days) => trn(keys::GIFT_TRANSFER_UNLOCKS_DAYS, days),
@@ -279,7 +280,11 @@ fn export_row(state: ExportState, cx: &mut Context<QuillApp>) -> AnyElement {
         }),
         _ => None,
     };
-    let label = tr(keys::GIFT_TRANSFER_VIA_BLOCKCHAIN);
+    let label = if to_wallet {
+        tr(keys::GIFT_TRANSFER_TO_WALLET)
+    } else {
+        tr(keys::GIFT_TRANSFER_VIA_BLOCKCHAIN)
+    };
     let a11y = match &status {
         Some(status) => format!("{label}, {status}"),
         None => label.to_string(),

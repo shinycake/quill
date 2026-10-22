@@ -3,7 +3,8 @@
 //! nothing can be transferred or exported). `QUILL_DEMO_GIFT_TRANSFER`
 //! picks the step: `picker` (default, export still locked), `locked`,
 //! `confirm`, `probing`, `password`, `peer`, `open-chat` (the open chat's
-//! user listed first) or `action-locked`. The GPUI tests in
+//! user listed first), `wallet` (unlocked, wallet on: "Move to My Wallet")
+//! or `action-locked`. The GPUI tests in
 //! `gift_transfer_tests.rs` drive the same demo.
 #![deny(clippy::indexing_slicing)]
 
@@ -44,7 +45,7 @@ fn demo_mode() -> String {
 /// The export opens now for the steps after "Send via Blockchain".
 fn export_date(mode: &str, now: i64) -> i64 {
     match mode {
-        "confirm" | "password" | "probing" => now - 60,
+        "confirm" | "password" | "probing" | "wallet" => now - 60,
         _ => now + LOCKED_FOR,
     }
 }
@@ -80,6 +81,7 @@ pub(super) fn seed_gift_transfer_session(sink: Arc<MemorySink>) -> Session {
     let mode = demo_mode();
     let now = now_unix();
     session.users_state.contacts = Some(CONTACTS.to_vec());
+    session.ton_wallet.set_can_use(mode == "wallet");
     let hub = &mut session.payments.hub;
     hub.gifts_open = true;
     hub.gifts_owner = Some(MessageSender::User { user_id: ME });

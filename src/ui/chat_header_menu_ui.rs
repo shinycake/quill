@@ -13,6 +13,7 @@ use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::state::InfoPanelTarget;
 use quill::telegram::envelope::ChatKind;
+use quill::ton_wallet::WalletSurface;
 
 impl QuillApp {
     pub(super) fn chat_navigation_menu(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -109,6 +110,9 @@ impl QuillApp {
                                     ..
                                 }
                             )),
+                    can_send_money: private_user.is_some_and(|user| {
+                        session.is_some_and(|s| s.ton_wallet.profile_address(user).is_some())
+                    }),
                     new_window: self.can_open_chat_window(c),
                 })
             })
@@ -193,6 +197,7 @@ impl QuillApp {
                     .filter(|secs| *secs > 0)
                     .unwrap_or(86_400);
             }
+            HeaderEntry::SendMoney => self.show_wallet_notice(WalletSurface::SendMoney, cx),
             HeaderEntry::CloseSecretChat => self.open_close_secret_chat_confirm(chat_id, cx),
             _ => {}
         }
@@ -246,6 +251,7 @@ fn entry_label(
         HeaderEntry::AutoDelete => (tr(keys::MANAGE_MESSAGES_TTL_MENU), None),
         HeaderEntry::ReceivedGifts => (tr(keys::Q_CHAT_RECEIVED_GIFTS), Some(N::ChatGifts)),
         HeaderEntry::Gift => (tr(keys::Q_CHAT_SEND_A_GIFT), Some(N::SendGift)),
+        HeaderEntry::SendMoney => (tr(keys::WALLET_PROFILE_SEND_MONEY), None),
         HeaderEntry::NewWindow => (tr(keys::CONTEXT_NEW_WINDOW), Some(N::NewWindow)),
         HeaderEntry::CloseSecretChat => (tr(keys::Q_CHAT_CLOSE_SECRET_CHAT), None),
     }

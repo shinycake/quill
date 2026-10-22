@@ -178,6 +178,7 @@
 "lng_gift_transfer_sure" = "Do you want to transfer ownership of {name} to {recipient}?";
 "lng_gift_transfer_sure_for" = "Do you want to transfer ownership of {name} to {recipient} for {price}?";
 "lng_gift_transfer_title" = "Transfer {name}";
+"lng_gift_transfer_to_wallet" = "Move to My Wallet";
 "lng_gift_transfer_unlocks_about" = "{when}, you'll be able to send this collectible to any TON blockchain address outside Telegram for sale or auction.";
 "lng_gift_transfer_unlocks_days#one" = "unlocks in {count} day";
 "lng_gift_transfer_unlocks_days#other" = "unlocks in {count} days";
@@ -312,6 +313,13 @@
 "lng_suggest_decline_reason" = "Add a reason (optional)";
 "lng_username_text_copied" = "Username copied to clipboard.";
 "lng_view_button_boost" = "Boost";
+"lng_wallet_add_funds" = "Add Funds";
+"lng_wallet_collectible_send" = "Send {name}";
+"lng_wallet_first_send_title" = "Send";
+"lng_wallet_keys_title" = "Keys & Backup";
+"lng_wallet_profile_send_money" = "Send Money";
+"lng_wallet_replace_create" = "Create a New Wallet";
+"lng_wallet_send_balance" = "Balance: {amount} Grams";
 "qll_gift_value_couldnt_load" = "Couldn't load the value: {reason}";
 "qll_gift_value_not_sent" = "Couldn't load the value. Check your connection and try again.";
 "qll_grams_could_not_load" = "Couldn't load your Grams.";
@@ -498,7 +506,6 @@
 "qll_money_enabled_two_step_verification_more" = "• Enabled Two-Step Verification more than 7 days ago.";
 "qll_money_encrypted_backup" = "Encrypted Backup";
 "qll_money_encrypted_comment" = "Encrypted comment";
-"qll_money_encrypted_comment_open_it_in" = "Encrypted comment. Open it in an official Telegram app to read it.";
 "qll_money_end_affiliate_program" = "End Affiliate Program";
 "qll_money_end_anyway" = "End Anyway";
 "qll_money_enter_a_number" = "Enter a number.";
@@ -524,6 +531,7 @@
 "qll_money_full_name" = "Full name";
 "qll_money_gb" = "{value} GB";
 "qll_money_get_more_boosts_for_your" = "Get more boosts for your {0} by gifting Telegram Premium to your {1}.";
+"qll_money_get_telegram_apps" = "Get Telegram apps";
 "qll_money_gift" = "Gift {headline}";
 "qll_money_gift_auction" = "Gift auction, {badge}, {line}";
 "qll_money_gift_for" = "Gift for {star_count}{unwrap_or_default}";
@@ -670,6 +678,7 @@
 "qll_money_reactions" = "Reactions";
 "qll_money_reactions_per_post" = "Reactions per post";
 "qll_money_reactions_per_story" = "Reactions per story";
+"qll_money_receive" = "Receive";
 "qll_money_received" = "Received";
 "qll_money_recent_posts" = "Recent posts";
 "qll_money_recipient" = "Recipient";
@@ -692,6 +701,7 @@
 "qll_money_resale_price_in_stars" = "Resale price in Stars";
 "qll_money_restricting_new_chats_needs_telegram" = "Restricting new chats needs Telegram Premium.";
 "qll_money_retry" = "Retry";
+"qll_money_review_request" = "Review request";
 "qll_money_revoke_link" = "Revoke Link";
 "qll_money_save_card" = "Save card{caption}";
 "qll_money_save_message" = "Save message";
@@ -830,6 +840,7 @@
 "qll_money_views_per_story" = "Views per story";
 "qll_money_wallet_address" = "Wallet address: {address}";
 "qll_money_wallet_address_2" = "Wallet address";
+"qll_money_wallet_not_supported" = "Quill doesn't support this. Open the official Telegram apps to use it.";
 "qll_money_warning" = "Warning";
 "qll_money_what_each_level_unlocks" = "What each level unlocks";
 "qll_money_what_is" = "What is";

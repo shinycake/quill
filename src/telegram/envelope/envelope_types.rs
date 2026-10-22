@@ -264,6 +264,9 @@ pub struct UserProfileExtras {
     /// `incoming_paid_message_star_count`: Stars the user pays per message
     /// to the account; 0 when they write for free.
     pub incoming_paid_message_star_count: i64,
+    /// `ton_wallet_card.gram_amount`: the balance on the user's public TON
+    /// wallet card, in nanograms; `None` when the user has no card.
+    pub ton_wallet_card_balance: Option<i64>,
 }
 
 /// B10: one `chatPhoto` (schema 1.8.67, line 1030) from
@@ -348,6 +351,10 @@ pub(crate) fn parse_user_profile_extras(info: Option<&serde_json::Value>) -> Use
             info.get("bot_verification"),
         ),
         incoming_paid_message_star_count: field(info, "incoming_paid_message_star_count").max(0),
+        ton_wallet_card_balance: info
+            .get("ton_wallet_card")
+            .filter(|card| !card.is_null())
+            .map(|card| field(card, "gram_amount").max(0)),
     }
 }
 

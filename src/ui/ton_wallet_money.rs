@@ -11,6 +11,7 @@ use super::app::QuillApp;
 use super::chat_theme::success;
 use super::message_text::format_unix_date_time;
 use super::shell::{DialogKind, QuillShell};
+use super::wallet_notice::notice_button;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -23,13 +24,11 @@ use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::Session;
 use quill::ton_wallet::{
-    MoneyTab, TonWalletState, WalletNft, WalletTx, fiat, format_gram_amount_with, own,
+    MoneyTab, TonWalletState, WalletNft, WalletSurface, WalletTx, fiat, format_gram_amount_with,
+    own,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
-
-/// The read-only note under the balance.
-pub(super) const READ_ONLY_NOTE: &str = "Quill shows your wallet but can't send, receive or back it up. Use an official Telegram app for that.";
 
 impl QuillApp {
     pub(super) fn ton_wallet_mut(&mut self) -> Option<&mut TonWalletState> {
@@ -285,8 +284,31 @@ fn overview(
                     }),
             ),
     );
+    let mut actions: Vec<(&'static str, &'static str, WalletSurface)> = Vec::new();
     match own {
         Some(own) if own.exists() => {
+            actions.extend([
+                (
+                    "money-send",
+                    tr(keys::WALLET_FIRST_SEND_TITLE),
+                    WalletSurface::Send,
+                ),
+                (
+                    "money-receive",
+                    tr(keys::Q_MONEY_RECEIVE),
+                    WalletSurface::Receive,
+                ),
+                (
+                    "money-add-funds",
+                    tr(keys::WALLET_ADD_FUNDS),
+                    WalletSurface::AddFunds,
+                ),
+                (
+                    "money-backup",
+                    tr(keys::WALLET_KEYS_TITLE),
+                    WalletSurface::Backup,
+                ),
+            ]);
             body = body.child(super::ton_wallet_details::address_block(
                 "money-address",
                 tr(keys::Q_MONEY_YOUR_ADDRESS),
@@ -312,6 +334,11 @@ fn overview(
             );
         }
         Some(_) => {
+            actions.push((
+                "money-create",
+                tr(keys::WALLET_REPLACE_CREATE),
+                WalletSurface::CreateWallet,
+            ));
             body = body.child(
                 div()
                     .text_sm()
@@ -329,7 +356,15 @@ fn overview(
         }
     }
     body = body.child(currency_row(wallet, cx));
-    body = body.child(div().text_xs().text_color(muted).child(READ_ONLY_NOTE));
+    if !actions.is_empty() {
+        body = body.child(
+            div().flex().flex_wrap().gap_2().children(
+                actions.into_iter().map(|(id, label, surface)| {
+                    notice_button(id, id.to_string(), label, surface, cx)
+                }),
+            ),
+        );
+    }
     let tabs = [MoneyTab::Transactions, MoneyTab::Collectibles];
     let owner = cx.entity().downgrade();
     let tabs = TabBar::new("money-tabs")

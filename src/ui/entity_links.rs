@@ -474,7 +474,8 @@ impl QuillApp {
             _ => Default::default(),
         };
         // A TON address also opens on the blockchain explorer (iOS "View
-        // in Explorer"); "Send Money" is never offered.
+        // in Explorer") and offers "Send Money", which opens the shared
+        // notice: Quill can't send.
         let ton_address = match &popup.link {
             LinkTarget::TonAddress(address) => Some(address.clone()),
             _ => None,
@@ -483,6 +484,15 @@ impl QuillApp {
             super::ton_wallet_ui::explorer_menu_row(
                 "link-popup-explorer",
                 address,
+                |this| this.message_ui.link_popup = None,
+                None,
+                cx,
+            )
+        });
+        let wallet_on = self.session().is_some_and(|s| s.ton_wallet.can_use);
+        let send_row = (ton_address.is_some() && wallet_on).then(|| {
+            super::ton_wallet_ui::send_money_menu_row(
+                "link-popup-send-money",
                 |this| this.message_ui.link_popup = None,
                 None,
                 cx,
@@ -561,6 +571,7 @@ impl QuillApp {
                                         })),
                                 )
                                 .when_some(explorer_row, |panel, row| panel.child(row))
+                                .when_some(send_row, |panel, row| panel.child(row))
                                 .children(card_actions.into_iter().enumerate().map(
                                     |(index, action)| {
                                         let url = action.url;

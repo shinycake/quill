@@ -43,6 +43,8 @@ pub mod order {
     pub const TRANSLATE: u8 = 47;
     /// "View in Explorer" of a TON address sits right after Translate.
     pub const TON_EXPLORER: u8 = 48;
+    /// "Send Money" to a TON address follows View in Explorer.
+    pub const TON_SEND_MONEY: u8 = 49;
     pub const COPY_POST_LINK: u8 = 50;
     pub const FORWARD: u8 = 55;
     /// "Add Offer" follows Forward (tdesktop `AddOfferAction`).
