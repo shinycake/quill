@@ -43,12 +43,154 @@ pub(in crate::ui) fn apply_ready_gifs(
     session.stickers.gifs.loading = true;
     let extra = session.request(RequestPurpose::GetSavedAnimations, None);
     let saved = format!(
-        r#"{{"@type":"animations","@extra":"{}","animations":[{{"@type":"animation","duration":1,"width":240,"height":140,"file_name":"demo-gif.gif","mime_type":"image/gif","has_stickers":false,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":240,"height":140,"file":{thumb}}},"animation":{local_clip}}},{{"@type":"animation","duration":2,"width":240,"height":140,"file_name":"saved.mp4","mime_type":"video/mp4","has_stickers":false,"minithumbnail":null,"thumbnail":null,"animation":{pending}}}]}}"#,
-        extra.0
+        r#"{{"@type":"animations","@extra":"{}","animations":[{}]}}"#,
+        extra.0,
+        saved_gifs(&thumb, &local_clip, &pending).join(",")
     );
     if let Some(owned) = copy_and_parse(&saved, seq, &dyn_sink) {
         session.apply(owned);
     }
+    // `updateAnimationSearchParameters`' suggested searches.
+    session.stickers.gifs.provider_emojis = ["👍", "😘", "😍", "😡", "🥳", "😂", "😮", "🙄", "😎"]
+        .map(String::from)
+        .to_vec();
+}
+
+/// The saved GIFs of the GIF panel demo, like a real collection: mixed
+/// shapes, most with an MP4 preview loop for a thumbnail (as Telegram
+/// sends them), some with a still JPEG, one with only its blurred
+/// minithumbnail and one with nothing downloaded yet.
+fn saved_gifs(thumb: &str, local_clip: &str, pending: &str) -> Vec<String> {
+    let fixture = |name: &str| {
+        demo_media_allowlist()
+            .join(name)
+            .to_string_lossy()
+            .into_owned()
+    };
+    let mini = format!(
+        r#"{{"@type":"minithumbnail","width":40,"height":30,"data":"{}"}}"#,
+        crate::ui::demo::DEMO_MINITHUMB
+    );
+    let thumbnail = |format: &str, width: i32, height: i32, file: &str| {
+        format!(
+            r#"{{"@type":"thumbnail","format":{{"@type":"{format}"}},"width":{width},"height":{height},"file":{file}}}"#
+        )
+    };
+    let animation = |name: &str, width: i32, height: i32, mini: &str, thumb: &str, clip: &str| {
+        format!(
+            r#"{{"@type":"animation","duration":2,"width":{width},"height":{height},"file_name":"{name}","mime_type":"video/mp4","has_stickers":false,"minithumbnail":{mini},"thumbnail":{thumb},"animation":{clip}}}"#
+        )
+    };
+    let loop_file = |id: i32, name: &str| demo_file_json(id, &fixture(name), true);
+    let gifs = [
+        (
+            "demo-gif.gif",
+            240,
+            140,
+            "null".to_string(),
+            thumbnail("thumbnailFormatJpeg", 240, 140, thumb),
+            local_clip.to_string(),
+        ),
+        (
+            "steve-carell-no.mp4",
+            384,
+            216,
+            mini.clone(),
+            thumbnail(
+                "thumbnailFormatMpeg4",
+                192,
+                108,
+                &loop_file(64, "demo-gif-loop-wide.mp4"),
+            ),
+            demo_file_json(74, "", false),
+        ),
+        (
+            "corgi-smirk.mp4",
+            240,
+            240,
+            "null".to_string(),
+            thumbnail(
+                "thumbnailFormatMpeg4",
+                120,
+                120,
+                &loop_file(65, "demo-gif-loop-square.mp4"),
+            ),
+            demo_file_json(75, "", false),
+        ),
+        (
+            "коза.mp4",
+            192,
+            256,
+            "null".to_string(),
+            thumbnail(
+                "thumbnailFormatMpeg4",
+                96,
+                128,
+                &loop_file(66, "demo-gif-loop-tall.mp4"),
+            ),
+            demo_file_json(76, "", false),
+        ),
+        (
+            "sunset-pan.mp4",
+            400,
+            200,
+            "null".to_string(),
+            thumbnail(
+                "thumbnailFormatJpeg",
+                200,
+                100,
+                &loop_file(67, "demo-gif-still-wide.jpg"),
+            ),
+            demo_file_json(77, "", false),
+        ),
+        (
+            "waiting-for-thumbnail.mp4",
+            320,
+            240,
+            mini,
+            "null".to_string(),
+            demo_file_json(78, "", false),
+        ),
+        (
+            "mountain-loop.mp4",
+            320,
+            240,
+            "null".to_string(),
+            thumbnail(
+                "thumbnailFormatJpeg",
+                160,
+                120,
+                &loop_file(68, "demo-gif-still-photo.jpg"),
+            ),
+            demo_file_json(79, "", false),
+        ),
+        (
+            "saved.mp4",
+            240,
+            140,
+            "null".to_string(),
+            "null".to_string(),
+            pending.to_string(),
+        ),
+        (
+            "dance-loop.mp4",
+            480,
+            270,
+            "null".to_string(),
+            thumbnail(
+                "thumbnailFormatMpeg4",
+                192,
+                108,
+                &loop_file(69, "demo-gif-loop-wide.mp4"),
+            ),
+            demo_file_json(80, "", false),
+        ),
+    ];
+    gifs.iter()
+        .map(|(name, width, height, mini, thumb, clip)| {
+            animation(name, *width, *height, mini, thumb, clip)
+        })
+        .collect()
 }
 
 pub(in crate::ui) fn apply_ready_video(

@@ -2,7 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
-use gpui_kit::component::input::TextareaState;
+use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 
@@ -14,7 +14,12 @@ pub(crate) struct PickerUi {
     pub(super) emoji_search_input: Entity<TextareaState>,
     /// The reaction selector's own search (cleared on each open).
     pub(super) reaction_search_input: Entity<TextareaState>,
-    pub(super) gif_search_input: Entity<TextareaState>,
+    /// The GIFs tab's search: typing searches once it pauses
+    /// (`gif_search_typed`); `gif_keystroke` counts the edits so only the
+    /// last one searches.
+    pub(super) gif_search_input: Entity<InputState>,
+    pub(super) gif_keystroke: u64,
+    pub(super) gif_scroll: ScrollHandle,
     pub(super) sticker_search_input: Entity<TextareaState>,
 }
 
@@ -35,12 +40,19 @@ impl PickerUi {
                 .placeholder(tr(keys::Q_MISC_SEARCH_EMOJI_PACKS))
                 .auto_grow(1, 1)
         });
-        let gif_search_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder(tr(keys::GIFS_SEARCH))
-                .auto_grow(1, 1)
-                .submit_on_enter(false)
-        });
+        let gif_search_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(tr(keys::GIFS_SEARCH)));
+        cx.subscribe_in(
+            &gif_search_input,
+            window,
+            |this, _, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    // Each chat window has its own field: type in its scope.
+                    this.in_window_of(window, cx, |this, _, cx| this.gif_search_typed(cx));
+                }
+            },
+        )
+        .detach();
         let sticker_search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder(tr(keys::Q_MISC_SEARCH_STICKERS_AND_SETS))
@@ -53,6 +65,8 @@ impl PickerUi {
             emoji_search_input,
             reaction_search_input,
             gif_search_input,
+            gif_keystroke: 0,
+            gif_scroll: ScrollHandle::new(),
             sticker_search_input,
         }
     }

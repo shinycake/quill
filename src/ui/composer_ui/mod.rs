@@ -150,6 +150,10 @@ impl QuillApp {
     }
 
     pub(super) fn close_gif_panel(&mut self, cx: &mut Context<Self>) {
+        // The GIFs are a tab of the media panel: closing them closes it.
+        if self.close_media_panel(cx) {
+            return;
+        }
         if let Some(live) = self.live.as_mut() {
             live.driver.close_gif_panel();
         } else if let Some(session) = self.demo_session.as_mut() {

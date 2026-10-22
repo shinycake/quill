@@ -525,9 +525,12 @@ impl QuillApp {
                             }
                         });
                         let released = drag_app.clone();
-                        window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                        window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
                             if phase.bubble() && event.button == MouseButton::Left {
-                                let _ = released.update(cx, |this, cx| this.selection_release(cx));
+                                let position = event.position;
+                                let _ = released.update(cx, |this, cx| {
+                                    this.selection_release(position, window, cx)
+                                });
                             }
                         });
                         let top = rows

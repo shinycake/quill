@@ -1,7 +1,7 @@
 //! Contact cards and dice.
 
 use super::*;
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr};
 
 /// What the viewer knows about a shared contact's Telegram account, which
 /// picks the card's buttons (tdesktop `HistoryView::Contact`).
@@ -158,115 +158,5 @@ pub(in crate::ui) fn contact_row(
                 )
             },
         )
-        .into_any_element()
-}
-
-/// Phase 4.4: `messageDice` row. A regular dice plays its landing
-/// animation once (`diceStickersRegular` final state, drawn like an
-/// animated sticker) and rests on the last frame, which shows the rolled
-/// value. A slot machine stacks its five stickers the way Telegram
-/// Desktop does (`history_view_slot_machine.cpp`): background, three
-/// reels, lever, each resting on its last frame, which shows the symbol.
-/// Until the animation decodes the emoji face stands in. The line under
-/// the picture states the result in words.
-pub(in crate::ui) fn dice_row(
-    row_id: u64,
-    dice: &quill::telegram::envelope::DiceContent,
-    files: &quill::state::FileMap,
-    downloading: &quill::state::DownloadIntents,
-    media_roots: &[PathBuf],
-    animated: Option<crate::ui::sticker_playback::AnimatedVisual>,
-    layers: Vec<Option<crate::ui::sticker_playback::AnimatedVisual>>,
-    cx: &mut Context<QuillApp>,
-) -> AnyElement {
-    let picture = if dice.slot_layers.is_empty() {
-        match &dice.final_sticker {
-            Some(sticker) => sticker_attachment(
-                row_id,
-                sticker,
-                files,
-                downloading,
-                media_roots,
-                animated,
-                cx,
-            ),
-            None => div()
-                .text_size(px(64.0))
-                .child(dice.face().to_string())
-                .into_any_element(),
-        }
-    } else {
-        slot_machine(row_id, dice, files, downloading, media_roots, layers, cx)
-    };
-    div()
-        .id(("dice-row", row_id))
-        .flex()
-        .flex_col()
-        .items_center()
-        .gap_1()
-        .px_3()
-        .py_1()
-        .child(picture)
-        .child(
-            div()
-                .id(("dice-result", row_id))
-                .role(Role::Label)
-                .text_sm()
-                .font_medium()
-                .child(dice.result_line()),
-        )
-        .into_any_element()
-}
-
-/// The slot machine's layers stacked in one 128 px square, bottom first.
-/// A layer without its animation yet shows its still, so the machine is
-/// whole from the first frame.
-fn slot_machine(
-    row_id: u64,
-    dice: &quill::telegram::envelope::DiceContent,
-    files: &quill::state::FileMap,
-    downloading: &quill::state::DownloadIntents,
-    media_roots: &[PathBuf],
-    layers: Vec<Option<crate::ui::sticker_playback::AnimatedVisual>>,
-    cx: &mut Context<QuillApp>,
-) -> AnyElement {
-    let mut layers = layers.into_iter();
-    let stack = div()
-        .id(("slot-machine", row_id))
-        .role(Role::Image)
-        .aria_label(tr_with(
-            keys::Q_MISC_SLOT_MACHINE,
-            &[("result_line", &(dice.result_line()).to_string())],
-        ))
-        .relative()
-        .mt_2()
-        .flex_none()
-        .size(px(128.));
-    dice.slot_layers
-        .iter()
-        .enumerate()
-        .fold(stack, |stack, (index, sticker)| {
-            let animated = layers.next().flatten();
-            let layer_id = row_id.wrapping_mul(8).wrapping_add(index as u64);
-            // The still path carries the sticker's own top margin; the
-            // stack has none to spare, so pull it back.
-            let layer = sticker_attachment(
-                layer_id,
-                sticker,
-                files,
-                downloading,
-                media_roots,
-                animated,
-                cx,
-            );
-            stack.child(
-                div()
-                    .absolute()
-                    .top(px(-8.))
-                    .left_0()
-                    .size(px(128.))
-                    .child(layer),
-            )
-        })
         .into_any_element()
 }

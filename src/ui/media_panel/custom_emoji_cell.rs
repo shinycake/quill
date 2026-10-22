@@ -372,13 +372,7 @@ impl QuillApp {
                     })),
             );
         let body: AnyElement = if tab == PanelTab::Gifs {
-            div()
-                .flex_1()
-                .min_h_0()
-                .id("media-panel-gifs")
-                .overflow_y_scroll()
-                .child(self.gif_picker_panel(cx))
-                .into_any_element()
+            self.gif_picker_panel(cx)
         } else {
             let weak = cx.weak_entity();
             let sections = self.pickers.media_panel.sections.clone();
@@ -481,30 +475,17 @@ impl QuillApp {
                                     .into_any_element()
                             }),
                     };
-                    div()
-                        .id(("panel-section", index as u64))
-                        .size(px(32.))
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded_md()
-                        .cursor_pointer()
-                        .when(index == active, |this| this.bg(cx.theme().accent))
-                        .hover(|style| style.bg(cx.theme().accent))
-                        .role(gpui_kit::Role::Button)
-                        .aria_label(section.label.clone())
-                        .tooltip({
-                            let label = section.label.clone();
-                            move |window, cx| {
-                                gpui_kit::component::tooltip::Tooltip::new(label.clone())
-                                    .build(window, cx)
-                            }
-                        })
-                        .on_click(cx.listener(move |this, _, _, cx| {
+                    section_chip(
+                        ("panel-section", index as u64),
+                        icon,
+                        section.label,
+                        true,
+                        index == active,
+                        cx.listener(move |this, _, _, cx| {
                             this.jump_to_panel_section(index, cx);
-                        }))
-                        .child(icon)
+                        }),
+                        cx,
+                    )
                 }));
             div()
                 .flex_1()
@@ -550,4 +531,40 @@ impl QuillApp {
             .child(body)
             .into_any_element()
     }
+}
+
+/// A button of a tab's footer strip (the emoji, sticker and GIF sections):
+/// its icon, highlighted when `selected`, named `label` (shown as a tooltip
+/// when `tooltip`; an emoji is its own name).
+pub(in crate::ui) fn section_chip(
+    id: impl Into<ElementId>,
+    icon: AnyElement,
+    label: SharedString,
+    tooltip: bool,
+    selected: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .size(px(32.))
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_md()
+        .cursor_pointer()
+        .when(selected, |this| this.bg(cx.theme().accent))
+        .hover(|style| style.bg(cx.theme().accent))
+        .role(gpui_kit::Role::Button)
+        .aria_label(label.clone())
+        .aria_selected(selected)
+        .tab_index(0)
+        .when(tooltip, |this| {
+            this.tooltip(move |window, cx| {
+                gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx)
+            })
+        })
+        .on_click(on_click)
+        .child(icon)
 }

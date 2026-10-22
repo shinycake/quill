@@ -2,8 +2,8 @@
 use super::*;
 use crate::text::TextEntityKind;
 
-/// Clips of the inline results panel fetched for autoplay, and the
-/// largest one.
+/// Clips of the inline results and GIF panels fetched for autoplay, and
+/// the largest one.
 const INLINE_CLIPS_PREFETCH: usize = 24;
 const INLINE_CLIP_MAX: i64 = 5 * 1024 * 1024;
 
@@ -241,6 +241,47 @@ impl Session {
         ids
     }
 
+    /// Files the GIF panel shows, most urgent first: every tile's still
+    /// picture, then the MP4 preview loops of the first screens, then the
+    /// small full clips of the first screens' GIFs that have no preview
+    /// (tdesktop `VideoPreviewState::automaticLoad`). Downloaded ahead of
+    /// the chat's own thumbnails: the panel is what the user is looking at.
+    pub fn gif_panel_file_ids_to_download(&self) -> Vec<FileId> {
+        let mut ids = Vec::new();
+        if !self.stickers.gifs.open {
+            return ids;
+        }
+        let shown = self.stickers.gifs.visible_animations();
+        let prefs = &self.settings.media_prefs;
+        let autoplay = prefs.autoplay_gifs && !prefs.data_saver;
+        ids.extend(
+            shown
+                .iter()
+                .filter_map(AnimationItem::still_thumb)
+                .filter(|id| self.should_download(*id)),
+        );
+        if autoplay {
+            let first = shown.iter().take(INLINE_CLIPS_PREFETCH);
+            ids.extend(
+                first
+                    .clone()
+                    .filter_map(AnimationItem::preview_clip)
+                    .filter(|id| self.should_download(*id)),
+            );
+            ids.extend(
+                first
+                    .filter(|animation| animation.preview_clip().is_none())
+                    .map(|animation| animation.file_id)
+                    .filter(|clip| {
+                        self.file(*clip)
+                            .is_none_or(|file| file.size.max(file.expected_size) <= INLINE_CLIP_MAX)
+                            && self.should_download(*clip)
+                    }),
+            );
+        }
+        ids
+    }
+
     /// Photo thumbs in the open chat that are not secret/spoiler and still need a download.
     pub fn thumb_file_ids_to_download(&self) -> Vec<FileId> {
         let mut ids = Vec::new();
@@ -358,13 +399,13 @@ impl Session {
                         ids.push(file_id);
                     }
                 }
-                // A dice's landing animation: its thumbnail is the still
-                // shown until the animation decodes.
+                // A dice's roll and landing: their thumbnails are the
+                // stills shown until the animations decode.
                 MessageContent::Dice(dice) => {
-                    for file_id in dice
-                        .final_sticker
-                        .iter()
-                        .chain(&dice.slot_layers)
+                    for file_id in [&dice.initial, &dice.landing]
+                        .into_iter()
+                        .flatten()
+                        .flat_map(|stickers| stickers.layers())
                         .filter_map(|sticker| sticker.display_file_id())
                     {
                         if self.should_download(file_id) {
@@ -445,16 +486,6 @@ impl Session {
                     .sticker
                     .as_ref()
                     .and_then(|sticker| sticker.display_file_id())
-                    && self.should_download(file_id)
-                {
-                    ids.push(file_id);
-                }
-            }
-        }
-        if self.stickers.gifs.open {
-            for animation in self.stickers.gifs.visible_animations() {
-                let file_id = animation.thumb_file_id.filter(|id| id.0 != 0);
-                if let Some(file_id) = file_id
                     && self.should_download(file_id)
                 {
                     ids.push(file_id);
