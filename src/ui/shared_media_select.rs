@@ -353,6 +353,7 @@ impl QuillApp {
             message_ids: state.selected_ids(),
             send_copy: false,
             remove_caption: false,
+            topic_id: None,
         };
         self.share.pending_forward = Some(draft);
         self.clear_shared_media_selection(cx);

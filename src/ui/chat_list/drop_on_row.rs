@@ -10,10 +10,12 @@
 //! delivers the same `ExternalPaths` drag on macOS, Windows and Linux.
 #![deny(clippy::indexing_slicing)]
 
+use super::drop_topic::DropPayload;
 use super::*;
 use crate::ui::status_note::StatusNote;
 use quill::drop_modes::{DragEntry, DragState, DropAction, classify};
 use quill::forward_drag::{Destination, Drop, ForwardDrag, list_accepts};
+use quill::suggested_posts::DirectMessagesRole;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -67,6 +69,14 @@ impl DropOnRow {
             ..Self::default()
         };
     }
+}
+
+/// A drop on this chat asks for a topic first: a forum, or the direct
+/// messages group an administrator reads (`ShowDropMediaBox` for a forum or a
+/// monoforum).
+fn needs_topic(session: &quill::state::Session, chat_id: ChatId) -> bool {
+    session.chat_shown_as_forum(chat_id)
+        || session.direct_messages_role(chat_id) == Some(DirectMessagesRole::Admin)
 }
 
 /// Sorts `rows` by the position each had when the list froze; rows that came
@@ -250,8 +260,7 @@ impl QuillApp {
         };
         let route = Destination {
             can_receive: quill::state::Session::can_share_to(chat),
-            needs_topic: session.chat_shown_as_forum(chat_id)
-                || session.direct_messages_role(chat_id).is_some(),
+            needs_topic: needs_topic(session, chat_id),
         }
         .route();
         match route {
@@ -261,9 +270,15 @@ impl QuillApp {
                 return;
             }
             Drop::ChooseTopic => {
-                self.connection.set_note(StatusNote::silent(tr(
-                    keys::Q_CHATLIST_OPEN_THE_FORUM_AND_FORWARD,
-                )));
+                if session.chat_shown_as_forum(chat_id) {
+                    self.open_drop_topic(chat_id, DropPayload::Forward(drag.clone()), window, cx);
+                } else {
+                    // A direct messages group an administrator reads has
+                    // conversations, not topics; Quill has no chooser for them.
+                    self.connection.set_note(StatusNote::silent(tr(
+                        keys::Q_CHATLIST_OPEN_THE_DIRECT_MESSAGES_AND_FORWARD,
+                    )));
+                }
                 return;
             }
             Drop::Forward => {}
@@ -273,24 +288,40 @@ impl QuillApp {
             self.connection.set_note(StatusNote::error(note));
             return;
         }
+        if self.set_forward_bar(chat_id, None, drag, cx) {
+            self.select_listed_chat(chat_id, window, cx);
+        }
+    }
+
+    /// The messages of `drag` wait in the forward bar of `chat_id`, the same
+    /// state the Forward box leaves when one chat is chosen. False when
+    /// nothing could be carried.
+    pub(in crate::ui) fn set_forward_bar(
+        &mut self,
+        chat_id: ChatId,
+        topic: Option<i32>,
+        drag: &ForwardDrag,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(first) = drag.ids().first().copied() else {
-            return;
+            return false;
         };
         let Some(mut draft) =
             quill::composer::ForwardDraft::from_message(drag.from_chat(), first, false)
         else {
-            return;
+            return false;
         };
         draft.message_ids = drag.ids().to_vec();
+        draft.topic_id = topic;
         self.share.pending_forward = Some(draft);
         self.share.forward_bar_dest = Some(chat_id);
         self.share.forward_picker_open = false;
         self.share.selection.clear();
-        self.select_listed_chat(chat_id, window, cx);
         self.connection.set_note(StatusNote::silent(tr(
             keys::Q_OPS_FORWARD_BAR_READY_PRESS_SEND,
         )));
         cx.notify();
+        true
     }
 
     /// Freezes the list order at what is shown now, for two more seconds.
@@ -354,15 +385,21 @@ impl QuillApp {
             self.connection.set_note(StatusNote::error(note));
             return;
         }
-        // A forum (or direct messages group) asks for a topic first in
-        // tdesktop (`ShowDropMediaBox`); Quill has no chooser yet.
-        let session = self.session();
-        if session.is_some_and(|s| {
-            s.chat_shown_as_forum(chat_id) || s.direct_messages_role(chat_id).is_some()
-        }) {
-            self.connection.set_note(StatusNote::silent(tr(
-                keys::Q_CHATLIST_OPEN_THE_FORUM_AND_DROP,
-            )));
+        // A forum asks for a topic first (`ShowDropMediaBox`).
+        if let Some(session) = self.session()
+            && needs_topic(session, chat_id)
+        {
+            if session.chat_shown_as_forum(chat_id) {
+                let payload = DropPayload::Files {
+                    paths: paths.to_vec(),
+                    kind: drag,
+                };
+                self.open_drop_topic(chat_id, payload, window, cx);
+            } else {
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_CHATLIST_OPEN_THE_DIRECT_MESSAGES_AND_DROP,
+                )));
+            }
             return;
         }
         self.select_listed_chat(chat_id, window, cx);

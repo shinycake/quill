@@ -265,3 +265,47 @@ fn send_as_senders_load_and_set_only_listed_unlocked_identities() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn a_forward_goes_to_the_topic_its_draft_picked_and_not_to_the_open_one() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let _keep = dir;
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    for (id, title, order) in [(7, "Alice", 9), (8, "Bob", 8), (9, "Cy", 7)] {
+        for json in chat_json(id, title, order) {
+            ingest(&mut driver, &json, &seq, &sink);
+        }
+    }
+    ingest(&mut driver, SOURCE_MESSAGE, &seq, &sink);
+    driver.select_chat(ChatId(7)).unwrap();
+    let mut draft = ForwardDraft::from_message(ChatId(7), MessageId(50), false).unwrap();
+    driver.select_chat(ChatId(8)).unwrap();
+    // Another topic is open when Send runs.
+    driver.session.open_topic = Some(6);
+    draft.topic_id = Some(5);
+    driver
+        .forward_messages_with_options(ChatId(8), &draft, &SendOptions::default())
+        .unwrap();
+    draft.topic_id = None;
+    driver
+        .forward_messages_with_options(ChatId(9), &draft, &SendOptions::default())
+        .unwrap();
+    let sent: Vec<Value> = recorder
+        .snapshot()
+        .iter()
+        .map(|json| serde_json::from_str::<Value>(json).unwrap())
+        .filter(|v| v["@type"] == "forwardMessages")
+        .collect();
+    assert_eq!(sent.len(), 2);
+    let topic_of = |chat: i64| {
+        sent.iter()
+            .find(|v| v["chat_id"] == chat)
+            .map(|v| v["topic_id"].clone())
+    };
+    assert_eq!(topic_of(8).unwrap()["forum_topic_id"], 5);
+    assert_eq!(topic_of(8).unwrap()["@type"], "messageTopicForum");
+    assert!(topic_of(9).unwrap().is_null());
+}

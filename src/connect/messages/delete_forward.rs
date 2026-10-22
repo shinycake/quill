@@ -175,9 +175,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         } else {
             self.session.messages.in_flight_forward = Some(flight);
         }
-        let json = forward_messages_with_options(
+        // The topic was bound when the drop picked it, not when Send runs.
+        let json = forward_messages_to_topic(
             extra,
-            dest,
+            (dest, draft.topic_id),
             draft.from_chat_id,
             &draft.message_ids,
             draft.send_copy,

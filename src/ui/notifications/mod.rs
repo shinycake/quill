@@ -752,6 +752,7 @@ impl QuillApp {
             progressed = true;
         }
         self.poll_folder_new_chats();
+        self.prune_drop_topic();
         if self.drain_folder_share(cx)
             | self.drive_folder_invite(cx)
             | self.drain_folder_limit(cx)
