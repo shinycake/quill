@@ -23,7 +23,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let kind = self.session.chats.get(&chat_id.0).map(|chat| chat.kind.clone());
+        let kind = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .map(|chat| chat.kind.clone());
         if !self
             .session
             .users_state
@@ -73,7 +77,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .insert(chat_id.0, ChatPhotosFetch::Loading);
         let json = search_chat_photos(extra, chat_id, MessageId(0), CHAT_PHOTOS_LIMIT);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.users_state.chat_photo_history.remove(&chat_id.0);
+            self.session
+                .users_state
+                .chat_photo_history
+                .remove(&chat_id.0);
             return Err(err);
         }
         Ok(())
@@ -95,7 +102,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                     total_count,
                     photos,
                     loading_more,
-                }) = self.session.users_state.user_profile_photos.get_mut(&user_id)
+                }) = self
+                    .session
+                    .users_state
+                    .user_profile_photos
+                    .get_mut(&user_id)
                 else {
                     return Ok(None);
                 };
@@ -115,8 +126,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 );
                 let sent = self.send_json_request(extra, &json);
                 if sent.is_err()
-                    && let Some(ProfilePhotosFetch::Loaded { loading_more, .. }) =
-                        self.session.users_state.user_profile_photos.get_mut(&user_id)
+                    && let Some(ProfilePhotosFetch::Loaded { loading_more, .. }) = self
+                        .session
+                        .users_state
+                        .user_profile_photos
+                        .get_mut(&user_id)
                 {
                     *loading_more = false;
                 }
@@ -127,7 +141,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                     next_from_message_id,
                     loading_more,
                     ..
-                }) = self.session.users_state.chat_photo_history.get_mut(&chat_id.0)
+                }) = self
+                    .session
+                    .users_state
+                    .chat_photo_history
+                    .get_mut(&chat_id.0)
                 else {
                     return Ok(None);
                 };
@@ -144,8 +162,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                     &search_chat_photos(extra, chat_id, from, CHAT_PHOTOS_LIMIT),
                 );
                 if sent.is_err()
-                    && let Some(ChatPhotosFetch::Loaded { loading_more, .. }) =
-                        self.session.users_state.chat_photo_history.get_mut(&chat_id.0)
+                    && let Some(ChatPhotosFetch::Loaded { loading_more, .. }) = self
+                        .session
+                        .users_state
+                        .chat_photo_history
+                        .get_mut(&chat_id.0)
                 {
                     *loading_more = false;
                 }
@@ -229,8 +250,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 let extra = self
                     .session
                     .request(RequestPurpose::DeleteMessages, Some(chat_id));
-                self.send_json_request(extra, &delete_messages(extra, chat_id, &[message_id], revoke))
-                    .map(Some)
+                self.send_json_request(
+                    extra,
+                    &delete_messages(extra, chat_id, &[message_id], revoke),
+                )
+                .map(Some)
             }
         }
     }

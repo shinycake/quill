@@ -412,9 +412,10 @@ impl QuillApp {
                                 }));
                         }
                         if menu_can_report {
-                            menu = menu.item(item(tr(keys::MEDIAVIEW_REPORT_PROFILE_PHOTO), |this, _, cx| {
-                                this.report_viewer_profile_photo(cx)
-                            }));
+                            menu = menu.item(item(
+                                tr(keys::MEDIAVIEW_REPORT_PROFILE_PHOTO),
+                                |this, _, cx| this.report_viewer_profile_photo(cx),
+                            ));
                         }
                         if !menu_protected && !menu_profile {
                             menu = menu.item(item(tr(keys::Q_AV_FORWARD), |this, window, cx| {

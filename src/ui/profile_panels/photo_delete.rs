@@ -48,9 +48,7 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .w(px(320.))
-                .content(move |content, _, _| {
-                    content.child(div().text_sm().child(question))
-                })
+                .content(move |content, _, _| content.child(div().text_sm().child(question)))
                 .footer(
                     div()
                         .flex()

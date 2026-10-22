@@ -22,7 +22,11 @@ fn change(message_id: i64, photo_id: i64) -> ChatPhotoChange {
 }
 
 fn kinds(gallery: &crate::state::PhotoGallery) -> Vec<(i64, GalleryPhotoKind)> {
-    gallery.photos.iter().map(|p| (p.photo.id, p.kind)).collect()
+    gallery
+        .photos
+        .iter()
+        .map(|p| (p.photo.id, p.kind))
+        .collect()
 }
 
 #[test]
@@ -31,7 +35,10 @@ fn a_chat_without_a_photo_lists_only_its_history() {
     let gallery = chat_gallery(ChatId(5), None, &changes, 2, false, |_| false);
     assert_eq!(
         kinds(&gallery),
-        [(2, GalleryPhotoKind::Earlier), (1, GalleryPhotoKind::Earlier)]
+        [
+            (2, GalleryPhotoKind::Earlier),
+            (1, GalleryPhotoKind::Earlier)
+        ]
     );
     assert_eq!(gallery.total, 2);
 }

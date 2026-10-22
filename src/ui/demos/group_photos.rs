@@ -68,8 +68,7 @@ fn apply_group_photos(session: &mut Session, sink: &Arc<MemorySink>, seq: &Atomi
             r#"{{"@type":"updateSupergroup","supergroup":{{"@type":"supergroup","id":{PHOTO_GROUP},"is_channel":false,"status":{{"@type":"chatMemberStatusCreator","is_anonymous":false,"is_member":true}},"member_count":42}}}}"#
         ),
     ];
-    let extra =
-        session.request_for_supergroup(RequestPurpose::GetSupergroupFullInfo, PHOTO_GROUP);
+    let extra = session.request_for_supergroup(RequestPurpose::GetSupergroupFullInfo, PHOTO_GROUP);
     jsons.push(format!(
         r#"{{"@type":"supergroupFullInfo","@extra":"{}","photo":{},"description":"Saturday long runs and the occasional hill repeat.","member_count":42}}"#,
         extra.0,

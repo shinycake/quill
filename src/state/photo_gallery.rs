@@ -105,7 +105,8 @@ pub fn user_gallery(
                 is_outgoing: false,
             }),
     );
-    if let Some(public) = public.filter(|public| !listed(public.id) && Some(public.id) != personal_id)
+    if let Some(public) =
+        public.filter(|public| !listed(public.id) && Some(public.id) != personal_id)
     {
         total += 1;
         if !has_more {
@@ -215,7 +216,8 @@ impl Session {
                     return None;
                 };
                 let info = self.user_full_info(user_id);
-                let parsed = |photo: Option<&ParsedProfilePhoto>| photo.map(ProfilePhoto::from_parsed);
+                let parsed =
+                    |photo: Option<&ParsedProfilePhoto>| photo.map(ProfilePhoto::from_parsed);
                 let personal = parsed(info.and_then(|info| info.extras.personal_photo.as_ref()));
                 let public = parsed(info.and_then(|info| info.extras.public_photo.as_ref()));
                 Some(user_gallery(

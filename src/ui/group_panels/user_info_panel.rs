@@ -122,7 +122,9 @@ impl QuillApp {
                 .role(gpui_kit::Role::Button)
                 .aria_label(tr(keys::Q_PEOPLE_VIEW_PROFILE_PHOTOS))
                 .tab_index(0)
-                .on_click(cx.listener(move |this, _, _, cx| this.open_peer_photos(quill::state::PhotoOwner::User(user_id), cx)))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_peer_photos(quill::state::PhotoOwner::User(user_id), cx)
+                }))
                 .child(avatar)
                 .into_any_element()
         } else {

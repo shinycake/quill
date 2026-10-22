@@ -103,13 +103,14 @@ fn photo_history_pages_follow_the_current_photo() {
     );
     assert_eq!(gallery.total, 3);
     assert!(gallery.has_more);
-    assert_eq!(gallery.photos.get(1).and_then(|p| p.message_id), Some(MessageId(20)));
+    assert_eq!(
+        gallery.photos.get(1).and_then(|p| p.message_id),
+        Some(MessageId(20))
+    );
 
     // The next page is asked for and appended.
-    let Some(ChatPhotosFetch::Loaded { loading_more, .. }) = session
-        .users_state
-        .chat_photo_history
-        .get_mut(&GROUP)
+    let Some(ChatPhotosFetch::Loaded { loading_more, .. }) =
+        session.users_state.chat_photo_history.get_mut(&GROUP)
     else {
         panic!("history loaded");
     };
@@ -306,9 +307,7 @@ fn user_photos_page_and_end_with_the_public_photo() {
             photo_json(9001, 911, 912)
         ),
     );
-    let gallery = session
-        .photo_gallery(PhotoOwner::User(31))
-        .expect("loaded");
+    let gallery = session.photo_gallery(PhotoOwner::User(31)).expect("loaded");
     // One more listed photo to load, then the public photo: 3 in all.
     assert_eq!(gallery.total, 3);
     assert!(gallery.has_more);
@@ -331,9 +330,7 @@ fn user_photos_page_and_end_with_the_public_photo() {
             photo_json(9002, 913, 914)
         ),
     );
-    let gallery = session
-        .photo_gallery(PhotoOwner::User(31))
-        .expect("loaded");
+    let gallery = session.photo_gallery(PhotoOwner::User(31)).expect("loaded");
     assert_eq!(
         ids(&gallery),
         [
@@ -351,7 +348,14 @@ fn a_failed_later_page_keeps_the_loaded_photos() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     seed_group(&mut session, &seq, &sink, MEMBER_STATUS);
-    apply_page(&mut session, &seq, &sink, 5, 20, &[change_json(30, 503, 41)]);
+    apply_page(
+        &mut session,
+        &seq,
+        &sink,
+        5,
+        20,
+        &[change_json(30, 503, 41)],
+    );
     if let Some(ChatPhotosFetch::Loaded { loading_more, .. }) =
         session.users_state.chat_photo_history.get_mut(&GROUP)
     {

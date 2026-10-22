@@ -53,8 +53,14 @@ mod tests {
     #[test]
     fn several_photos_count_and_name_the_special_ones() {
         assert_eq!(header(Owner::Group, Kind::Main, 1, 3), "Photo 1 of 3");
-        assert_eq!(header(Owner::Channel, Kind::Earlier, 3, 40), "Photo 3 of 40");
-        assert_eq!(header(Owner::User, Kind::Personal, 1, 4), "Photo set by you");
+        assert_eq!(
+            header(Owner::Channel, Kind::Earlier, 3, 40),
+            "Photo 3 of 40"
+        );
+        assert_eq!(
+            header(Owner::User, Kind::Personal, 1, 4),
+            "Photo set by you"
+        );
         assert_eq!(header(Owner::User, Kind::Public, 4, 4), "Public Photo");
         // The public photo is only named on the last place.
         assert_eq!(header(Owner::User, Kind::Public, 3, 4), "Photo 3 of 4");
@@ -63,7 +69,10 @@ mod tests {
     #[test]
     fn a_lone_photo_names_its_owner() {
         assert_eq!(header(Owner::User, Kind::Main, 1, 1), "Profile Photo");
-        assert_eq!(header(Owner::User, Kind::Personal, 1, 1), "Photo set by you");
+        assert_eq!(
+            header(Owner::User, Kind::Personal, 1, 1),
+            "Photo set by you"
+        );
         assert_eq!(header(Owner::Group, Kind::Main, 1, 1), "Group Photo");
         assert_eq!(header(Owner::Channel, Kind::Main, 1, 1), "Channel Photo");
     }

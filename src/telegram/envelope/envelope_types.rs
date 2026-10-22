@@ -347,7 +347,7 @@ pub(crate) fn parse_user_profile_extras(info: Option<&serde_json::Value>) -> Use
             .get("public_photo")
             .filter(|value| !value.is_null())
             .and_then(super::users::parse_profile_photo),
-        business:crate::business_info::parse_business_info(info.get("business_info")),
+        business: crate::business_info::parse_business_info(info.get("business_info")),
         sponsored_enabled: flag(info, "has_sponsored_messages_enabled") == Some(true),
         main_profile_tab: crate::profile_tab::ProfileTab::from_value(info.get("main_profile_tab")),
         calls_blocked: flag(info, "can_be_called") == Some(false)

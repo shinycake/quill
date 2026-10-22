@@ -219,8 +219,7 @@ impl Session {
             self.apply_saved_tag_page(messages, total_count, next_from_message_id, pending);
             return;
         }
-        if let Some(pending) =
-            pending.filter(|p| p.purpose == RequestPurpose::GetChatPhotoHistory)
+        if let Some(pending) = pending.filter(|p| p.purpose == RequestPurpose::GetChatPhotoHistory)
         {
             self.apply_chat_photo_history(messages, total_count, next_from_message_id, pending);
             return;

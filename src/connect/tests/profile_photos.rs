@@ -95,7 +95,8 @@ fn file_json(id: i32) -> String {
 }
 
 const MEMBER: &str = r#"{"@type":"chatMemberStatusMember"}"#;
-const CREATOR: &str = r#"{"@type":"chatMemberStatusCreator","is_anonymous":false,"is_member":true}"#;
+const CREATOR: &str =
+    r#"{"@type":"chatMemberStatusCreator","is_anonymous":false,"is_member":true}"#;
 
 #[test]
 fn a_group_viewer_asks_for_the_current_photo_and_the_photo_history() {
@@ -104,7 +105,10 @@ fn a_group_viewer_asks_for_the_current_photo_and_the_photo_history() {
     f.driver.fetch_chat_photos(ChatId(GROUP)).unwrap();
     let full = f.sent_of("getSupergroupFullInfo");
     assert_eq!(full.len(), 1);
-    assert_eq!(full.first().map(|v| v["supergroup_id"].clone()), Some(9.into()));
+    assert_eq!(
+        full.first().map(|v| v["supergroup_id"].clone()),
+        Some(9.into())
+    );
     let search = f.sent_of("searchChatMessages");
     let Some(search) = search.first() else {
         panic!("history asked for");
@@ -132,7 +136,10 @@ fn later_history_pages_start_from_the_last_message() {
         .unwrap();
     assert!(page.is_some());
     let searches = f.sent_of("searchChatMessages");
-    assert_eq!(searches.get(1).map(|v| v["from_message_id"].clone()), Some(40.into()));
+    assert_eq!(
+        searches.get(1).map(|v| v["from_message_id"].clone()),
+        Some(40.into())
+    );
     // One page at a time.
     assert!(
         f.driver
@@ -171,9 +178,15 @@ fn set_main_and_delete_send_the_chat_requests() {
     let mut f = Fixture::new();
     f.seed_group(MEMBER);
     // A member without the right may not set the group's photo.
-    assert!(f.driver.set_chat_photo_from_earlier(ChatId(GROUP), 77).is_err());
+    assert!(
+        f.driver
+            .set_chat_photo_from_earlier(ChatId(GROUP), 77)
+            .is_err()
+    );
     f.seed_group(CREATOR);
-    f.driver.set_chat_photo_from_earlier(ChatId(GROUP), 77).unwrap();
+    f.driver
+        .set_chat_photo_from_earlier(ChatId(GROUP), 77)
+        .unwrap();
     let set = f.sent_of("setChatPhoto");
     let Some(set) = set.first() else {
         panic!("setChatPhoto sent");
@@ -194,15 +207,25 @@ fn set_main_and_delete_send_the_chat_requests() {
     f.answer_history(&search, 0, &change_json(40));
     f.driver.delete_photo(delete, true).unwrap();
     let deleted = f.sent_of("deleteMessages");
-    assert_eq!(deleted.first().map(|v| v["message_ids"].clone()), Some(serde_json::json!([40])));
-    assert_eq!(deleted.first().map(|v| v["revoke"].clone()), Some(true.into()));
+    assert_eq!(
+        deleted.first().map(|v| v["message_ids"].clone()),
+        Some(serde_json::json!([40]))
+    );
+    assert_eq!(
+        deleted.first().map(|v| v["revoke"].clone()),
+        Some(true.into())
+    );
 }
 
 #[test]
 fn reports_name_the_chat_and_never_yourself() {
     let mut f = Fixture::new();
     f.driver.session.my_user_id = Some(777);
-    assert!(f.driver.report_photo(PhotoOwner::User(777), 5, "reportReasonSpam").is_err());
+    assert!(
+        f.driver
+            .report_photo(PhotoOwner::User(777), 5, "reportReasonSpam")
+            .is_err()
+    );
     f.driver
         .report_photo(PhotoOwner::User(31), 5, "reportReasonSpam")
         .unwrap();
@@ -210,7 +233,13 @@ fn reports_name_the_chat_and_never_yourself() {
         .report_photo(PhotoOwner::Chat(ChatId(GROUP)), 6, "reportReasonViolence")
         .unwrap();
     let reports = f.sent_of("reportChatPhoto");
-    assert_eq!(reports.first().map(|v| v["chat_id"].clone()), Some(31.into()));
-    assert_eq!(reports.get(1).map(|v| v["chat_id"].clone()), Some(GROUP.into()));
+    assert_eq!(
+        reports.first().map(|v| v["chat_id"].clone()),
+        Some(31.into())
+    );
+    assert_eq!(
+        reports.get(1).map(|v| v["chat_id"].clone()),
+        Some(GROUP.into())
+    );
     assert_eq!(reports.get(1).map(|v| v["file_id"].clone()), Some(6.into()));
 }
