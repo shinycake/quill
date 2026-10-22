@@ -1,7 +1,7 @@
 name: pages
 
 # Builds the product page in site/ and deploys it to GitHub Pages. The
-# download buttons and "What's new" come from the latest published release,
+# version line and download sizes come from the latest published release,
 # so the page is rebuilt whenever a release is published.
 on:
   push:
