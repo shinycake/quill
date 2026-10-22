@@ -165,6 +165,34 @@ attempt.then(() => b.postMessage('sw:registered'), () => b.postMessage('sw:refus
 
 const SERVICE_WORKER_SCRIPT: &str = "self.addEventListener('fetch', () => {});";
 
+/// Starts workers from a page-made `blob:` script through every route to
+/// a worker constructor other than `Worker` itself: each still runs the
+/// bridge's prelude first.
+const WORKER_ROUTES_PAGE: &str = r#"<!doctype html><html><head><script>
+const b = window.TelegramWebProxy;
+b.onmessage = (e) => b.postMessage(new Uint8Array(e.data).slice().reverse());
+const code = "postMessage([typeof WebAssembly, typeof WebTransport, typeof Worker].join(','));";
+const url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+const first = new Worker(url);
+const routes = [
+  ['prototype', () => Worker.prototype.constructor],
+  ['instance', () => Object.getPrototypeOf(first).constructor],
+  ['original', () => Object.getPrototypeOf(Object.getPrototypeOf(first)).constructor],
+  ['same', () => (Worker.prototype.constructor === Worker &&
+    Object.getPrototypeOf(Worker.prototype).constructor === Worker) ? Worker : null],
+];
+const next = (i) => {
+  if (i >= routes.length) { return; }
+  const [name, make] = routes[i];
+  let w;
+  try { const Ctor = make(); w = new Ctor(url); } catch (error) { b.postMessage(name + ':threw'); return next(i + 1); }
+  w.onmessage = (e) => { b.postMessage(name + ':' + e.data); next(i + 1); };
+  w.onerror = () => { b.postMessage(name + ':error'); next(i + 1); };
+};
+first.onmessage = (e) => { b.postMessage('worker:' + e.data); next(0); };
+first.onerror = () => { b.postMessage('worker:error'); next(0); };
+</script></head><body></body></html>"#;
+
 const NAVIGATING_PAGE: &str = r#"<!doctype html><html><head><script>
 window.TelegramWebProxy.postMessage('leaving');
 setTimeout(() => { window.location.href = '/other/'; }, 100);
@@ -237,6 +265,7 @@ fn serve() -> (u16, Arc<Mutex<Vec<String>>>) {
                 "/restrict/worker.js" => ("200 OK", "", RESTRICTIONS_WORKER),
                 "/sw/" => ("200 OK", "", SERVICE_WORKER_PAGE),
                 "/sw/worker.js" => ("200 OK", "", SERVICE_WORKER_SCRIPT),
+                "/workers/" => ("200 OK", "", WORKER_ROUTES_PAGE),
                 "/nav/" => ("200 OK", "", NAVIGATING_PAGE),
                 "/blank/" => ("200 OK", "", BLANK_PAGE),
                 "/tamper/" => ("200 OK", "", TAMPERING_PAGE),
@@ -542,6 +571,24 @@ fn no_service_worker_through_the_prototype() {
         "{:?}",
         seen.lock().unwrap()
     );
+}
+
+/// `new Worker.prototype.constructor(url)` and the like never reach the
+/// engine's own constructor, which would skip the prelude.
+#[test]
+#[ignore = "needs a desktop session and a system web view"]
+fn no_route_to_a_worker_without_the_prelude() {
+    let (port, _) = serve();
+    let mut helper = Helper::open(port, "/workers/");
+    helper.ready();
+    let stripped = "undefined,undefined,undefined";
+    for name in ["worker", "prototype", "instance", "original", "same"] {
+        assert_eq!(
+            helper.text(Duration::from_secs(10)),
+            format!("{name}:{stripped}")
+        );
+    }
+    helper.echoes();
 }
 
 #[test]

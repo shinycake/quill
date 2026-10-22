@@ -80,9 +80,18 @@ database and keys, and a crash there cannot take Quill down.
   A sweep only opens lock files that exist; it never creates one. So a claim that holds its lock
   and still finds the file knows the file is its own, and a folder without a lock file is never in
   use (a claim makes the lock first, a teardown deletes it last). A host whose claim fails (the
-  account folder cannot be written) tries again on the next `open`, and until it has a folder it
-  opens no carrier (`Terminated`, so TDLib may retry): no helper ever runs on WebView2's default
-  folder next to the executable.
+  account folder cannot be written) tries again on a later `open`, at most every 10 s
+  (`CLAIM_BACKOFF`), and until it has a folder it opens no carrier (`Terminated`, so TDLib may
+  retry): no helper ever runs on WebView2's default folder next to the executable.
+
+  Only `WouldBlock` from `try_lock` means another holder. Any other lock error (a filesystem that
+  cannot lock: some NFS, SMB or FUSE mounts) ends the claim at once: it deletes the lock file it
+  just made and tries no other name, so nothing piles up (`a_claim_that_cannot_lock_leaves_nothing`).
+  A sweep that meets such an error cannot tell whether the lock is held, so it takes the safe side:
+  it deletes the lock file only when its folder is already gone, keeps a folder next to one, and
+  says so on stderr once per process (`a_sweep_that_cannot_lock_keeps_folders`). On NFS without
+  `local_lock=flock`, `flock` becomes a per-process byte-range lock, which another open in the same
+  process would get; local filesystems (APFS, ext4, NTFS) are fine.
 
   So a teardown that runs late, after the account's next client has started, never touches the
   new host's folder (`a_late_teardown_leaves_the_next_hosts_folder_alone`). Before this, both hosts
@@ -101,18 +110,21 @@ database and keys, and a crash there cannot take Quill down.
     start, the host is dropped: its helpers are killed and its folder is deleted on a background
     thread.
   - Shutdown sends every running helper `close` with `last`, waits for the helpers still exiting
-    (`SHUTDOWN_WAIT`, 3 s at most in all), then deletes its generation, retrying for 2 s.
+    (`SHUTDOWN_WAIT`, 3.5 s at most in all), then deletes its generation, retrying for 2 s.
   - A closing helper on Windows drops its web view and its environment. If Quill said this was
     the host's last carrier (`close` with `last`), it then waits up to `BROWSER_EXIT_WAIT` (2 s)
     for the browser process before it exits. Closing one carrier while another is open does not
     wait: the other's view keeps the shared browser process alive anyway, so the wait could only
-    run out. All the deadlines come from `BROWSER_EXIT_WAIT`, in one order: the helper's wait
-    (2 s), then the helper ending itself after Quill hangs up (2.5 s, below), then Quill killing
-    a closed helper (`CLOSE_GRACE`, 3 s). Shutdown gives each helper the same 3 s as a last close,
-    since every helper it closes is told it is the last.
+    run out.
+  - The close deadlines are defined together, with const asserts on their order, in
+    `crates/webview-protocol/src/carrier.rs`: the page's notice (`PAGE_CLOSE_NOTICE`, 200 ms) plus
+    the view's teardown (`VIEW_TEARDOWN`, 500 ms) plus the browser wait (`BROWSER_EXIT_WAIT`, 2 s)
+    is less than the helper's hangup grace after a close (`CLOSED_HANGUP_GRACE`, 2.75 s), which
+    is less than Quill's kill of a closed helper (`CLOSED_HELPER_DEADLINE`, 3.5 s). Shutdown waits
+    the same 3.5 s, since every helper it closes is told it is the last.
   - Quill always hangs up (closes the helper's input) right after `close`. A hangup ends the
     helper 300 ms later, so a stuck loop cannot keep it alive, but after a `close` that grace is
-    2.5 s (`CLOSED_GRACE` in `crates/webview-host/src/carrier/watchdog.rs`). Before this, the
+    `CLOSED_HANGUP_GRACE`. Before this, the
     300 ms grace cut the browser wait short whenever Quill, not a test, ran the helper: the
     Quill-host live test on Windows never logged the wait, and at b8b8d837 it left the profile
     behind (run 39719957861).
@@ -150,7 +162,12 @@ database and keys, and a crash there cannot take Quill down.
   - Workers get the same: the page's `new Worker(url)`
     starts a small script of ours that removes them (and nested workers) and then loads the
     page's script with `importScripts` or `import()`. One difference a page could notice: the
-    worker's `self.location` is a `blob:` address.
+    worker's `self.location` is a `blob:` address. The engine's own constructors are out of reach:
+    the wrapper has a prototype of its own, and both its `constructor` and the original
+    prototype's name the wrapper and cannot be changed. `no_route_to_a_worker_without_the_prelude`
+    starts a page-made `blob:` worker through `Worker.prototype.constructor`, an instance's
+    prototype and the original prototype; each runs the prelude. With the old wrapper, which
+    shared the original prototype, `new Worker.prototype.constructor(url)` had `WebAssembly`.
   - No service workers. A service worker's fetches would be outside the page's policy. The
     bridge replaces `navigator.serviceWorker`, the `Navigator.prototype` getter behind it and
     `ServiceWorkerContainer.prototype.register` in every frame, and the getter in workers too.
@@ -159,6 +176,8 @@ database and keys, and a crash there cannot take Quill down.
     through the prototype's getter and checks it fails and the script is never fetched. On
     WKWebView, each layer alone keeps the worker out; with both off it registers. WebView2's
     request filter also refuses any request marked `Service-Worker: script`, wherever it points.
+    On WebView2 runtimes before 1.0.2210 the filter does not see worker requests, so there the
+    header check does nothing and the policy and the bridge are the only layers.
   - Natively, WebRTC
     is off in WebKitGTK's settings. WebView2 gets `--js-flags=--noexpose-wasm` (no WebAssembly in
     any frame or worker), `--disable-blink-features=WebTransport`, and

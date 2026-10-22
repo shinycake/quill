@@ -89,7 +89,13 @@
       var blob = new scope.Blob([workerPrelude + load], { type: 'text/javascript' });
       return Reflect.construct(Original, [scope.URL.createObjectURL(blob), options], new.target);
     };
-    Wrapped.prototype = Original.prototype;
+    // No way back to the original through `constructor`: the wrapper's
+    // own prototype and the original's both name the wrapper, and neither
+    // can be changed. Instances still are `instanceof` both.
+    var proto = Object.create(Original.prototype);
+    lockIn(proto, 'constructor', Wrapped);
+    lockIn(Original.prototype, 'constructor', Wrapped);
+    lockIn(Wrapped, 'prototype', proto);
     lockIn(scope, name, Wrapped);
   };
 
