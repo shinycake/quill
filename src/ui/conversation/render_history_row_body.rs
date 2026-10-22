@@ -55,6 +55,7 @@ impl QuillApp {
                     chrome.sender_avatar.clone(),
                     // Settings → Appearance: font size + bubble/plain style.
                     look,
+                    session,
                     cx,
                 )
             }

@@ -465,6 +465,11 @@ crate::ui::screenshot_demo::register_demos![
         "screenshot demo — chat list: messages dragged over a row"
     )
     .setup(QuillApp::demo_drop_forward),
+    crate::ui::screenshot_demo::DemoSpec::chats(
+        "ready-drop-media-forward",
+        "screenshot demo — chat list: one album picture dragged over a row"
+    )
+    .setup(QuillApp::demo_drop_media_forward),
 ];
 
 #[cfg(feature = "demo-capture")]
@@ -472,6 +477,27 @@ impl QuillApp {
     fn demo_drop_on_row(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         let state = &mut self.chat_list.drop_on_row;
         state.hover = Some(ChatId(12));
+        state.preview = true;
+    }
+
+    /// The video of the own album (message 812 of chat 11), picked up by its
+    /// picture, carried over the row of chat 12.
+    fn demo_drop_media_forward(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+        let chat = ChatId(11);
+        let id = quill::ids::MessageId(812);
+        if let Some(session) = self.demo_session.as_mut() {
+            self.demo_ui
+                .seq
+                .store(session.last_seq, std::sync::atomic::Ordering::SeqCst);
+            crate::ui::history::apply_ready_albums(session, &self.demo_ui.sink, &self.demo_ui.seq);
+        }
+        let drag = self.session().and_then(|session| {
+            super::super::forward_drag_source::drag_for(session, chat, id, &[])
+        });
+        let state = &mut self.chat_list.drop_on_row;
+        state.hover = Some(ChatId(12));
+        state.forward = drag;
+        state.in_list = true;
         state.preview = true;
     }
 

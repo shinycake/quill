@@ -383,9 +383,11 @@ pub(in crate::ui) fn animation_attachment(
                                             .group_hover(MEDIA_VISUAL_GROUP, |s| s.visible()),
                                         (false, _) => disc,
                                     })
-                                    // Press on the disc must not start the frame's click (open viewer).
-                                    .swallow_press()
+                                    // The press bubbles, so the frame's drag can start
+                                    // from the disc; a click on the disc stops here and
+                                    // does not also open the viewer.
                                     .on_click(cx.listener(move |this, _, _, cx| {
+                                        cx.stop_propagation();
                                         if let Some((chat_id, sponsored_id)) = sponsored {
                                             this.click_sponsored_message(
                                                 chat_id,
@@ -540,6 +542,7 @@ pub(in crate::ui) fn video_attachment(
                 .flatten();
             div()
                 .id(("video-visual", row_id))
+                .debug_selector(move || format!("video-{row_id}"))
                 .relative()
                 .when_some(viewer_open, |this, (chat_id, message_id)| {
                     this.role(gpui_kit::Role::Button)
@@ -567,9 +570,8 @@ pub(in crate::ui) fn video_attachment(
                                     .role(gpui_kit::Role::Button)
                                     .aria_label(play_label)
                                     .cursor_pointer()
-                                    // Press on the disc must not start the frame's click (open viewer).
-                                    .swallow_press()
                                     .on_click(cx.listener(move |this, _, _, cx| {
+                                        cx.stop_propagation();
                                         if let Some((chat_id, sponsored_id)) = sponsored {
                                             this.click_sponsored_message(
                                                 chat_id,

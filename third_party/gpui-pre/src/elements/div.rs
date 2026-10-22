@@ -631,7 +631,23 @@ impl Interactivity {
                 constructor(value.downcast_ref().unwrap(), offset, window, cx).into()
             }),
             external_payload: None,
+            start_distance: DRAG_THRESHOLD,
         });
+    }
+
+    /// Sets how far (Manhattan distance, in pixels) the pointer must move
+    /// with the button down before this element's drag starts; the default
+    /// is 2. A press that moves less stays a click. Must be called after
+    /// [`Self::on_drag`]. Quill patch.
+    pub fn drag_start_distance(&mut self, distance: Pixels)
+    where
+        Self: Sized,
+    {
+        let Some(drag_listener) = self.drag_listener.as_mut() else {
+            debug_assert!(false, "drag_start_distance must be called after on_drag");
+            return;
+        };
+        drag_listener.start_distance = f64::from(distance);
     }
 
     /// Registers a callback resolving a payload to offer the platform if a drag started by this
@@ -1631,6 +1647,16 @@ pub trait StatefulInteractiveElement: InteractiveElement {
         self
     }
 
+    /// Sets how far the pointer must move before the drag of [`Self::on_drag`]
+    /// starts. The fluent API equivalent to [`Interactivity::drag_start_distance`].
+    fn drag_start_distance(mut self, distance: Pixels) -> Self
+    where
+        Self: Sized,
+    {
+        self.interactivity().drag_start_distance(distance);
+        self
+    }
+
     /// Registers a callback resolving a payload to offer the platform if a drag started by this
     /// element leaves the window. It is invoked at most once per drag gesture, when the pointer
     /// exits the viewport. Must be called after [`Self::on_drag`], with the same dragged value
@@ -1763,6 +1789,7 @@ pub(crate) struct DragListener {
     value: Arc<dyn Any>,
     render: Box<dyn Fn(&dyn Any, Point<Pixels>, &mut Window, &mut App) -> AnyView + 'static>,
     external_payload: Option<ExternalDragPayloadResolver>,
+    start_distance: f64,
 }
 
 type ExternalDragPayloadResolver =
@@ -2979,7 +3006,13 @@ impl Interactivity {
                         let mut pending_mouse_down = pending_mouse_down.borrow_mut();
                         if let Some(mouse_down) = pending_mouse_down.clone()
                             && !cx.has_active_drag()
-                            && (event.position - mouse_down.position).magnitude() > DRAG_THRESHOLD
+                            && drag_listener.as_ref().is_some_and(|listener| {
+                                {
+                                    let moved = event.position - mouse_down.position;
+                                    f64::from(moved.x.abs() + moved.y.abs())
+                                        > listener.start_distance
+                                }
+                            })
                             && let Some(listener) = drag_listener.take()
                             && mouse_down.button == MouseButton::Left
                         {
