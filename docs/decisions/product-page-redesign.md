@@ -18,7 +18,8 @@ A from-scratch redesign (a "QSL card" look with ultramarine, vermilion and Archi
 - **An HDR section** covers HDR photos sent as files, with the platform and format details from `hdr-viewer-macos.md` and `hdr-viewer-windows.md`. Its captures come from the `ready-hdr-file-viewer` and `ready-hdr-files` demos.
 - **"What's missing" is gone**, along with `site/data/missing.json` and its nav link.
 - **New screenshots** come from the screenshot demos in light and dark: chat (both themes), channel, polls, reactions, player, accent colour, Appearance settings and the media viewer, as 2000 px WebP files in the existing gallery tabs.
-- **Headline animation:** on load a quill drawn in the icon's blues writes the headline, inking each letter as the nib passes (about 2 s). It skips with reduced motion or a window resize, and the heading keeps its full text for search and screen readers.
+- **Headline animation:** on load, the white feather from the app icon writes the headline (about 7 s). The nib sweeps across each letter and reveals it as it goes, the ink starts glossy and dries, and the pen lifts between words and lines with a shadow that grows as it rises. Then it flies to the header, curling and turning as it shrinks, and becomes the feather of the logo. Until it lands, the header shows `icon-base-256.webp`, the icon with the feather removed and the Q's ring closed. The animation is skipped with reduced motion or a window resize, and the heading keeps its full text for search and screen readers.
+- **Hero video:** re-recorded with `scripts/hero/record.sh` (Cap Studio, the `ready-showcase` mock data, a current release build). `tour.sh` now targets a window under the menu bar of a 1512×982-point laptop screen and the current chat-list layout, which has an Archived row at the top.
 - **Questions** gain "How is Quill different from Telegram Desktop?" and "Is Quill free?".
 
 ## Search and AI search

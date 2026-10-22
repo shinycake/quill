@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Quill: a lighter Telegram client for Mac, Windows and Linux</title>
-  <meta name="description" content="Quill is a free, open-source Telegram client written in Rust. It uses about a third of Telegram Desktop's memory and opens about four times sooner.">
+  <meta name="description" content="Quill is a free, open-source Telegram client written in Rust. It uses about a third of Telegram Desktop's memory and opens about four times faster.">
   <link rel="canonical" href="https://shinycake.github.io/quill/">
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#0b0f17" media="(prefers-color-scheme: dark)">
@@ -13,7 +13,7 @@
   <meta property="og:site_name" content="Quill">
   <meta property="og:url" content="https://shinycake.github.io/quill/">
   <meta property="og:title" content="Quill: a lighter Telegram client for your desktop">
-  <meta property="og:description" content="Free and open source, written in Rust. About a third of Telegram Desktop's memory, and its window opens about four times sooner.">
+  <meta property="og:description" content="Free and open source, written in Rust. About a third of Telegram Desktop's memory, and its window opens about four times faster.">
   <meta property="og:image" content="https://shinycake.github.io/quill/img/og-image.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
@@ -76,7 +76,7 @@
         "@type": "FAQPage",
         "mainEntity": [
           { "@type": "Question", "name": "Is Quill made by Telegram?", "acceptedAnswer": { "@type": "Answer", "text": "No. Quill is an independent, open-source project. It isn't affiliated with, endorsed by or sponsored by Telegram. It uses the public Telegram API under Telegram's API Terms of Service, through Telegram's own TDLib library." } },
-          { "@type": "Question", "name": "How is Quill different from Telegram Desktop?", "acceptedAnswer": { "@type": "Answer", "text": "Quill is a separate app written from scratch in Rust, with its interface drawn on the GPU by GPUI, the framework from the Zed editor. On an M1 Pro Mac it used about a third of Telegram Desktop's memory after launch and put its window on screen about four times sooner on a warm launch." } },
+          { "@type": "Question", "name": "How is Quill different from Telegram Desktop?", "acceptedAnswer": { "@type": "Answer", "text": "Quill is a separate app written from scratch in Rust, with its interface drawn on the GPU by GPUI, the framework from the Zed editor. On an M1 Pro Mac it used about a third of Telegram Desktop's memory after launch and put its window on screen about four times faster on a warm launch." } },
           { "@type": "Question", "name": "Can my account get banned for using Quill?", "acceptedAnswer": { "@type": "Answer", "text": "Quill follows Telegram's rules for third-party apps as closely as it can, but Telegram decides what it allows and nobody can promise anything. Quill is early, experimental software: use it at your own risk and keep an official Telegram app installed." } },
           { "@type": "Question", "name": "Does Quill see my messages?", "acceptedAnswer": { "@type": "Answer", "text": "Quill runs on your computer and stores its data there, encrypted with a key kept in the macOS keychain, Windows DPAPI or a private file on Linux. It has no server of its own and collects no analytics. Besides Telegram it only contacts GitHub to check for updates, and that can be switched off." } },
           { "@type": "Question", "name": "Is Quill free?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Quill is free software under the MIT license, and the source code is on GitHub." } }
@@ -92,7 +92,10 @@
   <header class="nav" id="top">
     <div class="wrap nav-inner">
       <a class="brand" href="#top" aria-label="Quill home">
-        <img src="img/icon-256.webp" alt="" width="28" height="28">
+        <span class="brand-mark">
+          <img class="brand-full" src="img/icon-256.webp" alt="" width="28" height="28">
+          <img class="brand-base" src="img/icon-base-256.webp" alt="" width="28" height="28">
+        </span>
         <span>Quill</span>
       </a>
       <nav aria-label="Sections">
@@ -112,12 +115,15 @@
       <div class="glow" aria-hidden="true"></div>
       <div class="wrap hero-inner">
         <h1 id="hero-title">A native Telegram client for your desktop, <span class="accent">lighter and faster than the official app.</span></h1>
-        <svg class="quill-pen" id="quill-pen" viewBox="0 0 64 64" width="56" height="56" aria-hidden="true" focusable="false">
-          <defs><linearGradient id="quill-vane" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#0a6fb8"/><stop offset=".55" stop-color="#099dda"/><stop offset="1" stop-color="#5fc7fb"/></linearGradient></defs>
-          <path d="M9 55 C16 38 30 18 60 3 C55 20 42 38 20 50 L13 53 Z" fill="url(#quill-vane)"/>
-          <path d="M26 38 L33 33 M31 31 L39 25 M37 23 L45 17" stroke="#ffffff" stroke-opacity=".45" stroke-width="1.6" stroke-linecap="round"/>
-          <path d="M3 61 L50 12" stroke="#e8f6ff" stroke-width="1.6" stroke-linecap="round"/>
-          <path d="M3 61 L9 53 L12 56 Z" fill="#03263f"/>
+        <svg class="quill-pen" id="quill-pen" viewBox="-32 -132 64 136" width="56" height="119" aria-hidden="true" focusable="false">
+          <defs>
+            <linearGradient id="qv" x1="-28" y1="0" x2="16" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#b9c9d8"/><stop offset=".45" stop-color="#f1f6fa"/><stop offset=".62" stop-color="#ffffff"/><stop offset="1" stop-color="#d3dfe9"/></linearGradient>
+          </defs>
+          <path data-part="vane" fill="url(#qv)" stroke="#7f98ae" stroke-opacity=".55" stroke-width=".7" stroke-linejoin="round"/>
+          <path data-part="barbs" stroke="#93a8bb" stroke-opacity=".55" stroke-width=".55" stroke-linecap="round" fill="none"/>
+          <path data-part="rachis" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+          <path data-part="groove" stroke="#8aa1b6" stroke-opacity=".7" stroke-width=".5" fill="none"/>
+          <path data-part="nib" fill="#0b2a44"/>
         </svg>
         <p class="lede">Quill is written from scratch in Rust and draws its whole interface on the GPU. It runs on macOS, Windows and Linux and talks to Telegram through Telegram's own TDLib library, so your chats, contacts and account are the real thing. It's free and open source.</p>
         <div class="cta">
@@ -127,7 +133,7 @@
           </a>
           <a class="btn ghost" href="https://github.com/shinycake/quill">View source</a>
         </div>
-        <p class="proof"><a href="#measured">On the same Mac, Quill used <strong>about a third</strong> of Telegram Desktop's memory and opened its window <strong>about 4× sooner</strong>.</a></p>
+        <p class="proof"><a href="#measured">On the same Mac, Quill used <strong>about a third</strong> of Telegram Desktop's memory and opened its window <strong>about 4× faster</strong>.</a></p>
         <p class="fine" id="hero-meta">Unofficial. Not affiliated with Telegram.</p>
         <figure class="laptop" aria-label="Quill running on a laptop">
           <div class="laptop-lid">
@@ -219,8 +225,8 @@
           <tbody>
             <tr><th scope="row">Memory a minute after launch</th><td>About a third as much</td></tr>
             <tr><th scope="row">Memory after opening five chats</th><td>About 40% as much</td></tr>
-            <tr><th scope="row">Window on screen, warm launch</th><td>About 4× sooner</td></tr>
-            <tr><th scope="row">Window on screen, cold launch</th><td>About 2× sooner</td></tr>
+            <tr><th scope="row">Window on screen, warm launch</th><td>About 4× faster</td></tr>
+            <tr><th scope="row">Window on screen, cold launch</th><td>About 2× faster</td></tr>
           </tbody>
         </table>
       </div>
@@ -485,7 +491,7 @@
       </details>
       <details>
         <summary>How is Quill different from Telegram Desktop?</summary>
-        <p>It's a separate app, written from scratch in Rust, with its interface drawn on the GPU by GPUI, the framework from the Zed editor. On our test Mac it used about a third of Telegram Desktop's memory and put its window on screen about four times sooner on a warm launch. <a href="#measured">How we measured.</a></p>
+        <p>It's a separate app, written from scratch in Rust, with its interface drawn on the GPU by GPUI, the framework from the Zed editor. On our test Mac it used about a third of Telegram Desktop's memory and put its window on screen about four times faster on a warm launch. <a href="#measured">How we measured.</a></p>
       </details>
       <details>
         <summary>Can my account get banned for using it?</summary>
