@@ -306,34 +306,43 @@ impl QuillApp {
     /// menu, each clearable in place — plus the rich-editor entry point.
     /// `None` when there is nothing to show, so the composer stays one row.
     pub(in crate::ui) fn composer_options_row(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let chip = |id: &'static str, label: String, cx: &mut Context<Self>| {
+        // Each chip is built in its own function, so a debug build does not
+        // reserve every chip's builder steps at once
+        // (docs/decisions/main-thread-stack.md).
+        let items: Vec<AnyElement> = [
+            self.silent_option_chip(cx),
+            self.schedule_option_chip(cx),
+            self.preview_option_chip(cx),
+            self.rich_editor_entry(cx),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        if items.is_empty() {
+            return None;
+        }
+        Some(
             div()
-                .id(id)
+                .id("composer-options")
                 .flex()
+                .flex_wrap()
                 .items_center()
                 .gap_1()
-                .pl_2()
-                .pr_1()
-                .h(px(22.))
-                .rounded_full()
-                .bg(cx.theme().secondary)
-                .text_xs()
-                .text_color(cx.theme().secondary_foreground)
-                .child(label)
-        };
-        let mut row = div()
-            .id("composer-options")
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap_1()
-            .px_1()
-            .pb_1();
-        let mut any = false;
-        if self.composer_effective_silent() {
-            any = true;
-            row = row.child(
-                chip("chip-silent", tr(keys::Q_CHAT_SILENT).into(), cx).child(
+                .px_1()
+                .pb_1()
+                .children(items)
+                .into_any_element(),
+        )
+    }
+
+    #[inline(never)]
+    fn silent_option_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.composer_effective_silent() {
+            return None;
+        }
+        Some(
+            option_chip("chip-silent", tr(keys::Q_CHAT_SILENT).into(), cx)
+                .child(
                     Button::new("chip-silent-clear")
                         .icon(gpui_kit::assets::IconName::X)
                         .xsmall()
@@ -345,54 +354,62 @@ impl QuillApp {
                             }
                             cx.notify();
                         })),
-                ),
-            );
-        }
-        let schedule_label = match self.pending_send().scheduling {
-            ComposerScheduling::None => None,
-            ComposerScheduling::SendAtDate(date) => Some(format!(
+                )
+                .into_any_element(),
+        )
+    }
+
+    #[inline(never)]
+    fn schedule_option_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let label = match self.pending_send().scheduling {
+            ComposerScheduling::None => return None,
+            ComposerScheduling::SendAtDate(date) => format!(
                 "{} · {}",
                 match self.schedule_kind() {
                     ScheduleKind::Reminder => tr(keys::Q_CHAT_REMINDER),
                     ScheduleKind::Schedule => tr(keys::Q_CHAT_SCHEDULED),
                 },
                 super::message_text::format_unix_date_time(date)
-            )),
-            ComposerScheduling::SendWhenOnline => Some(tr(keys::Q_CHAT_WHEN_ONLINE).to_string()),
+            ),
+            ComposerScheduling::SendWhenOnline => tr(keys::Q_CHAT_WHEN_ONLINE).to_string(),
         };
-        if let Some(label) = schedule_label {
-            any = true;
-            row = row.child(
-                chip("chip-schedule", label, cx)
-                    .cursor_pointer()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        if this.composer_ui.schedule_popup_open {
-                            this.composer_ui.schedule_popup_open = false;
+        Some(
+            option_chip("chip-schedule", label, cx)
+                .cursor_pointer()
+                .on_click(cx.listener(|this, _, window, cx| {
+                    if this.composer_ui.schedule_popup_open {
+                        this.composer_ui.schedule_popup_open = false;
+                        cx.notify();
+                    } else {
+                        this.open_schedule_picker(ScheduleTarget::Composer, window, cx);
+                    }
+                }))
+                .child(
+                    Button::new("chip-schedule-clear")
+                        .icon(gpui_kit::assets::IconName::X)
+                        .xsmall()
+                        .ghost()
+                        .accessibility_label(tr(keys::CONTEXT_SEND_NOW_MSG))
+                        .swallow_press()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.update_pending_send(|send| {
+                                send.scheduling = ComposerScheduling::None
+                            });
                             cx.notify();
-                        } else {
-                            this.open_schedule_picker(ScheduleTarget::Composer, window, cx);
-                        }
-                    }))
-                    .child(
-                        Button::new("chip-schedule-clear")
-                            .icon(gpui_kit::assets::IconName::X)
-                            .xsmall()
-                            .ghost()
-                            .accessibility_label(tr(keys::CONTEXT_SEND_NOW_MSG))
-                            .swallow_press()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.update_pending_send(|send| {
-                                    send.scheduling = ComposerScheduling::None
-                                });
-                                cx.notify();
-                            })),
-                    ),
-            );
+                        })),
+                )
+                .into_any_element(),
+        )
+    }
+
+    #[inline(never)]
+    fn preview_option_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.pending_send().preview.disabled {
+            return None;
         }
-        if self.pending_send().preview.disabled {
-            any = true;
-            row = row.child(
-                chip("chip-preview", tr(keys::Q_CHAT_NO_LINK_PREVIEW).into(), cx).child(
+        Some(
+            option_chip("chip-preview", tr(keys::Q_CHAT_NO_LINK_PREVIEW).into(), cx)
+                .child(
                     Button::new("chip-preview-clear")
                         .icon(gpui_kit::assets::IconName::X)
                         .xsmall()
@@ -402,46 +419,50 @@ impl QuillApp {
                             this.update_pending_send(|send| send.preview.disabled = false);
                             cx.notify();
                         })),
-                ),
-            );
-        }
-        // M2: the rich editor opens via ⛶ after typing more than 3 lines
-        // (anniversary post). The button hides again while the editor is
-        // open (a ✕ close button takes its place in the editor bar).
-        // Premium gate (`premiumFeatureRichMessages`, schema 1.8.67 line
-        // 8160 — "The ability to send rich messages"): non-Premium users
-        // get the button but tapping it explains the requirement instead
-        // of opening the editor.
-        if !self.composer_ui.rich_editor_open && self.composer.read(cx).value().lines().count() > 3
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// M2: the rich editor opens via ⛶ after typing more than 3 lines
+    /// (anniversary post). The button hides again while the editor is
+    /// open (a ✕ close button takes its place in the editor bar).
+    /// Premium gate (`premiumFeatureRichMessages`, schema 1.8.67 line
+    /// 8160 — "The ability to send rich messages"): non-Premium users
+    /// get the button but tapping it explains the requirement instead
+    /// of opening the editor.
+    #[inline(never)]
+    fn rich_editor_entry(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.composer_ui.rich_editor_open || self.composer.read(cx).value().lines().count() <= 3
         {
-            row = row.child(
-                Button::new("rich-editor-open")
-                    .label(tr(keys::Q_CHAT_RICH_EDITOR))
-                    .ghost()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        let premium = this
-                            .live
-                            .as_ref()
-                            .is_some_and(|live| live.driver.session.my_is_premium());
-                        if premium {
-                            // The editor works on block markup: show it raw.
-                            let markup = this.composer_markup(cx);
-                            this.composer_ui.rich_editor_open = true;
-                            this.set_composer_markup(&markup, window, cx);
-                            this.connection.set_note(StatusNote::silent(tr(
-                                keys::Q_CHAT_RICH_EDITOR_MARKUP_BECOMES_BLOCKS,
-                            )));
-                        } else {
-                            this.connection.set_note(StatusNote::info(tr(
-                                keys::Q_CHAT_RICH_MESSAGES_REQUIRE_TELEGRAM_PREMIUM,
-                            )));
-                        }
-                        cx.notify();
-                    })),
-            );
-            any = true;
+            return None;
         }
-        any.then(|| row.into_any_element())
+        Some(
+            Button::new("rich-editor-open")
+                .label(tr(keys::Q_CHAT_RICH_EDITOR))
+                .ghost()
+                .on_click(cx.listener(|this, _, window, cx| {
+                    let premium = this
+                        .live
+                        .as_ref()
+                        .is_some_and(|live| live.driver.session.my_is_premium());
+                    if premium {
+                        // The editor works on block markup: show it raw.
+                        let markup = this.composer_markup(cx);
+                        this.composer_ui.rich_editor_open = true;
+                        this.set_composer_markup(&markup, window, cx);
+                        this.connection.set_note(StatusNote::silent(tr(
+                            keys::Q_CHAT_RICH_EDITOR_MARKUP_BECOMES_BLOCKS,
+                        )));
+                    } else {
+                        this.connection.set_note(StatusNote::info(tr(
+                            keys::Q_CHAT_RICH_MESSAGES_REQUIRE_TELEGRAM_PREMIUM,
+                        )));
+                    }
+                    cx.notify();
+                }))
+                .into_any_element(),
+        )
     }
 
     /// Slice msg-richtext-ai-tools: run one AI action against the open
@@ -761,4 +782,21 @@ impl QuillApp {
             Some(SelfDestructSend::Immediately) => tr(keys::Q_CHAT_VIEW_ONCE).to_string(),
         }
     }
+}
+
+/// A send-option chip of the composer's option row.
+fn option_chip(id: &'static str, label: String, cx: &mut Context<QuillApp>) -> Stateful<Div> {
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .gap_1()
+        .pl_2()
+        .pr_1()
+        .h(px(22.))
+        .rounded_full()
+        .bg(cx.theme().secondary)
+        .text_xs()
+        .text_color(cx.theme().secondary_foreground)
+        .child(label)
 }

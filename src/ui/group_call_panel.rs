@@ -685,6 +685,16 @@ impl QuillApp {
     /// The main window's bar for a joined voice chat: mute, the chat's
     /// title and count, leave; a click brings the window back.
     pub(super) fn group_call_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.session()?.calls.active_group_call.as_ref()?;
+        self.group_call_bar_body(cx)
+    }
+
+    /// `group_call_bar` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
+    #[inline(never)]
+    fn group_call_bar_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let call = self.session()?.calls.active_group_call.as_ref()?;
         // A live story plays in the story viewer, without the call bar.
         if !call.is_joined || call.is_live_story {

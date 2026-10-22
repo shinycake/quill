@@ -33,6 +33,19 @@ impl QuillApp {
     }
 
     pub(super) fn shared_media_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let shared = &self.session()?.media.shared_media;
+        if shared.playlist_user.is_none() && !shared.open {
+            return None;
+        }
+        self.shared_media_panel_body(cx)
+    }
+
+    /// `shared_media_panel` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    /// The outer function repeats this body's first check; keep the two in step.
+    #[inline(never)]
+    fn shared_media_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         if let Some(user_id) = session.media.shared_media.playlist_user {
             return Some(self.playlist_panel(user_id, cx));
