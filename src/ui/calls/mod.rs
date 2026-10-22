@@ -53,88 +53,6 @@ impl QuillApp {
             .unwrap_or_default()
     }
 
-    /// Phase C1b: `createCall` from a user profile. `is_video: true`
-    /// starts video-call *signaling* — media transport is still Phase
-    /// C2, so the call carries no audio or video and the UI says so.
-    /// The outgoing call is tracked once the `callId` answer arrives
-    /// (with `is_video` derived from the request args); its states
-    /// arrive as `updateCall`.
-    /// Phase C2i: preference-aware entry point for starting a call
-    /// from a profile / user panel / history row. When the
-    /// confirm-before-calling pref is on, the call waits for the user
-    /// to confirm in the dialog — the actual `startCall` goes through
-    /// `dial_user`.
-    pub(super) fn start_call_for_user(
-        &mut self,
-        user_id: i64,
-        is_video: bool,
-        cx: &mut Context<Self>,
-    ) {
-        if self
-            .live
-            .as_ref()
-            .is_some_and(|live| !live.driver.has_call_engine())
-        {
-            self.connection.set_note(StatusNote::error(tr(
-                keys::Q_OPS_CALLS_ARE_UNAVAILABLE_THE_AUDIO,
-            )));
-            cx.notify();
-            return;
-        }
-        // Refuse offline before the confirm dialog — a call can't be
-        // queued, so confirming then failing would be dishonest.
-        if self
-            .live
-            .as_ref()
-            .is_some_and(|live| live.driver.session.is_offline())
-        {
-            self.connection.set_note(StatusNote::error(tr(
-                keys::Q_OPS_YOURE_OFFLINE_CANT_START_A,
-            )));
-            cx.notify();
-            return;
-        }
-        if self
-            .session()
-            .is_some_and(|session| session.calls.prefs.confirm_before_calling)
-        {
-            self.calls.confirm = Some((user_id, is_video));
-            cx.notify();
-            return;
-        }
-        self.dial_user(user_id, is_video, cx);
-    }
-
-    /// Phase C2i: the actual `startCall` send, after any confirmation.
-    /// Slice parity:platform-offline-errors — a call can't be queued
-    /// like a message, so refuse while offline with an honest note.
-    pub(super) fn dial_user(&mut self, user_id: i64, is_video: bool, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            if live.driver.session.is_offline() {
-                self.connection.set_note(StatusNote::error(tr(
-                    keys::Q_OPS_YOURE_OFFLINE_CANT_START_A,
-                )));
-                cx.notify();
-                return;
-            }
-            let result = live.driver.start_call(user_id, is_video);
-            self.connection.set_note(match result {
-                Ok(_) => {
-                    if is_video {
-                        StatusNote::silent(tr(keys::Q_OPS_STARTING_VIDEO_CALL))
-                    } else {
-                        StatusNote::silent(tr(keys::Q_OPS_CALLING_2))
-                    }
-                }
-                Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_START_THE_CALL)),
-            });
-        } else if self.demo_session.is_some() {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_OPS_DEMO_CALL_START_NO_LIVE)));
-        }
-        cx.notify();
-    }
-
     /// Phase C2i: the user confirmed the pending call in the
     /// confirm-before-calling dialog.
     pub(super) fn confirm_pending_call(&mut self, cx: &mut Context<Self>) {
@@ -383,6 +301,23 @@ impl QuillApp {
 
     /// Phase C1: `acceptCall` for the ringing incoming call.
     pub(super) fn accept_incoming_call(&mut self, cx: &mut Context<Self>) {
+        // As for dialing: the microphone, and the camera for a video call
+        // that will send it, are allowed before answering.
+        let camera = self.live.as_ref().and_then(|live| {
+            live.driver
+                .session
+                .calls
+                .active_call
+                .as_ref()
+                .map(|call| call.camera_on)
+        });
+        match camera {
+            Some(camera) => self.with_capture_access(camera, Self::answer_call, cx),
+            None => self.answer_call(cx),
+        }
+    }
+
+    fn answer_call(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.accept_call();
             self.connection.set_note(match result {
@@ -941,6 +876,7 @@ mod camera_note_tests;
 #[cfg(feature = "demo-capture")]
 mod clock_notify_tests;
 pub(super) mod demo_feed;
+mod dial;
 pub(super) mod live_pip;
 #[cfg(feature = "demo-capture")]
 mod live_pip_demo;
