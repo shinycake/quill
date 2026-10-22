@@ -132,24 +132,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    /// Logout, quit or a closed client: every web view goes at once.
+    /// Logout, quit or a closed client: every web view goes at once, and
+    /// this client hosts no more carriers.
     pub(crate) fn shut_down_carriers(&mut self) {
         self.session.settings.proxy.carriers.shut_down();
-        let Some(host) = self.carrier_host.as_mut() else {
+        // The driver runs on the UI thread: the shutdown, which waits for
+        // helpers to exit and deletes files, goes to a thread of its own,
+        // taking the host with it, so it runs once. If no thread can
+        // start, dropping the host kills its helpers and deletes its files
+        // in the background.
+        let Some(mut host) = self.carrier_host.take() else {
             return;
         };
-        if !host.shutdown_waits() {
-            host.shutdown();
-            return;
-        }
-        // The driver runs on the UI thread: a shutdown that waits for
-        // helpers to exit goes to a thread of its own, taking the host
-        // with it. If none can start, dropping the host ends its helpers
-        // without waiting.
-        if let Some(mut host) = self.carrier_host.take() {
-            let _ = std::thread::Builder::new()
-                .name("quill-carrier-teardown".into())
-                .spawn(move || host.shutdown());
-        }
+        self.session.apply_carrier_hosting(false);
+        let _ =
+            crate::thread_guard::spawn_guarded("quill-carrier-teardown", move || host.shutdown());
     }
 }

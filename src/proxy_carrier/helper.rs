@@ -19,8 +19,8 @@ use super::{
 use crate::media_tools::NoConsole;
 use crate::telegram::requests::process_web_proxy_carrier_message;
 use quill_webview_protocol::carrier::{
-    CarrierCommand, CarrierEvent, CarrierFailure, MAX_LINE_BYTES, MAX_PENDING_BYTES, SecretUrl,
-    base64_len,
+    BROWSER_EXIT_WAIT, CarrierCommand, CarrierEvent, CarrierFailure, MAX_LINE_BYTES,
+    MAX_PENDING_BYTES, SecretUrl, base64_len,
 };
 use quill_webview_protocol::lines::{Line, read_bounded_line};
 use quill_webview_protocol::{decode, encode};
@@ -44,14 +44,15 @@ const START_TIMEOUT: Duration = Duration::from_secs(60);
 const HELPER_SILENCE: Duration = Duration::from_secs(15);
 /// How often a writer thread looks at the clocks when nothing is queued.
 const WATCH_TICK: Duration = Duration::from_secs(1);
-/// How long a closed helper gets to send the page `{"t":"close"}` and go
-/// before it is killed. On Windows it first waits up to 2 s for WebView2's
-/// browser process to let go of the data folder (`browser_exit.rs` in the
-/// helper), so this is longer than that.
-const CLOSE_GRACE: Duration = Duration::from_secs(3);
+/// How long a closed helper gets to send the page `{"t":"close"}` (about
+/// 200 ms) and go before it is killed. The last carrier's helper on
+/// Windows first waits up to [`BROWSER_EXIT_WAIT`] for WebView2's browser
+/// process to let go of the data folder (`browser_exit.rs` in the helper).
+const CLOSE_GRACE: Duration = BROWSER_EXIT_WAIT.saturating_add(Duration::from_secs(1));
 /// The most [`CarrierHost::shutdown`] waits for helpers still exiting, in
-/// all.
-const SHUTDOWN_WAIT: Duration = Duration::from_millis(2500);
+/// all. Shutdown tells every helper it is the last, so each may wait for
+/// the shared browser process as a last close does: the same budget.
+const SHUTDOWN_WAIT: Duration = CLOSE_GRACE;
 /// How long a reader waits for the exit status of a helper whose output
 /// ended, to tell a missing library from a crash.
 const EXIT_WAIT: Duration = Duration::from_millis(500);
@@ -233,8 +234,9 @@ struct Running {
 pub struct HelperConfig {
     /// The helper; `None` hosts nothing.
     pub program: Option<PathBuf>,
-    /// This account's folder for the web views' files, emptied when the
-    /// host starts and stops.
+    /// This account's folder for the web views' files. Each host uses a
+    /// folder of its own in there and removes it when it stops
+    /// ([`data_folder`]).
     pub data_dir: Option<PathBuf>,
     /// Where the capability check keeps its answer for this helper build;
     /// `None` runs no check.
@@ -246,7 +248,10 @@ pub struct HelperConfig {
 
 pub struct HelperCarrierHost {
     program: Option<PathBuf>,
-    data_dir: Option<PathBuf>,
+    /// The account's folder the generations live in.
+    root: Option<PathBuf>,
+    /// This host's data folder, until it stops.
+    generation: Option<data_folder::Generation>,
     relay: RelaySink,
     capability: Capability,
     carriers: HashMap<i32, Running>,
@@ -259,17 +264,20 @@ pub struct HelperCarrierHost {
 
 impl HelperCarrierHost {
     pub fn new(config: HelperConfig) -> Self {
-        if let Some(dir) = &config.data_dir {
-            // Whatever the last run left (it may have been killed).
-            data_folder::clear_for_start(dir);
-        }
+        let generation = config.data_dir.as_deref().and_then(|root| {
+            let generation = data_folder::Generation::claim(root);
+            // What earlier hosts left (they may have been killed).
+            data_folder::sweep_in_background(root.to_path_buf());
+            generation
+        });
         if let (Some(program), Some(cache)) = (&config.program, &config.probe_cache) {
             start_probe(program.clone(), cache.clone(), config.capability.clone());
         }
         let (failures_tx, failures) = channel();
         Self {
             program: config.program,
-            data_dir: config.data_dir,
+            root: config.data_dir,
+            generation,
             relay: config.relay,
             capability: config.capability,
             carriers: HashMap::new(),
@@ -279,10 +287,22 @@ impl HelperCarrierHost {
         }
     }
 
-    fn data_dir_arg(&self) -> Option<String> {
-        let dir = self.data_dir.as_ref()?;
-        let _ = std::fs::create_dir_all(dir);
-        dir.to_str().map(String::from)
+    /// The folder a new helper gets. With an account folder configured a
+    /// helper never runs without one of its own: a claim that failed when
+    /// the host started is tried again, and failing that the carrier is
+    /// not opened (TDLib may try again).
+    fn data_dir_arg(&mut self) -> Result<Option<String>, CarrierError> {
+        let Some(root) = &self.root else {
+            return Ok(None);
+        };
+        if self.generation.is_none() {
+            self.generation = data_folder::Generation::claim(root);
+        }
+        self.generation
+            .as_ref()
+            .and_then(|generation| generation.dir().to_str())
+            .map(|dir| Some(dir.to_string()))
+            .ok_or(CarrierError::Terminated)
     }
 }
 
@@ -314,6 +334,7 @@ impl CarrierHost for HelperCarrierHost {
         if !self.available() {
             return Err(CarrierError::Unsupported);
         }
+        let data_dir = self.data_dir_arg()?;
         let program = self.program.as_ref().ok_or(CarrierError::Unsupported)?;
         // Not starting is this process's trouble (no handles, no memory),
         // not proof the system has no web view: TDLib may try again.
@@ -330,7 +351,7 @@ impl CarrierHost for HelperCarrierHost {
             origin: request.origin.clone(),
             path_prefix: request.path_prefix.clone(),
             bridge_object_name: request.bridge_object_name.clone(),
-            data_dir: self.data_dir_arg(),
+            data_dir,
         };
         let writer = {
             let shared = shared.clone();
@@ -387,9 +408,10 @@ impl CarrierHost for HelperCarrierHost {
     fn close(&mut self, carrier_id: i32, notify_page: bool) {
         if let Some(running) = self.carriers.remove(&carrier_id) {
             running.shared.closing.store(true, Ordering::Release);
+            let last = self.carriers.is_empty();
             let _ = running
                 .commands
-                .try_send(CarrierCommand::Close { notify_page });
+                .try_send(CarrierCommand::Close { notify_page, last });
             // It goes by itself after telling the page; if it does not (a
             // stuck loop, a writer stuck on a full pipe), it is killed.
             if let Some(child) = running.shared.take_child() {
@@ -419,15 +441,11 @@ impl CarrierHost for HelperCarrierHost {
         self.failures.try_iter().collect()
     }
 
-    fn shutdown_waits(&self) -> bool {
-        !self.carriers.is_empty() || self.exiting.iter().any(still_exiting)
-    }
-
     /// Closes every helper and waits, at most [`SHUTDOWN_WAIT`] in all, for
     /// the ones still exiting (on Windows a helper waits for WebView2's
-    /// browser process before it goes), then removes the data folder.
-    /// Blocks: the driver runs it on a thread of its own when
-    /// [`CarrierHost::shutdown_waits`] says so.
+    /// browser process before it goes), then removes this host's data
+    /// folder, retrying for a while. Blocks: the driver runs it on a
+    /// thread of its own.
     fn shutdown(&mut self) {
         self.stop(true);
     }
@@ -442,9 +460,10 @@ impl HelperCarrierHost {
                 running.shared.kill();
                 continue;
             }
-            let _ = running
-                .commands
-                .try_send(CarrierCommand::Close { notify_page: false });
+            let _ = running.commands.try_send(CarrierCommand::Close {
+                notify_page: false,
+                last: true,
+            });
             if let Some(child) = running.shared.take_child() {
                 self.exiting
                     .push(crate::child_reap::reap_after_notice(child, SHUTDOWN_WAIT));
@@ -457,9 +476,25 @@ impl HelperCarrierHost {
             }
             let _ = exiting.recv_timeout(left);
         }
-        if let Some(dir) = &self.data_dir {
-            data_folder::clear_at_shutdown(dir);
+        if let Some(generation) = self.generation.take() {
+            if wait {
+                generation.remove(data_folder::RETRY_FOR);
+            } else {
+                generation.remove_in_background(data_folder::RETRY_FOR);
+            }
         }
+    }
+
+    /// Whether helpers are still running or on their way out.
+    #[cfg(test)]
+    fn exiting(&self) -> bool {
+        !self.carriers.is_empty() || self.exiting.iter().any(still_exiting)
+    }
+
+    /// This host's data folder.
+    #[cfg(test)]
+    fn data_folder(&self) -> Option<&Path> {
+        self.generation.as_ref().map(data_folder::Generation::dir)
     }
 }
 
@@ -508,8 +543,8 @@ fn write_commands(
             return;
         }
         match queue.recv_timeout(WATCH_TICK) {
-            Ok(CarrierCommand::Close { notify_page }) => {
-                let _ = write_line(&mut stdin, &CarrierCommand::Close { notify_page });
+            Ok(close @ CarrierCommand::Close { .. }) => {
+                let _ = write_line(&mut stdin, &close);
                 return;
             }
             Ok(command) => {

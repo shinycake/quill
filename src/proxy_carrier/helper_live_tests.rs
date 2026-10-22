@@ -120,7 +120,10 @@ fn helper_live_relay_round_trip() {
     std::thread::sleep(Duration::from_millis(1500));
     assert!(host.poll().is_empty());
     host.shutdown();
-    assert!(!data_dir.exists());
+    let left: Vec<_> = std::fs::read_dir(&data_dir)
+        .map(|entries| entries.flatten().map(|entry| entry.file_name()).collect())
+        .unwrap_or_default();
+    assert!(left.is_empty(), "{left:?}");
 }
 
 #[test]

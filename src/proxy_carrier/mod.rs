@@ -98,14 +98,9 @@ pub trait CarrierHost: Send {
     fn close(&mut self, carrier_id: i32, notify_page: bool);
     /// Carriers that failed since the last call.
     fn poll(&mut self) -> Vec<(i32, CarrierError)>;
-    /// Whether [`CarrierHost::shutdown`] would wait for something (helpers
-    /// still running or exiting). The driver then runs it on a thread of
-    /// its own, never on the UI thread.
-    fn shutdown_waits(&self) -> bool {
-        false
-    }
-    /// End everything (logout, quit). May block for a bounded time when
-    /// [`CarrierHost::shutdown_waits`].
+    /// End everything (logout, quit), the host's files included. May block
+    /// for a bounded time: the driver runs it once, on a thread of its own,
+    /// never on the UI thread.
     fn shutdown(&mut self);
 }
 

@@ -16,6 +16,13 @@ fn request(id: i32) -> CarrierRequest {
 }
 
 fn host(program: Option<PathBuf>) -> (HelperCarrierHost, Receiver<String>) {
+    host_with(program, None)
+}
+
+fn host_with(
+    program: Option<PathBuf>,
+    data_dir: Option<PathBuf>,
+) -> (HelperCarrierHost, Receiver<String>) {
     let (tx, rx) = channel();
     let tx = Mutex::new(tx);
     let relay: RelaySink = Arc::new(move |request: &str| {
@@ -25,7 +32,7 @@ fn host(program: Option<PathBuf>) -> (HelperCarrierHost, Receiver<String>) {
     });
     let host = HelperCarrierHost::new(HelperConfig {
         program,
-        data_dir: None,
+        data_dir,
         probe_cache: None,
         relay,
         capability: Capability::default(),
@@ -171,10 +178,10 @@ fn a_closed_carrier_reports_no_failure() {
     host.close(5, false);
     // It exits once the close reaches it; that exit is no failure.
     let deadline = Instant::now() + Duration::from_secs(2);
-    while host.shutdown_waits() && Instant::now() < deadline {
+    while host.exiting() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert!(!host.shutdown_waits());
+    assert!(!host.exiting());
     std::thread::sleep(Duration::from_millis(100));
     assert_eq!(host.poll(), Vec::new());
 }
@@ -205,7 +212,7 @@ fn shutdown_ends_every_helper_at_once() {
 #[test]
 fn a_shutdown_with_nothing_running_or_exiting_does_not_wait() {
     let (mut host, _) = host(Some(stays_up("idle-shutdown")));
-    assert!(!host.shutdown_waits());
+    assert!(!host.exiting());
     let started = Instant::now();
     host.shutdown();
     assert!(started.elapsed() < Duration::from_millis(200));
@@ -217,7 +224,7 @@ fn a_shutdown_with_nothing_running_or_exiting_does_not_wait() {
 fn a_shutdown_waits_for_helpers_at_most_its_ceiling() {
     let (mut host, _) = host(Some(script("stuck", "exec sleep 30")));
     assert_eq!(host.open(&request(5)), Ok(()));
-    assert!(host.shutdown_waits());
+    assert!(host.exiting());
     let started = Instant::now();
     host.shutdown();
     let took = started.elapsed();
@@ -229,7 +236,7 @@ fn a_shutdown_waits_for_helpers_at_most_its_ceiling() {
         took < SHUTDOWN_WAIT + Duration::from_millis(500),
         "{took:?}"
     );
-    assert!(!host.shutdown_waits());
+    assert!(!host.exiting());
 }
 
 #[test]
@@ -251,4 +258,63 @@ fn an_exit_code_of_127_is_a_loader_failure() {
     assert!(loader_failure(ExitStatus::from_raw(127 << 8)));
     assert!(!loader_failure(ExitStatus::from_raw(1 << 8)));
     assert!(!loader_failure(ExitStatus::from_raw(9)));
+}
+
+fn cookie_in(dir: &Path) -> PathBuf {
+    let cookie = dir.join("Cookies");
+    std::fs::write(&cookie, b"cookie").unwrap();
+    cookie
+}
+
+/// The account's next host starts while the last one is still tearing
+/// down (a helper that ignores the close keeps it waiting): neither the
+/// new host's sweep nor the old teardown touches the other's folder.
+#[test]
+fn a_late_teardown_leaves_the_next_hosts_folder_alone() {
+    let root = crate::scratch::process_dir("carrier-host")
+        .join("late-teardown")
+        .join("webview-carrier");
+    let (mut old, _) = host_with(
+        Some(script("late-stuck", "exec sleep 30")),
+        Some(root.clone()),
+    );
+    assert_eq!(old.open(&request(5)), Ok(()));
+    let old_cookie = cookie_in(old.data_folder().unwrap());
+    let started = Instant::now();
+    let teardown =
+        crate::thread_guard::spawn_guarded("test-teardown", move || old.shutdown()).unwrap();
+    let (new, _) = host_with(Some(stays_up("late-new")), Some(root.clone()));
+    let new_cookie = cookie_in(new.data_folder().unwrap());
+    if let Some(sweep) = data_folder::sweep_in_background(root.clone()) {
+        let _ = sweep.join();
+    }
+    assert!(
+        started.elapsed() < SHUTDOWN_WAIT,
+        "the teardown is still waiting"
+    );
+    assert!(old_cookie.exists());
+    let _ = teardown.join();
+    assert!(!old_cookie.exists());
+    assert!(new_cookie.exists());
+    drop(new);
+}
+
+/// No helper runs without a folder of its own once an account folder is
+/// configured: an open fails until a generation can be claimed.
+#[test]
+fn without_a_folder_of_its_own_no_carrier_opens() {
+    let base = crate::scratch::process_dir("carrier-host").join("no-folder");
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(&base).unwrap();
+    let root = base.join("webview-carrier");
+    std::fs::write(&root, b"not a folder").unwrap();
+    let (mut host, _) = host_with(Some(stays_up("no-folder-helper")), Some(root.clone()));
+    assert_eq!(host.data_folder(), None);
+    assert_eq!(host.open(&request(5)), Err(CarrierError::Terminated));
+    std::fs::remove_file(&root).unwrap();
+    assert_eq!(host.open(&request(6)), Ok(()));
+    let folder = host.data_folder().map(Path::to_path_buf).unwrap();
+    assert!(folder.starts_with(&root) && folder.is_dir());
+    host.shutdown();
+    assert!(!folder.exists());
 }

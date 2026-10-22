@@ -132,6 +132,17 @@ impl Rig {
         std::mem::take(&mut self.log.lock().unwrap().calls)
     }
 
+    /// The calls once the host's shutdown has run (on the teardown thread).
+    fn calls_after_shutdown(&self) -> Vec<Call> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !self.log.lock().unwrap().calls.contains(&Call::Shutdown)
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        self.calls()
+    }
+
     fn sent(&self, type_name: &str) -> Vec<Value> {
         self.recorder
             .snapshot()
@@ -317,7 +328,7 @@ fn quitting_while_open_shuts_every_view_down() {
     rig.open(2, 1);
     rig.calls();
     crate::connect::closing::begin_close(&mut rig.driver);
-    assert_eq!(rig.calls(), vec![Call::Shutdown]);
+    assert_eq!(rig.calls_after_shutdown(), vec![Call::Shutdown]);
     assert!(rig.driver.session.settings.proxy.carriers.open.is_empty());
     // Whatever the host still reports is dropped.
     rig.host_fails(2, CarrierError::Terminated);
@@ -332,8 +343,32 @@ fn logging_out_shuts_every_view_down() {
     rig.feed(json!({"@type": "updateAuthorizationState",
         "authorization_state": {"@type": "authorizationStateLoggingOut"}}));
     rig.driver.carrier_tick();
-    assert!(rig.calls().contains(&Call::Shutdown));
+    assert!(rig.calls_after_shutdown().contains(&Call::Shutdown));
     assert!(rig.driver.session.settings.proxy.carriers.open.is_empty());
+}
+
+/// The client stays logging out (then closed) for many ticks: the host
+/// shuts down once, and the session knows no carrier can be hosted.
+#[test]
+fn the_host_shuts_down_once() {
+    let mut rig = Rig::new();
+    rig.open(1, 1);
+    rig.calls();
+    rig.feed(json!({"@type": "updateAuthorizationState",
+        "authorization_state": {"@type": "authorizationStateLoggingOut"}}));
+    for _ in 0..5 {
+        rig.driver.carrier_tick();
+    }
+    rig.feed(json!({"@type": "updateAuthorizationState",
+        "authorization_state": {"@type": "authorizationStateClosed"}}));
+    for _ in 0..5 {
+        rig.driver.carrier_tick();
+    }
+    crate::connect::closing::begin_close(&mut rig.driver);
+    assert_eq!(rig.calls_after_shutdown(), vec![Call::Shutdown]);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    assert_eq!(rig.calls(), Vec::new());
+    assert!(!rig.driver.session.settings.proxy.carriers.hosting);
 }
 
 #[test]
