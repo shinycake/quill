@@ -31,6 +31,7 @@
 "lng_chatbots_read" = "Read Messages";
 "lng_chatbots_remove_bot" = "Remove Bot";
 "lng_chatbots_warning_title" = "Warning";
+"lng_choose_file" = "Choose a file";
 "lng_close" = "Close";
 "lng_context_copy_link" = "Copy Link";
 "lng_context_pin_msg" = "Pin";
@@ -204,6 +205,7 @@
 "qll_media_choose_a_duration_then_a" = "Choose a duration, then a status. Refresh to retry missing choices.";
 "qll_media_choose_a_jpeg_png_or" = "Choose a JPEG, PNG or WebP image.";
 "qll_media_choose_a_photo_or_a" = "choose a photo or a video";
+"qll_media_choose_a_photo_or_video" = "Choose a photo or video for the story.";
 "qll_media_choose_a_sticker" = "Choose a sticker";
 "qll_media_choose_a_sticker_in_the" = "Choose a sticker in the sticker panel";
 "qll_media_choose_a_user_channel_or" = "Choose a user, channel or group to verify or unverify.";
@@ -383,6 +385,7 @@
 "qll_media_downloading" = "Downloading {name}";
 "qll_media_downloading_2" = "{kind_label} — downloading…";
 "qll_media_downloading_3" = "{sticker_label} — downloading";
+"qll_media_drop_or_click_story_media" = "Drop a photo or video here, or click to choose one";
 "qll_media_dynamic_emoji_pack_order" = "Dynamic emoji pack order";
 "qll_media_edit" = "Edit";
 "qll_media_edit_close_friends" = "Edit close friends…";
@@ -397,7 +400,6 @@
 "qll_media_emoji_stickers_and_gifs" = "Emoji, stickers and GIFs";
 "qll_media_enabling_stealth_mode" = "Enabling stealth mode…";
 "qll_media_enter_2_step_password" = "Enter 2-step password";
-"qll_media_enter_a_photo_or_video" = "Enter a photo or video file path";
 "qll_media_enter_at_least_one_story" = "enter at least one story id";
 "qll_media_enter_positive_whole_hours_within" = "Enter positive whole hours within the supported date range.";
 "qll_media_enter_the_cover_time_in" = "Enter the cover time in seconds (0 or more)";
@@ -408,7 +410,7 @@
 "qll_media_failed" = "{label} — failed: {reason}";
 "qll_media_fast_buttons_mode" = "Fast buttons mode";
 "qll_media_favorites" = "Favorites";
-"qll_media_file_not_found_check_the" = "File not found — check the path";
+"qll_media_file_moved_choose_again" = "The file was moved or deleted. Choose it again.";
 "qll_media_forever" = "Forever";
 "qll_media_game_data_missing_cant_launch" = "Game data missing; can't launch.";
 "qll_media_game_sent" = "Game sent";
@@ -435,6 +437,7 @@
 "qll_media_join_request_sent" = "join request sent";
 "qll_media_joining_group" = "joining group…";
 "qll_media_joining_live_story" = "joining live story…";
+"qll_media_keep_current_media" = "Keep current";
 "qll_media_keep_editing" = "Keep editing";
 "qll_media_keys_1_to_9_press" = "Keys 1 to 9 press the buttons under the last message.";
 "qll_media_let_this_bot_set_your" = "Let this bot set your emoji status";
@@ -511,11 +514,11 @@
 "qll_media_no_viewers_yet" = "No viewers yet";
 "qll_media_no_vote_statistics_yet" = "No vote statistics yet.";
 "qll_media_no_voters_yet" = "No voters yet.";
-"qll_media_not_a_photo_or_video" = "Not a photo or video file — check the extension";
 "qll_media_not_downloaded" = "Not downloaded";
 "qll_media_not_downloaded_2" = "{kind_label} — not downloaded";
 "qll_media_not_supported_in_this_slice" = "{kind_label} — not supported in this slice";
 "qll_media_only_a_bot_can_open" = "Only a bot can open a mini app.";
+"qll_media_only_photos_and_videos_stories" = "Only photos and videos can be posted as stories.";
 "qll_media_open" = "Open";
 "qll_media_open_a_pack_to_preview" = "Open a pack to preview its emoji.";
 "qll_media_open_album_media" = "Open album media";
@@ -543,7 +546,6 @@
 "qll_media_photo" = "Photo {file_name}";
 "qll_media_photo_2" = "Photo";
 "qll_media_photo_downloading" = "Photo — downloading…";
-"qll_media_photo_video_preview" = "Photo/video preview";
 "qll_media_pick_a_deadline" = "Pick a deadline";
 "qll_media_pick_at_least_one_user" = "Pick at least one user for \"Selected users\"";
 "qll_media_pin_stories" = "pin stories";
@@ -618,7 +620,7 @@
 "qll_media_reorder" = "Reorder";
 "qll_media_reorder_album_stories" = "reorder album stories";
 "qll_media_reorder_story_albums" = "reorder story albums";
-"qll_media_replace_media_optional_empty_keeps" = "Replace media (optional — empty keeps the current)";
+"qll_media_replace" = "Replace";
 "qll_media_reply" = "Reply";
 "qll_media_reply_to_story" = "Reply to story";
 "qll_media_report" = "Report";
@@ -721,15 +723,15 @@
 "qll_media_story_album_name" = "Story album name";
 "qll_media_story_area_isnt_supported" = "story area {type_name} isn't supported";
 "qll_media_story_caption" = "Story caption";
-"qll_media_story_cover_file_path" = "Story cover file path";
+"qll_media_story_cover_time" = "Story cover time in seconds";
 "qll_media_story_identifiers_for_new_album" = "Story identifiers for new album";
 "qll_media_story_identifiers_to_add" = "Story identifiers to add";
 "qll_media_story_ids_comma_separated_optional" = "Story ids, comma-separated (optional)";
 "qll_media_story_ids_to_add_comma" = "Story ids to add, comma-separated";
+"qll_media_story_keeps_current_media" = "The story keeps its current photo or video unless you replace it";
 "qll_media_story_link" = "Story link";
 "qll_media_story_link_copied" = "Story link copied";
 "qll_media_story_load_failed" = "Couldn't load the story.";
-"qll_media_story_media_file_path" = "Story media file path";
 "qll_media_story_reaction_emoji" = "Story reaction emoji";
 "qll_media_story_reply_sent" = "Story reply sent";
 "qll_media_story_reply_sent_2" = "Story reply sent ({what})";

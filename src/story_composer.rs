@@ -1,8 +1,7 @@
 //! Phase 9.3: story posting composer — pure state, no GPUI.
 //!
-//! The composer is a path-entry dialog (no native file-picker
-//! infrastructure exists yet — see DECISIONS.md Phase 9.3): a local
-//! photo/video path, a caption, and a 4-way privacy selector. The actual
+//! The composer takes a photo or video from the native file dialog or a
+//! drop, a caption, and a 4-way privacy selector. The actual
 //! TDLib shapes live in `telegram::requests` (`postStory`,
 //! `canPostStory`) and `telegram::envelope` (`canPostStoryResult*`);
 //! this module holds the composer-side state the UI overlay renders:
@@ -191,11 +190,22 @@ fn area_position(x: f64, y: f64, w: f64, h: f64, corner_radius: f64) -> Value {
     })
 }
 
+/// The photo or video picked for the story.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoryMedia {
+    /// UTF-8 so it can ride in `inputFileLocal`.
+    pub path: String,
+    pub kind: StoryMediaKind,
+}
+
 /// Composer state. Pure (no GPUI); the UI layer owns the text inputs and
 /// syncs them into this before posting.
 #[derive(Debug, Clone, Default)]
 pub struct StoryComposer {
     pub open: bool,
+    /// Picked with the native file dialog or dropped on the composer. In
+    /// edit mode `None` keeps the story's current media.
+    pub media: Option<StoryMedia>,
     pub privacy: StoryPrivacy,
     pub selected_user_ids: Vec<i64>,
     /// Phase 9.4: expiry selection, post-to-chat-page, protect-content,
@@ -271,6 +281,24 @@ impl StoryComposer {
 
     pub fn close(&mut self) {
         *self = Self::default();
+    }
+
+    /// Take a picked or dropped file. A file that is not a photo or video
+    /// (or has a non-UTF-8 path) is refused and the earlier pick stays.
+    pub fn pick_media(&mut self, path: &std::path::Path) -> bool {
+        let Some(path) = path.to_str() else {
+            return false;
+        };
+        let kind = StoryMediaKind::detect(path);
+        if kind == StoryMediaKind::Unknown {
+            return false;
+        }
+        self.media = Some(StoryMedia {
+            path: path.to_string(),
+            kind,
+        });
+        self.local_error = None;
+        true
     }
 
     /// `true` when the privacy selector needs at least one picked user.
@@ -366,6 +394,25 @@ mod tests {
         let json = StoryPrivacy::SelectedUsers.settings_json(&[7, 9]);
         assert_eq!(json["@type"], "storyPrivacySettingsSelectedUsers");
         assert_eq!(json["user_ids"], json!([7, 9]));
+    }
+
+    #[test]
+    fn only_photos_and_videos_are_picked() {
+        let mut composer = StoryComposer::open();
+        composer.local_error = Some("pick one".into());
+        assert!(composer.pick_media(std::path::Path::new("/a/b.JPG")));
+        assert_eq!(
+            composer.media.as_ref().map(|m| m.kind),
+            Some(StoryMediaKind::Photo)
+        );
+        assert_eq!(composer.local_error, None);
+        assert!(!composer.pick_media(std::path::Path::new("/a/notes.txt")));
+        assert_eq!(
+            composer.media.as_ref().map(|m| m.path.as_str()),
+            Some("/a/b.JPG")
+        );
+        composer.close();
+        assert_eq!(composer.media, None);
     }
 
     #[test]

@@ -184,48 +184,6 @@ impl QuillApp {
                     }
                 }
             }
-            TextPromptKind::GroupPhoto => {
-                // Empty removes the photo; otherwise the path must be
-                // a real file — TDLib would reject a missing one anyway.
-                // `~` expands to the home dir.
-                let value = quill::path_expand::expand_tilde(&value);
-                let photo = if value.is_empty() {
-                    None
-                } else if std::path::Path::new(&value).is_file() {
-                    Some(value.as_str())
-                } else {
-                    self.admin.username_dialog = Some(dialog);
-                    self.connection.set_note(StatusNote::silent(tr_with(
-                        keys::Q_PEOPLE_FILE_NOT_FOUND,
-                        &[("value", &value.to_string())],
-                    )));
-                    cx.notify();
-                    return;
-                };
-                match self.live.as_mut() {
-                    Some(live) => match live.driver.set_group_photo(chat_id, photo) {
-                        Ok(Some(_)) => {
-                            if value.is_empty() {
-                                tr(keys::Q_PEOPLE_PHOTO_REMOVED).into()
-                            } else {
-                                tr(keys::Q_PEOPLE_PHOTO_UPDATED).into()
-                            }
-                        }
-                        Ok(None) => {
-                            self.admin.username_dialog = Some(dialog);
-                            tr(keys::Q_PEOPLE_YOU_CANT_CHANGE_THIS_GROUPS).into()
-                        }
-                        Err(_) => {
-                            self.admin.username_dialog = Some(dialog);
-                            tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_PHOTO).into()
-                        }
-                    },
-                    None => {
-                        self.admin.username_dialog = Some(dialog);
-                        tr(keys::Q_PEOPLE_PHOTOS_NEED_A_LIVE_CONNECTION).into()
-                    }
-                }
-            }
         };
         self.connection.set_note(StatusNote::info(note));
         cx.notify();
@@ -683,10 +641,6 @@ impl QuillApp {
                 TextPromptKind::GroupDescription => (
                     tr(keys::Q_PEOPLE_GROUP_DESCRIPTION),
                     tr(keys::Q_PEOPLE_UP_TO_255_CHARACTERS_EMPTY),
-                ),
-                TextPromptKind::GroupPhoto => (
-                    tr(keys::MEDIAVIEW_GROUP_PHOTO),
-                    tr(keys::Q_PEOPLE_PATH_TO_AN_IMAGE_FILE),
                 ),
                 // Slice G10: community rename prompt.
                 TextPromptKind::CommunityName { .. } => (

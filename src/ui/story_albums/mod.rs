@@ -515,7 +515,7 @@ impl QuillApp {
             .child(
                 div().flex_1().child(
                     Textarea::new(&self.stories.cover_input)
-                        .aria_label(tr(keys::Q_MEDIA_STORY_COVER_FILE_PATH))
+                        .aria_label(tr(keys::Q_MEDIA_STORY_COVER_TIME))
                         .h(px(32.)),
                 ),
             )

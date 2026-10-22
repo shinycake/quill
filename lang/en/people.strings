@@ -85,7 +85,6 @@
 "lng_manage_peer_send_only_members_about" = "Turn this on if you expect users to join your group before being able to send messages.";
 "lng_manage_peer_send_title" = "Who can send messages?";
 "lng_manage_peer_welcome_messages" = "Welcome Message";
-"lng_mediaview_group_photo" = "Group Photo";
 "lng_menu_settings" = "Settings";
 "lng_new_contact_add_name" = "Add {user} to contacts";
 "lng_new_contact_share" = "Share my phone number";
@@ -390,7 +389,6 @@
 "qll_people_expires_in_days" = "Expires in {remaining_86_400} days";
 "qll_people_expires_today" = "Expires today";
 "qll_people_expires_tomorrow" = "Expires tomorrow";
-"qll_people_file_not_found" = "file not found: {value}";
 "qll_people_filter_by_tag" = "Filter by Tag";
 "qll_people_first_name" = "First name";
 "qll_people_founder" = "Founder";
@@ -546,7 +544,6 @@
 "qll_people_passcode" = "Passcode";
 "qll_people_paste_the_contents_of_a" = "Paste the contents of a .vcf file. Only cards with a phone number are imported.";
 "qll_people_paste_vcard_vcf_text" = "Paste vCard (.vcf) text…";
-"qll_people_path_to_an_image_file" = "Path to an image file — empty removes the photo";
 "qll_people_permissions_need_a_live_connection" = "permissions need a live connection (demo)";
 "qll_people_permissions_updated" = "permissions updated";
 "qll_people_personal_channel" = "Personal channel";
@@ -556,9 +553,7 @@
 "qll_people_phone_number_copied_to_clipboard" = "Phone number copied to clipboard";
 "qll_people_phone_number_hidden" = "Phone number hidden";
 "qll_people_photo" = "Photo";
-"qll_people_photo_file_path_empty_remove" = "Photo file path (empty = remove current photo)";
 "qll_people_photo_removal_requested" = "Photo removal requested.";
-"qll_people_photo_removed" = "photo removed";
 "qll_people_photo_update_requested" = "Photo update requested.";
 "qll_people_photo_updated" = "photo updated";
 "qll_people_photos_need_a_live_connection" = "photos need a live connection (demo)";
@@ -774,3 +769,4 @@
 "lng_rights_slowmode_interval_seconds#other" = "every {count} seconds";
 "lng_rights_slowmode_interval_minutes#one" = "every {count} minute";
 "lng_rights_slowmode_interval_minutes#other" = "every {count} minutes";
+"lng_choose_image" = "Choose an image";

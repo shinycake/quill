@@ -907,24 +907,44 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Slice G8: group/channel photo edit prompt (`setChatPhoto`,
-    /// schema 1.8.67, line 13435) — a local file path; empty removes
-    /// the current photo. No native file picker exists in the app, so
-    /// the path is typed like every other text prompt.
-    pub(super) fn open_group_photo_dialog(
+    /// Slice G8: "Change photo" — the native file dialog, then
+    /// `setChatPhoto` (schema 1.8.69) with the picked image.
+    pub(super) fn choose_group_photo(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        let picker = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some(tr(keys::CHOOSE_IMAGE).into()),
+        });
+        cx.spawn(async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = picker.await
+                && let Some(path) = paths.into_iter().next()
+            {
+                let _ = this.update(cx, |this, cx| this.submit_group_photo(chat_id, &path, cx));
+            }
+        })
+        .detach();
+    }
+
+    fn submit_group_photo(
         &mut self,
         chat_id: ChatId,
-        window: &mut Window,
+        path: &std::path::Path,
         cx: &mut Context<Self>,
     ) {
-        self.admin.username_dialog = Some(UsernameDialog::new(
-            window,
-            cx,
-            chat_id,
-            TextPromptKind::GroupPhoto,
-            "",
-            tr(keys::Q_PEOPLE_PHOTO_FILE_PATH_EMPTY_REMOVE),
-        ));
+        let photo = path
+            .to_str()
+            .filter(|_| quill::profile_forms::is_profile_photo_file(path));
+        let note = match (photo, self.live.as_mut()) {
+            (None, _) => tr(keys::Q_PEOPLE_CHOOSE_A_JPEG_PNG_OR),
+            (Some(photo), Some(live)) => match live.driver.set_group_photo(chat_id, Some(photo)) {
+                Ok(Some(_)) => tr(keys::Q_PEOPLE_PHOTO_UPDATED),
+                Ok(None) => tr(keys::Q_PEOPLE_YOU_CANT_CHANGE_THIS_GROUPS),
+                Err(_) => tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_PHOTO),
+            },
+            (Some(_), None) => tr(keys::Q_PEOPLE_PHOTOS_NEED_A_LIVE_CONNECTION),
+        };
+        self.connection.set_note(StatusNote::info(note));
         cx.notify();
     }
 }
