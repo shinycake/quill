@@ -153,7 +153,10 @@ fn paid_content() -> String {
 }
 
 fn photo(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Point<gpui_kit::Pixels> {
-    inject(app, vcx, &photo_content())
+    let fallback = inject(app, vcx, &photo_content());
+    vcx.debug_bounds("photo-901").map_or(fallback, |frame| {
+        point(frame.center().x, frame.bottom() - px(30.))
+    })
 }
 
 fn viewer_open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
@@ -308,31 +311,7 @@ fn a_click_on_a_photo_still_opens_the_viewer(cx: &mut TestAppContext) {
     let at = photo(&app, vcx);
     vcx.simulate_click(at, Modifiers::default());
     frames(vcx);
-    if !viewer_open(&app, vcx) {
-        // TEMP diagnostics: where does a click open the viewer?
-        let mut hits = Vec::new();
-        for dy in (-60..260).step_by(20) {
-            for dx in (-60..520).step_by(30) {
-                let p = point(at.x + px(dx as f32), at.y + px(dy as f32));
-                vcx.simulate_click(p, Modifiers::default());
-                frames(vcx);
-                if viewer_open(&app, vcx) {
-                    hits.push((dx, dy));
-                    app.update(vcx, |app, cx| app.close_media_viewer(cx));
-                }
-            }
-        }
-        let rows: Vec<String> = app.read_with(vcx, |app, _| {
-            app.history
-                .hit_rows
-                .borrow()
-                .iter()
-                .map(|(ix, b)| format!("{ix}:{b:?}"))
-                .collect()
-        });
-        let sel = vcx.debug_bounds("photo-901");
-        panic!("DIAG at {at:?} photo {sel:?} hits {hits:?} rows {rows:?}");
-    }
+    assert!(viewer_open(&app, vcx));
 }
 
 #[gpui_kit::test]
@@ -404,8 +383,9 @@ fn a_paid_media_card_does_not_lift(cx: &mut TestAppContext) {
 /// A point on the play disc of the injected video (message 901): a press
 /// the disc swallowed would not lift the video.
 fn video_disc(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Point<gpui_kit::Pixels> {
-    let base = inject(app, vcx, &video_content());
-    point(base.x + px(35.), base.y + px(30.))
+    let fallback = inject(app, vcx, &video_content());
+    vcx.debug_bounds("video-901")
+        .map_or(fallback, |frame| frame.center())
 }
 
 #[gpui_kit::test]
