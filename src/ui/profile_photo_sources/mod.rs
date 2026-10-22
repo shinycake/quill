@@ -91,6 +91,13 @@ pub(crate) struct PhotoSources {
     serial: u32,
 }
 
+impl PhotoSources {
+    /// A camera or emoji panel shows in place of the dialog's body.
+    pub(crate) fn is_open(&self) -> bool {
+        self.mode != SourceMode::Closed
+    }
+}
+
 fn work_dir() -> PathBuf {
     let dir = quill::scratch::temp_work_dir("quill-profile-photo");
     let _ = std::fs::create_dir_all(&dir);

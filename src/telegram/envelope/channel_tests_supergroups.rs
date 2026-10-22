@@ -501,6 +501,7 @@ fn group_full_info_keeps_each_bots_commands() {
         EnvelopePayload::Groups(GroupsPayload::UpdateBasicGroupFullInfo {
             basic_group_id,
             bot_commands,
+            ..
         }) => {
             assert_eq!(basic_group_id, 4);
             assert_eq!(bot_commands, expected);

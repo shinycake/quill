@@ -716,6 +716,15 @@ impl QuillApp {
                             }),
                     ),
             );
+        // `basicGroupFullInfo.description`, plain text.
+        let description = self
+            .session()
+            .and_then(|s| s.chat_description(chat_id))
+            .unwrap_or_default()
+            .to_string();
+        if !description.is_empty() {
+            body = body.child(self.about_text_block(chat_id, &description, &[], cx));
+        }
         if let Some(section) = self.media_counts_section(0, cx) {
             body = body.child(section);
         }

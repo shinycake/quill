@@ -127,7 +127,7 @@ impl QuillApp {
             return;
         };
         let title = chat.title.clone();
-        let kind = chat.kind;
+        let kind = chat.kind.clone();
         let is_channel = chat.is_channel();
         let description = session.chat_description(chat_id).map(str::to_string);
         if let Some(live) = self.live.as_mut() {
@@ -193,7 +193,7 @@ impl QuillApp {
 
     /// Save (tdesktop `Controller::save`): validate the name, then send
     /// what changed. Nothing changed closes the box.
-    pub(in crate::ui) fn save_group_edit_box(&mut self, cx: &mut App) {
+    pub(in crate::ui) fn save_group_edit_box(&mut self, cx: &mut Context<Self>) {
         let Some(edit) = self.group_edit_box() else {
             return;
         };
@@ -224,7 +224,7 @@ impl QuillApp {
                 if let Some(edit) = self.admin.group_edit_box.as_mut() {
                     edit.title_empty = true;
                 }
-                self.notify_app(cx);
+                cx.notify();
                 return;
             }
             // The field's counter is already red; Save waits.
@@ -232,7 +232,7 @@ impl QuillApp {
         };
         if edits.is_empty() {
             self.admin.group_edit_box = None;
-            self.notify_app(cx);
+            cx.notify();
             return;
         }
         let Some(live) = self.live.as_mut() else {
@@ -240,7 +240,7 @@ impl QuillApp {
                 keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A,
             )));
             self.admin.group_edit_box = None;
-            self.notify_app(cx);
+            cx.notify();
             return;
         };
         let sent = live.driver.save_group_info(chat_id, &edits);
@@ -259,16 +259,12 @@ impl QuillApp {
             }
             Err(err) => {
                 self.connection.set_note(StatusNote::error(user_error_for(
-                    keys::Q_PEOPLE_COULD_NOT_SAVE_GROUP_INFO,
+                    keys::Q_NOTES_FAILED_SAVE_GROUP_INFO,
                     &err,
                 )));
             }
         }
-        self.notify_app(cx);
-    }
-
-    fn notify_app(&self, cx: &mut App) {
-        self.self_entity.notify(cx);
+        cx.notify();
     }
 
     /// The box's name, description and photo, or the open source panel.
@@ -446,9 +442,6 @@ crate::ui::shell::register_dialogs! {
 }
 
 mod demo;
-
-#[cfg(test)]
-mod tests;
 
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]

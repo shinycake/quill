@@ -173,7 +173,7 @@ impl QuillApp {
             .collect()
     }
 
-    fn sticker_visual(&self, item: &StickerItem, size: f32) -> AnyElement {
+    pub(in crate::ui) fn sticker_visual(&self, item: &StickerItem, size: f32) -> AnyElement {
         let session = self.session();
         let roots = self.media_display_roots();
         let path = item

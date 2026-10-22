@@ -3,6 +3,7 @@
 "lng_admin_log_filter_actions_settings_section" = "Group Settings";
 "lng_admin_log_filter_invite_links" = "Invite links";
 "lng_admin_log_filter_topics" = "Topics";
+"lng_bad_photo" = "Sorry, Quill can't process that type of image.";
 "lng_blocked_list_confirm_ok" = "Block";
 "lng_boosts_link_subtext" = "Share this link with your subscribers to get more boosts.";
 "lng_boosts_link_subtext_group" = "Share this link with the members of your group to get more boosts.";
@@ -29,6 +30,10 @@
 "lng_create_group_back" = "Back";
 "lng_create_group_create" = "Create";
 "lng_create_group_invite_link" = "Invite link";
+"lng_dlg_new_channel_name" = "Channel name";
+"lng_dlg_new_group_name" = "Group name";
+"lng_edit_channel_title" = "Edit channel";
+"lng_edit_group" = "Edit group";
 "lng_edit_topics_about" = "The group chat will be divided into topics created by admins or users.";
 "lng_emoji_group_badge" = "Group Emoji";
 "lng_forum_choose_title_and_icon" = "Choose a topic name and icon";
@@ -138,8 +143,9 @@
 "lng_settings_color_tab_profile" = "Profile";
 "lng_settings_save" = "Save";
 "lng_star_ref_link_copied_title" = "Link copied to clipboard";
+"lng_sure_delete_channel" = "Are you sure you want to delete this channel? All subscribers will be removed and all messages will be lost.";
+"lng_sure_delete_group" = "Are you sure you want to delete this group? All members will be removed, and all messages will be lost.";
 "lng_switch_emoji" = "Emoji";
-"qll_people_1_128_characters" = "1–128 characters";
 "qll_people_1_more_boost" = "1 more boost";
 "qll_people_1_topic" = "1 topic";
 "qll_people_a_stars_price_charges_people" = "A Stars price charges people monthly to join through this link. Expiry, limit and approval do not apply.";
@@ -207,7 +213,6 @@
 "qll_people_change_info" = "Change info";
 "qll_people_change_number" = "Change number…";
 "qll_people_change_phone_number" = "Change phone number";
-"qll_people_change_photo" = "Change photo";
 "qll_people_change_who_can_see_your" = "Change who can see your birthday";
 "qll_people_channel" = "Channel";
 "qll_people_channel_2" = "Channel {chat_id}";
@@ -297,11 +302,8 @@
 "qll_people_could_not_update_admin_rights" = "could not update admin rights";
 "qll_people_could_not_update_community_name" = "could not update community name";
 "qll_people_could_not_update_community_permissions" = "could not update community permissions";
-"qll_people_could_not_update_description" = "could not update description";
 "qll_people_could_not_update_member_status" = "could not update member status";
 "qll_people_could_not_update_permissions" = "could not update permissions";
-"qll_people_could_not_update_photo" = "could not update photo";
-"qll_people_could_not_update_title" = "could not update title";
 "qll_people_could_not_update_topic" = "could not update topic";
 "qll_people_couldn_t_load_contacts" = "Couldn’t load contacts.";
 "qll_people_couldnt_load_channels_retry" = "Couldn't load channels. Retry";
@@ -312,6 +314,7 @@
 "qll_people_couldnt_open_the_map" = "Couldn't open the map";
 "qll_people_couldnt_reach_telegram_try_again" = "Couldn't reach Telegram; try again.";
 "qll_people_couldnt_save_contact_prefs" = "couldn't save contact prefs: {err}";
+"qll_people_couldnt_save_reason" = "Couldn't save: {reason}";
 "qll_people_couldnt_send_the_change_try" = "Couldn't send the change. Try again.";
 "qll_people_couldnt_share_the_contact_here" = "Couldn't share the contact here.";
 "qll_people_create" = "Create {to_lowercase}";
@@ -367,20 +370,13 @@
 "qll_people_demo_mode_this_needs_a" = "Demo mode: this needs a live session.";
 "qll_people_demote" = "Demote {name}?";
 "qll_people_demote_2" = "Demote";
-"qll_people_description_0_255_characters_empty" = "Description (0–255 characters, empty = clear)";
-"qll_people_description_cleared" = "description cleared";
-"qll_people_description_must_be_at_most" = "description must be at most 255 characters";
-"qll_people_description_updated" = "description updated";
-"qll_people_descriptions_need_a_live_connection" = "descriptions need a live connection (demo)";
 "qll_people_discuss" = "Discuss";
-"qll_people_edit_description" = "Edit description";
 "qll_people_edit_messages" = "Edit messages";
 "qll_people_edit_name" = "Edit Name";
 "qll_people_edit_profile" = "Edit profile";
 "qll_people_edit_rights" = "Edit rights — {name}";
 "qll_people_edit_stories" = "Edit stories";
 "qll_people_edit_tag" = "Edit tag";
-"qll_people_edit_title" = "Edit title";
 "qll_people_enable_paid_reactions" = "Enable Paid Reactions";
 "qll_people_enter_a_name_for_the" = "Enter a name for the contact.";
 "qll_people_enter_a_name_or_phone" = "Enter a name or phone number to add the contact.";
@@ -399,13 +395,10 @@
 "qll_people_giveaway" = "giveaway · {expires}";
 "qll_people_group" = "Group {supergroup_id}";
 "qll_people_group_2" = "Group {basic_group_id}";
-"qll_people_group_description" = "Group description";
 "qll_people_group_or_channel_description" = "Group or channel description";
 "qll_people_group_or_channel_title" = "Group or channel title";
 "qll_people_group_pack_change_is_unavailable" = "Group pack change is unavailable or already pending.";
 "qll_people_group_pack_change_requested" = "Group pack change requested.";
-"qll_people_group_title" = "Group title";
-"qll_people_group_title_1_128_characters" = "Group title (1–128 characters)";
 "qll_people_haddad" = "Haddad";
 "qll_people_hide" = "Hide";
 "qll_people_hide_members" = "Hide Members";
@@ -555,8 +548,6 @@
 "qll_people_photo" = "Photo";
 "qll_people_photo_removal_requested" = "Photo removal requested.";
 "qll_people_photo_update_requested" = "Photo update requested.";
-"qll_people_photo_updated" = "photo updated";
-"qll_people_photos_need_a_live_connection" = "photos need a live connection (demo)";
 "qll_people_pick_a_chat_for_the" = "Pick a chat for the community";
 "qll_people_pick_a_date_and_time" = "Pick a date and time";
 "qll_people_pick_at_least_one_contact" = "pick at least one contact to add";
@@ -698,8 +689,6 @@
 "qll_people_this_users_privacy_settings_dont" = "This user's privacy settings don't allow calls.";
 "qll_people_this_will_remove_your_contacts" = "This will remove your contacts from the Telegram servers. If 'Sync contacts' is enabled, contacts will be re-synced.";
 "qll_people_title_must_be_1_128" = "title must be 1–128 characters";
-"qll_people_title_updated" = "title updated";
-"qll_people_titles_need_a_live_connection" = "titles need a live connection (demo)";
 "qll_people_too_many_public_usernames" = "Too many public usernames";
 "qll_people_topic" = "Topic {forum_topic_id}";
 "qll_people_topic_created" = "topic created";
@@ -724,7 +713,6 @@
 "qll_people_unlink_from_posts_will_no" = "Unlink \"{linked}\" from \"{title}\"? Posts will no longer have comments.";
 "qll_people_unlink_from_this_group_comments" = "Unlink \"{name}\" from this group? Comments on its posts stop appearing here.";
 "qll_people_unpin" = "Unpin";
-"qll_people_up_to_255_characters_empty" = "Up to 255 characters — empty clears it";
 "qll_people_updating_community_permissions" = "updating community permissions…";
 "qll_people_upgrade" = "Upgrade";
 "qll_people_upgrade_to_supergroup" = "Upgrade to supergroup";
@@ -756,7 +744,6 @@
 "qll_people_you_are_banned_from_this" = "You are banned from this channel.";
 "qll_people_you_cant_change_the_discussion" = "You can't change the discussion group here.";
 "qll_people_you_cant_change_this_communitys" = "you can't change this community's permissions";
-"qll_people_you_cant_change_this_groups" = "you can't change this group's info";
 "qll_people_you_dont_have_any_channels" = "You don't have any channels to show yet.";
 "qll_people_you_dont_have_any_groups" = "You don't have any groups that can be linked.";
 "qll_people_you_dont_have_any_settings" = "You don't have any settings to change here.";
@@ -769,4 +756,3 @@
 "lng_rights_slowmode_interval_seconds#other" = "every {count} seconds";
 "lng_rights_slowmode_interval_minutes#one" = "every {count} minute";
 "lng_rights_slowmode_interval_minutes#other" = "every {count} minutes";
-"lng_choose_image" = "Choose an image";

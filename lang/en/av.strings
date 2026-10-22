@@ -212,7 +212,6 @@
 "qll_av_participant_volume" = "Volume for {name}";
 "qll_av_pause_video_message" = "Pause video message";
 "qll_av_photo_copied" = "photo copied";
-"qll_av_photo_update_requested" = "Photo update requested.";
 "qll_av_picture_in_picture" = "Picture-in-Picture";
 "qll_av_pin_album" = "Pin album";
 "qll_av_pinning_album" = "pinning album…";
@@ -232,7 +231,6 @@
 "qll_av_previous" = "Previous";
 "qll_av_previous_track" = "Previous track";
 "qll_av_profile" = "… Profile";
-"qll_av_profile_edits_need_a_signed" = "Profile edits need a signed-in account.";
 "qll_av_profile_photo" = "Profile photo";
 "qll_av_push_to_talk" = "Push-to-talk";
 "qll_av_quieter" = "Quieter ({volume}%)";

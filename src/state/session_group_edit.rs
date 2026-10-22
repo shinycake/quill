@@ -93,4 +93,30 @@ impl Session {
             _ => None,
         }
     }
+
+    /// A refused Edit box request: the box shows it under its field.
+    pub(crate) fn record_group_info_edit_error(
+        &mut self,
+        err: &TdError,
+        pending: Option<&PendingRequest>,
+    ) {
+        let Some(pending) = pending else {
+            return;
+        };
+        let field = match pending.purpose {
+            RequestPurpose::SetChatTitle => GroupInfoField::Title,
+            RequestPurpose::SetChatDescription => GroupInfoField::Description,
+            RequestPurpose::SetChatPhoto => GroupInfoField::Photo,
+            _ => return,
+        };
+        if let Some(chat_id) = pending.chat_id {
+            self.groups.info_edit_errors.insert(
+                chat_id.0,
+                GroupInfoEditError {
+                    field,
+                    reason: super::request_errors::error_reason(err),
+                },
+            );
+        }
+    }
 }

@@ -16,6 +16,7 @@ use super::shell::{DialogKind, QuillShell};
 use super::video_editor::EditorTarget;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::dialog::Dialog;
+use gpui_kit::component::*;
 use gpui_kit::*;
 use image::RgbaImage;
 use quill::lang::{keys, tr};

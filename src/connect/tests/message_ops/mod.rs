@@ -16,6 +16,7 @@ use std::sync::atomic::AtomicU64;
 mod edit_cover;
 mod edits;
 mod group_admin;
+mod group_edit_box;
 
 #[test]
 fn driver_sends_a_reply_aimed_at_another_chat_as_external() {

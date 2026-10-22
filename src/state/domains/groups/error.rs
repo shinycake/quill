@@ -30,27 +30,8 @@ impl Session {
         ) {
             self.note_premium_limit(err, pending);
         }
+        self.record_group_info_edit_error(err, pending);
         match pending.map(|p| p.purpose) {
-            Some(
-                purpose @ (RequestPurpose::SetChatTitle
-                | RequestPurpose::SetChatDescription
-                | RequestPurpose::SetChatPhoto),
-            ) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    let field = match purpose {
-                        RequestPurpose::SetChatTitle => GroupInfoField::Title,
-                        RequestPurpose::SetChatDescription => GroupInfoField::Description,
-                        _ => GroupInfoField::Photo,
-                    };
-                    self.groups.info_edit_errors.insert(
-                        chat_id.0,
-                        GroupInfoEditError {
-                            field,
-                            reason: error_reason(err),
-                        },
-                    );
-                }
-            }
             Some(RequestPurpose::CanTransferOwnership) => {
                 self.groups.ownership.check_in_flight = false;
                 self.groups.ownership.check_error = Some(format!(
