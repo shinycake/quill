@@ -83,18 +83,30 @@ fn inject(
         cx.notify();
     });
     frames(vcx);
+    // A taller history (other fonts) leaves the new row below the fold:
+    // scroll to it so its media is where the press lands.
+    app.update(vcx, |app, cx| app.jump_to_latest_messages(cx));
+    frames(vcx);
     // The incoming bubble's media sits at the row's left edge.
-    app.read_with(vcx, |app, _| {
+    let (row, at) = app.read_with(vcx, |app, _| {
         let hits = app.history.hit_rows.borrow();
         hits.iter()
             .find_map(|(ix, bounds)| match app.history.rows.get(*ix) {
-                Some(HistoryRow::Single(inputs)) if inputs.message.id == MessageId(901) => {
-                    Some(point(bounds.left() + px(90.), bounds.top() + px(50.)))
-                }
+                Some(HistoryRow::Single(inputs)) if inputs.message.id == MessageId(901) => Some((
+                    *bounds,
+                    point(bounds.left() + px(90.), bounds.top() + px(50.)),
+                )),
                 _ => None,
             })
             .expect("the injected row is painted")
-    })
+    });
+    // The composer takes the bottom of the window.
+    let window = vcx.update(|window, _| window.viewport_size());
+    assert!(
+        at.y > px(60.) && at.y < window.height - px(120.),
+        "the press point {at:?} (row {row:?}) is off the history of a {window:?} window"
+    );
+    at
 }
 
 fn file() -> String {
