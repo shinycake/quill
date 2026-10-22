@@ -1,5 +1,18 @@
 use super::*;
 
+thread_local! {
+    /// Makes this thread's `try_lock` fail as a filesystem without locks.
+    pub(super) static LOCKS_FAIL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `body` with this thread's locks failing.
+fn without_locks<T>(body: impl FnOnce() -> T) -> T {
+    LOCKS_FAIL.with(|fail| fail.set(true));
+    let result = body();
+    LOCKS_FAIL.with(|fail| fail.set(false));
+    result
+}
+
 fn root(name: &str) -> PathBuf {
     let root = crate::scratch::process_dir("carrier-data-folder")
         .join(name)
@@ -88,9 +101,9 @@ fn a_claim_never_reuses_a_leftover_name() {
     let _ = std::fs::create_dir_all(&root);
     let cookie = with_cookie(&root.join("7-0"));
     let _ = std::fs::write(root.join("7-0.lock"), b"");
-    assert!(Generation::try_claim(&root, "7-0").is_none());
+    assert_eq!(Generation::try_claim(&root, "7-0").err(), Some(Miss::Taken));
     with_cookie(&root.join("7-1"));
-    assert!(Generation::try_claim(&root, "7-1").is_none());
+    assert_eq!(Generation::try_claim(&root, "7-1").err(), Some(Miss::Taken));
     assert!(cookie.exists());
     let fresh = Generation::try_claim(&root, "7-2").unwrap();
     assert_eq!(std::fs::read_dir(fresh.dir()).unwrap().count(), 0);
@@ -140,4 +153,31 @@ fn the_listing_is_relative_and_bounded() {
         "{lines:?}"
     );
     assert_eq!(listing(generation.dir(), 1).len(), 1);
+}
+
+/// Where locks cannot be taken at all, a claim gives up at the first name
+/// and leaves no lock file behind.
+#[test]
+fn a_claim_that_cannot_lock_leaves_nothing() {
+    let root = root("no-locks-claim");
+    assert!(without_locks(|| Generation::claim(&root)).is_none());
+    assert_eq!(names(&root), Vec::<String>::new());
+    assert!(Generation::claim(&root).is_some());
+}
+
+/// A lock that cannot be tested goes only when its folder is gone; a
+/// folder next to one is kept.
+#[test]
+fn a_sweep_that_cannot_lock_keeps_folders() {
+    let root = root("no-locks-sweep");
+    let _ = std::fs::create_dir_all(&root);
+    let kept = with_cookie(&root.join("3-0"));
+    let _ = std::fs::write(root.join("3-0.lock"), b"");
+    let _ = std::fs::write(root.join("3-1.lock"), b"");
+    without_locks(|| sweep(&root));
+    assert!(kept.exists());
+    assert_eq!(
+        names(&root),
+        vec!["3-0".to_string(), "3-0.lock".to_string()]
+    );
 }

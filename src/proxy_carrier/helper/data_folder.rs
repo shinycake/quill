@@ -13,9 +13,10 @@
 //! moment after its helper exits, so the teardown retries for a while;
 //! whatever is still there is swept by the next start.
 
-use std::fs::{File, OpenOptions};
+use std::fs::{File, OpenOptions, TryLockError};
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -29,6 +30,28 @@ const MAX_TRIES: u32 = 256;
 
 /// The next generation number this process tries.
 static NEXT: AtomicU32 = AtomicU32::new(0);
+/// Whether a sweep has said it met locks it cannot test.
+static UNTESTABLE_LOGGED: AtomicBool = AtomicBool::new(false);
+
+/// Why one name could not be claimed.
+#[derive(Debug, PartialEq, Eq)]
+enum Miss {
+    /// Someone else has it (a leftover, a sweep): try the next name.
+    Taken,
+    /// The folder cannot hold a generation (it cannot be written, or its
+    /// filesystem cannot lock): no other name will do better.
+    Failed,
+}
+
+/// `File::try_lock`, which tests can make fail as a filesystem without
+/// locks does.
+fn try_lock(file: &File) -> Result<(), TryLockError> {
+    #[cfg(test)]
+    if tests::LOCKS_FAIL.with(std::cell::Cell::get) {
+        return Err(TryLockError::Error(ErrorKind::Unsupported.into()));
+    }
+    file.try_lock()
+}
 
 /// One host's data folder and the lock that says it is in use.
 #[derive(Debug)]
@@ -41,44 +64,62 @@ pub(super) struct Generation {
 impl Generation {
     /// A new, empty generation under `root`. Cheap (a lock file and a
     /// folder), so it may run on any thread. `None` when `root` cannot
-    /// hold one.
+    /// hold one; a failure that is not about one name stops at once and
+    /// leaves no file behind.
     pub(super) fn claim(root: &Path) -> Option<Self> {
         std::fs::create_dir_all(root).ok()?;
         let pid = std::process::id();
         for _ in 0..MAX_TRIES {
             let name = format!("{pid}-{}", NEXT.fetch_add(1, Ordering::Relaxed));
-            if let Some(generation) = Self::try_claim(root, &name) {
-                return Some(generation);
+            match Self::try_claim(root, &name) {
+                Ok(generation) => return Some(generation),
+                Err(Miss::Taken) => {}
+                Err(Miss::Failed) => return None,
             }
         }
         None
     }
 
-    fn try_claim(root: &Path, name: &str) -> Option<Self> {
+    fn try_claim(root: &Path, name: &str) -> Result<Self, Miss> {
         let lock_path = root.join(format!("{name}{LOCK}"));
         // `create_new`: a name a leftover of an earlier process with this
         // pid still holds is never reused.
-        let lock = OpenOptions::new()
+        let lock = match OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&lock_path)
-            .ok()?;
-        lock.try_lock().ok()?;
+        {
+            Ok(lock) => lock,
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => return Err(Miss::Taken),
+            Err(_) => return Err(Miss::Failed),
+        };
+        // From here the file is this claim's: whatever fails removes it.
+        let give_up = |miss: Miss| {
+            let _ = std::fs::remove_file(&lock_path);
+            Err(miss)
+        };
+        match try_lock(&lock) {
+            Ok(()) => {}
+            // A sweep holds it for a moment and deletes it.
+            Err(TryLockError::WouldBlock) => return Err(Miss::Taken),
+            Err(TryLockError::Error(_)) => return give_up(Miss::Failed),
+        }
         // A sweep may have taken and deleted the file between the two
         // calls above; this lock would then guard nothing.
         if !lock_path.exists() {
-            return None;
+            return Err(Miss::Taken);
         }
         let dir = root.join(name);
-        if std::fs::create_dir(&dir).is_err() {
+        match std::fs::create_dir(&dir) {
+            Ok(()) => Ok(Self {
+                dir,
+                lock_path,
+                _lock: lock,
+            }),
             // A leftover folder without its lock: the sweep's.
-            return None;
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => give_up(Miss::Taken),
+            Err(_) => give_up(Miss::Failed),
         }
-        Some(Self {
-            dir,
-            lock_path,
-            _lock: lock,
-        })
     }
 
     pub(super) fn dir(&self) -> &Path {
@@ -163,19 +204,35 @@ fn sweep(root: &Path) {
 /// with `create_new`, so a claim that holds the lock and still finds its
 /// file knows the file is its own. A folder without a lock file is never
 /// in use (a claim makes the lock first, a teardown deletes it last).
+///
+/// A lock that cannot be tested at all (a filesystem without locks) says
+/// nothing about its holder. Its file goes only when its folder is already
+/// gone, so there is nothing a live host could lose; a folder next to such
+/// a lock is kept, and the sweep says so once.
 fn remove_if_unheld(root: &Path, name: &str) {
     let lock_path = root.join(format!("{name}{LOCK}"));
+    let folder = root.join(name);
     match OpenOptions::new().write(true).open(&lock_path) {
-        Ok(lock) => {
-            if lock.try_lock().is_err() {
-                return;
+        Ok(lock) => match try_lock(&lock) {
+            Ok(()) => {
+                if remove_tree(&folder) {
+                    let _ = std::fs::remove_file(&lock_path);
+                }
             }
-            if remove_tree(&root.join(name)) {
-                let _ = std::fs::remove_file(&lock_path);
+            Err(TryLockError::WouldBlock) => {}
+            Err(TryLockError::Error(error)) => {
+                if !folder.exists() {
+                    let _ = std::fs::remove_file(&lock_path);
+                } else if !UNTESTABLE_LOGGED.swap(true, Ordering::Relaxed) {
+                    eprintln!(
+                        "carrier data: cannot test the lock of {}, keeping it ({error})",
+                        folder.display()
+                    );
+                }
             }
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            remove_tree(&root.join(name));
+        },
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            remove_tree(&folder);
         }
         Err(_) => {}
     }

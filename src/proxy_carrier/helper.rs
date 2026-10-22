@@ -19,7 +19,7 @@ use super::{
 use crate::media_tools::NoConsole;
 use crate::telegram::requests::process_web_proxy_carrier_message;
 use quill_webview_protocol::carrier::{
-    BROWSER_EXIT_WAIT, CarrierCommand, CarrierEvent, CarrierFailure, MAX_LINE_BYTES,
+    CLOSED_HELPER_DEADLINE, CarrierCommand, CarrierEvent, CarrierFailure, MAX_LINE_BYTES,
     MAX_PENDING_BYTES, SecretUrl, base64_len,
 };
 use quill_webview_protocol::lines::{Line, read_bounded_line};
@@ -44,11 +44,11 @@ const START_TIMEOUT: Duration = Duration::from_secs(60);
 const HELPER_SILENCE: Duration = Duration::from_secs(15);
 /// How often a writer thread looks at the clocks when nothing is queued.
 const WATCH_TICK: Duration = Duration::from_secs(1);
-/// How long a closed helper gets to send the page `{"t":"close"}` (about
-/// 200 ms) and go before it is killed. The last carrier's helper on
-/// Windows first waits up to [`BROWSER_EXIT_WAIT`] for WebView2's browser
-/// process to let go of the data folder (`browser_exit.rs` in the helper).
-const CLOSE_GRACE: Duration = BROWSER_EXIT_WAIT.saturating_add(Duration::from_secs(1));
+/// How long a closed helper gets to tell the page, drop its view and (the
+/// last one, on Windows) wait for WebView2's browser process before it is
+/// killed. The order of the close deadlines is checked where they are
+/// defined (the protocol crate's `carrier.rs`).
+const CLOSE_GRACE: Duration = CLOSED_HELPER_DEADLINE;
 /// The most [`CarrierHost::shutdown`] waits for helpers still exiting, in
 /// all. Shutdown tells every helper it is the last, so each may wait for
 /// the shared browser process as a last close does: the same budget.
@@ -56,6 +56,9 @@ const SHUTDOWN_WAIT: Duration = CLOSE_GRACE;
 /// How long a reader waits for the exit status of a helper whose output
 /// ended, to tell a missing library from a crash.
 const EXIT_WAIT: Duration = Duration::from_millis(500);
+/// How long a host that could not claim a data folder waits before it
+/// tries again; meanwhile every open is refused.
+const CLAIM_BACKOFF: Duration = Duration::from_secs(10);
 /// The capability check's whole budget.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -252,6 +255,8 @@ pub struct HelperCarrierHost {
     root: Option<PathBuf>,
     /// This host's data folder, until it stops.
     generation: Option<data_folder::Generation>,
+    /// No claim before this, after one failed.
+    claim_after: Option<Instant>,
     relay: RelaySink,
     capability: Capability,
     carriers: HashMap<i32, Running>,
@@ -276,6 +281,8 @@ impl HelperCarrierHost {
         let (failures_tx, failures) = channel();
         Self {
             program: config.program,
+            claim_after: (config.data_dir.is_some() && generation.is_none())
+                .then(|| Instant::now() + CLAIM_BACKOFF),
             root: config.data_dir,
             generation,
             relay: config.relay,
@@ -288,15 +295,17 @@ impl HelperCarrierHost {
     }
 
     /// The folder a new helper gets. With an account folder configured a
-    /// helper never runs without one of its own: a claim that failed when
-    /// the host started is tried again, and failing that the carrier is
-    /// not opened (TDLib may try again).
+    /// helper never runs without one of its own: a claim that failed is
+    /// tried again, at most every [`CLAIM_BACKOFF`], and until one works no
+    /// carrier opens (TDLib may try again).
     fn data_dir_arg(&mut self) -> Result<Option<String>, CarrierError> {
         let Some(root) = &self.root else {
             return Ok(None);
         };
-        if self.generation.is_none() {
+        let now = Instant::now();
+        if self.generation.is_none() && self.claim_after.is_none_or(|after| now >= after) {
             self.generation = data_folder::Generation::claim(root);
+            self.claim_after = self.generation.is_none().then(|| now + CLAIM_BACKOFF);
         }
         self.generation
             .as_ref()

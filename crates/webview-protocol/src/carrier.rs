@@ -16,9 +16,47 @@
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+// What happens after Quill sends `close`, in order, and the deadlines that
+// keep each step from cutting the one before it short. Quill hangs up
+// right after `close`.
+//
+// 1. The page gets `{"t":"close"}` and [`PAGE_CLOSE_NOTICE`] to finish.
+// 2. The helper drops its web view and its environment, within
+//    [`VIEW_TEARDOWN`].
+// 3. On Windows, for the last carrier, it waits up to [`BROWSER_EXIT_WAIT`]
+//    for WebView2's browser process to let go of the data folder.
+// 4. Its stdin watchdog ends it [`CLOSED_HANGUP_GRACE`] after the hangup,
+//    should the loop be stuck.
+// 5. Quill kills it [`CLOSED_HELPER_DEADLINE`] after the close; that is
+//    also the most a shutdown waits for its helpers.
+
+/// How long the page gets to end its relay session after `{"t":"close"}`
+/// (the schema's "for example, in 200 milliseconds").
+pub const PAGE_CLOSE_NOTICE: Duration = Duration::from_millis(200);
+/// What dropping the web view and its environment may take.
+pub const VIEW_TEARDOWN: Duration = Duration::from_millis(500);
 /// The most a closing helper waits for WebView2's browser process to exit
-/// (`CarrierCommand::Close::last`). On CI it took 175 to 822 ms.
+/// (`CarrierCommand::Close::last`). On CI it took 156 ms to 1.2 s.
 pub const BROWSER_EXIT_WAIT: Duration = Duration::from_secs(2);
+/// How long a helper that has read `close` keeps going after Quill hangs
+/// up before it ends itself.
+pub const CLOSED_HANGUP_GRACE: Duration = Duration::from_millis(2750);
+/// When Quill kills a closed helper that has not gone, and the most a
+/// shutdown waits for its helpers in all.
+pub const CLOSED_HELPER_DEADLINE: Duration = Duration::from_millis(3500);
+
+const _: () = assert!(
+    PAGE_CLOSE_NOTICE
+        .saturating_add(VIEW_TEARDOWN)
+        .saturating_add(BROWSER_EXIT_WAIT)
+        .as_millis()
+        < CLOSED_HANGUP_GRACE.as_millis(),
+    "the hangup grace would cut the browser wait short"
+);
+const _: () = assert!(
+    CLOSED_HANGUP_GRACE.as_millis() < CLOSED_HELPER_DEADLINE.as_millis(),
+    "Quill would kill a closed helper before it can end itself"
+);
 
 /// Longest binary message the page may post, decoded. TDLib coalesces at
 /// most 1 MiB per update (`MAX_CARRIER_DATA_SIZE`); the page's frames are

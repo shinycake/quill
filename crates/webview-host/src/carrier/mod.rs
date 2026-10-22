@@ -45,9 +45,8 @@ use wry::{NewWindowResponse, PageLoadEvent, PermissionResponse, WebViewBuilder};
 /// How often the loop looks at its timers and asks the page for a sign of
 /// life (tdesktop `kProbeInterval`).
 const TICK: Duration = Duration::from_secs(3);
-/// How long the page gets to end its relay session after `{"t":"close"}`
-/// (the schema's "for example, in 200 milliseconds").
-const CLOSE_GRACE: Duration = Duration::from_millis(200);
+/// How long the page gets to end its relay session after `{"t":"close"}`.
+const CLOSE_GRACE: Duration = quill_webview_protocol::carrier::PAGE_CLOSE_NOTICE;
 /// Set (in debug builds only) to let the helper's own tests serve the page
 /// from `http://127.0.0.1:<port>`.
 const LOOPBACK_ENV: &str = "QUILL_WEBVIEW_CARRIER_LOOPBACK";

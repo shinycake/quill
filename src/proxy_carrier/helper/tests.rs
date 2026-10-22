@@ -312,6 +312,9 @@ fn without_a_folder_of_its_own_no_carrier_opens() {
     assert_eq!(host.data_folder(), None);
     assert_eq!(host.open(&request(5)), Err(CarrierError::Terminated));
     std::fs::remove_file(&root).unwrap();
+    // Not tried again on every open: the next claim waits out the backoff.
+    assert_eq!(host.open(&request(6)), Err(CarrierError::Terminated));
+    host.claim_after = Some(Instant::now());
     assert_eq!(host.open(&request(6)), Ok(()));
     let folder = host.data_folder().map(Path::to_path_buf).unwrap();
     assert!(folder.starts_with(&root) && folder.is_dir());

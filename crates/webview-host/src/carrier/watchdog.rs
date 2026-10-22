@@ -8,7 +8,7 @@
 //! the helper when the thread that started it goes.
 
 use quill_webview_protocol::carrier::{
-    BROWSER_EXIT_WAIT, CarrierCommand, MAX_DELIVERY_BYTES, base64_len,
+    CLOSED_HANGUP_GRACE, CarrierCommand, MAX_DELIVERY_BYTES, base64_len,
 };
 use quill_webview_protocol::decode;
 use quill_webview_protocol::lines::{Line, read_bounded_line};
@@ -17,12 +17,11 @@ use std::time::Duration;
 /// How long the event loop gets to exit on its own after Quill hangs up.
 const HANGUP_GRACE: Duration = Duration::from_millis(300);
 /// The same once Quill has sent `close`, which it always follows by
-/// hanging up: the loop may still be telling the page (about 200 ms) and
-/// then, on Windows, waiting for WebView2's browser process. Cutting that
-/// wait short leaves the data folder held. Still less than Quill's own
-/// deadline for a closed helper (`CLOSE_GRACE` in
-/// `src/proxy_carrier/helper.rs`).
-const CLOSED_GRACE: Duration = BROWSER_EXIT_WAIT.saturating_add(Duration::from_millis(500));
+/// hanging up: the loop may still be telling the page and then, on
+/// Windows, waiting for WebView2's browser process. Cutting that wait
+/// short leaves the data folder held. The order of these deadlines is
+/// checked where they are defined (the protocol crate's `carrier.rs`).
+const CLOSED_GRACE: Duration = CLOSED_HANGUP_GRACE;
 
 /// Read the rest of stdin, one command per line, handing each to `deliver`
 /// until it returns `false` (the loop is gone). Never returns after Quill
