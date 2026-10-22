@@ -106,6 +106,25 @@ pub(super) fn media_draggable(
     }
 }
 
+/// The message's picture, video, sticker or file as the bubble shows it:
+/// pressing it and moving picks the message up for a chat row
+/// (`dragItemByHandler`), and media that does not lead the bubble sits below
+/// a gap.
+pub(super) fn media_block(
+    session: Option<&Session>,
+    message: &HistoryMessage,
+    media: AnyElement,
+    media_led: bool,
+) -> AnyElement {
+    let drag = drag_for_media(session, message);
+    let media = media_draggable(("media-drag", message.id.0 as u64), media, drag);
+    if media_led {
+        media
+    } else {
+        div().mt_2().child(media).into_any_element()
+    }
+}
+
 /// Set while a lifted message drag is in flight, so the history can tell it
 /// from any other drag. Cleared when the button comes up.
 #[derive(Default)]

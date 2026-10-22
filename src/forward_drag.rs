@@ -141,7 +141,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pictures_stickers_and_files_drag_by_a_press_but_text_and_audio_do_not() {
+    fn a_dice_drags_by_a_press_but_service_messages_do_not() {
         use crate::telegram::envelope::DiceContent;
         let dice = MessageContent::Dice(DiceContent {
             emoji: "🎲".into(),

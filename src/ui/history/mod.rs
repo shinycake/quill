@@ -23,7 +23,6 @@ use super::message_text::{
     FooterMeta, caption_above_media, message_chrome, message_footer_meta, message_rich_block,
     message_text_block, rich_text_reserving,
 };
-use super::nested_click::SwallowPress;
 use super::pressable::PressableDiv;
 use super::synthetic::{BubbleLook, footer_reserve, session_bubble_quoted, session_bubble_rich};
 use super::*;
@@ -611,10 +610,11 @@ pub(super) fn album_tile(
                         Button::new(format!("album-play-{row_id}"))
                             .label(tr(keys::Q_MEDIA_PLAY))
                             .ghost()
-                            // Kit buttons let the press bubble: without this the
-                            // tile's own click also opens the viewer.
-                            .swallow_press()
+                            // The press bubbles, so the tile's drag can start from
+                            // the button; a click stops here instead of also
+                            // opening the viewer through the tile's own click.
                             .on_click(cx.listener(move |this, _, _, cx| {
+                                cx.stop_propagation();
                                 this.open_media_viewer_at(chat_id, message_id, item_offset, cx);
                             })),
                     )

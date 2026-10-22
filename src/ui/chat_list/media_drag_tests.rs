@@ -56,9 +56,14 @@ fn dragging(vcx: &mut VisualTestContext) -> bool {
     vcx.update(|_, cx| cx.has_active_drag())
 }
 
-/// Receives one more photo (message 901, no file yet) in chat 11 and
-/// returns a point on its picture (the row's left, under its top).
-fn photo(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Point<gpui_kit::Pixels> {
+/// Receives one more message (id 901, incoming, chat 11) with `content` (the
+/// JSON of a TDLib `MessageContent`) and returns a point on its media (the
+/// row's left, under its top).
+fn inject(
+    app: &Entity<QuillApp>,
+    vcx: &mut VisualTestContext,
+    content: &str,
+) -> Point<gpui_kit::Pixels> {
     app.update(vcx, |app, cx| {
         let present = app
             .session()
@@ -68,9 +73,8 @@ fn photo(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Point<gpui_kit:
             return;
         }
         let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> = app.demo_ui.sink.clone();
-        let file = crate::ui::demo::demo_file_json(990, "", false);
         let json = format!(
-            r#"{{"@type":"updateNewMessage","message":{{"id":901,"chat_id":11,"is_outgoing":false,"date":1790640000,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{file},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#
+            r#"{{"@type":"updateNewMessage","message":{{"id":901,"chat_id":11,"is_outgoing":false,"date":1790640000,"content":{content}}}}}"#
         );
         let parsed = quill::telegram::client::copy_and_parse(&json, &app.demo_ui.seq, &sink);
         if let (Some(session), Some(parsed)) = (app.demo_session.as_mut(), parsed) {
@@ -79,7 +83,7 @@ fn photo(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Point<gpui_kit:
         cx.notify();
     });
     frames(vcx);
-    // The incoming bubble's picture sits at the row's left edge.
+    // The incoming bubble's media sits at the row's left edge.
     app.read_with(vcx, |app, _| {
         let hits = app.history.hit_rows.borrow();
         hits.iter()
@@ -89,8 +93,55 @@ fn photo(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Point<gpui_kit:
                 }
                 _ => None,
             })
-            .expect("the photo row is painted")
+            .expect("the injected row is painted")
     })
+}
+
+fn file() -> String {
+    crate::ui::demo::demo_file_json(990, "", false)
+}
+
+fn photo_content() -> String {
+    let file = file();
+    format!(
+        r#"{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{file},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":false,"is_secret":false}}"#
+    )
+}
+
+fn sticker_content() -> String {
+    let file = file();
+    format!(
+        r#"{{"@type":"messageSticker","is_premium":false,"sticker":{{"@type":"sticker","id":"990","set_id":"77","width":128,"height":128,"emoji":"x","format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":null,"sticker":{file}}}}}"#
+    )
+}
+
+fn video_note_content() -> String {
+    let file = file();
+    format!(
+        r#"{{"@type":"messageVideoNote","video_note":{{"@type":"videoNote","duration":5,"waveform":"","length":200,"minithumbnail":null,"thumbnail":null,"speech_recognition_result":null,"video":{file}}},"is_viewed":true,"is_secret":false}}"#
+    )
+}
+
+fn document_content() -> String {
+    let file = file();
+    format!(
+        r#"{{"@type":"messageDocument","document":{{"@type":"document","file_name":"report.pdf","mime_type":"application/pdf","minithumbnail":null,"thumbnail":null,"document":{file}}},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}"#
+    )
+}
+
+fn video_content() -> String {
+    let file = file();
+    format!(
+        r#"{{"@type":"messageVideo","video":{{"@type":"video","duration":7,"width":240,"height":160,"file_name":"clip.mp4","mime_type":"video/mp4","has_stickers":false,"supports_streaming":true,"minithumbnail":null,"thumbnail":null,"video":{file}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":"","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}"#
+    )
+}
+
+fn paid_content() -> String {
+    r#"{"@type":"messagePaidMedia","star_count":5,"media":[{"@type":"paidMediaPreview","width":240,"height":160,"duration":0,"minithumbnail":null}],"caption":{"@type":"formattedText","text":"","entities":[]},"show_caption_above_media":false}"#.to_string()
+}
+
+fn photo(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Point<gpui_kit::Pixels> {
+    inject(app, vcx, &photo_content())
 }
 
 fn viewer_open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
@@ -268,4 +319,95 @@ fn a_pending_photo_does_not_lift(cx: &mut TestAppContext) {
     let to = centre_of(vcx, ("chat-row", 12));
     press_and_move(vcx, from, to);
     assert!(!dragging(vcx));
+}
+
+/// Lifting `content` from its row and dropping it on chat 12 forwards message 901.
+fn lifts_and_forwards(cx: &mut TestAppContext, content: String) {
+    let (app, mut vcx) = open(cx, "ready-albums");
+    let vcx = &mut vcx;
+    let from = inject(&app, vcx, &content);
+    let to = centre_of(vcx, ("chat-row", 12));
+    press_and_move(vcx, from, to);
+    assert!(dragging(vcx), "the press lifted a drag");
+    assert!(lit(vcx, 12));
+    vcx.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
+    frames(vcx);
+    assert_eq!(forward_bar(&app, vcx), vec![MessageId(901)]);
+}
+
+#[gpui_kit::test]
+fn a_sticker_lifts_its_message(cx: &mut TestAppContext) {
+    lifts_and_forwards(cx, sticker_content());
+}
+
+#[gpui_kit::test]
+fn a_document_lifts_its_message(cx: &mut TestAppContext) {
+    lifts_and_forwards(cx, document_content());
+}
+
+#[gpui_kit::test]
+fn a_round_video_lifts_its_message(cx: &mut TestAppContext) {
+    lifts_and_forwards(cx, video_note_content());
+}
+
+#[gpui_kit::test]
+fn a_single_video_lifts_its_message(cx: &mut TestAppContext) {
+    lifts_and_forwards(cx, video_content());
+}
+
+#[gpui_kit::test]
+fn a_paid_media_card_does_not_lift(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx, "ready-albums");
+    let vcx = &mut vcx;
+    let from = inject(&app, vcx, &paid_content());
+    let to = centre_of(vcx, ("chat-row", 12));
+    press_and_move(vcx, from, to);
+    assert!(!dragging(vcx), "a locked card is not a drag source");
+}
+
+/// A point on the play disc of the injected video (message 901): a press
+/// the disc swallowed would not lift the video.
+fn video_disc(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Point<gpui_kit::Pixels> {
+    let base = inject(app, vcx, &video_content());
+    point(base.x + px(35.), base.y + px(30.))
+}
+
+#[gpui_kit::test]
+fn a_video_lifts_from_its_centre_disc(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx, "ready-albums");
+    let vcx = &mut vcx;
+    let from = video_disc(&app, vcx);
+    let to = centre_of(vcx, ("chat-row", 12));
+    press_and_move(vcx, from, to);
+    assert!(dragging(vcx), "the press on the disc lifted a drag");
+    vcx.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
+    frames(vcx);
+    assert_eq!(forward_bar(&app, vcx), vec![MessageId(901)]);
+    assert!(!viewer_open(&app, vcx));
+}
+
+#[gpui_kit::test]
+fn a_click_on_the_video_disc_is_not_a_drag(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx, "ready-albums");
+    let vcx = &mut vcx;
+    let at = video_disc(&app, vcx);
+    vcx.simulate_click(at, Modifiers::default());
+    frames(vcx);
+    assert!(!dragging(vcx));
+    assert!(forward_bar(&app, vcx).is_empty());
+}
+
+#[gpui_kit::test]
+fn a_lifted_photo_released_over_the_history_does_not_reply(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx, "ready-albums");
+    let vcx = &mut vcx;
+    let from = photo(&app, vcx);
+    // Far to the right of the press: a swipe to reply goes left, so go
+    // left over the history instead.
+    let to = point(from.x - px(60.), from.y + px(2.));
+    press_and_move(vcx, from, to);
+    vcx.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
+    frames(vcx);
+    let replying = app.read_with(vcx, |app, _| app.composer_ui.reply().is_some());
+    assert!(!replying, "the release ended a drag, not a swipe to reply");
 }

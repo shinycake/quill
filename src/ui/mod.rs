@@ -58,6 +58,7 @@ mod frame_clock;
 pub mod link_inbox;
 mod wake_wait;
 pub use wake_wait::sleep_or_wake;
+mod drag_start_tests;
 #[cfg(feature = "frame-profiler")]
 mod frame_profile;
 mod frame_state;

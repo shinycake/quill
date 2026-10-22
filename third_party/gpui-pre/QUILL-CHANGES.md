@@ -86,9 +86,9 @@ and up) alive for good.
 ## A drag can start later than 2 pixels
 
 Added in 2026 for dragging a message out by its picture
-(`docs/decisions/chatlist-drag-media-forward.md`). `src/elements/div.rs`:
+(`docs/decisions/drag-media-to-chat-row.md`). `src/elements/div.rs`:
 `Interactivity::drag_start_distance` and the fluent
 `StatefulInteractiveElement::drag_start_distance`, which set how far the
-pointer moves before `on_drag` starts (default still 2). Telegram Desktop
+pointer moves (Manhattan distance) before `on_drag` starts (default still 2). Telegram Desktop
 starts a drag after 10 pixels, and a press that moves less must still click
 the picture it is on.

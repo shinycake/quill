@@ -3007,8 +3007,11 @@ impl Interactivity {
                         if let Some(mouse_down) = pending_mouse_down.clone()
                             && !cx.has_active_drag()
                             && drag_listener.as_ref().is_some_and(|listener| {
-                                (event.position - mouse_down.position).magnitude()
-                                    > listener.start_distance
+                                {
+                                    let moved = event.position - mouse_down.position;
+                                    f64::from(moved.x.abs() + moved.y.abs())
+                                        > listener.start_distance
+                                }
                             })
                             && let Some(listener) = drag_listener.take()
                             && mouse_down.button == MouseButton::Left
