@@ -122,6 +122,21 @@ impl QuillApp {
         if !self.profile_modal_active() {
             return None;
         }
+        self.profile_modal_overlay_body(window, cx)
+    }
+
+    /// `profile_modal_overlay` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    #[inline(never)]
+    fn profile_modal_overlay_body(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !self.profile_modal_active() {
+            return None;
+        }
         let modal = self.dialogs.profile_modal.as_ref()?;
         let now = Instant::now();
         let shown = modal.glide.value(now).clamp(0., 1.);

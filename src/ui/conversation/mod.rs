@@ -5,7 +5,6 @@ use super::app::{PaneMode, QuillApp, pane_placeholder};
 use super::group_panels::SupergroupHeaderExtras;
 use super::history::HistoryShared;
 use super::history::{album_history_row, history_skeleton, session_history_row};
-use super::pressable::PressableDiv;
 use super::synthetic::BubbleLook;
 use super::*;
 use gpui_kit::assets::IconName;
@@ -131,7 +130,6 @@ impl QuillApp {
         } else {
             title.to_string()
         };
-        let muted_fg = cx.theme().muted_foreground;
         // Phase B4: chat-level auto-delete / self-destruct timer status
         // (`chat.message_auto_delete_time`, schema 1.8.67 lines 3616 /
         // 3627) — shown under the title when a timer is set.
@@ -252,90 +250,22 @@ impl QuillApp {
                 self.bot_verify_icon_path(chat)
             })
         };
-        let identity = div()
-            .id("conversation-identity")
-            .flex()
-            .items_center()
-            .gap_3()
-            .min_w_0()
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .min_w_0()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_1()
-                            .min_w_0()
-                            .when_some(verify_icon, |this, path| {
-                                this.child(super::bot_verify_icon::bot_verify_icon(path))
-                            })
-                            .child(
-                                div()
-                                    .font_semibold()
-                                    .truncate()
-                                    .child(super::bidi_line::one_line_plain(title_text)),
-                            )
-                            .children(badges.into_iter().map(|badge| {
-                                let emoji = match badge {
-                                    quill::peer_badge::TitleBadge::EmojiStatus(id) => self
-                                        .status_glyph(
-                                            super::status_emoji::StatusSurface::Header,
-                                            chat_id_for_status,
-                                            id,
-                                            cx,
-                                        ),
-                                    _ => None,
-                                };
-                                super::chat_row::title_badge_element(badge, emoji, cx)
-                            })),
-                    )
-                    .when_some(status_line, |this, line| {
-                        this.child(
-                            div()
-                                .id("conversation-status")
-                                .flex()
-                                .items_center()
-                                .text_xs()
-                                .text_color(if status_accent {
-                                    cx.theme().primary
-                                } else {
-                                    muted_fg
-                                })
-                                .when_some(status_indicator, |this, indicator| {
-                                    this.child(super::activity_indicator::activity_indicator(
-                                        indicator,
-                                        cx.theme().primary,
-                                        "header-activity".into(),
-                                    ))
-                                })
-                                .child(
-                                    div()
-                                        .min_w_0()
-                                        .truncate()
-                                        .child(super::bidi_line::one_line_plain(line)),
-                                ),
-                        )
-                    }),
-            )
-            .when_some(info_target, |this, target| {
-                this.role(gpui_kit::Role::Button)
-                    .aria_label(tr(keys::Q_CHAT_OPEN_CONVERSATION_INFORMATION))
-                    .tab_index(0)
-                    .cursor_pointer()
-                    .rounded_md()
-                    .pressable(cx.theme())
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_info_panel_target(target, window, cx);
-                    }))
-            })
-            .into_any_element();
+        let identity = self.conversation_identity(
+            header_view::HeaderIdentity {
+                title: title_text,
+                verify_icon,
+                badges,
+                status_owner: chat_id_for_status,
+                status_line,
+                status_accent,
+                status_indicator,
+                info_target,
+            },
+            cx,
+        );
         let can_call = private_user.is_some_and(|user_id| {
             session.is_some_and(|s| Self::can_start_secret_chat_with(s, user_id))
         });
-        let chat_search_open = self.chat_search_is_open();
         let header = div()
             .id("conversation-header")
             .px_4()
@@ -367,112 +297,14 @@ impl QuillApp {
                     .child(identity),
             )
             .when(actions.is_some(), |this| {
-                // Phase C3a: voice-chat affordance for groups/channels —
-                // join the live voice chat, or start one when none is
-                // live. Signaling only (no audio transport yet).
-                let (voice_ok, voice_live) = self
-                    .session()
-                    .and_then(|s| s.chats.get(&chat_id.0))
-                    .map(|c| {
-                        let kind_ok = matches!(
-                            c.kind,
-                            ChatKind::BasicGroup { .. } | ChatKind::Supergroup { .. }
-                        );
-                        (kind_ok, kind_ok && c.video_chat.is_some())
-                    })
-                    .unwrap_or((false, false));
-                let voice_ok =
-                    voice_ok && thread_header.is_none() && self.chat_call_button_visible(chat_id);
-                let view_in_chat = thread_header
-                    .as_ref()
-                    .is_some_and(|(_, _, comments)| *comments);
-                this.child(
-                    div()
-                        .flex()
-                        .flex_none()
-                        .items_center()
-                        .gap_1()
-                        .when(view_in_chat, |this| {
-                            this.child(
-                                Button::new("thread-view-in-chat")
-                                    .label(tr(keys::Q_CHAT_VIEW_IN_CHAT))
-                                    .ghost()
-                                    .tooltip(tr(keys::Q_CHAT_SHOW_THE_POST_IN_THE))
-                                    .accessibility_label(tr(keys::Q_CHAT_VIEW_IN_CHAT))
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.view_thread_in_chat(cx);
-                                    })),
-                            )
-                        })
-                        .when_some(private_user.filter(|_| can_call), |this, user_id| {
-                            this.child(
-                                Button::new("chat-call")
-                                    .icon(gpui_kit::assets::IconName::Phone)
-                                    .ghost()
-                                    .tooltip(tr(keys::Q_CHAT_CALL))
-                                    .accessibility_label(tr(keys::Q_CHAT_CALL))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.start_call_for_user(user_id, false, cx);
-                                    })),
-                            )
-                        })
-                        .child({
-                            {
-                                Button::new("chat-find")
-                                    .icon(if chat_search_open {
-                                        gpui_kit::assets::IconName::X
-                                    } else {
-                                        gpui_kit::assets::IconName::Search
-                                    })
-                                    .ghost()
-                                    .tooltip(if chat_search_open {
-                                        tr(keys::Q_CHAT_CLOSE_SEARCH)
-                                    } else {
-                                        tr(keys::Q_CHAT_SEARCH_THIS_CHAT)
-                                    })
-                                    .accessibility_label(tr(keys::Q_CHAT_SEARCH_THIS_CHAT))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        if this.chat_search_is_open() {
-                                            this.close_chat_search_ui(window, cx);
-                                        } else {
-                                            this.open_chat_search_ui(window, cx);
-                                        }
-                                    }))
-                            }
-                        })
-                        .when(voice_ok, |this| {
-                            this.child(self.chat_voice_chat_button(chat_id, voice_live, cx))
-                        })
-                        // Telegram Desktop's third-column toggle: shows or
-                        // hides the chat's info panel.
-                        .when_some(info_target, |this, target| {
-                            let open = self
-                                .session()
-                                .is_some_and(|s| s.users_state.open_info_panel == Some(target));
-                            this.child(
-                                Button::new("chat-info-toggle")
-                                    .icon(gpui_kit::assets::IconName::PanelRight)
-                                    .ghost()
-                                    .selected(open)
-                                    .tooltip(if open {
-                                        tr(keys::Q_CHAT_HIDE_INFO)
-                                    } else {
-                                        tr(keys::Q_CHAT_SHOW_INFO)
-                                    })
-                                    .accessibility_label(tr(keys::Q_CHAT_TOGGLE_CHAT_INFO))
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        if open {
-                                            this.close_info_panel(cx);
-                                        } else {
-                                            this.open_info_panel_target(target, window, cx);
-                                        }
-                                    })),
-                            )
-                        })
-                        .child(self.chat_navigation_menu(cx)),
-                )
+                this.child(self.conversation_header_actions(
+                    chat_id,
+                    thread_header.as_ref(),
+                    private_user.filter(|_| can_call),
+                    info_target,
+                    cx,
+                ))
             });
-        // Selecting messages swaps the bar for Forward N / Delete N / Cancel.
         self.with_selection_bar(chat_id, header, cx)
     }
 
@@ -644,6 +476,7 @@ impl ConversationPart {
 }
 
 mod conversation_part1;
+mod header_view;
 mod history_message_list;
 mod history_scroll_memory;
 mod render_history_row_body;

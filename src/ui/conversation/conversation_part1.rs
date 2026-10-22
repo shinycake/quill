@@ -643,18 +643,7 @@ impl QuillApp {
                         cx,
                     );
                     self.history.rows_key = Some(key);
-                    div()
-                        .flex()
-                        .flex_col()
-                        .flex_1()
-                        .min_h_0()
-                        .min_w_0()
-                        .children(self.thread_root_bar(cx))
-                        .when(self.history.thread_info_open, |this| {
-                            this.children(self.thread_info_card(cx))
-                        })
-                        .child(list)
-                        .into_any_element()
+                    self.thread_history_pane(list, cx)
                 } else if is_forum
                     && open_topic.is_none()
                     && !tabs_used
@@ -736,30 +725,7 @@ impl QuillApp {
                         });
                     }
                     if history_failed {
-                        div()
-                            .id("history-load-failed")
-                            .flex_1()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .justify_center()
-                            .gap_2()
-                            .p_6()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(tr(keys::Q_CHAT_COULDN_T_LOAD_MESSAGES)),
-                            )
-                            .child(
-                                Button::new("history-retry")
-                                    .label(tr(keys::Q_CHAT_RETRY))
-                                    .ghost()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.retry_history_load(cx);
-                                    })),
-                            )
-                            .into_any_element()
+                        history_load_failed(cx)
                     } else if history_loading {
                         history_skeleton().into_any_element()
                     } else if is_secret {
@@ -791,19 +757,75 @@ impl QuillApp {
                     // history is scrolled to the bottom.
                     let scrolled_up = self.history.scroller.read(cx).is_scrolled_up();
                     match self.sponsored_footer(scrolled_up, cx) {
-                        Some(footer) => div()
-                            .id("history-with-sponsored")
-                            .flex()
-                            .flex_col()
-                            .flex_1()
-                            .min_h_0()
-                            .min_w_0()
-                            .child(list)
-                            .child(footer)
-                            .into_any_element(),
+                        Some(footer) => history_with_sponsored(list, footer),
                         None => list,
                     }
                 },
             ))
     }
+
+    /// A reply thread's history under its root bar and info card.
+    #[inline(never)]
+    fn thread_history_pane(&mut self, list: AnyElement, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .children(self.thread_root_bar(cx))
+            .when(self.history.thread_info_open, |this| {
+                this.children(self.thread_info_card(cx))
+            })
+            .child(list)
+            .into_any_element()
+    }
+}
+
+// `session_history` builds one of many panes; the larger ones are built
+// here so its frame stays small in a debug build
+// (docs/decisions/main-thread-stack.md).
+
+/// The first page failed or timed out: the reason and Retry.
+#[inline(never)]
+fn history_load_failed(cx: &mut Context<QuillApp>) -> AnyElement {
+    div()
+        .id("history-load-failed")
+        .flex_1()
+        .flex()
+        .flex_row()
+        .items_center()
+        .justify_center()
+        .gap_2()
+        .p_6()
+        .child(
+            div()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child(tr(keys::Q_CHAT_COULDN_T_LOAD_MESSAGES)),
+        )
+        .child(
+            Button::new("history-retry")
+                .label(tr(keys::Q_CHAT_RETRY))
+                .ghost()
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.retry_history_load(cx);
+                })),
+        )
+        .into_any_element()
+}
+
+/// A channel's history with its sponsored message at the end.
+#[inline(never)]
+fn history_with_sponsored(list: AnyElement, footer: AnyElement) -> AnyElement {
+    div()
+        .id("history-with-sponsored")
+        .flex()
+        .flex_col()
+        .flex_1()
+        .min_h_0()
+        .min_w_0()
+        .child(list)
+        .child(footer)
+        .into_any_element()
 }

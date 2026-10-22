@@ -3,7 +3,6 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::{QuillApp, corner_button};
-use gpui_kit::component::button::Button;
 use gpui_kit::*;
 use quill::corner_buttons::{FastShare, FastShareChat, FastShareFacts};
 use quill::ids::{ChatId, MessageId};
@@ -86,25 +85,25 @@ pub(super) fn button(
     pending: bool,
     what: FastShare,
     cx: &mut Context<QuillApp>,
-) -> Button {
+) -> AnyElement {
     match what {
         FastShare::Share => corner_button(
             format!("message-fast-share-{}", message_id.0),
             gpui_kit::assets::IconName::Forward,
             tr(keys::Q_CHAT_FORWARD),
+            cx.listener(move |this, _: &ClickEvent, window, cx| {
+                this.begin_forward_one(chat_id, message_id, pending, window, cx);
+            }),
             cx,
-        )
-        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-            this.begin_forward_one(chat_id, message_id, pending, window, cx);
-        })),
+        ),
         FastShare::GoToOriginal(source_chat, source_message) => corner_button(
             format!("message-go-to-original-{}", message_id.0),
             gpui_kit::assets::IconName::ArrowUpRight,
             tr(keys::Q_CHAT_GO_TO_MESSAGE),
+            cx.listener(move |this, _: &ClickEvent, window, cx| {
+                this.go_to_message_in(source_chat, source_message, window, cx);
+            }),
             cx,
-        )
-        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-            this.go_to_message_in(source_chat, source_message, window, cx);
-        })),
+        ),
     }
 }

@@ -669,6 +669,15 @@ impl QuillApp {
         {
             self.open_message_url(&url, cx);
         }
+        self.session()?.messages.instant_view.as_ref()?;
+        self.instant_view_overlay_body(cx)
+    }
+
+    /// `instant_view_overlay` past its cheap check. A debug build reserves
+    /// this builder's whole frame on entry, so frames that show nothing
+    /// skip it (docs/decisions/main-thread-stack.md).
+    #[inline(never)]
+    fn instant_view_overlay_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let page = self.session()?.messages.instant_view.clone()?;
         let url = page.url.clone();
         Some(

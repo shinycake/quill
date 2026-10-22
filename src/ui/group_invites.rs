@@ -224,6 +224,15 @@ impl QuillApp {
     /// Phase D3a: the invite-link creation dialog, rendered above the
     /// composer like the poll dialog.
     pub(super) fn invite_link_dialog_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.admin.invite_link_dialog.as_ref()?;
+        self.invite_link_dialog_panel_body(cx)
+    }
+
+    /// `invite_link_dialog_panel` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    #[inline(never)]
+    fn invite_link_dialog_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.admin.invite_link_dialog.as_ref()?;
         let creates_join_request = dialog.creates_join_request;
         let editing = dialog.edit_link.is_some();

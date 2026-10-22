@@ -764,5 +764,6 @@ pub(in crate::ui) use drop_on_row::DropOnRow;
 mod header_fit;
 mod listed;
 mod select_bar;
+mod sidebar;
 mod step_open;
 mod toggle_chat_pin;

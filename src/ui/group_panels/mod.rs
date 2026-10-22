@@ -478,6 +478,17 @@ impl QuillApp {
     }
 
     pub(super) fn info_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.info_panel_open() {
+            return None;
+        }
+        self.info_panel_body(cx)
+    }
+
+    /// `info_panel` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    #[inline(never)]
+    fn info_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         // A profile opened from a sender avatar is presented as a modal
         // layer (`profile_modal_overlay`), not in the right column.
         // Earn pages open in their own layer (`earn_layer`).

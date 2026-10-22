@@ -387,6 +387,17 @@ impl QuillApp {
 
     /// The bar, when a voice note or music file is active.
     pub(super) fn player_bar(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.active_playback_id()?;
+        self.playback.track_duration()?;
+        self.playback.active_position_secs()?;
+        self.player_bar_body(cx)
+    }
+
+    /// `player_bar` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    #[inline(never)]
+    fn player_bar_body(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let id = self.active_playback_id()?;
         let duration = self.playback.track_duration()?;
         let position = self.playback.active_position_secs()?;

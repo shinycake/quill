@@ -681,6 +681,19 @@ impl QuillApp {
     /// The chat-list bar while the user has bids in running auctions
     /// (tdesktop `TopBarSuggestion` for gift auctions).
     pub(super) fn gift_auction_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let now = now_unix();
+        auction_bar(
+            &self.session()?.payments.gift_market.active_auctions(now),
+            now,
+        )?;
+        self.gift_auction_bar_body(cx)
+    }
+
+    /// `gift_auction_bar` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    #[inline(never)]
+    fn gift_auction_bar_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         let now = now_unix();
         let list = session.payments.gift_market.active_auctions(now);

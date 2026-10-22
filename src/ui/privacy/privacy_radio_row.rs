@@ -226,6 +226,15 @@ impl QuillApp {
     /// rows where tdesktop offers them, then users and groups with Remove
     /// and Add pickers.
     pub(crate) fn privacy_exceptions_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.privacy.exceptions?;
+        self.privacy_exceptions_overlay_body(cx)
+    }
+
+    /// `privacy_exceptions_overlay` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    #[inline(never)]
+    fn privacy_exceptions_overlay_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (target, kind) = self.privacy.exceptions?;
         let session = self.session()?;
         let PrivacyEditorTarget::Rule(key) = target else {

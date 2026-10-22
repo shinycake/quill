@@ -14,6 +14,17 @@ impl QuillApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        if !self.composer_ui.command_menu_open {
+            return None;
+        }
+        self.command_menu_dropdown_body(cx)
+    }
+
+    /// `command_menu_dropdown` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    #[inline(never)]
+    fn command_menu_dropdown_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (prefix, items) = self.command_menu_state(cx)?;
         let selected = self
             .composer_ui

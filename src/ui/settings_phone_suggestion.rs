@@ -16,6 +16,23 @@ use quill::lang::{keys, tr};
 impl QuillApp {
     /// The prompt, or `None` when TDLib has no phone suggestion pending.
     pub(super) fn settings_phone_suggestion(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self
+            .session()?
+            .chat_list
+            .suggestions
+            .actions
+            .contains(ACTION_PHONE)
+        {
+            return None;
+        }
+        self.settings_phone_suggestion_body(cx)
+    }
+
+    /// `settings_phone_suggestion` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    #[inline(never)]
+    fn settings_phone_suggestion_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         if !session.chat_list.suggestions.actions.contains(ACTION_PHONE) {
             return None;

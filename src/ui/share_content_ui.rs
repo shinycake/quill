@@ -228,6 +228,15 @@ impl QuillApp {
     }
 
     pub(super) fn share_content_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.share.content_dialog.as_ref()?;
+        self.share_content_panel_body(cx)
+    }
+
+    /// `share_content_panel` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    #[inline(never)]
+    fn share_content_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.share.content_dialog.as_ref()?;
         let mut body = div()
             .id("share-content-panel")

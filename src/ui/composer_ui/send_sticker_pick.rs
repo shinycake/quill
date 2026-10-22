@@ -501,6 +501,20 @@ impl QuillApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        self.composer_ui
+            .pending_edit
+            .as_ref()?
+            .media_edit
+            .replacement
+            .as_ref()?;
+        self.edit_replacement_chip_body(cx)
+    }
+
+    /// `edit_replacement_chip` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    #[inline(never)]
+    fn edit_replacement_chip_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let edit = self.composer_ui.pending_edit.as_ref()?;
         let replacement = edit.media_edit.replacement.as_ref()?;
         let as_file_toggle = edit.can_toggle_as_file(replacement);

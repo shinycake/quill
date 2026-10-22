@@ -180,6 +180,15 @@ impl QuillApp {
 
     /// The box, above the composer input row.
     pub(super) fn composer_date_dialog_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.composer_ui.date_dialog.as_ref()?;
+        self.composer_date_dialog_panel_body(cx)
+    }
+
+    /// `composer_date_dialog_panel` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    #[inline(never)]
+    fn composer_date_dialog_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.composer_ui.date_dialog.as_ref()?;
         Some(
             div()

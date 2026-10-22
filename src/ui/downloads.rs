@@ -199,6 +199,17 @@ impl QuillApp {
         if !self.downloads_panel_open() {
             return None;
         }
+        self.downloads_panel_body(cx)
+    }
+
+    /// `downloads_panel` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    #[inline(never)]
+    fn downloads_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.downloads_panel_open() {
+            return None;
+        }
         let session = self.session()?;
         let (active, recent) = (
             session.media.downloads.user_count(),

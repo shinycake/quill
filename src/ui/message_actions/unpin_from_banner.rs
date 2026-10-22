@@ -1,6 +1,7 @@
 //! Methods moved out of `message_actions.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::lean_buttons::ghost_text_button;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with, trn};
 
@@ -41,6 +42,19 @@ impl QuillApp {
     /// click jumps to it and steps to the next older one. The right
     /// button unpins (or hides) a lone pin, or lists several.
     pub(in crate::ui) fn pinned_message_banner(
+        &self,
+        chat_id: ChatId,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        self.session()?.pinned_list(chat_id).first()?;
+        self.pinned_message_banner_body(chat_id, cx)
+    }
+
+    /// `pinned_message_banner` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    #[inline(never)]
+    fn pinned_message_banner_body(
         &self,
         chat_id: ChatId,
         cx: &mut Context<Self>,
@@ -93,50 +107,9 @@ impl QuillApp {
                 })
         });
         let right = if count == 1 {
-            Button::new("pinned-bar-close")
-                .icon(gpui_kit::assets::IconName::X)
-                .ghost()
-                .small()
-                .tooltip(if can_pin {
-                    tr(keys::CONTEXT_UNPIN_FROM_TOP)
-                } else {
-                    tr(keys::Q_CHAT_HIDE)
-                })
-                .accessibility_label(if can_pin {
-                    tr(keys::Q_CHAT_UNPIN_MESSAGE)
-                } else {
-                    tr(keys::Q_CHAT_HIDE_PINNED_MESSAGE)
-                })
-                .on_click(cx.listener(move |_, _, window, cx| {
-                    let app = cx.entity().downgrade();
-                    if can_pin {
-                        confirm(
-                            window,
-                            cx,
-                            tr(keys::PINNED_UNPIN_SURE),
-                            tr(keys::CONTEXT_UNPIN_FROM_TOP),
-                            move |cx| {
-                                let _ = app.update(cx, |this, cx| {
-                                    this.unpin_from_banner(chat_id, message_id, cx);
-                                });
-                            },
-                        );
-                    } else {
-                        confirm_hide_pinned(window, cx, app, chat_id, newest);
-                    }
-                }))
+            pinned_bar_close_button(can_pin, chat_id, message_id, newest, cx)
         } else {
-            Button::new("pinned-bar-list")
-                .icon(gpui_kit::assets::IconName::List)
-                .ghost()
-                .small()
-                .selected(self.history.pinned_list_open)
-                .tooltip(tr(keys::Q_CHAT_PINNED_MESSAGES))
-                .accessibility_label(tr(keys::Q_CHAT_PINNED_MESSAGES))
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.history.pinned_list_open = !this.history.pinned_list_open;
-                    cx.notify();
-                }))
+            pinned_bar_list_button(self.history.pinned_list_open, cx)
         };
         Some(
             div()
@@ -279,10 +252,10 @@ impl QuillApp {
         });
         let noun = if count == 1 { "message" } else { "messages" };
         let footer = if can_pin {
-            Button::new("pinned-list-unpin-all")
-                .label(trn(keys::PINNED_UNPIN_ALL, count))
-                .ghost()
-                .on_click(cx.listener(move |_, _, window, cx| {
+            ghost_text_button(
+                "pinned-list-unpin-all",
+                trn(keys::PINNED_UNPIN_ALL, count),
+                cx.listener(move |_, _, window, cx| {
                     let app = cx.entity().downgrade();
                     confirm(
                         window,
@@ -296,15 +269,17 @@ impl QuillApp {
                             });
                         },
                     );
-                }))
+                }),
+            )
         } else {
-            Button::new("pinned-list-hide")
-                .label(tr(keys::PINNED_HIDE_ALL))
-                .ghost()
-                .on_click(cx.listener(move |_, _, window, cx| {
+            ghost_text_button(
+                "pinned-list-hide",
+                tr(keys::PINNED_HIDE_ALL),
+                cx.listener(move |_, _, window, cx| {
                     let app = cx.entity().downgrade();
                     confirm_hide_pinned(window, cx, app, chat_id, newest);
-                }))
+                }),
+            )
         };
         Some(
             div()
@@ -356,4 +331,64 @@ impl QuillApp {
         }
         cx.notify();
     }
+}
+
+/// The pinned bar's close button for a lone pin: unpins it, or for readers
+/// hides the bar. Built in a frame of its own, like `lean_buttons`.
+fn pinned_bar_close_button(
+    can_pin: bool,
+    chat_id: ChatId,
+    message_id: MessageId,
+    newest: MessageId,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    Button::new("pinned-bar-close")
+        .icon(gpui_kit::assets::IconName::X)
+        .ghost()
+        .small()
+        .tooltip(if can_pin {
+            tr(keys::CONTEXT_UNPIN_FROM_TOP)
+        } else {
+            tr(keys::Q_CHAT_HIDE)
+        })
+        .accessibility_label(if can_pin {
+            tr(keys::Q_CHAT_UNPIN_MESSAGE)
+        } else {
+            tr(keys::Q_CHAT_HIDE_PINNED_MESSAGE)
+        })
+        .on_click(cx.listener(move |_, _, window, cx| {
+            let app = cx.entity().downgrade();
+            if can_pin {
+                confirm(
+                    window,
+                    cx,
+                    tr(keys::PINNED_UNPIN_SURE),
+                    tr(keys::CONTEXT_UNPIN_FROM_TOP),
+                    move |cx| {
+                        let _ = app.update(cx, |this, cx| {
+                            this.unpin_from_banner(chat_id, message_id, cx);
+                        });
+                    },
+                );
+            } else {
+                confirm_hide_pinned(window, cx, app, chat_id, newest);
+            }
+        }))
+        .into_any_element()
+}
+
+/// The pinned bar's list toggle when several messages are pinned.
+fn pinned_bar_list_button(open: bool, cx: &mut Context<QuillApp>) -> AnyElement {
+    Button::new("pinned-bar-list")
+        .icon(gpui_kit::assets::IconName::List)
+        .ghost()
+        .small()
+        .selected(open)
+        .tooltip(tr(keys::Q_CHAT_PINNED_MESSAGES))
+        .accessibility_label(tr(keys::Q_CHAT_PINNED_MESSAGES))
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.history.pinned_list_open = !this.history.pinned_list_open;
+            cx.notify();
+        }))
+        .into_any_element()
 }

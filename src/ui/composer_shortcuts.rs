@@ -220,6 +220,15 @@ impl QuillApp {
 
     /// The dialog panel, above the composer input row.
     pub(super) fn composer_link_dialog_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.composer_ui.link_dialog.as_ref()?;
+        self.composer_link_dialog_panel_body(cx)
+    }
+
+    /// `composer_link_dialog_panel` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    #[inline(never)]
+    fn composer_link_dialog_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.composer_ui.link_dialog.as_ref()?;
         Some(
             div()
@@ -397,6 +406,15 @@ impl QuillApp {
 
     /// The box, above the composer input row.
     pub(super) fn code_language_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.composer_ui.code_language.as_ref()?;
+        self.code_language_panel_body(cx)
+    }
+
+    /// `code_language_panel` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    #[inline(never)]
+    fn code_language_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.composer_ui.code_language.as_ref()?;
         let typed = dialog.input.read(cx).value().chars().count();
         let over = typed > quill::code_language::CODE_LANGUAGE_LIMIT;

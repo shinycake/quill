@@ -754,6 +754,15 @@ impl QuillApp {
     /// fields, anonymous / multiple-answers / revoting / shuffle / quiz
     /// toggles, discard confirmation, Create / Cancel.
     pub(super) fn poll_dialog_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.composer_ui.poll_dialog.as_ref()?;
+        self.poll_dialog_panel_body(cx)
+    }
+
+    /// `poll_dialog_panel` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    #[inline(never)]
+    fn poll_dialog_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.composer_ui.poll_dialog.as_ref()?;
         let mut panel = div()
             .id("poll-dialog")

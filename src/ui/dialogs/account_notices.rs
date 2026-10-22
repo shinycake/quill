@@ -85,6 +85,18 @@ impl QuillApp {
     /// "Someone just got access to your messages!" strip with the two
     /// answers, above the chat list (tdesktop's top-bar suggestion).
     pub(crate) fn unconfirmed_login_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let notices = &self.session()?.settings.notices;
+        if notices.unconfirmed_count == 0 || notices.unconfirmed_entries.is_empty() {
+            return None;
+        }
+        self.unconfirmed_login_banner_body(cx)
+    }
+
+    /// `unconfirmed_login_banner` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    #[inline(never)]
+    fn unconfirmed_login_banner_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         let notices = &session.settings.notices;
         if notices.unconfirmed_count == 0 || notices.unconfirmed_entries.is_empty() {

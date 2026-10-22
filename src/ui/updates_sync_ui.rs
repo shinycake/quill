@@ -105,6 +105,16 @@ impl QuillApp {
     /// One strip while a live location of ours is running: where, how
     /// long is left, whether someone looked, and Stop.
     pub(crate) fn live_share_strip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let now = quill::local_time::now_unix();
+        self.session()?.sync.live_shares_at(now).next()?;
+        self.live_share_strip_body(cx)
+    }
+
+    /// `live_share_strip` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    #[inline(never)]
+    fn live_share_strip_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         let now = quill::local_time::now_unix();
         let shares: Vec<_> = session.sync.live_shares_at(now).copied().collect();

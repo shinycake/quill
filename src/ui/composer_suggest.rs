@@ -297,6 +297,15 @@ impl QuillApp {
     /// The popup above the composer: a list of hashtags, or a strip of
     /// emoji tiles with the highlighted one's name.
     pub(super) fn suggest_menu_dropdown(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.composer_ui.suggest.active.as_ref()?;
+        self.suggest_menu_dropdown_body(cx)
+    }
+
+    /// `suggest_menu_dropdown` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    #[inline(never)]
+    fn suggest_menu_dropdown_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let active = self.composer_ui.suggest.active.as_ref()?;
         let selected = self
             .composer_ui
