@@ -190,6 +190,10 @@ impl CallEngine for NtgcallsEngine {
             .user_to_call
             .lock_or_recover()
             .remove(&user_id);
+        self.callback
+            .peer_screencasting
+            .lock_or_recover()
+            .remove(&user_id);
         if let Some(instance) = self.instance {
             // SAFETY: best-effort teardown on a live instance. The return
             // value is intentionally ignored so hangup remains idempotent.

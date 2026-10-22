@@ -212,6 +212,10 @@ pub(crate) struct CallbackShared {
     pub(crate) remote_screen_hook: Mutex<Option<RemoteVideoStateCallback>>,
     /// The peer's 1:1 microphone on/off hook.
     pub(crate) remote_audio_hook: Mutex<Option<RemoteAudioStateCallback>>,
+    /// Peers (by user id) whose 1:1 screen share is on. A 1:1 call has
+    /// one video track, as in tgcalls: a shared screen arrives on it as
+    /// camera frames, and only the MediaState says it is a screen.
+    pub(crate) peer_screencasting: Mutex<HashSet<i64>>,
     pub(crate) frame_seq: AtomicU64,
     /// Phase C2g: group-call callback routing: native `chat_id` -> the
     /// TDLib group call id the driver assigned, and the ssrc map that
@@ -262,6 +266,7 @@ impl CallbackShared {
             remote_video_hook: Mutex::new(None),
             remote_screen_hook: Mutex::new(None),
             remote_audio_hook: Mutex::new(None),
+            peer_screencasting: Mutex::new(HashSet::new()),
             frame_seq: AtomicU64::new(0),
             group_chat_to_call: Mutex::new(HashMap::new()),
             group_video_ssrc_to_user: Mutex::new(HashMap::new()),
