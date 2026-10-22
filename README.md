@@ -997,13 +997,13 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Own wallet transaction history and NFTs, view only (planned: phase 1, read-only) <!-- parity:wallet-own-history -->
 - [x] TON transfer and TON Connect links show a notice instead of acting (planned: phase 1, read-only) <!-- parity:wallet-links-notice -->
 - [x] First incoming transfer hint (planned: phase 1, read-only) <!-- parity:wallet-first-transfer-hint -->
-- [ ] Decrypt encrypted transfer comments (deferred: needs security & legal review) <!-- parity:wallet-decrypt-comments -->
-- [ ] Create, import, replace or delete a wallet (deferred: needs security & legal review) <!-- parity:wallet-create-import -->
-- [ ] Secret phrase backup, export and restore (deferred: needs security & legal review) <!-- parity:wallet-secret-backup -->
-- [ ] Send Grams to a user or address, including gasless transfers (deferred: needs security & legal review) <!-- parity:wallet-send -->
-- [ ] Connect the wallet to apps with TON Connect, approve requests, manage sessions (deferred: needs security & legal review) <!-- parity:wallet-tonconnect-sessions -->
-- [ ] Buy Grams through on-ramp providers (deferred: needs security & legal review) <!-- parity:wallet-onramp -->
-- [ ] Move a collectible gift to or from your own TON wallet, and the TON wallet card on profiles (TDLib 1.8.69; deferred with the wallet items above) <!-- parity:wallet-gift-withdraw-card -->
+- [ ] Decrypt encrypted transfer comments (not planned in Quill: the comment opens a notice pointing to the official apps) <!-- parity:wallet-decrypt-comments -->
+- [ ] Create, import, replace or delete a wallet (not planned in Quill: "Create a New Wallet" opens a notice pointing to the official apps) <!-- parity:wallet-create-import -->
+- [ ] Secret phrase backup, export and restore (not planned in Quill: Keys & Backup opens a notice pointing to the official apps) <!-- parity:wallet-secret-backup -->
+- [ ] Send Grams to a user or address, including gasless transfers (not planned in Quill: Send, Send Money and send links open a notice pointing to the official apps) <!-- parity:wallet-send -->
+- [ ] Connect the wallet to apps with TON Connect, approve requests, manage sessions (not planned in Quill: TON Connect links and "Review request" open a notice pointing to the official apps) <!-- parity:wallet-tonconnect-sessions -->
+- [ ] Buy Grams through on-ramp providers (not planned in Quill: Add Funds opens a notice pointing to the official apps) <!-- parity:wallet-onramp -->
+- [ ] Move a collectible gift to or from your own TON wallet, and the TON wallet card on profiles (not planned in Quill: "Move to My Wallet" opens a notice pointing to the official apps; the profile shows the card balance only; TDLib 1.8.69) <!-- parity:wallet-gift-withdraw-card -->
 
 ### Scheduled messages
 
