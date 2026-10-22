@@ -29,7 +29,11 @@ fn topic(chat: i64, id: i32, name: &str, unread: u32) -> String {
 }
 
 impl QuillApp {
-    fn demo_forum_row_topics(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+    pub(in crate::ui) fn demo_forum_row_topics(
+        &mut self,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };

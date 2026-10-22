@@ -693,6 +693,30 @@ pub fn forward_messages_with_options(
     remove_caption: bool,
     options: &SendOptions,
 ) -> String {
+    forward_messages_to_topic(
+        extra,
+        (chat_id, None),
+        from_chat_id,
+        message_ids,
+        send_copy,
+        remove_caption,
+        options,
+    )
+}
+
+/// `forwardMessages` into a forum topic of `target.0`
+/// (`topic_id = messageTopicForum{forum_topic_id}`, `target.1`); `None`
+/// forwards to the chat itself (the General topic of a forum).
+pub fn forward_messages_to_topic(
+    extra: RequestId,
+    target: (ChatId, Option<i32>),
+    from_chat_id: ChatId,
+    message_ids: &[MessageId],
+    send_copy: bool,
+    remove_caption: bool,
+    options: &SendOptions,
+) -> String {
+    let (chat_id, topic_id) = target;
     // TDLib takes a repeat period only when one message is forwarded.
     let options = &SendOptions {
         schedule_repeat_period: if message_ids.len() == 1 {
@@ -707,7 +731,7 @@ pub fn forward_messages_with_options(
         "@type": "forwardMessages",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
-        "topic_id": Value::Null,
+        "topic_id": message_topic_value(topic_id),
         "from_chat_id": from_chat_id.0,
         "message_ids": message_ids.iter().map(|id| id.0).collect::<Vec<_>>(),
         "options": if plain { Value::Null } else { message_send_options(options) },

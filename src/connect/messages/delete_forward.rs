@@ -175,9 +175,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         } else {
             self.session.messages.in_flight_forward = Some(flight);
         }
-        let json = forward_messages_with_options(
+        // Forwarding into the chat you have a topic of open lands in that
+        // topic, like a message typed there.
+        let json = forward_messages_to_topic(
             extra,
-            dest,
+            (dest, self.send_topic(dest)),
             draft.from_chat_id,
             &draft.message_ids,
             draft.send_copy,

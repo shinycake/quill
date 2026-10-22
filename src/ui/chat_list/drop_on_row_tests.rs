@@ -154,7 +154,7 @@ fn a_single_folder_is_dropped_as_one_archive(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn a_drop_on_a_forum_row_opens_nothing_and_attaches_nothing(cx: &mut TestAppContext) {
+fn a_drop_on_a_forum_row_asks_for_a_topic_and_attaches_nothing(cx: &mut TestAppContext) {
     let (app, mut vcx) = open(cx);
     let vcx = &mut vcx;
     let chat = open_chat(&app, vcx);
