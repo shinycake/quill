@@ -1,2 +1,0 @@
-# Web proxy carriers hosted in the quill-webview helper (docs/decisions/web-proxies.md)
-parity:data-proxy-web

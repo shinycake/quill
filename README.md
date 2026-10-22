@@ -1167,7 +1167,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Network usage statistics with reset <!-- parity:data-network-usage -->
 - [x] Proxy list: add, edit, delete, enable, disable and ping SOCKS5, MTProto and HTTP proxies <!-- parity:data-proxy -->
 - [x] Proxy extras: share QR, use system proxy, auto-switch, connection-type row and shield in the connection strip (partial: all but "use system proxy", which TDLib has no hook for) <!-- parity:data-proxy-extras -->
-- [ ] Web proxies (TDLib 1.8.69 `proxyTypeWeb` and its links) <!-- parity:data-proxy-web -->
+- [x] Web proxies (TDLib 1.8.69 `proxyTypeWeb` and its links) <!-- parity:data-proxy-web -->
 - [x] Try IPv6 option <!-- parity:data-ipv6 -->
 - [x] Export Telegram data box: types, media sizes, date range, HTML and JSON <!-- parity:data-export-full -->
 - [x] Chat export as HTML with media, date range and senders <!-- parity:data-chat-export-html -->
