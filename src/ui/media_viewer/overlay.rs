@@ -97,7 +97,11 @@ impl QuillApp {
                 || self.viewer.state.current().zip(self.session()).is_some_and(
                     |(item, session)| session.chat_has_protected_content(item.chat_id),
                 );
-        let can_delete = self.viewer_delete_confirm().is_some();
+        let profile_facts = self.profile_photo_facts();
+        let can_delete = match &profile_facts {
+            Some(facts) => facts.actions.delete.is_some(),
+            None => self.viewer_delete_confirm().is_some(),
+        };
         let row_id = item.message_id.0 as u64;
         let downloading_now = item
             .display_file_ids
@@ -105,36 +109,20 @@ impl QuillApp {
             .chain(std::iter::once(&item.download_file_id))
             .any(|id| file_is_downloading(*id, &files, &downloading));
         let profile_view = self.viewer.state.source() == ViewerSource::Profile;
-        let kind_label = if profile_view {
-            if self.viewer.extra.profile_personal == Some(item.message_id.0) {
-                tr(keys::MEDIAVIEW_PROFILE_PHOTO_BY_YOU)
-            } else {
-                tr(keys::Q_AV_PROFILE_PHOTO)
-            }
-        } else if ttl.is_some() {
+        let kind_label = if ttl.is_some() {
             quill::media_viewer::disappearing_label(item.kind)
         } else {
             item.kind.label()
         };
-        // B10: "Set as main photo" for one of your own earlier photos (the
-        // first one already is the main photo).
-        let (position, _) = self.viewer.state.position().unwrap_or((0, 0));
-        let can_set_main = profile_view
-            && position > 1
-            && self
-                .viewer
-                .extra
-                .profile_user
-                .zip(self.session().and_then(|s| s.my_user_id))
-                .is_some_and(|(shown, me)| shown == me);
-        // Reporting someone else's profile photo (`reportChatPhoto`).
-        let can_report = profile_view
-            && self
-                .viewer
-                .extra
-                .profile_user
-                .zip(self.session().and_then(|s| s.my_user_id))
-                .is_some_and(|(shown, me)| shown != me);
+        // Set as Main and Report (tdesktop's viewer menu) for profile,
+        // group and channel photos.
+        let can_set_main = profile_facts
+            .as_ref()
+            .is_some_and(|facts| facts.actions.set_main);
+        let can_report = profile_facts
+            .as_ref()
+            .is_some_and(|facts| facts.actions.report);
+        let header = profile_facts.map(|facts| facts.header);
         // The visual fills the fit area (`geometry`); the media fits inside
         // it (object-fit contain). Scroll zooms (1×–8×, frame-center
         // kept) and drag pans when zoomed.
@@ -419,12 +407,12 @@ impl QuillApp {
                         let mut menu = menu;
                         if menu_set_main {
                             menu = menu
-                                .item(item(tr(keys::Q_AV_SET_AS_MAIN_PHOTO), |this, _, cx| {
+                                .item(item(tr(keys::MEDIAVIEW_SET_USERPIC), |this, _, cx| {
                                     this.set_viewer_photo_as_main(cx)
                                 }));
                         }
                         if menu_can_report {
-                            menu = menu.item(item(tr(keys::Q_AV_REPORT), |this, _, cx| {
+                            menu = menu.item(item(tr(keys::MEDIAVIEW_REPORT_PROFILE_PHOTO), |this, _, cx| {
                                 this.report_viewer_profile_photo(cx)
                             }));
                         }
@@ -517,6 +505,7 @@ impl QuillApp {
                 can_set_main,
                 can_report,
                 profile_view,
+                header,
             };
             self.viewer_chrome(&item, facts, geometry, window, cx)
         });

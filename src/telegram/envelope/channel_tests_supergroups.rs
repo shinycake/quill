@@ -10,6 +10,7 @@ fn supergroup_full_info_parsed() {
         .unwrap();
     match env.payload {
         EnvelopePayload::Groups(GroupsPayload::SupergroupFullInfo {
+            photo: None,
             description,
             member_count,
             linked_chat_id,

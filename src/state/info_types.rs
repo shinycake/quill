@@ -70,15 +70,101 @@ pub struct ProfilePhoto {
     pub height: i32,
 }
 
+impl ProfilePhoto {
+    /// The gallery entry of a parsed `chatPhoto` (its files are cached
+    /// separately).
+    pub fn from_parsed(photo: &crate::telegram::envelope::ParsedProfilePhoto) -> Self {
+        Self {
+            id: photo.id,
+            added_date: photo.added_date,
+            thumb_file_id: photo.thumb_file_id.0,
+            full_file_id: photo.full_file_id.0,
+            width: photo.width,
+            height: photo.height,
+        }
+    }
+}
+
 /// B10: fetch state of a user's profile photos (`getUserProfilePhotos`).
+/// `photos` grows a page at a time; `total_count` is the server's count.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProfilePhotosFetch {
     Loading,
     Loaded {
         total_count: i32,
         photos: Vec<ProfilePhoto>,
+        /// The next page (`offset` = `photos.len()`) is in flight.
+        loading_more: bool,
     },
     Failed(String),
+}
+
+/// Whose photos the profile photo viewer pages over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PhotoOwner {
+    User(i64),
+    /// A basic group, supergroup or channel.
+    Chat(ChatId),
+}
+
+/// One `messageChatChangePhoto` of a group or channel (the history
+/// tdesktop pages with `SharedMediaType::ChatPhoto`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatPhotoChange {
+    pub message_id: MessageId,
+    pub photo: ProfilePhoto,
+    pub is_outgoing: bool,
+}
+
+/// Fetch state of a chat's photo history (`searchChatMessages` with
+/// `searchMessagesFilterChatPhoto`), newest first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChatPhotosFetch {
+    Loading,
+    Loaded {
+        total_count: i32,
+        changes: Vec<ChatPhotoChange>,
+        /// `foundChatMessages.next_from_message_id`; 0 when nothing is left.
+        next_from_message_id: MessageId,
+        loading_more: bool,
+    },
+    Failed(String),
+}
+
+/// What a photo of a [`PhotoGallery`] is to its owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GalleryPhotoKind {
+    /// The photo the owner shows now.
+    Main,
+    /// The photo the current user set for a contact ("Photo set by you").
+    Personal,
+    /// A user's public photo, shown when the main one is hidden by privacy
+    /// settings; listed last ("Public Photo").
+    Public,
+    /// An earlier photo.
+    Earlier,
+}
+
+/// One photo of a profile photo gallery.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GalleryPhoto {
+    pub photo: ProfilePhoto,
+    pub kind: GalleryPhotoKind,
+    /// Chats: the `messageChatChangePhoto` that set it, when listed.
+    pub message_id: Option<MessageId>,
+    pub is_outgoing: bool,
+}
+
+/// The photos the profile photo viewer pages over, newest first, as far
+/// as they are loaded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhotoGallery {
+    pub owner: PhotoOwner,
+    pub photos: Vec<GalleryPhoto>,
+    /// Every photo the owner has, loaded or not ("Photo 3 of 40").
+    pub total: usize,
+    /// More photos can be fetched.
+    pub has_more: bool,
 }
 
 /// Phase 6: cached `supergroupFullInfo` subset (schema 1.8.67, line 2792).

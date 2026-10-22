@@ -26,6 +26,7 @@ mod files;
 mod group_thumbs;
 mod items;
 pub mod pip;
+mod profile;
 mod quality;
 mod save;
 mod swipe;
@@ -54,6 +55,7 @@ pub use group_thumbs::{
 pub use items::{
     collect_media_items, poll_option_viewer_item, profile_photo_items, timed_viewer_item,
 };
+pub use profile::{PhotoHeaderOwner, profile_photo_header};
 pub use quality::{VideoQualityOption, build_quality_options, current_quality, pick_quality};
 pub use save::{
     downloads_dir, os_downloads_dir, save_media_to_downloads, save_media_to_downloads_in_dir,
@@ -126,10 +128,12 @@ pub enum ViewerSource {
     /// A Shared Media tab (tdesktop `SharedMediaWithLastSlice`): the list
     /// grows toward older messages as the viewer pages toward its start.
     SharedMedia,
-    /// B10: one user's profile photos (`getUserProfilePhotos`), newest
-    /// first. Items carry the `chatPhoto.id` as their message id and no
-    /// chat, so the message-bound actions (forward, delete, show in chat,
-    /// album pin) do not apply.
+    /// B10: a user's, group's or channel's photos, newest first
+    /// (`state::PhotoGallery`). Items carry the `chatPhoto.id` as their
+    /// message id and the group or channel as their chat (none for a
+    /// user), so the message-bound actions (forward, show in chat, album
+    /// pin) do not apply; delete, set as main and report follow
+    /// `Session::photo_actions`.
     Profile,
     /// The picture or clip of one poll option. The item carries the poll's
     /// chat and message, but it is not a message of its own: forward, delete
@@ -231,11 +235,46 @@ impl MediaViewer {
         viewer
     }
 
-    /// B10: open over a user's profile photos on `index`.
-    pub fn open_profile(items: Vec<MediaViewerItem>, index: usize) -> Self {
+    /// B10: open over a user's, group's or channel's photos (newest
+    /// first) on `index`. `total` counts the photos not loaded yet.
+    pub fn open_profile(items: Vec<MediaViewerItem>, index: usize, total: usize) -> Self {
         let mut viewer = Self::open(items, index);
         viewer.source = ViewerSource::Profile;
+        viewer.total = total;
         viewer
+    }
+
+    /// Profile photos: the viewer is close enough to the end of the loaded
+    /// photos that the next page should be requested.
+    pub fn wants_more_photos(&self) -> bool {
+        self.is_open()
+            && self.source == ViewerSource::Profile
+            && self.index + VIEWER_PRELOAD_AHEAD >= self.items.len()
+            && self.total > self.items.len()
+    }
+
+    /// Profile photos: take the gallery as it now stands (newest first).
+    /// When it starts with the photos already shown, the rest is appended
+    /// and the total updated; any other change is left for the next open.
+    /// Returns how many were added.
+    pub fn extend_photos(&mut self, gallery: Vec<MediaViewerItem>, total: usize) -> usize {
+        if self.source != ViewerSource::Profile || !self.is_open() {
+            return 0;
+        }
+        let prefix = self.items.len() <= gallery.len()
+            && self
+                .items
+                .iter()
+                .zip(&gallery)
+                .all(|(shown, now)| shown.message_id == now.message_id);
+        if !prefix {
+            return 0;
+        }
+        self.total = total;
+        let added: Vec<MediaViewerItem> = gallery.into_iter().skip(self.items.len()).collect();
+        let count = added.len();
+        self.items.extend(added);
+        count
     }
 
     /// Open on the media of one poll option.
@@ -364,7 +403,12 @@ impl MediaViewer {
     /// counts the older items that are not loaded yet.
     pub fn position(&self) -> Option<(usize, usize)> {
         let total = self.total.max(self.items.len());
-        let unloaded = total - self.items.len();
+        // Shared Media lists oldest first, so the unloaded items come
+        // before; profile photos list newest first, so they come after.
+        let unloaded = match self.source {
+            ViewerSource::Profile => 0,
+            _ => total - self.items.len(),
+        };
         self.is_open().then(|| (unloaded + self.index + 1, total))
     }
 
@@ -521,20 +565,67 @@ mod tests {
             width,
             height,
         };
-        let items = profile_photo_items(&[photo(901, 11, 12, 800, 600), photo(902, 13, 14, 0, 0)]);
+        let photos = [photo(901, 11, 12, 800, 600), photo(902, 13, 14, 0, 0)];
+        let items = profile_photo_items(&photos, ChatId(0));
         assert_eq!(items[0].message_id, MessageId(901));
         assert_eq!(items[0].download_file_id, FileId(12));
         assert_eq!(items[0].display_file_ids, vec![FileId(12), FileId(11)]);
         assert_eq!(items[0].natural_size, Some((800, 600)));
         assert_eq!(items[1].natural_size, None);
-        let mut viewer = MediaViewer::open_profile(items, 0);
+        let mut viewer = MediaViewer::open_profile(items, 0, 2);
         assert_eq!(viewer.source(), ViewerSource::Profile);
         assert_eq!(viewer.position(), Some((1, 2)));
         assert!(!viewer.wants_older());
+        assert!(!viewer.wants_more_photos());
         viewer.next();
         assert_eq!(viewer.current().map(|i| i.message_id), Some(MessageId(902)));
         viewer.close();
         assert_eq!(viewer.source(), ViewerSource::Chat);
+    }
+
+    fn profile_items(ids: std::ops::Range<i64>) -> Vec<MediaViewerItem> {
+        let photos: Vec<crate::state::ProfilePhoto> = ids
+            .map(|id| crate::state::ProfilePhoto {
+                id,
+                added_date: 0,
+                thumb_file_id: 1,
+                full_file_id: 2,
+                width: 0,
+                height: 0,
+            })
+            .collect();
+        profile_photo_items(&photos, ChatId(-100))
+    }
+
+    #[test]
+    fn profile_viewer_counts_the_unloaded_photos_after_the_loaded_ones() {
+        // 140 photos, the newest 100 loaded.
+        let mut viewer = MediaViewer::open_profile(profile_items(0..100), 0, 140);
+        assert_eq!(viewer.position(), Some((1, 140)));
+        assert!(!viewer.wants_more_photos(), "far from the loaded end");
+        for _ in 0..(100 - VIEWER_PRELOAD_AHEAD) {
+            viewer.next();
+        }
+        assert_eq!(viewer.position(), Some((101 - VIEWER_PRELOAD_AHEAD, 140)));
+        assert!(viewer.wants_more_photos(), "within the preload margin");
+        // The next page lands: appended after the shown ones.
+        assert_eq!(viewer.extend_photos(profile_items(0..140), 140), 40);
+        assert_eq!(viewer.len(), 140);
+        assert_eq!(viewer.position(), Some((101 - VIEWER_PRELOAD_AHEAD, 140)));
+        assert!(!viewer.wants_more_photos(), "everything is loaded");
+        assert_eq!(viewer.current().map(|i| i.chat_id), Some(ChatId(-100)));
+    }
+
+    #[test]
+    fn profile_viewer_ignores_a_gallery_that_changed_its_start() {
+        let mut viewer = MediaViewer::open_profile(profile_items(0..3), 1, 5);
+        assert_eq!(viewer.extend_photos(profile_items(1..6), 5), 0);
+        assert_eq!(viewer.len(), 3);
+        assert_eq!(viewer.position(), Some((2, 5)));
+        // A shared media viewer never takes profile pages.
+        let mut shared = MediaViewer::open_shared(profile_items(0..3), 0, 9);
+        assert_eq!(shared.extend_photos(profile_items(0..6), 6), 0);
+        assert!(!shared.wants_more_photos());
     }
 
     #[test]

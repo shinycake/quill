@@ -32,7 +32,11 @@ pub(crate) struct DialogUi {
     pub(super) chat_appearance_dialog: Option<super::chat_appearance_dialog::ChatAppearanceDialog>,
     /// B10: a profile photo gallery whose list was requested; the viewer
     /// opens when it lands (checked by the poll loop).
-    pub(super) pending_profile_gallery: Option<i64>,
+    pub(super) pending_profile_gallery: Option<quill::state::PhotoOwner>,
+    /// "Do you want to delete this photo?" for a photo deleted from the
+    /// profile photo viewer, with whether an earlier photo's message goes
+    /// for everyone.
+    pub(super) photo_delete: Option<(quill::state::PhotoDelete, bool)>,
     /// Phase 6: add-contact dialog (phone + first/last name) opened from
     /// the user info panel.
     pub(super) add_contact_dialog: Option<AddContactDialog>,
@@ -94,6 +98,7 @@ impl DialogUi {
             peer_color_dialog: None,
             chat_appearance_dialog: None,
             pending_profile_gallery: None,
+            photo_delete: None,
             add_contact_dialog: None,
             import_contacts_dialog: None,
             block_bar_dialog: None,

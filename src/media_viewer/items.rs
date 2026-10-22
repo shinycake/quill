@@ -4,15 +4,19 @@ use super::*;
 use crate::telegram::envelope::PollOptionMedia;
 
 /// B10: viewer items for a profile photo gallery. The item's `message_id`
-/// is the `chatPhoto.id` ("Set as main photo" reads it back); both sizes
-/// are display candidates, the largest first.
-pub fn profile_photo_items(photos: &[crate::state::ProfilePhoto]) -> Vec<MediaViewerItem> {
+/// is the `chatPhoto.id` ("Set as main photo" reads it back) and its chat
+/// the group or channel the photos belong to (`ChatId(0)` for a user);
+/// both sizes are display candidates, the largest first.
+pub fn profile_photo_items<'a>(
+    photos: impl IntoIterator<Item = &'a crate::state::ProfilePhoto>,
+    chat_id: ChatId,
+) -> Vec<MediaViewerItem> {
     photos
-        .iter()
+        .into_iter()
         .map(|photo| MediaViewerItem {
             group: None,
             file_name: None,
-            chat_id: ChatId(0),
+            chat_id,
             message_id: MessageId(photo.id),
             kind: MediaViewerKind::Photo,
             display_file_ids: vec![FileId(photo.full_file_id), FileId(photo.thumb_file_id)],
@@ -225,7 +229,9 @@ fn viewer_item_for(message: &HistoryMessage, allow_secret: bool) -> Option<Media
         // A chat-photo change or a suggested profile photo opens in the
         // viewer like any photo.
         MessageContent::Action(action) => match action.as_ref() {
-            ServiceAction::ChatPhoto { photo: Some(photo) }
+            ServiceAction::ChatPhoto {
+                photo: Some(photo), ..
+            }
             | ServiceAction::SuggestProfilePhoto {
                 photo: Some(photo), ..
             } => photo_viewer_item(message, photo),

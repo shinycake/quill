@@ -227,6 +227,8 @@ pub enum GroupsPayload {
     /// counts, invite link, gift fields, paid-message and other statistics
     /// flags, location.
     SupergroupFullInfo {
+        /// `photo`: the current photo, the first one of the photo viewer.
+        photo: Option<ParsedProfilePhoto>,
         description: String,
         member_count: i32,
         linked_chat_id: i64,
@@ -414,6 +416,9 @@ pub enum GroupsPayload {
     BasicGroupFullInfo {
         members: Vec<ParsedChatMember>,
         bot_commands: Vec<GroupBotCommands>,
+        /// `photo`: the group's current photo, the first one of its photo
+        /// viewer.
+        photo: Option<ParsedProfilePhoto>,
     },
     /// Phase D3c: `chatEvents` (TDLib 1.8.67, line 7938) — the response
     /// of `getChatEventLog` (line 15252). Carries no chat id; correlated

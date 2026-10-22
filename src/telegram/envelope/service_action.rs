@@ -66,9 +66,11 @@ pub enum ServiceAction {
     ChatTitle {
         title: String,
     },
-    /// The new photo (thumbnail shown under the row).
+    /// The new photo (thumbnail shown under the row) and its `chatPhoto.id`
+    /// (0 if unknown), which ties it to the chat's current photo.
     ChatPhoto {
         photo: Option<PhotoContent>,
+        photo_id: i64,
     },
     ChatPhotoDeleted,
     OwnerLeft {
@@ -537,6 +539,7 @@ impl ServiceAction {
             },
             "messageChatChangePhoto" => A::ChatPhoto {
                 photo: chat_photo(value, files),
+                photo_id: value.get("photo").map_or(0, |photo| i(photo, "id")),
             },
             "messageChatDeletePhoto" => A::ChatPhotoDeleted,
             "messageChatOwnerLeft" => A::OwnerLeft {

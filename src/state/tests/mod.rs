@@ -43,6 +43,7 @@ mod notify_os;
 mod payments;
 mod premium_hub;
 mod premium_limit;
+mod photo_gallery;
 mod profile_panels;
 mod redraw;
 mod requests;

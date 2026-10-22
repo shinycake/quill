@@ -296,7 +296,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(confirm) = self.viewer_delete_confirm() {
+        if self.viewer.state.source() == ViewerSource::Profile {
+            self.delete_viewer_profile_photo(cx);
+        } else if let Some(confirm) = self.viewer_delete_confirm() {
             self.open_delete_dialog(confirm, window, cx);
         }
     }
