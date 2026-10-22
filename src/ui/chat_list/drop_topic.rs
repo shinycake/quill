@@ -176,11 +176,18 @@ impl QuillApp {
         }
     }
 
-    fn drop_topic_failed(&self) -> bool {
-        self.chat_list
-            .drop_topic
-            .as_ref()
-            .is_some_and(|waiting| waiting.load_failed)
+    /// The topics could not be asked for or TDLib answered with an error.
+    pub(in crate::ui) fn drop_topic_failed(&self) -> bool {
+        let Some(waiting) = self.chat_list.drop_topic.as_ref() else {
+            return false;
+        };
+        waiting.load_failed
+            || self.session().is_some_and(|session| {
+                session
+                    .threads
+                    .forum_topics_failed
+                    .contains(&waiting.chat_id.0)
+            })
     }
 
     fn close_drop_topic(&mut self, cx: &mut Context<Self>) {
@@ -198,6 +205,11 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.drop_topic_alive() {
+            self.prune_drop_topic();
+            cx.notify();
+            return;
+        }
         let Some((chat_id, payload)) = self
             .chat_list
             .drop_topic

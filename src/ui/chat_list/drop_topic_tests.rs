@@ -467,7 +467,55 @@ fn a_chooser_closes_when_its_forum_is_no_longer_one(cx: &mut TestAppContext) {
             session.chats.remove(&71);
         }
     });
-    app.update(vcx, |_, cx| cx.notify());
+    // The poll that applies TDLib updates drops the stale chooser.
+    app.update(vcx, |app, _| app.prune_drop_topic());
     frames(vcx);
     assert!(!chooser_open(&app, vcx));
+}
+
+#[gpui_kit::test]
+fn a_topics_request_that_fails_leaves_loading_for_the_error_line(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx, "ready-forum-row-topics");
+    let vcx = &mut vcx;
+    drop_file_on(vcx, 73);
+    assert!(!app.read_with(vcx, |app, _| app.drop_topic_failed()));
+    // TDLib answers the topics request of the forum with an error.
+    app.update(vcx, |app, _| {
+        let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> = app.demo_ui.sink.clone();
+        if let Some(session) = app.demo_session.as_mut() {
+            let extra = session.request(
+                quill::state::RequestPurpose::GetForumTopics,
+                Some(ChatId(73)),
+            );
+            let json = format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHANNEL_INVALID"}}"#,
+                extra.0
+            );
+            if let Some(parsed) =
+                quill::telegram::client::copy_and_parse(&json, &app.demo_ui.seq, &sink)
+            {
+                session.apply(parsed);
+            }
+        }
+    });
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.drop_topic_failed()));
+    assert!(listed(&app, vcx).is_empty());
+}
+
+#[gpui_kit::test]
+fn choosing_on_a_forum_that_went_away_drops_the_chooser_and_does_nothing(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx, "ready-forum-row-topics");
+    let vcx = &mut vcx;
+    let chat = open_chat(&app, vcx);
+    drop_file_on(vcx, 71);
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.chats.remove(&71);
+        }
+    });
+    choose(&app, vcx, Some(4));
+    assert!(!chooser_open(&app, vcx));
+    assert_eq!(open_chat(&app, vcx), chat);
+    assert_eq!(attached(&app, vcx), 0);
 }

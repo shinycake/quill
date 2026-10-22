@@ -36,13 +36,16 @@ administrator gets the same box over its sublists (`ChooseSublistBoxController`)
   messageTopicForum`, so switching topics before Send does not move the
   forward and the ordinary Forward box and share box behave as before.
   `load_forum_topics` asks for a forum's topics when the drop lands on a chat
-  that is not open; a request that cannot be sent shows "Could not load the
-  topics." instead of "Loading".
+  that is not open; a request that cannot be sent, or a TDLib error for it
+  (`threads.forum_topics_failed`), shows "Could not load the topics." instead
+  of "Loading".
 - A refusal (slow mode, secret chat, no files) or a topic that vanished while
   the box was open shows a note and keeps the box open. "All Messages" on a
   bot chat that is open in a topic leaves that topic. The box closes when its
   forum is removed, left or the account changes (tdesktop closes it on
-  `forum->destroyed()`).
+  `forum->destroyed()`): `drop_topic_alive` keeps the dialog from showing, and
+  the poll that applies TDLib updates (or the next choose) drops the state.
+  Render changes nothing.
 - Strings: `lng_forum_all_messages`, `lng_forum_create_new_topic`,
   `lng_topics_not_found` under their tdesktop names; the two forum notes
   were replaced by direct-messages ones.
