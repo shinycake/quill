@@ -417,8 +417,45 @@ impl CarrierHost for HelperCarrierHost {
             // Best effort: a web view still exiting may hold files, and the
             // next start empties the folder anyway.
             let _ = std::fs::remove_dir_all(dir);
+            if dir.exists() && std::env::var_os("QUILL_WEBVIEW_DEBUG").is_some() {
+                for line in leftovers(dir, 50) {
+                    eprintln!("carrier data left: {line}");
+                }
+            }
         }
     }
+}
+
+/// Up to `limit` entries still under `dir`, as relative paths with sizes,
+/// for the debug trace of a folder that would not go away.
+fn leftovers(dir: &Path, limit: usize) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(folder) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&folder) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if found.len() >= limit {
+                return found;
+            }
+            let path = entry.path();
+            let relative = path
+                .strip_prefix(dir)
+                .unwrap_or(&path)
+                .display()
+                .to_string();
+            match entry.metadata() {
+                Ok(meta) if meta.is_dir() => {
+                    found.push(format!("{relative}/"));
+                    pending.push(path);
+                }
+                Ok(meta) => found.push(format!("{relative} ({} bytes)", meta.len())),
+                Err(_) => found.push(format!("{relative} (unreadable)")),
+            }
+        }
+    }
+    found
 }
 
 impl Drop for HelperCarrierHost {

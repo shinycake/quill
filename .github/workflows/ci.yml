@@ -182,6 +182,7 @@ jobs:
         if: steps.changed.outputs.run == 'true'
         env:
           QUILL_CARRIER_HELPER: target/debug/quill-webview.exe
+          QUILL_WEBVIEW_DEBUG: "1"
           QUILL_WEBVIEW_CARRIER_LOOPBACK: "1"
         run: cargo test --no-default-features --locked --lib helper_live -- --ignored --nocapture
 
