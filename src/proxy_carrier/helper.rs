@@ -49,6 +49,9 @@ const WATCH_TICK: Duration = Duration::from_secs(1);
 /// browser process to let go of the data folder (`browser_exit.rs` in the
 /// helper), so this is longer than that.
 const CLOSE_GRACE: Duration = Duration::from_secs(3);
+/// The most [`CarrierHost::shutdown`] waits for helpers still exiting, in
+/// all.
+const SHUTDOWN_WAIT: Duration = Duration::from_millis(2500);
 /// How long a reader waits for the exit status of a helper whose output
 /// ended, to tell a missing library from a crash.
 const EXIT_WAIT: Duration = Duration::from_millis(500);
@@ -249,6 +252,9 @@ pub struct HelperCarrierHost {
     carriers: HashMap<i32, Running>,
     failures_tx: Sender<(i32, CarrierError)>,
     failures: Receiver<(i32, CarrierError)>,
+    /// Closed helpers still on their way out; each hears once its helper
+    /// is gone.
+    exiting: Vec<Receiver<()>>,
 }
 
 impl HelperCarrierHost {
@@ -269,6 +275,7 @@ impl HelperCarrierHost {
             carriers: HashMap::new(),
             failures_tx,
             failures,
+            exiting: Vec::new(),
         }
     }
 
@@ -386,7 +393,8 @@ impl CarrierHost for HelperCarrierHost {
             // It goes by itself after telling the page; if it does not (a
             // stuck loop, a writer stuck on a full pipe), it is killed.
             if let Some(child) = running.shared.take_child() {
-                crate::child_reap::reap_after(child, CLOSE_GRACE);
+                self.exiting
+                    .push(crate::child_reap::reap_after_notice(child, CLOSE_GRACE));
             }
         }
     }
@@ -407,13 +415,47 @@ impl CarrierHost for HelperCarrierHost {
         for carrier_id in overdue {
             self.carriers.remove(&carrier_id);
         }
+        self.exiting.retain(still_exiting);
         self.failures.try_iter().collect()
     }
 
+    fn shutdown_waits(&self) -> bool {
+        !self.carriers.is_empty() || self.exiting.iter().any(still_exiting)
+    }
+
+    /// Closes every helper and waits, at most [`SHUTDOWN_WAIT`] in all, for
+    /// the ones still exiting (on Windows a helper waits for WebView2's
+    /// browser process before it goes), then removes the data folder.
+    /// Blocks: the driver runs it on a thread of its own when
+    /// [`CarrierHost::shutdown_waits`] says so.
     fn shutdown(&mut self) {
+        self.stop(true);
+    }
+}
+
+impl HelperCarrierHost {
+    fn stop(&mut self, wait: bool) {
+        let deadline = Instant::now() + SHUTDOWN_WAIT;
         for (_, running) in self.carriers.drain() {
             running.shared.closing.store(true, Ordering::Release);
-            running.shared.kill();
+            if !wait {
+                running.shared.kill();
+                continue;
+            }
+            let _ = running
+                .commands
+                .try_send(CarrierCommand::Close { notify_page: false });
+            if let Some(child) = running.shared.take_child() {
+                self.exiting
+                    .push(crate::child_reap::reap_after_notice(child, SHUTDOWN_WAIT));
+            }
+        }
+        for exiting in self.exiting.drain(..) {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if !wait || left.is_zero() {
+                break;
+            }
+            let _ = exiting.recv_timeout(left);
         }
         if let Some(dir) = &self.data_dir {
             data_folder::clear_at_shutdown(dir);
@@ -421,9 +463,17 @@ impl CarrierHost for HelperCarrierHost {
     }
 }
 
+/// Whether the helper behind `notice` has not gone yet.
+fn still_exiting(notice: &Receiver<()>) -> bool {
+    matches!(notice.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty))
+}
+
 impl Drop for HelperCarrierHost {
+    /// Never waits: a host dropped without `shutdown` (a CLI tool, a
+    /// thread that could not start) kills its helpers and leaves the rest
+    /// to the data folder's fallbacks.
     fn drop(&mut self) {
-        self.shutdown();
+        self.stop(false);
     }
 }
 

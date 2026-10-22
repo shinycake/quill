@@ -68,21 +68,31 @@ database and keys, and a crash there cannot take Quill down.
   WebKitGTK filter are compiled into `rules/` and `filters/` and removed once loaded. All the
   carriers of one account share WebView2's browser process, because WebView2 shares it per data
   folder. They still get one renderer each.
-- **The folder goes without blocking anything** (`src/proxy_carrier/helper/data_folder.rs`). It
-  holds the cookies the pages set, so it should not outlive the account's client. On Windows,
-  WebView2's browser process outlives the helper for a moment and holds files there, and the
-  host's delete at shutdown failed on the `carrier-live-windows` runner. Three steps handle that:
-  - A closing helper on Windows drops its web view and then waits up to 2 s for that browser
+- **The folder goes when the client does, without blocking the window**
+  (`src/proxy_carrier/helper/data_folder.rs`). It holds the cookies the pages set, so it should
+  not outlive the account's client. On Windows, WebView2's browser process outlives the helper and
+  holds the whole profile (`lockfile`, `Local State`, `History`, `Login Data`, caches) until it
+  exits. On the `carrier-live-windows` runner that took 173 to 762 ms after the web view was
+  dropped, and more than 1.3 s once (run 39712613845), so a delete right after the helper exits
+  can fail. In order:
+  - A closing helper on Windows drops its web view, then waits up to 2 s for that browser
     process (`BrowserProcessId`) before it exits. Quill's kill deadline for a closed helper is 3 s.
-  - At shutdown, a folder that cannot be deleted at once is renamed to
-    `webview-carrier.stale-<pid>-<nanos>` and deleted on a background thread, which retries for
-    about 2 s. Quill's quit never waits on it.
+  - Shutdown (logout, quit, a closed client) sends every running helper `close`, then waits for
+    the helpers still exiting, 2.5 s at most in all, then deletes the folder. With nothing running
+    or exiting it does not wait at all. The driver, which runs on the UI thread, asks
+    `CarrierHost::shutdown_waits` first. When there is something to wait for, it hands the host to
+    a `quill-carrier-teardown` thread that runs the shutdown, so the window never waits. If that
+    thread cannot start, the host is dropped instead: its helpers are killed and the folder is left
+    to the next two steps.
+  - A folder that still cannot be deleted is renamed to `webview-carrier.stale-<pid>-<nanos>` and
+    deleted on a background thread, which retries for about 2 s. WebView2's open files can block
+    the rename too.
   - When an account's client starts, the last run's folder is renamed aside the same way. It and
-    every older `.stale-` folder are deleted in the background. This covers helpers that were
-    killed and anything else that held on. If the rename fails, the folder is deleted on the spot,
-    so a new run never starts on the last run's cookies.
+    every older `.stale-` folder are deleted in the background, which covers killed helpers and
+    anything else that held on. If the rename fails, the folder is deleted on the spot, so a new
+    run never starts on the last run's cookies.
   - With `QUILL_WEBVIEW_DEBUG` set, a folder that survives the delete at shutdown is listed (up to
-    50 relative paths with sizes).
+    50 relative paths with sizes), and the helper logs how long it waited for its browser process.
 - **Locked down before the page runs.** The page is loaded only after the platform lockdown has
   succeeded, and the helper says `ready` only then:
   - Script dialogs and printing: `alert`, `confirm`, `prompt`, `print` and `onbeforeunload` are

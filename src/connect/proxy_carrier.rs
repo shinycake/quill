@@ -135,8 +135,21 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Logout, quit or a closed client: every web view goes at once.
     pub(crate) fn shut_down_carriers(&mut self) {
         self.session.settings.proxy.carriers.shut_down();
-        if let Some(host) = self.carrier_host.as_mut() {
+        let Some(host) = self.carrier_host.as_mut() else {
+            return;
+        };
+        if !host.shutdown_waits() {
             host.shutdown();
+            return;
+        }
+        // The driver runs on the UI thread: a shutdown that waits for
+        // helpers to exit goes to a thread of its own, taking the host
+        // with it. If none can start, dropping the host ends its helpers
+        // without waiting.
+        if let Some(mut host) = self.carrier_host.take() {
+            let _ = std::thread::Builder::new()
+                .name("quill-carrier-teardown".into())
+                .spawn(move || host.shutdown());
         }
     }
 }

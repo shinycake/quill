@@ -128,7 +128,7 @@ fn a_closed_carrier_reports_no_failure() {
     assert_eq!(host.open(&request(5)), Ok(()));
     host.close(5, false);
     std::thread::sleep(Duration::from_millis(300));
-    assert!(host.poll().is_empty());
+    assert_eq!(host.poll(), Vec::new());
 }
 
 #[test]
@@ -149,7 +149,50 @@ fn shutdown_ends_every_helper_at_once() {
         .unwrap();
     host.shutdown();
     assert!(shared.take_child().is_none());
-    assert!(host.poll().is_empty());
+    assert_eq!(host.poll(), Vec::new());
+}
+
+#[test]
+fn a_shutdown_with_nothing_running_or_exiting_does_not_wait() {
+    let (mut host, _) = host(Some("/bin/cat".into()));
+    assert!(!host.shutdown_waits());
+    let started = Instant::now();
+    host.shutdown();
+    assert!(started.elapsed() < Duration::from_millis(200));
+}
+
+/// A helper that ignores the close command: shutdown gives up at its
+/// ceiling.
+#[test]
+fn a_shutdown_waits_for_helpers_at_most_its_ceiling() {
+    let (mut host, _) = host(Some(script("stuck", "exec sleep 30")));
+    assert_eq!(host.open(&request(5)), Ok(()));
+    assert!(host.shutdown_waits());
+    let started = Instant::now();
+    host.shutdown();
+    let took = started.elapsed();
+    assert!(
+        took >= SHUTDOWN_WAIT.saturating_sub(Duration::from_millis(100)),
+        "{took:?}"
+    );
+    assert!(
+        took < SHUTDOWN_WAIT + Duration::from_millis(500),
+        "{took:?}"
+    );
+    assert!(!host.shutdown_waits());
+}
+
+#[test]
+fn a_closed_helper_that_exits_ends_the_wait() {
+    let (mut host, _) = host(Some("/bin/cat".into()));
+    assert_eq!(host.open(&request(5)), Ok(()));
+    if let Some(running) = host.carriers.get(&5) {
+        running.shared.kill();
+    }
+    host.close(5, false);
+    let started = Instant::now();
+    host.shutdown();
+    assert!(started.elapsed() < Duration::from_secs(1));
 }
 
 #[test]
