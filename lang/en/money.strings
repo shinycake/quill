@@ -840,7 +840,7 @@
 "qll_money_views_per_story" = "Views per story";
 "qll_money_wallet_address" = "Wallet address: {address}";
 "qll_money_wallet_address_2" = "Wallet address";
-"qll_money_wallet_not_supported" = "Quill doesn't support this yet. Open the official Telegram apps to use it.";
+"qll_money_wallet_not_supported" = "Quill doesn't support this. Open the official Telegram apps to use it.";
 "qll_money_warning" = "Warning";
 "qll_money_what_each_level_unlocks" = "What each level unlocks";
 "qll_money_what_is" = "What is";

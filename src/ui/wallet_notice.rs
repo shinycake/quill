@@ -77,9 +77,6 @@ impl QuillApp {
         app.update(cx, |_, cx| {
             let body = div()
                 .id("wallet-notice")
-                .flex()
-                .flex_col()
-                .gap_4()
                 .child(
                     div()
                         .id("wallet-notice-text")
@@ -88,48 +85,46 @@ impl QuillApp {
                         .debug_selector(|| "wallet-notice-text".to_string())
                         .child(tr(keys::Q_MONEY_WALLET_NOT_SUPPORTED)),
                 )
+                .into_any_element();
+            let footer = div()
+                .flex()
+                .justify_end()
+                .gap_2()
                 .child(
                     div()
-                        .flex()
-                        .justify_end()
-                        .gap_2()
+                        .debug_selector(|| "wallet-notice-ok".to_string())
                         .child(
-                            div()
-                                .debug_selector(|| "wallet-notice-ok".to_string())
-                                .child(
-                                    Button::new("wallet-notice-ok")
-                                        .label(tr(keys::BOX_OK))
-                                        .ghost()
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.dismiss_wallet_notice(cx);
-                                            this.close_kit_dialog_if_done(
-                                                DialogKind::WalletNotice,
-                                                window,
-                                                cx,
-                                            );
-                                        })),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .debug_selector(|| "wallet-notice-open".to_string())
-                                .child(
-                                    Button::new("wallet-notice-open")
-                                        .label(tr(keys::Q_MONEY_GET_TELEGRAM_APPS))
-                                        .primary()
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            cx.open_url(OFFICIAL_APPS_URL);
-                                            this.dismiss_wallet_notice(cx);
-                                            this.close_kit_dialog_if_done(
-                                                DialogKind::WalletNotice,
-                                                window,
-                                                cx,
-                                            );
-                                        })),
-                                ),
+                            Button::new("wallet-notice-ok")
+                                .label(tr(keys::BOX_OK))
+                                .ghost()
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.dismiss_wallet_notice(cx);
+                                    this.close_kit_dialog_if_done(
+                                        DialogKind::WalletNotice,
+                                        window,
+                                        cx,
+                                    );
+                                })),
                         ),
                 )
-                .into_any_element();
+                .child(
+                    div()
+                        .debug_selector(|| "wallet-notice-open".to_string())
+                        .child(
+                            Button::new("wallet-notice-open")
+                                .label(tr(keys::Q_MONEY_GET_TELEGRAM_APPS))
+                                .primary()
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    cx.open_url(OFFICIAL_APPS_URL);
+                                    this.dismiss_wallet_notice(cx);
+                                    this.close_kit_dialog_if_done(
+                                        DialogKind::WalletNotice,
+                                        window,
+                                        cx,
+                                    );
+                                })),
+                        ),
+                );
             let body = Rc::new(RefCell::new(Some(body)));
             let on_money_page = this_surface.is_some_and(WalletSurface::on_money_page);
             let dialog = dialog.overlay(true);
@@ -148,6 +143,7 @@ impl QuillApp {
                         content.child(body)
                     },
                 ))
+                .footer(footer)
                 .on_close(on_close)
         })
     }

@@ -6,7 +6,7 @@ The owner decided Quill will not build the deferred wallet features
 (`wallet-decrypt-comments`, `wallet-create-import`, `wallet-secret-backup`,
 `wallet-send`, `wallet-tonconnect-sessions`, `wallet-onramp`,
 `wallet-gift-withdraw-card`). Instead, every place where one of them shows
-up opens one shared notice: Quill doesn't support this yet, with a button
+up opens one shared notice: Quill doesn't support this, with a button
 that opens https://telegram.org/apps in the system browser.
 
 ## What Telegram Desktop does
