@@ -31,7 +31,7 @@ struct MockInner {
     remote_screen_hook: Option<RemoteVideoStateCallback>,
     /// The peer's 1:1 microphone hook (replace semantics).
     remote_audio_hook: Option<RemoteAudioStateCallback>,
-    camera_changes: Vec<(i32, bool, Option<String>)>,
+    camera_changes: Vec<(i32, Option<String>)>,
     /// Phase C2i: 1:1 screen-share toggle recording for driver tests.
     p2p_screen_share_changes: Vec<(i32, bool)>,
     frame_seq: u64,
@@ -43,9 +43,9 @@ struct MockInner {
     /// The native key each live group call holds (ntgcalls keys group
     /// calls by chat id and 1:1 calls by the peer's user id).
     group_keys: HashMap<i32, i64>,
-    group_connects: Vec<(i32, String, bool)>,
+    group_connects: Vec<(i32, String, Option<String>)>,
     group_video_syncs: Vec<(i32, Vec<GroupVideoSource>)>,
-    group_camera_changes: Vec<(i32, bool, Option<String>)>,
+    group_camera_changes: Vec<(i32, Option<String>)>,
     screen_share_offers: Vec<i32>,
     screen_share_connects: Vec<(i32, String)>,
     screen_share_stops: Vec<i32>,
@@ -147,7 +147,7 @@ impl MockEngine {
         self.inner.lock_or_recover().device_selections.clone()
     }
 
-    pub fn camera_changes(&self) -> Vec<(i32, bool, Option<String>)> {
+    pub fn camera_changes(&self) -> Vec<(i32, Option<String>)> {
         self.inner.lock_or_recover().camera_changes.clone()
     }
 
@@ -160,7 +160,7 @@ impl MockEngine {
         self.inner.lock_or_recover().group_roles.clone()
     }
 
-    pub fn group_connects(&self) -> Vec<(i32, String, bool)> {
+    pub fn group_connects(&self) -> Vec<(i32, String, Option<String>)> {
         self.inner.lock_or_recover().group_connects.clone()
     }
 
@@ -168,7 +168,7 @@ impl MockEngine {
         self.inner.lock_or_recover().group_video_syncs.clone()
     }
 
-    pub fn group_camera_changes(&self) -> Vec<(i32, bool, Option<String>)> {
+    pub fn group_camera_changes(&self) -> Vec<(i32, Option<String>)> {
         self.inner.lock_or_recover().group_camera_changes.clone()
     }
 
@@ -462,12 +462,7 @@ impl CallEngine for MockEngine {
         Ok(())
     }
 
-    fn set_camera_enabled(
-        &mut self,
-        call_id: i32,
-        enabled: bool,
-        camera: Option<&str>,
-    ) -> Result<(), EngineError> {
+    fn set_camera(&mut self, call_id: i32, camera: Option<&str>) -> Result<(), EngineError> {
         let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
@@ -477,7 +472,7 @@ impl CallEngine for MockEngine {
         }
         inner
             .camera_changes
-            .push((call_id, enabled, camera.map(str::to_owned)));
+            .push((call_id, camera.map(str::to_owned)));
         Ok(())
     }
 
@@ -524,7 +519,7 @@ impl CallEngine for MockEngine {
         &mut self,
         group_call_id: i32,
         answer_payload: &str,
-        video_enabled: bool,
+        camera: Option<&str>,
     ) -> Result<(), EngineError> {
         let mut inner = self.inner.lock_or_recover();
         if !inner.available {
@@ -536,9 +531,11 @@ impl CallEngine for MockEngine {
                 code,
             });
         }
-        inner
-            .group_connects
-            .push((group_call_id, answer_payload.to_owned(), video_enabled));
+        inner.group_connects.push((
+            group_call_id,
+            answer_payload.to_owned(),
+            camera.map(str::to_owned),
+        ));
         let chat_id = inner
             .group_offers
             .iter()
@@ -628,7 +625,6 @@ impl CallEngine for MockEngine {
     fn set_group_camera(
         &mut self,
         group_call_id: i32,
-        enabled: bool,
         camera: Option<&str>,
     ) -> Result<(), EngineError> {
         let mut inner = self.inner.lock_or_recover();
@@ -637,7 +633,7 @@ impl CallEngine for MockEngine {
         }
         inner
             .group_camera_changes
-            .push((group_call_id, enabled, camera.map(str::to_owned)));
+            .push((group_call_id, camera.map(str::to_owned)));
         Ok(())
     }
 

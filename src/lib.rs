@@ -60,6 +60,7 @@ pub mod deep_link_types;
 pub mod dev_cli;
 pub mod diagnostics;
 pub mod drop_modes;
+pub mod drop_topic;
 pub mod earn;
 pub mod emoji;
 pub mod emoji_catalog;

@@ -318,7 +318,7 @@ fn an_unforwardable_member_keeps_the_selection_from_lifting(cx: &mut TestAppCont
 }
 
 #[gpui_kit::test]
-fn a_drop_on_a_forum_row_shows_a_note_and_opens_nothing(cx: &mut TestAppContext) {
+fn a_drop_on_a_forum_row_asks_for_a_topic_and_opens_nothing(cx: &mut TestAppContext) {
     let (app, mut vcx) = selected(cx);
     let vcx = &mut vcx;
     app.update(vcx, |app, _| {

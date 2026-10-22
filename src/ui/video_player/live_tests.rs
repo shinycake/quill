@@ -511,7 +511,8 @@ fn a_turned_mirrored_frame_packs_upright_into_nv12() {
     let frame = core.track.borrow().nv12.shown_frame().expect("nv12");
     assert_eq!((frame.width(), frame.height()), (36, 64));
     let (luma, _) = frame.nv12_planes().expect("planes");
-    // Turned 90 (the right column becomes the top row), then mirrored.
+    // Turned 90 clockwise (the left column becomes the top row), then
+    // mirrored.
     let source_frame = LiveFrame::new(
         1,
         64,
@@ -522,13 +523,9 @@ fn a_turned_mirrored_frame_packs_upright_into_nv12() {
     )
     .expect("frame");
     let y = source_frame.i420().expect("planes").y;
-    // (x, y) -> turned (y, 63 - x) -> mirrored (35 - y, 63 - x).
+    // (x, y) -> turned (35 - y, x) -> mirrored (y, x).
     for (sx, sy) in [(0usize, 0usize), (10, 3), (63, 35)] {
-        assert_eq!(
-            luma[(63 - sx) * 36 + (35 - sy)],
-            y[sy * 64 + sx],
-            "{sx},{sy}"
-        );
+        assert_eq!(luma[sx * 36 + sy], y[sy * 64 + sx], "{sx},{sy}");
     }
 }
 

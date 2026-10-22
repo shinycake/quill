@@ -320,19 +320,24 @@ mod tests {
         // already readable when the loop wakes.
         let sink = Arc::new(MemorySink::new());
         let bridge = ReceiveBridge::spawn_injected(sink).unwrap();
-        let seen = crate::wake::UPDATES.epoch();
+        let mut seen = crate::wake::UPDATES.epoch();
         let start = std::time::Instant::now();
         bridge
             .inject(r#"{"@type":"updateOption","name":"x","value":{"@type":"optionValueEmpty"}}"#);
-        while crate::wake::UPDATES.epoch() == seen && start.elapsed() < Duration::from_secs(2) {
-            std::thread::sleep(Duration::from_millis(2));
+        // Other tests running in parallel poke the same global wake-up
+        // (call engine hooks), so a poke with nothing queued is noise:
+        // wait for the next one. Ours must arrive with the update readable.
+        let mut received = false;
+        while !received && start.elapsed() < Duration::from_secs(2) {
+            if crate::wake::UPDATES.epoch() == seen {
+                std::thread::sleep(Duration::from_millis(2));
+                continue;
+            }
+            seen = crate::wake::UPDATES.epoch();
+            received = bridge.rx.try_recv().is_ok();
         }
-        assert_ne!(crate::wake::UPDATES.epoch(), seen, "no wake-up");
+        assert!(received, "no wake-up with the update queued");
         assert!(start.elapsed() < Duration::from_millis(500));
-        assert!(
-            bridge.rx.try_recv().is_ok(),
-            "poked before the update was queued"
-        );
     }
 
     #[test]

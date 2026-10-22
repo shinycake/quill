@@ -231,6 +231,7 @@ pub(in crate::ui) fn paid_album_card(
             downloading,
             media_roots,
             index,
+            None,
             cx,
         ));
     }

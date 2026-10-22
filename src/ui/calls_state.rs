@@ -38,6 +38,9 @@ pub(crate) struct CallUi {
     /// Phase C2i: pending "call again" / profile-call confirmation when
     /// the confirm-before-calling pref is on: `(user_id, is_video)`.
     pub(super) confirm: Option<(i64, bool)>,
+    /// A call waiting on microphone (and camera) permission before its
+    /// `createCall`: `(user_id, is_video)`.
+    pub(super) dialing: Option<(i64, bool)>,
     /// Settings > Calls: the microphone test and its level meter
     /// (`ui::call_audio_ui`), `Some` while testing.
     pub(super) mic_test: Option<super::call_audio_ui::MicTest>,
@@ -68,6 +71,7 @@ impl CallUi {
             sounds: super::call_sounds::CallSounds::new(audio_output),
             sound_marks: Default::default(),
             confirm: None,
+            dialing: None,
             mic_test: None,
         }
     }

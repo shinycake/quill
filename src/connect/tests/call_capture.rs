@@ -109,7 +109,7 @@ fn group_driver() -> (
     handle
         .create_group_call(77, -100, crate::calls::engine::GroupCallRole::Member)
         .unwrap();
-    handle.connect_group_call(77, "answer", false).unwrap();
+    handle.connect_group_call(77, "answer", None).unwrap();
     let mics = install_fake_mic(&mut driver);
     (dir, driver, handle, mics)
 }
@@ -270,7 +270,6 @@ fn private_call_uses_the_chosen_microphone() {
                 p2p_allowed: false,
                 mic_input: None,
                 speaker_input: None,
-                video_enabled: false,
                 camera_input: None,
             },
         )

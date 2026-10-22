@@ -100,6 +100,7 @@ fn one_to_one_pictures_go_to_live_feeds_newest_first() {
 #[test]
 fn the_camera_preview_feed_follows_the_camera() {
     let (dir, mut driver, handle, _sink, _seq) = ready_call_driver();
+    handle.set_devices(vec![camera("cam-1")]);
     assert!(driver.set_call_camera(77, true).is_ok());
     let preview = driver
         .live_sink(call_key(true, false))
@@ -178,14 +179,23 @@ fn the_screen_share_feed_ends_when_the_share_goes_inactive() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+fn camera(id: &str) -> MediaDevice {
+    MediaDevice {
+        id: id.into(),
+        name: id.into(),
+        kind: MediaDeviceKind::Camera,
+    }
+}
+
 /// Phase C2e: the UI camera toggle reaches the engine with the
-/// call id, the new state, and the selected camera — but only
-/// once a transport exists; before that the intent is stored
-/// cleanly (the real engine errors on an untracked call) so it
-/// can apply on connect.
+/// call id and the camera to send — but only once a transport
+/// exists; before that the intent is stored cleanly (the real
+/// engine errors on an untracked call) so it can apply on connect.
+/// The call is a voice call: any call can turn the camera on.
 #[test]
 fn set_call_camera_gates_engine_on_transport() {
     let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+    handle.set_devices(vec![camera("cam-1")]);
     // No transport yet: intent stored, engine untouched.
     assert!(driver.set_call_camera(77, false).is_ok());
     assert!(handle.camera_changes().is_empty());
@@ -193,12 +203,83 @@ fn set_call_camera_gates_engine_on_transport() {
     // Transport connected: the toggle drives the engine.
     ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
     assert!(driver.set_call_camera(77, true).is_ok());
-    assert_eq!(handle.camera_changes(), vec![(77, true, None)]);
+    assert_eq!(handle.camera_changes(), vec![(77, Some("cam-1".into()))]);
     assert!(driver.session.calls.active_call.as_ref().unwrap().camera_on);
     assert_eq!(
         driver.set_call_camera(999, true),
         Err(crate::calls::engine::EngineError::NoSuchCall(999))
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// ntgcalls opens only a named camera: turning it off and on again
+/// names it each time, and a camera plugged in mid-call is found.
+#[test]
+fn the_camera_always_goes_out_by_id() {
+    let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+    ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+    // No camera yet: refused and named, the call stays camera-off.
+    assert_eq!(
+        driver.set_call_camera(77, true),
+        Err(crate::calls::engine::EngineError::NoCamera)
+    );
+    assert!(handle.camera_changes().is_empty());
+    assert!(!driver.session.calls.active_call.as_ref().unwrap().camera_on);
+    handle.set_devices(vec![camera("usb-cam"), camera("built-in")]);
+    assert!(driver.set_call_camera(77, true).is_ok());
+    assert!(driver.set_call_camera(77, false).is_ok());
+    // A menu pick while the camera is on switches to it.
+    assert!(driver.set_call_camera(77, true).is_ok());
+    assert!(driver.select_call_camera(Some("built-in".into())).is_ok());
+    // Back to the default: the first camera listed.
+    assert!(driver.select_call_camera(None).is_ok());
+    assert_eq!(
+        handle.camera_changes(),
+        vec![
+            (77, Some("usb-cam".into())),
+            (77, None),
+            (77, Some("usb-cam".into())),
+            (77, Some("built-in".into())),
+            (77, Some("usb-cam".into())),
+        ]
+    );
+    // A pick while the camera is off is only stored.
+    assert!(driver.set_call_camera(77, false).is_ok());
+    assert!(driver.select_call_camera(Some("built-in".into())).is_ok());
+    assert_eq!(handle.camera_changes().len(), 6);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A menu pick with no camera listed keeps the running camera on
+/// instead of switching it off under a call that says it is on.
+#[test]
+fn a_camera_pick_with_no_camera_listed_keeps_the_camera() {
+    let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+    ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+    handle.set_devices(vec![camera("usb-cam")]);
+    assert!(driver.set_call_camera(77, true).is_ok());
+    handle.set_devices(Vec::new());
+    driver.refresh_call_devices();
+    assert_eq!(
+        driver.select_call_camera(Some("gone".into())),
+        Err(crate::calls::engine::EngineError::NoCamera)
+    );
+    assert_eq!(handle.camera_changes(), vec![(77, Some("usb-cam".into()))]);
+    assert!(driver.session.calls.active_call.as_ref().unwrap().camera_on);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A voice call whose camera was turned on while ringing connects
+/// with that camera.
+#[test]
+fn a_voice_call_connects_with_a_camera_turned_on_early() {
+    let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+    handle.set_devices(vec![camera("cam-1")]);
+    assert!(driver.set_call_camera(77, true).is_ok());
+    ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+    let connects = handle.connects();
+    assert_eq!(connects.len(), 1);
+    assert_eq!(connects[0].1.camera_input.as_deref(), Some("cam-1"));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -210,11 +291,14 @@ fn set_call_camera_gates_engine_on_transport() {
 #[test]
 fn set_call_screen_share_gates_engine_on_transport() {
     let (dir, mut driver, handle, sink, seq) = ready_call_driver();
-    handle.set_devices(vec![MediaDevice {
-        id: "screen-0".into(),
-        name: "Test Screen".into(),
-        kind: MediaDeviceKind::Screen,
-    }]);
+    handle.set_devices(vec![
+        MediaDevice {
+            id: "screen-0".into(),
+            name: "Test Screen".into(),
+            kind: MediaDeviceKind::Screen,
+        },
+        camera("cam-1"),
+    ]);
     driver.refresh_call_devices();
     // No transport yet: intent stored, engine untouched.
     assert!(driver.set_call_screen_share(77, true).is_ok());
@@ -400,7 +484,6 @@ fn connect_params_video_honors_no_camera() {
     ingest_call_json(&mut driver, &seq, &sink, &ready_video_call_json());
     let connects = handle.connects();
     assert_eq!(connects.len(), 1);
-    assert!(!connects[0].1.video_enabled);
     assert_eq!(connects[0].1.camera_input, None);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -438,7 +521,6 @@ fn connect_params_camera_off_intent_survives_pre_connect() {
     ingest_call_json(&mut driver, &seq, &sink, &ready_video_call_json());
     let connects = handle.connects();
     assert_eq!(connects.len(), 1);
-    assert!(!connects[0].1.video_enabled);
     assert_eq!(connects[0].1.camera_input, None);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -466,7 +548,6 @@ fn connect_params_video_selects_camera() {
     ingest_call_json(&mut driver, &seq, &sink, &ready_video_call_json());
     let connects = handle.connects();
     assert_eq!(connects.len(), 1);
-    assert!(connects[0].1.video_enabled);
     assert_eq!(connects[0].1.camera_input, Some("cam-1".to_string()));
     assert_eq!(driver.selected_call_camera(), Some("cam-1"));
     let _ = std::fs::remove_dir_all(&dir);
@@ -519,4 +600,43 @@ fn feeds_end_with_the_call() {
     assert!(camera.snapshot().end.is_some());
     assert!(driver.live_sink(call_key(false, false)).is_none());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// What the engine reports between Telegram updates applies on the next
+/// poll: in a connected call Telegram may send nothing for minutes (the
+/// call's own signaling then runs over its data channel), so the peer's
+/// camera, the transport state and the peer's microphone must not wait
+/// for an unrelated update.
+#[test]
+fn engine_reports_apply_without_a_telegram_update() {
+    let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+    ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+    assert!(!driver.request_tick(Instant::now()), "nothing pending");
+    handle.emit_transport_state(77, TransportState::Connected);
+    handle.emit_remote_video_state(77, RemoteVideoState::Active);
+    handle.emit_remote_audio_muted(77, true);
+    assert!(driver.request_tick(Instant::now()), "the UI redraws");
+    let call = driver.session.calls.active_call.as_ref().unwrap();
+    assert_eq!(call.transport, Some(TransportState::Connected));
+    assert_eq!(call.remote_video, RemoteVideoState::Active);
+    assert!(call.remote_audio_muted);
+    // The peer's feed is open before any window asks for it, so the
+    // first frame is kept.
+    handle.emit_live_frame(call_key(false, false), first_frame());
+    let peer = driver.live_sink(call_key(false, false)).expect("peer feed");
+    assert!(peer.latest().is_some());
+    assert!(!driver.request_tick(Instant::now()), "drained");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn first_frame() -> crate::calls::live_video::LiveFrame {
+    crate::calls::live_video::LiveFrame::new(
+        0,
+        2,
+        2,
+        crate::calls::live_video::LiveRotation::None,
+        vec![0; 6],
+        Instant::now(),
+    )
+    .expect("frame")
 }

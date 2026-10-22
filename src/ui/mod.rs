@@ -58,6 +58,7 @@ mod frame_clock;
 pub mod link_inbox;
 mod wake_wait;
 pub use wake_wait::sleep_or_wake;
+mod drag_start_tests;
 #[cfg(feature = "frame-profiler")]
 mod frame_profile;
 mod frame_state;
@@ -510,6 +511,8 @@ mod video_editor_set;
 mod video_editor_timeline;
 mod video_editor_tools;
 mod video_player;
+mod wallet_notice;
+mod wallet_notice_demo;
 mod wallpaper;
 mod wallpaper_cache;
 mod wallpaper_preview;

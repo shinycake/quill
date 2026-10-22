@@ -85,10 +85,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some((answer, video_enabled)) = join_answer
             && !answer.is_empty()
         {
+            // The device list as of joining, for the camera and for the
+            // screen-share availability gate.
+            self.refresh_call_devices();
+            let camera = video_enabled.then(|| self.call_camera_device()).flatten();
             let Some(engine) = self.call_engine.as_deref_mut() else {
                 return Ok(());
             };
-            let result = engine.connect_group_call(group_call_id, &answer, video_enabled);
+            let result = engine.connect_group_call(group_call_id, &answer, camera.as_deref());
             // Join muted if you muted before the transport was up.
             if result.is_ok() {
                 let muted = self
@@ -124,10 +128,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             if connected {
                 self.start_stream_feeder(group_call_id);
-                self.group_camera_state.insert(group_call_id, video_enabled);
-                // Refresh the device cache on connect so the screen-share
-                // availability gate sees the engine's real sources.
-                self.refresh_call_devices();
+                self.group_camera_state.insert(group_call_id, camera);
             }
         }
         let transport_ready = self
@@ -174,14 +175,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .calls
             .group_call(group_call_id)
-            .map(|call| call.is_my_video_enabled && !call.is_my_video_paused)
-            .unwrap_or(false);
+            .is_some_and(|call| call.is_my_video_enabled && !call.is_my_video_paused)
+            .then(|| self.call_camera_device())
+            .flatten();
         if self.group_camera_state.get(&group_call_id) != Some(&wanted_camera) {
-            let camera = self.selected_camera.clone();
             let Some(engine) = self.call_engine.as_deref_mut() else {
                 return Ok(());
             };
-            let result = engine.set_group_camera(group_call_id, wanted_camera, camera.as_deref());
+            let result = engine.set_group_camera(group_call_id, wanted_camera.as_deref());
             match result {
                 Ok(()) => {
                     self.group_camera_state.insert(group_call_id, wanted_camera);

@@ -29,7 +29,6 @@ fn native_default_audio_sources_before_connect() {
         p2p_allowed: false,
         mic_input: None,
         speaker_input: None,
-        video_enabled: false,
         camera_input: None,
     };
     for length in [0, 1, 255, 257] {
@@ -48,7 +47,6 @@ fn native_default_audio_sources_before_connect() {
             mic: None,
             speaker: None,
             camera: None,
-            camera_enabled: false,
             screen_share_on: false,
         },
     );
@@ -105,7 +103,7 @@ fn native_rtmp_connect_reports_stream_mode() {
     engine
         .create_group_call(7, chat_id, GroupCallRole::Member)
         .expect("Native group offer");
-    let result = engine.connect_group_call(7, r#"{"rtmp":true}"#, false);
+    let result = engine.connect_group_call(7, r#"{"rtmp":true}"#, None);
     eprintln!("rtmp connect: {result:?}");
     assert_eq!(engine.group_call_mode(chat_id), Some(GroupCallMode::Rtmp));
     result.expect("RTMP connect with playback-only sources");
@@ -147,7 +145,7 @@ fn native_stream_connect_needs_no_capture_and_asks_for_parts() {
     engine
         .create_group_call(8, chat_id, GroupCallRole::Member)
         .expect("Native group offer");
-    let result = engine.connect_group_call(8, r#"{"stream":true}"#, false);
+    let result = engine.connect_group_call(8, r#"{"stream":true}"#, None);
     eprintln!("stream connect: {result:?}");
     result.expect("Stream connect with playback-only sources");
     assert_eq!(engine.group_call_mode(chat_id), Some(GroupCallMode::Stream));

@@ -34,7 +34,7 @@ pub struct ActiveCall {
     /// Phase C2e: local camera intent (UI toggle). Initialized from
     /// `is_video` — a video call starts with the camera on, a voice
     /// call with it off. The engine picks it up through
-    /// `set_camera_enabled`.
+    /// `set_camera`.
     pub camera_on: bool,
     /// Phase C2i: local screen-share send intent (UI toggle). The
     /// engine picks it up through `set_screen_share_enabled`; screen

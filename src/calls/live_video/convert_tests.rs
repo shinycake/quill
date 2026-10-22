@@ -72,10 +72,10 @@ fn rotate_rgba(src: &[u8], w: usize, h: usize, rotation: ntg_video_rotation) -> 
     for y in 0..h {
         for x in 0..w {
             let (dx, dy) = match rotation {
-                // 90° clockwise: the right column lands on top.
-                NTG_VIDEO_ROTATION_VIDEO_ROTATION_90 => (y, w - 1 - x),
+                // 90° clockwise: the left column lands on top.
+                NTG_VIDEO_ROTATION_VIDEO_ROTATION_90 => (h - 1 - y, x),
                 NTG_VIDEO_ROTATION_VIDEO_ROTATION_180 => (w - 1 - x, h - 1 - y),
-                NTG_VIDEO_ROTATION_VIDEO_ROTATION_270 => (h - 1 - y, x),
+                NTG_VIDEO_ROTATION_VIDEO_ROTATION_270 => (y, w - 1 - x),
                 _ => (x, y),
             };
             let src_off = (y * w + x) * 4;
@@ -167,7 +167,7 @@ fn i420_to_rgba_rejects_bad_sizes() {
 }
 
 /// Phase C2e: validates rotation handling. 2x1 with distinct pixels,
-/// rotated 90° clockwise, becomes 1x2 with the right column on top.
+/// rotated 90° clockwise, becomes 1x2 with the left column on top.
 #[test]
 fn i420_to_rgba_rotation_90() {
     let rgba = i420_to_rgba(
@@ -179,8 +179,8 @@ fn i420_to_rgba_rotation_90() {
     .expect("valid 2x1 frame");
     assert_eq!(
         rgba,
-        vec![16, 16, 16, 255, 235, 235, 235, 255],
-        "black pixel (right column) lands on top"
+        vec![235, 235, 235, 255, 16, 16, 16, 255],
+        "white pixel (left column) lands on top"
     );
 }
 
@@ -602,17 +602,17 @@ fn packed_nv12_of_a_turned_and_mirrored_frame_matches_the_planes() {
     let mut out = vec![0u8; nv12_packed_len(2, 4).expect("even")];
     assert!(i420_to_nv12_packed(&shown, &mut out));
     let (luma, chroma) = out.split_at(8);
-    // Turned 90: (x, y) lands at (y, w - 1 - x); mirrored: x' = tw - 1 - x.
+    // Turned 90: (x, y) lands at (h - 1 - y, x); mirrored: x' = tw - 1 - x.
     for y in 0..2usize {
         for x in 0..4usize {
-            let (tx, ty) = (y, 3 - x);
+            let (tx, ty) = (1 - y, x);
             let mx = 1 - tx;
             assert_eq!(luma[ty * 2 + mx], frame.y[y * 4 + x], "luma {x},{y}");
         }
     }
-    // Chroma: the 2 × 1 grid turned to 1 × 2 (the right block on top); a
+    // Chroma: the 2 × 1 grid turned to 1 × 2 (the left block on top); a
     // single column mirrors to itself.
-    assert_eq!(chroma, [frame.u[1], frame.v[1], frame.u[0], frame.v[0]]);
+    assert_eq!(chroma, [frame.u[0], frame.v[0], frame.u[1], frame.v[1]]);
 }
 
 /// What a live frame costs on Windows before (I420 to BGRA, uploaded to

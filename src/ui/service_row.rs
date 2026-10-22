@@ -337,6 +337,8 @@ pub(super) fn service_message_row(
     let ton_transfer = super::ton_wallet_ui::transfer_of(&message.content).map(|transfer| {
         super::ton_wallet_ui::transfer_card(row_id, message, transfer, session, cx)
     });
+    let connect_review =
+        super::ton_wallet_ui::connect_review_button(row_id, &message.content, session, cx);
     let open_code = super::premium_ui::gift_card_of(&message.content)
         .and_then(|(_, card)| super::link_info_boxes::gift_code_open_button(row_id, card, cx));
     div()
@@ -367,6 +369,7 @@ pub(super) fn service_message_row(
         .when_some(birthday, |this, birthday| this.child(birthday))
         .when_some(card, |this, card| this.child(card))
         .when_some(ton_transfer, |this, card| this.child(card))
+        .when_some(connect_review, |this, button| this.child(button))
         .when_some(learn_more, |this, button| this.child(button))
         .when_some(open_code, |this, button| this.child(button))
         .when_some(buttons, |this, buttons| this.child(buttons))

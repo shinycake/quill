@@ -2,7 +2,7 @@
 use super::*;
 use crate::calls::engine::{
     CallEngine, ConnectParams, EngineError, MediaDevice, MediaDeviceKind, RtcServer,
-    TransportState, video_wanted,
+    TransportState, pick_camera,
 };
 use crate::ids::RequestId;
 use crate::locks::LockExt;
@@ -52,14 +52,21 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     pub fn set_call_engine(&mut self, mut engine: Box<dyn CallEngine>) {
         let outbox = self.signaling_outbox.clone();
+        // Each hook wakes the poll loop, which applies the report at once
+        // (`pump_call_engine_reports`) instead of after its idle sleep.
         engine.set_signaling_emitted_callback(Arc::new(move |call_id, data| {
             outbox.lock_or_recover().push_back((call_id, data));
+            crate::wake::UPDATES.poke();
         }));
         let transport_outbox = self.transport_outbox.clone();
         engine.set_transport_state_callback(Arc::new(move |call_id, state| {
+            crate::advanced::debug_mode::debug_log(&format!(
+                "[call] {call_id} transport {state:?}"
+            ));
             transport_outbox
                 .lock_or_recover()
                 .push_back((call_id, state));
+            crate::wake::UPDATES.poke();
         }));
         self.install_remote_state_hooks(engine.as_mut());
         self.install_stream_hooks(engine.as_mut());
@@ -171,17 +178,17 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     fn call_connect_params(&self, is_outgoing: bool, ready: &ReadyParams) -> ConnectParams {
         let library_versions = ready.library_versions.clone();
-        let is_video = self.session.calls.active_call.as_ref().is_some_and(|call| {
-            // A camera toggle before the transport existed is stored in
-            // `camera_on` and must survive into the connect params (a
-            // camera-off toggle means the call is negotiated without
-            // video). At initial connect `camera_on == is_video`, so
-            // nothing changes there.
-            call.is_video && call.camera_on
-        });
-        let (video_enabled, default_camera) = video_wanted(is_video, &self.call_devices_cache);
-        let camera_input = video_enabled
-            .then(|| self.selected_camera.clone().or(default_camera))
+        // A camera toggle before the transport existed is stored in
+        // `camera_on` and survives into the connect params: a video call
+        // starts with it on, a voice call with it off, and either may
+        // have been flipped while ringing.
+        let camera_input = self
+            .session
+            .calls
+            .active_call
+            .as_ref()
+            .is_some_and(|call| call.camera_on)
+            .then(|| self.call_camera_device())
             .flatten();
         ConnectParams {
             encryption_key: ready.encryption_key.clone(),
@@ -207,55 +214,84 @@ impl<S: JsonSender> ConnectDriver<S> {
             p2p_allowed: ready.allow_p2p,
             mic_input: self.selected_devices.0.clone(),
             speaker_input: self.selected_devices.1.clone(),
-            // Phase C2e: a video call negotiates video only when a camera
-            // exists; the user's camera pick wins over the first
-            // enumerated camera. The connect path refreshes the device
-            // cache before calling this (cheap no-op when the engine is
-            // missing).
-            video_enabled,
+            // The connect path refreshes the device cache before calling
+            // this (cheap no-op when the engine is missing).
             camera_input,
         }
     }
 
-    /// Phase C2e: honest 1:1 video readiness — the active call is a video
-    /// call, the engine is available, and a camera exists. The UI uses
-    /// this for disabled states instead of guessing.
+    /// Phase C2e: honest 1:1 video readiness — the engine is available
+    /// and lists a camera. Any call can turn the camera on (tdesktop
+    /// offers it in voice calls too); the UI uses this for disabled
+    /// states instead of guessing.
     pub fn call_video_ready(&self) -> bool {
-        let is_video = self
-            .session
-            .calls
-            .active_call
-            .as_ref()
-            .is_some_and(|call| call.is_video);
         self.call_engine
             .as_ref()
             .is_some_and(|engine| engine.is_available())
-            && video_wanted(is_video, &self.call_devices_cache).0
+            && pick_camera(None, &self.call_devices_cache).is_some()
     }
 
-    /// Phase C2e: selected camera device id; `None` is the engine default.
+    /// Phase C2e: selected camera device id; `None` is the first camera.
     pub fn selected_call_camera(&self) -> Option<&str> {
         self.selected_camera.as_deref()
+    }
+
+    /// The camera a call would turn on now, from a fresh device list:
+    /// `Unavailable` without the call library (no list to read, which is
+    /// not the same as no camera), `NoCamera` when none is listed.
+    pub fn camera_to_turn_on(&mut self) -> Result<String, EngineError> {
+        if !self
+            .call_engine
+            .as_ref()
+            .is_some_and(|engine| engine.is_available())
+        {
+            return Err(EngineError::Unavailable);
+        }
+        self.refresh_call_devices();
+        self.call_camera_device().ok_or(EngineError::NoCamera)
+    }
+
+    /// The camera calls send from now, by device id, from the cached
+    /// device list (`pick_camera`).
+    pub(crate) fn call_camera_device(&self) -> Option<String> {
+        pick_camera(self.selected_camera.as_deref(), &self.call_devices_cache)
     }
 
     /// Phase C2e: camera toggle through the native engine. The engine is
     /// called first and its error propagates *without* flipping the
     /// session flag (mirrors `set_call_muted`); without a connected
     /// transport the intent is only stored (it applies on connect).
+    /// Turning it on re-reads the device list and fails with `NoCamera`
+    /// when there is none.
     /// Phase C2i: enabling the camera clears the screen-share intent —
     /// ntgcalls forbids camera+screen in Capture mode.
     pub fn set_call_camera(&mut self, call_id: i32, enabled: bool) -> Result<(), EngineError> {
+        if !self
+            .session
+            .calls
+            .active_call
+            .as_ref()
+            .is_some_and(|call| call.id == call_id)
+        {
+            return Err(if self.session.calls.active_call.is_some() {
+                EngineError::NoSuchCall(call_id)
+            } else {
+                EngineError::NoActiveCall
+            });
+        }
+        let camera = if enabled {
+            Some(self.camera_to_turn_on()?)
+        } else {
+            None
+        };
         let Some(call) = self.session.calls.active_call.as_mut() else {
             return Err(EngineError::NoActiveCall);
         };
-        if call.id != call_id {
-            return Err(EngineError::NoSuchCall(call_id));
-        }
         if call.transport.is_some()
             && let Some(engine) = self.call_engine.as_deref_mut()
             && engine.is_available()
         {
-            engine.set_camera_enabled(call.id, enabled, self.selected_camera.as_deref())?;
+            engine.set_camera(call.id, camera.as_deref())?;
         }
         call.camera_on = enabled;
         if enabled {
@@ -306,27 +342,52 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
-    /// Phase C2e: pick the camera device id (`None` = engine default).
-    /// The selection is stored (so it applies on connect) and forwarded
-    /// to the native engine with the current camera intent only when a
-    /// transport is already connected; a failed forward propagates
-    /// before the stored selection changes.
+    /// Phase C2e: pick the camera device id (`None` = the first camera).
+    /// The selection is stored (so it applies on connect) and, while the
+    /// camera is on over a connected transport, the engine switches to
+    /// it; a failed switch propagates before the stored selection
+    /// changes.
     pub fn select_call_camera(&mut self, camera: Option<String>) -> Result<(), EngineError> {
-        let camera_on = self
+        let sending = self
             .session
             .calls
             .active_call
             .as_ref()
-            .is_some_and(|call| call.camera_on);
-        if let Some(call) = self.session.calls.active_call.as_ref()
-            && call.transport.is_some()
+            .filter(|call| call.camera_on && call.transport.is_some())
+            .map(|call| call.id);
+        if let Some(call_id) = sending
             && let Some(engine) = self.call_engine.as_deref_mut()
             && engine.is_available()
         {
-            engine.set_camera_enabled(call.id, camera_on, camera.as_deref())?;
+            // An empty list must not switch a running camera off while the
+            // call still says it is on.
+            let device = pick_camera(camera.as_deref(), &self.call_devices_cache)
+                .ok_or(EngineError::NoCamera)?;
+            engine.set_camera(call_id, Some(&device))?;
         }
         self.selected_camera = camera;
         Ok(())
+    }
+
+    /// Per poll: apply what the call engine reported since the last pump
+    /// (signaling to relay, transport and peer media states). A connected
+    /// call's own signaling runs over its data channel, so Telegram may
+    /// send nothing for a long time and these must not wait for an
+    /// unrelated update. Returns whether anything was pending.
+    pub(crate) fn pump_call_engine_reports(&mut self) -> bool {
+        let pending = !self.signaling_outbox.lock_or_recover().is_empty()
+            || !self.transport_outbox.lock_or_recover().is_empty()
+            || !self.video_state_outbox.lock_or_recover().is_empty()
+            || !self.screen_state_outbox.lock_or_recover().is_empty()
+            || !self.audio_state_outbox.lock_or_recover().is_empty();
+        if !pending {
+            return false;
+        }
+        let active = self.session.calls.active_call.as_ref().map(|call| call.id);
+        // A send failure leaves the bytes queued for the next poll.
+        let _ = self.pump_call_engine(active, None);
+        self.drain_remote_audio_state();
+        true
     }
 
     /// Phase C2b: synchronize reducer call lifecycle/signaling with the

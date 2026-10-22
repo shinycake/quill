@@ -760,8 +760,11 @@ impl QuillApp {
 
 mod drop_on_row;
 mod drop_on_row_tests;
+mod drop_topic;
 mod forward_drop_tests;
+mod media_drag_tests;
 pub(in crate::ui) use drop_on_row::DropOnRow;
+pub(in crate::ui) use drop_topic::DropTopic;
 mod header_fit;
 mod listed;
 mod select_bar;

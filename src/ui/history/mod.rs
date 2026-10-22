@@ -23,7 +23,6 @@ use super::message_text::{
     FooterMeta, caption_above_media, message_chrome, message_footer_meta, message_rich_block,
     message_text_block, rich_text_reserving,
 };
-use super::nested_click::SwallowPress;
 use super::pressable::PressableDiv;
 use super::synthetic::{BubbleLook, footer_reserve, session_bubble_quoted, session_bubble_rich};
 use super::*;
@@ -188,6 +187,7 @@ pub(super) fn album_history_row(
     sender_avatar: Option<(String, Option<PathBuf>)>,
     // Settings → Appearance: font size + bubble/plain style.
     look: BubbleLook,
+    session: Option<&Session>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let Some(first) = messages.first() else {
@@ -241,6 +241,7 @@ pub(super) fn album_history_row(
             downloading,
             media_roots,
             0,
+            super::forward_drag_source::drag_for_media(session, message),
             cx,
         );
         mosaic = mosaic.child(tile);
@@ -452,6 +453,8 @@ pub(super) fn album_tile(
     // Which item of the message the tile is (a bought paid-media album
     // holds several under one message id); 0 for ordinary albums.
     item_offset: usize,
+    // What a press on the tile that moves picks up, when it may.
+    drag: Option<quill::forward_drag::ForwardDrag>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = (message.id.0 as u64)
@@ -471,9 +474,7 @@ pub(super) fn album_tile(
     // (kit buttons do not).
     let frame = div()
         .id(("album-tile", row_id))
-        .absolute()
-        .left(px(part.x as f32))
-        .top(px(part.y as f32))
+        .test_support()
         .w(px(part.width as f32))
         .h(px(part.height as f32))
         .map(|this| corners.round(this))
@@ -485,143 +486,173 @@ pub(super) fn album_tile(
         .on_click(cx.listener(move |this, _, _, cx| {
             this.open_media_viewer_at(chat_id, message_id, item_offset, cx);
         }));
-    match &message.content {
-        MessageContent::Photo(photo) => {
-            if let Some(path) = photo_display_path(photo, files, media_roots) {
-                frame
-                    .child(
-                        img(super::image_budget::sized_media(
-                            &path,
-                            (px(part.width as f32), px(part.height as f32)),
-                            photo
-                                .largest_size()
-                                .or_else(|| photo.thumb_size())
-                                .map(|size| (size.width, size.height)),
-                            super::image_budget::Fit::Cover,
-                        ))
-                        .id(("album-photo", row_id))
-                        .w(px(part.width as f32))
-                        .h(px(part.height as f32))
-                        .aspect_ratio(part.width.max(1) as f32 / part.height.max(1) as f32)
-                        .map(|this| corners.round(this))
-                        .object_fit(ObjectFit::Cover)
-                        .with_fallback(move || {
-                            div()
-                                .size_full()
-                                .map(|this| corners.round(this))
-                                .bg(fill_muted())
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .child(tr(keys::Q_MEDIA_PHOTO_2))
-                                .into_any_element()
-                        }),
-                    )
-                    .into_any_element()
-            } else {
-                let open_id = photo.open_file_id().unwrap_or(FileId(0));
-                let downloading_now = file_is_downloading(open_id, files, downloading);
-                frame
-                    .bg(fill_muted())
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(text_bright())
-                            .child(if downloading_now {
+    let tile =
+        match &message.content {
+            MessageContent::Photo(photo) => {
+                if let Some(path) = photo_display_path(photo, files, media_roots) {
+                    frame
+                        .child(
+                            img(super::image_budget::sized_media(
+                                &path,
+                                (px(part.width as f32), px(part.height as f32)),
+                                photo
+                                    .largest_size()
+                                    .or_else(|| photo.thumb_size())
+                                    .map(|size| (size.width, size.height)),
+                                super::image_budget::Fit::Cover,
+                            ))
+                            .id(("album-photo", row_id))
+                            .w(px(part.width as f32))
+                            .h(px(part.height as f32))
+                            .aspect_ratio(part.width.max(1) as f32 / part.height.max(1) as f32)
+                            .map(|this| corners.round(this))
+                            .object_fit(ObjectFit::Cover)
+                            .with_fallback(move || {
+                                div()
+                                    .size_full()
+                                    .map(|this| corners.round(this))
+                                    .bg(fill_muted())
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(tr(keys::Q_MEDIA_PHOTO_2))
+                                    .into_any_element()
+                            }),
+                        )
+                        .into_any_element()
+                } else {
+                    let open_id = photo.open_file_id().unwrap_or(FileId(0));
+                    let downloading_now = file_is_downloading(open_id, files, downloading);
+                    frame
+                        .bg(fill_muted())
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(div().text_xs().text_color(text_bright()).child(
+                            if downloading_now {
                                 tr(keys::Q_MEDIA_PHOTO_DOWNLOADING)
                             } else {
                                 tr(keys::Q_MEDIA_PHOTO_2)
-                            }),
-                    )
-                    .into_any_element()
-            }
-        }
-        MessageContent::Video(video) => {
-            let play_id = video.play_file_id().unwrap_or(FileId(0));
-            let thumb_id = video.thumb_file_id().unwrap_or(FileId(0));
-            let message_id = message.id;
-            let visual = [thumb_id, play_id].into_iter().find_map(|id| {
-                if id.0 == 0 {
-                    return None;
+                            },
+                        ))
+                        .into_any_element()
                 }
-                files
-                    .get(&id.0)
-                    .and_then(|file| file.usable_path())
-                    .and_then(|path| sandboxed_display_path(path, media_roots))
-            });
-            let duration = format_voice_duration(video.duration);
-            let picture = if let Some(path) = visual {
-                img(super::image_budget::sized_media(
-                    &path,
-                    (px(part.width as f32), px(part.height as f32)),
-                    Some((video.width, video.height)),
-                    super::image_budget::Fit::Cover,
-                ))
-                .id(("album-video", row_id))
-                .w(px(part.width as f32))
-                .h(px(part.height as f32))
-                .aspect_ratio(part.width.max(1) as f32 / part.height.max(1) as f32)
-                .map(|this| corners.round(this))
-                .object_fit(ObjectFit::Cover)
-                .with_fallback(move || {
+            }
+            MessageContent::Video(video) => {
+                let play_id = video.play_file_id().unwrap_or(FileId(0));
+                let thumb_id = video.thumb_file_id().unwrap_or(FileId(0));
+                let message_id = message.id;
+                let visual = [thumb_id, play_id].into_iter().find_map(|id| {
+                    if id.0 == 0 {
+                        return None;
+                    }
+                    files
+                        .get(&id.0)
+                        .and_then(|file| file.usable_path())
+                        .and_then(|path| sandboxed_display_path(path, media_roots))
+                });
+                let duration = format_voice_duration(video.duration);
+                let picture = if let Some(path) = visual {
+                    img(super::image_budget::sized_media(
+                        &path,
+                        (px(part.width as f32), px(part.height as f32)),
+                        Some((video.width, video.height)),
+                        super::image_budget::Fit::Cover,
+                    ))
+                    .id(("album-video", row_id))
+                    .w(px(part.width as f32))
+                    .h(px(part.height as f32))
+                    .aspect_ratio(part.width.max(1) as f32 / part.height.max(1) as f32)
+                    .map(|this| corners.round(this))
+                    .object_fit(ObjectFit::Cover)
+                    .with_fallback(move || {
+                        div()
+                            .size_full()
+                            .map(|this| corners.round(this))
+                            .bg(success_bg())
+                            .into_any_element()
+                    })
+                    .into_any_element()
+                } else {
                     div()
                         .size_full()
                         .map(|this| corners.round(this))
                         .bg(success_bg())
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(text_on_fill())
+                                .child(tr(keys::Q_MEDIA_VIDEO)),
+                        )
                         .into_any_element()
-                })
-                .into_any_element()
-            } else {
-                div()
-                    .size_full()
-                    .map(|this| corners.round(this))
-                    .bg(success_bg())
-                    .flex()
-                    .items_center()
-                    .justify_center()
+                };
+                frame
+                    .child(picture)
                     .child(
                         div()
+                            .absolute()
+                            .bottom(px(4.))
+                            .left(px(4.))
+                            .px_1()
+                            .rounded_sm()
+                            .bg(bg_tile())
                             .text_xs()
-                            .text_color(text_on_fill())
-                            .child(tr(keys::Q_MEDIA_VIDEO)),
+                            .text_color(text_bright())
+                            .child(tr_with(
+                                keys::Q_MEDIA_VIDEO_2,
+                                &[("duration", &duration.to_string())],
+                            )),
+                    )
+                    .child(
+                        // Laid over the whole tile and centred, so the button
+                        // never joins the flow below the picture (where the
+                        // tile's clip hid it).
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .size_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                div().id(("album-play-slot", row_id)).test_support().child(
+                                    Button::new(format!("album-play-{row_id}"))
+                                        .label(tr(keys::Q_MEDIA_PLAY))
+                                        // The press bubbles, so the tile's drag can start
+                                        // from the button; a click stops here instead of
+                                        // also opening the viewer through the tile's own
+                                        // click.
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            cx.stop_propagation();
+                                            this.open_media_viewer_at(
+                                                chat_id,
+                                                message_id,
+                                                item_offset,
+                                                cx,
+                                            );
+                                        })),
+                                ),
+                            ),
                     )
                     .into_any_element()
-            };
-            frame
-                .child(picture)
-                .child(
-                    div()
-                        .absolute()
-                        .bottom(px(4.))
-                        .left(px(4.))
-                        .px_1()
-                        .rounded_sm()
-                        .bg(bg_tile())
-                        .text_xs()
-                        .text_color(text_bright())
-                        .child(tr_with(
-                            keys::Q_MEDIA_VIDEO_2,
-                            &[("duration", &duration.to_string())],
-                        )),
-                )
-                .child(
-                    Button::new(format!("album-play-{row_id}"))
-                        .label(tr(keys::Q_MEDIA_PLAY))
-                        .ghost()
-                        // Kit buttons let the press bubble: without this the
-                        // tile's own click also opens the viewer.
-                        .swallow_press()
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.open_media_viewer_at(chat_id, message_id, item_offset, cx);
-                        })),
-                )
-                .into_any_element()
-        }
-        _ => frame.into_any_element(),
-    }
+            }
+            _ => frame.into_any_element(),
+        };
+    // A press on a tile that moves picks up that one message (`GroupPart`),
+    // not the album; the tile's own click stays on `frame`, inside.
+    let spot = div()
+        .id(("album-drag", row_id))
+        .absolute()
+        .left(px(part.x as f32))
+        .top(px(part.y as f32))
+        .w(px(part.width as f32))
+        .h(px(part.height as f32))
+        .child(tile);
+    super::forward_drag_source::draggable(spot, drag).into_any_element()
 }
 
 /// A service message ("X joined", "pinned a message", timers, screenshots)

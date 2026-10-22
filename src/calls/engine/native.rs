@@ -200,6 +200,13 @@ pub(crate) unsafe extern "C" fn frames_trampoline(
             let Some(is_screen) = p2p_frame_kind(mode, device) else {
                 return;
             };
+            // The peer's shared screen comes over the camera track.
+            let is_screen = is_screen
+                || (!is_local
+                    && shared
+                        .peer_screencasting
+                        .lock_or_recover()
+                        .contains(&user_id));
             let Some(call_id) = shared.user_to_call.lock_or_recover().get(&user_id).copied() else {
                 return;
             };
@@ -358,13 +365,22 @@ pub(crate) unsafe extern "C" fn remote_source_trampoline(
         // Phase C2j: camera and screen-share states ride separate hooks so the
         // driver can clear retained screen frames without touching the camera
         // state. Audio and other devices never reach this path.
+        let video = remote_video_state_from(state.state);
+        if state.device == NTG_STREAM_DEVICE_SCREEN {
+            let mut casting = shared.peer_screencasting.lock_or_recover();
+            if video == RemoteVideoState::Inactive {
+                casting.remove(&user_id);
+            } else {
+                casting.insert(user_id);
+            }
+        }
         let hook = if state.device == NTG_STREAM_DEVICE_SCREEN {
             shared.remote_screen_hook.lock_or_recover().clone()
         } else {
             shared.remote_video_hook.lock_or_recover().clone()
         };
         if let (Some(call_id), Some(hook)) = (call_id, hook) {
-            hook(call_id, remote_video_state_from(state.state));
+            hook(call_id, video);
         }
     })
 }
@@ -384,17 +400,18 @@ pub(crate) fn remote_video_state_from(status: ntg_stream_status) -> RemoteVideoS
     }
 }
 
-/// Phase C2e: honest no-camera decision for the driver (session 2): a video
-/// call is only wanted when a camera exists; otherwise video stays off.
-pub fn video_wanted(is_video_call: bool, devices: &[MediaDevice]) -> (bool, Option<String>) {
-    if !is_video_call {
-        return (false, None);
-    }
-    devices
+/// The camera a call sends from: the one picked in the call menu while
+/// the engine still lists it, else the first camera listed. `None` when
+/// there is no camera (ntgcalls opens only a listed device, by its id).
+pub fn pick_camera(selected: Option<&str>, devices: &[MediaDevice]) -> Option<String> {
+    let mut cameras = devices
         .iter()
-        .find(|device| device.kind == MediaDeviceKind::Camera)
-        .map(|camera| (true, Some(camera.id.clone())))
-        .unwrap_or((false, None))
+        .filter(|device| device.kind == MediaDeviceKind::Camera);
+    let first = cameras.clone().next();
+    cameras
+        .find(|device| Some(device.id.as_str()) == selected)
+        .or(first)
+        .map(|device| device.id.clone())
 }
 
 pub(crate) fn c_strings(values: &[String]) -> Result<Vec<CString>, EngineError> {

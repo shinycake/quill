@@ -201,7 +201,37 @@ impl QuillApp {
     /// C2g applies the flag to the native camera capture in the driver
     /// pump once the transport is connected.
     pub(super) fn toggle_group_call_video(&mut self, cx: &mut Context<Self>) {
+        let turning_on = self.live.as_ref().is_some_and(|live| {
+            live.driver
+                .session
+                .calls
+                .active_group_call
+                .as_ref()
+                .is_some_and(|call| !call.is_my_video_enabled)
+        });
+        if turning_on {
+            self.with_camera_access(Self::flip_group_call_video, cx);
+        } else {
+            self.flip_group_call_video(cx);
+        }
+    }
+
+    fn flip_group_call_video(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
+            let turning_on = live
+                .driver
+                .session
+                .calls
+                .active_group_call
+                .as_ref()
+                .is_some_and(|call| !call.is_my_video_enabled);
+            // Others would see your camera as on with nothing sent.
+            if turning_on && let Err(err) = live.driver.camera_to_turn_on() {
+                self.connection
+                    .set_note(super::calls::camera_toggle_note(Err(err), false));
+                cx.notify();
+                return;
+            }
             self.connection
                 .set_note(match live.driver.toggle_group_call_my_video() {
                     Ok(_) => StatusNote::silent(tr(keys::Q_AV_TOGGLING_VIDEO)),

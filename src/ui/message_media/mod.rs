@@ -2,7 +2,6 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::nested_click::SwallowPress;
 use super::pressable::PressableDiv;
 use super::*;
 use gpui_kit::component::button::*;

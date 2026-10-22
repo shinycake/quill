@@ -14,7 +14,7 @@ use crate::telegram::requests::{
     VoiceNoteSend, compose_rich_message_with_ai, compose_text_with_ai, create_rich_message_with_ai,
     delete_messages, edit_media_content, edit_message_caption, edit_message_media,
     edit_message_scheduling_state, edit_message_text, fix_rich_message_with_ai, fix_text_with_ai,
-    forward_messages_with_options, get_chat_history, get_chat_scheduled_messages,
+    forward_messages_to_topic, get_chat_history, get_chat_scheduled_messages,
     get_full_rich_message, input_message_photo, input_message_video, open_message_content,
     recognize_speech, resend_messages, send_animation, send_document, send_local_animation,
     send_message_album, send_photo, send_rich_message, send_sticker, send_text, send_video,

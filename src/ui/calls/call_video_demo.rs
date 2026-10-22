@@ -4,6 +4,8 @@
 //! feeds. The call window opens beside the main window; capture it with
 //! `QUILL_DEMO_CAPTURE_WINDOWS=1`. `QUILL_DEMO_SCREEN=1`: Maya shares her
 //! screen instead. `QUILL_DEMO_DEVICES=1`: the device menu is open.
+//! `QUILL_DEMO_VOICE=1`: the call started as a voice call and both
+//! cameras were turned on mid-call.
 #![deny(clippy::indexing_slicing)]
 
 use super::demo_feed::{DemoFeed, demo_feed};
@@ -108,7 +110,7 @@ pub(in crate::ui) fn seed_video_call(
         id: CALL,
         user_id: PEER,
         is_outgoing: true,
-        is_video: true,
+        is_video: std::env::var_os("QUILL_DEMO_VOICE").is_none(),
         state: CallState::Ready,
         started_at: ready_at,
         ready_at: Some(ready_at),

@@ -12,6 +12,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ids::{ChatId, MessageId};
+use crate::telegram::envelope::MessageContent;
 use std::sync::Arc;
 
 /// The messages a drag carries and the chat they come from.
@@ -118,9 +119,42 @@ pub fn list_accepts(one_column: bool) -> bool {
     !one_column
 }
 
+/// Whether a press on this message's media may pick the message up
+/// (`media()->dragItemByHandler`): the picture, video, GIF, sticker, round
+/// video, dice and document thumbnail. Voice notes and audio rows keep their
+/// press for the seek bar, as tdesktop only lets their play button drag.
+pub fn media_press_drags(content: &MessageContent) -> bool {
+    matches!(
+        content,
+        MessageContent::Photo(_)
+            | MessageContent::Video(_)
+            | MessageContent::Animation(_)
+            | MessageContent::Sticker(_)
+            | MessageContent::VideoNote(_)
+            | MessageContent::Dice(_)
+            | MessageContent::Document(_)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_dice_drags_by_a_press_but_service_messages_do_not() {
+        use crate::telegram::envelope::DiceContent;
+        let dice = MessageContent::Dice(DiceContent {
+            emoji: "🎲".into(),
+            value: 3,
+            initial: None,
+            landing: None,
+        });
+        assert!(media_press_drags(&dice));
+        assert!(!media_press_drags(&MessageContent::ScreenshotTaken));
+        assert!(!media_press_drags(
+            &MessageContent::ChatRemovedFromCommunity
+        ));
+    }
 
     const CHAT: ChatId = ChatId(7);
 
@@ -142,6 +176,24 @@ mod tests {
         let drag =
             ForwardDrag::begin(CHAT, MessageId(20), &ids(&[10, 30]), false, |_| true).unwrap();
         assert_eq!(drag.ids(), ids(&[20]).as_slice());
+    }
+
+    #[test]
+    fn a_press_on_media_carries_that_message_even_with_a_selection_elsewhere() {
+        let drag = ForwardDrag::begin(CHAT, MessageId(40), &[], false, |_| true).unwrap();
+        assert_eq!(drag.ids(), ids(&[40]).as_slice());
+    }
+
+    #[test]
+    fn a_media_press_in_a_protected_or_unsent_message_refuses() {
+        assert_eq!(
+            ForwardDrag::begin(CHAT, MessageId(40), &[], true, |_| true),
+            Err(Refusal::Protected)
+        );
+        assert_eq!(
+            ForwardDrag::begin(CHAT, MessageId(40), &[], false, |_| false),
+            Err(Refusal::NotForwardable)
+        );
     }
 
     #[test]

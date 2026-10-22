@@ -82,6 +82,8 @@ pub(crate) struct ChatListUi {
     pub(super) pending_story_open: Option<super::story_viewer::PendingStoryOpen>,
     /// A file drag over the rows.
     pub(super) drop_on_row: super::chat_list::DropOnRow,
+    /// A drop on a forum row waiting for its topic (`DialogKind::DropTopic`).
+    pub(super) drop_topic: Option<super::chat_list::DropTopic>,
     /// The keyboard selection in the list and in its search results.
     pub(super) keys: super::chat_list_keys::ChatListKeys,
 }
@@ -116,6 +118,7 @@ impl ChatListUi {
             pending_close_secret_chat: None,
             pending_story_open: None,
             drop_on_row: Default::default(),
+            drop_topic: None,
             keys: Default::default(),
         }
     }

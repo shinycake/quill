@@ -810,11 +810,7 @@ pub(in crate::ui) fn session_history_row(
         }
     });
     let extra_media = extra_media.map(|media| {
-        if media_led {
-            media
-        } else {
-            div().mt_2().child(media).into_any_element()
-        }
+        crate::ui::forward_drag_source::media_block(session, message, media, media_led)
     });
     let extra_media_present = extra_media.is_some();
     let extra_is_empty =

@@ -63,6 +63,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.maybe_fetch_forum_topics(chat_id)
     }
 
+    /// Asks for the first page of `chat_id`'s topics unless they are loaded
+    /// or on their way (the topic chooser of a file or forward drop on a
+    /// chat that is not open).
+    pub fn load_forum_topics(&mut self, chat_id: ChatId) -> Result<(), ConnectSendError> {
+        self.maybe_fetch_forum_topics(chat_id)
+    }
+
     pub(crate) fn maybe_fetch_forum_topics(
         &mut self,
         chat_id: ChatId,

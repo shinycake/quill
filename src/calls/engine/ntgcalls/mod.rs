@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 mod call_engine;
 mod external;
+mod log;
 mod stream_audio;
 
 /// Phase C2b: safe driver-thread adapter over the runtime-loaded C ABI.
@@ -75,6 +76,7 @@ impl NtgcallsEngine {
         // SAFETY: ntgcalls allocated the successful protocol output and its
         // matching free function accepts the same stack wrapper by pointer.
         unsafe { (api.ntg_protocol_free)(&mut raw) };
+        log::install(&api);
 
         Ok(Self {
             api,
@@ -291,7 +293,7 @@ impl NtgcallsEngine {
         let capture = ntg_media_description {
             microphone: &mut mic_audio,
             speaker: null_mut(),
-            camera: if media.camera_enabled {
+            camera: if camera.is_some() {
                 &mut camera_video
             } else {
                 null_mut()
@@ -509,7 +511,7 @@ impl NtgcallsEngine {
             width: 640,
             height: 480,
             fps: 30,
-            // NULL input selects the default device.
+            // ntgcalls opens the named device only; a NULL input fails.
             input: camera
                 .as_ref()
                 .map_or(null_mut(), |value| value.as_ptr().cast_mut()),
@@ -525,7 +527,7 @@ impl NtgcallsEngine {
             // Phase C2i: screen share replaces the camera — ntgcalls
             // rejects camera+screen in Capture mode
             // (`stream_manager.cpp:69`, v3.0.0).
-            camera: if config.camera_enabled && !config.screen_share_on {
+            camera: if camera.is_some() && !config.screen_share_on {
                 &mut camera_video
             } else {
                 null_mut()
@@ -546,6 +548,10 @@ impl NtgcallsEngine {
                 capture,
             )
         };
+        crate::advanced::debug_mode::debug_log(&format!(
+            "[call] {call_id} capture camera {:?} screen {} -> {rc}",
+            config.camera, config.screen_share_on
+        ));
         if rc != NTG_OK {
             return Err(EngineError::Engine {
                 op: "ntg_set_stream_sources",
@@ -757,3 +763,6 @@ mod playback_tests {
 
 #[cfg(test)]
 mod native_tests;
+
+#[cfg(test)]
+mod loopback_tests;

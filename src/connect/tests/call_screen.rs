@@ -111,7 +111,7 @@ fn group_driver() -> (
     handle
         .create_group_call(77, -100, crate::calls::engine::GroupCallRole::Member)
         .unwrap();
-    handle.connect_group_call(77, "answer", false).unwrap();
+    handle.connect_group_call(77, "answer", None).unwrap();
     let screens = install_fake_screen(&mut driver);
     (dir, driver, handle, screens)
 }
@@ -309,7 +309,6 @@ fn a_private_call_shares_without_pause_requests() {
                 p2p_allowed: false,
                 mic_input: None,
                 speaker_input: None,
-                video_enabled: false,
                 camera_input: None,
             },
         )
