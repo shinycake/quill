@@ -127,7 +127,27 @@ impl QuillApp {
         start: fn(&mut Self, &mut Context<Self>),
         cx: &mut Context<Self>,
     ) {
-        let devices: &[bool] = if camera { &[true, false] } else { &[false] };
+        let devices: &'static [bool] = if camera { &[true, false] } else { &[false] };
+        self.with_device_access(devices, start, cx);
+    }
+
+    /// Run `start` once the camera is allowed (a call turning it on), or
+    /// say why it can't be used.
+    pub(super) fn with_camera_access(
+        &mut self,
+        start: fn(&mut Self, &mut Context<Self>),
+        cx: &mut Context<Self>,
+    ) {
+        self.with_device_access(&[true], start, cx);
+    }
+
+    /// `devices`: `true` for the camera, `false` for the microphone.
+    fn with_device_access(
+        &mut self,
+        devices: &'static [bool],
+        start: fn(&mut Self, &mut Context<Self>),
+        cx: &mut Context<Self>,
+    ) {
         for &device in devices {
             match access(device) {
                 Access::Granted => {}
@@ -139,7 +159,7 @@ impl QuillApp {
                 }
                 Access::Undetermined => {
                     self.connection.set_note(StatusNote::silent(format!(
-                        "Allow Quill to use the {} to record.",
+                        "Allow Quill to use the {}.",
                         if device { "camera" } else { "microphone" }
                     )));
                     cx.notify();
@@ -161,7 +181,7 @@ impl QuillApp {
                         };
                         let _ = this.update(cx, |this, cx| {
                             if granted {
-                                this.with_capture_access(camera, start, cx);
+                                this.with_device_access(devices, start, cx);
                             } else {
                                 this.connection
                                     .set_note(StatusNote::error(denied_note(device)));

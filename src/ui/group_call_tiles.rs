@@ -72,6 +72,11 @@ impl QuillApp {
             return Some(player.clone());
         }
         let player = VideoPlayer::live(sink, Purpose::Live { tile: true }, cx);
+        // Your camera reads as a mirror, as tdesktop's self tile does
+        // (`VideoTile::mirror`); screens and others' cameras never flip.
+        if matches!(key, LiveKey::Local { .. }) {
+            player.set_live_mirrored(true);
+        }
         if let Some(old) = self.group_call.players.insert(key, player.clone()) {
             old.release_live(cx);
         }

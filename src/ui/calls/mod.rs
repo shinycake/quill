@@ -220,6 +220,24 @@ impl QuillApp {
     /// surfaces in the status note without flipping the flag (driver
     /// contract). Demo: flips the flag only, no live Telegram.
     pub(super) fn toggle_call_camera(&mut self, cx: &mut Context<Self>) {
+        // Turning the camera on asks macOS (or checks Windows privacy)
+        // first, so a refusal is named instead of sending a black camera.
+        let turning_on = self.live.as_ref().is_some_and(|live| {
+            live.driver
+                .session
+                .calls
+                .active_call
+                .as_ref()
+                .is_some_and(|call| !call.camera_on)
+        });
+        if turning_on {
+            self.with_camera_access(Self::flip_call_camera, cx);
+        } else {
+            self.flip_call_camera(cx);
+        }
+    }
+
+    fn flip_call_camera(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let Some(call) = live.driver.session.calls.active_call.as_ref() else {
                 return;

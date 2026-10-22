@@ -201,6 +201,22 @@ impl QuillApp {
     /// C2g applies the flag to the native camera capture in the driver
     /// pump once the transport is connected.
     pub(super) fn toggle_group_call_video(&mut self, cx: &mut Context<Self>) {
+        let turning_on = self.live.as_ref().is_some_and(|live| {
+            live.driver
+                .session
+                .calls
+                .active_group_call
+                .as_ref()
+                .is_some_and(|call| !call.is_my_video_enabled)
+        });
+        if turning_on {
+            self.with_camera_access(Self::flip_group_call_video, cx);
+        } else {
+            self.flip_group_call_video(cx);
+        }
+    }
+
+    fn flip_group_call_video(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let turning_on = live
                 .driver

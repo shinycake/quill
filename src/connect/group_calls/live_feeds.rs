@@ -194,6 +194,30 @@ impl<S: JsonSender> ConnectDriver<S> {
         for source in ended {
             source.end(LiveEnd::Left);
         }
+        // Open the feeds of others' video now, not when a tile first
+        // asks: a static screen share may send its only frame before the
+        // tile draws, and the hook drops frames that have no feed.
+        let Some(call) = call else {
+            return;
+        };
+        for participant in &call.participants {
+            let MessageSender::User { user_id } = participant.participant_id else {
+                continue;
+            };
+            if participant.is_current_user {
+                continue;
+            }
+            for screen in [false, true] {
+                let key = LiveKey::Video {
+                    call_id: group_call_id,
+                    user_id,
+                    screen,
+                };
+                if call_has_video(call, key) {
+                    let _ = self.feed_source(key);
+                }
+            }
+        }
     }
 
     /// After every engine pump and camera toggle: end and drop the 1:1
@@ -213,6 +237,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         });
         for source in ended {
             source.end(LiveEnd::Left);
+        }
+        // The peer's pictures open as soon as they are on, for the same
+        // reason as a group call's (`sync_call_feeds`).
+        if let Some(call) = call {
+            for screen in [false, true] {
+                let key = LiveKey::Call {
+                    call_id: call.id,
+                    local: false,
+                    screen,
+                };
+                if one_to_one_has_video(call, key) {
+                    let _ = self.feed_source(key);
+                }
+            }
         }
     }
 
