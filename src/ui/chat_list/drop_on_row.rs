@@ -288,7 +288,7 @@ impl QuillApp {
             self.connection.set_note(StatusNote::error(note));
             return;
         }
-        if self.set_forward_bar(chat_id, drag, cx) {
+        if self.set_forward_bar(chat_id, None, drag, cx) {
             self.select_listed_chat(chat_id, window, cx);
         }
     }
@@ -299,6 +299,7 @@ impl QuillApp {
     pub(in crate::ui) fn set_forward_bar(
         &mut self,
         chat_id: ChatId,
+        topic: Option<i32>,
         drag: &ForwardDrag,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -311,6 +312,7 @@ impl QuillApp {
             return false;
         };
         draft.message_ids = drag.ids().to_vec();
+        draft.topic_id = topic;
         self.share.pending_forward = Some(draft);
         self.share.forward_bar_dest = Some(chat_id);
         self.share.forward_picker_open = false;

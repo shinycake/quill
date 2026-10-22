@@ -254,13 +254,17 @@ fn message_centre(
     vcx: &mut VisualTestContext,
     id: MessageId,
 ) -> Point<gpui_kit::Pixels> {
-    app.read_with(vcx, |app, _| {
+    // A taller layout (other fonts) can leave the row below the fold.
+    app.update(vcx, |app, cx| app.jump_to_latest_messages(cx));
+    frames(vcx);
+    let at = app.read_with(vcx, |app, _| {
         let hits = app.history.hit_rows.borrow();
         hits.iter()
             .find_map(|(ix, bounds)| match app.history.rows.get(*ix) {
                 Some(crate::ui::HistoryRow::Single(inputs)) if inputs.message.id == id => {
-                    // Off the bubble, where the selection overlay takes the press.
-                    let y = bounds.bottom() - px(10.);
+                    // Off the bubble, low in the row, clear of the hover toolbar
+                    // and where the selection overlay takes the press.
+                    let y = bounds.bottom() - px(35.);
                     Some(if inputs.message.is_outgoing {
                         point(bounds.left() + px(6.), y)
                     } else {
@@ -269,24 +273,36 @@ fn message_centre(
                 }
                 _ => None,
             })
-            .expect("the message is painted")
-    })
+    });
+    assert!(at.is_some(), "message {id:?} is painted");
+    let at = at.unwrap_or_default();
+    // The composer takes the bottom of the window.
+    let window = vcx.update(|window, _| window.viewport_size());
+    assert!(
+        at.y > px(60.) && at.y < window.height - px(120.),
+        "the press point {at:?} is off the history of a {window:?} window"
+    );
+    at
 }
 
 /// Lifts the selected messages of the selection demo and drops them on the
 /// row of chat 13.
 fn drop_selection_on_13(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     let from = message_centre(app, vcx, MessageId(101));
-    let to = row_centre(vcx, 13);
     let none = Modifiers::default();
     vcx.simulate_mouse_move(from, None, none);
     vcx.simulate_mouse_down(from, MouseButton::Left, none);
+    let aim = row_centre(vcx, 13);
     for step in 1..=4 {
         let t = step as f32 / 4.;
-        let at = point(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t);
+        let at = point(from.x + (aim.x - from.x) * t, from.y + (aim.y - from.y) * t);
         vcx.simulate_mouse_move(at, Some(MouseButton::Left), none);
         frames(vcx);
     }
+    // The list may have reflowed while the drag started.
+    let to = row_centre(vcx, 13);
+    vcx.simulate_mouse_move(to, Some(MouseButton::Left), none);
+    frames(vcx);
     vcx.simulate_mouse_up(to, MouseButton::Left, none);
     frames(vcx);
 }
@@ -314,6 +330,11 @@ fn a_forward_drop_on_a_forum_row_asks_for_a_topic_then_waits_in_its_bar(cx: &mut
             .as_ref()
             .map(|d| d.message_ids.clone());
         assert_eq!(ids, Some(vec![MessageId(101), MessageId(102)]));
+        // The topic is bound when it is picked, not when Send runs.
+        assert_eq!(
+            app.share.pending_forward.as_ref().and_then(|d| d.topic_id),
+            Some(2)
+        );
     });
 }
 
@@ -394,4 +415,59 @@ fn the_payload_remembers_what_a_file_drop_brought(cx: &mut TestAppContext) {
             DropPayload::Forward(_) => panic!("a file drop"),
         }
     });
+}
+
+fn choose(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, topic: Option<i32>) {
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| app.choose_drop_topic(topic, window, cx));
+    });
+    frames(vcx);
+}
+
+#[gpui_kit::test]
+fn a_topic_that_vanished_keeps_the_chooser_open_and_the_chat_closed(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx, "ready-forum-row-topics");
+    let vcx = &mut vcx;
+    let chat = open_chat(&app, vcx);
+    drop_file_on(vcx, 71);
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut()
+            && let Some(topics) = session.threads.forum_topics.get_mut(&71)
+        {
+            topics.retain(|t| t.forum_topic_id != 4);
+        }
+    });
+    choose(&app, vcx, Some(4));
+    assert!(chooser_open(&app, vcx));
+    assert_eq!(open_chat(&app, vcx), chat);
+    assert_eq!(attached(&app, vcx), 0);
+}
+
+#[gpui_kit::test]
+fn all_messages_leaves_the_topic_the_chat_was_open_in(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx, "ready-forum-row-topics");
+    let vcx = &mut vcx;
+    drop_file_on(vcx, 71);
+    pick(vcx, 4);
+    assert_eq!(open_topic(&app, vcx), Some(4));
+    drop_file_on(vcx, 71);
+    choose(&app, vcx, None);
+    assert_eq!(open_chat(&app, vcx), Some(ChatId(71)));
+    assert_eq!(open_topic(&app, vcx), None);
+}
+
+#[gpui_kit::test]
+fn a_chooser_closes_when_its_forum_is_no_longer_one(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx, "ready-forum-row-topics");
+    let vcx = &mut vcx;
+    drop_file_on(vcx, 71);
+    assert!(chooser_open(&app, vcx));
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.chats.remove(&71);
+        }
+    });
+    app.update(vcx, |_, cx| cx.notify());
+    frames(vcx);
+    assert!(!chooser_open(&app, vcx));
 }

@@ -334,6 +334,7 @@ impl QuillShell {
 
 impl Render for QuillShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.app.update(cx, |app, _| app.prune_drop_topic());
         self.sync_kit_dialogs(window, cx);
         div()
             .size_full()

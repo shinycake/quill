@@ -67,6 +67,9 @@ pub struct ForwardDraft {
     /// M1: `forwardMessages.remove_caption` — strip captions on the copies
     /// (ignored by TDLib unless `send_copy` is true).
     pub remove_caption: bool,
+    /// The forum topic of the destination chosen when the drop picked it
+    /// (`forwardMessages.topic_id`); `None` sends to the chat itself.
+    pub topic_id: Option<i32>,
 }
 
 impl ForwardDraft {
@@ -80,6 +83,7 @@ impl ForwardDraft {
             message_ids: vec![message_id],
             send_copy: false,
             remove_caption: false,
+            topic_id: None,
         })
     }
 

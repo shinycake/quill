@@ -225,3 +225,4 @@
 "qll_chatlist_unread_chats_2" = "{count} unread chats";
 "qll_chatlist_waiting_for_the_qr_payload" = "Waiting for the QR payload from Telegram…";
 "qll_chatlist_you_are_all_caught_up" = "You are all caught up.";
+"qll_chatlist_topics_could_not_load" = "Could not load the topics.";

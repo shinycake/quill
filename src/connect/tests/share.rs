@@ -267,7 +267,7 @@ fn send_as_senders_load_and_set_only_listed_unlocked_identities() {
 }
 
 #[test]
-fn a_forward_into_the_open_chat_lands_in_the_open_topic_only() {
+fn a_forward_goes_to_the_topic_its_draft_picked_and_not_to_the_open_one() {
     let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
     let _keep = dir;
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
@@ -281,12 +281,15 @@ fn a_forward_into_the_open_chat_lands_in_the_open_topic_only() {
     }
     ingest(&mut driver, SOURCE_MESSAGE, &seq, &sink);
     driver.select_chat(ChatId(7)).unwrap();
-    let draft = ForwardDraft::from_message(ChatId(7), MessageId(50), false).unwrap();
+    let mut draft = ForwardDraft::from_message(ChatId(7), MessageId(50), false).unwrap();
     driver.select_chat(ChatId(8)).unwrap();
-    driver.session.open_topic = Some(5);
+    // Another topic is open when Send runs.
+    driver.session.open_topic = Some(6);
+    draft.topic_id = Some(5);
     driver
         .forward_messages_with_options(ChatId(8), &draft, &SendOptions::default())
         .unwrap();
+    draft.topic_id = None;
     driver
         .forward_messages_with_options(ChatId(9), &draft, &SendOptions::default())
         .unwrap();

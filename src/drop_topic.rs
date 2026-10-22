@@ -27,11 +27,12 @@ pub fn name_matches(query: &str, name: &str) -> bool {
         .all(|want| have.iter().any(|word| word.starts_with(want.as_str())))
 }
 
-/// The topics the chooser lists for `query`, in the order given.
+/// The topics the chooser lists for `query`, in the order given. The
+/// General topic a forum hides above its list is not one of them.
 pub fn topics_for<'a>(topics: &'a [ForumTopic], query: &str) -> Vec<&'a ForumTopic> {
     topics
         .iter()
-        .filter(|topic| name_matches(query, &topic.name))
+        .filter(|topic| !topic.is_hidden && name_matches(query, &topic.name))
         .collect()
 }
 
@@ -98,5 +99,17 @@ mod tests {
         assert_eq!(ids, vec![2, 3]);
         assert_eq!(topics_for(&all, "").len(), 3);
         assert!(topics_for(&all, "zzz").is_empty());
+    }
+
+    #[test]
+    fn the_hidden_general_topic_is_not_listed() {
+        let mut general = topic(1, "General");
+        general.is_hidden = true;
+        let all = vec![general, topic(2, "Releases")];
+        let ids: Vec<i32> = topics_for(&all, "")
+            .iter()
+            .map(|t| t.forum_topic_id)
+            .collect();
+        assert_eq!(ids, vec![2]);
     }
 }

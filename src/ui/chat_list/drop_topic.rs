@@ -34,6 +34,8 @@ pub(in crate::ui) struct DropTopic {
     chat_id: ChatId,
     payload: DropPayload,
     search: Entity<TextareaState>,
+    /// The request for the forum's topics could not be sent.
+    load_failed: bool,
 }
 
 /// One row of the chooser.
@@ -71,13 +73,15 @@ impl QuillApp {
         )
         .detach();
         // The topics of a forum that is not open are not loaded yet.
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.load_forum_topics(chat_id);
-        }
+        let load_failed = self
+            .live
+            .as_mut()
+            .is_some_and(|live| live.driver.load_forum_topics(chat_id).is_err());
         self.chat_list.drop_topic = Some(DropTopic {
             chat_id,
             payload,
             search,
+            load_failed,
         });
         cx.notify();
     }
@@ -156,6 +160,29 @@ impl QuillApp {
             || session.bot_topics(waiting.chat_id).is_some()
     }
 
+    /// Whether the chat the chooser waits on is still a forum of this
+    /// account (tdesktop closes the box when the forum is destroyed).
+    pub(in crate::ui) fn drop_topic_alive(&self) -> bool {
+        match (self.chat_list.drop_topic.as_ref(), self.session()) {
+            (Some(waiting), Some(session)) => session.chat_shown_as_forum(waiting.chat_id),
+            _ => false,
+        }
+    }
+
+    /// Drops a chooser whose forum is gone, left or of another account.
+    pub(in crate::ui) fn prune_drop_topic(&mut self) {
+        if self.chat_list.drop_topic.is_some() && !self.drop_topic_alive() {
+            self.chat_list.drop_topic = None;
+        }
+    }
+
+    fn drop_topic_failed(&self) -> bool {
+        self.chat_list
+            .drop_topic
+            .as_ref()
+            .is_some_and(|waiting| waiting.load_failed)
+    }
+
     fn close_drop_topic(&mut self, cx: &mut Context<Self>) {
         if self.chat_list.drop_topic.take().is_some() {
             cx.notify();
@@ -163,47 +190,63 @@ impl QuillApp {
     }
 
     /// A topic was picked: the chat opens in it and the drop is completed
-    /// there (`filesOrForwardDrop(thread, data, forumResolved = true)`).
+    /// there (`filesOrForwardDrop(thread, data, forumResolved = true)`). A
+    /// refusal or a vanished topic leaves the chooser open with a note.
     pub(in crate::ui) fn choose_drop_topic(
         &mut self,
         topic: Option<i32>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(waiting) = self.chat_list.drop_topic.take() else {
+        let Some((chat_id, payload)) = self
+            .chat_list
+            .drop_topic
+            .as_ref()
+            .map(|waiting| (waiting.chat_id, waiting.payload.clone()))
+        else {
             return;
         };
-        let chat_id = waiting.chat_id;
+        let refusal = match &payload {
+            DropPayload::Files { .. } => self.start_files_refusal(chat_id).map(str::to_string),
+            DropPayload::Forward(_) => self.share_dest_refusal(chat_id, cx).map(|n| n.to_string()),
+        };
+        if let Some(note) = refusal {
+            self.connection.set_note(StatusNote::error(note));
+            cx.notify();
+            return;
+        }
+        let gone = topic.is_some_and(|id| {
+            self.session().is_none_or(|s| {
+                !s.ordered_forum_topic_refs(chat_id)
+                    .iter()
+                    .any(|t| t.forum_topic_id == id)
+            })
+        });
+        if gone {
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_OPEN_TOPIC)));
+            cx.notify();
+            return;
+        }
+        self.chat_list.drop_topic = None;
         cx.notify();
-        match &waiting.payload {
-            DropPayload::Files { paths, kind } => {
-                if let Some(note) = self.start_files_refusal(chat_id) {
-                    self.connection.set_note(StatusNote::error(note));
-                    return;
-                }
-                if !self.enter_drop_topic(chat_id, topic, window, cx) {
-                    return;
-                }
-                match kind {
-                    DragState::Folder => self.drop_on_zone(DropAction::Archive, paths, cx),
-                    _ => self.drop_files_plain(paths, cx),
-                }
-            }
+        if !self.enter_drop_topic(chat_id, topic, window, cx) {
+            return;
+        }
+        match &payload {
+            DropPayload::Files { paths, kind } => match kind {
+                DragState::Folder => self.drop_on_zone(DropAction::Archive, paths, cx),
+                _ => self.drop_files_plain(paths, cx),
+            },
             DropPayload::Forward(drag) => {
-                if let Some(note) = self.share_dest_refusal(chat_id, cx) {
-                    self.connection.set_note(StatusNote::error(note));
-                    return;
-                }
-                if self.enter_drop_topic(chat_id, topic, window, cx) {
-                    self.set_forward_bar(chat_id, drag, cx);
-                }
+                self.set_forward_bar(chat_id, topic, drag, cx);
             }
         }
     }
 
-    /// Opens `chat_id` and, for a topic, selects it. False when the chat did
-    /// not become the open one (it shows in a window of its own) or the
-    /// topic is gone.
+    /// Opens `chat_id` and, for a topic, selects it; "All Messages" leaves
+    /// the topic the chat was open in. False when the chat did not become
+    /// the open one (it shows in a window of its own) or the topic is gone.
     fn enter_drop_topic(
         &mut self,
         chat_id: ChatId,
@@ -215,10 +258,19 @@ impl QuillApp {
         if self.session().and_then(|s| s.open_chat) != Some(chat_id) {
             return false;
         }
-        if let Some(topic) = topic {
-            self.select_topic_ui(topic, cx);
-            if self.session().and_then(|s| s.open_topic) != Some(topic) {
-                return false;
+        match topic {
+            Some(topic) => {
+                self.select_topic_ui(topic, cx);
+                if self.session().and_then(|s| s.open_topic) != Some(topic) {
+                    self.connection
+                        .set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_OPEN_TOPIC)));
+                    return false;
+                }
+            }
+            None => {
+                if self.session().and_then(|s| s.open_topic).is_some() {
+                    self.deselect_topic_ui(cx);
+                }
             }
         }
         true
@@ -246,7 +298,9 @@ impl QuillApp {
             let choices = this.drop_topic_choices(cx);
             let mut list = div().id("drop-topic-list").flex().flex_col().gap_1();
             if choices.is_empty() {
-                let text = if this.drop_topic_loaded() {
+                let text = if this.drop_topic_failed() {
+                    tr(keys::Q_CHATLIST_TOPICS_COULD_NOT_LOAD)
+                } else if this.drop_topic_loaded() {
                     tr(keys::TOPICS_NOT_FOUND)
                 } else {
                     tr(keys::CONTACTS_LOADING)
@@ -311,7 +365,7 @@ crate::ui::shell::register_dialogs! {
     /// A drop on a forum row: which topic gets the files or messages.
     DropTopic => DialogSpec::new(
         2907,
-        |app| app.chat_list.drop_topic.is_some(),
+        |app| app.drop_topic_alive(),
         QuillApp::build_drop_topic_dialog,
     ),
 }

@@ -31,11 +31,18 @@ administrator gets the same box over its sublists (`ChooseSublistBoxController`)
   archive) or puts the messages in the forward bar. The refusals tdesktop
   checks first (chat takes no files, slow mode, secret chat) still apply.
   The tail of the forward drop moved into `set_forward_bar`.
-- Forwarding into a topic: `forwardMessages` now carries
-  `topic_id = messageTopicForum` when the destination is the open chat and a
-  topic is open (`ConnectDriver::send_topic`, the same rule messages typed in
-  the composer follow). `load_forum_topics` asks for a forum's topics when
-  the drop lands on a chat that is not open.
+- Forwarding into a topic: the topic is bound when it is picked.
+  `ForwardDraft.topic_id` carries it into `forwardMessages.topic_id =
+  messageTopicForum`, so switching topics before Send does not move the
+  forward and the ordinary Forward box and share box behave as before.
+  `load_forum_topics` asks for a forum's topics when the drop lands on a chat
+  that is not open; a request that cannot be sent shows "Could not load the
+  topics." instead of "Loading".
+- A refusal (slow mode, secret chat, no files) or a topic that vanished while
+  the box was open shows a note and keeps the box open. "All Messages" on a
+  bot chat that is open in a topic leaves that topic. The box closes when its
+  forum is removed, left or the account changes (tdesktop closes it on
+  `forum->destroyed()`).
 - Strings: `lng_forum_all_messages`, `lng_forum_create_new_topic`,
   `lng_topics_not_found` under their tdesktop names; the two forum notes
   were replaced by direct-messages ones.
@@ -52,18 +59,19 @@ administrator gets the same box over its sublists (`ChooseSublistBoxController`)
 - A topic list that has not arrived shows "Loading…" and, once it has, "No
   topics found." A forum with more topics than the first page lists the
   loaded ones only (no load-more).
-- A forward from the share box to the open chat while a topic is open now
-  lands in that topic (it went to General before).
+- Closed topics are listed with a lock, as in tdesktop; the hidden General
+  topic is not listed.
 
 ## Verified
 
-Unit tests (`quill::drop_topic`), a driver test (`forwardMessages` carries the
-open topic only for the open chat), GPUI tests
+Unit tests (`quill::drop_topic`), a driver test (`forwardMessages` carries the topic
+of its draft, not the open one), GPUI tests
 (`chat_list/drop_topic_tests.rs`: the drop lists topics and opens nothing,
 choosing opens the forum in the topic with the file attached, Cancel changes
 nothing, typing narrows the list, an unloaded forum lists none, plain chats
 still take the drop, a forward drop waits in the bar of the chosen topic and
-Cancel leaves it alone, administrator and member direct messages), the full
+Cancel leaves it alone, a vanished topic keeps the box open, All Messages leaves the open topic,
+the box closes with its forum, administrator and member direct messages), the full
 gate, and light and dark captures of `ready-drop-topic`.
 Not shown: a live TDLib forum (the demo has fixture topics), the real
 `forwardMessages` round trip, real OS file drags.
