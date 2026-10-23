@@ -26,7 +26,11 @@ impl Session {
         // `ChannelsLimitBox`, `PublicLinksLimitBox`).
         if matches!(
             pending.map(|p| p.purpose),
-            Some(RequestPurpose::JoinChat | RequestPurpose::SetSupergroupUsername)
+            Some(
+                RequestPurpose::JoinChat
+                    | RequestPurpose::SetSupergroupUsername
+                    | RequestPurpose::Groups(GroupsPurpose::CreateSupergroupChannel { .. })
+            )
         ) {
             self.note_premium_limit(err, pending);
         }

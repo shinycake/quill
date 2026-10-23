@@ -3,10 +3,12 @@ mod apply;
 mod boost_level;
 mod error;
 mod group_type;
+mod new_chat;
 mod purpose;
 mod state;
 
 pub use group_type::*;
+pub use new_chat::*;
 pub use purpose::*;
 
 pub use state::*;

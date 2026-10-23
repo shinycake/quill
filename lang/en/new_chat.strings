@@ -1,0 +1,17 @@
+// new_chat: the New Group / New Channel flow (tdesktop add_contact_box.cpp GroupInfoBox and SetupChannelBox, add_participants_box.cpp, menu_ttl.cpp).
+"lng_create_group_next" = "Next";
+"lng_create_group_create" = "Create";
+"lng_create_group_skip" = "Skip";
+"lng_create_group_invite_link" = "Invite link";
+"lng_group_invite_create" = "Create an invite link";
+"lng_create_channel_link_copied" = "Link copied to clipboard.";
+"lng_profile_add_participant" = "Add Members";
+"lng_participant_invite" = "Add";
+"lng_manage_messages_ttl_menu" = "Auto-Delete";
+"lng_manage_messages_ttl_title" = "Auto-delete messages";
+"lng_manage_messages_ttl_disable" = "Disable";
+"lng_cant_invite_privacy" = "Sorry, you cannot add this user to groups because of their privacy settings.";
+"lng_cant_do_this" = "Sorry, this action is unavailable.";
+"lng_cant_invite_not_contact" = "Sorry, you can only add mutual contacts\nto groups at the moment.\n{more_info}";
+"qll_new_chat_failed" = "Couldn't create the chat: {reason}";
+"qll_new_chat_photo_failed" = "The chat was created, but its photo could not be set.";

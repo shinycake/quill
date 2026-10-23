@@ -150,7 +150,7 @@ impl QuillApp {
     }
 
     /// What `checkChatUsername` would answer, put in the demo session.
-    pub(super) fn demo_answer_username_check(
+    pub(in crate::ui) fn demo_answer_username_check(
         &mut self,
         chat_id: ChatId,
         username: &str,

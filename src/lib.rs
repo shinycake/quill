@@ -121,6 +121,7 @@ pub mod moderation_exceptions;
 pub mod mute_menu;
 pub mod native_crash;
 pub mod network_usage;
+pub mod new_chat;
 pub mod notify;
 pub mod notify_accounts;
 pub mod notify_call;

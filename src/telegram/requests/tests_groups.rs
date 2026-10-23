@@ -296,12 +296,13 @@ fn g1_create_shapes_match_1_8_67() {
         RequestId(70),
         &[7, 8],
         "Study",
+        604_800,
     ))
     .unwrap();
     assert_eq!(v["@type"], "createNewBasicGroupChat");
     assert_eq!(v["user_ids"], serde_json::json!([7, 8]));
     assert_eq!(v["title"], "Study");
-    assert_eq!(v["message_auto_delete_time"], 0);
+    assert_eq!(v["message_auto_delete_time"], 604_800);
 
     // Slice G1: `createNewSupergroupChat title:string is_forum:Bool
     // is_channel:Bool description:string location:chatLocation
@@ -312,6 +313,7 @@ fn g1_create_shapes_match_1_8_67() {
         "News",
         true,
         "desc",
+        0,
     ))
     .unwrap();
     assert_eq!(v["@type"], "createNewSupergroupChat");
@@ -320,6 +322,7 @@ fn g1_create_shapes_match_1_8_67() {
     assert!(v["is_channel"].as_bool() == Some(true));
     assert_eq!(v["description"], "desc");
     assert!(v["location"].is_null());
+    assert_eq!(v["message_auto_delete_time"], 0);
     assert!(v["for_import"].as_bool() == Some(false));
 }
 

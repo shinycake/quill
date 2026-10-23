@@ -509,6 +509,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // history before a discussion link), taken before `apply`.
         let admin_followup = self.capture_admin_followup(&owned);
         let edit_after_upgrade = self.capture_edit_after_upgrade(&owned);
+        let new_chat_created = self.capture_new_chat(&owned);
         let paid_prices_change = Self::changes_paid_prices(&owned.envelope.payload);
         let send_outcome = Self::send_outcome(&owned.envelope.payload);
         self.session.apply(owned);
@@ -524,6 +525,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if let Some((edit, ok)) = edit_after_upgrade {
             self.run_edit_after_upgrade(edit, ok);
+        }
+        if let Some(extra) = new_chat_created {
+            self.run_new_chat_created(extra);
         }
         self.maybe_preload_topics(topic_chat, forum_supergroup);
         self.maybe_refresh_forum_topic(topic_refresh);

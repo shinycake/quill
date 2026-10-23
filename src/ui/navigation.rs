@@ -1,13 +1,13 @@
 //! Navigation keeps chat rows in the sidebar and preferences in Settings.
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
-use super::dialogs::CreateChatKind;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
+use quill::new_chat::NewChatKind;
 use quill::settings_catalog::Page;
 use quill::telegram::envelope::ChatKind;
 
@@ -196,13 +196,13 @@ impl QuillApp {
                 cx.notify();
             }
             NavigationAction::Group => {
-                self.open_create_chat_dialog(CreateChatKind::BasicGroup, window, cx);
+                self.open_new_chat(NewChatKind::Group, window, cx);
             }
             NavigationAction::Supergroup => {
-                self.open_create_chat_dialog(CreateChatKind::Supergroup, window, cx);
+                self.open_new_chat(NewChatKind::Megagroup, window, cx);
             }
             NavigationAction::Channel => {
-                self.open_create_chat_dialog(CreateChatKind::Channel, window, cx);
+                self.open_new_chat(NewChatKind::Channel, window, cx);
             }
             NavigationAction::CommunityCreate => {
                 self.open_create_community_dialog(window, cx);

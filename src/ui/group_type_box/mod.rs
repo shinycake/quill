@@ -3,7 +3,10 @@
 //! Private, the t.me link with its live check, the other usernames, who
 //! may join or write, and content protection. Save hands the choice back
 //! to the Edit box (`GroupEditBox::type_choice`), whose own Save sends it,
-//! as tdesktop's `savedCallback` does.
+//! as tdesktop's `savedCallback` does. A new supergroup or channel shows
+//! the same box as a step of its New Group / New Channel box, cut down to
+//! tdesktop's `SetupChannelBox` (Public or Private and the link), and its
+//! Save sends at once (`ui::new_chat`).
 #![deny(clippy::indexing_slicing)]
 
 mod sections;
@@ -48,9 +51,20 @@ pub(super) struct TypeBoxFacts {
     pub(super) editable: String,
     /// A discussion group: "Only members" applies.
     pub(super) discussion: bool,
+    /// The step of a chat being created (tdesktop `SetupChannelBox`).
+    pub(super) setup: bool,
 }
 
 impl GroupTypeBox {
+    pub(crate) fn new(draft: GroupTypeData, link_input: Entity<InputState>) -> Self {
+        Self {
+            draft,
+            link_input,
+            version: 0,
+            save_refused: false,
+        }
+    }
+
     /// The link as typed: the field is the one place it lives.
     pub(super) fn link_text(&self, cx: &App) -> String {
         self.link_input.read(cx).value().trim().to_string()
@@ -72,16 +86,35 @@ impl GroupTypeBox {
 
 impl QuillApp {
     pub(crate) fn group_type_box(&self) -> Option<&GroupTypeBox> {
-        self.group_edit_box()?.type_box.as_ref()
+        match self.group_edit_box() {
+            Some(edit) => edit.type_box.as_ref(),
+            None => self.new_chat_type_box(),
+        }
     }
 
     fn group_type_box_mut(&mut self) -> Option<&mut GroupTypeBox> {
-        self.group_edit_box_mut()?.type_box.as_mut()
+        if self.group_edit_box().is_some() {
+            return self.group_edit_box_mut()?.type_box.as_mut();
+        }
+        self.new_chat_type_box_mut()
+    }
+
+    /// The Type box open as its own dialog over the Edit box.
+    fn group_type_box_dialog_open(&self) -> bool {
+        self.group_edit_box()
+            .is_some_and(|edit| edit.type_box.is_some())
+    }
+
+    /// The chat the Type box edits, and whether it is a creation step.
+    fn group_type_chat(&self) -> Option<(ChatId, bool)> {
+        match self.group_edit_box() {
+            Some(edit) => Some((edit.chat_id, false)),
+            None => self.new_chat_type_chat().map(|chat| (chat, true)),
+        }
     }
 
     pub(super) fn group_type_facts(&self) -> Option<TypeBoxFacts> {
-        let edit = self.group_edit_box()?;
-        let chat_id = edit.chat_id;
+        let (chat_id, setup) = self.group_type_chat()?;
         let session = self.session()?;
         let chat = session.chats.get(&chat_id.0)?;
         let current = session.group_type_current(chat_id);
@@ -96,6 +129,7 @@ impl QuillApp {
             public_blocked,
             editable: current.username,
             discussion: session.group_admin_controls(chat_id).join_to_send,
+            setup,
         })
     }
 
@@ -143,12 +177,7 @@ impl QuillApp {
             }
         }
         if let Some(edit) = self.group_edit_box_mut() {
-            edit.type_box = Some(GroupTypeBox {
-                draft,
-                link_input,
-                version: 0,
-                save_refused: false,
-            });
+            edit.type_box = Some(GroupTypeBox::new(draft, link_input));
         }
         cx.notify();
     }
@@ -162,7 +191,7 @@ impl QuillApp {
 
     /// tdesktop `usernameChanged`: the local rules at once, the server
     /// after a pause.
-    fn group_link_changed(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn group_link_changed(&mut self, cx: &mut Context<Self>) {
         let Some(facts) = self.group_type_facts() else {
             return;
         };
@@ -173,6 +202,9 @@ impl QuillApp {
         type_box.save_refused = false;
         type_box.version = type_box.version.wrapping_add(1);
         let version = type_box.version;
+        if facts.setup {
+            self.new_chat_link_edited();
+        }
         cx.notify();
         if local_link_status(&text) != LinkStatus::Pending || text == facts.editable {
             return;
@@ -194,7 +226,7 @@ impl QuillApp {
             return;
         }
         let text = type_box.link_text(cx);
-        let Some(chat_id) = self.group_edit_box().map(|edit| edit.chat_id) else {
+        let Some((chat_id, _)) = self.group_type_chat() else {
             return;
         };
         if let Some(live) = self.live.as_mut() {
@@ -268,7 +300,11 @@ impl QuillApp {
 
     /// tdesktop `EditPeerTypeBox` Save: a public chat needs a usable link;
     /// a changed join approval asks about the existing invite links first.
-    fn save_group_type_box(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn save_group_type_box(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(facts) = self.group_type_facts() else {
             return;
         };
@@ -349,6 +385,18 @@ impl QuillApp {
     /// Hand the choice to the Edit box and close.
     fn finish_group_type_box(&mut self, apply_to_invites: Option<bool>, cx: &mut Context<Self>) {
         let blocked = self.group_type_facts().is_some_and(|f| f.public_blocked);
+        if self.group_edit_box().is_none() {
+            let Some(type_box) = self.new_chat_type_box() else {
+                return;
+            };
+            let mut draft = type_box.draft.clone();
+            if blocked {
+                draft.public = false;
+            }
+            draft.username = type_box.link_text(cx);
+            self.save_new_chat_type(draft, cx);
+            return;
+        }
         let Some(edit) = self.group_edit_box_mut() else {
             return;
         };
@@ -435,7 +483,7 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     GroupTypeBox => DialogSpec::new(
         7650,
-        |app| app.group_type_box().is_some(),
+        |app| app.group_type_box_dialog_open(),
         QuillApp::build_group_type_box_dialog,
     ),
 }

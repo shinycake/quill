@@ -16,8 +16,8 @@ pub(crate) struct AdminUi {
     /// Phase D3b: admin-management dialog state (promote picker /
     /// rights editor / demote confirm).
     pub(super) admin_dialog: Option<AdminDialog>,
-    /// Slice G1: group/supergroup/channel creation dialog.
-    pub(super) create_chat_dialog: Option<CreateChatDialog>,
+    /// New Group / New Channel (`ui::new_chat`).
+    pub(super) create_chat_dialog: Option<super::new_chat::NewChatDialog>,
     /// Slice G10: communities dialog state (create dialog + hub flag).
     pub(super) community: CommunityUi,
     /// Slice G1: member-management dialog (tabs + add section).

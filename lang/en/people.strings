@@ -297,7 +297,6 @@
 "qll_people_could_not_change_group_pack" = "Could not change group pack. Retry the action.";
 "qll_people_could_not_change_signatures" = "could not change signatures";
 "qll_people_could_not_change_the_view" = "could not change the view";
-"qll_people_could_not_create" = "could not create {to_lowercase}";
 "qll_people_could_not_create_community" = "could not create community";
 "qll_people_could_not_create_invite_link" = "could not create invite link";
 "qll_people_could_not_create_topic" = "could not create topic";
@@ -347,7 +346,6 @@
 "qll_people_couldnt_save_reason" = "Couldn't save: {reason}";
 "qll_people_couldnt_send_the_change_try" = "Couldn't send the change. Try again.";
 "qll_people_couldnt_share_the_contact_here" = "Couldn't share the contact here.";
-"qll_people_create" = "Create {to_lowercase}";
 "qll_people_create_invite_link" = "Create invite link";
 "qll_people_create_link" = "Create link";
 "qll_people_creating_chats_needs_a_live" = "creating chats needs a live connection (demo)";
@@ -425,8 +423,6 @@
 "qll_people_giveaway" = "giveaway · {expires}";
 "qll_people_group" = "Group {supergroup_id}";
 "qll_people_group_2" = "Group {basic_group_id}";
-"qll_people_group_or_channel_description" = "Group or channel description";
-"qll_people_group_or_channel_title" = "Group or channel title";
 "qll_people_group_pack_change_is_unavailable" = "Group pack change is unavailable or already pending.";
 "qll_people_group_pack_change_requested" = "Group pack change requested.";
 "qll_people_haddad" = "Haddad";
@@ -501,8 +497,6 @@
 "qll_people_member_search_needs_a_live" = "member search needs a live connection (demo)";
 "qll_people_member_unbanned" = "member unbanned";
 "qll_people_members" = "Members";
-"qll_people_members_selected#one" = "{count} member selected";
-"qll_people_members_selected#other" = "{count} members selected";
 "qll_people_month" = "Month";
 "qll_people_more_boosts" = "{left} more boosts";
 "qll_people_name" = "Name";
@@ -513,7 +507,6 @@
 "qll_people_naming_tags_needs_a_live" = "naming tags needs a live connection (demo)";
 "qll_people_naming_tags_needs_telegram_premium" = "Naming tags needs Telegram Premium.";
 "qll_people_never_expires" = "Never expires";
-"qll_people_new_chat" = "New chat";
 "qll_people_new_invite_link" = "New invite link";
 "qll_people_new_members_wont_see_earlier" = "New members won't see earlier messages. Showing them upgrades the group to a supergroup.";
 "qll_people_new_welcome_message" = "New welcome message";
