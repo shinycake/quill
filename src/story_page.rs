@@ -76,21 +76,6 @@ pub fn story_page_op_label(purpose: RequestPurpose) -> String {
     }
 }
 
-/// Phase 9.7: parse a comma/whitespace-separated story-id list from a
-/// text input (the story page's "add stories" / "new album" inputs).
-/// Non-numeric tokens are dropped; ids dedupe, order kept.
-pub fn parse_story_id_list(text: &str) -> Vec<i32> {
-    let mut ids = Vec::new();
-    for token in text.split(|c: char| c == ',' || c.is_whitespace()) {
-        if let Ok(id) = token.parse::<i32>()
-            && id > 0
-            && !ids.contains(&id)
-        {
-            ids.push(id);
-        }
-    }
-    ids
-}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,15 +285,5 @@ mod tests {
             session.stories.page_op.as_ref().map(|op| &op.state),
             Some(StoryPageOpState::Failed(_))
         ));
-    }
-
-    #[test]
-    fn parse_story_id_list_cases() {
-        // Phase 9.7: the story-page id inputs — commas/whitespace split,
-        // junk dropped, order kept, deduped.
-        assert_eq!(parse_story_id_list("301, 302,303"), vec![301, 302, 303]);
-        assert_eq!(parse_story_id_list("  7\n8\t9 "), vec![7, 8, 9]);
-        assert_eq!(parse_story_id_list("1,abc,2,,0,-3,1"), vec![1, 2]);
-        assert!(parse_story_id_list("").is_empty());
     }
 }

@@ -7,9 +7,10 @@
 use super::QuillApp;
 use gpui_kit::AppContext;
 use gpui_kit::component::input::TextareaState;
-use gpui_kit::gpui::{Context, Entity, Window};
+use gpui_kit::gpui::{Context, Entity, ScrollHandle, Window};
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
+use quill::story_album_picker::AlbumPicker;
 /// Phase 9.7: the chat story page overlay — story albums (list, open,
 /// create, rename, delete, add/remove/reorder stories, reorder albums),
 /// chat-page stories (pin/unpin), and the paginated archive list for one
@@ -22,10 +23,13 @@ pub(crate) struct StoryPage {
     pub(crate) open_album: Option<i32>,
     /// "New album" form inputs.
     pub(crate) new_album_name: Entity<TextareaState>,
-    pub(crate) new_album_story_ids: Entity<TextareaState>,
-    /// Rename + add-stories inputs on the opened album.
+    /// Rename input on the opened album.
     pub(crate) rename_input: Entity<TextareaState>,
-    pub(crate) add_story_ids: Entity<TextareaState>,
+    /// The story picker (add to an album, or choose a new album's
+    /// stories), while it is open.
+    pub(crate) picker: Option<AlbumPicker>,
+    /// Scroll of the picker's grid: the next page loads near its end.
+    pub(crate) picker_scroll: ScrollHandle,
     /// Album id awaiting the second delete click (two-click confirm).
     pub(crate) delete_confirm: Option<i32>,
 }
@@ -44,9 +48,9 @@ impl StoryPage {
             chat_id,
             open_album: None,
             new_album_name: input(tr(keys::Q_MEDIA_ALBUM_NAME_1_12_CHARACTERS)),
-            new_album_story_ids: input(tr(keys::Q_MEDIA_STORY_IDS_COMMA_SEPARATED_OPTIONAL)),
             rename_input: input(tr(keys::Q_MEDIA_ALBUM_NAME_1_12_CHARACTERS)),
-            add_story_ids: input(tr(keys::Q_MEDIA_STORY_IDS_TO_ADD_COMMA)),
+            picker: None,
+            picker_scroll: ScrollHandle::new(),
             delete_confirm: None,
         }
     }
