@@ -454,36 +454,48 @@ const READ_ON_CALLER: bool = cfg!(target_os = "macos");
 /// Windows. So there the last answer comes back at once and a stale one is
 /// read again on a thread of its own ([`refreshing`] says when the new answer
 /// is in); the first call has no answer yet and returns
-/// [`LinkHandlerState::Checking`]. On macOS this only reads the cache: the
-/// LaunchServices lookup runs in [`read_now`], when the dialog opens.
+/// [`LinkHandlerState::Checking`]. On macOS a stale answer is kept until
+/// [`read_now`] (the System page opening, the re-reads after "Make default");
+/// only a missing one is read here, once, so the row is never left checking.
 pub fn state() -> LinkHandlerState {
     if let Some(pinned) = lock_demo_pin().clone() {
         return pinned;
     }
     let generation = GENERATION.load(Ordering::Acquire);
     let (cached, stale) = lookup(CACHE.lock_or_recover().as_ref(), generation);
-    if stale && !READ_ON_CALLER {
-        start_refresh();
+    match cached {
+        None if READ_ON_CALLER => read_on_caller(generation),
+        cached => {
+            if stale && !READ_ON_CALLER {
+                start_refresh();
+            }
+            cached.unwrap_or(LinkHandlerState::Checking)
+        }
     }
-    cached.unwrap_or(LinkHandlerState::Checking)
+}
+
+/// Asks the OS on this thread and caches the answer (macOS only, see
+/// [`READ_ON_CALLER`]).
+fn read_on_caller(generation: u64) -> LinkHandlerState {
+    let fresh = query_state();
+    *CACHE.lock_or_recover() = Some(Cached {
+        at: Instant::now(),
+        state: fresh.clone(),
+        generation,
+    });
+    fresh
 }
 
 /// Asks the OS now and caches the answer. macOS reads on the calling thread
 /// (see [`READ_ON_CALLER`]), so this is for moments the user caused: the
-/// Appearance dialog opening, or a re-read after "Make default"; [`state`]
-/// itself never queries there. Elsewhere it starts a background read.
+/// System page opening, or a re-read after "Make default". Elsewhere it
+/// starts a background read.
 pub fn read_now() {
     if lock_demo_pin().is_some() {
         return;
     }
     if READ_ON_CALLER {
-        let generation = GENERATION.load(Ordering::Acquire);
-        let fresh = query_state();
-        *CACHE.lock_or_recover() = Some(Cached {
-            at: Instant::now(),
-            state: fresh,
-            generation,
-        });
+        read_on_caller(GENERATION.load(Ordering::Acquire));
     } else {
         invalidate();
         start_refresh();

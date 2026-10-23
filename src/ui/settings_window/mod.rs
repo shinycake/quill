@@ -92,6 +92,7 @@ impl QuillApp {
             }
             Page::Devices => self.fetch_sessions(),
             Page::Connection => self.fetch_proxy_list(),
+            Page::System => quill::link_handler::read_now(),
             _ => {}
         }
     }
