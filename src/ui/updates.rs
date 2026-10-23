@@ -1,82 +1,122 @@
-//! Release checks run off the UI thread. Nothing installs without the user's
-//! click, unless they turned on "Install updates automatically": then a new
-//! release is downloaded and staged, and installs the next time Quill starts
-//! (`update_install::apply_on_start`). Quill never restarts itself.
+//! Release checks run off the UI thread. One button carries the update
+//! through its steps (`UpdateControl`): Check for updates, Update Quill,
+//! the download, Restart to update. It sits in Settings and, while there is
+//! an update to act on, at the bottom of the chat list (tdesktop's "Update
+//! Telegram"). Quill checks at launch and every few hours, and downloads a
+//! new release without a click; a downloaded update also installs the next
+//! time Quill starts (`update_install::apply_on_start`). Quill never
+//! restarts itself.
 #![deny(clippy::indexing_slicing)]
 use super::QuillApp;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
-use gpui_kit::component::switch::Switch;
+use gpui_kit::component::progress::Progress as ProgressBar;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
-use quill::updater::{UpdateState, check_release};
+use quill::updater::{DownloadProgress, UpdateControl, UpdateState, check_latest_release};
+use std::time::Duration;
+
+/// How often a running Quill looks for a new release.
+const RECHECK_EVERY: Duration = Duration::from_secs(4 * 60 * 60);
 
 impl QuillApp {
     pub(super) fn check_for_updates(&mut self, cx: &mut Context<Self>) {
-        if matches!(
-            self.settings.update_state,
-            UpdateState::Checking
-                | UpdateState::Downloading(_)
-                | UpdateState::Installing(_)
-                | UpdateState::Staged(..)
+        if !matches!(
+            self.update_control(),
+            UpdateControl::Check { busy: false }
+                | UpdateControl::Install(_)
+                | UpdateControl::OpenRelease(_)
         ) {
             return;
         }
         self.settings.update_state = UpdateState::Checking;
         self.settings.update_banner_dismissed = false;
-        let beta = quill::advanced::update_channel::install_beta();
         let check = cx
             .background_executor()
-            .spawn(async move { check_release(beta) });
+            .spawn(async move { check_latest_release() });
         cx.spawn(async move |this, cx| {
             let state = check.await;
-            let _ = this.update(cx, |this, cx| {
-                // "Install beta versions" changed while this ran: the
-                // answer is for the other channel, ask again.
-                if quill::advanced::update_channel::install_beta() != beta {
-                    this.settings.update_state = UpdateState::Idle;
-                    this.check_for_updates(cx);
-                    return;
-                }
-                this.apply_check_result(state, cx);
-            });
+            let _ = this.update(cx, |this, cx| this.apply_check_result(state, cx));
         })
         .detach();
         cx.notify();
     }
 
-    /// The answer of a release check: shown, and staged when the user opted
-    /// in.
+    /// Checks at launch, then every few hours while Quill runs (tdesktop's
+    /// updater rechecks on a timer too). There is no launch check when the
+    /// session opens on "Updated to Quill X"; a check only starts when
+    /// nothing is in flight (`check_for_updates`).
+    pub(super) fn start_update_checks(&mut self, cx: &mut Context<Self>) {
+        if self.settings.update_state == UpdateState::Idle {
+            self.check_for_updates(cx);
+        }
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(RECHECK_EVERY).await;
+                if this
+                    .update(cx, |this, cx| this.check_for_updates(cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// The answer of a release check: shown, and a newer release this copy
+    /// can install starts downloading at once.
     pub(super) fn apply_check_result(&mut self, state: UpdateState, cx: &mut Context<Self>) {
         self.settings.update_state = state;
-        self.stage_if_opted_in(cx);
+        if let Some(release) = UpdateControl::auto_download(
+            &self.settings.update_state,
+            quill::update_install::self_update_availability(),
+        ) {
+            self.download_update(release, cx);
+        }
         cx.notify();
     }
 
-    /// "Install updates automatically": a release the check just found is
-    /// downloaded and staged without a click (`auto_update::staging_candidate`).
-    pub(super) fn stage_if_opted_in(&mut self, cx: &mut Context<Self>) {
-        let candidate = quill::advanced::auto_update::staging_candidate(
+    /// The update button for the current state (`UpdateControl::of`).
+    pub(super) fn update_control(&self) -> UpdateControl {
+        UpdateControl::of(
             &self.settings.update_state,
-            quill::advanced::auto_update::install_automatically(),
-            self.appearance.check_updates_on_launch,
-            quill::update_install::self_update_available(),
-        );
-        if let Some(release) = candidate {
-            self.stage_update(release, cx);
+            quill::update_install::self_update_availability(),
+        )
+    }
+
+    /// The update button was pressed: the step it shows.
+    fn press_update_control(&mut self, cx: &mut Context<Self>) {
+        match self.update_control() {
+            UpdateControl::Check { busy: false } => self.check_for_updates(cx),
+            UpdateControl::Install(release) => self.download_update(release, cx),
+            UpdateControl::Restart => self.restart_to_update(cx),
+            UpdateControl::OpenRelease(url) => cx.open_url(&url),
+            UpdateControl::Check { busy: true }
+            | UpdateControl::Downloading { .. }
+            | UpdateControl::Restarting => {}
         }
     }
 
-    /// Downloads, verifies and stages `release` in the background. The update
-    /// is applied at the next start (`update_install::apply_on_start`) or when
-    /// the user presses "Restart to update"; Quill never restarts itself.
-    fn stage_update(&mut self, release: quill::updater::ReleaseInfo, cx: &mut Context<Self>) {
-        self.settings.update_state = UpdateState::Downloading(release.clone());
+    /// Downloads, verifies and stages `release` in the background; the
+    /// button then offers "Restart to update", and the next start applies it
+    /// too (`update_install::apply_on_start`). Quill never restarts itself.
+    fn download_update(&mut self, release: quill::updater::ReleaseInfo, cx: &mut Context<Self>) {
+        if matches!(
+            self.settings.update_state,
+            UpdateState::Downloading(..) | UpdateState::Installing(_) | UpdateState::Staged(..)
+        ) {
+            return;
+        }
+        let progress = DownloadProgress::default();
+        self.settings.update_state = UpdateState::Downloading(release.clone(), progress.clone());
         let download_release = release.clone();
-        let download = cx
-            .background_executor()
-            .spawn(async move { quill::update_install::download_and_stage(&download_release) });
+        let download_progress = progress.clone();
+        let download = cx.background_executor().spawn(async move {
+            quill::update_install::download_and_stage(&download_release, &download_progress)
+        });
         cx.spawn(async move |this, cx| {
             let result = download.await;
             let _ = this.update(cx, |this, cx| {
@@ -86,6 +126,28 @@ impl QuillApp {
                 };
                 cx.notify();
             });
+        })
+        .detach();
+        // The progress lives in the download; redraw while it runs.
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(250))
+                    .await;
+                let running = this.update(cx, |this, cx| {
+                    let running = matches!(
+                        &this.settings.update_state,
+                        UpdateState::Downloading(_, current) if *current == progress
+                    );
+                    if running {
+                        cx.notify();
+                    }
+                    running
+                });
+                if !matches!(running, Ok(true)) {
+                    break;
+                }
+            }
         })
         .detach();
         cx.notify();
@@ -111,46 +173,95 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn install_update(&mut self, release: quill::updater::ReleaseInfo, cx: &mut Context<Self>) {
-        if matches!(
-            self.settings.update_state,
-            UpdateState::Downloading(_) | UpdateState::Installing(_)
-        ) {
-            return;
+    /// The text of the update button.
+    fn update_control_label(control: &UpdateControl) -> SharedString {
+        match control {
+            UpdateControl::Check { .. } => tr(keys::Q_OPS_CHECK_FOR_UPDATES).into(),
+            UpdateControl::Install(_) => tr(keys::Q_OPS_UPDATE_QUILL).into(),
+            UpdateControl::Downloading { progress, total } => tr_with(
+                keys::Q_OPS_DOWNLOADING_UPDATE,
+                &[(
+                    "progress",
+                    quill::updater::progress_text(progress.bytes(), *total).as_str(),
+                )],
+            )
+            .into(),
+            UpdateControl::Restart => tr(keys::Q_OPS_RESTART_TO_UPDATE).into(),
+            UpdateControl::Restarting => tr(keys::Q_OPS_INSTALLING_UPDATE).into(),
+            UpdateControl::OpenRelease(_) => tr(keys::Q_OPS_VIEW_RELEASE_ON_GITHUB).into(),
         }
-        self.settings.update_state = UpdateState::Downloading(release.clone());
-        let download_release = release.clone();
-        let download = cx
-            .background_executor()
-            .spawn(async move { quill::update_install::download_and_stage(&download_release) });
-        cx.spawn(async move |this, cx| {
-            let result = download.await;
-            let _ = this.update(cx, |this, cx| {
-                match result {
-                    Ok(plan) => match quill::update_install::hand_off(&plan) {
-                        Ok(()) => {
-                            this.settings.update_state = UpdateState::Installing(release);
-                            cx.quit();
-                        }
-                        Err(_) => {
-                            this.settings.update_state = UpdateState::InstallFailed(
-                                release,
-                                tr(keys::Q_OPS_COULD_NOT_START_THE_UPDATE),
-                            );
-                        }
-                    },
-                    Err(message) => {
-                        this.settings.update_state = UpdateState::DownloadFailed(release, message)
-                    }
-                }
-                cx.notify();
-            });
+    }
+
+    /// The update button itself; `id` tells the chat list's from Settings'.
+    fn update_control_button(
+        &self,
+        id: &'static str,
+        control: &UpdateControl,
+        cx: &mut Context<Self>,
+    ) -> Button {
+        let label = Self::update_control_label(control);
+        let button = Button::new(id)
+            .label(label.clone())
+            .accessibility_label(label)
+            .disabled(matches!(
+                control,
+                UpdateControl::Check { busy: true }
+                    | UpdateControl::Downloading { .. }
+                    | UpdateControl::Restarting
+            ))
+            .on_click(cx.listener(|this, _, _, cx| this.press_update_control(cx)));
+        // The step that moves the update forward is the primary action.
+        if matches!(
+            control,
+            UpdateControl::Install(_) | UpdateControl::Restart | UpdateControl::OpenRelease(_)
+        ) {
+            button.primary()
+        } else {
+            button
+        }
+    }
+
+    /// The download's progress bar under the button.
+    fn update_progress_bar(id: &'static str, control: &UpdateControl) -> Option<AnyElement> {
+        control.fraction().map(|fraction| {
+            ProgressBar::new(id)
+                .value(fraction * 100.)
+                .into_any_element()
         })
-        .detach();
-        cx.notify();
+    }
+
+    /// tdesktop's "Update Telegram" button at the bottom of the chat list,
+    /// there while an update can be installed, is downloading or is ready.
+    pub(in crate::ui) fn chat_list_update_button(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let control = self.update_control();
+        if !control.in_chat_list() {
+            return None;
+        }
+        Some(
+            div()
+                .id("chat-list-update")
+                .flex_none()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .children(Self::update_progress_bar(
+                    "chat-list-update-progress",
+                    &control,
+                ))
+                .child(
+                    self.update_control_button("chat-list-update-button", &control, cx)
+                        .w_full(),
+                )
+                .into_any_element(),
+        )
     }
 
     pub(in crate::ui) fn update_settings_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let control = self.update_control();
+        let status = self.settings.update_state.label();
         let mut section = div()
             .flex()
             .flex_col()
@@ -164,74 +275,38 @@ impl QuillApp {
                     .child(tr(keys::Q_OPS_QUILL_UPDATES)),
             )
             .child(
-                self.appearance_toggle_section(
-                    cx,
-                    tr(keys::Q_OPS_CHECK_FOR_UPDATES_ON_LAUNCH),
-                    tr(keys::Q_OPS_CHECK_GITHUB_RELEASES_AUTOMATICALLY_ON),
-                    Switch::new("check-updates-on-launch")
-                        .checked(self.appearance.check_updates_on_launch)
-                        .accessibility_label(tr(keys::Q_OPS_CHECK_FOR_UPDATES_ON_LAUNCH))
-                        .on_click(cx.listener(|this, &on, _, cx| {
-                            this.set_appearance(cx, |a| a.check_updates_on_launch = on)
-                        }))
-                        .into_any_element(),
-                ),
-            )
-            .child(
                 div()
                     .id("quill-update-status")
                     .role(Role::Label)
-                    .aria_label(self.settings.update_state.label())
+                    .aria_label(status.clone())
                     .text_sm()
-                    .child(self.settings.update_state.label()),
+                    .child(status),
             )
-            .children(self.auto_update_row(cx))
-            .children(self.install_beta_row(cx))
+            .children(Self::update_progress_bar("quill-update-progress", &control))
             .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    // While it downloads the status line above says so.
+                    .when(
+                        !matches!(
+                            control,
+                            UpdateControl::Downloading { .. } | UpdateControl::Restarting
+                        ),
+                        |row| {
+                            row.child(self.update_control_button(
+                                "quill-update-button",
+                                &control,
+                                cx,
+                            ))
+                        },
+                    )
+                    .children(self.release_page_button(&control, cx)),
+            )
+            .children(self.update_release_notes(cx));
+        if matches!(self.settings.update_state, UpdateState::Installed(_)) {
+            section = section.child(
                 div().flex().child(
-                    Button::new("check-for-updates")
-                        .label(tr(keys::Q_OPS_CHECK_FOR_UPDATES))
-                        .disabled(matches!(
-                            self.settings.update_state,
-                            UpdateState::Checking
-                                | UpdateState::Downloading(_)
-                                | UpdateState::Installing(_)
-                                | UpdateState::Staged(..)
-                        ))
-                        .on_click(cx.listener(|this, _, _, cx| this.check_for_updates(cx))),
-                ),
-            );
-        if let UpdateState::Available(release)
-        | UpdateState::DownloadFailed(release, _)
-        | UpdateState::InstallFailed(release, _)
-        | UpdateState::Staged(release, _)
-        | UpdateState::Installed(release) = &self.settings.update_state
-        {
-            let url = release.url.clone();
-            section = section
-                .child(
-                    div()
-                        .id("quill-release-notes")
-                        .role(Role::Label)
-                        .aria_label(if release.notes.is_empty() {
-                            tr(keys::Q_OPS_NO_RELEASE_NOTES_WERE_PROVIDED).to_string()
-                        } else {
-                            release.notes.clone()
-                        })
-                        .text_sm()
-                        .child(if release.notes.is_empty() {
-                            tr(keys::Q_OPS_NO_RELEASE_NOTES_WERE_PROVIDED).into()
-                        } else {
-                            release.notes.clone()
-                        }),
-                )
-                .child(
-                    Button::new("open-quill-release")
-                        .label(tr(keys::Q_OPS_VIEW_RELEASE_ON_GITHUB))
-                        .on_click(cx.listener(move |_, _, _, cx| cx.open_url(&url))),
-                );
-            if matches!(self.settings.update_state, UpdateState::Installed(_)) {
-                section = section.child(
                     Button::new("acknowledge-update-changelog")
                         .label(tr(keys::Q_OPS_DISMISS_CHANGELOG))
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -243,31 +318,88 @@ impl QuillApp {
                             }
                             cx.notify();
                         })),
-                );
-            } else if matches!(self.settings.update_state, UpdateState::Staged(..)) {
-                section = section.child(
-                    Button::new("restart-to-update")
-                        .label(tr(keys::Q_OPS_RESTART_TO_UPDATE))
-                        .on_click(cx.listener(|this, _, _, cx| this.restart_to_update(cx))),
-                );
-            } else if release.asset.is_some() && quill::update_install::self_update_available() {
-                let release = release.clone();
-                section = section.child(
-                    Button::new("install-quill-update")
-                        .label(tr(keys::Q_OPS_DOWNLOAD_INSTALL_AND_RESTART))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.install_update(release.clone(), cx)
-                        })),
-                );
-            } else {
-                section = section.child(
-                    div()
-                        .text_xs()
-                        .child(tr(keys::Q_OPS_INSTALL_THE_RELEASE_PACKAGE_FROM)),
-                );
-            }
+                ),
+            );
         }
         section.into_any_element()
+    }
+
+    /// The release the state is about, if any.
+    fn known_release(&self) -> Option<&quill::updater::ReleaseInfo> {
+        match &self.settings.update_state {
+            UpdateState::Available(release)
+            | UpdateState::Downloading(release, _)
+            | UpdateState::DownloadFailed(release, _)
+            | UpdateState::InstallFailed(release, _)
+            | UpdateState::Staged(release, _)
+            | UpdateState::Installing(release)
+            | UpdateState::Installed(release) => Some(release),
+            UpdateState::Idle
+            | UpdateState::Checking
+            | UpdateState::UpToDate
+            | UpdateState::NoRelease
+            | UpdateState::Failed(_) => None,
+        }
+    }
+
+    /// "View release on GitHub" beside the button, unless the button is
+    /// that link already.
+    fn release_page_button(
+        &self,
+        control: &UpdateControl,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if matches!(control, UpdateControl::OpenRelease(_)) {
+            return None;
+        }
+        let url = self.known_release()?.url.clone();
+        Some(
+            Button::new("open-quill-release")
+                .label(tr(keys::Q_OPS_VIEW_RELEASE_ON_GITHUB))
+                .ghost()
+                .on_click(cx.listener(move |_, _, _, cx| cx.open_url(&url)))
+                .into_any_element(),
+        )
+    }
+
+    /// The release's notes, and why this copy cannot install it itself.
+    fn update_release_notes(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let release = self.known_release()?;
+        let notes: SharedString = if release.notes.is_empty() {
+            tr(keys::Q_OPS_NO_RELEASE_NOTES_WERE_PROVIDED).into()
+        } else {
+            release.notes.clone().into()
+        };
+        // A newer release the button cannot install: the reason.
+        let reason = matches!(
+            self.settings.update_state,
+            UpdateState::Available(_) | UpdateState::DownloadFailed(..)
+        )
+        .then(quill::update_install::self_update_availability)
+        .and_then(Result::err);
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .id("quill-release-notes")
+                        .role(Role::Label)
+                        .aria_label(notes.clone())
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(notes),
+                )
+                .children(reason.map(|why| {
+                    div()
+                        .id("quill-update-unavailable")
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(tr(why.hint()))
+                }))
+                .into_any_element(),
+        )
     }
 
     /// "About Quill": version, the unofficial-client and no-warranty notice,
@@ -325,11 +457,10 @@ impl QuillApp {
             .into_any_element()
     }
 
+    /// "Updated to Quill X" after an update, with its notes; the update
+    /// itself is offered at the bottom of the chat list.
     pub(super) fn update_banner(&self, cx: &mut Context<Self>) -> AnyElement {
-        if !matches!(
-            self.settings.update_state,
-            UpdateState::Available(_) | UpdateState::Staged(..) | UpdateState::Installed(_)
-        ) {
+        if !matches!(self.settings.update_state, UpdateState::Installed(_)) {
             return div().into_any_element();
         }
         let label = self.settings.update_state.label();

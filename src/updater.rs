@@ -3,10 +3,12 @@
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
+mod control;
+pub use control::UpdateControl;
+
 pub const RELEASES_URL: &str = "https://github.com/shinycake/quill/releases";
 pub const LATEST_API_URL: &str = "https://api.github.com/repos/shinycake/quill/releases/latest";
-/// The beta channel reads the newest releases, pre-releases included
-/// (`/releases/latest` never returns a pre-release).
+/// The newest releases, pre-releases included (What's new reads them).
 pub const RELEASES_API_URL: &str =
     "https://api.github.com/repos/shinycake/quill/releases?per_page=30";
 pub(crate) const MAX_RESPONSE_BYTES: u64 = 1_048_576;
@@ -102,13 +104,52 @@ pub(crate) fn download_source(asset_url: &str) -> DownloadSource {
     }
 }
 
+/// Bytes of the update package downloaded so far: the download thread adds
+/// to it and the UI reads it on render.
+#[derive(Debug, Clone, Default)]
+pub struct DownloadProgress(std::sync::Arc<std::sync::atomic::AtomicU64>);
+
+impl DownloadProgress {
+    pub fn add(&self, bytes: u64) {
+        self.0
+            .fetch_add(bytes, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn bytes(&self) -> u64 {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// One download is equal only to itself.
+impl PartialEq for DownloadProgress {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for DownloadProgress {}
+
+fn release_size(release: &ReleaseInfo) -> u64 {
+    release.asset.as_ref().map_or(0, |asset| asset.size)
+}
+
+/// tdesktop `Ui::FormatDownloadText`: "12.3 / 45.6 MB".
+pub fn progress_text(ready: u64, total: u64) -> String {
+    const MB: u64 = 1024 * 1024;
+    let tenths = |bytes: u64| {
+        let tenths = bytes.saturating_mul(10) / MB;
+        format!("{}.{}", tenths / 10, tenths % 10)
+    };
+    format!("{} / {} MB", tenths(ready.min(total)), tenths(total))
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum UpdateState {
     #[default]
     Idle,
     Checking,
     Available(ReleaseInfo),
-    Downloading(ReleaseInfo),
+    Downloading(ReleaseInfo, DownloadProgress),
     Installing(ReleaseInfo),
     DownloadFailed(ReleaseInfo, &'static str),
     InstallFailed(ReleaseInfo, &'static str),
@@ -128,7 +169,13 @@ impl UpdateState {
             Self::Idle => format!("Quill {}", crate::version::APP),
             Self::Checking => "Checking for updates…".into(),
             Self::Available(release) => format!("Quill {} is available", release.version),
-            Self::Downloading(_) => "Downloading and verifying update…".into(),
+            Self::Downloading(release, progress) => crate::lang::tr_with(
+                crate::lang::keys::Q_OPS_DOWNLOADING_UPDATE,
+                &[(
+                    "progress",
+                    progress_text(progress.bytes(), release_size(release)).as_str(),
+                )],
+            ),
             Self::Installing(_) => "Installing update and restarting…".into(),
             Self::DownloadFailed(_, message) | Self::InstallFailed(_, message) => (*message).into(),
             Self::Installed(release) => format!("Updated to Quill {}", release.version),
@@ -200,37 +247,7 @@ pub(crate) fn release_version(tag: &str) -> Option<Version> {
     Version::parse(tag.strip_prefix('v').unwrap_or(tag)).ok()
 }
 
-/// The beta channel ("Install beta versions"): `body` is the releases list.
-/// The newest published release wins, pre-release or not, and drafts never
-/// count. An empty list is `NoRelease`.
-pub fn interpret_release_list(status: u16, body: &[u8], current: &str) -> UpdateState {
-    if status == 404 {
-        return UpdateState::NoRelease;
-    }
-    if status != 200 {
-        return UpdateState::Failed("Release server unavailable. Retry the check.");
-    }
-    if body.len() as u64 > MAX_RESPONSE_BYTES {
-        return UpdateState::Failed("Release information is too large. Retry the check.");
-    }
-    let Ok(releases) = serde_json::from_slice::<Vec<GithubRelease>>(body) else {
-        return UpdateState::Failed("Invalid release information. Retry the check.");
-    };
-    let Ok(current) = Version::parse(current) else {
-        return UpdateState::Failed("Unrecognized installed version.");
-    };
-    let newest = releases
-        .into_iter()
-        .filter(|release| !release.draft)
-        .filter_map(|release| Some((release_version(&release.tag_name)?, release)))
-        .max_by(|(a, _), (b, _)| a.cmp_precedence(b));
-    match newest {
-        Some((version, release)) => release_state(release, version, &current),
-        None => UpdateState::NoRelease,
-    }
-}
-
-/// The state for a release that passed its channel's filter.
+/// The state for a stable release.
 fn release_state(release: GithubRelease, version: Version, current: &Version) -> UpdateState {
     if !version.cmp_precedence(current).is_gt() {
         return UpdateState::UpToDate;
@@ -264,13 +281,13 @@ fn release_state(release: GithubRelease, version: Version, current: &Version) ->
 /// allowed: GitHub's API, or the test fixture's `releases.json` /
 /// `latest.json`.
 #[cfg(feature = "ui")]
-fn check_endpoint(beta: bool) -> (String, bool) {
+fn check_endpoint(list: bool) -> (String, bool) {
     #[cfg(feature = "demo-capture")]
     if let Some(base) = fixture_base() {
-        let file = if beta { "releases.json" } else { "latest.json" };
+        let file = if list { "releases.json" } else { "latest.json" };
         return (format!("{base}/{file}"), false);
     }
-    let url = if beta {
+    let url = if list {
         RELEASES_API_URL
     } else {
         LATEST_API_URL
@@ -278,26 +295,12 @@ fn check_endpoint(beta: bool) -> (String, bool) {
     (url.to_string(), true)
 }
 
-/// Blocking, bounded check; callers run it on the background executor.
-/// "Install beta versions" (`advanced::update_channel`) picks the channel.
+/// Blocking, bounded check of the latest stable release; callers run it on
+/// the background executor.
 #[cfg(feature = "ui")]
 pub fn check_latest_release() -> UpdateState {
-    check_release(crate::advanced::update_channel::install_beta())
-}
-
-/// The check for one channel: the latest stable release, or with `beta` the
-/// newest release of any kind.
-#[cfg(feature = "ui")]
-pub fn check_release(beta: bool) -> UpdateState {
-    let interpret = |status: u16, body: &[u8]| {
-        if beta {
-            interpret_release_list(status, body, crate::version::APP)
-        } else {
-            interpret_release(status, body, crate::version::APP)
-        }
-    };
-    match fetch_release_json(beta) {
-        Ok((status, body)) => interpret(status, &body),
+    match fetch_release_json(false) {
+        Ok((status, body)) => interpret_release(status, &body, crate::version::APP),
         Err(Fetch::Unreachable) => UpdateState::Failed(
             "Could not reach the release server. Check your connection and retry.",
         ),
@@ -480,93 +483,5 @@ mod tests {
             interpret_release(200, &vec![b' '; MAX_RESPONSE_BYTES as usize + 1], "0.1.0"),
             UpdateState::Failed(_)
         ));
-    }
-    fn listed(tag: &str, prerelease: bool, draft: bool) -> serde_json::Value {
-        json!({"tag_name":tag,"html_url":format!("{RELEASES_URL}/tag/{tag}"),"body":"notes","draft":draft,"prerelease":prerelease})
-    }
-
-    #[test]
-    fn the_beta_channel_takes_the_newest_published_release() {
-        let list = |items: Vec<serde_json::Value>| serde_json::to_vec(&items).unwrap();
-        let body = list(vec![
-            listed("v2026.1012.1300", true, false),
-            listed("v2026.1011.1200", false, false),
-        ]);
-        let UpdateState::Available(info) = interpret_release_list(200, &body, "2026.1011.1200")
-        else {
-            panic!("the pre-release is newer");
-        };
-        assert_eq!(info.version, "2026.1012.1300");
-        // Stable only: the same list through the stable reader refuses a
-        // pre-release outright.
-        assert!(matches!(
-            interpret_release(
-                200,
-                &serde_json::to_vec(&listed("v2026.1012.1300", true, false)).unwrap(),
-                "2026.1011.1200"
-            ),
-            UpdateState::Failed(_)
-        ));
-        // A draft never counts, however new.
-        let body = list(vec![
-            listed("v2026.1013.1400", true, true),
-            listed("v2026.1011.1200", false, false),
-        ]);
-        assert_eq!(
-            interpret_release_list(200, &body, "2026.1011.1200"),
-            UpdateState::UpToDate
-        );
-        // The order of the list does not matter.
-        let body = list(vec![
-            listed("v2026.1011.1200", false, false),
-            listed("v2026.1012.1300", true, false),
-        ]);
-        assert!(matches!(
-            interpret_release_list(200, &body, "2026.1011.1200"),
-            UpdateState::Available(_)
-        ));
-        // A newer stable release beats an older pre-release.
-        let body = list(vec![
-            listed("v2026.1012.1300", true, false),
-            listed("v2026.1014.1500", false, false),
-        ]);
-        let UpdateState::Available(info) = interpret_release_list(200, &body, "2026.1011.1200")
-        else {
-            panic!("newer stable");
-        };
-        assert_eq!(info.version, "2026.1014.1500");
-    }
-
-    #[test]
-    fn the_beta_list_handles_empty_and_broken_answers() {
-        assert_eq!(
-            interpret_release_list(200, b"[]", "0.1.0"),
-            UpdateState::NoRelease
-        );
-        assert_eq!(
-            interpret_release_list(404, b"", "0.1.0"),
-            UpdateState::NoRelease
-        );
-        for (status, body) in [
-            (403, b"[]".as_slice()),
-            (500, b"x"),
-            (200, b"{}"),
-            (200, b"nope"),
-        ] {
-            assert!(matches!(
-                interpret_release_list(status, body, "0.1.0"),
-                UpdateState::Failed(_)
-            ));
-        }
-        assert!(matches!(
-            interpret_release_list(200, &vec![b' '; MAX_RESPONSE_BYTES as usize + 1], "0.1.0"),
-            UpdateState::Failed(_)
-        ));
-        // Tags that are not versions are skipped, not fatal.
-        let body = serde_json::to_vec(&vec![listed("nightly", true, false)]).unwrap();
-        assert_eq!(
-            interpret_release_list(200, &body, "0.1.0"),
-            UpdateState::NoRelease
-        );
     }
 }

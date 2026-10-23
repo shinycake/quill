@@ -618,11 +618,8 @@ impl QuillApp {
             })
             .detach();
         }
-        if demo.is_none()
-            && app.appearance.check_updates_on_launch
-            && app.settings.update_state == quill::updater::UpdateState::Idle
-        {
-            app.check_for_updates(cx);
+        if demo.is_none() {
+            app.start_update_checks(cx);
         }
         cx.spawn(async move |this, cx| {
             loop {

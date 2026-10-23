@@ -28,11 +28,14 @@ register_demos![
         .setup(|app, _, _| app.demo_update(UpdateDemo::Install)),
     DemoSpec::chat_list("ready-update-staged")
         .setup(|app, _, _| app.demo_update(UpdateDemo::Staged)),
+    DemoSpec::chat_list("ready-update-downloading")
+        .setup(|app, _, _| app.demo_update(UpdateDemo::Downloading)),
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum UpdateDemo {
     Install,
+    Downloading,
     Staged,
     Changelog,
     Failure,
@@ -41,13 +44,12 @@ enum UpdateDemo {
 impl QuillApp {
     /// Settings → Updates with a fake 0.2.0 release (no network).
     fn demo_update(&mut self, demo: UpdateDemo) {
-        // The demo window is not an installed copy: show the update switches
+        // The demo window is not an installed copy: show the update section
         // as on an install that can replace itself, or with
         // `QUILL_DEMO_SELF_UPDATE=<reason>` (`0`, `translocated`,
         // `disk-image`, `read-only`, `package-manager`, `not-writable`,
         // `owned-by-another`, `checking`) as on one that cannot, for that
-        // reason. `QUILL_DEMO_AUTO_UPDATE=1` starts
-        // with "Install updates automatically" on.
+        // reason.
         #[cfg(feature = "demo-capture")]
         {
             let availability = match std::env::var("QUILL_DEMO_SELF_UPDATE") {
@@ -57,9 +59,6 @@ impl QuillApp {
                 Err(_) => Ok(()),
             };
             quill::update_install::force_self_update_available(Some(availability));
-            if std::env::var("QUILL_DEMO_AUTO_UPDATE").is_ok_and(|v| v == "1") {
-                quill::advanced::auto_update::set_install_automatically(true);
-            }
         }
         let release = quill::updater::ReleaseInfo {
             version: "0.2.0".into(),
@@ -71,7 +70,7 @@ impl QuillApp {
                     quill::updater::RELEASES_URL,
                     quill::updater::binary_asset_name()
                 ),
-                size: 120,
+                size: 48 * 1024 * 1024,
                 sha256: "a".repeat(64),
             }),
         };
@@ -82,6 +81,11 @@ impl QuillApp {
                 "Download interrupted. Retry the update.",
             ),
             UpdateDemo::Install => quill::updater::UpdateState::Available(release),
+            UpdateDemo::Downloading => {
+                let progress = quill::updater::DownloadProgress::default();
+                progress.add(19 * 1024 * 1024);
+                quill::updater::UpdateState::Downloading(release, progress)
+            }
             UpdateDemo::Staged => quill::updater::UpdateState::Staged(
                 quill::updater::ReleaseInfo {
                     notes: "Improved navigation, video playback and accessibility.".into(),
@@ -90,6 +94,10 @@ impl QuillApp {
                 "update-plan.json".into(),
             ),
         };
+        // `QUILL_DEMO_UPDATE_IN=chats`: the chat list and its update button.
+        if std::env::var("QUILL_DEMO_UPDATE_IN").is_ok_and(|v| v == "chats") {
+            return;
+        }
         self.open_settings_on(quill::settings_catalog::Page::System);
     }
 }

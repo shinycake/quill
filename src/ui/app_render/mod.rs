@@ -584,9 +584,7 @@ impl Render for QuillApp {
             .when(
                 matches!(
                     self.settings.update_state,
-                    quill::updater::UpdateState::Available(_)
-                        | quill::updater::UpdateState::Staged(..)
-                        | quill::updater::UpdateState::Installed(_)
+                    quill::updater::UpdateState::Installed(_)
                 ) && !self.settings.update_banner_dismissed,
                 |this| this.child(self.update_banner(cx)),
             )

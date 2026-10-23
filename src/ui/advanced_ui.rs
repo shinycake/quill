@@ -11,9 +11,8 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::advanced::experimental::{self, Category, Imported, OptionSpec, Values};
-use quill::advanced::{auto_update, hardware_video, update_channel};
+use quill::advanced::hardware_video;
 use quill::lang::{keys, tr};
-use quill::updater::UpdateState;
 
 impl QuillApp {
     /// The Advanced page. tdesktop's holds the update switches, Performance,
@@ -260,93 +259,6 @@ impl QuillApp {
         };
         self.connection.set_note(note);
         cx.notify();
-    }
-
-    fn update_options_visible(&self) -> bool {
-        self.appearance.check_updates_on_launch
-            && !matches!(
-                self.settings.update_state,
-                UpdateState::Downloading(_) | UpdateState::Installing(_)
-            )
-    }
-
-    /// "Install updates automatically" (tdesktop `cAutoUpdate`), off by
-    /// default. Where this installation cannot replace itself (macOS bundle,
-    /// package manager, read-only folder) the switch is off and disabled and
-    /// the hint says why. It stays visible while a download runs; turning it
-    /// off does not cancel one (a staged update still installs at the next
-    /// start, as in tdesktop).
-    pub(super) fn auto_update_row(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.appearance.check_updates_on_launch {
-            return None;
-        }
-        let row = auto_update::row_state(
-            auto_update::install_automatically(),
-            quill::update_install::self_update_availability(),
-        );
-        let label = tr(keys::Q_OPS_INSTALL_UPDATES_AUTOMATICALLY);
-        Some(
-            div()
-                .flex()
-                .flex_col()
-                .gap_1()
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .gap_3()
-                        .child(div().text_sm().child(label))
-                        .child(
-                            Switch::new("install-updates-automatically")
-                                .checked(row.checked)
-                                .disabled(!row.enabled)
-                                .accessibility_label(label)
-                                .on_click(cx.listener(|this, &on: &bool, _, cx| {
-                                    auto_update::set_install_automatically(on);
-                                    // A release already found is staged now.
-                                    this.stage_if_opted_in(cx);
-                                    cx.notify();
-                                })),
-                        ),
-                )
-                .child(
-                    div()
-                        .id("install-updates-automatically-hint")
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(tr(row.hint)),
-                )
-                .into_any_element(),
-        )
-    }
-
-    /// "Install beta versions" in the update section. tdesktop shows it with
-    /// the other update options, which are hidden while updates are off or
-    /// one is downloading.
-    pub(super) fn install_beta_row(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.update_options_visible() {
-            return None;
-        }
-        Some(
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .gap_3()
-                .child(div().text_sm().child(update_channel::LABEL))
-                .child(
-                    Switch::new("install-beta-versions")
-                        .checked(update_channel::install_beta())
-                        .accessibility_label(update_channel::LABEL)
-                        .on_click(cx.listener(|this, &on: &bool, _, cx| {
-                            update_channel::set_install_beta(on);
-                            // tdesktop checks again right away.
-                            this.check_for_updates(cx);
-                        })),
-                )
-                .into_any_element(),
-        )
     }
 }
 
