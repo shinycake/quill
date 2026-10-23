@@ -121,6 +121,7 @@ mod spell_state;
 mod start_files_state;
 mod start_files_ui;
 pub(crate) mod startup_failure;
+mod stickers_manager;
 mod stories_state;
 mod synthetic;
 pub(crate) mod tooltip_timing;

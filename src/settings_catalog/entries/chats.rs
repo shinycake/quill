@@ -97,13 +97,9 @@ pub(super) const ENTRIES: &[Entry] = &[
     )
     .section(keys::Q_SETTINGS_CHATS_SEC_EMOJI)
     .keywords(&["sticker mode"]),
-    Entry::new(
-        "chats.archived_stickers",
-        P,
-        keys::Q_MEDIA_ARCHIVED_STICKERS,
-    )
-    .section(keys::Q_SETTINGS_CHATS_SEC_EMOJI)
-    .keywords(&["sticker packs", "masks"]),
+    Entry::new("chats.archived_stickers", P, keys::STICKERS_YOU_HAVE)
+        .section(keys::Q_SETTINGS_CHATS_SEC_EMOJI)
+        .keywords(&["sticker packs", "archived", "trending", "reorder"]),
     Entry::new("chats.spellcheck", P, keys::Q_PREFS_CHECK_SPELLING)
         .section(keys::Q_PREFS_SPELLING)
         .keywords(&["typos", "autocorrect", "grammar"]),

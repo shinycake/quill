@@ -61,12 +61,8 @@ pub enum GroupConfirmAction {
     /// `deleteSavedOrderInfo` + `deleteSavedCredentials` (schema 1.8.67,
     /// lines 15286 / 15289). The dialog's chat id is a dummy.
     ClearPaymentInfo,
-    RemoveInstalledStickerSets,
     RemoveSavedGif {
         file_id: quill::ids::FileId,
-    },
-    RemoveStickerSet {
-        set_id: i64,
     },
     /// Subsection tabs: the tab menu's "Delete" — `deleteForumTopic`
     /// (schema 1.8.67, line 12736) for the dialog's chat.

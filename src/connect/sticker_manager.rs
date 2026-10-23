@@ -33,7 +33,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 continue;
             }
             asked.push(set.id);
-            files.extend(set.covers.iter().filter_map(|cover| cover.display_file_id()));
+            files.extend(
+                set.covers
+                    .iter()
+                    .filter_map(|cover| cover.display_file_id()),
+            );
         }
         self.session.stickers.manager.covers_requested.extend(asked);
         self.ensure_media_files(&files)
@@ -127,15 +131,14 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }
                 CommitStep::Remove(id) if masks => self.change_mask_set(id, false, false),
                 CommitStep::Remove(id) => self.manage_sticker_set(id, false, false),
-                CommitStep::Reorder(ids) if masks => self.mask_request(
-                    StickersPurpose::ReorderInstalledMaskSets.into(),
-                    |id| reorder_installed_mask_sets(id, &ids),
-                ),
-                CommitStep::Reorder(ids) => {
-                    self.sticker_request(RequestPurpose::ReorderInstalledStickerSets, |id| {
+                CommitStep::Reorder(ids) if masks => self
+                    .mask_request(StickersPurpose::ReorderInstalledMaskSets.into(), |id| {
+                        reorder_installed_mask_sets(id, &ids)
+                    }),
+                CommitStep::Reorder(ids) => self
+                    .sticker_request(RequestPurpose::ReorderInstalledStickerSets, |id| {
                         reorder_installed_sticker_sets(id, &ids)
-                    })
-                }
+                    }),
             };
             return match sent {
                 Ok(Some(_)) => Ok(()),
