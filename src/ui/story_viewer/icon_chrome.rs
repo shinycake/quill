@@ -8,6 +8,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
+use crate::ui::scroll_load::scrolled_near_end;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::ButtonCustomVariant;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
@@ -18,8 +19,6 @@ use quill::story_extras::{can_save_story, can_share_story, hide_label, profile_l
 const ICON: f32 = 18.;
 /// Square size of a chrome icon button.
 const BUTTON: f32 = 32.;
-/// Distance from the list's end at which the next viewers page loads.
-const LOAD_MORE_DISTANCE: f32 = 80.;
 
 /// What a ⋯ menu entry does. Mirrors the old text buttons one to one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -549,10 +548,7 @@ impl QuillApp {
             .session()
             .and_then(|s| s.stories.viewers.as_ref())
             .is_some_and(|v| !v.loading && !v.next_offset.is_empty());
-        let scroll = &self.stories.viewers_scroll;
-        let near_end = scroll.bounds().size.height > px(0.)
-            && scroll.max_offset().y + scroll.offset().y <= px(LOAD_MORE_DISTANCE);
-        if more && near_end {
+        if more && scrolled_near_end(&self.stories.viewers_scroll) {
             self.load_more_story_viewers(cx);
         }
     }

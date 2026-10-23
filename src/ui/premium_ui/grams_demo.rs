@@ -3,7 +3,8 @@
 //! `QUILL_DEMO_GRAMS` picks the view: unset or `overview` for the screen,
 //! `receipt` for a gift sale's receipt, `settings` for the Settings list
 //! with the "My Grams" row, `withdraw` for Collect's password box and
-//! `withdraw-check` for its security check (no password set).
+//! `withdraw-check` for its security check (no password set) and
+//! `loading-more` for the history with the next page on its way.
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
@@ -81,6 +82,13 @@ impl QuillApp {
                 self.open_grams(cx);
                 if let Some(grams) = self.grams_mut() {
                     grams.withdraw = Some(GramWithdraw::SecurityCheck { later: false });
+                }
+            }
+            "loading-more" => {
+                self.open_grams(cx);
+                if let Some(grams) = self.grams_mut() {
+                    grams.next_offset = "more".into();
+                    grams.loading = true;
                 }
             }
             "receipt" => {

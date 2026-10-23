@@ -316,7 +316,7 @@ impl QuillApp {
 
     /// Phase 9.5: the viewers panel — one row per interaction (actor
     /// name, relative time, reaction emoji or Forwarded/Reposted), a
-    /// count header, "Load more" while `next_offset` is non-empty, and
+    /// count header, the next page on scrolling near the end, and
     /// the loading / error / empty states.
     pub(in crate::ui) fn story_viewers_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         let state = self.session().and_then(|s| s.stories.viewers.clone());

@@ -393,6 +393,19 @@ pub(crate) fn scrollable_dialog_content<F>(
 where
     F: Fn(DialogContent, &mut Window, &mut App) -> DialogContent + 'static,
 {
+    scrollable_dialog_content_tracked(None, build)
+}
+
+/// `scrollable_dialog_content` whose scroll region is tracked by `scroll`, so
+/// a long list in the body can ask for its next page near the end
+/// (`ui/scroll_load.rs`).
+pub(crate) fn scrollable_dialog_content_tracked<F>(
+    scroll: Option<ScrollHandle>,
+    build: F,
+) -> impl Fn(DialogContent, &mut Window, &mut App) -> DialogContent
+where
+    F: Fn(DialogContent, &mut Window, &mut App) -> DialogContent + 'static,
+{
     move |content, window, cx| {
         let available = (window.viewport_size().height - px(180.)).max(px(80.));
         let body = build(DialogContent::new(), window, cx);
@@ -408,6 +421,9 @@ where
                 .w_full()
                 .max_h(available)
                 .overflow_y_scroll()
+                .when_some(scroll.as_ref(), |region, handle| {
+                    region.track_scroll(handle)
+                })
                 .pb_2()
                 .border_b_1()
                 .border_color(border)

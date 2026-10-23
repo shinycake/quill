@@ -7,8 +7,9 @@
 //! goes back to the top. Load more only appends, so it keeps the position.
 #![deny(clippy::indexing_slicing)]
 
+use super::scroll_load::Asked;
 use gpui_kit::component::*;
-use gpui_kit::{Point, px};
+use gpui_kit::{Point, ScrollHandle, px};
 use quill::state::SharedMediaTab;
 use std::cell::Cell;
 
@@ -24,6 +25,10 @@ pub(crate) struct PageKey {
 pub(crate) struct SharedMediaGridUi {
     scroll: [VirtualListScrollHandle; SharedMediaTab::COUNT],
     page: [Cell<Option<PageKey>>; SharedMediaTab::COUNT],
+    /// The month-sectioned list tabs (files, links, voice, music), which
+    /// page near their end (`scroll_load`).
+    list_scroll: [ScrollHandle; SharedMediaTab::COUNT],
+    list_asked: [Asked; SharedMediaTab::COUNT],
 }
 
 impl SharedMediaGridUi {
@@ -31,7 +36,17 @@ impl SharedMediaGridUi {
         Self {
             scroll: std::array::from_fn(|_| VirtualListScrollHandle::new()),
             page: std::array::from_fn(|_| Cell::new(None)),
+            list_scroll: std::array::from_fn(|_| ScrollHandle::new()),
+            list_asked: std::array::from_fn(|_| Asked::default()),
         }
+    }
+
+    pub(super) fn list_asked(&self, tab: SharedMediaTab) -> Option<&Asked> {
+        self.list_asked.get(tab.index())
+    }
+
+    pub(super) fn list_scroll(&self, tab: SharedMediaTab) -> Option<&ScrollHandle> {
+        self.list_scroll.get(tab.index())
     }
 
     /// The handle of `tab` for the page `key`, back at the top when the tab

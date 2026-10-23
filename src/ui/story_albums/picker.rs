@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
+use crate::ui::scroll_load::scrolled_near_end;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tooltip::Tooltip;
 use quill::local_path::sandboxed_display_path;
@@ -15,8 +16,6 @@ use std::path::PathBuf;
 const TILE_WIDTH: f32 = 118.0;
 const TILE_HEIGHT: f32 = 168.0;
 const CHECK_SIZE: f32 = 22.0;
-/// The next page loads when this little is left to scroll.
-const NEAR_END: f32 = 160.0;
 
 /// What a tile shows.
 struct Tile {
@@ -129,18 +128,6 @@ impl QuillApp {
         }
     }
 
-    /// The next archive page is on its way.
-    fn picker_loading(&self) -> bool {
-        use quill::state::RequestPurpose;
-        use quill::story_page::{StoryPageOpState, story_page_op_label};
-        self.session()
-            .and_then(|s| s.stories.page_op.as_ref())
-            .is_some_and(|op| {
-                op.state == StoryPageOpState::Checking
-                    && op.label == story_page_op_label(RequestPurpose::GetChatArchivedStories)
-            })
-    }
-
     /// More stories exist than are loaded.
     pub(super) fn picker_has_more(&self) -> bool {
         let Some(chat) = self.stories.page.as_ref().map(|page| page.chat_id.0) else {
@@ -159,11 +146,10 @@ impl QuillApp {
         let Some(scroll) = self.stories.page.as_ref().map(|p| p.picker_scroll.clone()) else {
             return;
         };
-        if self.picker_loading() || !self.picker_has_more() {
+        if self.archived_loading() || !self.picker_has_more() {
             return;
         }
-        let left = scroll.max_offset().y + scroll.offset().y;
-        if left > px(NEAR_END) {
+        if !scrolled_near_end(&scroll) {
             return;
         }
         self.load_more_archived_stories(cx);
@@ -277,7 +263,7 @@ impl QuillApp {
             .as_ref()
             .map(|page| page.picker_scroll.clone())
             .unwrap_or_default();
-        let loading = self.picker_loading();
+        let loading = self.archived_loading();
         let mut grid = div()
             .id("story-album-picker-grid")
             .flex()

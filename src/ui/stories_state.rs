@@ -44,6 +44,12 @@ pub(crate) struct StoryUi {
     pub(super) viewers_scroll: ScrollHandle,
     /// The statistics panel of the story open in the viewer.
     pub(super) stats_open: bool,
+    /// The statistics panel and the sidebar's public-story hits page near
+    /// their end (`scroll_load`).
+    pub(super) stats_scroll: ScrollHandle,
+    pub(super) stats_asked: super::scroll_load::Asked,
+    pub(super) found_scroll: ScrollHandle,
+    pub(super) found_asked: super::scroll_load::Asked,
     /// Phase 9.5: report flow UI open in the viewer overlay
     /// (`reportStory`).
     pub(super) report_open: bool,
@@ -158,6 +164,10 @@ impl StoryUi {
             viewers_open: false,
             viewers_scroll: ScrollHandle::new(),
             stats_open: false,
+            stats_scroll: ScrollHandle::new(),
+            stats_asked: Default::default(),
+            found_scroll: ScrollHandle::new(),
+            found_asked: Default::default(),
             report_open: false,
             report_text_input: story_report_text_input,
             page: None,

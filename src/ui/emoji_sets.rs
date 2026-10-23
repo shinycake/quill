@@ -6,6 +6,7 @@
 use super::app::QuillApp;
 use super::dialogs::GroupConfirmAction;
 use super::{DialogKind, QuillShell};
+use crate::ui::scroll_load::scrolled_near_end;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -27,7 +28,6 @@ use std::time::Duration;
 /// How long typing pauses before the search goes out.
 const SEARCH_DELAY: Duration = Duration::from_millis(300);
 /// Distance from the end of the list at which the next page is requested.
-const LOAD_MORE_DISTANCE: f32 = 160.;
 /// Cover previews shown on a row.
 const ROW_COVERS: usize = 4;
 const COVER_SIZE: f32 = 28.;
@@ -144,9 +144,7 @@ impl QuillApp {
     }
     fn emoji_sets_load_more(&mut self, cx: &mut Context<Self>) {
         let scroll = &self.pickers.emoji_set_scroll;
-        let near_end = scroll.bounds().size.height > px(0.)
-            && scroll.max_offset().y + scroll.offset().y <= px(LOAD_MORE_DISTANCE);
-        if !near_end
+        if !scrolled_near_end(scroll)
             || self
                 .session()
                 .is_none_or(|s| s.stickers.emoji.tab != EmojiSetTab::Trending)

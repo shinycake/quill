@@ -15,6 +15,9 @@ pub(crate) struct PrivacyState {
     pub(super) exception_picker_open: bool,
     /// Slice S3: block-user contact picker inside the Privacy overlay.
     pub(super) block_picker_open: bool,
+    /// The blocked-users rows, which page near their end (`scroll_load`).
+    pub(super) blocked_scroll: ScrollHandle,
+    pub(super) blocked_asked: super::scroll_load::Asked,
     /// Slice S3: two-step Unblock confirm on the Privacy screen.
     pub(super) unblock_confirm: Option<i64>,
     pub(super) device_qr_scanner: Option<super::device_qr::DeviceQrScanner>,
@@ -42,6 +45,8 @@ impl PrivacyState {
             exceptions: None,
             exception_picker_open: false,
             block_picker_open: false,
+            blocked_scroll: ScrollHandle::new(),
+            blocked_asked: Default::default(),
             unblock_confirm: None,
             device_qr_scanner: None,
             device_login_qr: None,

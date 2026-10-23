@@ -4,14 +4,13 @@
 //! and the "Load more" row of a paged list.
 
 use super::*;
+use crate::ui::scroll_load::scrolled_near_end;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{SearchConfirm, SearchMediaRow, SharedMediaTab, media_month_starts};
 
 /// tdesktop `kCollapsedChannelsCount`.
 const COLLAPSED_CHANNELS: usize = 5;
-/// Pixels left below the viewport at which the next page is requested.
-const SCROLL_PREFETCH: f32 = 240.;
 
 impl QuillApp {
     /// Channels tab on an empty field: the channels you joined (five, then
@@ -312,13 +311,8 @@ impl QuillApp {
         if !tabs.has_more() || tabs.loading_more || tabs.more_failed {
             return;
         }
-        let handle = &self.search_ui.results_scroll;
         // Not laid out yet: nothing to measure.
-        if handle.bounds().size.height <= px(0.) {
-            return;
-        }
-        let left = handle.max_offset().y + handle.offset().y;
-        if left <= px(SCROLL_PREFETCH) {
+        if scrolled_near_end(&self.search_ui.results_scroll) {
             self.load_more_search_ui(cx);
         }
     }

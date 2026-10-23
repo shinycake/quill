@@ -32,6 +32,23 @@ pub(crate) struct PaymentUi {
     /// Stars, members to award, countries (`stars_gift_ui`,
     /// `giveaway_pick_ui`).
     pub(super) pick_search: Entity<InputState>,
+    /// The scroll region of the giveaway dialog, which pages the members
+    /// list near its end (`scroll_load`).
+    pub(super) pick_scroll: ScrollHandle,
+    /// The same for the subscriptions dialog.
+    pub(super) subs_scroll: ScrollHandle,
+    /// The same for the Stars, received-gifts and Gram dialogs
+    /// (`premium_ui/paging.rs`).
+    pub(super) stars_scroll: ScrollHandle,
+    pub(super) gifts_scroll: ScrollHandle,
+    pub(super) grams_scroll: ScrollHandle,
+    /// The list length each paged dialog last asked at on its own, so a
+    /// page that never arrives cannot start a request loop.
+    pub(super) giveaway_asked: super::scroll_load::Asked,
+    pub(super) subs_asked: super::scroll_load::Asked,
+    pub(super) stars_asked: super::scroll_load::Asked,
+    pub(super) gifts_asked: super::scroll_load::Asked,
+    pub(super) grams_asked: super::scroll_load::Asked,
     /// The 2-step verification password of "Send via Blockchain"
     /// (`gift_transfer_ui`); emptied when it is sent and when the box
     /// closes.
@@ -135,6 +152,16 @@ impl PaymentUi {
             gift_pay_upgrade: false,
             gift_premium_by_stars: false,
             pick_search,
+            pick_scroll: ScrollHandle::new(),
+            subs_scroll: ScrollHandle::new(),
+            stars_scroll: ScrollHandle::new(),
+            gifts_scroll: ScrollHandle::new(),
+            grams_scroll: ScrollHandle::new(),
+            giveaway_asked: Default::default(),
+            subs_asked: Default::default(),
+            stars_asked: Default::default(),
+            gifts_asked: Default::default(),
+            grams_asked: Default::default(),
             gift_export_password,
             gift_export_password_focused: false,
             grams_withdraw_password,
