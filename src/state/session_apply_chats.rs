@@ -514,6 +514,7 @@ impl Session {
                     sticker_set_id,
                     custom_emoji_sticker_set_id,
                     admin: Default::default(),
+                    member_counts: Default::default(),
                 },
             );
             // Slice G2: anti-spam state for the manage-dialog
@@ -565,6 +566,7 @@ impl Session {
                 sticker_set_id,
                 custom_emoji_sticker_set_id,
                 admin: Default::default(),
+                member_counts: Default::default(),
             },
         );
         // Slice G2: anti-spam state for the manage-dialog toggle.

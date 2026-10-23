@@ -1,5 +1,6 @@
 //! Member context menu in the member list: Mention, Search messages,
-//! member tag, Promote / Edit admin rights, Restrict, Ban, Remove, Unban.
+//! member tag, Promote / Edit admin rights, Restrict, Ban, Remove, and
+//! Add to group / Delete on the Removed users list.
 //! Mirrors tdesktop's `ParticipantsBoxController::rowContextMenu`
 //! (`boxes/peers/edit_participants_box.cpp`) and `FillSenderUserpicMenu`
 //! (`window/window_peer_menu.cpp`). What the menu offers comes from
@@ -52,7 +53,8 @@ fn action_label(
                 tr(keys::RIGHTS_REMOVE_MEMBER)
             }
         }
-        MemberAction::Unban => tr(keys::Q_OPS_UNBAN),
+        MemberAction::AddToGroup => tr(keys::CONTEXT_ADD_TO_GROUP),
+        MemberAction::Unban => tr(keys::PROFILE_DELETE_REMOVED),
         MemberAction::Unrestrict => tr(keys::Q_OPS_UNRESTRICT),
     }
 }
@@ -90,6 +92,7 @@ impl QuillApp {
             viewer_can_promote: session.chat_can_manage_admins(chat_id),
             viewer_can_restrict: session.chat_can_restrict_members(chat_id),
             viewer_can_manage_tags: session.chat_can_manage_tags(chat_id),
+            viewer_can_add: session.chat_can_add_members(chat_id),
             chat_is_open: session.open_chat == Some(chat_id),
         })
     }
@@ -124,6 +127,7 @@ impl QuillApp {
                         | MemberAction::Unrestrict
                         | MemberAction::Ban
                         | MemberAction::Remove
+                        | MemberAction::AddToGroup
                         | MemberAction::Unban
                 );
                 if admin_tool && !separated && index > 0 {
@@ -190,9 +194,9 @@ impl QuillApp {
             MemberAction::Remove => {
                 self.open_group_confirm(chat_id, GroupConfirmAction::RemoveMember { user_id }, cx)
             }
-            MemberAction::Unban | MemberAction::Unrestrict => {
-                self.unban_member(chat_id, user_id, cx)
-            }
+            MemberAction::AddToGroup => self.add_removed_member(chat_id, user_id, cx),
+            MemberAction::Unban => self.remove_from_banned(chat_id, user_id, cx),
+            MemberAction::Unrestrict => self.unban_member(chat_id, user_id, cx),
         }
     }
 
@@ -201,6 +205,32 @@ impl QuillApp {
     fn leave_member_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.close_member_dialog(cx);
         self.close_kit_dialog_if_done(DialogKind::Member, window, cx);
+    }
+
+    /// "Add to group" for a removed user (tdesktop `unkickParticipant`).
+    fn add_removed_member(&mut self, chat_id: ChatId, user_id: i64, cx: &mut Context<Self>) {
+        let note = match self.live.as_mut() {
+            Some(live) => match live.driver.add_chat_members(chat_id, &[user_id]) {
+                Ok(_) => StatusNote::silent(tr(keys::Q_PEOPLE_ADDING_MEMBERS)),
+                Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_ADD_MEMBERS)),
+            },
+            None => StatusNote::info(tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE)),
+        };
+        self.connection.set_note(note);
+        self.refresh_member_dialog(cx);
+    }
+
+    /// "Delete" for a removed user (tdesktop `removeKicked`).
+    fn remove_from_banned(&mut self, chat_id: ChatId, user_id: i64, cx: &mut Context<Self>) {
+        let note = match self.live.as_mut() {
+            Some(live) => match live.driver.remove_from_banned(chat_id, user_id) {
+                Ok(Some(_)) => StatusNote::silent(tr(keys::Q_PEOPLE_MEMBER_UNBANNED)),
+                Ok(None) | Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UNBAN_MEMBER)),
+            },
+            None => StatusNote::info(tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE)),
+        };
+        self.connection.set_note(note);
+        self.refresh_member_dialog(cx);
     }
 
     /// "Mention": `@username` (or a text mention) goes into the composer.

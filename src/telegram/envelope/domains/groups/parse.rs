@@ -287,6 +287,7 @@ pub(crate) fn parse_groups_payload(
             admin: parse_supergroup_full_admin(Some(value)),
             bot_commands: parse_group_bot_commands(value.get("bot_commands")),
             share_theme: crate::peer_qr::theme::parse_share_theme(value.get("share_theme")),
+            member_counts: SupergroupMemberCounts::parse(Some(value)),
         })),
         // Parity slice: `updateSupergroupFullInfo` (schema 1.8.67, line
         // 10750) — same fields as the `supergroupFullInfo` response, with
@@ -391,6 +392,7 @@ pub(crate) fn parse_groups_payload(
                         .get("supergroup_full_info")
                         .and_then(|info| info.get("share_theme")),
                 ),
+                member_counts: SupergroupMemberCounts::parse(value.get("supergroup_full_info")),
             },
         )),
         "updateBasicGroupFullInfo" => Ok(EnvelopePayload::Groups(

@@ -124,7 +124,6 @@
 "qll_rest_connection_to_telegram_was_closed" = "Connection to Telegram was closed";
 "qll_rest_could_not_log_out_e" = "Could not log out: {e}";
 "qll_rest_restart_quill_to_finish_logging_out" = "Restart Quill to finish logging out. Nothing connects until then.";
-"qll_rest_could_not_change_slow_mode" = "could not change slow mode";
 "qll_rest_could_not_check_the_gift" = "could not check the gift code";
 "qll_rest_could_not_look_up_the" = "could not look up the language";
 "qll_rest_could_not_use_the_gift" = "could not use the gift code";
@@ -142,9 +141,6 @@
 "qll_rest_search_members" = "Search members";
 "qll_rest_shown_in_high_dynamic_range" = "Shown in high dynamic range";
 "qll_rest_shown_in_standard_range_on" = "Shown in standard range on this display";
-"qll_rest_slow_mode_needs_a_live" = "slow mode needs a live connection (demo)";
-"qll_rest_slow_mode_needs_the_restrict" = "slow mode needs the restrict-members admin right";
-"qll_rest_slow_mode_updated" = "slow mode updated";
 "qll_rest_slow_mode_wait_s_before" = "Slow mode: wait {wait}s before sending";
 "qll_rest_story_deleted" = "Story deleted";
 "qll_rest_telegram_premium_for" = "Telegram Premium for {day_count}";

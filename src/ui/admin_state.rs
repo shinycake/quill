@@ -22,8 +22,9 @@ pub(crate) struct AdminUi {
     pub(super) community: CommunityUi,
     /// Slice G1: member-management dialog (tabs + add section).
     pub(super) member_dialog: Option<MemberDialog>,
-    /// Slice G1: default chat permissions editor.
     pub(super) permissions_dialog: Option<PermissionsDialog>,
+    /// The "Add exception" / "Remove user" picker over the member dialog.
+    pub(super) add_special: Option<AddSpecialDialog>,
     /// Slice G1: public username editor.
     pub(super) username_dialog: Option<UsernameDialog>,
     /// Slice G1: restrict/ban dialog.
@@ -58,6 +59,7 @@ impl AdminUi {
             community: CommunityUi::default(),
             member_dialog: None,
             permissions_dialog: None,
+            add_special: None,
             username_dialog: None,
             restrict_dialog: None,
             ownership_dialog: None,

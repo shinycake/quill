@@ -47,6 +47,8 @@ pub struct MemberDialog {
     pub(crate) add_open: bool,
     pub(crate) add_search: Entity<TextareaState>,
     pub(crate) add_selected: Vec<i64>,
+    /// The member list; scrolling near its end loads the next page.
+    pub(crate) scroll: ScrollHandle,
 }
 
 impl MemberDialog {
@@ -76,6 +78,7 @@ impl MemberDialog {
             add_open: false,
             add_search,
             add_selected: Vec::new(),
+            scroll: ScrollHandle::new(),
         }
     }
 }

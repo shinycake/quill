@@ -76,6 +76,7 @@ mod passkeys_login;
 mod payments;
 mod peer_color;
 mod peer_qr;
+mod permissions_box;
 mod poll_option_menu;
 mod polls_checklists;
 mod premium_purchase;

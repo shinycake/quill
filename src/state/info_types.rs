@@ -215,6 +215,8 @@ pub struct SupergroupFullInfoData {
     /// Links, mentions and hashtags in `description`, parsed by TDLib when
     /// the info arrives (`crate::text::about`).
     pub description_entities: Vec<crate::text::TextEntity>,
+    /// Restricted and banned member counts (the permissions box rows).
+    pub member_counts: crate::telegram::envelope::SupergroupMemberCounts,
 }
 
 impl Default for SupergroupFullInfoData {
@@ -235,6 +237,7 @@ impl Default for SupergroupFullInfoData {
             custom_emoji_sticker_set_id: 0,
             admin: Default::default(),
             description_entities: Vec::new(),
+            member_counts: Default::default(),
         }
     }
 }

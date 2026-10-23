@@ -315,6 +315,7 @@ impl QuillApp {
                     // channel) — not success. Keep the dialog open and
                     // say so instead of claiming it happened.
                     Ok(Some(_)) => {
+                        self.admin.add_special = None;
                         if dialog.ban {
                             StatusNote::silent(tr(keys::Q_PEOPLE_MEMBER_BANNED))
                         } else {
@@ -351,131 +352,6 @@ impl QuillApp {
         };
         self.connection.set_note(note);
         self.refresh_member_dialog(cx);
-    }
-
-    /// Slice G1: open the default-permissions editor, seeded from the
-    /// chat's current block.
-    pub(super) fn open_permissions_dialog(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        let current = self
-            .session()
-            .and_then(|session| session.chats.get(&chat_id.0))
-            .and_then(|chat| chat.permissions)
-            .unwrap_or_else(ChatPermissions::all);
-        self.admin.permissions_dialog = Some(PermissionsDialog {
-            chat_id,
-            permissions: current,
-        });
-        cx.notify();
-    }
-
-    pub(super) fn close_permissions_dialog(&mut self, cx: &mut Context<Self>) {
-        self.admin.permissions_dialog = None;
-        cx.notify();
-    }
-
-    pub(super) fn toggle_permission(&mut self, index: usize, cx: &mut Context<Self>) {
-        if let Some(dialog) = self.admin.permissions_dialog.as_mut() {
-            let enabled = chat_permission_get(&dialog.permissions, index);
-            chat_permission_set(&mut dialog.permissions, index, !enabled);
-            cx.notify();
-        }
-    }
-
-    /// Slice G1: `setChatPermissions` (schema 1.8.67, line 13464).
-    pub(super) fn submit_permissions_dialog(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.admin.permissions_dialog.take() else {
-            return;
-        };
-        let note = match self.live.as_mut() {
-            Some(live) => match live
-                .driver
-                .set_chat_permissions(dialog.chat_id, &dialog.permissions)
-            {
-                Ok(_) => StatusNote::silent(tr(keys::Q_PEOPLE_PERMISSIONS_UPDATED)),
-                Err(_) => {
-                    self.admin.permissions_dialog = Some(dialog);
-                    StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_PERMISSIONS))
-                }
-            },
-            None => {
-                self.admin.permissions_dialog = Some(dialog);
-                StatusNote::info(tr(keys::Q_PEOPLE_PERMISSIONS_NEED_A_LIVE_CONNECTION))
-            }
-        };
-        self.connection.set_note(note);
-        cx.notify();
-    }
-
-    /// kit Phase 2 (redo): permissions hosted in a kit `Dialog` via
-    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
-    pub(super) fn build_permissions_dialog(
-        app: &Entity<QuillApp>,
-        shell: &Entity<QuillShell>,
-        dialog: Dialog,
-        cx: &mut App,
-    ) -> Dialog {
-        let on_close =
-            QuillShell::on_close_kind(app, shell, DialogKind::Permissions, |this, _, cx| {
-                this.close_permissions_dialog(cx);
-            });
-        app.update(cx, |this, cx| {
-            let dialog = dialog
-                .overlay(true)
-                .title(crate::ui::shell::dialog_title(tr(
-                    keys::Q_PEOPLE_DEFAULT_PERMISSIONS,
-                )));
-            let Some(dialog_state) = this.admin.permissions_dialog.as_ref() else {
-                return dialog.on_close(on_close);
-            };
-            let body = div()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(tr(keys::Q_PEOPLE_WHAT_NEW_MEMBERS_MAY_DO)),
-                )
-                .child(this.permission_checkboxes(&dialog_state.permissions, cx))
-                .into_any_element();
-            let footer = div()
-                .flex()
-                .justify_end()
-                .gap_2()
-                .child(
-                    Button::new("g1-permissions-cancel")
-                        .label(tr(keys::CANCEL))
-                        .ghost()
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.close_permissions_dialog(cx);
-                            this.close_kit_dialog_if_done(DialogKind::Permissions, window, cx);
-                        })),
-                )
-                .child(
-                    Button::new("g1-permissions-submit")
-                        .label(tr(keys::SETTINGS_SAVE))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.submit_permissions_dialog(cx);
-                            this.close_kit_dialog_if_done(DialogKind::Permissions, window, cx);
-                        })),
-                );
-            dialog
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
-                .footer(footer)
-                .on_close(on_close)
-        })
     }
 
     /// kit Phase 2 (redo): restrict/ban hosted in a kit `Dialog` via
@@ -574,6 +450,17 @@ impl QuillApp {
                         .placeholder(tr(keys::Q_PEOPLE_PICK_A_DATE_AND_TIME)),
                 );
             }
+            if !dialog_state.ban
+                && let Some(line) =
+                    this.restricted_by_line(dialog_state.chat_id, dialog_state.user_id)
+            {
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(line),
+                );
+            }
             if let Some(error) = dialog_state.error {
                 body = body.child(
                     div()
@@ -626,38 +513,6 @@ impl QuillApp {
                 .footer(footer)
                 .on_close(on_close)
         })
-    }
-
-    /// Slice G1: 16 permission checkboxes bound to the dialog's staged
-    /// copy (mirrors `rights_checkboxes`).
-    pub(super) fn permission_checkboxes(
-        &self,
-        permissions: &ChatPermissions,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let mut list = div().flex().flex_col().gap_1();
-        let mut row = div().flex().gap_2();
-        for (index, label) in CHAT_PERMISSION_LABELS.iter().enumerate() {
-            let enabled = chat_permission_get(permissions, index);
-            row = row.child(
-                div().flex_1().child(
-                    // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
-                    Checkbox::new(format!("g1-permission-{index}"))
-                        .checked(enabled)
-                        .label(tr(*label))
-                        .on_click(cx.listener(move |this, &on, _, cx| {
-                            if on != enabled {
-                                this.toggle_permission(index, cx);
-                            }
-                        })),
-                ),
-            );
-            if index % 2 == 1 {
-                list = list.child(row);
-                row = div().flex().gap_2();
-            }
-        }
-        list.into_any_element()
     }
 
     /// Slice G1: permission checkboxes for the restrict dialog (same
@@ -819,17 +674,17 @@ impl QuillApp {
 }
 
 crate::ui::shell::register_dialogs! {
-    Permissions => DialogSpec::new(
-        4400,
-        |app| app.admin.permissions_dialog.is_some(),
-        QuillApp::build_permissions_dialog,
-    ),
-
     Restrict => DialogSpec::new(
-        4600,
+        4290,
         |app| app.admin.restrict_dialog.is_some(),
         QuillApp::build_restrict_dialog,
     ),
 }
 
+mod add_special;
+mod permissions_box;
 mod promote_dialog_panel;
+mod stops_slider;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod stops_slider_tests;

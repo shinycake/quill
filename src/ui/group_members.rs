@@ -2,10 +2,12 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::pressable::action_row;
 use super::shell::DialogKind;
 use super::shell::QuillShell;
 use super::*;
 use crate::ui::status_note::StatusNote;
+use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
@@ -15,12 +17,17 @@ use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::add_special::SpecialRole;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{ContactRow, MemberListFilter, SupergroupMembersFetch};
 use quill::telegram::envelope::{ChannelMemberStatus, ChatKind, MessageSender};
 use std::cell::RefCell;
 use std::rc::Rc;
+
+/// How close to the end of a member list the next page is asked for.
+const LOAD_MORE_DISTANCE: f32 = 120.;
+
 impl QuillApp {
     /// Slice G1: open the member-management dialog and kick off the
     /// member fetch for the current tab.
@@ -275,13 +282,37 @@ impl QuillApp {
                 );
             }
             // Member rows.
+            let add_special = match tab {
+                MemberTab::Restricted if can_restrict => Some((
+                    SpecialRole::Restricted,
+                    IconName::UserPlus,
+                    tr(keys::CHANNEL_ADD_EXCEPTION),
+                )),
+                MemberTab::Banned if can_restrict => Some((
+                    SpecialRole::Kicked,
+                    IconName::UserX,
+                    tr(keys::CHANNEL_ADD_REMOVED),
+                )),
+                _ => None,
+            };
+            if let Some((role, icon, label)) = add_special {
+                body = body.child(
+                    action_row("g1-member-add-special", Some(icon), label, false, cx).on_click(
+                        cx.listener(move |this, _, window, cx| {
+                            this.open_add_special(chat_id, role, window, cx);
+                        }),
+                    ),
+                );
+            }
             let mut list = div()
                 .id("g1-member-list")
                 .flex()
                 .flex_col()
                 .gap_1()
                 .max_h(px(240.))
-                .overflow_y_scroll();
+                .overflow_y_scroll()
+                .track_scroll(&dialog_state.scroll)
+                .on_scroll_wheel(cx.listener(|this, _, _, cx| this.member_dialog_load_more(cx)));
             match fetch {
                 None | Some(SupergroupMembersFetch::Loading) => {
                     list = list.child(
@@ -328,7 +359,7 @@ impl QuillApp {
                                 .child(tr(keys::Q_PEOPLE_NO_MEMBERS)),
                         );
                     }
-                    for member in members.iter().take(200) {
+                    for member in members.iter() {
                         list = list.child(this.member_row(chat_id, member, cx));
                     }
                 }
@@ -534,35 +565,89 @@ impl QuillApp {
         let dialog = self.admin.member_dialog.as_ref()?;
         let session = self.session()?;
         if dialog.is_basic_group {
-            session
+            return session
                 .groups
                 .basic_group_members
                 .get(&dialog.chat_id.0)
-                .cloned()
-        } else {
-            let query = dialog.search_input.read(cx).value();
-            let filter = match dialog.tab.filter() {
-                Some(filter) => filter,
-                None if query.trim().is_empty() => MemberListFilter::Recent,
-                None => MemberListFilter::Search,
-            };
-            // Slice G1 fix-up: a Restricted/Banned tab left open after
-            // the viewer lost restrict rights has no fetchable page —
-            // fall back to Recent instead of spinning forever.
-            let filter = if !session.chat_can_restrict_members(dialog.chat_id)
-                && matches!(
-                    filter,
-                    MemberListFilter::Restricted | MemberListFilter::Banned
-                ) {
-                MemberListFilter::Recent
-            } else {
-                filter
-            };
-            session
-                .groups
-                .supergroup_members
-                .get(&(dialog.chat_id.0, filter))
-                .cloned()
+                .cloned();
+        }
+        let filter = self.member_dialog_filter(cx)?;
+        session
+            .groups
+            .supergroup_members
+            .get(&(dialog.chat_id.0, filter))
+            .cloned()
+    }
+
+    /// The supergroup list the dialog's tab and search show.
+    fn member_dialog_filter(&self, cx: &App) -> Option<MemberListFilter> {
+        let dialog = self.admin.member_dialog.as_ref()?;
+        let session = self.session()?;
+        let query = dialog.search_input.read(cx).value();
+        let filter = match dialog.tab.filter() {
+            Some(filter) => filter,
+            None if query.trim().is_empty() => MemberListFilter::Recent,
+            None => MemberListFilter::Search,
+        };
+        if !session.chat_can_restrict_members(dialog.chat_id)
+            && matches!(
+                filter,
+                MemberListFilter::Restricted | MemberListFilter::Banned
+            )
+        {
+            return Some(MemberListFilter::Recent);
+        }
+        Some(filter)
+    }
+
+    /// The member dialog scrolled: near the end of the list, ask for the
+    /// next page (tdesktop pages `getSupergroupMembers` past the first).
+    fn member_dialog_load_more(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.admin.member_dialog.as_ref() else {
+            return;
+        };
+        if dialog.is_basic_group {
+            return;
+        }
+        let Some(filter) = self.member_dialog_filter(cx) else {
+            return;
+        };
+        let (chat_id, scroll) = (dialog.chat_id, dialog.scroll.clone());
+        let query = dialog.search_input.read(cx).value().trim().to_string();
+        self.load_more_members(chat_id, filter, &query, &scroll);
+    }
+
+    /// Ask for the next page of a member list once `scroll` is near its
+    /// end and the server has more.
+    pub(super) fn load_more_members(
+        &mut self,
+        chat_id: ChatId,
+        filter: MemberListFilter,
+        query: &str,
+        scroll: &ScrollHandle,
+    ) {
+        if !scrolled_near_end(scroll) {
+            return;
+        }
+        let loaded = self.session().and_then(|session| {
+            match session.groups.supergroup_members.get(&(chat_id.0, filter)) {
+                Some(SupergroupMembersFetch::Loaded {
+                    members,
+                    total_count,
+                }) => Some((members.len() as i32, *total_count)),
+                _ => None,
+            }
+        });
+        let Some(loaded) = loaded
+            .filter(|(loaded, total)| loaded < total)
+            .map(|(loaded, _)| loaded)
+        else {
+            return;
+        };
+        if let Some(live) = self.live.as_mut() {
+            let _ = live
+                .driver
+                .fetch_supergroup_members_more(chat_id, filter, query, loaded);
         }
     }
 
@@ -608,9 +693,19 @@ impl QuillApp {
                     &[("chat_id", &chat_id.to_string())],
                 ),
             });
-        let status_label = match member.restriction {
-            Some(restriction) => super::restricted_exceptions::restricted_row_status(restriction),
-            None => Self::member_status_label(member.status).to_string(),
+        let tab = self.admin.member_dialog.as_ref().map(|dialog| dialog.tab);
+        let set_by = self.member_set_by(member);
+        let status_label = match (tab, set_by, member.restriction) {
+            (Some(MemberTab::Restricted), Some(by), _) => {
+                tr_with(keys::CHANNEL_BANNED_STATUS_RESTRICTED_BY, &[("user", &by)])
+            }
+            (Some(MemberTab::Banned), Some(by), _) => {
+                tr_with(keys::CHANNEL_BANNED_STATUS_REMOVED_BY, &[("user", &by)])
+            }
+            (_, _, Some(restriction)) => {
+                super::restricted_exceptions::restricted_row_status(restriction)
+            }
+            _ => Self::member_status_label(member.status).to_string(),
         };
         // Slice G1: show the admin custom title (`chatMember.tag`,
         // schema 1.8.67 line 2526) next to the status when set.
@@ -671,4 +766,9 @@ crate::ui::shell::register_dialogs! {
         |app| app.admin.member_dialog.is_some(),
         QuillApp::build_member_dialog,
     ),
+}
+
+fn scrolled_near_end(scroll: &ScrollHandle) -> bool {
+    scroll.bounds().size.height > px(0.)
+        && scroll.max_offset().y + scroll.offset().y <= px(LOAD_MORE_DISTANCE)
 }

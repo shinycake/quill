@@ -1,5 +1,6 @@
 #![deny(clippy::indexing_slicing)]
 pub(crate) mod account_notices;
+pub(crate) mod add_special;
 pub(crate) mod admin;
 pub(crate) mod call_rating;
 pub(crate) mod callback_password;
@@ -36,6 +37,7 @@ pub(crate) mod welcome;
 
 pub(crate) use super::security_recovery::TwofaConfirm;
 pub(crate) use account_notices::TermsStep;
+pub(crate) use add_special::*;
 pub(crate) use admin::*;
 pub(crate) use call_rating::*;
 pub(crate) use callback_password::*;
