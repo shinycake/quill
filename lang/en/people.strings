@@ -276,7 +276,6 @@
 "qll_people_contact_add_requested" = "Contact add requested.";
 "qll_people_contact_saved" = "Contact saved";
 "qll_people_contact_shared_with" = "Contact shared with {title}";
-"qll_people_contacts_to_import" = "Contacts to import";
 "qll_people_convert" = "Convert";
 "qll_people_converting_to_broadcast_group" = "converting to broadcast group…";
 "qll_people_copy_bio" = "Copy Bio";
@@ -526,8 +525,6 @@
 "qll_people_owner" = "👑 Owner";
 "qll_people_pack" = "Pack {current}";
 "qll_people_passcode" = "Passcode";
-"qll_people_paste_the_contents_of_a" = "Paste the contents of a .vcf file. Only cards with a phone number are imported.";
-"qll_people_paste_vcard_vcf_text" = "Paste vCard (.vcf) text…";
 "qll_people_permissions_updated" = "permissions updated";
 "qll_people_personal_channel" = "Personal channel";
 "qll_people_personal_channel_removed" = "Personal channel removed";
@@ -621,7 +618,6 @@
 "qll_people_show_chats" = "Show chats";
 "qll_people_shown_in_the_communities_hub" = "Shown in the communities hub and info panel";
 "qll_people_similar_channels" = "Similar channels";
-"qll_people_skipped_without_phone" = "{skipped} skipped without phone";
 "qll_people_some_reactions" = "Some reactions";
 "qll_people_sorry_this_link_is_taken" = "Sorry, this link is taken. But it's available for purchase. ";
 "qll_people_start_a_secret_chat_with" = "Start a secret chat with:";
@@ -719,3 +715,20 @@
 "lng_rights_slowmode_interval_seconds#other" = "every {count} seconds";
 "lng_rights_slowmode_interval_minutes#one" = "every {count} minute";
 "lng_rights_slowmode_interval_minutes#other" = "every {count} minutes";
+// The Contacts import box: choose a .vcf file, see what it holds, then import.
+"qll_people_import_choose_text" = "Choose a .vcf file with the contacts to import. Only cards with a phone number are imported.";
+"qll_people_import_choose_file" = "Choose File…";
+"qll_people_import_choose_other" = "Choose Another File…";
+"qll_people_import_reading" = "Reading {file}…";
+"qll_people_import_ready#one" = "{count} contact in {file} will be imported";
+"qll_people_import_ready#other" = "{count} contacts in {file} will be imported";
+"qll_people_import_skipped#one" = "{count} card without a phone number is skipped";
+"qll_people_import_skipped#other" = "{count} cards without a phone number are skipped";
+"qll_people_import_truncated#one" = "{count} card past the {limit}-card limit is skipped";
+"qll_people_import_truncated#other" = "{count} cards past the {limit}-card limit are skipped";
+"qll_people_import_more#one" = "and {count} more";
+"qll_people_import_more#other" = "and {count} more";
+"qll_people_import_not_vcard" = "{file} is not a .vcf file.";
+"qll_people_import_unreadable" = "Couldn't read {file}.";
+"qll_people_import_too_large" = "{file} is too large to be a contact list.";
+"qll_people_import_unnamed" = "Unnamed";
