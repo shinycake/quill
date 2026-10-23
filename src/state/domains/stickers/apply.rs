@@ -179,9 +179,6 @@ impl Session {
             } => {
                 if is_custom_emoji && id > 0 {
                     self.stickers.emoji.outdated_packs.insert(id);
-                    if self.stickers.emoji.selected_set_id == Some(id) {
-                        drop(self.requests.take_purpose(RequestPurpose::GetEmojiSet));
-                    }
                 }
             }
             StickersPayload::StickerSet {
@@ -251,18 +248,6 @@ impl Session {
                 {
                     self.remember_files(&files);
                     self.accept_library_set(set_id, stickers);
-                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetEmojiSet)
-                    && self.stickers.emoji.selected_set_id == Some(id)
-                {
-                    self.remember_files(&files);
-                    self.stickers.emoji.failed = false;
-                    self.stickers.emoji.preview_title = title;
-                    self.stickers
-                        .emoji
-                        .pack_files
-                        .insert(id, stickers.iter().map(|item| item.file_id).collect());
-                    self.stickers.emoji.outdated_packs.remove(&id);
-                    self.stickers.emoji.preview = stickers;
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStickerSet) {
                     self.remember_files(&files);
                     self.accept_sticker_set(id, stickers);

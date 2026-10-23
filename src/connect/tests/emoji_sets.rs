@@ -2,7 +2,7 @@ use super::super::{ConnectDriver, RecordingSender};
 use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::emoji::EmojiSetTab;
-use crate::ids::{FileId, RequestId};
+use crate::ids::RequestId;
 use crate::platform::MemorySecretStore;
 use crate::state::RequestPurpose;
 use crate::telegram::client::copy_and_parse;
@@ -34,9 +34,14 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
         json!({"@type":"stickerSets","@extra":installed.as_extra(),"sets":[set(1,true)]}),
     );
     assert_eq!(driver.session.stickers.emoji.installed_sets.len(), 1);
-    assert_eq!(
-        driver.session.emoji_pack_download_state(1),
-        "Not downloaded"
+    assert!(
+        driver
+            .session
+            .stickers
+            .emoji
+            .installed_sets
+            .iter()
+            .all(|s| s.id == 1)
     );
     assert!(driver.session.stickers.stickers.sets.is_empty());
     let old = driver.search_emoji_packs("old").unwrap().unwrap();
@@ -75,41 +80,9 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
     );
     assert_eq!(driver.session.stickers.emoji.trending_sets.len(), 2);
     assert!(!driver.session.stickers.emoji.trending_has_more); // Raw page length, not deduped count.
-    let old = driver.preview_emoji_pack(1).unwrap().unwrap();
-    let preview = driver.preview_emoji_pack(2).unwrap().unwrap();
-    ingest(
-        &mut driver,
-        json!({"@type":"stickerSet","@extra":old.as_extra(),"id":"1","title":"Old","stickers":[]}),
-    );
-    assert!(driver.session.stickers.emoji.preview_title.is_empty());
-    ingest(
-        &mut driver,
-        json!({"@type":"stickerSet","@extra":preview.as_extra(),"id":"2","title":"New","stickers":[
-        {"@type":"sticker","set_id":"2","width":64,"height":64,"emoji":"😀","format":{"@type":"stickerFormatWebp"},"sticker":{
-            "@type":"file","id":109,"size":5,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"is_downloading_completed":false}}}]}),
-    );
-    assert_eq!(driver.session.stickers.emoji.preview_title, "New");
-    assert_eq!(
-        driver.session.stickers.emoji.preview[0].file_id,
-        FileId(109)
-    );
-    assert_eq!(driver.session.emoji_pack_download_state(2), "Downloading…");
-    driver.download_emoji_pack(2).unwrap(); // In-flight file is deduped.
-    ingest(
-        &mut driver,
-        json!({"@type":"updateFile","file":{"@type":"file","id":109,"size":5,"local":{"@type":"localFile","path":"/tmp/emoji.webp","can_be_downloaded":true,"is_downloading_active":false,"is_downloading_completed":true}}}),
-    );
-    assert_eq!(driver.session.emoji_pack_download_state(2), "Downloaded");
-    ingest(
-        &mut driver,
-        json!({"@type":"updateStickerSet","sticker_set":{"@type":"stickerSet","id":"2","sticker_type":{"@type":"stickerTypeCustomEmoji"}}}),
-    );
-    assert_eq!(driver.session.emoji_pack_download_state(2), "Update needed");
-    assert!(driver.download_emoji_pack(2).is_err());
-    assert_eq!(sent_request(&recorder, "downloadFile")["file_id"], 109); // Preview works without a chat.
     assert!(driver.session.stickers.stickers.stickers.is_empty());
     let remove = driver.set_emoji_pack_installed(1, false).unwrap().unwrap();
-    assert_eq!(driver.session.emoji_pack_download_state(1), "Removing…");
+    assert_eq!(driver.session.stickers.emoji.mutating_set, Some((1, false)));
     assert!(driver.set_emoji_pack_installed(2, true).unwrap().is_none());
     ingest(
         &mut driver,
@@ -117,17 +90,22 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
     );
     assert_eq!(driver.session.stickers.emoji.installed_sets.len(), 1);
     assert!(driver.session.stickers.emoji.mutation_failed);
-    assert_eq!(
-        driver.session.emoji_pack_download_state(1),
-        "Not downloaded"
+    assert!(
+        driver
+            .session
+            .stickers
+            .emoji
+            .installed_sets
+            .iter()
+            .all(|s| s.id == 1)
     );
     let install = driver.set_emoji_pack_installed(2, true).unwrap().unwrap();
-    assert_eq!(driver.session.emoji_pack_download_state(2), "Installing…");
+    assert_eq!(driver.session.stickers.emoji.mutating_set, Some((2, true)));
     ingest(
         &mut driver,
         json!({"@type":"error","@extra":install.as_extra(),"code":500,"message":"test"}),
     );
-    assert_eq!(driver.session.emoji_pack_download_state(2), "Update needed");
+    assert_eq!(driver.session.stickers.emoji.mutating_set, None);
     let remove = driver.set_emoji_pack_installed(1, false).unwrap().unwrap();
     // An installed list issued before mutation success must not restore removed entries later.
     let stale = driver
@@ -171,10 +149,47 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
             .iter()
             .all(|set| !set.is_installed)
     );
-    assert!(driver.preview_emoji_pack(-1).is_err());
     assert!(driver.set_emoji_pack_installed(0, true).is_err());
     driver.session.auth = AuthorizationState::WaitPhoneNumber;
     assert!(driver.open_emoji_sets().is_err());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn emoji_pack_covers_download_once_without_a_button() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let installed = driver.open_emoji_sets().unwrap().unwrap();
+    let cover = |file: i64| {
+        json!({"@type":"sticker","set_id":"1","width":100,"height":100,"emoji":"😀",
+            "format":{"@type":"stickerFormatWebp"},
+            "sticker":{"@type":"file","id":file,"size":5,"local":{"@type":"localFile","path":"",
+                "can_be_downloaded":true,"is_downloading_completed":false}}})
+    };
+    let payload = json!({"@type":"stickerSets","@extra":installed.as_extra(),"sets":[
+        {"@type":"stickerSetInfo","id":"1","title":"One","name":"one","size":2,
+         "is_installed":true,"covers":[cover(201),cover(202)]}]});
+    driver
+        .ingest(copy_and_parse(&payload.to_string(), &seq, &sink).unwrap())
+        .unwrap();
+    let listed = &driver.session.stickers.emoji.installed_sets;
+    assert_eq!(listed.first().map(|s| s.covers.len()), Some(2));
+    assert!(driver.session.media.files.contains_key(&201));
+    driver.ensure_emoji_pack_covers().unwrap();
+    let sent = |recorder: &RecordingSender| {
+        recorder
+            .snapshot()
+            .iter()
+            .filter(|json| json.contains("\"downloadFile\""))
+            .count()
+    };
+    let first = sent(&recorder);
+    assert_eq!(first, 2);
+    driver.ensure_emoji_pack_covers().unwrap();
+    assert_eq!(sent(&recorder), first);
     let _ = std::fs::remove_dir_all(dir);
 }
 

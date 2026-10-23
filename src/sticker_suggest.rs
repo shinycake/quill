@@ -237,6 +237,8 @@ mod tests {
                 is_installed: true,
                 is_official: true,
                 is_owned: false,
+                covers: Vec::new(),
+                cover_files: Vec::new(),
             },
             StickerSetInfo {
                 id: 78,
@@ -246,6 +248,8 @@ mod tests {
                 is_installed: true,
                 is_official: false,
                 is_owned: false,
+                covers: Vec::new(),
+                cover_files: Vec::new(),
             },
         ];
         let answer = |extra: u64| {

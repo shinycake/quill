@@ -65,8 +65,7 @@ impl Session {
         if emoji_purpose == Some(RequestPurpose::SetEmojiStatus) {
             self.stickers.emoji.pending_status_emoji = None;
         }
-        if emoji_purpose == Some(RequestPurpose::GetEmojiSet)
-            || emoji_purpose == Some(RequestPurpose::ChangeEmojiSet)
+        if emoji_purpose == Some(RequestPurpose::ChangeEmojiSet)
             || (emoji_purpose == Some(RequestPurpose::GetInstalledEmojiSets)
                 && self.stickers.emoji.tab == crate::emoji::EmojiSetTab::Installed)
             || (emoji_purpose == Some(RequestPurpose::GetTrendingEmojiSets)
