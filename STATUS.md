@@ -803,7 +803,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Insert emoji at cursor in composer text <!-- parity:emoji-insert -->
 - [x] Big emoji rendering for emoji-only messages (Big Emoji setting) <!-- parity:emoji-big -->
 - [x] Custom emoji packs (browse/install/remove, "Emoji Sets" settings screen) <!-- parity:emoji-custom-packs -->
-- [ ] Emoji packs box like the stickers box: tabs, rows with previews, search as you type, packs load and download on their own (no Load, Search or Retry buttons) <!-- parity:emoji-packs-box -->
+- [x] Emoji packs box like the stickers box: tabs, rows with previews, search as you type, packs load and download on their own (no Load, Search or Retry buttons) <!-- parity:emoji-packs-box -->
 - [x] Render custom emoji inside message text <!-- parity:emoji-custom-render --> (inline sticker image at 1.25× text size; thumbnail first, else static WEBP; unresolved falls back to the span text; animated playback still static; live custom emoji unverified)
 - [x] Suggest animated emoji in composer <!-- parity:emoji-suggest-animated --> (composer trailing-emoji → `getAnimatedEmoji` (deduped, stale in-flight dropped) → suggestion row above the composer, tap to send as a sticker; `animatedEmoji` parse into EmojiPanel already existed)
 - [x] Emoji status: recent/trending/default choices, Premium-gated selection and removal, forever/1h/2h/8h/2d/custom expiry; thumbnails and safe retry; live changes unverified <!-- parity:emoji-status -->

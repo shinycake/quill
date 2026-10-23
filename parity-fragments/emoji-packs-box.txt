@@ -1,2 +1,0 @@
-# emoji packs box: tabs, rows with previews, search as you type, no manual buttons
-parity:emoji-packs-box
