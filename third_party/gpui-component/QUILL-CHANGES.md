@@ -48,3 +48,8 @@ public with the `syntect` feature (without `tree-sitter`). It returns the
 highlight names of a text for a language, so Quill colors message code blocks
 from its own theme tokens and runs the parse on a background thread
 (`docs/decisions/code-syntax-highlight.md`). Re-apply when re-vendoring.
+
+`src/message_scroller.rs`: `MessageScrollerState::distance_to_edges` passes
+`ListState::estimated_distance_to_edges` through, so Quill's history asks for
+the next page while three screens are left (`docs/decisions/history-preload.md`).
+Re-apply when re-vendoring.

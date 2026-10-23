@@ -2,7 +2,7 @@ use std::{ops::Range, time::Duration};
 
 use gpui::{
     AnyElement, App, Context, ElementId, Entity, FollowMode, Hsla, InteractiveElement as _,
-    IntoElement, ListAlignment, ListOffset, ListState, ParentElement as _, RenderOnce, Role,
+    IntoElement, ListAlignment, ListOffset, ListState, ParentElement as _, Pixels, RenderOnce, Role,
     SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
     linear_color_stop, linear_gradient, list, prelude::FluentBuilder as _, px, rems,
 };
@@ -72,6 +72,13 @@ impl MessageScrollerState {
     /// [`Self::item_count`] until then.
     pub fn logical_scroll_top(&self) -> ListOffset {
         self.list_state.logical_scroll_top()
+    }
+
+    /// How far the viewport is from the first row's top and from the last
+    /// row's bottom, with rows not measured yet counted at the mean row
+    /// height, and the viewport's height. `None` until a row is laid out.
+    pub fn distance_to_edges(&self) -> Option<(Pixels, Pixels, Pixels)> {
+        self.list_state.estimated_distance_to_edges()
     }
 
     /// Reset the list to `item_count` rows.
