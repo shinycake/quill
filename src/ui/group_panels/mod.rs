@@ -222,6 +222,14 @@ impl QuillApp {
                     // the media counts (yourself has none).
                     if live.driver.session.my_user_id != Some(user_id) {
                         let _ = live.driver.fetch_groups_in_common(user_id);
+                        // The cover's story ring, for someone outside the
+                        // story lists TDLib keeps current.
+                        if !live.driver.session.stories.tray.contains_key(&user_id) {
+                            let _ = live.driver.get_chat_active_stories(ChatId(user_id));
+                        }
+                    } else {
+                        // The Saved Messages cover counts its chats.
+                        let _ = live.driver.load_saved_topics();
                     }
                     live.driver.fetch_user_full_info(user_id).map(|_| ())
                 }

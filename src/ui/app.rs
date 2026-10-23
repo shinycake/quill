@@ -146,6 +146,8 @@ pub struct QuillApp {
     pub(super) peer_qr: super::peer_qr::PeerQrUi,
     /// The info cover's video profile photo (`ui/video_avatar`).
     pub(super) video_avatar: super::video_avatar::VideoAvatarUi,
+    /// The profile cover's rating and last seen boxes (`ui/profile_cover`).
+    pub(super) profile_cover: super::profile_cover::ProfileCoverUi,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

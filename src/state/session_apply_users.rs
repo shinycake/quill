@@ -42,6 +42,7 @@ impl Session {
                         photo_id,
                         blocked,
                         extras,
+                        ratings: Default::default(),
                     },
                 );
                 if let Some(bot_id) = pending

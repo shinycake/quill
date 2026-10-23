@@ -125,6 +125,15 @@ pub struct ParsedUser {
     /// Business chatbot (tdesktop `botInfo->supportsBusiness`).
     pub can_connect_to_business: bool,
     pub status: UserStatusKind,
+    /// `by_my_privacy_settings` of a `userStatusRecently` / `LastWeek` /
+    /// `LastMonth`: the exact time is hidden because the viewer hides
+    /// their own (tdesktop `LastseenStatus::isHiddenByMe`).
+    pub status_hidden_by_me: bool,
+    /// `user.is_support`: a Telegram support account.
+    pub is_support: bool,
+    /// `userTypeBot.active_user_count`: the bot's monthly users; 0 for
+    /// everyone else.
+    pub bot_active_users: i32,
     /// `profile_photo.small.id` (`profilePhoto`, schema 1.8.67 line 754);
     /// 0 = no photo.
     pub photo_small_file_id: i32,
@@ -207,6 +216,14 @@ pub(crate) fn parse_user_status(value: Option<&Value>) -> UserStatusKind {
         Some("userStatusLastMonth") => UserStatusKind::LastMonth,
         _ => UserStatusKind::Empty,
     }
+}
+
+/// `by_my_privacy_settings` of a `userStatus*`; false when absent.
+pub(crate) fn status_hidden_by_me(value: Option<&Value>) -> bool {
+    value
+        .and_then(|status| status.get("by_my_privacy_settings"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 /// A5: full username lists from `usernames` (schema 1.8.67, line 2372).
@@ -349,6 +366,17 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
     let can_manage_bots = bot_flag("can_manage_bots");
     let can_connect_to_business = bot_flag("can_connect_to_business");
     let status = parse_user_status(value.get("status"));
+    let status_hidden_by_me = status_hidden_by_me(value.get("status"));
+    let is_support = value
+        .get("is_support")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let bot_active_users = value
+        .get("type")
+        .filter(|_| is_bot)
+        .and_then(|t| t.get("active_user_count"))
+        .and_then(Value::as_i64)
+        .map_or(0, |count| count.max(0).sat_i32());
     let photo_small_file_id = i32::try_from(int53_or_zero(
         value
             .get("profile_photo")
@@ -428,6 +456,9 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         can_manage_bots,
         can_connect_to_business,
         status,
+        status_hidden_by_me,
+        is_support,
+        bot_active_users,
         photo_small_file_id,
         accent_color_id,
         background_custom_emoji_id,

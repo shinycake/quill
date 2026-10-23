@@ -398,3 +398,36 @@ fn failed_color_requests_surface_the_error_and_icons_flag() {
     );
     assert!(session.users_state.background_emoji_icons_failed);
 }
+
+#[test]
+fn hidden_last_seen_and_rating_reach_the_cover() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateUser","user":{"id":31,"first_name":"Ada","type":{"@type":"userTypeRegular"},"status":{"@type":"userStatusOnline","expires":1}}}"#,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateUserStatus","user_id":31,"status":{"@type":"userStatusRecently","by_my_privacy_settings":true}}"#,
+    );
+    assert!(
+        session
+            .user(31)
+            .is_some_and(|user| user.status_hidden_by_me)
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateUserFullInfo","user_id":31,"user_full_info":{"@type":"userFullInfo","rating":{"@type":"userRating","level":2,"is_maximum_level_reached":false,"rating":40,"current_level_rating":30,"next_level_rating":90}}}"#,
+    );
+    let rating = session
+        .user_full_info(31)
+        .and_then(|info| info.ratings.rating);
+    assert_eq!(rating.map(|r| (r.level, r.rating)), Some((2, 40)));
+}

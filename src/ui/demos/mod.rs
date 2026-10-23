@@ -25,6 +25,7 @@ mod payments;
 mod platform;
 mod privacy_media;
 mod profile_actions;
+pub(in crate::ui) mod profile_cover;
 pub(crate) mod reaction_fixtures;
 mod security;
 pub(crate) mod shared_media;

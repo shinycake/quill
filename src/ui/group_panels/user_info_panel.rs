@@ -75,22 +75,23 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let session = self.session();
+        let is_self = session
+            .and_then(|s| s.my_user_id)
+            .is_some_and(|me| me == user_id);
+        let facts = quill::profile_cover::CoverFacts::for_user(is_self);
+        if facts.saved_messages {
+            return self
+                .saved_messages_cover(cx)
+                .children(self.media_counts_section(0, cx))
+                .into_any_element();
+        }
         let user = session.and_then(|s| s.user(user_id)).cloned();
         let info = session.and_then(|s| s.user_full_info(user_id)).cloned();
         let name = user
             .as_ref()
             .map(|u| u.display_name())
             .unwrap_or_else(|| tr_with(keys::Q_PEOPLE_USER, &[("user_id", &user_id.to_string())]));
-        let status = user
-            .as_ref()
-            .map(|u| {
-                if u.is_bot {
-                    "bot".to_string()
-                } else {
-                    u.status.display()
-                }
-            })
-            .unwrap_or_default();
+        let status = user.as_ref().map(|u| self.user_cover_status(u, facts, cx));
         let roots = self.media_display_roots();
         let photo_path: Option<PathBuf> = session
             .and_then(|s| {
@@ -117,28 +118,11 @@ impl QuillApp {
             avatar,
             self.info_cover_behind(cx),
         );
-        let is_self = session
-            .and_then(|s| s.my_user_id)
-            .is_some_and(|me| me == user_id);
         // B10: a profile with a photo opens the photo gallery in the media
         // viewer.
         let has_photo = info.as_ref().is_some_and(|i| i.photo_id.is_some())
             || user.as_ref().is_some_and(|u| u.photo_small_file_id != 0);
-        let avatar: AnyElement = if has_photo {
-            div()
-                .id(("info-panel-photo-open", user_id as u64))
-                .cursor_pointer()
-                .role(gpui_kit::Role::Button)
-                .aria_label(tr(keys::Q_PEOPLE_VIEW_PROFILE_PHOTOS))
-                .tab_index(0)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.open_peer_photos(quill::state::PhotoOwner::User(user_id), cx)
-                }))
-                .child(avatar)
-                .into_any_element()
-        } else {
-            avatar
-        };
+        let avatar = self.user_cover_avatar(user_id, avatar, has_photo, cx);
         let name_for_copy = name.clone();
         let verify_icon = self.user_bot_verify_icon_path(user_id);
         // Verified check, Premium star or animated status after the name
@@ -195,12 +179,7 @@ impl QuillApp {
                             )
                             .children(badges),
                     )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(status),
-                    ),
+                    .children(status),
             );
         // Primary actions as a row of labeled icon tiles
         // (`profile_panels::action_row`).
@@ -239,10 +218,7 @@ impl QuillApp {
         }
         // tdesktop's "Change colors" (`addThemeEdit`): the chat's theme and
         // wallpaper, for the private chat open right now.
-        if !is_self
-            && in_own_chat
-            && let Some(chat) = session.and_then(|s| s.open_chat)
-        {
+        if in_own_chat && let Some(chat) = session.and_then(|s| s.open_chat) {
             body = body.child(
                 action_row(
                     "info-panel-chat-look",
@@ -276,7 +252,7 @@ impl QuillApp {
         }
         // Delete contact, a bot's Report, then Block, in the order of
         // tdesktop `ActionsFiller::fillUserActions`.
-        if !is_self && user.is_some() {
+        if user.is_some() {
             let blocked = info.as_ref().is_some_and(|i| i.blocked);
             let is_bot = user.as_ref().is_some_and(|u| u.is_bot);
             let mut danger = div().flex().flex_col().w_full().gap_0p5();

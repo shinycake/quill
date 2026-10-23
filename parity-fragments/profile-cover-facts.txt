@@ -1,0 +1,6 @@
+# profile cover facts: bot users, story ring, Stars rating, last seen, Saved Messages
+parity:profile-bot-monthly-users
+parity:profile-story-ring
+parity:profile-stars-rating
+parity:profile-show-last-seen
+parity:profile-saved-messages-cover

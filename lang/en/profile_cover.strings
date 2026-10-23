@@ -1,0 +1,38 @@
+// The user profile cover: special status lines, the Stars rating pill and
+// its box, and the hidden last seen button and its box (tdesktop
+// data_peer_values.cpp, info_profile_top_bar.cpp, stars_rating.cpp,
+// show_or_premium_box.cpp).
+"lng_status_service_notifications" = "service notifications";
+"lng_status_support" = "support";
+"lng_status_bot" = "bot";
+"lng_status_bot_app" = "app";
+"lng_status_bot_agent" = "agent";
+"lng_status_bot_ai" = "ai";
+"lng_status_bot_game" = "game";
+"lng_status_bot_gay" = "non-binary";
+"lng_bot_status_users#one" = "{count} monthly user";
+"lng_bot_status_users#other" = "{count} monthly users";
+"lng_status_lastseen_when" = "when?";
+"lng_lastseen_show_title" = "Show Your Last Seen";
+"lng_lastseen_show_about" = "To see **{user}'s** Last Seen time, either start\nshowing your own Last Seen time...";
+"lng_lastseen_show_button" = "Show My Last Seen";
+"lng_lastseen_or" = "or";
+"lng_lastseen_premium_title" = "Upgrade to Premium";
+"lng_lastseen_premium_about" = "Subscribing will let you see **{user}'s** Last Seen\nstatus without showing yours.";
+"lng_lastseen_premium_button" = "Subscribe to Telegram Premium";
+"lng_lastseen_shown_toast" = "Your last seen time is now visible.";
+"lng_stars_rating_title" = "Rating";
+"lng_stars_rating_negative_label" = "Negative Rating";
+"lng_stars_rating_negative" = "A negative rating indicates that **{name}'s** payments are unreliable.";
+"lng_stars_rating_about" = "This rating reflects **{name}'s** activity on Telegram. What affects it:";
+"lng_stars_title_gifts_telegram" = "Gifts from Telegram";
+"lng_stars_about_gifts_telegram" = "{emoji} 100% of the Stars spent on gifts purchased from Telegram.";
+"lng_stars_title_gifts_users" = "Gifts and Posts from Users";
+"lng_stars_about_gifts_users" = "{emoji} 20% of the Stars spent on resold gifts, paid messages and channel posts.";
+"lng_stars_title_refunds" = "Refunds and Conversions";
+"lng_stars_about_refunds" = "{emoji} 10x of refunded Stars and 85% of bought gifts converted to Stars.";
+"lng_stars_rating_added" = "Added";
+"lng_stars_rating_deducted" = "Deducted";
+"lng_stars_rating_understood" = "Understood";
+"lng_boost_level#one" = "Level {count}";
+"lng_boost_level#other" = "Level {count}";

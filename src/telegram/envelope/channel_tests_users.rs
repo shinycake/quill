@@ -132,7 +132,9 @@ fn update_user_status_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::Users(UsersPayload::UpdateUserStatus { user_id, status }) => {
+        EnvelopePayload::Users(UsersPayload::UpdateUserStatus {
+            user_id, status, ..
+        }) => {
             assert_eq!(user_id, UserId(31));
             assert_eq!(status, UserStatusKind::LastWeek);
         }
@@ -218,6 +220,7 @@ fn user_full_info_bio_parsed() {
             photo_id: _,
             blocked,
             share_theme: _,
+            ratings: _,
         }) => {
             assert_eq!(bio, "CANARY bio text");
             assert!(bot_info.is_none());
@@ -289,4 +292,52 @@ fn a_wallet_card_gives_the_profile_a_balance() {
     assert_eq!(extras.ton_wallet_card_balance, None);
     let extras = envelope_types::parse_user_profile_extras(None);
     assert_eq!(extras.ton_wallet_card_balance, None);
+}
+
+#[test]
+fn cover_facts_parsed_from_user_status_and_full_info() {
+    let env = parse_envelope(
+        r#"{"@type":"updateUser","user":{"id":21,"first_name":"Forecast","is_support":false,"status":{"@type":"userStatusEmpty"},"type":{"@type":"userTypeBot","can_be_edited":false,"can_join_groups":true,"can_read_all_group_messages":false,"has_main_web_app":false,"has_topics":false,"allows_users_to_create_topics":false,"can_manage_bots":false,"is_inline":false,"inline_query_placeholder":"","supports_guest_queries":false,"is_guard":false,"need_location":false,"can_connect_to_business":false,"can_be_added_to_attachment_menu":false,"active_user_count":1284567}}}"#,
+    )
+    .unwrap();
+    match env.payload {
+        EnvelopePayload::Users(UsersPayload::UpdateUser { user, .. }) => {
+            assert_eq!(user.bot_active_users, 1_284_567);
+            assert!(!user.is_support);
+        }
+        other => panic!("{other:?}"),
+    }
+    let env = parse_envelope(
+        r#"{"@type":"updateUser","user":{"id":42,"first_name":"Support","is_support":true,"status":{"@type":"userStatusRecently","by_my_privacy_settings":true},"type":{"@type":"userTypeRegular","active_user_count":5}}}"#,
+    )
+    .unwrap();
+    match env.payload {
+        EnvelopePayload::Users(UsersPayload::UpdateUser { user, .. }) => {
+            assert!(user.is_support);
+            assert!(user.status_hidden_by_me);
+            assert_eq!(user.bot_active_users, 0, "only bots have monthly users");
+        }
+        other => panic!("{other:?}"),
+    }
+    let env = parse_envelope(
+        r#"{"@type":"updateUserStatus","user_id":31,"status":{"@type":"userStatusLastMonth","by_my_privacy_settings":true}}"#,
+    )
+    .unwrap();
+    match env.payload {
+        EnvelopePayload::Users(UsersPayload::UpdateUserStatus { hidden_by_me, .. }) => {
+            assert!(hidden_by_me)
+        }
+        other => panic!("{other:?}"),
+    }
+    let env = parse_envelope(
+        r#"{"@type":"updateUserFullInfo","user_id":31,"user_full_info":{"@type":"userFullInfo","rating":{"@type":"userRating","level":7,"is_maximum_level_reached":false,"rating":1840,"current_level_rating":1500,"next_level_rating":2500},"pending_rating":null,"pending_rating_date":0}}"#,
+    )
+    .unwrap();
+    match env.payload {
+        EnvelopePayload::Users(UsersPayload::UpdateUserFullInfo { ratings, .. }) => {
+            assert_eq!(ratings.rating.map(|r| r.level), Some(7));
+            assert_eq!(ratings.pending, None);
+        }
+        other => panic!("{other:?}"),
+    }
 }
