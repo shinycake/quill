@@ -1141,7 +1141,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Global keyboard shortcuts: 22 bindings wired in `bind_keys` (Quit, focus sidebar/composer, chat search, media viewer nav/zoom) (src/ui/mod.rs:125) <!-- parity:platform-keyboard-shortcuts -->
 - [x] Keyboard shortcuts reference/help overlay listing all bindings <!-- parity:platform-shortcuts-reference -->
 - [x] Customizable key bindings <!-- parity:platform-custom-keybindings -->
-- [ ] Long lists load the next page on scroll with a spinner row everywhere (giveaway winners, subscriptions, Stars and gifts history, privacy exceptions, saved sublists, shared media, story pages and insights), never a Load more button; one shared helper <!-- parity:platform-scroll-load-everywhere -->
+- [x] Long lists load the next page on scroll with a spinner row everywhere (giveaway winners, subscriptions, Stars and gifts history, privacy exceptions, saved sublists, shared media, story pages and insights), never a Load more button; one shared helper <!-- parity:platform-scroll-load-everywhere -->
 - [x] Screen-reader accessible labels/roles on UI elements (partial: #287 adds conversation text/link/spoiler roles and named controls; native macOS AX actions verified; other flows remain to audit) <!-- parity:platform-screen-reader-labels -->
 - [ ] VoiceOver support (partial: macOS AccessKit tree and native AX actions verified by #287; spoken VoiceOver navigation across all flows remains unverified) <!-- parity:platform-voiceover -->
 - [x] High-contrast theme/mode <!-- parity:platform-high-contrast -->
