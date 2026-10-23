@@ -8,7 +8,6 @@ use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use crate::ui::story_page::StoryPage;
 use gpui_kit::component::Root;
-use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Focusable, TestAppContext, VisualTestContext, px, size};
 use quill::ids::ChatId;
 use quill::story_album_picker::AlbumPickerTarget;
