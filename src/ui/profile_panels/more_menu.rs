@@ -213,8 +213,7 @@ impl QuillApp {
             }
             E::Boosts => {
                 if let Some(id) = chat {
-                    self.open_group_settings_dialog(id, cx);
-                    self.set_group_settings_view(GroupSettingsView::Boosts, cx);
+                    self.open_group_settings_view(id, GroupSettingsView::Boosts, cx);
                 }
             }
             E::Monetization => {

@@ -53,9 +53,10 @@ pub const BROADCAST_FEATURES: [&str; 3] = [
 /// Second step: the permanent consequence (`lng_gigagroup_warning`).
 pub const BROADCAST_WARNING: &str = "Regular members of the group (non-admins) will permanently lose their right to send messages in the group.\n\nThis action can't be undone.";
 
-/// Line under the "Convert to broadcast group" row (`lng_rights_gigagroup_about`).
-pub const BROADCAST_ABOUT: &str =
-    "Broadcast groups can have over 200,000 members, but only admins can send messages in them.";
+/// Line under the "Convert to broadcast group" row.
+pub fn broadcast_about() -> &'static str {
+    crate::lang::tr(crate::lang::keys::RIGHTS_GIGAGROUP_ABOUT)
+}
 
 /// The bullet list shown in the first conversion dialog.
 pub fn broadcast_features_text() -> String {
@@ -66,13 +67,13 @@ pub fn broadcast_features_text() -> String {
         .join("\n")
 }
 
-/// Explainer at the top of the recent actions list
-/// (`lng_admin_log_about_text[_channel]`).
+/// Explainer at the top of the recent actions list.
 pub fn event_log_about(is_channel: bool) -> &'static str {
+    use crate::lang::{keys, tr};
     if is_channel {
-        "This is a list of all service actions taken by the channel's admins in the last 48 hours."
+        tr(keys::ADMIN_LOG_ABOUT_TEXT_CHANNEL)
     } else {
-        "This is a list of all notable actions by group members and admins in the last 48 hours."
+        tr(keys::ADMIN_LOG_ABOUT_TEXT)
     }
 }
 

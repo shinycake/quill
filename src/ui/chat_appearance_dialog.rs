@@ -256,8 +256,7 @@ impl QuillApp {
             return;
         };
         self.close_chat_appearance_dialog(cx);
-        self.open_group_settings_dialog(chat_id, cx);
-        self.set_group_settings_view(GroupSettingsView::Boosts, cx);
+        self.open_group_settings_view(chat_id, GroupSettingsView::Boosts, cx);
     }
 
     pub(super) fn build_chat_appearance_dialog(

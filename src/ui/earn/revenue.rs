@@ -764,7 +764,11 @@ impl QuillApp {
             .child(Switch::new(("earn-ads-off", 1u64)).checked(off).small())
             .on_click(cx.listener(move |this, _, _, cx| {
                 if locked && !off {
-                    this.earn.ask_boost = Some((chat_id, required.unwrap_or(0)));
+                    this.earn.ask_boost = Some(crate::ui::earn_state::AskBoost {
+                        chat_id,
+                        level: required.unwrap_or(0),
+                        reason: crate::ui::earn_state::AskBoostReason::Cpm,
+                    });
                     if let Some(live) = this.live.as_mut() {
                         let _ = live
                             .driver

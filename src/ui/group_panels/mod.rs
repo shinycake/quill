@@ -237,8 +237,6 @@ impl QuillApp {
                         // Phase D3b: administrator list; the driver
                         // no-ops unless the viewer may manage admins
                         // (owner or `can_promote_members`).
-                        // Phase D3c: recent-actions log; the driver no-ops
-                        // unless the viewer is an administrator/creator.
                         for fetch in [
                             live.driver.fetch_chat_invite_links(chat_id).map(|_| ()),
                             live.driver.fetch_chat_join_requests(chat_id).map(|_| ()),
@@ -247,7 +245,6 @@ impl QuillApp {
                                 .fetch_chat_invite_link_counts(chat_id)
                                 .map(|_| ()),
                             live.driver.fetch_chat_administrators(chat_id).map(|_| ()),
-                            live.driver.fetch_chat_event_log(chat_id).map(|_| ()),
                         ] {
                             if fetch.is_err() {
                                 result = fetch;

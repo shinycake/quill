@@ -13,6 +13,23 @@ use quill::premium_hub::StarTx;
 use quill::state::InfoPanelTarget;
 use std::collections::HashSet;
 
+/// What a locked switch needs boosts for (tdesktop `AskBoostReason`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AskBoostReason {
+    /// "Switch Off Ads" (`AskBoostCpm`).
+    Cpm,
+    /// "Auto-translate messages" (`AskBoostAutotranslate`).
+    Autotranslate,
+}
+
+/// The boost box of a locked switch: the channel and the level it needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AskBoost {
+    pub(crate) chat_id: i64,
+    pub(crate) level: i32,
+    pub(crate) reason: AskBoostReason,
+}
+
 pub(crate) struct EarnUi {
     /// The Stars to withdraw (tdesktop `AddInputFieldForCredits`).
     pub(super) amount: Entity<InputState>,
@@ -37,9 +54,8 @@ pub(crate) struct EarnUi {
     pub(super) ton_tx: Option<TonTx>,
     /// A Stars history row's receipt.
     pub(super) star_tx: Option<StarTx>,
-    /// The boost box a locked "Switch Off Ads" opens: the channel and the
-    /// level it needs.
-    pub(super) ask_boost: Option<(i64, i32)>,
+    /// The boost box a locked switch opens.
+    pub(super) ask_boost: Option<AskBoost>,
     /// The setup page's sliders and the stops they move over.
     pub(super) commission: Option<(Entity<SliderState>, Vec<i32>)>,
     pub(super) duration: Option<(Entity<SliderState>, Vec<i32>)>,

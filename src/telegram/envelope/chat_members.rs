@@ -626,6 +626,7 @@ pub(crate) fn parse_can_transfer_ownership_result(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SupergroupMemberCounts {
+    pub administrators: i32,
     pub restricted: i32,
     pub banned: i32,
 }
@@ -638,6 +639,7 @@ impl SupergroupMemberCounts {
                 .map_or(0, |n| i32::try_from(n.max(0)).unwrap_or(i32::MAX))
         };
         Self {
+            administrators: count("administrator_count"),
             restricted: count("restricted_count"),
             banned: count("banned_count"),
         }

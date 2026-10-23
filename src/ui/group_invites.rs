@@ -14,21 +14,6 @@ use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
-    /// Slice G1: `replacePrimaryChatInviteLink` (schema 1.8.67, line
-    /// 14089) — revokes the current primary link and creates a fresh
-    /// one; the new link arrives as `updateChatInviteLink`.
-    pub(super) fn replace_primary_invite_link(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        let note = match self.live.as_mut() {
-            Some(live) => match live.driver.replace_primary_chat_invite_link(chat_id) {
-                Ok(_) => StatusNote::info(tr(keys::Q_PEOPLE_REPLACING_PRIMARY_INVITE_LINK)),
-                Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_REPLACE_INVITE_LINK)),
-            },
-            None => StatusNote::info(tr(keys::Q_PEOPLE_INVITE_LINKS_NEED_A_LIVE)),
-        };
-        self.connection.set_note(note);
-        cx.notify();
-    }
-
     /// Phase D3a: open the invite-link create dialog for a chat.
     pub(super) fn open_invite_link_dialog(
         &mut self,

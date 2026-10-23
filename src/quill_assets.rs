@@ -58,6 +58,7 @@ gpui_kit::assets::icon_assets!(
         ChevronRight,
         Clock,
         CalendarClock,
+        ListClock,
         Star,
         Volume2,
         VolumeX,

@@ -1,6 +1,6 @@
 //! Connect driver: translation (`translateMessageText` / `translateText`).
 use super::*;
-use crate::ids::{ChatId, MessageId};
+use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::{RequestPurpose, RequestRollback};
 use crate::state::{TranslateTarget, Translation};
 use crate::telegram::envelope::ChatKind;
@@ -121,7 +121,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: ChatId,
         enabled: bool,
-    ) -> Result<(), ConnectSendError> {
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -133,7 +133,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let purpose = RequestPurpose::ToggleSupergroupAutoTranslate;
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
-            return Ok(());
+            return Ok(None);
         }
         let extra = self.session.request(purpose, Some(chat_id));
         if let Err(err) = self
@@ -156,6 +156,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 previous,
             });
         }
-        Ok(())
+        Ok(Some(extra))
     }
 }

@@ -10,7 +10,7 @@ use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
-use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
+use gpui_kit::{AppContext, ElementId, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::ids::ChatId;
 
 fn frames(vcx: &mut VisualTestContext) {
@@ -242,4 +242,76 @@ fn escape_and_cancel_close_the_emoji_panel(cx: &mut TestAppContext) {
     vcx.update(|_, cx| app.update(cx, |app, cx| app.close_group_edit_box(cx)));
     frames(vcx);
     assert!(app.read_with(vcx, |app, _| app.group_edit_box().is_none()));
+}
+
+fn shown(vcx: &mut VisualTestContext, id: &'static str) -> bool {
+    vcx.update(|window, _| window.try_find((id, 1u64)).is_some())
+}
+
+#[gpui_kit::test]
+fn author_profiles_show_only_while_signing(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = open_demo(cx, "ready-channel-edit-box");
+    let vcx = &mut vcx;
+    assert!(shown(vcx, "g2-toggle-sign-messages"));
+    assert!(shown(vcx, "g2-toggle-show-authors"));
+    vcx.update(|window, cx| window.click(("g2-toggle-sign-messages", 1u64), cx));
+    frames(vcx);
+    assert!(!shown(vcx, "g2-toggle-show-authors"));
+    let signatures = app.read_with(vcx, |app, _| {
+        app.group_edit_box().and_then(|edit| edit.signatures)
+    });
+    assert_eq!(
+        signatures.map(|s| (s.sign, s.profiles)),
+        Some((false, false))
+    );
+    vcx.update(|window, cx| window.click(("g2-toggle-sign-messages", 1u64), cx));
+    frames(vcx);
+    assert!(shown(vcx, "g2-toggle-show-authors"));
+}
+
+#[gpui_kit::test]
+fn locked_auto_translate_asks_for_boosts(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = open_demo(cx, "ready-channel-edit-box");
+    let vcx = &mut vcx;
+    vcx.update(|window, cx| window.click(("tr-toggle-auto-translate", 1u64), cx));
+    frames(vcx);
+    let (choice, ask) = app.read_with(vcx, |app, _| {
+        (
+            app.group_edit_box().and_then(|edit| edit.auto_translate),
+            app.earn.ask_boost,
+        )
+    });
+    assert_eq!(choice, None);
+    let ask = ask.expect("the boost box opens");
+    assert_eq!((ask.chat_id, ask.level), (62, 3));
+}
+
+#[gpui_kit::test]
+fn the_history_box_hands_its_choice_to_save(cx: &mut TestAppContext) {
+    let (app, shell, mut vcx) = open_demo(cx, "ready-group-edit-box");
+    let vcx = &mut vcx;
+    vcx.update(|_, cx| {
+        app.update(cx, |app, cx| {
+            if let Some(edit) = app.group_edit_box_mut() {
+                edit.history_box = Some(false);
+            }
+            cx.notify();
+        })
+    });
+    frames(vcx);
+    assert!(shell.read_with(vcx, |s, _| s.open_dialog
+        == Some(DialogKind::GroupHistoryBox)));
+    vcx.update(|window, cx| {
+        window
+            .within("group-history-visibility")
+            .click(ElementId::Integer(0), cx)
+    });
+    vcx.update(|window, cx| window.click("group-history-save", cx));
+    frames(vcx);
+    let edit = app.read_with(vcx, |app, _| {
+        app.group_edit_box()
+            .map(|edit| (edit.history_box, edit.history_visible))
+    });
+    assert_eq!(edit, Some((None, Some(true))));
+    assert!(shell.read_with(vcx, |s, _| s.open_dialog == Some(DialogKind::GroupEditBox)));
 }
