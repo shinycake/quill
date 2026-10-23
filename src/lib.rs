@@ -93,6 +93,7 @@ pub mod icon_badge;
 pub mod ids;
 pub mod inline_grid;
 pub mod inline_members;
+pub mod invite_link_form;
 pub mod json_access;
 pub mod key_fingerprint;
 pub mod lang;

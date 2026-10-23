@@ -179,7 +179,6 @@
 "lng_switch_emoji" = "Emoji";
 "qll_people_1_more_boost" = "1 more boost";
 "qll_people_1_topic" = "1 topic";
-"qll_people_a_stars_price_charges_people" = "A Stars price charges people monthly to join through this link. Expiry, limit and approval do not apply.";
 "qll_people_a_title_that_members_will" = "A title that members will see instead of 'Admin'. Empty removes it.";
 "qll_people_abort" = "Abort";
 "qll_people_abort_recovery_email_setup" = "Abort recovery email setup";
@@ -211,7 +210,6 @@
 "qll_people_allowed_while_restricted" = "Allowed while restricted";
 "qll_people_anti_spam_needs_a_live" = "anti-spam needs a live connection (demo)";
 "qll_people_anti_spam_updated" = "anti-spam updated";
-"qll_people_approval_required_to_join" = "Approval required to join";
 "qll_people_approve" = "Approve";
 "qll_people_are_you_sure" = "Are you sure?";
 "qll_people_are_you_sure_you_want" = "Are you sure you want to abort recovery email setup? The new address will not be activated.";
@@ -338,7 +336,6 @@
 "qll_people_couldnt_send_the_change_try" = "Couldn't send the change. Try again.";
 "qll_people_couldnt_share_the_contact_here" = "Couldn't share the contact here.";
 "qll_people_create_invite_link" = "Create invite link";
-"qll_people_create_link" = "Create link";
 "qll_people_creating_chats_needs_a_live" = "creating chats needs a live connection (demo)";
 "qll_people_creating_communities_needs_a_live" = "creating communities needs a live connection (demo)";
 "qll_people_creating_invite_link" = "creating invite link…";
@@ -398,7 +395,6 @@
 "qll_people_enter_a_name_for_the" = "Enter a name for the contact.";
 "qll_people_enter_a_name_or_phone" = "Enter a name or phone number to add the contact.";
 "qll_people_enter_a_username_to_check" = "Enter a username to check, or save it empty to remove it.";
-"qll_people_expiration_must_be_a_non" = "expiration must be a non-negative number of days";
 "qll_people_expires_in_days" = "Expires in {remaining_86_400} days";
 "qll_people_expires_today" = "Expires today";
 "qll_people_expires_tomorrow" = "Expires tomorrow";
@@ -425,9 +421,6 @@
 "qll_people_importing_contacts_2" = "importing contacts… ({join})";
 "qll_people_invalid_username" = "Invalid username";
 "qll_people_invite_link_copied" = "Invite link copied";
-"qll_people_invite_link_duration_in_days" = "Invite link duration in days";
-"qll_people_invite_link_member_limit" = "Invite link member limit";
-"qll_people_invite_link_name" = "Invite link name";
 "qll_people_invite_links_need_a_live" = "invite links need a live connection (demo)";
 "qll_people_invite_users" = "Invite users";
 "qll_people_item" = "Item";
@@ -479,7 +472,6 @@
 "qll_people_member_actions" = "Member actions";
 "qll_people_member_actions_need_a_live" = "member actions need a live connection (demo)";
 "qll_people_member_banned" = "member banned";
-"qll_people_member_limit_must_be_a" = "member limit must be a non-negative number";
 "qll_people_member_promoted" = "Member promoted";
 "qll_people_member_restricted" = "member restricted";
 "qll_people_member_s_could_not_be" = "{failed} member(s) could not be added";
@@ -496,7 +488,6 @@
 "qll_people_naming_tags_needs_a_live" = "naming tags needs a live connection (demo)";
 "qll_people_naming_tags_needs_telegram_premium" = "Naming tags needs Telegram Premium.";
 "qll_people_never_expires" = "Never expires";
-"qll_people_new_invite_link" = "New invite link";
 "qll_people_new_welcome_message" = "New welcome message";
 "qll_people_news_desk" = "News Desk";
 "qll_people_no_administrators" = "No administrators.";
@@ -586,8 +577,6 @@
 "qll_people_removing_saved_gif" = "removing saved GIF…";
 "qll_people_removing_sticker_set" = "removing sticker set…";
 "qll_people_removing_sticker_sets" = "removing {sent} sticker sets…";
-"qll_people_rename" = "Rename";
-"qll_people_rename_subscription_link" = "Rename subscription link";
 "qll_people_renaming_communities_needs_a_live" = "renaming communities needs a live connection (demo)";
 "qll_people_reopen" = "Reopen";
 "qll_people_report_sent" = "Report sent";
@@ -635,8 +624,6 @@
 "qll_people_skipped_without_phone" = "{skipped} skipped without phone";
 "qll_people_some_reactions" = "Some reactions";
 "qll_people_sorry_this_link_is_taken" = "Sorry, this link is taken. But it's available for purchase. ";
-"qll_people_stars_per_month" = "Stars per month";
-"qll_people_stars_price_must_be_a" = "Stars price must be a whole number";
 "qll_people_start_a_secret_chat_with" = "Start a secret chat with:";
 "qll_people_start_secret_chat_with" = "Start secret chat with {name}";
 "qll_people_statistics" = "Statistics";

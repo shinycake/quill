@@ -117,6 +117,9 @@ impl Session {
                             self.messages.tone_limits.max_duration =
                                 (*limit).clamp(0, i64::from(i32::MAX)) as i32
                         }
+                        "subscription_star_count_max" if *limit > 0 => {
+                            self.groups.subscription_star_max = Some(*limit)
+                        }
                         "supergroup_size_max" => {
                             self.groups.supergroup_size_max =
                                 i32::try_from(*limit).unwrap_or(i32::MAX)

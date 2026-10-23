@@ -7,8 +7,8 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 
 pub(crate) struct AdminUi {
-    /// Phase D3a: invite-link create dialog state.
-    pub(super) invite_link_dialog: Option<InviteLinkDialog>,
+    /// The New Link / Edit Link box (`invite_link_box/`).
+    pub(super) invite_link_box: Option<super::invite_link_box::InviteLinkBox>,
     /// B8: the invite link whose "who joined" details are expanded.
     pub(super) invite_link_details: Option<(ChatId, String)>,
     /// B8: whether the revoked-links list is expanded.
@@ -51,7 +51,7 @@ pub(crate) struct AdminUi {
 impl AdminUi {
     pub(super) fn new() -> Self {
         Self {
-            invite_link_dialog: None,
+            invite_link_box: None,
             invite_link_details: None,
             revoked_links_open: false,
             admin_dialog: None,
