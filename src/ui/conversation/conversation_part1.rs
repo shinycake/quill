@@ -159,7 +159,8 @@ impl QuillApp {
                         .when(
                             self.media_panel_open()
                                 && self.pickers.media_panel.reaction.is_none()
-                                && !self.story_reply_panel_active(),
+                                && !self.story_reply_panel_active()
+                                && !self.group_title_emoji_active(),
                             |this| {
                                 let panel = self.media_panel(cx);
                                 // Over the history: animations under it are

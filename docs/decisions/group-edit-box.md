@@ -4,10 +4,13 @@
 `boxes/peers/edit_peer_info_box.cpp` opens one Edit box for groups and channels:
 
 - At the top is a round photo button with a camera badge. Its menu (`ui/controls/userpic_button.cpp`)
-  offers "Photo or video" from the file dialog, the camera, and "Use an emoji". A picked
+  offers "Photo or video" from the file dialog, the camera, "From clipboard" (`addFromClipboard`,
+  only when the clipboard holds an image when the menu opens) and "Use an emoji". A picked
   picture goes through a crop step (square selection, round preview) before it is set.
   Pictures with a bad aspect ratio or format show a "can't process that type of image" note.
-- Under it are the name field (`lng_dlg_new_group_name` / `lng_dlg_new_channel_name`, max 128)
+- Under it are the name field (`lng_dlg_new_group_name` / `lng_dlg_new_channel_name`, max 128),
+  with an emoji toggle that drops down a `TabbedPanel` in `Mode::PeerTitle` (standard emoji
+  only; a pick goes in at the cursor),
   and the multiline description (max 255, with a counter).
 - Below are the management rows: type, linked chat, history, permissions (groups only),
   admins, members, removed users, recent actions, stickers, and Delete last.
@@ -29,6 +32,13 @@
   and hands the box back when it closes.
 - `save_group_info` (`src/connect/groups/info_edit.rs`) sends setChatTitle, setChatDescription
   and setChatPhoto in that order. `record_group_info_edit_error` maps each error to its field.
+- "From clipboard" reads GPUI's clipboard image (`ClipboardEntry::Image`, which macOS, X11,
+  Wayland and Windows all provide) when the menu opens, decodes it off the UI thread and opens
+  the same crop step.
+- The name field has the emoji toggle. It opens Quill's shared emoji panel under the toggle,
+  emoji tab only, with custom emoji left out, and routes picks into the name at the cursor
+  (`group_edit_box/title_emoji.rs`). A click off the panel or Escape closes it first, and
+  closing or saving the box closes it too.
 - The management rows moved from `group_admin_panels` into the box. The Permissions row is
   hidden for channels.
 - The envelope parses `basicGroupFullInfo.description`, and the basic group info panel shows it.
@@ -36,7 +46,6 @@
   ghost variant, the text was unreadable in the light theme.
 
 ## Deviations
-- The title field has no emoji panel, and the photo menu has no "From clipboard".
 - Removing a group photo is not part of this change.
 - The photo is sent in the same save as the text edits rather than right after it is cropped.
 - The bad-photo copy names Quill.
@@ -48,8 +57,12 @@
   and JSON, the sticker photo input, the error map, the permission check and the basic group
   description.
 - GPUI tests in `src/ui/group_edit_box/ui_tests.rs` check that the box opens filled, an empty
-  name keeps it open, Save sends and closes, Escape discards, and the crop hands the box back.
+  name keeps it open, Save sends and closes, Escape discards, the crop hands the box back, a
+  copied image opens the crop (and a too-long one is refused), and the emoji toggle inserts at
+  the cursor and closes on Escape or a click off it.
 - The `verify` skill captured the group, channel and basic group boxes, the photo menu, the
-  round crop, the box after the crop, and the info panel, in light and dark themes.
-- Not verified: real TDLib saves and errors, the camera, the native file dialog, and the
-  video avatar path for chats.
+  round crop, the box after the crop, and the info panel, in light and dark themes. It also
+  captured the emoji panel open and after a pick, and the photo menu with and without an
+  image on the system clipboard, plus the clipboard image in the crop and back in the box.
+- Not verified: real TDLib saves and errors, the camera, the native file dialog, the
+  video avatar path for chats, and the clipboard on Linux and Windows (only macOS ran).

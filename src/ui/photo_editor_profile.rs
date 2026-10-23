@@ -8,7 +8,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::image_decode::{DecodeError, DecodeSize, decode_file};
+use super::image_decode::{DecodeError, DecodeSize, decode_file, decode_image};
 use super::photo_edit::{CropRect, Placed, render};
 use super::photo_editor::{EditorPurpose, PhotoEditor, preview_of};
 use super::profile_photo_sources::{ChosenPhoto, PhotoPreview, PhotoTarget};
@@ -149,6 +149,18 @@ impl PhotoEditor {
     }
 }
 
+/// The image on the clipboard, if it holds one (GPUI reads PNG, JPEG,
+/// TIFF and the rest on macOS, the image MIME types on X11 and Wayland, and
+/// the PNG / DIB formats on Windows).
+pub(super) fn clipboard_image(cx: &App) -> Option<Image> {
+    cx.read_from_clipboard()?
+        .into_entries()
+        .find_map(|entry| match entry {
+            ClipboardEntry::Image(image) => Some(image),
+            _ => None,
+        })
+}
+
 impl QuillApp {
     /// "Photo or video" (tdesktop `UserpicButton` → `ChoosePhotoOrVideo`):
     /// the native file dialog; a photo opens the crop, anything else the
@@ -179,6 +191,37 @@ impl QuillApp {
                 .await;
             let _ = this.update_in(cx, |this, window, cx| {
                 this.open_picked_photo(target, path, decoded, window, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// "From clipboard" (tdesktop `addFromClipboard`): the copied image
+    /// opens the crop. Read again on the click: the menu showed the item
+    /// when the clipboard held an image, which may have changed since.
+    pub(super) fn paste_photo_from_clipboard(
+        &mut self,
+        target: PhotoTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(image) = clipboard_image(cx) else {
+            self.photo_target_note(target, tr(keys::BAD_PHOTO), cx);
+            return;
+        };
+        self.spawn_scoped_in(window, cx, async move |this, cx| {
+            let decoded = cx
+                .background_executor()
+                .spawn(async move { decode_image(&image.bytes, None, DecodeSize::FULL) })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.photo_target() != Some(target) {
+                    return;
+                }
+                match decoded {
+                    Ok(pixels) => this.open_profile_photo_crop(target, pixels, cx),
+                    Err(_) => this.photo_target_note(target, tr(keys::BAD_PHOTO), cx),
+                }
             });
         })
         .detach();

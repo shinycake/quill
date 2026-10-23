@@ -10,6 +10,7 @@
 
 mod manage;
 mod photo;
+mod title_emoji;
 
 use super::app::QuillApp;
 use super::profile_photo_sources::{ChosenPhoto, PhotoSources};
@@ -29,8 +30,6 @@ use quill::ids::{ChatId, RequestId};
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{GroupInfoField, Session};
 use quill::telegram::envelope::ChatKind;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 /// The description shows three lines and grows to eight.
 const DESCRIPTION_ROWS: (usize, usize) = (3, 8);
@@ -48,6 +47,8 @@ pub(crate) struct GroupEditBox {
     pub(crate) photo_note: Option<String>,
     /// The camera and emoji panels.
     pub(crate) sources: PhotoSources,
+    /// The name field's emoji toggle opened the emoji panel.
+    pub(crate) title_emoji: bool,
     /// The text requests of the last Save; `None` until Save sent any.
     saving: Option<Vec<RequestId>>,
     /// Save found the name empty (tdesktop `validateTitle`).
@@ -185,11 +186,13 @@ impl QuillApp {
             sources: PhotoSources::default(),
             saving: None,
             title_empty: false,
+            title_emoji: false,
         });
         cx.notify();
     }
 
     pub(in crate::ui) fn close_group_edit_box(&mut self, cx: &mut Context<Self>) {
+        self.close_group_title_emoji(cx);
         self.admin.group_edit_box = None;
         cx.notify();
     }
@@ -197,6 +200,7 @@ impl QuillApp {
     /// Save (tdesktop `Controller::save`): validate the name, then send
     /// what changed. Nothing changed closes the box.
     pub(in crate::ui) fn save_group_edit_box(&mut self, cx: &mut Context<Self>) {
+        self.close_group_title_emoji(cx);
         let Some(edit) = self.group_edit_box() else {
             return;
         };
@@ -270,7 +274,12 @@ impl QuillApp {
     }
 
     /// The box's name, description and photo, or the open source panel.
-    fn group_edit_box_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn group_edit_box_body(
+        &mut self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let emoji_toggle = self.group_title_emoji_toggle(window, cx);
         let edit = self.group_edit_box()?;
         if let Some(panel) = self.photo_sources_panel(cx) {
             return Some(panel);
@@ -320,7 +329,11 @@ impl QuillApp {
                         .flex()
                         .flex_col()
                         .gap_1()
-                        .child(Input::new(&edit.title_input).aria_label(name_label))
+                        .child(
+                            Input::new(&edit.title_input)
+                                .aria_label(name_label)
+                                .suffix(emoji_toggle),
+                        )
                         .children(title_error),
                 ),
             )
@@ -383,9 +396,9 @@ impl QuillApp {
                     } else {
                         tr(keys::EDIT_GROUP)
                     }));
-            let Some(body) = this.group_edit_box_body(cx) else {
+            if this.group_edit_box().is_none() {
                 return dialog.on_close(on_close);
-            };
+            }
             let saving = this
                 .group_edit_box()
                 .is_some_and(|edit| edit.state(this.session()) == EditBoxState::Saving);
@@ -416,13 +429,12 @@ impl QuillApp {
                             this.close_kit_dialog_if_done(DialogKind::GroupEditBox, window, cx);
                         })),
                 );
-            let body = Rc::new(RefCell::new(Some(body)));
+            let body_app = cx.entity();
             dialog
                 .content(crate::ui::shell::scrollable_dialog_content(
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
+                    move |content, window, cx| {
+                        let body = body_app
+                            .update(cx, |this, cx| this.group_edit_box_body(window, cx))
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },

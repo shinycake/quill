@@ -101,7 +101,10 @@ impl QuillApp {
                             ),
                     ),
             )
-            .dropdown_menu(move |menu, _, _| {
+            .dropdown_menu(move |menu, _, cx| {
+                // Built when the menu opens, like tdesktop's: "From
+                // clipboard" shows only while the clipboard holds an image.
+                let pasteable = crate::ui::photo_editor_profile::clipboard_image(cx).is_some();
                 let item = |label: &str,
                             icon: IconName,
                             action: fn(
@@ -117,17 +120,31 @@ impl QuillApp {
                         },
                     )
                 };
+                let menu = menu
+                    .item(item(
+                        tr(keys::ATTACH_PHOTO_OR_VIDEO),
+                        IconName::Image,
+                        |this, target, window, cx| this.choose_photo_or_video(target, window, cx),
+                    ))
+                    .item(item(
+                        tr(keys::Q_PEOPLE_CAMERA),
+                        IconName::Camera,
+                        |this, _, window, cx| {
+                            this.open_photo_source(SourceMode::Camera, window, cx)
+                        },
+                    ));
+                let menu = if pasteable {
+                    menu.item(item(
+                        tr(keys::PROFILE_PHOTO_FROM_CLIPBOARD),
+                        IconName::Copy,
+                        |this, target, window, cx| {
+                            this.paste_photo_from_clipboard(target, window, cx)
+                        },
+                    ))
+                } else {
+                    menu
+                };
                 menu.item(item(
-                    tr(keys::ATTACH_PHOTO_OR_VIDEO),
-                    IconName::Image,
-                    |this, target, window, cx| this.choose_photo_or_video(target, window, cx),
-                ))
-                .item(item(
-                    tr(keys::Q_PEOPLE_CAMERA),
-                    IconName::Camera,
-                    |this, _, window, cx| this.open_photo_source(SourceMode::Camera, window, cx),
-                ))
-                .item(item(
                     tr(keys::Q_PEOPLE_USE_AN_EMOJI),
                     IconName::FaceSlightlySmiling,
                     |this, _, window, cx| this.open_photo_source(SourceMode::Emoji, window, cx),

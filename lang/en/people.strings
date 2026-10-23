@@ -118,6 +118,7 @@
 "lng_profile_leave_group" = "Leave group";
 "lng_profile_loading" = "Loading…";
 "lng_profile_open_app_short" = "Open";
+"lng_profile_photo_from_clipboard" = "From clipboard";
 "lng_profile_report" = "Report";
 "lng_profile_restart_bot" = "Restart bot";
 "lng_profile_set_photo_button" = "Set Photo";
