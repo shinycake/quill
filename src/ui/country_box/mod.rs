@@ -215,7 +215,7 @@ impl QuillApp {
         let text = if value.is_empty() {
             label.to_string()
         } else {
-            value
+            format!("{label}: {value}")
         };
         Button::new(SharedString::from(format!("country-field-{}", host.id())))
             .label(text)
