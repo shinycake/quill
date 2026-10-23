@@ -50,6 +50,10 @@ pub(crate) struct FrameUi {
     pub(super) context_menu_previous_focus: Option<FocusHandle>,
     /// Focus return for hand-drawn layers (see `esc_stack::track_layer_focus`).
     pub(super) layer_focus: super::esc_stack::LayerFocus,
+    /// The one timer behind the debounced draft save (`draft_timer.rs`).
+    /// App-wide like the driver's pending draft it commits: a chat
+    /// window's state swapped in when it fires must not hide it.
+    pub(super) draft_timer: super::draft_timer::DraftTimer,
 }
 
 impl FrameUi {
@@ -84,6 +88,7 @@ impl FrameUi {
             context_menu_was_open: false,
             context_menu_previous_focus: None,
             layer_focus: Default::default(),
+            draft_timer: Default::default(),
         }
     }
 }

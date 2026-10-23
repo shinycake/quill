@@ -96,14 +96,16 @@ impl QuillApp {
         ));
     }
 
-    fn demo_ready_drafts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// A draft saved on another device for the open chat: the frame
+    /// upkeep puts it in the composer (`adopt_remote_draft`).
+    fn demo_ready_drafts(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_drafts(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.restore_open_draft(window, cx);
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — draft restored"));
+        self.connection.set_note(StatusNote::silent(
+            "screenshot demo — draft from another device",
+        ));
     }
 
     fn demo_ready_link_preview(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {

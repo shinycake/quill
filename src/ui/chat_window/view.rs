@@ -135,6 +135,7 @@ impl Render for ChatWindowView {
             app.release_viewer_key_probe(window, cx);
             app.viewer_follow_window_fullscreen(window);
             app.seed_history_width(f32::from(window.viewport_size().width));
+            app.adopt_remote_draft(window, cx);
             app.chat_window_body(chat_id, window, cx)
         });
         app.update(cx, |app, _| app.set_window_scope(outer));

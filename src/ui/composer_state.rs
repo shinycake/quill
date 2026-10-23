@@ -77,8 +77,6 @@ pub(crate) struct ComposerUi {
     /// keystroke bumps it so only the latest quiet window fires (schema:
     /// "Do not call this function too often"; TGX rate-limits 400ms).
     pub(super) preview_token: u64,
-    /// The one timer behind the debounced draft save (`draft_timer.rs`).
-    pub(super) draft_timer: super::draft_timer::DraftTimer,
     /// The composer text before the last keystroke, for "Replace emoji
     /// automatically" (it only reacts to one typed character).
     pub(super) prev_text: String,
@@ -117,6 +115,9 @@ pub(crate) struct ComposerUi {
     /// A topic or thread switch asked for the new slot's draft to be put
     /// in the composer on the next frame (`restore_draft_if_pending`).
     pub(super) draft_restore_pending: bool,
+    /// The session's remote draft revision this composer last checked
+    /// (`QuillApp::adopt_remote_draft`).
+    pub(super) remote_draft_seen: u64,
     /// Own-message edit (tdesktop `FieldHeader::editMessage`).
     pub(super) pending_edit: Option<ComposerEdit>,
     /// The "Cancel editing?" box is open (`DialogKind::CancelEditConfirm`).
@@ -199,7 +200,6 @@ impl ComposerUi {
             inline_return: None,
             edit_replace_as_file: false,
             preview_token: 0,
-            draft_timer: Default::default(),
             prev_text: String::new(),
             markdown_revert: None,
             send_silent_once: false,
@@ -213,6 +213,7 @@ impl ComposerUi {
             pending_reply: None,
             clear_draft_on_success: None,
             draft_restore_pending: false,
+            remote_draft_seen: 0,
             pending_edit: None,
             cancel_edit_confirm: false,
             placeholder_shown: None,
