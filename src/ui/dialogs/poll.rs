@@ -57,6 +57,19 @@ pub(crate) enum QuizLock {
     Regular,
 }
 
+impl QuizLock {
+    /// What a request-poll button asks for (`force_quiz` wins).
+    pub(crate) fn from_button(force_regular: bool, force_quiz: bool) -> Self {
+        if force_quiz {
+            Self::Quiz
+        } else if force_regular {
+            Self::Regular
+        } else {
+            Self::Free
+        }
+    }
+}
+
 /// The switches of the settings section, to tell an untouched box from one
 /// with input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

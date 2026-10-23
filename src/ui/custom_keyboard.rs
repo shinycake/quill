@@ -269,13 +269,7 @@ impl QuillApp {
                 force_regular,
                 force_quiz,
             } => {
-                let lock = if *force_quiz {
-                    QuizLock::Quiz
-                } else if *force_regular {
-                    QuizLock::Regular
-                } else {
-                    QuizLock::Free
-                };
+                let lock = QuizLock::from_button(*force_regular, *force_quiz);
                 element.on_click(cx.listener(move |this, _, window, cx| {
                     if one_time {
                         this.dismiss_custom_keyboard(chat_id, message_id, cx);

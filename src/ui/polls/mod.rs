@@ -974,5 +974,9 @@ crate::ui::shell::register_dialogs! {
     ),
 }
 
+mod demo;
 mod poll_deadline;
 mod poll_settings;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod settings_tests;
