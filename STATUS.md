@@ -780,7 +780,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Install sticker set (changeStickerSet install) <!-- parity:stickers-install -->
 - [x] Remove sticker set with confirm dialog <!-- parity:stickers-remove -->
 - [x] Archive sticker set + Archived view in settings (restore path) <!-- parity:stickers-archive -->
-- [ ] Stickers and emoji box in Settings: Installed, Masks, Trending and Archived tabs with thumbnail rows, count, remove with Undo, archive, drag reorder, more sets on scroll (the composer picker stays for sending) <!-- parity:stickers-manager-box -->
+- [x] Stickers and emoji box in Settings: Installed, Masks, Trending and Archived tabs with thumbnail rows, count, remove with Undo, archive, drag reorder, more sets on scroll (the composer picker stays for sending) <!-- parity:stickers-manager-box -->
 - [x] Reorder installed sticker sets <!-- parity:stickers-reorder -->
 - [x] Dynamic set order (auto-place recently used sets above others) <!-- parity:stickers-dynamic-order --> (backend + state: sticker sends pass update_order_of_installed_sticker_sets, updateInstalledStickerSets reorders the cached sets in place; picker already lists stored order, no UI change)
 - [x] Open sticker set preview screen (title, stickers grid, install/remove from preview) <!-- parity:stickers-set-preview -->
