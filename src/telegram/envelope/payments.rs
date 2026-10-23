@@ -60,18 +60,27 @@ pub struct InvoiceForm {
     pub is_flexible: bool,
 }
 
-/// Slice P1: the payment provider on a `paymentFormTypeRegular`
-/// (schema:4689–4702). Quill has no in-app web view, so both variants end
-/// at the OS browser: `Other` carries the provider's payment-page URL;
-/// card-token providers (Stripe/SmartGlocal) need a credential token the
-/// user obtains on the provider's site.
+/// The payment provider on a `paymentFormTypeRegular` (schema:5213–5226).
+/// Stripe and Smart Glocal take a new card in Quill's own card form
+/// (`payment_card`); any other provider has a web payment form at `url`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PaymentProviderKind {
-    /// `paymentProviderOther` — the URL of the provider's payment page.
+    /// `paymentProviderStripe`.
+    Stripe {
+        publishable_key: String,
+        need_country: bool,
+        need_postal_code: bool,
+        need_cardholder_name: bool,
+    },
+    /// `paymentProviderSmartGlocal`.
+    SmartGlocal {
+        public_token: String,
+        tokenize_url: String,
+    },
+    /// `paymentProviderOther`: the provider's payment form.
     Web { url: String },
-    /// Stripe / SmartGlocal / anything else — card credentials are a
-    /// provider-issued token (`inputCredentialsNew`).
-    Token { name: String },
+    /// A provider type this TDLib build does not describe.
+    Unsupported,
 }
 
 /// Slice P1: `paymentOption` (schema:4706) — an additional web payment
@@ -342,6 +351,27 @@ pub(crate) fn parse_shipping_option(value: &Value) -> ShippingOptionData {
     }
 }
 
+/// `PaymentProvider` (schema:5213–5226).
+fn parse_payment_provider(value: &Value) -> PaymentProviderKind {
+    let flag = |key: &str| value.get(key).and_then(Value::as_bool).unwrap_or(false);
+    match value.get("@type").and_then(Value::as_str) {
+        Some("paymentProviderStripe") => PaymentProviderKind::Stripe {
+            publishable_key: json_field_str(value, "publishable_key"),
+            need_country: flag("need_country"),
+            need_postal_code: flag("need_postal_code"),
+            need_cardholder_name: flag("need_cardholder_name"),
+        },
+        Some("paymentProviderSmartGlocal") => PaymentProviderKind::SmartGlocal {
+            public_token: json_field_str(value, "public_token"),
+            tokenize_url: json_field_str(value, "tokenize_url"),
+        },
+        Some("paymentProviderOther") => PaymentProviderKind::Web {
+            url: json_field_str(value, "url"),
+        },
+        _ => PaymentProviderKind::Unsupported,
+    }
+}
+
 /// Slice P1: `paymentForm` (TDLib 1.8.67, `schema/td_api.tl:4734`).
 /// `None` when the JSON is malformed; an unknown form *type* parses to
 /// `PaymentFormTypeData::Unknown` so the dialog can decline it honestly.
@@ -350,20 +380,7 @@ pub(crate) fn parse_payment_form(value: &Value) -> Option<PaymentFormData> {
     let form_type = match form_type_value.get("@type").and_then(Value::as_str)? {
         "paymentFormTypeRegular" => {
             let provider_value = form_type_value.get("payment_provider")?;
-            let provider = match provider_value.get("@type").and_then(Value::as_str) {
-                Some("paymentProviderOther") => PaymentProviderKind::Web {
-                    url: json_field_str(provider_value, "url"),
-                },
-                Some("paymentProviderStripe") => PaymentProviderKind::Token {
-                    name: "Stripe".into(),
-                },
-                Some("paymentProviderSmartGlocal") => PaymentProviderKind::Token {
-                    name: "Smart Glocal".into(),
-                },
-                _ => PaymentProviderKind::Token {
-                    name: "card".into(),
-                },
-            };
+            let provider = parse_payment_provider(provider_value);
             PaymentFormTypeData::Regular(Box::new(PaymentFormRegular {
                 invoice: parse_invoice_form(form_type_value.get("invoice")?),
                 provider,

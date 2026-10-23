@@ -27,6 +27,7 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
 fn search(app: &QuillApp, host: CountryHost, cx: &gpui_kit::App) -> String {
     let country_box = match host {
         CountryHost::Payment => app.payments.dialog.as_ref().unwrap().country_box.as_ref(),
+        CountryHost::PaymentCard => app.card_form().unwrap().country_box.as_ref(),
         CountryHost::Poll => app
             .composer_ui
             .poll_dialog
@@ -56,7 +57,7 @@ fn the_shipping_country_is_picked_from_the_list(cx: &mut TestAppContext) {
 
         // Picking a row stores the code, ends the box, and the order
         // carries it.
-        app.country_box_click(CountryHost::Payment, "FR", cx);
+        app.country_box_click(CountryHost::Payment, "FR", window, cx);
         let dialog = app.payments.dialog.as_ref().unwrap();
         assert!(dialog.country_box.is_none());
         assert_eq!(dialog.country_iso, "FR");
@@ -97,17 +98,17 @@ fn the_poll_takes_several_countries_up_to_the_limit(cx: &mut TestAppContext) {
             .limit_by_country = true;
         app.open_country_box(CountryHost::Poll, window, cx);
 
-        app.country_box_click(CountryHost::Poll, "US", cx);
-        app.country_box_click(CountryHost::Poll, "GB", cx);
+        app.country_box_click(CountryHost::Poll, "US", window, cx);
+        app.country_box_click(CountryHost::Poll, "GB", window, cx);
         // At the limit: the third click is refused with the TDLib number.
-        app.country_box_click(CountryHost::Poll, "FR", cx);
+        app.country_box_click(CountryHost::Poll, "FR", window, cx);
         assert!(app.connection.status_note().contains("up to 2 countries"));
         // Nothing is kept until Save.
         let dialog = app.composer_ui.poll_dialog.as_ref().unwrap();
         assert!(dialog.country_codes.is_empty());
 
         app.country_box_remove(CountryHost::Poll, "US", cx);
-        app.country_box_click(CountryHost::Poll, "FR", cx);
+        app.country_box_click(CountryHost::Poll, "FR", window, cx);
         app.country_box_save(CountryHost::Poll, cx);
 
         let dialog = app.composer_ui.poll_dialog.as_ref().unwrap();
@@ -119,7 +120,7 @@ fn the_poll_takes_several_countries_up_to_the_limit(cx: &mut TestAppContext) {
 
         // Reopening starts from what was saved; Cancel leaves it alone.
         app.open_country_box(CountryHost::Poll, window, cx);
-        app.country_box_click(CountryHost::Poll, "GB", cx);
+        app.country_box_click(CountryHost::Poll, "GB", window, cx);
         app.close_country_box(CountryHost::Poll, cx);
         let dialog = app.composer_ui.poll_dialog.as_ref().unwrap();
         assert_eq!(dialog.country_codes, ["GB", "FR"]);

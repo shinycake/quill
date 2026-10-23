@@ -2,13 +2,14 @@ use super::super::app::QuillApp;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
+use quill::payment_card::NewCredentials;
 use quill::telegram::envelope::{AddressData, OrderInfoData, PaymentFormData, PaymentFormTypeData};
 /// Slice P1: the payment checkout dialog. The text inputs mirror the
 /// `orderInfo` fields the invoice needs (`need_name` / `need_phone_number`
 /// / `need_email_address` / `need_shipping_address`, schema:4655); only
 /// the needed ones render. The credential choice is either a saved
-/// credential (`inputCredentialsSaved`, schema:4677) or a provider token
-/// (`inputCredentialsNew`, schema:4680).
+/// credential (`inputCredentialsSaved`, schema:5199) or a new card the
+/// provider tokenized in the card form (`inputCredentialsNew`, schema:5204).
 pub struct PaymentDialog {
     pub(crate) name_input: Entity<TextareaState>,
     pub(crate) phone_input: Entity<TextareaState>,
@@ -21,11 +22,17 @@ pub struct PaymentDialog {
     pub(crate) country_iso: String,
     pub(crate) country_box: Option<crate::ui::country_box::CountryBox>,
     pub(crate) postal_input: Entity<TextareaState>,
-    pub(crate) token_input: Entity<TextareaState>,
     pub(crate) credential_choice: PaymentCredentialChoice,
+    /// The card the provider tokenized, and whether to save it (tdesktop's
+    /// `NewCredentials`). Kept only while the checkout is open.
+    pub(crate) new_card: Option<NewCard>,
+    /// The "New Card" form, while it is open over the checkout.
+    pub(crate) card_form: Option<crate::ui::payments::card_form::CardForm>,
+    /// "Turn on Two-Step Verification" after asking to save a card the
+    /// account cannot save yet (tdesktop's `askSetPassword`).
+    pub(crate) password_prompt: bool,
     pub(crate) terms_accepted: bool,
     pub(crate) allow_save_order: bool,
-    pub(crate) allow_save_credentials: bool,
     /// Slice P1 fix-up: the dialog opens on Buy press before the form
     /// arrives — the saved order info prefills once, when the form lands.
     pub(crate) prefilled: bool,
@@ -34,7 +41,15 @@ pub struct PaymentDialog {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PaymentCredentialChoice {
     Saved(String),
-    NewToken,
+    /// The tokenized [`NewCard`], or nothing chosen yet when there is none.
+    NewCard,
+}
+
+/// A card entered in the card form and tokenized by its provider.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NewCard {
+    pub(crate) credentials: NewCredentials,
+    pub(crate) save: bool,
 }
 
 impl PaymentDialog {
@@ -58,11 +73,12 @@ impl PaymentDialog {
             country_iso: String::new(),
             country_box: None,
             postal_input: input(cx, tr(keys::Q_MONEY_POSTAL_CODE)),
-            token_input: input(cx, tr(keys::Q_MONEY_PROVIDER_CREDENTIAL_TOKEN)),
-            credential_choice: PaymentCredentialChoice::NewToken,
+            credential_choice: PaymentCredentialChoice::NewCard,
+            new_card: None,
+            card_form: None,
+            password_prompt: false,
             terms_accepted: false,
             allow_save_order: true,
-            allow_save_credentials: true,
             prefilled: false,
             // ponytail: no `validated` flag — the session's
             // `payment_validated: Option<ValidatedOrderInfoData>` is the
@@ -129,9 +145,5 @@ impl PaymentDialog {
                 postal_code: value(&self.postal_input),
             },
         }
-    }
-
-    pub(crate) fn token(&self, cx: &App) -> String {
-        self.token_input.read(cx).value().to_string()
     }
 }

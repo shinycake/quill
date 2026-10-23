@@ -26,6 +26,8 @@ use quill::phone::{self, Country};
 pub(crate) enum CountryHost {
     /// The checkout's shipping country (one).
     Payment,
+    /// The card form's billing country (one).
+    PaymentCard,
     /// The poll's allowed countries (several).
     Poll,
 }
@@ -34,6 +36,7 @@ impl CountryHost {
     fn id(self) -> &'static str {
         match self {
             Self::Payment => "payment",
+            Self::PaymentCard => "payment-card",
             Self::Poll => "poll",
         }
     }
@@ -91,6 +94,12 @@ impl QuillApp {
     fn country_box_slot(&mut self, host: CountryHost) -> Option<&mut Option<CountryBox>> {
         match host {
             CountryHost::Payment => self.payments.dialog.as_mut().map(|d| &mut d.country_box),
+            CountryHost::PaymentCard => self
+                .payments
+                .dialog
+                .as_mut()
+                .and_then(|d| d.card_form.as_mut())
+                .map(|form| &mut form.country_box),
             CountryHost::Poll => self
                 .composer_ui
                 .poll_dialog
@@ -108,6 +117,19 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let (mode, chosen) = match host {
+            CountryHost::PaymentCard => {
+                let Some(country_box) = self.card_country_box(window, cx) else {
+                    return;
+                };
+                if let Some(live) = self.live.as_mut() {
+                    let _ = live.driver.fetch_countries();
+                }
+                if let Some(slot) = self.country_box_slot(host) {
+                    *slot = Some(country_box);
+                }
+                cx.notify();
+                return;
+            }
             CountryHost::Payment => {
                 let iso = self
                     .payments
@@ -140,41 +162,54 @@ impl QuillApp {
 
     /// A country box is up (Esc closes it before its host).
     pub(super) fn country_box_open(&self) -> bool {
-        self.payments
-            .dialog
+        self.payments.dialog.as_ref().is_some_and(|dialog| {
+            dialog.country_box.is_some()
+                || dialog
+                    .card_form
+                    .as_ref()
+                    .is_some_and(|form| form.country_box.is_some())
+        }) || self
+            .composer_ui
+            .poll_dialog
             .as_ref()
             .is_some_and(|dialog| dialog.country_box.is_some())
-            || self
-                .composer_ui
-                .poll_dialog
-                .as_ref()
-                .is_some_and(|dialog| dialog.country_box.is_some())
     }
 
     pub(super) fn close_open_country_boxes(&mut self, cx: &mut Context<Self>) {
         self.close_country_box(CountryHost::Poll, cx);
+        self.close_country_box(CountryHost::PaymentCard, cx);
         self.close_country_box(CountryHost::Payment, cx);
     }
 
-    fn close_country_box(&mut self, host: CountryHost, cx: &mut Context<Self>) {
+    pub(super) fn close_country_box(&mut self, host: CountryHost, cx: &mut Context<Self>) {
         if let Some(slot) = self.country_box_slot(host) {
             *slot = None;
         }
         cx.notify();
     }
 
-    fn country_box_click(&mut self, host: CountryHost, iso: &str, cx: &mut Context<Self>) {
+    fn country_box_click(
+        &mut self,
+        host: CountryHost,
+        iso: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(country_box) = self.country_box_slot(host).and_then(Option::as_mut) else {
             return;
         };
         match country_box.selection.click(iso) {
             CountryClick::Picked(iso) => {
-                if let Some(dialog) = self.payments.dialog.as_mut()
-                    && host == CountryHost::Payment
-                {
-                    dialog.country_iso = iso;
-                }
                 self.close_country_box(host, cx);
+                match host {
+                    CountryHost::Payment => {
+                        if let Some(dialog) = self.payments.dialog.as_mut() {
+                            dialog.country_iso = iso;
+                        }
+                    }
+                    CountryHost::PaymentCard => self.card_country_picked(iso, window, cx),
+                    CountryHost::Poll => {}
+                }
             }
             CountryClick::LimitReached(max) => {
                 self.set_status_note(StatusNote::info(limit_text(max)), cx);
@@ -287,6 +322,7 @@ impl QuillApp {
     ) -> Option<AnyElement> {
         let country_box = match host {
             CountryHost::Payment => self.payments.dialog.as_ref()?.country_box.as_ref()?,
+            CountryHost::PaymentCard => self.card_form()?.country_box.as_ref()?,
             CountryHost::Poll => self
                 .composer_ui
                 .poll_dialog
@@ -329,8 +365,8 @@ impl QuillApp {
                         Checkbox::new(row_id)
                             .checked(chosen)
                             .label(label.trim().to_string())
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.country_box_click(host, &iso, cx);
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.country_box_click(host, &iso, window, cx);
                             })),
                     ),
                 );
@@ -347,8 +383,8 @@ impl QuillApp {
                         .rounded_md()
                         .cursor_pointer()
                         .hover(move |style| style.bg(hover))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.country_box_click(host, &iso, cx);
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.country_box_click(host, &iso, window, cx);
                         }))
                         .child(div().w(px(24.)).child(country.flag.clone()))
                         .child(div().flex_1().text_sm().child(country.name.clone()))
