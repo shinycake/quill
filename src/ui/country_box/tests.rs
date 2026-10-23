@@ -95,11 +95,7 @@ fn the_poll_takes_several_countries_up_to_the_limit(cx: &mut TestAppContext) {
         app.country_box_click(CountryHost::Poll, "GB", cx);
         // At the limit: the third click is refused with the TDLib number.
         app.country_box_click(CountryHost::Poll, "FR", cx);
-        assert!(
-            app.connection
-                .status_note()
-                .contains("up to 2 countries")
-        );
+        assert!(app.connection.status_note().contains("up to 2 countries"));
         // Nothing is kept until Save.
         let dialog = app.composer_ui.poll_dialog.as_ref().unwrap();
         assert!(dialog.country_codes.is_empty());
@@ -158,8 +154,14 @@ fn both_boxes_render_their_rows_and_buttons(cx: &mut TestAppContext) {
         app.open_poll_dialog(window, cx);
         app.open_country_box(CountryHost::Payment, window, cx);
         app.open_country_box(CountryHost::Poll, window, cx);
-        assert!(app.country_box_view(CountryHost::Payment, "Country", cx).is_some());
-        assert!(app.country_box_view(CountryHost::Poll, "Allowed", cx).is_some());
+        assert!(
+            app.country_box_view(CountryHost::Payment, "Country", cx)
+                .is_some()
+        );
+        assert!(
+            app.country_box_view(CountryHost::Poll, "Allowed", cx)
+                .is_some()
+        );
         assert!(app.poll_country_panel(cx).is_some());
     });
 }

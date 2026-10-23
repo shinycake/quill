@@ -269,7 +269,12 @@ impl QuillApp {
     ) -> Option<AnyElement> {
         let country_box = match host {
             CountryHost::Payment => self.payments.dialog.as_ref()?.country_box.as_ref()?,
-            CountryHost::Poll => self.composer_ui.poll_dialog.as_ref()?.country_box.as_ref()?,
+            CountryHost::Poll => self
+                .composer_ui
+                .poll_dialog
+                .as_ref()?
+                .country_box
+                .as_ref()?,
         };
         let countries = self.country_box_countries();
         let query = country_box.search.read(cx).value().to_string();
@@ -287,17 +292,13 @@ impl QuillApp {
             .flex()
             .flex_col();
         if hits.is_empty() {
-            list = list.child(
-                div()
-                    .p_3()
-                    .text_sm()
-                    .text_color(muted)
-                    .child(if countries.is_empty() {
-                        tr(keys::Q_MONEY_LOADING_COUNTRIES)
-                    } else {
-                        tr(keys::Q_OPS_COUNTRY_NOT_FOUND)
-                    }),
-            );
+            list = list.child(div().p_3().text_sm().text_color(muted).child(
+                if countries.is_empty() {
+                    tr(keys::Q_MONEY_LOADING_COUNTRIES)
+                } else {
+                    tr(keys::Q_OPS_COUNTRY_NOT_FOUND)
+                },
+            ));
         }
         for country in hits {
             let iso = country.iso.clone();
@@ -389,4 +390,5 @@ impl QuillApp {
 
 mod demo;
 #[cfg(test)]
+#[cfg(feature = "demo-capture")]
 mod tests;

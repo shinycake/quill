@@ -189,11 +189,9 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app| app.message_ui.poll_add_option.is_some(),
         |app, _, cx| app.close_poll_add_option(cx)
     ),
-    layer!(
-        "country-box",
-        |app| app.country_box_open(),
-        |app, _, cx| app.close_open_country_boxes(cx)
-    ),
+    layer!("country-box", |app| app.country_box_open(), |app, _, cx| {
+        app.close_open_country_boxes(cx)
+    }),
     layer!(
         "poll-dialog",
         |app| app.composer_ui.poll_dialog.is_some(),
