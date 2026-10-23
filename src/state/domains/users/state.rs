@@ -18,6 +18,13 @@ pub struct UsersState {
     pub similar_chat_totals: HashMap<i64, i32>,
     /// B10: profile photo galleries (`getUserProfilePhotos`) by user id.
     pub user_profile_photos: HashMap<i64, ProfilePhotosFetch>,
+    /// The current photo of a group or channel (`supergroupFullInfo.photo`
+    /// / `basicGroupFullInfo.photo`), by chat id; `None` = it has none.
+    /// Dropped on `updateChatPhoto`.
+    pub chat_current_photos: HashMap<i64, Option<ProfilePhoto>>,
+    /// A group or channel's photo history, by chat id. Dropped on
+    /// `updateChatPhoto`.
+    pub chat_photo_history: HashMap<i64, ChatPhotosFetch>,
     /// Phase 6: `getContacts` result — user ids, in server order. `None`
     /// until the first `users` response; `contacts_error` records a failed
     /// fetch so the UI can offer a retry.
@@ -136,6 +143,8 @@ impl UsersState {
             common_groups_paging: HashMap::new(),
             similar_chat_totals: HashMap::new(),
             user_profile_photos: HashMap::new(),
+            chat_current_photos: HashMap::new(),
+            chat_photo_history: HashMap::new(),
             contacts: None,
             contacts_error: false,
             contacts_notice: None,

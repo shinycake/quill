@@ -61,9 +61,9 @@ pub enum ProfileDialog {
         mode: quill::profile_forms::PersonalPhotoMode,
         path: Option<String>,
     },
-    /// Pick why a profile photo (`file_id`) is reported.
+    /// Pick why a profile, group or channel photo (`file_id`) is reported.
     ReportPhoto {
-        user_id: i64,
+        owner: quill::state::PhotoOwner,
         file_id: i32,
     },
     /// Send the game `game_short_name` of `bot_id` to a chat (`target` is

@@ -246,6 +246,9 @@ pub struct UserProfileExtras {
     /// `personal_photo` — the photo the current user set for this contact
     /// (shown first in the gallery as "Photo set by you").
     pub personal_photo: Option<ParsedProfilePhoto>,
+    /// `public_photo` — shown when the main photo is hidden by privacy
+    /// settings; listed last in the gallery as "Public Photo".
+    pub public_photo: Option<ParsedProfilePhoto>,
     /// `business_info`: Telegram Business hours and location.
     pub business: Option<crate::business_info::BusinessInfo>,
     /// `has_sponsored_messages_enabled` (own user): "Do Not Hide Ads".
@@ -338,6 +341,10 @@ pub(crate) fn parse_user_profile_extras(info: Option<&serde_json::Value>) -> Use
             .unwrap_or(false),
         personal_photo: info
             .get("personal_photo")
+            .filter(|value| !value.is_null())
+            .and_then(super::users::parse_profile_photo),
+        public_photo: info
+            .get("public_photo")
             .filter(|value| !value.is_null())
             .and_then(super::users::parse_profile_photo),
         business: crate::business_info::parse_business_info(info.get("business_info")),

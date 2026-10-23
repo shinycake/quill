@@ -76,6 +76,7 @@ mod media_library;
 mod member_list;
 mod ownership_types;
 mod paging;
+mod photo_gallery;
 mod redraw;
 mod request_errors;
 mod request_purpose;
@@ -182,6 +183,7 @@ pub use media_library::{
 };
 pub use member_list::*;
 pub use ownership_types::*;
+pub use photo_gallery::{PhotoActions, PhotoDelete, chat_gallery, user_gallery};
 pub use redraw::{RedrawNeed, redraw_need};
 pub(crate) use request_errors::*;
 pub use request_purpose::*;

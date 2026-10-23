@@ -14,6 +14,7 @@ impl Session {
     ) {
         match payload {
             GroupsPayload::SupergroupFullInfo {
+                photo,
                 description,
                 member_count,
                 linked_chat_id,
@@ -54,6 +55,9 @@ impl Session {
                     seq,
                 );
                 if let Some(supergroup_id) = full_info_group {
+                    if let Some(chat_id) = self.supergroup_chat(supergroup_id).map(|chat| chat.id) {
+                        self.store_chat_current_photo(chat_id, photo);
+                    }
                     self.store_group_bot_commands(
                         GroupCommandsKey::Supergroup(supergroup_id),
                         bot_commands,
@@ -531,10 +535,12 @@ impl Session {
                 description,
                 members,
                 bot_commands,
+                photo,
             } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBasicGroupFullInfo)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
+                    self.store_chat_current_photo(chat_id, photo);
                     if let Some(chat) = self.chats.get(&chat_id.0)
                         && let ChatKind::BasicGroup { basic_group_id } = chat.kind
                     {

@@ -783,8 +783,8 @@ impl QuillApp {
                     footer.into_any_element(),
                 ))
             }
-            ProfileDialog::ReportPhoto { user_id, file_id } => {
-                let (user_id, file_id) = (*user_id, *file_id);
+            ProfileDialog::ReportPhoto { owner, file_id } => {
+                let (owner, file_id) = (*owner, *file_id);
                 let mut body = div().flex().flex_col().gap_1().child(
                     div()
                         .text_xs()
@@ -803,7 +803,7 @@ impl QuillApp {
                         )
                         .on_click(cx.listener(
                             move |this, _, window, cx| {
-                                this.submit_photo_report(user_id, file_id, reason, cx);
+                                this.submit_photo_report(owner, file_id, reason, cx);
                                 this.close_profile_dialog(cx);
                                 this.close_kit_dialog_if_done(DialogKind::ProfilePanel, window, cx);
                             },

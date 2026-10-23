@@ -111,6 +111,10 @@ pub enum UsersPurpose {
     /// B10: `getUserProfilePhotos` (line 14591) for the profile photo
     /// gallery; pending `user_id`. Response is `chatPhotos`.
     GetUserProfilePhotos,
+    /// `searchChatMessages` with `searchMessagesFilterChatPhoto`: a page
+    /// of a group or channel's photo history; pending `chat_id`. Response
+    /// is `foundChatMessages`.
+    GetChatPhotoHistory,
     /// Phase B1: `createNewSecretChat`. Response is `chat` (the new
     /// secret chat); the canonical state arrives as `updateNewChat` /
     /// `updateSecretChat`.
@@ -178,6 +182,7 @@ flat_purposes!(Users(UsersPurpose) {
     SetUserPersonalPhoto,
     ReportChatPhoto,
     GetUserProfilePhotos,
+    GetChatPhotoHistory,
     CreateNewSecretChat,
     GetSecretChat,
     CloseSecretChat,

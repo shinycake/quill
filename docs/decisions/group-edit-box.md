@@ -41,6 +41,10 @@
   closing or saving the box closes it too.
 - The management rows moved from `group_admin_panels` into the box. The Permissions row is
   hidden for channels.
+- `Session::chat_can_edit_information` (from main's photo gallery work) now checks group
+  membership through the status TDLib reported for the chat or its basic group, as tdesktop's
+  `amIn` does, instead of only `Left`/`Banned` on the chat. The Edit box and the gallery's
+  "delete the current photo" both use it.
 - The envelope parses `basicGroupFullInfo.description`, and the basic group info panel shows it.
 - The photo-editor buttons now draw white text on the black layer in both themes. With the
   ghost variant, the text was unreadable in the light theme.

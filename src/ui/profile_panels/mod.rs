@@ -23,14 +23,13 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::lang::{keys, tr, tr_with, trn};
+use quill::lang::{keys, tr, trn};
 use quill::local_path::sandboxed_display_path;
-use quill::media_viewer::{MediaViewer, profile_photo_items};
 use quill::profile_forms::{
     PersonalPhotoMode, PhotoReportReason, is_profile_photo_file, parse_birthday, profile_link,
     unofficial_warning_text,
 };
-use quill::state::{ProfileChatsFetch, ProfileChatsKind, ProfilePhotosFetch};
+use quill::state::{ProfileChatsFetch, ProfileChatsKind};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -368,106 +367,6 @@ impl QuillApp {
 
     // ===================== profile photos =====================
 
-    /// Open the profile photo gallery of `user_id` in the media viewer.
-    /// The list is fetched first when it is not cached; the poll loop
-    /// opens the viewer when it lands.
-    pub(super) fn open_profile_photos(&mut self, user_id: i64, cx: &mut Context<Self>) {
-        let ready = self
-            .session()
-            .and_then(|s| s.profile_gallery(user_id))
-            .is_some_and(|(photos, _)| !photos.is_empty());
-        if ready {
-            self.show_profile_gallery(user_id, cx);
-            return;
-        }
-        let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
-                keys::Q_PEOPLE_PROFILE_PHOTOS_NEED_A_LIVE,
-            )));
-            cx.notify();
-            return;
-        };
-        // A failed earlier fetch is retried.
-        if matches!(
-            live.driver
-                .session
-                .users_state
-                .user_profile_photos
-                .get(&user_id),
-            Some(ProfilePhotosFetch::Failed(_))
-        ) {
-            live.driver
-                .session
-                .users_state
-                .user_profile_photos
-                .remove(&user_id);
-        }
-        match live.driver.fetch_user_profile_photos(user_id) {
-            Ok(_) => self.dialogs.pending_profile_gallery = Some(user_id),
-            Err(_) => self.connection.set_note(StatusNote::error(tr(
-                keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
-            ))),
-        }
-        cx.notify();
-    }
-
-    /// Poll-loop hook: open the gallery that was waiting for its list.
-    /// Returns `true` when something changed.
-    pub(super) fn pump_profile_gallery(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(user_id) = self.dialogs.pending_profile_gallery else {
-            return false;
-        };
-        let Some(state) = self
-            .session()
-            .and_then(|s| s.users_state.user_profile_photos.get(&user_id))
-            .cloned()
-        else {
-            return false;
-        };
-        let has_photos = self
-            .session()
-            .and_then(|s| s.profile_gallery(user_id))
-            .is_some_and(|(photos, _)| !photos.is_empty());
-        match state {
-            ProfilePhotosFetch::Loading => return false,
-            ProfilePhotosFetch::Loaded { .. } if has_photos => {
-                self.dialogs.pending_profile_gallery = None;
-                self.show_profile_gallery(user_id, cx);
-            }
-            ProfilePhotosFetch::Loaded { .. } => {
-                self.dialogs.pending_profile_gallery = None;
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_NO_PROFILE_PHOTOS)));
-            }
-            ProfilePhotosFetch::Failed(reason) => {
-                self.dialogs.pending_profile_gallery = None;
-                self.connection.set_note(StatusNote::error(tr_with(
-                    keys::Q_PEOPLE_COULDNT_LOAD_PROFILE_PHOTOS,
-                    &[("reason", &reason.to_string())],
-                )));
-            }
-        }
-        true
-    }
-
-    fn show_profile_gallery(&mut self, user_id: i64, cx: &mut Context<Self>) {
-        let Some((photos, personal)) = self.session().and_then(|s| s.profile_gallery(user_id))
-        else {
-            return;
-        };
-        let items = profile_photo_items(&photos);
-        if items.is_empty() {
-            return;
-        }
-        self.viewer.state = MediaViewer::open_profile(items, 0);
-        self.viewer.extra.profile_user = Some(user_id);
-        self.viewer.extra.profile_personal = personal;
-        self.viewer.open_gen += 1;
-        self.viewer_note_activity(false, cx);
-        self.reset_viewer_item_state(cx);
-        cx.notify();
-    }
-
     /// "Set as My Photo" under a suggested profile photo
     /// (`setProfilePhoto` with the suggestion's `chatPhoto.id`).
     pub(super) fn accept_suggested_photo(&mut self, photo_id: i64, cx: &mut Context<Self>) {
@@ -482,79 +381,6 @@ impl QuillApp {
             Ok(_) => self
                 .connection
                 .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_PROFILE_PHOTO_UPDATED))),
-            Err(_) => self.connection.set_note(StatusNote::error(tr(
-                keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
-            ))),
-        }
-        cx.notify();
-    }
-
-    /// "Set as main photo" on one of your own earlier photos.
-    pub(super) fn set_viewer_photo_as_main(&mut self, cx: &mut Context<Self>) {
-        let Some(photo_id) = self.viewer.state.current().map(|item| item.message_id.0) else {
-            return;
-        };
-        let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
-                keys::Q_PEOPLE_PROFILE_PHOTO_CHANGES_NEED_A,
-            )));
-            cx.notify();
-            return;
-        };
-        match live.driver.set_profile_photo_previous(photo_id) {
-            Ok(_) => {
-                self.connection.set_note(StatusNote::silent(tr(
-                    keys::Q_PEOPLE_MAIN_PROFILE_PHOTO_UPDATED,
-                )));
-                self.close_media_viewer(cx);
-            }
-            Err(_) => self.connection.set_note(StatusNote::error(tr(
-                keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
-            ))),
-        }
-        cx.notify();
-    }
-
-    /// Open the viewer's "Report" for the photo on screen: the viewer
-    /// closes first so the reason list is not hidden behind it.
-    pub(super) fn report_viewer_profile_photo(&mut self, cx: &mut Context<Self>) {
-        let Some(user_id) = self.viewer.extra.profile_user else {
-            return;
-        };
-        let Some(file_id) = self
-            .viewer
-            .state
-            .current()
-            .map(|item| item.download_file_id.0)
-        else {
-            return;
-        };
-        self.close_media_viewer(cx);
-        self.dialogs.profile_dialog = Some(ProfileDialog::ReportPhoto { user_id, file_id });
-        cx.notify();
-    }
-
-    fn submit_photo_report(
-        &mut self,
-        user_id: i64,
-        file_id: i32,
-        reason: PhotoReportReason,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
-                keys::Q_PEOPLE_DEMO_MODE_REPORTS_NEED_A,
-            )));
-            cx.notify();
-            return;
-        };
-        match live
-            .driver
-            .report_profile_photo(user_id, file_id, reason.td_type())
-        {
-            Ok(_) => self
-                .connection
-                .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_REPORT_SENT))),
             Err(_) => self.connection.set_note(StatusNote::error(tr(
                 keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
             ))),
@@ -630,6 +456,8 @@ mod change_phone_dialog;
 pub(in crate::ui) mod common_groups;
 mod details_card;
 mod main_profile_tab_dialog;
+mod photo_delete;
+mod photo_viewer;
 mod submit_personal_photo;
 
 #[cfg(test)]
@@ -639,3 +467,6 @@ mod about_text_tests;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod common_groups_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod photo_viewer_tests;

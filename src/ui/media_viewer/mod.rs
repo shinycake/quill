@@ -56,6 +56,7 @@ mod overlay;
 mod overlay_controls;
 mod pip;
 mod playback;
+mod profile_photos;
 mod swipe_indicator;
 mod ttl_ui;
 mod video;
@@ -76,10 +77,8 @@ pub(super) struct ViewerExtra {
     pub(in crate::ui) video_fullscreen: fullscreen::VideoFullscreen,
     /// A looping clip paused because the window lost focus.
     pub inactive_paused: bool,
-    /// B10: whose profile photos the viewer shows (`ViewerSource::Profile`).
-    pub profile_user: Option<i64>,
-    /// The `chatPhoto.id` of the photo you set for that contact.
-    pub profile_personal: Option<i64>,
+    /// B10: whose photos the viewer shows (`ViewerSource::Profile`).
+    pub profile_owner: Option<quill::state::PhotoOwner>,
     /// The "saved to your Downloads folder" toast and its generation (a
     /// newer save restarts the hide timer).
     pub saved_toast: Option<quill::viewer_extras::SavedToast>,
