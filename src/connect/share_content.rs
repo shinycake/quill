@@ -1,10 +1,11 @@
-//! Connect driver: the attach menu's Contact and Location sends.
+//! Connect driver: the attach menu's Contact, Location and venue sends.
 use super::*;
 use crate::composer::SendOptions;
 use crate::ids::{ChatId, RequestId};
 use crate::state::RequestPurpose;
 use crate::telegram::requests::{
     ContactShare, SendReply, send_contact_card, send_dice, send_location, send_story_card,
+    send_venue,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -112,6 +113,23 @@ impl<S: JsonSender> ConnectDriver<S> {
                 reply_to.as_ref(),
                 options,
             )
+        })
+    }
+
+    /// `sendMessage` + `inputMessageVenue`: a place from the Location
+    /// picker's venue list.
+    pub fn share_venue_to_chat(
+        &mut self,
+        chat_id: ChatId,
+        venue: &crate::location_picker::Venue,
+        reply_to: Option<SendReply>,
+        options: &SendOptions,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.share_target_ok(chat_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.send_built(chat_id, |extra, topic_id| {
+            send_venue(extra, chat_id, topic_id, venue, reply_to.as_ref(), options)
         })
     }
 

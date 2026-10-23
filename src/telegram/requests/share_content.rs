@@ -1,10 +1,12 @@
 //! `sendMessage` bodies for the attach menu's Contact and Location items and
 //! for the dice emoji (tdesktop `Api::SendAction` with
-//! `SendMediaType::Contact` / `Location` and `MTPDinputMediaDice`).
+//! `SendMediaType::Contact` / `Location` and `MTPDinputMediaDice`), and the
+//! Location picker's venue search and venue icons.
 
 use super::{SendReply, message_send_options, message_topic_value, send_reply_value};
 use crate::composer::SendOptions;
 use crate::ids::{ChatId, RequestId};
+use crate::location_picker::{GeoPoint, Venue};
 use serde_json::{Value, json};
 
 /// The emoji that send as a dice instead of text (tdesktop
@@ -49,28 +51,6 @@ pub struct ContactShare {
     pub first_name: String,
     pub last_name: String,
     pub user_id: i64,
-}
-
-/// Parse a latitude / longitude pair typed by the user. Accepts a decimal
-/// comma, trims whitespace, and rejects values outside -90..=90 /
-/// -180..=180 or non-finite numbers, with the reason to show.
-pub fn parse_coordinates(latitude: &str, longitude: &str) -> Result<(f64, f64), &'static str> {
-    fn number(text: &str) -> Option<f64> {
-        text.trim()
-            .replace(',', ".")
-            .parse::<f64>()
-            .ok()
-            .filter(|n| n.is_finite())
-    }
-    let lat = number(latitude).ok_or("Enter the latitude as a number, e.g. 37.7749.")?;
-    let lon = number(longitude).ok_or("Enter the longitude as a number, e.g. -122.4194.")?;
-    if !(-90.0..=90.0).contains(&lat) {
-        return Err("Latitude must be between -90 and 90.");
-    }
-    if !(-180.0..=180.0).contains(&lon) {
-        return Err("Longitude must be between -180 and 180.");
-    }
-    Ok((lat, lon))
 }
 
 fn send_content(
@@ -206,6 +186,79 @@ pub fn send_location(
     )
 }
 
+fn location_value(point: GeoPoint) -> Value {
+    json!({
+        "@type": "location",
+        "latitude": point.latitude(),
+        "longitude": point.longitude(),
+        "horizontal_accuracy": 0.0,
+    })
+}
+
+/// `inputMessageVenue venue:venue`: a place picked from the Location
+/// picker's venue list.
+pub fn send_venue(
+    extra: RequestId,
+    chat_id: ChatId,
+    topic_id: Option<i32>,
+    venue: &Venue,
+    reply_to: Option<&SendReply>,
+    options: &SendOptions,
+) -> String {
+    send_content(
+        extra,
+        chat_id,
+        topic_id,
+        reply_to,
+        options,
+        json!({
+            "@type": "inputMessageVenue",
+            "venue": {
+                "@type": "venue",
+                "location": location_value(venue.point),
+                "title": venue.title,
+                "address": venue.address,
+                "provider": venue.provider,
+                "id": venue.id,
+                "type": venue.venue_type,
+            },
+        }),
+    )
+}
+
+/// `getInlineQueryResults` to the venue search bot with the place to look
+/// around as `user_location` (tdesktop `LocationPicker::venuesRequest`).
+pub fn get_venue_results(
+    extra: RequestId,
+    bot_user_id: i64,
+    chat_id: ChatId,
+    point: GeoPoint,
+    query: &str,
+) -> String {
+    json!({
+        "@type": "getInlineQueryResults",
+        "@extra": extra.as_extra(),
+        "bot_user_id": bot_user_id,
+        "chat_id": chat_id.0,
+        "user_location": location_value(point),
+        "query": query,
+        "offset": "",
+    })
+    .to_string()
+}
+
+/// `getRemoteFile` for an image at `url` (a venue category icon), which
+/// TDLib downloads like any other thumbnail.
+pub fn get_remote_thumbnail_file(extra: RequestId, url: &str) -> String {
+    json!({
+        "@type": "getRemoteFile",
+        "@extra": extra.as_extra(),
+        "remote_file_id": url,
+        "file_type": {"@type": "fileTypeThumbnail"},
+    })
+    .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,16 +385,57 @@ mod tests {
     }
 
     #[test]
-    fn coordinates_are_validated() {
-        assert_eq!(
-            parse_coordinates("37.7749", " -122,4194 "),
-            Ok((37.7749, -122.4194))
-        );
-        assert!(parse_coordinates("", "1").is_err());
-        assert!(parse_coordinates("91", "0").is_err());
-        assert!(parse_coordinates("0", "-181").is_err());
-        assert!(parse_coordinates("NaN", "0").is_err());
-        assert!(parse_coordinates("inf", "0").is_err());
-        assert_eq!(parse_coordinates("-90", "180"), Ok((-90.0, 180.0)));
+    fn send_venue_carries_the_place() {
+        let venue = Venue {
+            point: GeoPoint::new(48.85, 2.35).expect("finite"),
+            title: "Cafe".into(),
+            address: "Rue de Rivoli".into(),
+            provider: "foursquare".into(),
+            id: "v1".into(),
+            venue_type: "food/cafe".into(),
+        };
+        let v = parse(&send_venue(
+            RequestId(8),
+            ChatId(77),
+            None,
+            &venue,
+            None,
+            &SendOptions::default(),
+        ));
+        let content = &v["input_message_content"];
+        assert_eq!(content["@type"], "inputMessageVenue");
+        assert_eq!(content["venue"]["@type"], "venue");
+        assert_eq!(content["venue"]["location"]["latitude"], 48.85);
+        assert_eq!(content["venue"]["title"], "Cafe");
+        assert_eq!(content["venue"]["address"], "Rue de Rivoli");
+        assert_eq!(content["venue"]["provider"], "foursquare");
+        assert_eq!(content["venue"]["id"], "v1");
+        assert_eq!(content["venue"]["type"], "food/cafe");
+    }
+
+    #[test]
+    fn venue_search_sends_the_users_location() {
+        let at = GeoPoint::new(48.85, 2.35).expect("finite");
+        let v = parse(&get_venue_results(
+            RequestId(9),
+            99,
+            ChatId(77),
+            at,
+            "pizza",
+        ));
+        assert_eq!(v["@type"], "getInlineQueryResults");
+        assert_eq!(v["bot_user_id"], 99);
+        assert_eq!(v["user_location"]["@type"], "location");
+        assert_eq!(v["user_location"]["longitude"], 2.35);
+        assert_eq!(v["query"], "pizza");
+        assert_eq!(v["offset"], "");
+    }
+
+    #[test]
+    fn venue_icon_is_a_remote_thumbnail() {
+        let v = parse(&get_remote_thumbnail_file(RequestId(10), "https://x/y.png"));
+        assert_eq!(v["@type"], "getRemoteFile");
+        assert_eq!(v["remote_file_id"], "https://x/y.png");
+        assert_eq!(v["file_type"]["@type"], "fileTypeThumbnail");
     }
 }

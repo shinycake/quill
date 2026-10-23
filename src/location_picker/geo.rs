@@ -68,6 +68,9 @@ pub fn same_place(a: Option<GeoPoint>, b: Option<GeoPoint>) -> bool {
 }
 
 fn wrap_longitude(longitude: f64) -> f64 {
+    if (-180.0..180.0).contains(&longitude) {
+        return longitude;
+    }
     let wrapped = (longitude + 180.).rem_euclid(360.) - 180.;
     // rem_euclid can round up to exactly 360 for tiny negative inputs.
     if wrapped >= 180. { -180. } else { wrapped }
