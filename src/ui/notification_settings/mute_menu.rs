@@ -26,6 +26,7 @@ impl QuillApp {
         self.ensure_chat_volume_slider(chat_id, cx);
         self.notify.mute_custom_open = custom;
         self.notify.notif_sound_picker_open = !custom;
+        self.queue_mute_time_inputs(cx);
         cx.notify();
     }
 
@@ -33,6 +34,7 @@ impl QuillApp {
         self.notify.mute_menu_open = true;
         self.notify.mute_chat = None;
         self.notify.mute_custom_open = false;
+        self.queue_mute_time_inputs(cx);
         if let Some(chat_id) = self.session().and_then(|session| session.open_chat) {
             self.ensure_chat_volume_slider(chat_id, cx);
         }
@@ -146,7 +148,6 @@ impl QuillApp {
         ];
         let sound_disabled = !chat_settings.use_default_sound && chat_settings.sound_id == 0;
         let custom_open = self.notify.mute_custom_open;
-        let custom = self.notify.mute_custom;
         let mut preset_row = div().id("mute-presets").flex().flex_wrap().gap_1();
         for (label, seconds) in presets {
             preset_row = preset_row.child(
@@ -169,8 +170,11 @@ impl QuillApp {
                 .small()
                 .label(tr(keys::Q_PREFS_CUSTOM))
                 .outline()
-                .on_click(cx.listener(|this, _, _, cx| {
+                .on_click(cx.listener(|this, _, window, cx| {
                     this.notify.mute_custom_open = !this.notify.mute_custom_open;
+                    if this.notify.mute_custom_open {
+                        this.reset_mute_time_inputs(window, cx);
+                    }
                     cx.notify();
                 })),
         );
@@ -187,68 +191,46 @@ impl QuillApp {
                     })),
             );
         }
-        let custom_row = custom_open.then(|| {
-            let stepper = |id: &'static str, label: String, minus: bool, hours: bool| {
-                let delta = if minus { -1 } else { 1 };
-                Button::new(id)
-                    .small()
-                    .ghost()
-                    .label(label)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.notify.mute_custom = if hours {
-                            this.notify.mute_custom.step_hours(delta)
-                        } else {
-                            this.notify.mute_custom.step_days(delta)
-                        };
-                        cx.notify();
-                    }))
-            };
-            div()
-                .id("mute-custom")
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .gap_1()
-                .child(stepper(
-                    "mute-days-minus",
-                    tr(keys::Q_PREFS_DAY).into(),
-                    true,
-                    false,
-                ))
-                .child(stepper(
-                    "mute-days-plus",
-                    tr(keys::Q_PREFS_DAY_2).into(),
-                    false,
-                    false,
-                ))
-                .child(stepper(
-                    "mute-hours-minus",
-                    tr(keys::Q_PREFS_HOUR).into(),
-                    true,
-                    true,
-                ))
-                .child(stepper(
-                    "mute-hours-plus",
-                    tr(keys::Q_PREFS_HOUR_2).into(),
-                    false,
-                    true,
-                ))
-                .child(
-                    Button::new("mute-custom-apply")
-                        .small()
-                        .label(tr_with(
-                            keys::Q_PREFS_MUTE_FOR_3,
-                            &[("label", &(custom.label()).to_string())],
-                        ))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if let Some(chat_id) = open_chat {
-                                let mute_for = this.notify.mute_custom.mute_for();
-                                this.notify.mute_custom_open = false;
-                                this.apply_chat_mute(chat_id, mute_for, cx);
-                            }
-                        })),
-                )
-        });
+        // tdesktop `MuteBox`: the fields, then "Mute" (or "Unmute" at zero).
+        let custom_row = custom_open
+            .then(|| self.mute_time_value(cx).zip(self.mute_time_fields(cx)))
+            .flatten()
+            .map(|(custom, fields)| {
+                let mute_for = custom.mute_for();
+                div()
+                    .id("mute-custom")
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(tr(keys::MUTE_BOX_TITLE)),
+                    )
+                    .child(fields)
+                    .child(
+                        div().flex().child(
+                            Button::new("mute-custom-apply")
+                                .small()
+                                .primary()
+                                .label(if mute_for == 0 {
+                                    tr(keys::MUTE_MENU_UNMUTE)
+                                } else {
+                                    tr(keys::MUTE_MENU_MUTE)
+                                })
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    if let Some(chat_id) = open_chat {
+                                        let mute_for = this
+                                            .mute_time_value(cx)
+                                            .map_or(0, |custom| custom.mute_for());
+                                        this.notify.mute_custom_open = false;
+                                        this.apply_chat_mute(chat_id, mute_for, cx);
+                                    }
+                                })),
+                        ),
+                    )
+            });
         let sound_toggle = Button::new("mute-sound-toggle")
             .small()
             .label(quill::mute_menu::sound_toggle_label(sound_disabled))

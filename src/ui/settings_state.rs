@@ -62,6 +62,9 @@ pub(crate) struct SettingsUi {
     /// being edited plus its draft settings (saved or discarded
     /// explicitly, never applied optimistically).
     pub(super) data_storage_editor: Option<(NetworkKind, AutoDownloadNetSettings)>,
+    /// The step sliders of the network editor, the local storage limits and
+    /// the auto-delete picker (`index_sliders.rs`).
+    pub(super) index_sliders: super::index_sliders::IndexSliders,
     /// Slice S4: the "Clear cache" button is awaiting its second,
     /// confirming tap.
     pub(super) storage_confirm: Option<StorageClear>,
@@ -115,6 +118,7 @@ impl SettingsUi {
             font_picker,
             accent_picker,
             data_storage_editor: None,
+            index_sliders: Default::default(),
             storage_confirm: None,
             storage_selected: Default::default(),
             proxy: Default::default(),

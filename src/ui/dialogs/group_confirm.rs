@@ -14,11 +14,6 @@ pub enum GroupConfirmAction {
     BroadcastIntro,
     /// Second step: the permanent consequence, then the conversion runs.
     BroadcastUpgrade,
-    /// Slice CL1: `deleteChatHistory` (schema 1.8.67, line 11845);
-    /// `revoke` clears for everyone (`chat.can_be_deleted_for_all_users`).
-    ClearHistory {
-        revoke: bool,
-    },
     /// Slice CL1: chat-list "Delete chat" — `deleteChatHistory` with
     /// `remove_from_chat_list: true` (Telegram X `Tdlib.deleteChat`),
     /// not the destructive `deleteChat` constructor.
