@@ -38,7 +38,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Add contact via dialog: phone (required), first/last name -> addContact (ui/mod.rs:9469; telegram/requests.rs:379) <!-- parity:auth-contact-add -->
 - [x] Delete contact (schema: removeContacts; TGX DeleteContactConfirm) <!-- parity:auth-contact-delete -->
 - [x] Import contacts from a file/vCard (schema: importContacts) <!-- parity:auth-contact-import -->
-- [ ] Import contacts by choosing a .vcf file instead of pasting vCard text <!-- parity:auth-contact-import-file -->
+- [x] Import contacts by choosing a .vcf file instead of pasting vCard text <!-- parity:auth-contact-import-file -->
 - [x] Sync contacts toggle + delete synced contacts from servers (TGX SyncContacts*, SyncContactsDeleteInfo) <!-- parity:auth-contact-sync -->
 - [x] Block user with confirmation (TGX QBlockUser/BlockUserConfirm; no block request builders in Quill) <!-- parity:auth-block-user -->
 - [x] Edit name: "Edit profile" dialog on the own info panel sends setName (telegram/requests.rs:4213; connect.rs:8910; ui/mod.rs:18963) <!-- parity:auth-edit-name -->
@@ -849,7 +849,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] User buttons open the private chat with the user (ui/mod.rs) <!-- parity:bots-inline-user -->
 - [x] Per-button disabled flag on inline buttons (verified: TDLib 1.8.67 exposes `inlineKeyboardButtonTypeDisabled`; `envelope.rs:8791` parses it to `InlineKeyboardButtonType::Disabled`; `inline_keyboard_button` (src/ui/mod.rs:44503) renders it non-interactive via the `element.disabled(true)` fallthrough (44599) — no click handler attached — with tooltip "This button is disabled" (44616)) <!-- parity:bots-inline-disabled-buttons -->
 - [x] Custom reply keyboards rendered above the composer; text sends, one-time hides on tap, contact/location/poll honestly disabled <!-- parity:bots-custom-keyboard -->
-- [ ] Bot keyboard buttons that request a location or a poll work: confirm and send the location; open the poll box with the bot's quiz setting <!-- parity:bots-keyboard-location-poll -->
+- [x] Bot keyboard buttons that request a location or a poll work: confirm and send the location; open the poll box with the bot's quiz setting <!-- parity:bots-keyboard-location-poll -->
 - [x] Force-reply markup focuses the composer with the reply target set <!-- parity:bots-force-reply -->
 - [x] Force-reply keyboards render the reply-keyboard bar (a ↩ {placeholder} ghost button above the composer, kit Button; tap focuses the composer) <!-- parity:bots-force-reply-keyboard -->
 - [x] Stop button for streaming bot drafts (cancel an in-flight streaming bot reply) <!-- parity:bots-streaming-draft-stop -->

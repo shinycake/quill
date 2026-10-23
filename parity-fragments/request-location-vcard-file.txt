@@ -1,3 +1,0 @@
-# bot keyboard location request (confirm, then send) and the .vcf file import
-parity:bots-keyboard-location-poll
-parity:auth-contact-import-file
