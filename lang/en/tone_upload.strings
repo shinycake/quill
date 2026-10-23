@@ -1,0 +1,9 @@
+// tone upload (tdesktop RingtonesBox "Upload Sound").
+"lng_edit_media_invalid_file" = "Sorry, no way to use this file.";
+"lng_ringtones_box_upload_button" = "Upload Sound";
+"lng_ringtones_box_upload_choose" = "Choose a tone";
+"lng_ringtones_error_max_duration" = "Sorry, but your file is too long. The maximum duration for ringtones is {duration}.";
+"lng_ringtones_error_max_size" = "Sorry, but your file is too big. The maximum size for ringtones is {size}.";
+"lng_ringtones_toast_added" = "Sound added!";
+"qll_tone_upload_failed" = "Could not add the sound. Try again.";
+"qll_tone_uploading" = "Uploading…";

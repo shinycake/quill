@@ -551,6 +551,27 @@ pub fn get_saved_notification_sounds(extra: RequestId) -> String {
     .to_string()
 }
 
+/// `addSavedNotificationSound` with the sound as a local file
+/// (`inputFileLocal`): TDLib uploads it and answers `notificationSound`.
+pub fn add_saved_notification_sound_local(extra: RequestId, path: &str) -> String {
+    json!({
+        "@type": "addSavedNotificationSound",
+        "@extra": extra.as_extra(),
+        "sound": { "@type": "inputFileLocal", "path": path },
+    })
+    .to_string()
+}
+
+/// `removeSavedNotificationSound notification_sound_id:int64 = Ok;`
+pub fn remove_saved_notification_sound(extra: RequestId, sound_id: i64) -> String {
+    json!({
+        "@type": "removeSavedNotificationSound",
+        "@extra": extra.as_extra(),
+        "notification_sound_id": sound_id.to_string(),
+    })
+    .to_string()
+}
+
 /// `getScopeNotificationSettings` (TDLib 1.8.67, line 13662).
 pub fn get_scope_notification_settings(
     extra: RequestId,

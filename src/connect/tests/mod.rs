@@ -125,6 +125,7 @@ mod support;
 mod threads;
 mod ton_wallet;
 mod ton_wallet_own;
+mod tone_upload;
 mod translate;
 mod update_batch;
 mod web_apps;

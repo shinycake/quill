@@ -35,6 +35,7 @@ use crate::telegram::requests_privacy::{
 mod notifications;
 mod sessions;
 mod storage;
+mod tone_upload;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Slice S3: fetch one Privacy-screen rule

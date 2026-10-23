@@ -134,8 +134,13 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::AddSavedNotificationSound) {
                     self.settings.saved_sounds_stale = true;
                 }
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::UploadSavedNotificationSound)
+                {
+                    self.finish_tone_upload(sounds);
                 // Parity slice: `getSavedNotificationSounds` answer.
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedNotificationSounds) {
+                } else if pending.map(|p| p.purpose)
+                    == Some(RequestPurpose::GetSavedNotificationSounds)
+                {
                     let files: Vec<ParsedFile> = sounds.iter().map(|s| s.sound.clone()).collect();
                     self.remember_files(&files);
                     // Parity slice: a refetch replaces the saved list, so
