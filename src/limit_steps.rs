@@ -160,7 +160,7 @@ mod tests {
         for ix in 0..CAP_STEPS {
             assert_eq!(cap_index(cap_at(ix)), ix);
         }
-        assert_eq!(cap_index(i64::from(i32::MAX)), CAP_STEPS - 1);
+        assert_eq!(cap_index(8000 * MIB), CAP_STEPS - 1);
         assert_eq!(cap_index(0), 0);
     }
 }

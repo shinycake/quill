@@ -31,11 +31,7 @@ impl QuillApp {
     /// Whether the chat row menu offers "Clear history" for `chat_id`.
     pub(in crate::ui) fn clear_history_plan(&self, chat: &ChatSummary) -> Option<ClearHistoryPlan> {
         let session = self.session()?;
-        let is_saved = match &chat.kind {
-            ChatKind::Private { user_id } => session.my_user_id == Some(user_id.0),
-            _ => false,
-        };
-        plan(chat, is_saved)
+        plan(chat, session.is_saved_messages(chat.id))
     }
 
     /// Ask, then clear. One box for every chat kind, with the revoke

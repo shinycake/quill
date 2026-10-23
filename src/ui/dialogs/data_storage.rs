@@ -334,6 +334,7 @@ impl QuillApp {
                 "data-storage-net-{}",
                 network.label().replace(' ', "-")
             ))
+            .test_support()
             .role(gpui_kit::Role::Button)
             .aria_label(tr_with(
                 keys::Q_OPS_AUTOMATIC_DOWNLOAD_SETTINGS,

@@ -38,6 +38,9 @@ mod tone_upload_demo;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod tone_upload_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod ttl_mute_tests;
 mod ttl_picker;
 mod volume;
 

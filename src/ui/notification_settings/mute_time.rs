@@ -112,6 +112,8 @@ impl QuillApp {
         let value = inputs.value(cx);
         let column = |id: &'static str, input: &Entity<InputState>, caption: String| {
             div()
+                .id(id)
+                .test_support()
                 .flex()
                 .flex_col()
                 .items_center()
@@ -124,7 +126,6 @@ impl QuillApp {
                 )
                 .child(
                     div()
-                        .id(id)
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
                         .child(caption),
@@ -152,5 +153,26 @@ impl QuillApp {
                 ))
                 .into_any_element(),
         )
+    }
+}
+
+#[cfg(test)]
+impl MuteTimeInputs {
+    /// Type `days`, `hours` and `minutes` into the fields.
+    pub(in crate::ui) fn set_for_test(
+        &self,
+        days: &str,
+        hours: &str,
+        minutes: &str,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        for (input, text) in [
+            (&self.days, days),
+            (&self.hours, hours),
+            (&self.minutes, minutes),
+        ] {
+            input.update(cx, |state, cx| state.set_value(text.to_string(), window, cx));
+        }
     }
 }

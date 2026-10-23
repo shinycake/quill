@@ -142,6 +142,7 @@ impl QuillApp {
         Some(
             div()
                 .id(id)
+                .test_support()
                 .flex()
                 .flex_col()
                 .gap_1()
@@ -174,6 +175,11 @@ pub(super) fn cap_slider_start(bytes: i64) -> usize {
         cap_index(bytes)
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "index_sliders_tests.rs"]
+mod live_tests;
 
 #[cfg(test)]
 mod tests {

@@ -11,6 +11,7 @@ use serde_json::Value;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
+mod clear_history;
 mod export;
 mod list_ops;
 mod rich_html;

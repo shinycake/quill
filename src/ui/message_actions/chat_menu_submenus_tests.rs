@@ -321,3 +321,64 @@ fn a_promotion_shapes_the_menu_like_use_top_promotion(cx: &mut TestAppContext) {
     click(vcx, "chat-menu-hide-promotion");
     assert!(app.update(vcx, |app, _| app.chat_list.menu.is_none()));
 }
+
+fn set_clear_flags(
+    app: &Entity<QuillApp>,
+    vcx: &mut VisualTestContext,
+    chat_id: ChatId,
+    only_for_self: bool,
+    for_all: bool,
+) {
+    app.update(vcx, |app, cx| {
+        let Some(chat) = app
+            .demo_session
+            .as_mut()
+            .and_then(|s| s.chats.get_mut(&chat_id.0))
+        else {
+            panic!("chat missing");
+        };
+        chat.can_be_deleted_only_for_self = only_for_self;
+        chat.can_be_deleted_for_all_users = for_all;
+        cx.notify();
+    });
+}
+
+#[gpui_kit::test]
+fn clear_history_is_one_item_that_asks_once(cx: &mut TestAppContext) {
+    let (app, mut vcx, chat_id) = open(cx);
+    let vcx = &mut vcx;
+    set_clear_flags(&app, vcx, chat_id, true, true);
+    show_menu(&app, vcx, chat_id);
+    assert!(present(vcx, "chat-menu-clear"));
+    assert!(
+        !present(vcx, "chat-menu-clear-all"),
+        "no separate item for everyone"
+    );
+    click(vcx, "chat-menu-clear");
+    assert!(app.update(vcx, |app, _| app.chat_list.menu.is_none()));
+    assert!(
+        present(vcx, "clear-history-revoke"),
+        "the box offers the checkbox where the other side can be cleared"
+    );
+}
+
+#[gpui_kit::test]
+fn clear_history_has_no_checkbox_when_only_this_side_can_be_cleared(cx: &mut TestAppContext) {
+    let (app, mut vcx, chat_id) = open(cx);
+    let vcx = &mut vcx;
+    set_clear_flags(&app, vcx, chat_id, true, false);
+    show_menu(&app, vcx, chat_id);
+    assert!(present(vcx, "chat-menu-clear"));
+    click(vcx, "chat-menu-clear");
+    frames(vcx);
+    assert!(!present(vcx, "clear-history-revoke"));
+}
+
+#[gpui_kit::test]
+fn clear_history_is_hidden_when_the_server_allows_none(cx: &mut TestAppContext) {
+    let (app, mut vcx, chat_id) = open(cx);
+    let vcx = &mut vcx;
+    set_clear_flags(&app, vcx, chat_id, false, false);
+    show_menu(&app, vcx, chat_id);
+    assert!(!present(vcx, "chat-menu-clear"));
+}
