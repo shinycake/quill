@@ -101,6 +101,7 @@ pub(super) struct PanelKey {
     recent_emoji: usize,
     premium: bool,
     category: Option<usize>,
+    unicode_only: bool,
 }
 
 /// The message the panel is choosing a reaction for (Telegram Desktop's
@@ -429,6 +430,7 @@ impl QuillApp {
                 .map_or(0, |s| s.settings.media_prefs.recent_emoji.len()),
             premium: self.session().is_some_and(|s| s.my_is_premium()),
             category: self.pickers.media_panel.category,
+            unicode_only: self.group_title_emoji_active(),
         };
         if self.pickers.media_panel.key.as_ref() == Some(&key) {
             return;
@@ -438,6 +440,7 @@ impl QuillApp {
                 && old.query == key.query
                 && old.reaction == key.reaction
                 && old.category == key.category
+                && old.unicode_only == key.unicode_only
         });
         let category_changed = self
             .pickers
@@ -512,6 +515,8 @@ impl QuillApp {
             push_grid(&mut rows, cells, EMOJI_COLS, false);
             return (rows, sections);
         }
+        // A chat title takes standard emoji only (tdesktop `PeerTitle`).
+        let unicode_only = self.group_title_emoji_active();
         let session = self.session();
         // Recent: plain emoji, then recently used custom emoji.
         let recent: Vec<PanelCell> = session
@@ -538,7 +543,7 @@ impl QuillApp {
                     .iter()
                     .take(quill::emoji_catalog::RECENT_LIMIT)
                     .map(|emoji| PanelCell::Emoji(SharedString::from(emoji.clone())))
-                    .chain(custom.take(EMOJI_COLS * 2))
+                    .chain(custom.take(if unicode_only { 0 } else { EMOJI_COLS * 2 }))
                     .collect()
             })
             .unwrap_or_default();
@@ -574,7 +579,7 @@ impl QuillApp {
             );
         }
         // Custom emoji packs after the standard emoji.
-        if let Some(session) = session {
+        if let Some(session) = session.filter(|_| !unicode_only) {
             push_custom_packs(&mut rows, &mut sections, session, None);
         }
         (rows, sections)

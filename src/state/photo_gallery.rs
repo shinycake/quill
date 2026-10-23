@@ -265,8 +265,9 @@ impl Session {
 
     /// Whether the current user may change a group or channel's title,
     /// photo and description (tdesktop `canEditInformation`): channels
-    /// need the right; in groups a member may unless the default
-    /// permissions forbid it.
+    /// need the right; in groups a member (tdesktop `amIn`, by the status
+    /// TDLib reported for the chat or its basic group) may unless the
+    /// default permissions forbid it.
     pub fn chat_can_edit_information(&self, chat_id: ChatId) -> bool {
         if self.chat_can_change_info(chat_id) {
             return true;
@@ -280,7 +281,14 @@ impl Session {
             _ => false,
         };
         is_group
-            && !self.chat_not_joined(chat_id)
+            && matches!(
+                self.group_own_status(chat_id),
+                Some(
+                    ChannelMemberStatus::Creator
+                        | ChannelMemberStatus::Administrator
+                        | ChannelMemberStatus::Member
+                )
+            )
             && chat.permissions.as_ref().is_some_and(|p| p.can_change_info)
     }
 

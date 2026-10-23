@@ -30,6 +30,7 @@ impl Session {
         ) {
             self.note_premium_limit(err, pending);
         }
+        self.record_group_info_edit_error(err, pending);
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::CanTransferOwnership) => {
                 self.groups.ownership.check_in_flight = false;

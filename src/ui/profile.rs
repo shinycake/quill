@@ -554,8 +554,12 @@ impl QuillApp {
                             .child(
                                 Button::new("edit-profile-set-photo")
                                     .label(tr(keys::PROFILE_SET_PHOTO_BUTTON))
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.choose_profile_photo(cx);
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.choose_photo_or_video(
+                                            crate::ui::profile_photo_sources::PhotoTarget::Profile,
+                                            window,
+                                            cx,
+                                        );
                                     })),
                             )
                             .when(has_photo, |this| {

@@ -66,15 +66,6 @@ pub fn broadcast_features_text() -> String {
         .join("\n")
 }
 
-/// Delete confirmation copy (`lng_sure_delete_group` / `_channel`).
-pub fn delete_chat_text(is_channel: bool) -> &'static str {
-    if is_channel {
-        "Are you sure you want to delete this channel? All subscribers will be removed and all messages will be lost."
-    } else {
-        "Are you sure you want to delete this group? All members will be removed, and all messages will be lost."
-    }
-}
-
 /// Explainer at the top of the recent actions list
 /// (`lng_admin_log_about_text[_channel]`).
 pub fn event_log_about(is_channel: bool) -> &'static str {
@@ -99,8 +90,7 @@ pub fn toggle_event_log_user(users: &mut Vec<i64>, user_id: i64) {
 mod tests {
     use super::{
         CUSTOM_TITLE_LIMIT, broadcast_features_text, custom_title_about, custom_title_fits,
-        custom_title_placeholder, delete_chat_text, event_log_about, length_counter,
-        toggle_event_log_user,
+        custom_title_placeholder, event_log_about, length_counter, toggle_event_log_user,
     };
 
     #[test]
@@ -151,9 +141,7 @@ mod tests {
     }
 
     #[test]
-    fn delete_and_log_copy_differ_by_kind() {
-        assert!(delete_chat_text(true).contains("subscribers"));
-        assert!(delete_chat_text(false).contains("members"));
+    fn log_copy_differs_by_kind() {
         assert!(event_log_about(true).contains("channel"));
         assert!(event_log_about(false).contains("group members"));
     }

@@ -18,7 +18,7 @@ fn driver_fetch_basic_group_members_shape() {
     driver
             .ingest(
                 copy_and_parse(
-                    r#"{"@type":"updateNewChat","chat":{"id":9,"title":"Group","type":{"@type":"chatTypeBasicGroup","basic_group_id":3},"permissions":{"@type":"chatPermissions","can_send_basic_messages":true},"unread_count":0}}"#,
+                    r#"{"@type":"updateNewChat","chat":{"id":9,"title":"Group","type":{"@type":"chatTypeBasicGroup","basic_group_id":3},"permissions":{"@type":"chatPermissions","can_send_basic_messages":true,"can_change_info":true},"unread_count":0}}"#,
                     &seq,
                     &dyn_sink,
                 )
@@ -71,7 +71,7 @@ fn driver_set_chat_member_tag_gates_and_shape() {
     driver
             .ingest(
                 copy_and_parse(
-                    r#"{"@type":"updateNewChat","chat":{"id":9,"title":"Group","type":{"@type":"chatTypeBasicGroup","basic_group_id":3},"permissions":{"@type":"chatPermissions","can_send_basic_messages":true},"unread_count":0}}"#,
+                    r#"{"@type":"updateNewChat","chat":{"id":9,"title":"Group","type":{"@type":"chatTypeBasicGroup","basic_group_id":3},"permissions":{"@type":"chatPermissions","can_send_basic_messages":true,"can_change_info":true},"unread_count":0}}"#,
                     &seq,
                     &dyn_sink,
                 )
@@ -132,7 +132,7 @@ fn driver_group_info_edit_gates_and_shape() {
     driver
             .ingest(
                 copy_and_parse(
-                    r#"{"@type":"updateNewChat","chat":{"id":9,"title":"Group","type":{"@type":"chatTypeBasicGroup","basic_group_id":3},"permissions":{"@type":"chatPermissions","can_send_basic_messages":true},"unread_count":0}}"#,
+                    r#"{"@type":"updateNewChat","chat":{"id":9,"title":"Group","type":{"@type":"chatTypeBasicGroup","basic_group_id":3},"permissions":{"@type":"chatPermissions","can_send_basic_messages":true,"can_change_info":true},"unread_count":0}}"#,
                     &seq,
                     &dyn_sink,
                 )
@@ -165,10 +165,12 @@ fn driver_group_info_edit_gates_and_shape() {
             .is_none()
     );
     assert_eq!(recorder.snapshot().len(), sent_before);
-    // Plain member of a basic group → sends: basic groups are
-    // democratic — no right needed.
+    // A basic group member needs the default `can_change_info`
+    // permission (tdesktop `ChatData::canEditInformation`).
+    assert!(driver.set_chat_photo(ChatId(9), None).unwrap().is_none());
+    driver.session.chats.get_mut(&9).unwrap().my_member_status = Some(ChannelMemberStatus::Member);
     let extra = driver
-        .set_group_photo(ChatId(9), None)
+        .set_chat_photo(ChatId(9), None)
         .unwrap()
         .expect("request sent");
     let sent = recorder.snapshot().last().cloned().expect("request");
@@ -183,10 +185,11 @@ fn driver_group_info_edit_gates_and_shape() {
     // Supergroup plain member without `permissions.can_change_info`
     // → refused.
     let sent_before = recorder.snapshot().len();
-    assert!(driver.set_group_photo(ChatId(10), None).unwrap().is_none());
+    assert!(driver.set_chat_photo(ChatId(10), None).unwrap().is_none());
     assert_eq!(recorder.snapshot().len(), sent_before);
     // Supergroup plain member WITH the default
     // `permissions.can_change_info` → sends.
+    driver.session.chats.get_mut(&10).unwrap().my_member_status = Some(ChannelMemberStatus::Member);
     driver
         .session
         .chats
@@ -197,7 +200,7 @@ fn driver_group_info_edit_gates_and_shape() {
         .unwrap()
         .can_change_info = true;
     let extra = driver
-        .set_group_photo(ChatId(10), None)
+        .set_chat_photo(ChatId(10), None)
         .unwrap()
         .expect("request sent");
     let sent = recorder.snapshot().last().cloned().expect("request");
@@ -249,8 +252,11 @@ fn driver_group_info_edit_gates_and_shape() {
             .is_err()
     );
     // Photo set → `inputChatPhotoStatic` / `inputFileLocal`.
+    let still = crate::profile_photo_sources::ChatPhotoInput::Static {
+        path: "/tmp/group.jpg".into(),
+    };
     let extra = driver
-        .set_group_photo(ChatId(9), Some("/tmp/group.jpg"))
+        .set_chat_photo(ChatId(9), Some(&still))
         .unwrap()
         .expect("request sent");
     let sent = recorder.snapshot().last().cloned().expect("request");
@@ -266,7 +272,7 @@ fn driver_group_info_edit_gates_and_shape() {
         .requests
         .take_purpose(RequestPurpose::SetChatPhoto);
     let extra = driver
-        .set_group_photo(ChatId(9), None)
+        .set_chat_photo(ChatId(9), None)
         .unwrap()
         .expect("request sent");
     let sent = recorder.snapshot().last().cloned().expect("request");
@@ -470,7 +476,7 @@ fn driver_community_create_rename_refetch_chain() {
     driver
             .ingest(
                 copy_and_parse(
-                    r#"{"@type":"updateNewChat","chat":{"id":9,"title":"Group","type":{"@type":"chatTypeBasicGroup","basic_group_id":3},"permissions":{"@type":"chatPermissions","can_send_basic_messages":true},"unread_count":0}}"#,
+                    r#"{"@type":"updateNewChat","chat":{"id":9,"title":"Group","type":{"@type":"chatTypeBasicGroup","basic_group_id":3},"permissions":{"@type":"chatPermissions","can_send_basic_messages":true,"can_change_info":true},"unread_count":0}}"#,
                     &seq,
                     &dyn_sink,
                 )

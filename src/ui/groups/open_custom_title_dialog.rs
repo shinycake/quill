@@ -96,34 +96,6 @@ impl QuillApp {
                     }
                 }
             }
-            TextPromptKind::GroupTitle => {
-                // 1–128 chars per the schema (line 13430); the driver
-                // re-validates before sending.
-                if value.is_empty() || value.chars().count() > 128 {
-                    self.admin.username_dialog = Some(dialog);
-                    self.connection
-                        .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_TITLE_MUST_BE_1_128)));
-                    cx.notify();
-                    return;
-                }
-                match self.live.as_mut() {
-                    Some(live) => match live.driver.set_group_title(chat_id, &value) {
-                        Ok(Some(_)) => tr(keys::Q_PEOPLE_TITLE_UPDATED).into(),
-                        Ok(None) => {
-                            self.admin.username_dialog = Some(dialog);
-                            tr(keys::Q_PEOPLE_YOU_CANT_CHANGE_THIS_GROUPS).into()
-                        }
-                        Err(_) => {
-                            self.admin.username_dialog = Some(dialog);
-                            tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_TITLE).into()
-                        }
-                    },
-                    None => {
-                        self.admin.username_dialog = Some(dialog);
-                        tr(keys::Q_PEOPLE_TITLES_NEED_A_LIVE_CONNECTION).into()
-                    }
-                }
-            }
             // Slice G10: `setCommunityName` (schema 1.8.67, line 11811;
             // the driver refuses empty names client-side). Not
             // optimistic — the new name arrives via `updateCommunity`.
@@ -147,40 +119,6 @@ impl QuillApp {
                     None => {
                         self.admin.username_dialog = Some(dialog);
                         tr(keys::Q_PEOPLE_RENAMING_COMMUNITIES_NEEDS_A_LIVE).into()
-                    }
-                }
-            }
-            TextPromptKind::GroupDescription => {
-                // 0–255 chars per the schema (line 13533); empty clears.
-                if value.chars().count() > 255 {
-                    self.admin.username_dialog = Some(dialog);
-                    self.connection.set_note(StatusNote::silent(tr(
-                        keys::Q_PEOPLE_DESCRIPTION_MUST_BE_AT_MOST,
-                    )));
-                    cx.notify();
-                    return;
-                }
-                match self.live.as_mut() {
-                    Some(live) => match live.driver.set_group_description(chat_id, &value) {
-                        Ok(Some(_)) => {
-                            if value.is_empty() {
-                                tr(keys::Q_PEOPLE_DESCRIPTION_CLEARED).into()
-                            } else {
-                                tr(keys::Q_PEOPLE_DESCRIPTION_UPDATED).into()
-                            }
-                        }
-                        Ok(None) => {
-                            self.admin.username_dialog = Some(dialog);
-                            tr(keys::Q_PEOPLE_YOU_CANT_CHANGE_THIS_GROUPS).into()
-                        }
-                        Err(_) => {
-                            self.admin.username_dialog = Some(dialog);
-                            tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_DESCRIPTION).into()
-                        }
-                    },
-                    None => {
-                        self.admin.username_dialog = Some(dialog);
-                        tr(keys::Q_PEOPLE_DESCRIPTIONS_NEED_A_LIVE_CONNECTION).into()
                     }
                 }
             }
@@ -631,16 +569,6 @@ impl QuillApp {
                 TextPromptKind::CustomTitle { .. } => (
                     tr(keys::Q_PEOPLE_CUSTOM_TITLE),
                     tr(keys::Q_PEOPLE_A_TITLE_THAT_MEMBERS_WILL),
-                ),
-                // Slice G8: group/channel info editing reuses the text
-                // prompt — each kind gets its own title and hint.
-                TextPromptKind::GroupTitle => (
-                    tr(keys::Q_PEOPLE_GROUP_TITLE),
-                    tr(keys::Q_PEOPLE_1_128_CHARACTERS),
-                ),
-                TextPromptKind::GroupDescription => (
-                    tr(keys::Q_PEOPLE_GROUP_DESCRIPTION),
-                    tr(keys::Q_PEOPLE_UP_TO_255_CHARACTERS_EMPTY),
                 ),
                 // Slice G10: community rename prompt.
                 TextPromptKind::CommunityName { .. } => (
