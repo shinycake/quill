@@ -35,6 +35,8 @@ pub(super) struct CheckoutView {
     pub(super) sending: bool,
     /// An error line is on the checkout.
     pub(super) note: bool,
+    /// The last payment attempt was sent off to verify.
+    pub(super) verification: bool,
 }
 
 impl InvoiceWatch {
@@ -64,11 +66,12 @@ impl InvoiceWatch {
             self.failed = false;
             self.pending = false;
         } else if self.sending {
-            // The attempt ended without paying: with an error on the form it
-            // failed, without one TDLib sent the person off to verify.
+            // The attempt ended without paying: an error on the form means it
+            // failed, a verification step means it is pending, and anything
+            // else leaves it cancelled.
             self.sending = false;
             self.failed = view.note;
-            self.pending = !view.note;
+            self.pending = view.verification && !view.note;
         }
         None
     }
@@ -115,6 +118,9 @@ impl QuillApp {
             paid: self.session().is_some_and(|s| s.payments.form_paid),
             sending: self.session().is_some_and(|s| s.payments.sending),
             note: self.session().is_some_and(|s| s.payments.note.is_some()),
+            verification: self
+                .session()
+                .is_some_and(|s| s.payments.verification_started),
         };
         let Some(window) = self.mini_apps.window.as_mut() else {
             return;
@@ -187,9 +193,25 @@ mod tests {
             sending: true,
             ..open()
         };
+        let verifying = CheckoutView {
+            verification: true,
+            ..open()
+        };
+        assert_eq!(watch.observe(sending), None);
+        assert_eq!(watch.observe(verifying), None);
+        assert_eq!(watch.observe(CheckoutView::default()), Some("pending"));
+    }
+
+    #[test]
+    fn a_send_that_ends_quietly_is_cancelled() {
+        let mut watch = InvoiceWatch::new("s");
+        let sending = CheckoutView {
+            sending: true,
+            ..open()
+        };
         assert_eq!(watch.observe(sending), None);
         assert_eq!(watch.observe(open()), None);
-        assert_eq!(watch.observe(CheckoutView::default()), Some("pending"));
+        assert_eq!(watch.observe(CheckoutView::default()), Some("cancelled"));
     }
 
     #[test]
@@ -205,8 +227,12 @@ mod tests {
         };
         watch.observe(sending);
         watch.observe(refused);
+        let verifying = CheckoutView {
+            verification: true,
+            ..open()
+        };
         watch.observe(sending);
-        watch.observe(open());
+        watch.observe(verifying);
         assert_eq!(watch.observe(CheckoutView::default()), Some("pending"));
     }
 }

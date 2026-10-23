@@ -18,7 +18,11 @@
 - `src/ui/web_app_ui/invoice.rs`: the event queues a render action (needs the
   window), brings Quill in front, starts the existing invoice checkout
   (`open_invoice_link`) and watches the payment state. A pure `InvoiceWatch`
-  maps paid / sending / error note / dialog closed to the four outcomes.
+  maps paid / sending / error note / verification step / dialog closed to the
+  four outcomes (a send that ends with neither a note nor a verification step
+  reports cancelled). `PaymentsState::verification_started` records the
+  verification answer because `verification_url` is drained by the browser
+  opener.
   Paid closes the checkout like tdesktop.
 - `src/ui/web_app_ui/phone.rs`: the prompt is the helper's native popup, so it
   shows over the web view. `PhoneFlow` (Asking, Unblocking, Sending) is polled;
