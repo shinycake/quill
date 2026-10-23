@@ -1,2 +1,0 @@
-# New card form with Stripe / Smart Glocal tokenization; other providers open their own page
-parity:bots-payment-card-form
