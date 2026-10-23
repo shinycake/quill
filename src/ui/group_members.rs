@@ -545,7 +545,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         match id_prefix {
-            "g1-create" => self.toggle_create_chat_user(user_id, cx),
+            "g1-create" => self.toggle_new_chat_user(user_id, cx),
             "g1-add" => self.toggle_member_add_user(user_id, cx),
             // Phase 9.3: the story composer's "Selected users" picker.
             "story-composer" => self.toggle_story_composer_user(user_id, cx),

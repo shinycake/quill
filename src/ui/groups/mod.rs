@@ -14,7 +14,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, RequestId};
-use quill::lang::{keys, tr, tr_with, trn_with};
+use quill::lang::{keys, tr, trn_with};
 use quill::state::GroupsPurpose;
 use quill::state::{MemberListFilter, RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
@@ -613,88 +613,6 @@ impl QuillApp {
         })
     }
 
-    pub(super) fn open_create_chat_dialog(
-        &mut self,
-        kind: CreateChatKind,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.admin.create_chat_dialog = Some(CreateChatDialog::new(window, cx, kind));
-        cx.notify();
-    }
-
-    pub(super) fn close_create_chat_dialog(&mut self, cx: &mut Context<Self>) {
-        self.admin.create_chat_dialog = None;
-        cx.notify();
-    }
-
-    pub(super) fn toggle_create_chat_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
-        if let Some(dialog) = self.admin.create_chat_dialog.as_mut() {
-            if let Some(position) = dialog.selected_users.iter().position(|id| *id == user_id) {
-                dialog.selected_users.remove(position);
-            } else {
-                dialog.selected_users.push(user_id);
-            }
-            cx.notify();
-        }
-    }
-
-    /// Slice G1: submit the creation dialog. Basic groups send their
-    /// picked members with the create call; supergroups/channels are
-    /// created first and members are added from the member dialog
-    /// afterwards (`createNewSupergroupChat` takes no members, schema
-    /// 1.8.67 line 13337).
-    pub(super) fn submit_create_chat_dialog(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.admin.create_chat_dialog.take() else {
-            return;
-        };
-        let title = dialog.title_input.read(cx).value().trim().to_string();
-        let description = dialog.description_input.read(cx).value().trim().to_string();
-        let kind = dialog.kind;
-        let user_ids = dialog.selected_users.clone();
-        if title.is_empty() {
-            self.admin.create_chat_dialog = Some(dialog);
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_PEOPLE_NAME_CANNOT_BE_EMPTY)));
-            cx.notify();
-            return;
-        }
-        let note = match self.live.as_mut() {
-            Some(live) => {
-                let result = match kind {
-                    CreateChatKind::BasicGroup => live
-                        .driver
-                        .create_basic_group(&title, &user_ids)
-                        .map(|_| ()),
-                    CreateChatKind::Supergroup => live
-                        .driver
-                        .create_supergroup_channel(&title, false, &description)
-                        .map(|_| ()),
-                    CreateChatKind::Channel => live
-                        .driver
-                        .create_supergroup_channel(&title, true, &description)
-                        .map(|_| ()),
-                };
-                match result {
-                    Ok(()) => StatusNote::silent(format!("{} created", kind.title())),
-                    Err(_) => {
-                        self.admin.create_chat_dialog = Some(dialog);
-                        StatusNote::error(tr_with(
-                            keys::Q_PEOPLE_COULD_NOT_CREATE,
-                            &[("to_lowercase", &(kind.title().to_lowercase()).to_string())],
-                        ))
-                    }
-                }
-            }
-            None => {
-                self.admin.create_chat_dialog = Some(dialog);
-                StatusNote::info(tr(keys::Q_PEOPLE_CREATING_CHATS_NEEDS_A_LIVE))
-            }
-        };
-        self.connection.set_note(note);
-        cx.notify();
-    }
-
     /// Slice G10: open the "New community" dialog (side-menu entry).
     pub(super) fn open_create_community_dialog(
         &mut self,
@@ -820,12 +738,6 @@ impl QuillApp {
 }
 
 crate::ui::shell::register_dialogs! {
-    CreateChat => DialogSpec::new(
-        4200,
-        |app| app.admin.create_chat_dialog.is_some(),
-        QuillApp::build_create_chat_dialog,
-    ),
-
     Username => DialogSpec::new(
         4500,
         |app| app.admin.username_dialog.is_some(),

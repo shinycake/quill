@@ -9,7 +9,7 @@
 #![deny(clippy::indexing_slicing)]
 
 mod manage;
-mod photo;
+pub(in crate::ui) mod photo;
 mod title_emoji;
 
 use super::app::QuillApp;

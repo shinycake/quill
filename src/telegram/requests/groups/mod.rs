@@ -409,13 +409,18 @@ pub fn chat_member_status_banned_json(banned_until_date: i32) -> Value {
 /// message_auto_delete_time:int32 = CreatedBasicGroupChat;`
 /// Title is 1-128 characters. The new chat arrives as `updateNewChat`;
 /// the `CreatedBasicGroupChat` answer carries its id.
-pub fn create_new_basic_group_chat(extra: RequestId, user_ids: &[i64], title: &str) -> String {
+pub fn create_new_basic_group_chat(
+    extra: RequestId,
+    user_ids: &[i64],
+    title: &str,
+    message_auto_delete_time: i32,
+) -> String {
     json!({
         "@type": "createNewBasicGroupChat",
         "@extra": extra.as_extra(),
         "user_ids": user_ids,
         "title": title,
-        "message_auto_delete_time": 0,
+        "message_auto_delete_time": message_auto_delete_time,
     })
     .to_string()
 }
@@ -432,6 +437,7 @@ pub fn create_new_supergroup_chat(
     title: &str,
     is_channel: bool,
     description: &str,
+    message_auto_delete_time: i32,
 ) -> String {
     json!({
         "@type": "createNewSupergroupChat",
@@ -441,7 +447,7 @@ pub fn create_new_supergroup_chat(
         "is_channel": is_channel,
         "description": description,
         "location": Value::Null,
-        "message_auto_delete_time": 0,
+        "message_auto_delete_time": message_auto_delete_time,
         "for_import": false,
     })
     .to_string()

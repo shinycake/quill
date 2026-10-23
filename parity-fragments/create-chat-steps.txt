@@ -1,0 +1,2 @@
+# New Group / New Channel steps: photo, name, auto-delete, members, type, subscribers
+parity:groups-create-steps

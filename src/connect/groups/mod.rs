@@ -6,11 +6,10 @@ use crate::state::{GroupsPurpose, ThreadsPurpose};
 use crate::telegram::envelope::{ChatKind, ParsedCommunity};
 use crate::telegram::requests::{
     add_chat_welcome_message, boost_chat, create_community, create_forum_topic,
-    create_new_basic_group_chat, create_new_supergroup_chat, delete_chat_welcome_message,
-    delete_community, delete_forum_topic, edit_chat_welcome_message, edit_forum_topic,
-    get_available_chat_boost_slots, get_chat_boost_status, get_chat_history, get_chat_member,
-    get_chat_statistics, get_community_full_info, get_forum_topics, get_me, get_supergroup,
-    get_supergroup_full_info, join_chat, leave_chat, load_chat_welcome_messages,
+    delete_chat_welcome_message, delete_community, delete_forum_topic, edit_chat_welcome_message,
+    edit_forum_topic, get_available_chat_boost_slots, get_chat_boost_status, get_chat_history,
+    get_chat_member, get_chat_statistics, get_community_full_info, get_forum_topics, get_me,
+    get_supergroup, get_supergroup_full_info, join_chat, leave_chat, load_chat_welcome_messages,
     search_chat_messages, set_chat_member_tag, set_chat_message_auto_delete_time,
     set_chat_slow_mode_delay, set_community_name, set_community_permissions, set_community_photo,
     toggle_forum_topic_closed, toggle_forum_topic_pinned, toggle_general_forum_topic_hidden,
@@ -27,6 +26,7 @@ mod community;
 mod forum;
 mod group_type;
 mod info_edit;
+mod new_chat;
 mod supergroup;
 mod welcome;
 
@@ -368,61 +368,6 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<Option<RequestId>, ConnectSendError> {
         self.session.groups.chat_statistics.remove(&chat_id.0);
         self.fetch_chat_statistics(chat_id, is_dark)
-    }
-
-    /// Slice G1: `createNewBasicGroupChat` (schema 1.8.67, line 13327).
-    /// The response is `createdBasicGroupChat`; the new chat itself
-    /// arrives as `updateNewChat`.
-    pub fn create_basic_group(
-        &mut self,
-        title: &str,
-        user_ids: &[i64],
-    ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        let purpose = RequestPurpose::CreateBasicGroup;
-        if self.session.requests.has_purpose(purpose) {
-            return Ok(None);
-        }
-        let extra = self.session.request(purpose, None);
-        if let Err(err) = self
-            .sender
-            .send_json(&create_new_basic_group_chat(extra, user_ids, title))
-        {
-            self.session.requests.take(extra);
-            return Err(err);
-        }
-        Ok(Some(extra))
-    }
-
-    /// Slice G1: `createNewSupergroupChat` (schema 1.8.67, line 13337).
-    /// `is_channel` selects channel vs. supergroup; the new chat arrives
-    /// as `updateNewChat`.
-    pub fn create_supergroup_channel(
-        &mut self,
-        title: &str,
-        is_channel: bool,
-        description: &str,
-    ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        let purpose = RequestPurpose::Groups(GroupsPurpose::CreateSupergroupChannel { is_channel });
-        if self.session.requests.has_purpose(purpose) {
-            return Ok(None);
-        }
-        let extra = self.session.request(purpose, None);
-        if let Err(err) = self.sender.send_json(&create_new_supergroup_chat(
-            extra,
-            title,
-            is_channel,
-            description,
-        )) {
-            self.session.requests.take(extra);
-            return Err(err);
-        }
-        Ok(Some(extra))
     }
 
     /// Slice G1: `toggleSupergroupIsBroadcastGroup` (schema 1.8.67, line

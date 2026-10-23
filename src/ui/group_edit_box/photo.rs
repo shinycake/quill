@@ -1,19 +1,21 @@
 //! The Edit box's photo (tdesktop `UserpicButton` with `ChangeType`): the
-//! chosen photo, else the chat's own; a click opens its sources menu.
+//! chosen photo, else the chat's own; a click opens its sources menu. The
+//! New Group / New Channel box uses the same button.
 
 use super::GroupEditBox;
 use crate::ui::app::QuillApp;
 use crate::ui::message_text::kit_avatar_element;
-use crate::ui::profile_photo_sources::{PhotoPreview, PhotoTarget, SourceMode};
+use crate::ui::profile_photo_sources::{ChosenPhoto, PhotoPreview, PhotoTarget, SourceMode};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 
-const PHOTO_PX: f32 = 76.0;
+pub(in crate::ui) const PHOTO_PX: f32 = 76.0;
 
 impl QuillApp {
     pub(super) fn group_edit_photo(
@@ -27,7 +29,37 @@ impl QuillApp {
             .and_then(|s| s.chats.get(&chat_id.0))
             .map(|chat| chat.title.clone())
             .unwrap_or_default();
-        let picture = match edit.photo.as_ref().and_then(|photo| photo.preview.clone()) {
+        let roots = self.media_display_roots();
+        let path = self
+            .session()
+            .and_then(|s| s.chat_photo_path(chat_id))
+            .and_then(|path| sandboxed_display_path(path, &roots));
+        let fallback = kit_avatar_element(&title, path.as_deref(), px(PHOTO_PX)).into_any_element();
+        self.chat_photo_button(
+            "group-edit-photo",
+            edit.photo.as_ref(),
+            fallback,
+            PhotoTarget::Chat(chat_id),
+            edit.photo_note.clone(),
+            true,
+            cx,
+        )
+    }
+
+    /// The round photo button with its change badge and sources menu, for
+    /// the Edit box and the New Group / New Channel box. `fallback` shows
+    /// until a source made a photo; `badge` adds the camera mark.
+    pub(in crate::ui) fn chat_photo_button(
+        &self,
+        id: &'static str,
+        chosen: Option<&ChosenPhoto>,
+        fallback: AnyElement,
+        target: PhotoTarget,
+        note: Option<String>,
+        badge: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let picture = match chosen.and_then(|photo| photo.preview.clone()) {
             Some(PhotoPreview::Image(image)) => img(ImageSource::Render(image))
                 .size(px(PHOTO_PX))
                 .rounded_full()
@@ -57,18 +89,10 @@ impl QuillApp {
                         .child(self.sticker_visual(&sticker, PHOTO_PX * 0.6)),
                 )
                 .into_any_element(),
-            None => {
-                let roots = self.media_display_roots();
-                let path = self
-                    .session()
-                    .and_then(|s| s.chat_photo_path(chat_id))
-                    .and_then(|path| sandboxed_display_path(path, &roots));
-                kit_avatar_element(&title, path.as_deref(), px(PHOTO_PX)).into_any_element()
-            }
+            None => fallback,
         };
         let owner = cx.entity().downgrade();
-        let target = PhotoTarget::Chat(chat_id);
-        let button = Button::new("group-edit-photo")
+        let button = Button::new(id)
             .ghost()
             .rounded(ButtonRounded::Size(px(PHOTO_PX / 2.)))
             .size(px(PHOTO_PX))
@@ -81,25 +105,27 @@ impl QuillApp {
                     .size(px(PHOTO_PX))
                     .child(picture)
                     // tdesktop's change-photo badge: the photo is a button.
-                    .child(
-                        div()
-                            .absolute()
-                            .right_0()
-                            .bottom_0()
-                            .size(px(26.))
-                            .rounded_full()
-                            .bg(cx.theme().primary)
-                            .border_2()
-                            .border_color(cx.theme().background)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(
-                                Icon::new(IconName::Camera)
-                                    .size(px(14.))
-                                    .text_color(cx.theme().primary_foreground),
-                            ),
-                    ),
+                    .when(badge, |picture| {
+                        picture.child(
+                            div()
+                                .absolute()
+                                .right_0()
+                                .bottom_0()
+                                .size(px(26.))
+                                .rounded_full()
+                                .bg(cx.theme().primary)
+                                .border_2()
+                                .border_color(cx.theme().background)
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(
+                                    Icon::new(IconName::Camera)
+                                        .size(px(14.))
+                                        .text_color(cx.theme().primary_foreground),
+                                ),
+                        )
+                    }),
             )
             .dropdown_menu(move |menu, _, cx| {
                 // Built when the menu opens, like tdesktop's: "From
@@ -150,10 +176,7 @@ impl QuillApp {
                     |this, _, window, cx| this.open_photo_source(SourceMode::Emoji, window, cx),
                 ))
             });
-        let note = edit
-            .photo_note
-            .clone()
-            .map(|text| div().text_xs().text_color(cx.theme().danger).child(text));
+        let note = note.map(|text| div().text_xs().text_color(cx.theme().danger).child(text));
         div()
             .flex()
             .flex_col()

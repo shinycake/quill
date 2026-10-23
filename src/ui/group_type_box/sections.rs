@@ -13,6 +13,7 @@ use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::radio::Radio;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use quill::group_type::{LinkStatus, join_approval_applies, request_to_join_about};
 use quill::lang::{keys, tr, trn};
@@ -47,7 +48,10 @@ fn switch_row(
 }
 
 impl QuillApp {
-    pub(super) fn group_type_box_body(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(in crate::ui) fn group_type_box_body(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let facts = self.group_type_facts()?;
         let type_box = self.group_type_box()?;
         let public = type_box.draft.public && !facts.public_blocked;
@@ -57,6 +61,14 @@ impl QuillApp {
             .flex_col()
             .gap_3()
             .child(self.group_type_choice(&facts, public, cx));
+        if facts.setup {
+            if public {
+                body = body.child(self.group_type_link(type_box, &facts, cx));
+            } else if !facts.group {
+                body = body.child(self.new_chat_invite_link(facts.chat_id, cx));
+            }
+            return Some(body.into_any_element());
+        }
         if public {
             body = body.child(self.group_type_link(type_box, &facts, cx));
             if let Some(list) = self.group_type_usernames(type_box, &facts, cx) {
@@ -168,17 +180,20 @@ impl QuillApp {
             ),
             LinkStatus::Purchasable => Some(self.group_type_purchase_line(type_box, cx)),
         };
-        let failed = self
-            .group_edit_box()
-            .and_then(|edit| edit.username_failure(self.session()))
-            .filter(|_| status == LinkStatus::Current)
-            .map(|reason| {
-                div()
-                    .text_xs()
-                    .text_color(danger)
-                    .child(reason)
-                    .into_any_element()
-            });
+        let failed = if facts.setup {
+            self.new_chat_username_failure()
+        } else {
+            self.group_edit_box()
+                .and_then(|edit| edit.username_failure(self.session()))
+                .filter(|_| status == LinkStatus::Current)
+        }
+        .map(|reason| {
+            div()
+                .text_xs()
+                .text_color(danger)
+                .child(reason)
+                .into_any_element()
+        });
         div()
             .flex()
             .flex_col()
@@ -191,7 +206,9 @@ impl QuillApp {
             )
             .children(line)
             .children(failed)
-            .child(about(tr(keys::CREATE_CHANNEL_LINK_ABOUT), cx))
+            .when(!facts.setup, |block| {
+                block.child(about(tr(keys::CREATE_CHANNEL_LINK_ABOUT), cx))
+            })
             .into_any_element()
     }
 

@@ -38,6 +38,8 @@ pub(crate) enum PhotoTarget {
     Profile,
     /// A group's or channel's photo, kept in its Edit box until Save.
     Chat(ChatId),
+    /// The photo of a group or channel being created, set once it exists.
+    NewChat,
 }
 
 /// How a chosen photo looks before it is sent.
@@ -158,11 +160,14 @@ fn replace_image(slot: &mut Option<Arc<RenderImage>>, new: Option<Arc<RenderImag
 }
 
 impl QuillApp {
-    /// Where the sources' result goes: the open group Edit box, else the
-    /// edit-profile dialog.
+    /// Where the sources' result goes: the open group Edit box, the New
+    /// Group / New Channel box, else the edit-profile dialog.
     pub(super) fn photo_target(&self) -> Option<PhotoTarget> {
         if let Some(edit) = self.group_edit_box() {
             return Some(PhotoTarget::Chat(edit.chat_id));
+        }
+        if self.new_chat_photo_open() {
+            return Some(PhotoTarget::NewChat);
         }
         self.dialogs
             .edit_profile_dialog
@@ -173,6 +178,7 @@ impl QuillApp {
     fn sources_mut(&mut self) -> Option<&mut PhotoSources> {
         match self.photo_target()? {
             PhotoTarget::Chat(_) => self.group_edit_box_mut().map(|edit| &mut edit.sources),
+            PhotoTarget::NewChat => self.new_chat_dialog_mut().map(|dialog| &mut dialog.sources),
             PhotoTarget::Profile => self
                 .dialogs
                 .edit_profile_dialog
@@ -184,6 +190,7 @@ impl QuillApp {
     fn sources(&self) -> Option<&PhotoSources> {
         match self.photo_target()? {
             PhotoTarget::Chat(_) => self.group_edit_box().map(|edit| &edit.sources),
+            PhotoTarget::NewChat => self.new_chat_dialog().map(|dialog| &dialog.sources),
             PhotoTarget::Profile => self
                 .dialogs
                 .edit_profile_dialog
@@ -200,7 +207,7 @@ impl QuillApp {
         };
         let users = &session.users_state;
         match self.photo_target() {
-            Some(PhotoTarget::Chat(_)) => (
+            Some(PhotoTarget::Chat(_) | PhotoTarget::NewChat) => (
                 &users.chat_photo_emoji_icons,
                 users.chat_photo_emoji_icons_failed,
             ),
@@ -227,7 +234,10 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let for_chat = matches!(self.photo_target(), Some(PhotoTarget::Chat(_)));
+        let for_chat = matches!(
+            self.photo_target(),
+            Some(PhotoTarget::Chat(_) | PhotoTarget::NewChat)
+        );
         if mode == SourceMode::Emoji
             && let Some(live) = self.live.as_mut()
         {
@@ -298,6 +308,14 @@ impl QuillApp {
                     Ok(())
                 }
                 _ => Err(tr(keys::Q_NOTES_FAILED_SET_PHOTO).to_string()),
+            },
+            PhotoTarget::NewChat => match self.new_chat_dialog_mut() {
+                Some(dialog) => {
+                    dialog.photo = Some(photo);
+                    dialog.photo_note = None;
+                    Ok(())
+                }
+                None => Err(tr(keys::Q_NOTES_FAILED_SET_PHOTO).to_string()),
             },
             PhotoTarget::Profile => {
                 self.send_profile_photo(&photo.input)?;

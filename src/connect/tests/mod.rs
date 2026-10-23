@@ -67,6 +67,7 @@ mod message_effects;
 mod message_menu;
 mod message_ops;
 mod messaging;
+mod new_chat;
 mod new_contact;
 mod owned_bots;
 mod paid_messages;

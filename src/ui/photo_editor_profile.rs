@@ -295,6 +295,11 @@ impl QuillApp {
                     edit.photo_note = Some(text.into());
                 }
             }
+            PhotoTarget::NewChat => {
+                if let Some(dialog) = self.new_chat_dialog_mut() {
+                    dialog.photo_note = Some(text.into());
+                }
+            }
             PhotoTarget::Profile => self.connection.set_note(StatusNote::error(text)),
         }
         cx.notify();

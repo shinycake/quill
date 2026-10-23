@@ -201,6 +201,8 @@ pub struct GroupsState {
     pub info_edit_errors: HashMap<i64, GroupInfoEditError>,
     /// The Type box: link checks, the public links limit and its list.
     pub group_type: GroupTypeState,
+    /// New Group / New Channel creations, by their create request.
+    pub new_chats: NewChatState,
     /// Slice G1: `supergroup.join_by_request` (schema 1.8.67, lines
     /// 2733/2746), keyed by supergroup id. Drives the "Approve new
     /// members" toggle.
@@ -330,6 +332,7 @@ impl GroupsState {
             basic_group_descriptions: HashMap::new(),
             info_edit_errors: HashMap::new(),
             group_type: GroupTypeState::default(),
+            new_chats: NewChatState::default(),
             supergroup_join_by_request: HashMap::new(),
             supergroup_join_to_send: HashMap::new(),
             supergroup_restricted: HashSet::new(),
