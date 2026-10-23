@@ -144,6 +144,8 @@
 "lng_stories_about_selected_contacts_my" = "Only some users you selected can view this story.";
 "lng_stories_link_invalid" = "This link is broken or has expired.";
 "lng_stories_my_name" = "My Story";
+"lng_story_comment_ph" = "Comment story…";
+"lng_story_reply_ph" = "Reply privately…";
 "lng_switch_emoji" = "Emoji";
 "lng_todo_create_allow_add" = "Allow Others to Add Tasks";
 "lng_todo_create_allow_mark" = "Allow Others to Mark As Done";
@@ -480,7 +482,7 @@
 "qll_media_new_sticker" = "New Sticker";
 "qll_media_new_story" = "New story";
 "qll_media_new_story_album_name" = "New story album name";
-"qll_media_next" = "Next ›";
+"qll_media_next" = "Next story";
 "qll_media_no_apps_match" = "No apps match “{trim}”.";
 "qll_media_no_apps_to_show_right" = "No apps to show right now.";
 "qll_media_no_archived_sticker_sets" = "No archived sticker sets.";
@@ -557,7 +559,7 @@
 "qll_media_posting_to_profile" = "Posting to profile…";
 "qll_media_premium" = "Premium";
 "qll_media_preparing" = "Preparing {file_name}…";
-"qll_media_prev" = "‹ Prev";
+"qll_media_prev" = "Previous story";
 "qll_media_privacy" = "Privacy";
 "qll_media_privacy_policy" = "Privacy policy";
 "qll_media_privacy_privacy" = "Privacy (/privacy)";

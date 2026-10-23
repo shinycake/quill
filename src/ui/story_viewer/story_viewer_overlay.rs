@@ -265,6 +265,8 @@ impl QuillApp {
             .min_h_0()
             .child(visual)
             .children(self.story_sibling_layer(window_width, cx))
+            .children(self.story_step_button(-1, cx))
+            .children(self.story_step_button(1, cx))
             .into_any_element();
         // A live stream has no caption, progress or reactions row
         // (tdesktop hides them for a video stream).
@@ -349,30 +351,7 @@ impl QuillApp {
                             .child(self.story_more_row(cx))
                             .child(self.story_action_row(cx))
                     })
-                    .children(live_composer)
-                    .child(
-                        div()
-                            .flex()
-                            .gap_2()
-                            .child(
-                                Button::new("story-viewer-prev")
-                                    .label(tr(keys::Q_MEDIA_PREV))
-                                    .custom(chrome::ghost(cx))
-                                    .disabled(!self.story_step_available(-1))
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.step_story_viewer(-1, cx);
-                                    })),
-                            )
-                            .child(
-                                Button::new("story-viewer-next")
-                                    .label(tr(keys::Q_MEDIA_NEXT))
-                                    .custom(chrome::ghost(cx))
-                                    .disabled(!self.story_step_available(1))
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.step_story_viewer(1, cx);
-                                    })),
-                            ),
-                    ),
+                    .children(live_composer),
             )
             .children(reply_panel)
     }

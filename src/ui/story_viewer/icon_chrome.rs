@@ -327,6 +327,68 @@ impl QuillApp {
         }
     }
 
+    /// tdesktop's reply placeholder: "Comment story..." in a group,
+    /// "Reply privately..." everywhere else (`media_stories_reply.cpp`).
+    fn story_reply_placeholder(&self) -> &'static str {
+        let group = self
+            .stories
+            .viewer
+            .current()
+            .and_then(|item| self.session()?.chats.get(&item.chat_id.0))
+            .is_some_and(|chat| {
+                matches!(
+                    chat.kind,
+                    quill::telegram::envelope::ChatKind::Supergroup {
+                        is_channel: false,
+                        ..
+                    }
+                )
+            });
+        if group {
+            tr(keys::STORY_COMMENT_PH)
+        } else {
+            tr(keys::STORY_REPLY_PH)
+        }
+    }
+
+    /// The chevron at the story's left or right edge that steps to the
+    /// previous or next story; absent when there is nowhere to go.
+    pub(super) fn story_step_button(
+        &self,
+        delta: i32,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !self.story_step_available(delta) {
+            return None;
+        }
+        let (id, icon, label) = if delta < 0 {
+            (
+                "story-viewer-prev",
+                IconName::ChevronLeft,
+                tr(keys::Q_MEDIA_PREV),
+            )
+        } else {
+            (
+                "story-viewer-next",
+                IconName::ChevronRight,
+                tr(keys::Q_MEDIA_NEXT),
+            )
+        };
+        let edge = div().absolute().top(relative(0.5)).mt(px(-BUTTON / 2.));
+        let edge = if delta < 0 {
+            edge.left(px(6.))
+        } else {
+            edge.right(px(6.))
+        };
+        Some(
+            edge.child(
+                icon_button(id, icon, label, chrome::over_media(cx))
+                    .on_click(cx.listener(move |this, _, _, cx| this.step_story_viewer(delta, cx))),
+            )
+            .into_any_element(),
+        )
+    }
+
     /// The row under the story: the reply field with the heart and share
     /// icons for someone else's story, the recent views (eye and count,
     /// reactions, forwards) with share for your own.
@@ -337,6 +399,7 @@ impl QuillApp {
         let interactions = story.as_ref().is_some_and(|s| s.can_get_interactions);
         let chosen = story.as_ref().and_then(|s| s.chosen_reaction_emoji.clone());
         let mut row = div().flex().w(px(360.)).items_center().gap_1();
+        let placeholder = self.story_reply_placeholder();
         if interactions {
             let info = story.as_ref().and_then(|s| s.interaction_info);
             let views = info.map_or(0, |i| i.view_count);
@@ -399,8 +462,13 @@ impl QuillApp {
                         .tab_index(0)
                         .hover(|style| style.bg(chrome::compose_bg_over()))
                         .truncate()
-                        .child(tr(keys::Q_MEDIA_REPLY_TO_STORY))
-                        .on_click(cx.listener(|this, _, _, cx| this.toggle_story_reply(cx))),
+                        .child(placeholder)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.stories.reply_input.update(cx, |input, cx| {
+                                input.set_placeholder(placeholder, window, cx)
+                            });
+                            this.toggle_story_reply(cx);
+                        })),
                 );
             } else {
                 row = row.child(div().flex_1());

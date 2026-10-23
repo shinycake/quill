@@ -78,6 +78,17 @@ pub(in crate::ui) fn ghost(cx: &App) -> ButtonCustomVariant {
         .shadow(false)
 }
 
+/// A round icon button over the story's picture: a dark wash so it reads on
+/// any photo, white icon.
+pub(in crate::ui) fn over_media(cx: &App) -> ButtonCustomVariant {
+    ButtonCustomVariant::new(cx)
+        .color(hsla(0., 0., 0., 0.4))
+        .foreground(fg())
+        .hover(hsla(0., 0., 0., 0.6))
+        .active(hsla(0., 0., 0., 0.7))
+        .shadow(false)
+}
+
 /// A composer button on `storiesComposeBg` with a gray icon.
 pub(in crate::ui) fn compose(cx: &App) -> ButtonCustomVariant {
     ButtonCustomVariant::new(cx)
