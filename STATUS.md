@@ -381,6 +381,21 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Groups in common load 40 at a time, with a Load more row, local search past 20 groups and a plural count <!-- parity:profile-common-groups-paging -->
 - [x] "My QR code" box: the styled QR card for your profile and for users, groups and channels with a username, with colors, an emoji pattern, upgraded-gift themes, and copy and share; opened from Settings, the profile actions and the info top bar (tdesktop `peer_qr_box`) <!-- parity:profile-qr-code-box -->
 - [x] Profile share themes for users and groups (TDLib 1.8.69 `setProfileShareTheme`, `share_theme`) <!-- parity:profile-share-theme -->
+- [x] Group and channel photo viewer: current photo first, earlier photos after it, opened from the info panel avatar <!-- parity:viewer-chat-photos -->
+- [x] Delete a profile, group or channel photo from the viewer, with tdesktop's confirmation <!-- parity:viewer-delete-profile-photo -->
+- [x] Set an earlier group or channel photo as the main photo from the viewer <!-- parity:viewer-set-main-chat -->
+- [x] Public (fallback) photo as the last entry in a user's photos <!-- parity:viewer-public-photo -->
+- [x] Photo viewer pages past 100 photos and the counter uses the total <!-- parity:viewer-photos-paging -->
+- [ ] Video avatars play on the profile cover and in the photo viewer <!-- parity:profile-video-avatar -->
+- [ ] Profile "More" menu in the info section (tdesktop FillDialogsEntryMenu, Section::Profile) <!-- parity:profile-more-menu -->
+- [ ] Private chat "Restrict saving content" toggle (toggleChatHasProtectedContent) <!-- parity:profile-private-no-forwards -->
+- [ ] Link and location rows on group and channel profiles <!-- parity:profile-link-row -->
+- [ ] "N members, M online" status on group profiles <!-- parity:profile-members-online -->
+- [ ] Bot profiles show monthly users <!-- parity:profile-bot-monthly-users -->
+- [ ] Story ring on the profile avatar that opens the stories <!-- parity:profile-story-ring -->
+- [ ] Stars rating pill on user profiles <!-- parity:profile-stars-rating -->
+- [ ] Premium "Show last seen" button on hidden last-seen profiles <!-- parity:profile-show-last-seen -->
+- [ ] Saved Messages profile cover <!-- parity:profile-saved-messages-cover -->
 
 ### Media
 
@@ -544,6 +559,19 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Restrict until a custom date and per-right exception lists <!-- parity:admin-restrict-until-custom -->
 - [x] Admin custom title length counter and default "Admin" label <!-- parity:admin-title-counter -->
 - [x] Recent actions: server-side admin filter and explainer <!-- parity:admin-log-extras -->
+- [ ] Group and channel Edit box: photo, name with emoji, description, Save, and the management rows <!-- parity:admin-edit-box -->
+- [ ] Crop step after choosing a profile, group or channel photo <!-- parity:admin-photo-crop -->
+- [ ] Group and channel photo from the camera, an emoji avatar or a video <!-- parity:groups-photo-sources -->
+- [ ] Group and channel type box: public or private, link with live availability check <!-- parity:admin-type-box -->
+- [ ] Channels can set a public link <!-- parity:channel-public-link -->
+- [ ] Public link availability and validation messages (checkChatUsername) <!-- parity:admin-link-availability -->
+- [ ] Group and channel info action buttons: Mute, Join, Discuss, Manage, Video chat, Gift, Report, Leave <!-- parity:groups-info-action-row -->
+- [ ] Permissions box grouped like tdesktop, with media sub-permissions, slow mode and boost unrestrict <!-- parity:admin-permissions-groups -->
+- [ ] Add an exception and add a removed user from the permissions screens <!-- parity:admin-exceptions-add -->
+- [ ] Member lists page past 200 <!-- parity:groups-member-paging -->
+- [ ] Auto-translate toggle locked behind the boost level <!-- parity:admin-autotranslate-boost-lock -->
+- [ ] Sign messages / show authors' profiles dependency in channel settings <!-- parity:admin-signatures-profiles -->
+- [ ] Create group or channel with photo, type and add-members steps <!-- parity:groups-create-steps -->
 
 ### Forums, Saved Messages & threads
 
@@ -1048,6 +1076,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Events: contact joined Telegram, pinned messages <!-- parity:notify-events -->
 - [x] Include muted chats in folder counters <!-- parity:notify-muted-counters -->
 - [x] Sender avatar in OS notifications (partial: Linux shipped; macOS and Windows need an image field on GPUI SystemNotification) <!-- parity:notify-avatar -->
+- [ ] Upload a custom notification sound from a file (tdesktop RingtonesBox "Upload Sound") <!-- parity:notify-upload-sound -->
 
 ### Settings: appearance & chat
 
