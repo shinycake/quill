@@ -1,11 +1,11 @@
 //! The auto-delete timer picker below the conversation header.
 //!
 //! Regular chats follow tdesktop `menu/menu_ttl.cpp` (`TTLBox`): one pick
-//! from a fixed list of 16 periods (`quill::auto_delete::TTL_CHOICES`), a
-//! Save button, and "Disable" while a timer is set
+//! from "Off" and a fixed list of 16 periods
+//! (`quill::auto_delete::TTL_CHOICES`), and a Save button
 //! (`setChatMessageAutoDeleteTime`, schema 1.8.67 line 13454). tdesktop
 //! draws that pick as a drum picker; the kit has none, so it is a `Slider`
-//! over the list index. Secret chats keep their own self-destruct presets
+//! over the list index, step 0 being Off. Secret chats keep their own self-destruct presets
 //! (any number of seconds is valid there).
 
 use super::*;
@@ -15,25 +15,30 @@ use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// Open the picker for `chat_id`, the slider on the chat's current
-    /// timer (or the nearest period; a day when none is set).
+    /// timer (the nearest period), or on Off when none is set.
     pub(in crate::ui) fn open_ttl_picker(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         let current = self
             .session()
             .and_then(|s| s.chats.get(&chat_id.0))
             .map_or(0, |chat| chat.message_auto_delete_time);
-        let start = nearest_choice_index(if current > 0 { current } else { 86_400 });
+        let start = if current > 0 {
+            nearest_choice_index(current) + 1
+        } else {
+            0
+        };
         self.set_step_slider(StepSlider::AutoDelete, start, cx);
         self.notify.ttl_picker_open = true;
         cx.notify();
     }
 
-    /// The period the slider is on.
+    /// The period the slider is on; 0 is Off.
     fn picked_ttl(&self, cx: &App) -> i32 {
         self.settings
             .index_sliders
             .index(StepSlider::AutoDelete, cx)
+            .and_then(|index| index.checked_sub(1))
             .and_then(|index| TTL_CHOICES.get(index).copied())
-            .unwrap_or(86_400)
+            .unwrap_or(0)
     }
 
     pub(in crate::ui) fn ttl_picker_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -61,8 +66,7 @@ impl QuillApp {
         let body = if is_secret {
             self.secret_ttl_presets(open_chat, open_chat_summary, cx)
         } else {
-            let timer_set = open_chat_summary.is_some_and(|chat| chat.message_auto_delete_time > 0);
-            self.regular_ttl_picker(open_chat, timer_set, cx)
+            self.regular_ttl_picker(open_chat, cx)
         };
         div()
             .id("ttl-picker")
@@ -107,19 +111,19 @@ impl QuillApp {
             .child(body)
     }
 
-    /// `TTLBox`: the slider, "Disable" while a timer is set, Cancel, Save.
-    fn regular_ttl_picker(
-        &self,
-        open_chat: Option<ChatId>,
-        timer_set: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    /// `TTLBox`: the slider (Off first), Cancel, Save.
+    fn regular_ttl_picker(&self, open_chat: Option<ChatId>, cx: &mut Context<Self>) -> AnyElement {
         let picked = self.picked_ttl(cx);
+        let picked_label = if picked == 0 {
+            tr(keys::SETTINGS_TTL_AFTER_OFF).to_string()
+        } else {
+            format_ttl(picked)
+        };
         let slider = self.step_slider_row(
             StepSlider::AutoDelete,
             "ttl-slider",
             tr(keys::Q_PREFS_AUTO_DELETE_TIMER).to_string(),
-            format_ttl(picked),
+            picked_label,
             cx,
         );
         div()
@@ -132,19 +136,6 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .when(timer_set, |row| {
-                        row.child(
-                            Button::new("ttl-disable")
-                                .small()
-                                .ghost()
-                                .label(tr(keys::MANAGE_MESSAGES_TTL_DISABLE))
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    if let Some(chat_id) = open_chat {
-                                        this.apply_chat_ttl(chat_id, 0, cx);
-                                    }
-                                })),
-                        )
-                    })
                     .child(div().flex_1())
                     .child(
                         Button::new("ttl-cancel")

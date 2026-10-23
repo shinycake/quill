@@ -97,33 +97,30 @@ fn auto_delete_slider_saves_the_period_it_is_on(cx: &mut TestAppContext) {
     frames(vcx);
     assert!(shown(vcx, "ttl-slider"));
     assert!(shown(vcx, "ttl-save"));
-    assert!(
-        !shown(vcx, "ttl-disable"),
-        "Disable needs a timer to disable"
-    );
-    // No timer yet: the slider starts on one day.
+    assert!(!shown(vcx, "ttl-disable"), "Off is a slider step");
+    // No timer yet: the slider starts on Off.
     let start = app.read_with(vcx, |app, cx| {
         app.settings.index_sliders.index(StepSlider::AutoDelete, cx)
     });
     assert_eq!(start, Some(0));
 
-    // Index 2 is 3 days; nothing is sent until Save.
-    move_ttl_slider(&app, vcx, 2);
+    // Index 3 is 3 days (0 is Off); nothing is sent until Save.
+    move_ttl_slider(&app, vcx, 3);
     assert_eq!(ttl_of(&app, vcx, chat_id), 0);
     vcx.update(|window, cx| window.click("ttl-save", cx));
     frames(vcx);
     assert_eq!(ttl_of(&app, vcx, chat_id), 3 * DAY);
     assert!(!shown(vcx, "ttl-slider"), "saving closes the picker");
 
-    // Reopened on the saved period, with Disable.
+    // Reopened on the saved period; Off and Save disables it.
     app.update(vcx, |app, cx| app.open_ttl_picker(chat_id, cx));
     frames(vcx);
     let start = app.read_with(vcx, |app, cx| {
         app.settings.index_sliders.index(StepSlider::AutoDelete, cx)
     });
-    assert_eq!(start, Some(2));
-    assert!(shown(vcx, "ttl-disable"));
-    vcx.update(|window, cx| window.click("ttl-disable", cx));
+    assert_eq!(start, Some(3));
+    move_ttl_slider(&app, vcx, 0);
+    vcx.update(|window, cx| window.click("ttl-save", cx));
     frames(vcx);
     assert_eq!(ttl_of(&app, vcx, chat_id), 0);
     assert!(!shown(vcx, "ttl-slider"));

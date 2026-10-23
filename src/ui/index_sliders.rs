@@ -38,7 +38,8 @@ impl StepSlider {
             Self::DataCap(_) => CAP_STEPS,
             Self::StorageSize => SIZE_STEPS,
             Self::StorageKeep => KEEP_STEPS,
-            Self::AutoDelete => quill::auto_delete::TTL_CHOICES.len(),
+            // Step 0 is Off, then the fixed periods.
+            Self::AutoDelete => quill::auto_delete::TTL_CHOICES.len() + 1,
         }
     }
 }
