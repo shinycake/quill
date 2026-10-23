@@ -92,3 +92,11 @@ Added in 2026 for dragging a message out by its picture
 pointer moves (Manhattan distance) before `on_drag` starts (default still 2). Telegram Desktop
 starts a drag after 10 pixels, and a press that moves less must still click
 the picture it is on.
+
+## A list says how far its viewport is from either end
+
+Added in 2026 so history pages are asked for three screens early, as Telegram
+Desktop does (`docs/decisions/history-preload.md`). `src/elements/list.rs`:
+`ListState::estimated_distance_to_edges` returns the distance from the
+viewport to the list's start and end, counting each item not measured yet at
+the mean height of the measured ones, and the viewport's height.

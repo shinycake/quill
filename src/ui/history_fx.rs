@@ -14,6 +14,13 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+/// Whether the older and the newer page are due, `above` and `below` being
+/// how far the viewport is from the loaded window's ends.
+pub(super) fn preload_due(above: Pixels, below: Pixels, viewport: Pixels) -> (bool, bool) {
+    let lead = viewport * PRELOAD_SCREENS;
+    (above <= lead, below <= lead)
+}
+
 /// A history row painted last frame: `(row, bounds, starts its day)`.
 pub(crate) type ScrollProbeRow = (usize, Bounds<Pixels>, bool);
 
@@ -23,6 +30,9 @@ const DATE_HIDE_AFTER: Duration = Duration::from_millis(1000);
 const DATE_HIDE_AFTER_DAY_CHANGE: Duration = Duration::from_millis(3000);
 /// `historyDateFadeDuration`.
 const DATE_FADE: Duration = Duration::from_millis(200);
+/// tdesktop `kPreloadHeightsCount`: the next page is asked for while this
+/// many screens are still left toward that end.
+const PRELOAD_SCREENS: f32 = 3.;
 
 /// `activeFadeInDuration` / `activeFadeOutDuration` (lib_ui basic.style).
 const JUMP_FADE_IN: Duration = Duration::from_millis(500);
@@ -252,6 +262,7 @@ impl QuillApp {
             if let Some(key) = this.history.key {
                 this.remember_scroll(key, cx);
             }
+            this.preload_history_by_scroll(cx);
             // Pinned to the live edge, rows only move because messages arrive.
             if this.history.scroller.read(cx).is_following_tail() {
                 return;
@@ -260,6 +271,23 @@ impl QuillApp {
             // The pill lives in the conversation: the chat list can replay.
             this.notify_conversation(cx);
         });
+    }
+
+    /// tdesktop `HistoryWidget::preloadHistoryByScroll`: ask for the older
+    /// or newer page while three screens are still left toward that end, so
+    /// a scroll rarely reaches the edge of the loaded window and waits there.
+    fn preload_history_by_scroll(&mut self, cx: &mut Context<Self>) {
+        let Some((above, below, viewport)) = self.history.scroller.read(cx).distance_to_edges()
+        else {
+            return;
+        };
+        let (older, newer) = preload_due(above, below, viewport);
+        if older {
+            self.maybe_auto_load_older(cx);
+        }
+        if newer {
+            self.maybe_auto_load_newer(cx);
+        }
     }
 
     /// Resolve the probed top row to its day; a changed day while the pill

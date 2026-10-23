@@ -776,6 +776,27 @@ impl ListState {
         point(Pixels::ZERO, state.max_scroll_offset())
     }
 
+    /// Quill: how far the viewport's top is from the list's start and its
+    /// bottom from the list's end, counting each unmeasured item at the mean
+    /// height of the measured ones, and the viewport's height. `None` before
+    /// the first layout or while no item is measured.
+    pub fn estimated_distance_to_edges(&self) -> Option<(Pixels, Pixels, Pixels)> {
+        let state = self.0.borrow();
+        let viewport = state.last_layout_bounds?.size.height;
+        let total = state.items.summary();
+        if total.rendered_count == 0 {
+            return None;
+        }
+        let mean = total.height / total.rendered_count as f32;
+        let top = state.logical_scroll_top();
+        let mut cursor = state.items.cursor::<ListItemSummary>(());
+        let before: ListItemSummary = cursor.summary(&Count(top.item_ix), Bias::Right);
+        let above = before.height + mean * before.unrendered_count as f32 + top.offset_in_item;
+        let content = total.height + mean * total.unrendered_count as f32;
+        let below = content - above - viewport;
+        Some((above.max(Pixels::ZERO), below.max(Pixels::ZERO), viewport))
+    }
+
     /// Returns the current scroll offset adjusted for the scrollbar.
     ///
     /// The returned offset has a negative `y` component representing
