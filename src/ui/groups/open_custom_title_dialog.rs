@@ -199,14 +199,6 @@ impl QuillApp {
                         .map(|sent| {
                             sent_note(sent, tr(keys::Q_PEOPLE_CONVERTING_TO_BROADCAST_GROUP))
                         }),
-                    // Slice CL1: `deleteChatHistory` (schema 1.8.67,
-                    // line 11845). TDLib answers `ok`/`error`
-                    // asynchronously; a refusal surfaces via
-                    // `Session::chat_action_error`.
-                    GroupConfirmAction::ClearHistory { revoke } => live
-                        .driver
-                        .clear_chat_history(dialog.chat_id, revoke)
-                        .map(|sent| sent_note(sent, tr(keys::Q_PEOPLE_CLEARING_HISTORY))),
                     // Slice B2: "Restart bot" — `deleteChatHistory` +
                     // `sendBotStartMessage` (schema lines 11845 / 12216).
                     // The bot user id is read from the session before the

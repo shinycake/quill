@@ -6,18 +6,17 @@
 //! options of its storage optimizer.
 
 use super::super::app::QuillApp;
+use super::super::index_sliders::StepSlider;
 use super::data_storage::format_storage_bytes;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::table::{Table, TableBody, TableRow};
 use gpui_kit::component::*;
-use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::data_settings::top_chats_by_size;
 use quill::lang::{keys, tr, tr_with, trn_with};
-use quill::storage_limits::{
-    KEEP_LIMITS, SIZE_LIMITS, StorageOptionValue, keep_label, options_for, size_limit_label,
-};
+use quill::limit_steps::{keep_limit_index, size_limit_index};
+use quill::storage_limits::{StorageOptionValue, keep_label, options_for, size_limit_label};
 use quill::telegram::envelope::{StorageStats, storage_category_entries};
 
 /// What the pending "Clear" confirmation will clear.
@@ -340,83 +339,71 @@ impl QuillApp {
         )
     }
 
-    /// "Total size limit" and "Clear files older than" as chips.
-    pub(super) fn local_storage_limits(&self, cx: &mut Context<Self>) -> Div {
+    /// Start the two limit sliders on what TDLib reports. They are made
+    /// once per visit (`open_data_storage` drops them).
+    pub(super) fn ensure_storage_sliders(&mut self, cx: &mut Context<Self>) {
+        let sliders = &self.settings.index_sliders;
+        if sliders.contains(StepSlider::StorageSize) && sliders.contains(StepSlider::StorageKeep) {
+            return;
+        }
         let limits = self
             .session()
             .map(|s| s.settings.storage_limits)
             .unwrap_or_default();
-        let size = limits.size_limit();
-        let keep = limits.keep_for();
-        let mut sizes = div().flex().flex_wrap().gap_1();
-        for bytes in SIZE_LIMITS {
-            sizes = sizes.child(
-                Button::new(format!("local-storage-size-{bytes}"))
-                    .label(size_limit_label(bytes))
-                    .small()
-                    .when(size == Some(bytes), |b| b.primary())
-                    .when(size != Some(bytes), |b| b.outline())
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.apply_storage_limits(Some(bytes), keep, cx);
-                    })),
-            );
-        }
-        sizes = sizes.child(
-            Button::new("local-storage-size-none")
-                .label(tr(keys::Q_OPS_NO_LIMIT))
-                .small()
-                .when(size.is_none(), |b| b.primary())
-                .when(size.is_some(), |b| b.outline())
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.apply_storage_limits(None, keep, cx);
-                })),
+        self.set_step_slider(
+            StepSlider::StorageSize,
+            size_limit_index(limits.size_limit()),
+            cx,
         );
-        let mut ages = div().flex().flex_wrap().gap_1();
-        for secs in KEEP_LIMITS {
-            ages = ages.child(
-                Button::new(format!("local-storage-keep-{secs}"))
-                    .label(keep_label(secs))
-                    .small()
-                    .when(keep == Some(secs), |b| b.primary())
-                    .when(keep != Some(secs), |b| b.outline())
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.apply_storage_limits(size, Some(secs), cx);
-                    })),
-            );
-        }
-        ages = ages.child(
-            Button::new("local-storage-keep-never")
-                .label(tr(keys::LOCAL_STORAGE_LIMIT_NEVER))
-                .small()
-                .when(keep.is_none(), |b| b.primary())
-                .when(keep.is_some(), |b| b.outline())
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.apply_storage_limits(size, None, cx);
-                })),
+        self.set_step_slider(
+            StepSlider::StorageKeep,
+            keep_limit_index(limits.keep_for()),
+            cx,
+        );
+    }
+
+    /// tdesktop `setupLimits`: "Total size limit" and "Clear files older
+    /// than" as sliders over tdesktop's steps. TDLib has no separate media
+    /// limit, so that slider has no counterpart.
+    pub(super) fn local_storage_limits(&self, cx: &mut Context<Self>) -> Div {
+        let (size, keep) = self.storage_slider_limits(cx);
+        let size_value =
+            size.map_or_else(|| tr(keys::Q_OPS_NO_LIMIT).to_string(), size_limit_label);
+        let keep_value = keep.map_or_else(
+            || tr(keys::LOCAL_STORAGE_LIMIT_NEVER).to_string(),
+            keep_label,
         );
         div()
             .flex()
             .flex_col()
-            .gap_2()
+            .gap_3()
             .child(subheading(tr(keys::LOCAL_STORAGE_MANAGE_TITLE)))
-            .child(
-                div()
-                    .text_sm()
-                    .child(tr(keys::LOCAL_STORAGE_SIZE_LIMIT_TITLE)),
-            )
-            .child(sizes)
-            .child(
-                div()
-                    .text_sm()
-                    .child(tr(keys::LOCAL_STORAGE_TIME_LIMIT_TITLE)),
-            )
-            .child(ages)
+            .children(self.step_slider_row(
+                StepSlider::StorageSize,
+                "local-storage-size-limit",
+                tr(keys::LOCAL_STORAGE_SIZE_LIMIT_TITLE).to_string(),
+                size_value,
+                cx,
+            ))
+            .children(self.step_slider_row(
+                StepSlider::StorageKeep,
+                "local-storage-time-limit",
+                tr(keys::LOCAL_STORAGE_TIME_LIMIT_TITLE).to_string(),
+                keep_value,
+                cx,
+            ))
             .child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(tr(keys::LOCAL_STORAGE_MAX_SIZE_ABOUT)),
             )
+    }
+
+    /// The release of a limit slider: send the limits both sliders are on.
+    pub(in crate::ui) fn apply_storage_sliders(&mut self, cx: &mut Context<Self>) {
+        let (size, keep) = self.storage_slider_limits(cx);
+        self.apply_storage_limits(size, keep, cx);
     }
 
     fn apply_storage_limits(

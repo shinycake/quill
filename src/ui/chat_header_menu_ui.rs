@@ -184,16 +184,7 @@ impl QuillApp {
                     self.select_listed_chat(ChatId(discussion), window, cx);
                 }
             }
-            HeaderEntry::AutoDelete => {
-                self.notify.ttl_picker_open = true;
-                self.notify.ttl_custom_open = false;
-                self.notify.ttl_custom_secs = self
-                    .session()
-                    .and_then(|s| s.chats.get(&chat_id.0))
-                    .map(|c| c.message_auto_delete_time)
-                    .filter(|secs| *secs > 0)
-                    .unwrap_or(86_400);
-            }
+            HeaderEntry::AutoDelete => self.open_ttl_picker(chat_id, cx),
             HeaderEntry::SendMoney => self.show_wallet_notice(WalletSurface::SendMoney, cx),
             HeaderEntry::CloseSecretChat => self.open_close_secret_chat_confirm(chat_id, cx),
             _ => {}

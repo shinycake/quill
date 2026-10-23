@@ -24,6 +24,7 @@ mod desktop_options;
 mod fixtures;
 mod global;
 mod mute_menu;
+mod mute_time;
 mod notify_view;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
@@ -37,8 +38,13 @@ mod tone_upload_demo;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod tone_upload_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod ttl_mute_tests;
 mod ttl_picker;
 mod volume;
+
+pub(super) use mute_time::MuteTimeInputs;
 
 /// Phase 8.1: cap on concurrent OS-notification worker threads (`notify-send
 /// --wait` blocks until dismissal). Excess bursts are dropped, not stacked.

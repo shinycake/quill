@@ -95,16 +95,6 @@ impl QuillApp {
                         quill::admin_extras::BROADCAST_WARNING.to_string(),
                         tr(keys::Q_PEOPLE_CONVERT).to_string(),
                     ),
-                    GroupConfirmAction::ClearHistory { revoke } => (
-                        tr(keys::Q_PEOPLE_CLEAR_HISTORY).to_string(),
-                        if revoke {
-                            tr(keys::Q_PEOPLE_DELETE_ALL_MESSAGES_IN_THIS)
-                        } else {
-                            tr(keys::Q_PEOPLE_DELETE_ALL_MESSAGES_IN_THIS_2)
-                        }
-                        .to_string(),
-                        tr(keys::Q_PEOPLE_CLEAR).to_string(),
-                    ),
                     GroupConfirmAction::RestartBot => (
                         tr(keys::Q_PEOPLE_RESTART_BOT).to_string(),
                         tr(keys::Q_PEOPLE_CLEAR_THIS_BOTS_CHAT_HISTORY)

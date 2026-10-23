@@ -1,0 +1,13 @@
+// limits (sliders for mute, auto-delete, downloads and storage; clear history box).
+"lng_delete_clear_for_me" = "This will clear history just for you, not for other participants of the chat.";
+"lng_delete_for_everyone_check" = "Delete for everyone";
+"lng_delete_for_other_check" = "Also delete for {user}";
+"lng_media_size_limit" = "Limit by size";
+"lng_media_size_up_to" = "up to {size}";
+"lng_mute_box_title" = "Mute notifications for...";
+"lng_mute_menu_mute" = "Mute";
+"lng_sure_delete_channel_history" = "Are you sure you want to delete all messages in \"{channel}\"?\n\nThis action cannot be undone.";
+"lng_sure_delete_group_history" = "Are you sure you want to delete all messages in \"{group}\"?\n\nThis action cannot be undone.";
+"lng_sure_delete_history" = "Are you sure you want to delete all message history with {contact}?\n\nThis action cannot be undone.";
+"lng_sure_delete_saved_messages" = "Are you sure you want to delete all your saved messages?\n\nThis action cannot be undone.";
+"qll_ops_network_downloads" = "{network} downloads";

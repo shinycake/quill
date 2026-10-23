@@ -246,7 +246,6 @@ impl QuillApp {
         let unread = chat.is_marked_as_unread || chat.unread_count > 0;
         let archived = chat.in_archive;
         let can_clear = chat.can_be_deleted_only_for_self || chat.can_be_deleted_for_all_users;
-        let can_revoke = chat.can_be_deleted_for_all_users;
 
         // Telegram Desktop's chat menu: left-aligned rows with an icon, in
         // its order (Archive, Pin, Mute, Mark as read/unread, Clear
@@ -523,40 +522,19 @@ impl QuillApp {
                 cx.notify();
             }
         );
+        // One item; the box asks whether to clear for the other side too.
         if can_clear {
-            item!(
+            item_window!(
                 60,
                 Lucide::Eraser,
                 "chat-menu-clear",
                 tr(keys::Q_CHAT_CLEAR_HISTORY),
                 this,
+                window,
                 cx,
                 {
-                    this.open_group_confirm(
-                        chat_id,
-                        GroupConfirmAction::ClearHistory { revoke: false },
-                        cx,
-                    );
                     this.chat_list.menu = None;
-                    cx.notify();
-                }
-            );
-        }
-        if can_revoke {
-            item!(
-                61,
-                Lucide::Eraser,
-                "chat-menu-clear-all",
-                tr(keys::Q_CHAT_CLEAR_HISTORY_FOR_EVERYONE),
-                this,
-                cx,
-                {
-                    this.open_group_confirm(
-                        chat_id,
-                        GroupConfirmAction::ClearHistory { revoke: true },
-                        cx,
-                    );
-                    this.chat_list.menu = None;
+                    this.open_clear_history_box(chat_id, window, cx);
                     cx.notify();
                 }
             );

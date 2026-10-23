@@ -254,7 +254,6 @@
 "qll_people_choose_which_tab_your_profile" = "Choose which tab your profile opens on.";
 "qll_people_choose_who_can_see_your" = "Choose who can see your birthday";
 "qll_people_clear" = "Clear";
-"qll_people_clear_history" = "Clear history";
 "qll_people_clear_saved_payment_info" = "Clear saved payment info";
 "qll_people_clear_this_bots_chat_history" = "Clear this bot's chat history and send /start again? This cannot be undone.";
 "qll_people_clearing_history" = "clearing history…";
@@ -351,8 +350,6 @@
 "qll_people_decline" = "Decline";
 "qll_people_default" = "Default";
 "qll_people_default_icon" = "Default icon";
-"qll_people_delete_all_messages_in_this" = "Delete all messages in this chat for everyone? This cannot be undone.";
-"qll_people_delete_all_messages_in_this_2" = "Delete all messages in this chat for you? This cannot be undone.";
 "qll_people_delete_and_all_its_messages" = "Delete {name} and all its messages? This cannot be undone.";
 "qll_people_delete_chat" = "Delete chat";
 "qll_people_delete_chats" = "Delete chats";
