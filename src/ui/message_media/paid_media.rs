@@ -232,6 +232,8 @@ pub(in crate::ui) fn paid_album_card(
             media_roots,
             index,
             None,
+            // Bought items carry no spoiler.
+            None,
             cx,
         ));
     }

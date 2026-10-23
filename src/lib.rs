@@ -117,6 +117,7 @@ pub mod main_menu;
 pub mod marketplace;
 pub mod media_capture;
 pub mod media_session;
+pub mod media_spoiler;
 pub mod media_timestamp;
 pub mod media_tools;
 pub mod media_viewer;

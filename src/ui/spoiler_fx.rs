@@ -389,7 +389,7 @@ fn draw_text_specks(rect: Bounds<Pixels>, origin: Point<Pixels>, color: Hsla, wi
 }
 
 /// A spoiler key: (chat id, message id, run index, caption).
-type RevealKey = (i64, u64, u64, bool);
+pub(super) type RevealKey = (i64, u64, u64, bool);
 
 /// tdesktop `st::fadeWrapDuration`: a revealed spoiler fades its cover out.
 const REVEAL_FADE: f32 = 0.2;
@@ -415,6 +415,39 @@ pub(super) fn reveal_fade(key: RevealKey) -> Option<f32> {
         let t = at.elapsed().as_secs_f32() / REVEAL_FADE;
         (t < 1.).then_some(1. - t)
     })
+}
+
+/// The reveal key of a message's media spoiler (photo, video or GIF).
+pub(super) fn media_key(
+    chat_id: quill::ids::ChatId,
+    message_id: quill::ids::MessageId,
+) -> RevealKey {
+    (chat_id.0, message_id.0 as u64, u64::MAX, false)
+}
+
+/// A media spoiler's cover while it shows.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum MediaCover {
+    /// Not revealed yet: a click reveals it.
+    Covered,
+    /// Just revealed: the cover fades out at this opacity.
+    Fading(f32),
+}
+
+/// The cover over `content`'s media spoiler; `None` once it is gone or
+/// when the media has no spoiler.
+pub(super) fn media_cover(
+    content: &quill::telegram::envelope::MessageContent,
+    key: RevealKey,
+    revealed: &std::collections::HashSet<RevealKey>,
+) -> Option<MediaCover> {
+    if !quill::media_spoiler::has_media_spoiler(content) {
+        None
+    } else if revealed.contains(&key) {
+        reveal_fade(key).map(MediaCover::Fading)
+    } else {
+        Some(MediaCover::Covered)
+    }
 }
 
 /// Whether any reveal is still fading (the frame clock keeps going).

@@ -360,10 +360,6 @@ pub fn bg_subtle() -> Rgba {
     pick_key(K::WindowBgOver, 0x21262d, 0xeaeef2, Some(0x0))
 }
 #[inline]
-pub fn bg_tile() -> Rgba {
-    pick_key(K::WindowBg, 0x010409, 0xffffff, Some(0x0))
-}
-#[inline]
 pub fn bg_black() -> Rgba {
     // Deliberate black chips stay black in both modes.
     hex(0x000000)

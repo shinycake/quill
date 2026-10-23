@@ -39,6 +39,9 @@ impl QuillApp {
                 chrome,
                 ..
             } => {
+                for message in messages {
+                    self.tick_media_spoiler(message, cx);
+                }
                 let refs: Vec<&HistoryMessage> = messages.iter().collect();
                 let sender_status = refs.first().and_then(|first| {
                     self.sender_status_element(chrome.sender.as_ref(), first.id.0, cx)
@@ -56,6 +59,7 @@ impl QuillApp {
                     // Settings → Appearance: font size + bubble/plain style.
                     look,
                     session,
+                    &self.message_ui.spoiler_revealed,
                     cx,
                 )
             }
@@ -75,29 +79,7 @@ impl QuillApp {
                 {
                     self.request_animation_tick(gif.fps(), cx);
                 }
-                // A covered spoiler's dust shimmers (gently: 20 fps).
-                let spoiler = match &message.content {
-                    MessageContent::Photo(photo) => photo.has_spoiler,
-                    MessageContent::Video(video) => video.has_spoiler,
-                    MessageContent::Animation(animation) => animation.has_spoiler,
-                    _ => false,
-                };
-                let key = (message.chat_id.0, message.id.0 as u64, u64::MAX, false);
-                // lib_ui draws spoiler frames every 33 ms; a reveal fades
-                // the cover out.
-                // Outside an animation layer (`anim_layer`), and while a
-                // reveal fades the cover, the specks are redrawn with the
-                // history.
-                let covered = !self.message_ui.spoiler_revealed.contains(&key);
-                let fading = super::spoiler_fx::reveal_fade(key).is_some();
-                if spoiler
-                    && (fading
-                        || (covered
-                            && super::anim_layer::current().is_none()
-                            && !super::spoiler_fx::still()))
-                {
-                    self.request_animation_tick(30, cx);
-                }
+                self.tick_media_spoiler(message, cx);
                 let sender_status =
                     self.sender_status_element(chrome.sender.as_ref(), message.id.0, cx);
                 let row = session_history_row(
@@ -436,6 +418,40 @@ impl QuillApp {
                 .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_LOAD_HISTORY)));
         }
         cx.notify();
+    }
+
+    /// The message's media is still behind its spoiler (not clicked yet):
+    /// it neither shows nor autoplays.
+    pub(in crate::ui) fn media_spoiler_covered(&self, message: &HistoryMessage) -> bool {
+        matches!(
+            super::spoiler_fx::media_cover(
+                &message.content,
+                super::spoiler_fx::media_key(message.chat_id, message.id),
+                &self.message_ui.spoiler_revealed,
+            ),
+            Some(super::spoiler_fx::MediaCover::Covered)
+        )
+    }
+
+    /// A covered media spoiler's dust shimmers (lib_ui draws its frames
+    /// every 33 ms): outside an animation layer (`anim_layer`), and while
+    /// a reveal fades the cover, the specks are redrawn with the history.
+    fn tick_media_spoiler(&self, message: &HistoryMessage, cx: &mut Context<Self>) {
+        let key = super::spoiler_fx::media_key(message.chat_id, message.id);
+        let redraw = match super::spoiler_fx::media_cover(
+            &message.content,
+            key,
+            &self.message_ui.spoiler_revealed,
+        ) {
+            Some(super::spoiler_fx::MediaCover::Fading(_)) => true,
+            Some(super::spoiler_fx::MediaCover::Covered) => {
+                super::anim_layer::current().is_none() && !super::spoiler_fx::still()
+            }
+            None => false,
+        };
+        if redraw {
+            self.request_animation_tick(30, cx);
+        }
     }
 
     pub(in crate::ui) fn maybe_auto_load_older(&mut self, cx: &mut Context<Self>) {

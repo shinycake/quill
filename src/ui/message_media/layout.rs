@@ -211,7 +211,10 @@ pub(in crate::ui) fn media_disc(id: impl Into<ElementId>, state: MediaDisc) -> S
 }
 
 /// Download fraction of `file_id`, when TDLib reported a total.
-pub(super) fn download_fraction(file_id: FileId, files: &quill::state::FileMap) -> Option<f32> {
+pub(in crate::ui) fn download_fraction(
+    file_id: FileId,
+    files: &quill::state::FileMap,
+) -> Option<f32> {
     files
         .get(&file_id.0)
         .and_then(ParsedFile::download_progress)

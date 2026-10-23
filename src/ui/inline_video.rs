@@ -223,7 +223,7 @@ impl QuillApp {
 
     /// The inline frame for a history row's video or GIF, when it should
     /// play: the native player is available, no viewer covers the chat,
-    /// it isn't secret or behind a spoiler, the clip is downloaded, and
+    /// it isn't secret or behind an unrevealed spoiler, the clip is downloaded, and
     /// either autoplay is on for its kind with data saver off, or a click
     /// asked for it ([`Demand`]: a round video, an MP4 GIF).
     pub(super) fn inline_frame(
@@ -244,10 +244,11 @@ impl QuillApp {
         let autoplay_videos = prefs.autoplay_videos && !prefs.data_saver;
         let autoplay_gifs = prefs.autoplay_gifs && !prefs.data_saver;
         let caption_width = self.inline_caption_width(message, cx);
+        let spoiler_covered = self.media_spoiler_covered(message);
         // `viewed`: a round video, whether it was watched.
         let (file_id, tile, duration, autoplay, viewed) = match &message.content {
             MessageContent::Video(video)
-                if autoplay_videos && !video.is_secret && !video.has_spoiler =>
+                if autoplay_videos && !video.is_secret && !spoiler_covered =>
             {
                 (
                     video.play_file_id()?,
@@ -278,7 +279,7 @@ impl QuillApp {
             // be a video, which asks for them here on demand).
             MessageContent::Animation(animation)
                 if !animation.is_secret
-                    && !animation.has_spoiler
+                    && !spoiler_covered
                     && (demand.is_some()
                         || (autoplay_gifs && animation.mime_type != "image/gif")) =>
             {

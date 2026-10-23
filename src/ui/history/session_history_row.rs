@@ -282,8 +282,8 @@ pub(in crate::ui) fn session_history_row(
     );
     // A spoiler stays covered until clicked; once revealed, it renders as
     // the plain media it is.
-    let media_revealed =
-        revealed.contains(&(message.chat_id.0, message.id.0 as u64, u64::MAX, false));
+    let reveal_key = super::super::spoiler_fx::media_key(message.chat_id, message.id);
+    let media_revealed = revealed.contains(&reveal_key);
     // Media corners follow the bubble (Telegram Desktop `BubbleRounding`): a
     // picture that leads the bubble takes its radius on the edges that are
     // free of the sender name, a caption above/below, badges or reactions.
@@ -313,39 +313,27 @@ pub(in crate::ui) fn session_history_row(
             !caption_below && !badges && !has_chips,
         )
     };
-    let content = effective_content(&message.content, message.ephemeral.as_ref());
+    let covered_content = effective_content(&message.content, message.ephemeral.as_ref());
+    // A revealed spoiler is plain media from here on: it shows, opens and
+    // plays like any other.
+    let unveiled = media_revealed
+        .then(|| quill::media_spoiler::unveiled(covered_content))
+        .flatten();
+    let content = unveiled.as_ref().unwrap_or(covered_content);
     let (frame_w, frame_h) = single_media_frame(content, caption_w, media_max).unwrap_or_default();
     let extra_media = match content {
-        MessageContent::Photo(photo) if photo.has_spoiler && !media_revealed => {
-            Some(spoiler_cover(
-                message.id.0 as u64,
-                message.chat_id,
-                message.id,
-                photo.minithumbnail.as_ref(),
-                photo.open_file_id(),
-                frame_w,
-                frame_h,
-                corners,
-                cx,
-            ))
-        }
-        MessageContent::Video(video) if video.has_spoiler && !media_revealed => {
-            Some(spoiler_cover(message.id.0 as u64, message.chat_id, message.id, None, None, frame_w, frame_h, corners, cx))
-        }
-        MessageContent::Animation(animation) if animation.has_spoiler && !media_revealed => {
-            Some(spoiler_cover(message.id.0 as u64, message.chat_id, message.id, None, None, frame_w, frame_h, corners, cx))
-        }
+        content if quill::media_spoiler::has_media_spoiler(content) => Some(spoiler_cover(
+            message.id.0 as u64,
+            message.chat_id,
+            message.id,
+            content,
+            files,
+            downloading,
+            (frame_w, frame_h),
+            corners,
+            cx,
+        )),
         MessageContent::Photo(photo) => {
-            let unveiled;
-            let photo = if photo.has_spoiler {
-                unveiled = quill::telegram::envelope::PhotoContent {
-                    has_spoiler: false,
-                    ..photo.clone()
-                };
-                &unveiled
-            } else {
-                photo
-            };
             Some(photo_attachment(
                 message.id.0 as u64,
                 photo,
@@ -724,71 +712,25 @@ pub(in crate::ui) fn session_history_row(
         }
     }
     // A just-revealed spoiler: its cover fades out over the media.
-    let reveal_key = (message.chat_id.0, message.id.0 as u64, u64::MAX, false);
-    let extra_media = match (
-        extra_media,
-        media_revealed
-            .then(|| super::super::spoiler_fx::reveal_fade(reveal_key))
-            .flatten(),
-    ) {
-        (Some(media), Some(cover_opacity)) => {
+    let cover_fade = super::super::spoiler_fx::media_cover(covered_content, reveal_key, revealed);
+    let extra_media = match (extra_media, cover_fade) {
+        (Some(media), Some(super::super::spoiler_fx::MediaCover::Fading(opacity))) => {
             // Built outside the animation layer: the cover fades under an
             // opacity the layer can't apply, so the slice draws its specks.
             let cover = super::super::anim_layer::with_layer(None, || {
-                match effective_content(&message.content, message.ephemeral.as_ref()) {
-                    MessageContent::Photo(photo) if photo.has_spoiler => Some(spoiler_cover(
-                        message.id.0 as u64,
-                        message.chat_id,
-                        message.id,
-                        photo.minithumbnail.as_ref(),
-                        None,
-                        frame_w,
-                        frame_h,
-                        corners,
-                        cx,
-                    )),
-                    MessageContent::Video(video) if video.has_spoiler => Some(spoiler_cover(
-                        message.id.0 as u64,
-                        message.chat_id,
-                        message.id,
-                        None,
-                        None,
-                        frame_w,
-                        frame_h,
-                        corners,
-                        cx,
-                    )),
-                    MessageContent::Animation(animation) if animation.has_spoiler => {
-                        Some(spoiler_cover(
-                            message.id.0 as u64,
-                            message.chat_id,
-                            message.id,
-                            None,
-                            None,
-                            frame_w,
-                            frame_h,
-                            corners,
-                            cx,
-                        ))
-                    }
-                    _ => None,
-                }
+                spoiler_cover(
+                    message.id.0 as u64,
+                    message.chat_id,
+                    message.id,
+                    covered_content,
+                    files,
+                    downloading,
+                    (frame_w, frame_h),
+                    corners,
+                    cx,
+                )
             });
-            Some(match cover {
-                Some(cover) => div()
-                    .relative()
-                    .child(media)
-                    .child(
-                        div()
-                            .absolute()
-                            .top_0()
-                            .left_0()
-                            .opacity(cover_opacity)
-                            .child(cover),
-                    )
-                    .into_any_element(),
-                None => media,
-            })
+            Some(fading_spoiler(media, cover, opacity))
         }
         (media, _) => media,
     };
