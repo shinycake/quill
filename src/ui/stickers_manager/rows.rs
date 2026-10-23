@@ -181,7 +181,7 @@ impl QuillApp {
             .justify_center()
             .text_color(cx.theme().muted_foreground)
             .when(row.tab == ManagerTab::Installed, |handle| {
-                handle.child(Icon::new(IconName::GripVertical).size_4())
+                handle.child(Icon::new(IconName::ChevronsUpDown).size_4())
             })
             .when(draggable, |handle| {
                 let drag_title = title.clone();
