@@ -30,8 +30,9 @@ pub enum EmojiSetTab {
 #[derive(Debug, Clone, Default)]
 pub struct EmojiPanel {
     pub mutating_set: Option<(i64, bool)>,
+    /// Sets whose cover previews were asked for, so a repaint never asks twice.
+    pub covers_requested: HashSet<i64>,
     pub pending_status_emoji: Option<i64>,
-    pub pack_files: std::collections::HashMap<i64, Vec<crate::ids::FileId>>,
     pub outdated_packs: std::collections::HashSet<i64>,
     pub status_open: bool,
     pub status_note: Option<String>,
@@ -40,9 +41,6 @@ pub struct EmojiPanel {
     pub failed: bool,
     pub mutation_failed: bool,
     pub tab: EmojiSetTab,
-    pub selected_set_id: Option<i64>,
-    pub preview_title: String,
-    pub preview: Vec<StickerItem>,
     pub search_query: String,
     pub trending_offset: i32,
     pub trending_next_offset: i32,
@@ -218,43 +216,15 @@ impl Session {
         sets
     }
 
-    pub fn emoji_pack_download_state(&self, id: i64) -> &'static str {
-        if let Some((set_id, installed)) = self.stickers.emoji.mutating_set
-            && set_id == id
-        {
-            return if installed {
-                "Installing…"
-            } else {
-                "Removing…"
-            };
+    fn remember_cover_files(&mut self, sets: &[StickerSetInfo]) {
+        for set in sets {
+            self.remember_files(&set.cover_files);
         }
-        if self.stickers.emoji.outdated_packs.contains(&id) {
-            return "Update needed";
-        }
-        let Some(ids) = self.stickers.emoji.pack_files.get(&id) else {
-            return "Not downloaded";
-        };
-        if !ids.is_empty()
-            && ids.iter().all(|id| {
-                self.media
-                    .files
-                    .get(&id.0)
-                    .and_then(|file| file.usable_path())
-                    .is_some()
-            })
-        {
-            return "Downloaded";
-        }
-        if ids
-            .iter()
-            .any(|id| self.media.downloads.is_downloading(id.0, &self.media.files))
-        {
-            return "Downloading…";
-        }
-        "Not downloaded"
     }
+
     /// Slice S10: store the installed emoji sets.
     pub fn accept_installed_emoji_sets(&mut self, sets: Vec<StickerSetInfo>) {
+        self.remember_cover_files(&sets);
         let installed: std::collections::HashSet<_> = sets.iter().map(|set| set.id).collect();
         for set in self
             .stickers
@@ -283,6 +253,7 @@ impl Session {
 
     /// Slice S10: store the trending emoji sets (single-page replace, like S8).
     pub fn accept_trending_emoji_sets(&mut self, sets: Vec<StickerSetInfo>, is_premium: bool) {
+        self.remember_cover_files(&sets);
         if self.stickers.emoji.tab == EmojiSetTab::Trending {
             self.stickers.emoji.failed = false;
         }
@@ -313,6 +284,7 @@ impl Session {
 
     /// Slice S10: store a `searchStickerSets` answer (emoji type).
     pub fn accept_found_emoji_sets(&mut self, sets: Vec<StickerSetInfo>) {
+        self.remember_cover_files(&sets);
         if self.stickers.emoji.tab == EmojiSetTab::Search {
             self.stickers.emoji.failed = false;
         }

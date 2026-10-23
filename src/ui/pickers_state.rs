@@ -11,7 +11,14 @@ pub(crate) struct PickerUi {
     pub(super) media_panel: super::media_panel::MediaPanel,
     /// The emoji status selector's search (cleared on each open).
     pub(super) status_search_input: Entity<TextareaState>,
-    pub(super) emoji_set_search_input: Entity<TextareaState>,
+    /// The emoji packs box's search: typing searches once it pauses
+    /// (`emoji_sets_search_typed`); `emoji_set_keystroke` counts the edits so
+    /// only the last one searches, and `emoji_set_return_tab` is the tab an
+    /// emptied field goes back to.
+    pub(super) emoji_set_search_input: Entity<InputState>,
+    pub(super) emoji_set_keystroke: u64,
+    pub(super) emoji_set_return_tab: quill::emoji::EmojiSetTab,
+    pub(super) emoji_set_scroll: ScrollHandle,
     pub(super) emoji_search_input: Entity<TextareaState>,
     /// The reaction selector's own search (cleared on each open).
     pub(super) reaction_search_input: Entity<TextareaState>,
@@ -42,11 +49,17 @@ impl PickerUi {
             }
         })
         .detach();
-        let emoji_set_search_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder(tr(keys::Q_MISC_SEARCH_EMOJI_PACKS))
-                .auto_grow(1, 1)
-        });
+        let emoji_set_search_input = cx
+            .new(|cx| InputState::new(window, cx).placeholder(tr(keys::Q_MISC_SEARCH_EMOJI_PACKS)));
+        cx.subscribe(
+            &emoji_set_search_input,
+            |this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.emoji_sets_search_typed(cx);
+                }
+            },
+        )
+        .detach();
         let gif_search_input =
             cx.new(|cx| InputState::new(window, cx).placeholder(tr(keys::GIFS_SEARCH)));
         cx.subscribe_in(
@@ -69,6 +82,9 @@ impl PickerUi {
             media_panel: super::media_panel::MediaPanel::default(),
             status_search_input,
             emoji_set_search_input,
+            emoji_set_keystroke: 0,
+            emoji_set_return_tab: quill::emoji::EmojiSetTab::default(),
+            emoji_set_scroll: ScrollHandle::new(),
             emoji_search_input,
             reaction_search_input,
             gif_search_input,

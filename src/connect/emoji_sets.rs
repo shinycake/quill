@@ -4,7 +4,7 @@ use crate::emoji::EmojiSetTab;
 use crate::ids::RequestId;
 use crate::state::RequestPurpose;
 use crate::sticker_suggest::suggest_emoji_for;
-use crate::telegram::requests::{change_sticker_set, get_sticker_set, view_trending_sticker_sets};
+use crate::telegram::requests::{change_sticker_set, view_trending_sticker_sets};
 use crate::telegram::requests_emoji::{
     get_animated_emoji, get_installed_emoji_sets, get_trending_emoji_sets, search_emoji_sets,
 };
@@ -366,13 +366,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.stickers.emoji.tab = tab;
-        self.session.stickers.emoji.selected_set_id = None;
-        self.session.stickers.emoji.preview.clear();
-        drop(
-            self.session
-                .requests
-                .take_purpose(RequestPurpose::GetEmojiSet),
-        );
         match tab {
             EmojiSetTab::Installed => self.emoji_set_request(
                 RequestPurpose::GetInstalledEmojiSets,
@@ -391,6 +384,31 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             EmojiSetTab::Search => Ok(None),
         }
+    }
+
+    /// Download the cover previews of the sets the box lists, once each.
+    pub fn ensure_emoji_pack_covers(&mut self) -> Result<(), ConnectSendError> {
+        let emoji = &mut self.session.stickers.emoji;
+        let listed: &[crate::telegram::envelope::StickerSetInfo] = match emoji.tab {
+            EmojiSetTab::Installed => &emoji.installed_sets,
+            EmojiSetTab::Trending => &emoji.trending_sets,
+            EmojiSetTab::Search => &emoji.found_sets,
+        };
+        let mut files = Vec::new();
+        let mut asked = Vec::new();
+        for set in listed {
+            if emoji.covers_requested.contains(&set.id) {
+                continue;
+            }
+            asked.push(set.id);
+            files.extend(
+                set.covers
+                    .iter()
+                    .filter_map(|cover| cover.display_file_id()),
+            );
+        }
+        emoji.covers_requested.extend(asked);
+        self.ensure_media_files(&files)
     }
 
     /// B11: the panel's emoji search also asks `getKeywordEmojis`, in the
@@ -467,26 +485,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         })
     }
 
-    pub fn preview_emoji_pack(
-        &mut self,
-        set_id: i64,
-    ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.chats_path_active() || set_id <= 0 {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        drop(
-            self.session
-                .requests
-                .take_purpose(RequestPurpose::GetEmojiSet),
-        );
-        self.session.stickers.emoji.selected_set_id = Some(set_id);
-        self.session.stickers.emoji.preview.clear();
-        self.session.stickers.emoji.preview_title.clear();
-        self.emoji_set_request(RequestPurpose::GetEmojiSet, |id| {
-            get_sticker_set(id, set_id)
-        })
-    }
-
     pub fn set_emoji_pack_installed(
         &mut self,
         set_id: i64,
@@ -505,24 +503,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(request)
     }
 
-    pub fn download_emoji_pack(&mut self, set_id: i64) -> Result<(), ConnectSendError> {
-        if self.session.stickers.emoji.outdated_packs.contains(&set_id) {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        let ids = self
-            .session
-            .stickers
-            .emoji
-            .pack_files
-            .get(&set_id)
-            .cloned()
-            .ok_or(ConnectSendError::InvalidRequest)?;
-        for id in ids {
-            self.download_file(id, THUMB_DOWNLOAD_PRIORITY)?;
-        }
-        Ok(())
-    }
-
     pub(crate) fn refresh_emoji_pack_catalog(&mut self) -> Result<(), ConnectSendError> {
         // TDLib sends this update while it loads the list a request asked
         // for, so a dropped in-flight request is sent again; a cached list
@@ -537,7 +517,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         for purpose in [
             RequestPurpose::SearchEmojiSets,
             RequestPurpose::GetTrendingEmojiSets,
-            RequestPurpose::GetEmojiSet,
         ] {
             drop(self.session.requests.take_purpose(purpose));
         }
@@ -561,10 +540,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             EmojiSetTab::Trending => {
                 self.select_emoji_set_tab(EmojiSetTab::Trending)?;
             }
-            EmojiSetTab::Installed => {
-                self.session.stickers.emoji.selected_set_id = None;
-                self.session.stickers.emoji.preview.clear();
-            }
+            EmojiSetTab::Installed => {}
         }
         Ok(())
     }

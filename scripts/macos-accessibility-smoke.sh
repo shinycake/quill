@@ -188,18 +188,16 @@ if " \(CommandLine.arguments[3]) ".contains(" \(flow) ") {
     precondition(!before.contains { name($0).contains("messageFutureFeature") }, "Raw API constructor shown to user")
     print("PASS: unsupported card, accessible release action, expiry notice without update action and no raw API constructor")
 } else if CommandLine.arguments[2] == "ready-emoji-packs" {
-    for label in ["Downloaded", "Downloading…", "Update needed", "Installing…"] {
-        precondition(before.contains { role($0) == "AXStaticText" && name($0) == label }, "Missing pack state: \(label)")
+    let packs = ["Animals", "Fun faces", "Food and drink"]
+    let order = before.filter { role($0) == "AXButton" && packs.contains(name($0)) }.map { name($0) }
+    precondition(order == packs, "Packs not listed most recent first: \(order)")
+    for pack in packs {
+        precondition(before.contains { role($0) == "AXButton" && name($0) == "Remove \(pack)" }, "Missing remove button: \(pack)")
     }
-    func packOrder(_ elements: [AXUIElement]) -> [String] {
-        elements.filter { role($0) == "AXButton" && ["Downloaded pack", "Downloading pack"].contains(name($0)) }.map { name($0) }
+    for label in ["Search", "Retry", "Download or retry pack", "Dynamic emoji pack order"] {
+        precondition(!before.contains { name($0).hasPrefix(label) && role($0) == "AXButton" }, "Manual control still shown: \(label)")
     }
-    precondition(packOrder(before) == ["Downloading pack", "Downloaded pack"], "Recent pack not first")
-    let toggle = before.first { name($0) == "Dynamic emoji pack order" && role($0) != "AXStaticText" }!
-    precondition(AXUIElementPerformAction(toggle, kAXPressAction as CFString) == .success, "Cannot toggle dynamic order")
-    Thread.sleep(forTimeInterval: 0.3)
-    precondition(packOrder(windows.flatMap { nodes($0) }) == ["Downloaded pack", "Downloading pack"], "Toggle did not restore server order")
-    print("PASS: native pack states and dynamic order toggle restore authoritative order")
+    print("PASS: pack rows named, most recent first, with remove buttons and no manual load, search or retry controls")
 } else {
 precondition(before.contains { role($0) == "AXStaticText" && name($0).hasPrefix("Bold italic") }, "Message text absent")
 precondition(before.contains { role($0) == "AXButton" && name($0) == "Formatting" }, "Formatting label absent")
