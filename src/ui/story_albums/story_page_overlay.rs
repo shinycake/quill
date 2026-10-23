@@ -179,17 +179,13 @@ impl QuillApp {
                 );
             }
             detail = detail.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        Button::new("story-page-add-stories")
-                            .label(tr(keys::Q_MEDIA_ALBUM_ADD_STORIES))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.open_album_picker(AlbumPickerTarget::Album(album_id), cx);
-                            })),
-                    ),
+                div().flex().items_center().gap_2().child(
+                    Button::new("story-page-add-stories")
+                        .label(tr(keys::Q_MEDIA_ALBUM_ADD_STORIES))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.open_album_picker(AlbumPickerTarget::Album(album_id), cx);
+                        })),
+                ),
             );
             body = body.child(detail);
         } else {

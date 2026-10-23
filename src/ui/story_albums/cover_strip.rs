@@ -12,8 +12,8 @@ use quill::story_cover::{
 };
 use std::cell::Cell;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 const PREVIEW_HEIGHT: f32 = 180.0;
@@ -104,8 +104,7 @@ impl QuillApp {
                 return;
             };
             let opened = this.update(cx, |this, cx| {
-                let Some(cover) = this.stories.cover.as_mut().filter(|c| c.serial == serial)
-                else {
+                let Some(cover) = this.stories.cover.as_mut().filter(|c| c.serial == serial) else {
                     return false;
                 };
                 cover.duration_ms = Some(duration_ms);
@@ -117,11 +116,15 @@ impl QuillApp {
                 return;
             }
             let height = (STRIP_HEIGHT * 2.0) as u32;
-            for (index, at) in frame_times(duration_ms, STRIP_FRAMES).into_iter().enumerate() {
+            for (index, at) in frame_times(duration_ms, STRIP_FRAMES)
+                .into_iter()
+                .enumerate()
+            {
                 let source = source.clone();
                 let still = cx
                     .background_spawn(async move {
-                        let path = quill::video_edit::render_strip_frame(&source, at, height).ok()?;
+                        let path =
+                            quill::video_edit::render_strip_frame(&source, at, height).ok()?;
                         let still = crate::ui::video_editor::load_still(&path);
                         let _ = std::fs::remove_file(path);
                         still
@@ -171,8 +174,7 @@ impl QuillApp {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                let Some(cover) = this.stories.cover.as_mut().filter(|c| c.serial == serial)
-                else {
+                let Some(cover) = this.stories.cover.as_mut().filter(|c| c.serial == serial) else {
                     return;
                 };
                 cover.preview_job = None;

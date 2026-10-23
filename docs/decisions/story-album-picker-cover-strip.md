@@ -27,7 +27,7 @@ used here, as the brief allowed.
   (photo size or video thumbnail, duration badge on videos), a check on each
   tile, a button that counts: "Add N Stories" when only adding, "Save (N
   stories)" when removing too, "Create Album with N Stories" for a new album.
-  The old comma-separated id inputs and `parse_story_id_list` are gone. The
+  The next archive page loads when the grid scrolls within 160 px of its end (a spinner row shows while it loads), with no "Load more" button. The old comma-separated id inputs and `parse_story_id_list` are gone. The
   count in the button is a Quill addition; tdesktop's button has no number.
 - `quill::story_cover` and `ui/story_albums/cover_strip.rs`: the cover picker
   replaces the seconds input. A preview of the chosen frame over eight frames

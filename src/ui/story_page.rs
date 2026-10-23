@@ -7,7 +7,7 @@
 use super::QuillApp;
 use gpui_kit::AppContext;
 use gpui_kit::component::input::TextareaState;
-use gpui_kit::gpui::{Context, Entity, Window};
+use gpui_kit::gpui::{Context, Entity, ScrollHandle, Window};
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::story_album_picker::AlbumPicker;
@@ -28,6 +28,8 @@ pub(crate) struct StoryPage {
     /// The story picker (add to an album, or choose a new album's
     /// stories), while it is open.
     pub(crate) picker: Option<AlbumPicker>,
+    /// Scroll of the picker's grid: the next page loads near its end.
+    pub(crate) picker_scroll: ScrollHandle,
     /// Album id awaiting the second delete click (two-click confirm).
     pub(crate) delete_confirm: Option<i32>,
 }
@@ -48,6 +50,7 @@ impl StoryPage {
             new_album_name: input(tr(keys::Q_MEDIA_ALBUM_NAME_1_12_CHARACTERS)),
             rename_input: input(tr(keys::Q_MEDIA_ALBUM_NAME_1_12_CHARACTERS)),
             picker: None,
+            picker_scroll: ScrollHandle::new(),
             delete_confirm: None,
         }
     }

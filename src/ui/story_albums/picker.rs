@@ -4,16 +4,19 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tooltip::Tooltip;
 use quill::local_path::sandboxed_display_path;
 use quill::story_album_picker::{AlbumPicker, candidate_ids};
-use std::path::PathBuf;
-use quill::telegram::envelope::StoryContentView;
 use quill::story_cover::time_label;
+use quill::telegram::envelope::StoryContentView;
+use std::path::PathBuf;
 
 const TILE_WIDTH: f32 = 118.0;
 const TILE_HEIGHT: f32 = 168.0;
 const CHECK_SIZE: f32 = 22.0;
+/// The next page loads when this little is left to scroll.
+const NEAR_END: f32 = 160.0;
 
 /// What a tile shows.
 struct Tile {
@@ -26,11 +29,7 @@ struct Tile {
 impl QuillApp {
     /// Open the picker on an album (its stories start ticked) or for a new
     /// album, and ask for the thumbnails not yet local.
-    pub(super) fn open_album_picker(
-        &mut self,
-        target: AlbumPickerTarget,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn open_album_picker(&mut self, target: AlbumPickerTarget, cx: &mut Context<Self>) {
         let Some(chat_id) = self.stories.page.as_ref().map(|page| page.chat_id) else {
             return;
         };
@@ -46,6 +45,7 @@ impl QuillApp {
             page.picker = Some(AlbumPicker::new(target, initial));
         }
         self.request_picker_thumbs(cx);
+        self.picker_load_near_end(cx);
         cx.notify();
     }
 
@@ -129,6 +129,47 @@ impl QuillApp {
         }
     }
 
+    /// The next archive page is on its way.
+    fn picker_loading(&self) -> bool {
+        use quill::state::RequestPurpose;
+        use quill::story_page::{StoryPageOpState, story_page_op_label};
+        self.session()
+            .and_then(|s| s.stories.page_op.as_ref())
+            .is_some_and(|op| {
+                op.state == StoryPageOpState::Checking
+                    && op.label == story_page_op_label(RequestPurpose::GetChatArchivedStories)
+            })
+    }
+
+    /// More stories exist than are loaded.
+    pub(super) fn picker_has_more(&self) -> bool {
+        let Some(chat) = self.stories.page.as_ref().map(|page| page.chat_id.0) else {
+            return false;
+        };
+        self.session()
+            .and_then(|s| s.stories.archived_stories.get(&chat))
+            .is_some_and(|archived| {
+                usize::try_from(archived.total_count).is_ok_and(|n| n > archived.story_ids.len())
+            })
+    }
+
+    /// Load the next page when the grid is scrolled near its end (or does
+    /// not fill its box yet), as tdesktop's story grid does.
+    pub(super) fn picker_load_near_end(&mut self, cx: &mut Context<Self>) {
+        let Some(scroll) = self.stories.page.as_ref().map(|p| p.picker_scroll.clone()) else {
+            return;
+        };
+        if self.picker_loading() || !self.picker_has_more() {
+            return;
+        }
+        let left = scroll.max_offset().y + scroll.offset().y;
+        if left > px(NEAR_END) {
+            return;
+        }
+        self.load_more_archived_stories(cx);
+        self.request_picker_thumbs(cx);
+    }
+
     /// Download the thumbnails of the candidates that are not local yet.
     pub(super) fn request_picker_thumbs(&mut self, cx: &mut Context<Self>) {
         let roots = self.media_display_roots();
@@ -201,9 +242,11 @@ impl QuillApp {
         let target = picker.target;
         let unchanged = picker.unchanged();
         let only_adds = picker.only_adds();
-        let name_empty = self.stories.page.as_ref().is_some_and(|page| {
-            page.new_album_name.read(cx).value().trim().is_empty()
-        });
+        let name_empty = self
+            .stories
+            .page
+            .as_ref()
+            .is_some_and(|page| page.new_album_name.read(cx).value().trim().is_empty());
         let label = match target {
             AlbumPickerTarget::NewAlbum if count > 0 => trn_with(
                 keys::Q_MEDIA_ALBUM_CREATE_STORIES_COUNT,
@@ -228,13 +271,27 @@ impl QuillApp {
             AlbumPickerTarget::NewAlbum => name_empty,
         };
         let tiles = self.picker_tiles();
+        let scroll = self
+            .stories
+            .page
+            .as_ref()
+            .map(|page| page.picker_scroll.clone())
+            .unwrap_or_default();
+        let loading = self.picker_loading();
         let mut grid = div()
             .id("story-album-picker-grid")
             .flex()
             .flex_wrap()
             .gap_2()
             .max_h(px(380.))
-            .overflow_y_scroll();
+            .overflow_y_scroll()
+            .track_scroll(&scroll)
+            .on_scroll_wheel(cx.listener(|_, _, _, cx| {
+                cx.spawn(async move |this, cx| {
+                    let _ = this.update(cx, |this, cx| this.picker_load_near_end(cx));
+                })
+                .detach();
+            }));
         if tiles.is_empty() {
             grid = grid.child(
                 div()
@@ -245,6 +302,17 @@ impl QuillApp {
         }
         for tile in tiles {
             grid = grid.child(self.picker_tile(tile, cx));
+        }
+        if loading {
+            grid = grid.child(
+                div()
+                    .id("story-album-picker-loading")
+                    .w_full()
+                    .flex()
+                    .justify_center()
+                    .py_2()
+                    .child(Spinner::new().small()),
+            );
         }
         div()
             .flex()
@@ -275,29 +343,16 @@ impl QuillApp {
             )
             .child(grid)
             .child(
-                div()
-                    .flex()
-                    .justify_between()
-                    .child(
-                        Button::new("story-album-picker-more")
-                            .label(tr(keys::Q_MEDIA_LOAD_MORE))
-                            .ghost()
-                            .text_color(cx.theme().foreground)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.load_more_archived_stories(cx);
-                                this.request_picker_thumbs(cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("story-album-picker-confirm")
-                            .primary()
-                            .label(label)
-                            .disabled(disabled)
-                            .on_click(cx.listener(move |this, _, _, cx| match target {
-                                AlbumPickerTarget::Album(_) => this.save_album_picker(cx),
-                                AlbumPickerTarget::NewAlbum => this.create_story_album(cx),
-                            })),
-                    ),
+                div().flex().justify_end().child(
+                    Button::new("story-album-picker-confirm")
+                        .primary()
+                        .label(label)
+                        .disabled(disabled)
+                        .on_click(cx.listener(move |this, _, _, cx| match target {
+                            AlbumPickerTarget::Album(_) => this.save_album_picker(cx),
+                            AlbumPickerTarget::NewAlbum => this.create_story_album(cx),
+                        })),
+                ),
             )
             .into_any_element()
     }

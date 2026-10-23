@@ -14,8 +14,8 @@ use gpui_kit::*;
 use quill::connect::LiveConnect;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with, trn_with};
-use quill::story_composer::StoryPrivacy;
 use quill::story_album_picker::AlbumPickerTarget;
+use quill::story_composer::StoryPrivacy;
 use quill::story_page::StoryPageOpState;
 use quill::telegram::envelope::StoryAreaKind;
 /// Phase 9.5: the viewer privacy editor's state — the story plus the
@@ -757,9 +757,9 @@ impl QuillApp {
     }
 }
 
+mod cover_strip;
 #[cfg(feature = "demo-capture")]
 mod demo;
-mod cover_strip;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod picker_tests;
