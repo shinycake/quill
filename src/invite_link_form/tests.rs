@@ -251,11 +251,12 @@ fn custom_values_are_checked_like_tdesktop() {
 
 #[test]
 fn the_dollar_rate_comes_from_the_app_config() {
+    let option = "stars_usd_withdraw_rate_x1000";
     let config = serde_json::json!({
         "@type": "jsonValueObject",
         "members": [{
             "@type": "jsonObjectMember",
-            "key": "stars_usd_withdraw_rate_x1000",
+            "key": option,
             "value": {"@type": "jsonValueNumber", "value": 1300.0}
         }]
     });
