@@ -38,6 +38,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Add contact via dialog: phone (required), first/last name -> addContact (ui/mod.rs:9469; telegram/requests.rs:379) <!-- parity:auth-contact-add -->
 - [x] Delete contact (schema: removeContacts; TGX DeleteContactConfirm) <!-- parity:auth-contact-delete -->
 - [x] Import contacts from a file/vCard (schema: importContacts) <!-- parity:auth-contact-import -->
+- [ ] Import contacts by choosing a .vcf file instead of pasting vCard text <!-- parity:auth-contact-import-file -->
 - [x] Sync contacts toggle + delete synced contacts from servers (TGX SyncContacts*, SyncContactsDeleteInfo) <!-- parity:auth-contact-sync -->
 - [x] Block user with confirmation (TGX QBlockUser/BlockUserConfirm; no block request builders in Quill) <!-- parity:auth-block-user -->
 - [x] Edit name: "Edit profile" dialog on the own info panel sends setName (telegram/requests.rs:4213; connect.rs:8910; ui/mod.rs:18963) <!-- parity:auth-edit-name -->
@@ -500,6 +501,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Slow-mode bypass when viewer boosts meet the unrestrict threshold (src/state.rs:3034) <!-- parity:groups-slow-mode-boost-bypass -->
 - [x] Invite-link list with expiry/humanised "Never expires"/"Expired" labels and pending-join-request counts (src/ui/mod.rs:8397) <!-- parity:groups-invite-link-list -->
 - [x] Create invite link dialog — name, expiration, member limit, join-request toggle (src/ui/mod.rs:222) <!-- parity:groups-invite-link-create -->
+- [ ] Invite link expiry and usage limit use presets (1 hour, 1 day, 1 week, no limit, custom date) instead of typed days and member counts <!-- parity:groups-invite-link-presets -->
 - [x] Edit, copy and revoke invite links (src/ui/mod.rs:6341) <!-- parity:groups-invite-link-edit-revoke -->
 - [x] Primary invite link displayed with replace via `replacePrimaryChatInviteLink` (src/ui/mod.rs) <!-- parity:groups-invite-link-primary -->
 - [x] Join-request list with approve/decline buttons and pending-count badge (src/ui/mod.rs:8596) <!-- parity:groups-join-requests -->
@@ -560,6 +562,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Restrict until a custom date and per-right exception lists <!-- parity:admin-restrict-until-custom -->
 - [x] Admin custom title length counter and default "Admin" label <!-- parity:admin-title-counter -->
 - [x] Recent actions: server-side admin filter and explainer <!-- parity:admin-log-extras -->
+- [ ] Recent actions load older events as you scroll, without Load more or Refresh buttons <!-- parity:admin-log-scroll-load -->
 - [x] Group and channel Edit box: photo, name with emoji, description, Save, and the management rows <!-- parity:admin-edit-box -->
 - [x] Crop step after choosing a profile, group or channel photo <!-- parity:admin-photo-crop -->
 - [x] Group and channel photo from the camera, an emoji avatar or a video <!-- parity:groups-photo-sources -->
@@ -798,6 +801,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Insert emoji at cursor in composer text <!-- parity:emoji-insert -->
 - [x] Big emoji rendering for emoji-only messages (Big Emoji setting) <!-- parity:emoji-big -->
 - [x] Custom emoji packs (browse/install/remove, "Emoji Sets" settings screen) <!-- parity:emoji-custom-packs -->
+- [ ] Emoji packs box like the stickers box: tabs, rows with previews, search as you type, packs load and download on their own (no Load, Search or Retry buttons) <!-- parity:emoji-packs-box -->
 - [x] Render custom emoji inside message text <!-- parity:emoji-custom-render --> (inline sticker image at 1.25× text size; thumbnail first, else static WEBP; unresolved falls back to the span text; animated playback still static; live custom emoji unverified)
 - [x] Suggest animated emoji in composer <!-- parity:emoji-suggest-animated --> (composer trailing-emoji → `getAnimatedEmoji` (deduped, stale in-flight dropped) → suggestion row above the composer, tap to send as a sticker; `animatedEmoji` parse into EmojiPanel already existed)
 - [x] Emoji status: recent/trending/default choices, Premium-gated selection and removal, forever/1h/2h/8h/2d/custom expiry; thumbnails and safe retry; live changes unverified <!-- parity:emoji-status -->
@@ -843,6 +847,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] User buttons open the private chat with the user (ui/mod.rs) <!-- parity:bots-inline-user -->
 - [x] Per-button disabled flag on inline buttons (verified: TDLib 1.8.67 exposes `inlineKeyboardButtonTypeDisabled`; `envelope.rs:8791` parses it to `InlineKeyboardButtonType::Disabled`; `inline_keyboard_button` (src/ui/mod.rs:44503) renders it non-interactive via the `element.disabled(true)` fallthrough (44599) — no click handler attached — with tooltip "This button is disabled" (44616)) <!-- parity:bots-inline-disabled-buttons -->
 - [x] Custom reply keyboards rendered above the composer; text sends, one-time hides on tap, contact/location/poll honestly disabled <!-- parity:bots-custom-keyboard -->
+- [ ] Bot keyboard buttons that request a location or a poll work: confirm and send the location; open the poll box with the bot's quiz setting <!-- parity:bots-keyboard-location-poll -->
 - [x] Force-reply markup focuses the composer with the reply target set <!-- parity:bots-force-reply -->
 - [x] Force-reply keyboards render the reply-keyboard bar (a ↩ {placeholder} ghost button above the composer, kit Button; tap focuses the composer) <!-- parity:bots-force-reply-keyboard -->
 - [x] Stop button for streaming bot drafts (cancel an in-flight streaming bot reply) <!-- parity:bots-streaming-draft-stop -->
@@ -861,6 +866,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Inline mode: type @bot in composer, inline query results list, send an inline result (`getInlineQueryResults` backend from S9; this slice adds: `@bot query` trigger parse, bot resolution via local user cache with `searchPublicChat` fallback, 100ms-debounced queries, results dropdown with keyboard/mouse pick + next-page loading, `sendInlineQueryResultMessage` send, secret-chat alert on the typed path) <!-- parity:bots-inline-mode -->
 - [x] Games: send / play, high scores (no game code at all) — render `messageGame` as a card (thumbnail/title/text/description); Play reuses the B1 `press_game_button` flow (`callbackQueryPayloadGame` → answer URL opens in OS browser); inline high-score panel via `getGameHighScores` keyed on the current user (toggle open/close); bot profile panel gets a Games section (games cached per bot from `messageGame` traffic in the shared `upsert_message` choke point) with Send buttons → `sendMessage`+`inputMessageGame`; chat-list preview `🎮 {title}` <!-- parity:bots-games -->
 - [x] Poll creation dialog: question, add/remove options (2–10), validation errors, anonymous + multiple-answer toggles (ui/mod.rs:14860, poll.rs:112) <!-- parity:bots-poll-create -->
+- [ ] Poll time limit is a Limit Duration switch with a deadline date and time picker, not typed hours <!-- parity:bots-poll-deadline-picker -->
 - [x] Create quiz polls: quiz-mode toggle, mark correct option (radio), quiz explanation (0–200 chars, ≤2 line feeds); sends `inputPollTypeQuiz` (ui/mod.rs, poll.rs, requests.rs) <!-- parity:bots-poll-create-quiz -->
 - [x] Poll description field (shown above the poll title) (ui/mod.rs, requests.rs) <!-- parity:bots-poll-description -->
 - [x] Poll duration setting: auto-close after N hours (1–24 UI ceiling, `open_period`; true max is server `getOption("poll_open_period_max")`) (ui/mod.rs, poll.rs) <!-- parity:bots-poll-duration -->
@@ -881,6 +887,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Poll stopped service message <!-- parity:bots-poll-service-message -->
 - [x] Invoice message rendering: product card with title, description, total price, TEST badge; paid invoices link to their receipt (ui/mod.rs) <!-- parity:bots-payment-invoice -->
 - [x] Payment checkout flow: getPaymentForm dialog, validateOrderInfo with shipping options, saved/new credentials, terms consent, sendPaymentForm; provider/additional-option/verification URLs open in the OS browser; Stars forms honestly declined (envelope.rs, requests.rs, connect.rs, state.rs, ui/mod.rs) <!-- parity:bots-payment-checkout -->
+- [ ] Pay with a new card in a card form (number, expiry, CVC, name, country, ZIP) or the provider's own form, never a pasted provider token <!-- parity:bots-payment-card-form -->
 - [ ] Shipping address country picked from a searchable country list, not a typed country code <!-- parity:bots-payment-country-picker -->
 - [x] Payment receipts: getPaymentReceipt dialog from paid invoices ("View receipt") plus messagePaymentSuccessful/messagePaymentSuccessfulBot rows (ui/mod.rs) <!-- parity:bots-payment-receipt -->
 - [x] Recurring payments: ⭐ Subscriptions dialog — `getStarSubscriptions` list with pagination + star balance, `editStarSubscription` cancel/re-enable (inline confirm), `reuseStarSubscription` to rejoin the chat of an active channel subscription when the type's `can_reuse` is set (expired channel subs renew via the type's `invite_link`, opened in the OS browser); mutations refetch from the authoritative `ok`, never optimistic; recurring-invoice terms (`recurring_payment_terms_of_service_url`) surfaced in the checkout dialog <!-- parity:bots-payment-recurring -->
@@ -895,6 +902,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Owned bots management and create a bot <!-- parity:bots-owned-manage -->
 - [x] Bot earnings and affiliate programs <!-- parity:bots-earn-affiliate -->
 - [x] "Apps" tab in search with popular mini apps <!-- parity:bots-apps-tab -->
+- [ ] Mini apps can open invoices (openInvoice): run the checkout and report paid, failed, pending or cancelled back to the app <!-- parity:bots-webapp-invoice -->
+- [ ] Mini apps can ask to share your phone number, with a confirmation box <!-- parity:bots-webapp-share-phone -->
 - [x] Add an option to an open poll and "Allow adding options" when creating <!-- parity:polls-add-option -->
 - [x] Poll creation extras: hide results until close, restrict to subscribers, absolute deadline <!-- parity:polls-create-extras -->
 - [x] Links and media in poll options <!-- parity:polls-option-media -->
