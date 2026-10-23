@@ -175,6 +175,15 @@ fn header(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<String>
     app.read_with(vcx, |app, _| app.profile_photo_facts().map(|f| f.header))
 }
 
+/// The pointer rests on the viewer's controls, as it does on the way to a
+/// thumb. The strip hides with the other controls after 1.1 s of idle
+/// time measured on the wall clock, which a slow runner spends on the
+/// first frames' image decoding alone.
+fn hold_controls(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    app.update(vcx, |app, cx| app.viewer_note_activity(true, cx));
+    settle(vcx);
+}
+
 /// 1100 x 739 photos at 80 high.
 const PHOTO_WIDTH: f32 = 80.0 * 1100.0 / 739.0;
 
@@ -183,6 +192,7 @@ fn a_group_photo_gallery_shows_a_strip_and_a_thumb_opens_its_photo(cx: &mut Test
     let (app, mut vcx) = group_photos(cx);
     let vcx = &mut vcx;
     assert_eq!(current(&app, vcx), 9303);
+    hold_controls(&app, vcx);
     let thumbs: Vec<_> = THUMBS
         .iter()
         .map(|id| vcx.debug_bounds(id).expect("a thumb per photo"))
@@ -194,6 +204,7 @@ fn a_group_photo_gallery_shows_a_strip_and_a_thumb_opens_its_photo(cx: &mut Test
     let third = vcx.debug_bounds(THUMBS[2]).expect("thumb 3");
     vcx.simulate_click(third.center(), Modifiers::default());
     slide(vcx);
+    hold_controls(&app, vcx);
     assert_eq!(current(&app, vcx), 9301, "the oldest photo");
     assert_eq!(header(&app, vcx).as_deref(), Some("Photo 3 of 3"));
     let third = vcx.debug_bounds(THUMBS[2]).expect("thumb 3");
@@ -208,6 +219,7 @@ fn a_group_photo_gallery_shows_a_strip_and_a_thumb_opens_its_photo(cx: &mut Test
 
     app.update_in(vcx, |app, _, cx| app.step_media_viewer(-1, cx));
     slide(vcx);
+    hold_controls(&app, vcx);
     assert_eq!(header(&app, vcx).as_deref(), Some("Photo 2 of 3"));
     let second = vcx.debug_bounds(THUMBS[1]).expect("thumb 2");
     assert!((f32::from(second.size.width) - PHOTO_WIDTH).abs() < 1.0);
