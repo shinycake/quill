@@ -1,6 +1,6 @@
-//! The thumbnail strip under an album in the viewer (tdesktop
-//! `GroupThumbs`, media_view_group_thumbs.cpp). Pure layout: which items of
-//! the current item's album show, where each thumb sits and how wide it is,
+//! The thumbnail strip under an album or a profile photo gallery in the
+//! viewer (tdesktop `GroupThumbs`, media_view_group_thumbs.cpp). Pure
+//! layout: which items of the current item's group show, where each thumb sits and how wide it is,
 //! and the frames of the short slide when the current item changes.
 //!
 //! x is measured from the strip's centre. The current thumb is centred on
@@ -11,7 +11,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::MediaViewerItem;
-use crate::ids::MessageId;
+use crate::ids::{FileId, MessageId};
 
 /// Thumb height (`mediaviewGroupHeight`).
 pub const GROUP_THUMB_HEIGHT: f32 = 80.0;
@@ -38,6 +38,23 @@ pub enum ViewerGroup {
     Album(i64),
     /// A bought paid-media album: one message holding every item.
     PaidMedia(MessageId),
+    /// A user's, group's or channel's photos: the viewer pages over one
+    /// gallery, so every item is in it (tdesktop's `ComputeContext` gives
+    /// every photo of `UserPhotosSlice`, and every `ChatPhoto` entry, the
+    /// peer as context).
+    ProfilePhotos,
+}
+
+/// The files a thumb draws, most preferred first. A profile photo's thumb
+/// is its small size (tdesktop `PhotoSize::Thumbnail`), which
+/// `profile_photo_items` lists after the full one; an album item's are its
+/// display candidates.
+pub fn thumb_file_ids(item: &MediaViewerItem) -> Vec<FileId> {
+    let mut ids = item.display_file_ids.clone();
+    if item.group == Some(ViewerGroup::ProfilePhotos) {
+        ids.reverse();
+    }
+    ids
 }
 
 /// One thumb of a laid-out strip.
@@ -444,6 +461,69 @@ mod tests {
             strip_frames(Some(&other_album), &to, 0.0),
             strip_frames(None, &to, 0.0)
         );
+    }
+
+    fn gallery(count: i64) -> Vec<MediaViewerItem> {
+        let photos: Vec<crate::state::ProfilePhoto> = (0..count)
+            .map(|n| crate::state::ProfilePhoto {
+                id: 900 + n,
+                added_date: 0,
+                thumb_file_id: (10 * n + 1) as i32,
+                full_file_id: (10 * n + 2) as i32,
+                width: 640,
+                height: 640,
+            })
+            .collect();
+        crate::media_viewer::profile_photo_items(&photos, crate::ids::ChatId(-100))
+    }
+
+    #[test]
+    fn a_profile_gallery_is_one_strip_of_square_thumbs() {
+        let items = gallery(3);
+        let strip = group_strip(&items, 0, WIDE).expect("a strip");
+        assert_eq!(strip.group, ViewerGroup::ProfilePhotos);
+        assert_eq!((strip.start, positions(&strip)), (0, vec![0, 1, 2]));
+        let [current, second, third] = strip.thumbs.as_slice() else {
+            panic!("three thumbs");
+        };
+        assert!(
+            current.current && current.width == GROUP_THUMB_HEIGHT,
+            "square"
+        );
+        assert!((current.left + 40.0).abs() < 0.01, "centred");
+        assert!((second.left - (current.left + current.width) - 15.0).abs() < 0.01);
+        assert!((third.left - (second.left + second.width) - 6.0).abs() < 0.01);
+        assert_eq!(group_strip(&gallery(1), 0, WIDE), None, "a lone photo");
+    }
+
+    #[test]
+    fn a_long_gallery_shows_what_fits_and_grows_with_the_next_page() {
+        let mut items = gallery(10);
+        let end = group_strip(&items, 9, WIDE).expect("a strip");
+        assert_eq!(positions(&end), (2..=9).collect::<Vec<_>>(), "loaded edge");
+        items.extend(gallery(20).into_iter().skip(10));
+        let paged = group_strip(&items, 9, WIDE).expect("a strip");
+        assert_eq!(positions(&paged), (2..=16).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_profile_thumb_draws_the_small_size_and_an_album_its_own_files() {
+        let photo = gallery(1).remove(0);
+        assert_eq!(thumb_file_ids(&photo), vec![FileId(1), FileId(2)]);
+        let part = album(1, 9).remove(0);
+        assert_eq!(thumb_file_ids(&part), part.display_file_ids);
+    }
+
+    #[test]
+    fn the_strip_downloads_the_small_size_of_the_photos_it_shows() {
+        use crate::media_viewer::MediaViewer;
+        let viewer = MediaViewer::open_profile(gallery(30), 15, 30);
+        let ids: Vec<i32> = (8..=22).map(|n| 10 * n + 1).collect();
+        let want: Vec<FileId> = ids.into_iter().map(FileId).collect();
+        assert_eq!(viewer.strip_downloads(WIDE), want);
+        let album_viewer = MediaViewer::open(album(3, 9), 0);
+        assert!(album_viewer.strip_downloads(WIDE).is_empty());
+        assert!(MediaViewer::closed().strip_downloads(WIDE).is_empty());
     }
 
     #[test]

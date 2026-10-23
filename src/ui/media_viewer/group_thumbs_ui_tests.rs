@@ -1,10 +1,15 @@
-//! The album strip in the real viewer: one thumb per album item with the
-//! current one wider, a click on a thumb opens its item, the strip keeps
-//! the wheel, and a lone photo has no strip (needs the `demo-capture`
-//! feature for gpui-kit's test support).
+//! The thumbnail strip in the real viewer: one thumb per album item with
+//! the current one wider, a click on a thumb opens its item, the strip
+//! keeps the wheel, a lone photo has no strip, and a group's photo gallery
+//! has one too (needs the `demo-capture` feature for gpui-kit's test
+//! support).
 use super::navigation::wheel_ui_tests::{current, new_app, notch, open, settle};
 use crate::ui::app::QuillApp;
-use gpui_kit::{Entity, Modifiers, TestAppContext, VisualTestContext};
+use crate::ui::screenshot_demo::ScreenshotDemo;
+use crate::ui::shell::QuillShell;
+use gpui_kit::component::Root;
+use gpui_kit::test::TestQueryExt;
+use gpui_kit::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, px, size};
 use quill::ids::{FileId, MessageId};
 use quill::telegram::envelope::{MessageContent, PhotoContent, PhotoSizeView};
 use std::time::Duration;
@@ -140,4 +145,82 @@ fn the_strip_follows_the_arrows_and_a_lone_photo_has_none(cx: &mut TestAppContex
     open(&app, vcx, 8950);
     assert_eq!(current(&app, vcx), 8950);
     assert!(vcx.debug_bounds("media-viewer-group-thumbs").is_none());
+}
+
+/// The `ready-info-group-photos` demo with its group's photos open in the
+/// viewer from the info panel's avatar.
+fn group_photos(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+    cx.update(gpui_kit::init);
+    let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let slot_in = slot.clone();
+    let demo = ScreenshotDemo::named("ready-info-group-photos");
+    let handle = cx.open_window(size(px(1200.), px(900.)), move |window, cx| {
+        let view = cx.new(|cx| QuillApp::new_with_demo(window, cx, None, Some(demo)));
+        let shell = cx.new(|_| QuillShell::new(view.clone()));
+        *slot_in.borrow_mut() = Some(view);
+        Root::new(shell, window, cx)
+    });
+    let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+    settle(&mut vcx);
+    let Some(app) = slot.borrow().clone() else {
+        panic!("the window opened");
+    };
+    let avatar = vcx.update(|window, _| window.find_by_label("View photos").bounds());
+    vcx.simulate_click(avatar.center(), Modifiers::default());
+    settle(&mut vcx);
+    (app, vcx)
+}
+
+fn header(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<String> {
+    app.read_with(vcx, |app, _| app.profile_photo_facts().map(|f| f.header))
+}
+
+/// The pointer rests on the viewer's controls, as it does on the way to a
+/// thumb. The strip hides with the other controls after 1.1 s of idle
+/// time measured on the wall clock, which a slow runner spends on the
+/// first frames' image decoding alone.
+fn hold_controls(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    app.update(vcx, |app, cx| app.viewer_note_activity(true, cx));
+    settle(vcx);
+}
+
+/// 1100 x 739 photos at 80 high.
+const PHOTO_WIDTH: f32 = 80.0 * 1100.0 / 739.0;
+
+#[gpui_kit::test]
+fn a_group_photo_gallery_shows_a_strip_and_a_thumb_opens_its_photo(cx: &mut TestAppContext) {
+    let (app, mut vcx) = group_photos(cx);
+    let vcx = &mut vcx;
+    assert_eq!(current(&app, vcx), 9303);
+    hold_controls(&app, vcx);
+    let thumbs: Vec<_> = THUMBS
+        .iter()
+        .map(|id| vcx.debug_bounds(id).expect("a thumb per photo"))
+        .collect();
+    assert!(vcx.debug_bounds("media-viewer-group-thumb-4").is_none());
+    assert!((f32::from(thumbs[0].size.width) - PHOTO_WIDTH).abs() < 1.0);
+    assert_eq!(f32::from(thumbs[2].size.width), 56.0);
+
+    let third = vcx.debug_bounds(THUMBS[2]).expect("thumb 3");
+    vcx.simulate_click(third.center(), Modifiers::default());
+    slide(vcx);
+    hold_controls(&app, vcx);
+    assert_eq!(current(&app, vcx), 9301, "the oldest photo");
+    assert_eq!(header(&app, vcx).as_deref(), Some("Photo 3 of 3"));
+    let third = vcx.debug_bounds(THUMBS[2]).expect("thumb 3");
+    assert!((f32::from(third.size.width) - PHOTO_WIDTH).abs() < 1.0);
+    let band = vcx
+        .debug_bounds("media-viewer-bottom-band")
+        .expect("the band");
+    assert!(
+        (f32::from(third.center().x) - f32::from(band.center().x)).abs() < 1.0,
+        "the strip slid the new current thumb to the centre"
+    );
+
+    app.update_in(vcx, |app, _, cx| app.step_media_viewer(-1, cx));
+    slide(vcx);
+    hold_controls(&app, vcx);
+    assert_eq!(header(&app, vcx).as_deref(), Some("Photo 2 of 3"));
+    let second = vcx.debug_bounds(THUMBS[1]).expect("thumb 2");
+    assert!((f32::from(second.size.width) - PHOTO_WIDTH).abs() < 1.0);
 }

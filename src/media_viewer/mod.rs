@@ -50,7 +50,7 @@ pub use files::{
 };
 pub use group_thumbs::{
     GROUP_STRIP_PADDING, GROUP_THUMB_HEIGHT, GROUP_THUMB_SLIDE_MS, GROUP_THUMB_WIDTH_MAX,
-    GroupStrip, GroupThumb, ThumbFrame, ViewerGroup, group_strip, strip_frames,
+    GroupStrip, GroupThumb, ThumbFrame, ViewerGroup, group_strip, strip_frames, thumb_file_ids,
 };
 pub use items::{
     collect_media_items, poll_option_viewer_item, profile_photo_items, timed_viewer_item,
@@ -144,6 +144,11 @@ pub enum ViewerSource {
 /// Items left before the loaded edge at which the viewer asks for the
 /// next older Shared Media page.
 pub const VIEWER_PRELOAD_AHEAD: usize = 6;
+
+/// Profile photos the viewer keeps loaded past the current one: fewer and
+/// it asks for the next page (tdesktop `kIdsLimit`, the slice it builds
+/// around the open photo, which also feeds the thumbnail strip).
+pub const VIEWER_PROFILE_PHOTOS_AROUND: usize = 48;
 
 /// One openable media item.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -249,7 +254,7 @@ impl MediaViewer {
     pub fn wants_more_photos(&self) -> bool {
         self.is_open()
             && self.source == ViewerSource::Profile
-            && self.index + VIEWER_PRELOAD_AHEAD >= self.items.len()
+            && self.index + VIEWER_PROFILE_PHOTOS_AROUND >= self.items.len()
             && self.total > self.items.len()
     }
 
@@ -367,6 +372,26 @@ impl MediaViewer {
     /// current strip slides from (`None` before any step).
     pub fn group_strip_before(&self, available: f32) -> Option<GroupStrip> {
         group_strip(&self.items, self.arrived_from?, available)
+    }
+
+    /// The files the strip laid out in `available` points still has to
+    /// fetch: the small size of each profile photo it shows (tdesktop's
+    /// `GroupThumbs::Thumb` asks for `PhotoSize::Thumbnail`). An album's
+    /// thumbs draw what its chat already loaded, so it asks for none.
+    pub fn strip_downloads(&self, available: f32) -> Vec<FileId> {
+        let Some(strip) = self.group_strip(available) else {
+            return Vec::new();
+        };
+        if strip.group != ViewerGroup::ProfilePhotos {
+            return Vec::new();
+        }
+        strip
+            .thumbs
+            .iter()
+            .filter_map(|thumb| self.items.get(strip.start.saturating_add(thumb.position)))
+            .filter_map(|item| thumb_file_ids(item).first().copied())
+            .filter(|id| id.0 != 0)
+            .collect()
     }
 
     /// Changes with every step, to key the strip's slide.
@@ -603,15 +628,23 @@ mod tests {
         let mut viewer = MediaViewer::open_profile(profile_items(0..100), 0, 140);
         assert_eq!(viewer.position(), Some((1, 140)));
         assert!(!viewer.wants_more_photos(), "far from the loaded end");
-        for _ in 0..(100 - VIEWER_PRELOAD_AHEAD) {
+        for _ in 0..(100 - VIEWER_PROFILE_PHOTOS_AROUND - 1) {
             viewer.next();
         }
-        assert_eq!(viewer.position(), Some((101 - VIEWER_PRELOAD_AHEAD, 140)));
+        assert!(!viewer.wants_more_photos(), "48 still loaded past it");
+        viewer.next();
+        assert_eq!(
+            viewer.position(),
+            Some((101 - VIEWER_PROFILE_PHOTOS_AROUND, 140))
+        );
         assert!(viewer.wants_more_photos(), "within the preload margin");
         // The next page lands: appended after the shown ones.
         assert_eq!(viewer.extend_photos(profile_items(0..140), 140), 40);
         assert_eq!(viewer.len(), 140);
-        assert_eq!(viewer.position(), Some((101 - VIEWER_PRELOAD_AHEAD, 140)));
+        assert_eq!(
+            viewer.position(),
+            Some((101 - VIEWER_PROFILE_PHOTOS_AROUND, 140))
+        );
         assert!(!viewer.wants_more_photos(), "everything is loaded");
         assert_eq!(viewer.current().map(|i| i.chat_id), Some(ChatId(-100)));
     }

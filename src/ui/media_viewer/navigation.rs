@@ -219,6 +219,7 @@ impl QuillApp {
         self.viewer.extra.inactive_paused = false;
         self.stop_viewer_video();
         self.ensure_viewer_download(cx);
+        self.download_viewer_strip_thumbs();
         self.maybe_autoplay_viewer_video(cx);
         // What TDLib allows for this message (Delete in the toolbar).
         // Profile photos and poll option media are not messages; an

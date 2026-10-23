@@ -87,6 +87,9 @@ pub(super) struct ViewerExtra {
     pub share_at: Option<(ChatId, MessageId, i32)>,
     /// Turns of videos rotated in this run, by `(chat, message)`.
     pub rotations: HashMap<(i64, i64), u8>,
+    /// The width the last frame laid the thumbnail strip out in, which
+    /// says which profile photo thumbs to fetch.
+    pub strip_lane: Option<f32>,
     /// The caption's collapsed / expanded state.
     pub(in crate::ui) caption: caption::ViewerCaption,
 }

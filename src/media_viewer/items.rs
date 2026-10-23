@@ -14,7 +14,7 @@ pub fn profile_photo_items<'a>(
     photos
         .into_iter()
         .map(|photo| MediaViewerItem {
-            group: None,
+            group: Some(ViewerGroup::ProfilePhotos),
             file_name: None,
             chat_id,
             message_id: MessageId(photo.id),

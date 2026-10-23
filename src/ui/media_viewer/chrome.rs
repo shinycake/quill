@@ -4,7 +4,7 @@
 //! idle timer (tdesktop `_fullScreenVideo`).
 #![deny(clippy::indexing_slicing)]
 
-use super::geometry::{CAPTION_GAP, GROUP_STRIP_ROOM};
+use super::geometry::{CAPTION_GAP, GROUP_STRIP_ROOM, lane_width};
 use super::layer::ViewerGeometry;
 use super::*;
 use crate::ui::video_player::controls::hide_cursor;
@@ -125,6 +125,7 @@ impl QuillApp {
             )
         });
         let viewport = window.viewport_size();
+        self.viewer.extra.strip_lane = Some(lane_width(f32::from(viewport.width)));
         let group_thumbs = self.viewer_group_thumbs(f32::from(viewport.width), cx);
         // An expanded caption stops short of the top bar with the strip
         // under it too.
