@@ -57,6 +57,11 @@ pub(in crate::ui) fn frame_bg() -> Hsla {
     rgb(BG).into()
 }
 
+/// A chosen heart reaction.
+pub(in crate::ui) fn heart() -> Hsla {
+    rgb(0xff5a6e).into()
+}
+
 /// The gold of the Stars icon on the Stars button and in the toast.
 pub(in crate::ui) fn stars_gold() -> Hsla {
     rgb(0xffb800).into()
@@ -70,6 +75,17 @@ pub(in crate::ui) fn ghost(cx: &App) -> ButtonCustomVariant {
         .foreground(fg())
         .hover(hsla(0., 0., 1., 0.1))
         .active(hsla(0., 0., 1., 0.16))
+        .shadow(false)
+}
+
+/// A round icon button over the story's picture: a dark wash so it reads on
+/// any photo, white icon.
+pub(in crate::ui) fn over_media(cx: &App) -> ButtonCustomVariant {
+    ButtonCustomVariant::new(cx)
+        .color(hsla(0., 0., 0., 0.4))
+        .foreground(fg())
+        .hover(hsla(0., 0., 0., 0.6))
+        .active(hsla(0., 0., 0., 0.7))
         .shadow(false)
 }
 

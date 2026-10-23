@@ -819,6 +819,10 @@ pub(in crate::ui) mod chrome;
 mod demo;
 mod ensure_story_download;
 mod follow;
+mod icon_chrome;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod icon_chrome_tests;
 mod live_comments;
 mod live_composer;
 #[cfg(feature = "demo-capture")]

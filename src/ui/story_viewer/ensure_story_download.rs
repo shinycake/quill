@@ -160,29 +160,6 @@ impl QuillApp {
         }
     }
 
-    /// Phase 9.2: the viewer's own-story interaction counters
-    /// (`storyInteractionInfo`, `schema/td_api.tl:6712`) — only rendered
-    /// when TDLib populated them (`story.can_get_interactions`) and at
-    /// least one counter is nonzero.
-    pub(in crate::ui) fn story_viewer_counts(&self) -> Option<String> {
-        let story = self.current_story()?;
-        if !story.can_get_interactions {
-            return None;
-        }
-        let info = story.interaction_info.filter(|info| info.any_nonzero())?;
-        let mut parts = Vec::new();
-        if info.view_count > 0 {
-            parts.push(format!("👁 {}", info.view_count));
-        }
-        if info.reaction_count > 0 {
-            parts.push(format!("❤️ {}", info.reaction_count));
-        }
-        if info.forward_count > 0 {
-            parts.push(format!("↩ {}", info.forward_count));
-        }
-        Some(parts.join(" · "))
-    }
-
     /// Phase 9.2+: the reaction picker popover fed by
     /// `getStoryAvailableReactions` (`availableReactions`,
     /// `schema/td_api.tl:13802`). Emoji taps set the reaction via
@@ -295,243 +272,13 @@ impl QuillApp {
         picker.into_any_element()
     }
 
-    /// Phase 9.2: reaction / reply / delete affordances under the viewer
-    /// visual, plus the reaction picker popover and the reply input row.
-    /// The quick-react toggles ❤; Reply is gated on
-    /// `story.can_be_replied`; Delete on `story.can_be_deleted`.
-    /// Phase 9.5: Viewers (own stories, `can_get_interactions`), Report
-    /// (other people's stories) and the Stealth toggle join the row.
+    /// The panels the bottom bar and the ⋯ menu open under the viewer: the
+    /// reaction picker, the viewers list, statistics, the report flow, the
+    /// cover and privacy editors and the management status line.
     pub(in crate::ui) fn story_action_row(&self, cx: &mut Context<Self>) -> AnyElement {
-        let story = self.current_story();
-        let chosen = story
-            .as_ref()
-            .and_then(|story| story.chosen_reaction_emoji.clone());
-        let can_reply = story.as_ref().is_some_and(|story| story.can_be_replied);
-        let can_delete = story.as_ref().is_some_and(|story| story.can_be_deleted);
-        // Phase 9.5: posted-story management gates (schema 1.8.67,
-        // `td_api.tl:6742`) — TDLib's flags are authoritative, so these
-        // naturally cover own stories and admin-manageable
-        // channel/group stories.
-        let can_edit = story.as_ref().is_some_and(|story| story.can_be_edited);
-        let can_set_privacy = story
-            .as_ref()
-            .is_some_and(|story| story.can_set_privacy_settings);
-        let can_forward = story.as_ref().is_some_and(|story| story.can_be_forwarded);
-        // Phase 9.5 (review fix-up): one shared `story_manage.pending`
-        // slot — disable the management buttons while a call is in
-        // flight so two ops can't overwrite each other's state.
-        let manage_busy = self.session().is_some_and(|s| s.stories.manage.pending);
-        let is_video = self
-            .stories
-            .viewer
-            .current()
-            .is_some_and(|item| matches!(item.kind, StoryViewerKind::Video));
-        let quick_label = if chosen.as_deref() == Some("❤") {
-            "❤️ ✓"
-        } else {
-            "❤️"
-        };
-        let mut row = div()
-            .flex()
-            .flex_row()
-            .flex_wrap()
-            .gap_2()
-            .items_center()
-            .justify_center();
-        row = row.child(
-            Button::new("story-quick-react")
-                .label(quick_label)
-                .custom(chrome::ghost(cx))
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.quick_react_story(cx);
-                })),
-        );
-        // Phase 9.2+: the viewer's chosen custom-emoji / paid reaction.
-        // Emoji chosen state already shows on the quick-react button;
-        // custom emoji renders its sticker (✨ fallback while loading),
-        // paid renders ⭐.
-        if let Some(extra) = story.as_ref().and_then(|story| story.chosen_reaction_extra) {
-            let badge: AnyElement = match extra {
-                StoryChosenExtraReaction::CustomEmoji(id) => {
-                    match self.story_custom_emoji_path(id) {
-                        Some(path) => img(path)
-                            .id(("story-chosen-custom-emoji", id as u64))
-                            .w(px(28.))
-                            .h(px(28.))
-                            .aspect_ratio(px(28.) / px(28.))
-                            .object_fit(ObjectFit::Contain)
-                            .with_fallback(|| div().text_xl().child("✨").into_any_element())
-                            .into_any_element(),
-                        None => div().text_xl().child("✨").into_any_element(),
-                    }
-                }
-                StoryChosenExtraReaction::Paid => div().text_xl().child("⭐").into_any_element(),
-            };
-            row = row.child(badge);
-        }
-        // Phase 9.7: entry point to the chat story page (albums, chat-page
-        // stories, archive) for the current story's chat.
-        row = row.child(
-            Button::new("story-open-page")
-                .label(tr(keys::Q_MEDIA_STORIES))
-                .ghost()
-                .text_color(rgb(0xffffff))
-                .on_click(cx.listener(|this, _, window, cx| {
-                    if let Some(item) = this.stories.viewer.current() {
-                        let chat_id = item.chat_id;
-                        this.close_story_viewer(cx);
-                        this.open_story_page(chat_id, window, cx);
-                    }
-                })),
-        );
-        row = row.child(
-            Button::new("story-react-picker")
-                .label(tr(keys::Q_MEDIA_REACT))
-                .custom(chrome::ghost(cx))
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.toggle_story_reaction_picker(cx);
-                })),
-        );
-        if can_reply {
-            row = row.child(
-                Button::new("story-reply")
-                    .label(tr(keys::Q_MEDIA_REPLY))
-                    .custom(chrome::ghost(cx))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.toggle_story_reply(cx);
-                    })),
-            );
-        }
-        if can_delete {
-            row = row.child(
-                Button::new("story-delete")
-                    .label(tr(keys::BOX_DELETE))
-                    .custom(chrome::ghost(cx))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.delete_story_viewer(cx);
-                    })),
-            );
-        }
-        // Phase 9.5: Viewers on own stories (`can_get_interactions` —
-        // `getStoryInteractions` only serves stories posted on behalf of
-        // the current user); Report on other people's stories.
-        let can_get_interactions = story
-            .as_ref()
-            .is_some_and(|story| story.can_get_interactions);
-        if can_get_interactions {
-            row = row.child(
-                Button::new("story-viewers")
-                    .label(tr(keys::Q_MEDIA_VIEWERS))
-                    .custom(chrome::ghost(cx))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.toggle_story_viewers(cx);
-                    })),
-            );
-        }
-        if story.as_ref().is_some_and(|story| story.can_get_statistics) {
-            row = row.child(
-                Button::new("story-statistics")
-                    .label(tr(keys::Q_MEDIA_STATISTICS))
-                    .custom(chrome::ghost(cx))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.toggle_story_stats(cx);
-                    })),
-            );
-        }
-        if let Some(query) = self.viewer_story_search_query() {
-            row = row.child(
-                Button::new("story-search-here")
-                    .label(tr(keys::Q_MEDIA_STORIES_HERE))
-                    .custom(chrome::ghost(cx))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.search_stories_from_viewer(query.clone(), window, cx);
-                    })),
-            );
-        }
-        if !can_delete {
-            row = row.child(
-                Button::new("story-report")
-                    .label(tr(keys::Q_MEDIA_REPORT))
-                    .custom(chrome::ghost(cx))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.toggle_story_report(cx);
-                    })),
-            );
-        }
-        // Phase 9.5: stealth toggle — the label reflects
-        // `updateStoryStealthMode` state.
-        let stealth_label = self.story_stealth_label();
-        row = row.child(
-            Button::new("story-stealth")
-                .label(stealth_label)
-                .custom(chrome::ghost(cx))
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.toggle_story_stealth(cx);
-                })),
-        );
-        // Phase 9.5: posted-story management — Edit opens the composer
-        // in edit mode, Cover edits the video cover frame, Privacy
-        // opens the privacy editor, Repost opens the composer with
-        // `from_story_full_id` set.
-        if can_edit {
-            row = row.child(
-                Button::new("story-edit")
-                    .label(tr(keys::Q_MEDIA_EDIT))
-                    .custom(chrome::ghost(cx))
-                    .disabled(manage_busy)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        let Some(item) = this.stories.viewer.current().cloned() else {
-                            return;
-                        };
-                        this.open_story_edit(item.chat_id.0, item.story_id, window, cx);
-                    })),
-            );
-            if is_video {
-                row = row.child(
-                    Button::new("story-cover")
-                        .label(tr(keys::Q_MEDIA_COVER))
-                        .custom(chrome::ghost(cx))
-                        .disabled(manage_busy)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            let Some(item) = this.stories.viewer.current().cloned() else {
-                                return;
-                            };
-                            this.toggle_story_cover_edit(item.chat_id.0, item.story_id, cx);
-                        })),
-                );
-            }
-        }
-        if can_set_privacy {
-            row = row.child(
-                Button::new("story-privacy")
-                    .label(tr(keys::Q_MEDIA_PRIVACY))
-                    .custom(chrome::ghost(cx))
-                    .disabled(manage_busy)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.toggle_story_privacy_edit(window, cx);
-                    })),
-            );
-        }
-        if can_forward {
-            row = row.child(
-                Button::new("story-repost")
-                    .label(tr(keys::Q_MEDIA_REPOST))
-                    .custom(chrome::ghost(cx))
-                    .disabled(manage_busy)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        let Some(item) = this.stories.viewer.current().cloned() else {
-                            return;
-                        };
-                        this.open_story_repost(item.chat_id.0, item.story_id, window, cx);
-                    })),
-            );
-        }
-        let mut column = div().flex().flex_col().gap_2().items_center().child(row);
+        let mut column = div().flex().flex_col().gap_2().items_center();
         if self.stories.reaction_picker_open {
             column = column.child(self.story_reaction_picker(cx));
-        }
-        if self.stories.reply_open {
-            column = column.child(self.story_reply_row(cx));
         }
         if self.stories.viewers_open {
             column = column.child(self.story_viewers_panel(cx));
@@ -581,6 +328,8 @@ impl QuillApp {
             .max_w(px(360.))
             .max_h(px(260.))
             .overflow_y_scroll()
+            .track_scroll(&self.stories.viewers_scroll)
+            .on_scroll_wheel(cx.listener(|this, _, _, cx| this.story_viewers_scrolled(cx)))
             .p_2()
             .rounded_md()
             .bg(bg_canvas())
@@ -640,20 +389,19 @@ impl QuillApp {
         if let Some(error) = state.error.clone() {
             panel = panel.child(div().text_sm().text_color(danger()).child(error));
         }
-        if state.loading {
+        if state.loading || !state.next_offset.is_empty() {
             panel = panel.child(
                 div()
+                    .id("story-viewers-loading-more")
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .gap_2()
+                    .py_2()
                     .text_sm()
                     .text_color(text_muted())
+                    .child(gpui_kit::component::spinner::Spinner::new().small())
                     .child(tr(keys::Q_MEDIA_LOADING_VIEWERS)),
-            );
-        } else if !state.next_offset.is_empty() {
-            panel = panel.child(
-                Button::new("story-viewers-load-more")
-                    .label(tr(keys::Q_MEDIA_LOAD_MORE))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.load_more_story_viewers(cx);
-                    })),
             );
         } else if state.rows.is_empty() && !state.loading {
             panel = panel.child(

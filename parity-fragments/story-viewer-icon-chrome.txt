@@ -1,0 +1,2 @@
+parity:stories-viewer-icon-chrome
+parity:stories-viewers-scroll-load
