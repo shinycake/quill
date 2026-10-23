@@ -1,0 +1,13 @@
+// Send Location's map picker (tdesktop ui/controls/location_picker.cpp).
+"lng_maps_point" = "Location";
+"lng_maps_point_send" = "Send This Location";
+"lng_maps_or_choose" = "Or choose a venue";
+"lng_maps_places_in_area" = "Places in this area";
+"lng_maps_no_places" = "No places found";
+"lng_maps_choose_to_search" = "Choose location to see places nearby.";
+"lng_maps_venues_source" = "Powered by Foursquare";
+"qll_location_denied" = "Quill isn't allowed to use your location. Turn it on in your system's privacy settings, or drag the map to a place.";
+"qll_location_unavailable" = "Your location isn't available right now. Drag the map to a place.";
+"qll_location_my_location" = "Show my location";
+"qll_location_map" = "Map. Drag it to move the pin.";
+"qll_location_close_search" = "Close search";
