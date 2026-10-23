@@ -167,7 +167,8 @@ impl QuillApp {
     /// A draft another client saved for the slot this composer shows goes
     /// into the field, unless the user has unsaved changes there or is
     /// editing a message (tdesktop `HistoryWidget::applyCloudDraft`). Runs
-    /// once per remote change, in the scope of the window it updates.
+    /// once per remote change, in the scope of the window it updates, and
+    /// acts only when that slot's own draft changed.
     pub(super) fn adopt_remote_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(revision) = self.session().map(Session::remote_draft_revision) else {
             return;
@@ -180,18 +181,43 @@ impl QuillApp {
         let Some(chat_id) = self.open_chat_id() else {
             return;
         };
+        let Some((topic, draft, held)) = self.session().map(|session| {
+            let topic = session.open_draft_topic(chat_id);
+            let draft = session.draft_for(chat_id, topic).cloned();
+            let held = session.draft_is_dirty(chat_id, topic)
+                || !session.accepts_composer_draft(chat_id, topic);
+            (topic, draft, held)
+        }) else {
+            return;
+        };
+        // A change to the draft of the slot the field was filled from
+        // (`restore_open_draft`) replaces it. A slot the field was not
+        // filled from is only filled while the field is empty, so text a
+        // link put there stays.
+        let previous = self
+            .composer_ui
+            .shown_draft
+            .replace((chat_id, topic, draft.clone()));
+        if held {
+            return;
+        }
         let reply = self.composer_ui.reply().map(|reply| reply.message_id);
         let markup = self.composer_markup(cx);
         let shown = draft_text_to_store(&markup, reply.is_some());
-        let stale = self.session().is_some_and(|session| {
-            let topic = session.open_draft_topic(chat_id);
-            let draft = session.draft_for(chat_id, topic);
-            !session.draft_is_dirty(chat_id, topic)
-                && session.accepts_composer_draft(chat_id, topic)
-                && (draft.map(|draft| draft.text.as_str()) != shown
-                    || draft.and_then(|draft| draft.reply_to_message_id) != shown.and(reply))
-        });
-        if stale {
+        let take = match previous {
+            Some((shown_chat, shown_topic, shown_draft))
+                if shown_chat == chat_id && shown_topic == topic =>
+            {
+                shown_draft != draft
+            }
+            _ => shown.is_none(),
+        };
+        if !take {
+            return;
+        }
+        if draft.as_ref().map(|draft| draft.text.as_str()) != shown
+            || draft.and_then(|draft| draft.reply_to_message_id) != shown.and(reply)
+        {
             self.restore_open_draft(window, cx);
         }
     }
@@ -315,6 +341,9 @@ impl QuillApp {
         let Some((draft, preview)) = restored else {
             return;
         };
+        self.composer_ui.shown_draft = self
+            .session()
+            .map(|session| (chat_id, session.open_draft_topic(chat_id), draft.clone()));
         let text = draft
             .as_ref()
             .map(|draft| draft.text.clone())

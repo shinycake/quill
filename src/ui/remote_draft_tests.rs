@@ -161,8 +161,14 @@ fn a_draft_for_another_chat_leaves_the_composer_alone(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     let other = other_chat(&app, vcx);
+    // Text a link put in the field is not saved yet; it stays.
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.set_composer_markup("from a link", window, cx)
+        });
+    });
     remote_draft(&app, vcx, other, Some("for the other chat"));
-    assert_eq!(composer_text(&app, vcx), "");
+    assert_eq!(composer_text(&app, vcx), "from a link");
     assert_eq!(
         stored_draft(&app, vcx, other).as_deref(),
         Some("for the other chat")

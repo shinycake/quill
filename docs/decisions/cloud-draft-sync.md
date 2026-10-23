@@ -26,6 +26,12 @@ user is editing a message or has unsaved changes in that slot.
   runs in the frame upkeep and in each chat window's render. When the
   revision moved and the composer differs from the slot's draft, it calls
   `restore_open_draft`.
+- Each composer also records the slot and draft it was last filled from
+  (`ComposerUi::shown_draft`, set by `restore_open_draft`). A remote change
+  replaces the field only when that slot's own draft changed. A slot the
+  field was not filled from is filled only while the field is empty. Text
+  a link put in the composer, which is not saved yet, survives drafts
+  arriving for other chats.
 - When the composer already shows the draft, nothing is restored, so the
   caret stays where it is.
 

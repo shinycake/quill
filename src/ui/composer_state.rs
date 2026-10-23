@@ -5,8 +5,10 @@
 use super::*;
 use quill::composer::ComposerEdit;
 use quill::composer::ComposerReplyTo;
+use quill::composer::DraftTopic;
 use quill::ids::ChatId;
 use quill::ids::MessageId;
+use quill::telegram::envelope::ChatDraft;
 
 /// A draft to clear once a send is acknowledged. `sent` is the composer
 /// markup that send took: when set, the stored draft goes only while it
@@ -118,6 +120,10 @@ pub(crate) struct ComposerUi {
     /// The session's remote draft revision this composer last checked
     /// (`QuillApp::adopt_remote_draft`).
     pub(super) remote_draft_seen: u64,
+    /// The slot this composer last showed and its stored draft then. Only
+    /// a change to that draft replaces the field: text a link put in the
+    /// composer survives drafts arriving for other chats.
+    pub(super) shown_draft: Option<(ChatId, DraftTopic, Option<ChatDraft>)>,
     /// Own-message edit (tdesktop `FieldHeader::editMessage`).
     pub(super) pending_edit: Option<ComposerEdit>,
     /// The "Cancel editing?" box is open (`DialogKind::CancelEditConfirm`).
@@ -214,6 +220,7 @@ impl ComposerUi {
             clear_draft_on_success: None,
             draft_restore_pending: false,
             remote_draft_seen: 0,
+            shown_draft: None,
             pending_edit: None,
             cancel_edit_confirm: false,
             placeholder_shown: None,
