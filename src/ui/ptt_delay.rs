@@ -9,6 +9,7 @@ use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::*;
 use quill::calls::ptt::{DELAY_STEPS, delay_by_index, delay_label, index_for_delay};
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// Create the slider on first use, seeded from the saved delay.
@@ -65,7 +66,7 @@ impl QuillApp {
                 div()
                     .id("call-pref-ptt-delay-slider")
                     .role(Role::Group)
-                    .aria_label("Push-to-talk release delay")
+                    .aria_label(tr(keys::Q_LEFTOVERS_PUSH_TO_TALK_RELEASE_DELAY))
                     .child(Slider::new(slider).bg(cx.theme().primary)),
             );
         }

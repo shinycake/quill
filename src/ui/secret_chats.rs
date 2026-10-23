@@ -190,7 +190,10 @@ impl QuillApp {
             self.connection.set_note(if secs == 0 {
                 StatusNote::silent(tr(keys::Q_OPS_TIMER_OFF))
             } else {
-                StatusNote::silent(format!("timer {}", format_ttl_setting(secs)))
+                StatusNote::silent(tr_with(
+                    keys::Q_LEFTOVERS_TIMER_SET,
+                    &[("time", &format_ttl_setting(secs))],
+                ))
             });
             cx.notify();
         }

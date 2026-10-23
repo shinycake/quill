@@ -207,9 +207,9 @@ impl QuillApp {
                                 .font_semibold()
                                 .child(tr(keys::GIFT_BUY_PRICE_CHANGE_TITLE)),
                         )
-                        .child(div().text_sm().child(format!(
-                            "This gift price was changed and now is {}. Do you still want to buy?",
-                            price_text(changed)
+                        .child(div().text_sm().child(tr_with(
+                            keys::GIFT_BUY_PRICE_CHANGE_TEXT,
+                            &[("price", &(price_text(changed)).to_string())],
                         )));
                 } else if buy.recipient.is_self {
                     body = body.child(div().text_sm().child(tr_with(
@@ -217,9 +217,13 @@ impl QuillApp {
                         &[("name", &name.to_string()), ("price", &shown.to_string())],
                     )));
                 } else {
-                    body = body.child(div().text_sm().child(format!(
-                        "Do you want to buy {name} for {shown} and gift it to {}?",
-                        buy.recipient.name
+                    body = body.child(div().text_sm().child(tr_with(
+                        keys::GIFT_BUY_RESALE_CONFIRM,
+                        &[
+                            ("name", &name.to_string()),
+                            ("price", &shown.to_string()),
+                            ("user", &buy.recipient.name.to_string()),
+                        ],
                     )));
                 }
                 // The other currency's amount (tdesktop "Equals to").
@@ -234,9 +238,12 @@ impl QuillApp {
                     ));
                 }
                 if let Some(balance) = session.payments.hub.balance {
-                    body = body.child(div().text_xs().text_color(muted).child(format!(
-                        "Your balance is \u{2605}{}.",
-                        quill::premium_hub::group_digits(balance.stars)
+                    body = body.child(div().text_xs().text_color(muted).child(tr_with(
+                        keys::Q_LEFTOVERS_STARS_BALANCE_IS,
+                        &[(
+                            "amount",
+                            &(quill::premium_hub::group_digits(balance.stars)).to_string(),
+                        )],
                     )));
                 }
             }

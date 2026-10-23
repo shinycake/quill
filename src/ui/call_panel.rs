@@ -803,12 +803,15 @@ impl Render for CallPanel {
                         .gap(px(4.))
                         .children(snap.emojis.iter().map(|emoji| div().child(emoji.clone())))
                         .tooltip({
-                            let tip: SharedString = format!(
-                                "If the emoji on {}'s screen are the same, this call is 100% secure",
-                                snap.name
+                            let tip: SharedString = tr_with(
+                                keys::CALL_FINGERPRINT_TOOLTIP,
+                                &[("user", &snap.name.to_string())],
                             )
                             .into();
-                            move |window, cx| gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+                            move |window, cx| {
+                                gpui_kit::component::tooltip::Tooltip::new(tip.clone())
+                                    .build(window, cx)
+                            }
                         }),
                 )
         });

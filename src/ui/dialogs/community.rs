@@ -421,7 +421,7 @@ pub fn render_community_info_panel(
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("hidden"),
+                            .child(tr(keys::INFO_MOBILE_HIDDEN)),
                     );
                 }
                 chats = chats.child(row);

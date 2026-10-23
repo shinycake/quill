@@ -744,7 +744,7 @@ impl QuillApp {
                         row.child(
                             gpui_kit::component::tag::Tag::secondary()
                                 .xsmall()
-                                .child("edit"),
+                                .child(tr(keys::CONTEXT_EDIT_MSG)),
                         )
                     })
                     .into_any_element()

@@ -257,9 +257,9 @@ impl QuillApp {
             let left = i64::from(state.pending_reset_date) - now_secs();
             if left > 0 {
                 body = body
-                    .child(div().text_sm().child(format!(
-                        "You can reset your password in {}.",
-                        format_reset_duration(left)
+                    .child(div().text_sm().child(tr_with(
+                        keys::SETTINGS_CLOUD_PASSWORD_RESET_IN,
+                        &[("duration", &(format_reset_duration(left)).to_string())],
                     )))
                     .child(self.twofa_confirm_or(
                         cx,

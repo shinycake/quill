@@ -158,10 +158,11 @@ impl QuillApp {
                     return;
                 }
                 Access::Undetermined => {
-                    self.connection.set_note(StatusNote::silent(format!(
-                        "Allow Quill to use the {}.",
-                        if device { "camera" } else { "microphone" }
-                    )));
+                    self.connection.set_note(StatusNote::silent(tr(if device {
+                        keys::Q_LEFTOVERS_ALLOW_CAMERA
+                    } else {
+                        keys::Q_LEFTOVERS_ALLOW_MICROPHONE
+                    })));
                     cx.notify();
                     let (sender, answer) = std::sync::mpsc::channel();
                     request(device, sender);

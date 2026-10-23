@@ -21,7 +21,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::AccountKey;
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{Key, keys, tr, tr_with};
 use quill::settings::{
     AccountPaths, AppearancePrefs, AutoNight, ChatPrefs, ThemeChoice, clamp_font_size,
     load_appearance_prefs, load_chat_prefs, safe_app_root, save_appearance_prefs, save_chat_prefs,
@@ -55,12 +55,12 @@ pub(crate) fn accent_rgb_from(color: Hsla) -> u32 {
 
 /// Wallpaper presets (0xRRGGBB); the "Default" chip keeps the theme
 /// background.
-const WALLPAPER_PRESETS: &[(u32, &str)] = &[
-    (0x0e1621, "Dark blue"),
-    (0x17212b, "Slate"),
-    (0x1c2b33, "Teal"),
-    (0x2a1e2e, "Plum"),
-    (0x141414, "Near black"),
+const WALLPAPER_PRESETS: &[(u32, Key)] = &[
+    (0x0e1621, keys::Q_LEFTOVERS_WALLPAPER_DARK_BLUE),
+    (0x17212b, keys::Q_LEFTOVERS_WALLPAPER_SLATE),
+    (0x1c2b33, keys::Q_LEFTOVERS_WALLPAPER_TEAL),
+    (0x2a1e2e, keys::Q_LEFTOVERS_WALLPAPER_PLUM),
+    (0x141414, keys::Q_LEFTOVERS_WALLPAPER_NEAR_BLACK),
 ];
 
 impl QuillApp {

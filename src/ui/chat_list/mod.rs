@@ -741,9 +741,9 @@ impl QuillApp {
         if self.demo_session.is_some() {
             self.apply_demo_archive(chat_id, !archived);
             self.connection.set_note(if archived {
-                StatusNote::info("unarchived")
+                StatusNote::info(tr(keys::ARCHIVED_REMOVED))
             } else {
-                StatusNote::info("archived")
+                StatusNote::info(tr(keys::ARCHIVED_ADDED))
             });
             cx.notify();
         }

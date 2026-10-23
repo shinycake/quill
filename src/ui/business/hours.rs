@@ -20,8 +20,12 @@ use quill::business_settings::{TimeZone, closest_time_zone};
 use quill::lang::{keys, tr};
 use quill::local_time::{now_unix, utc_offset_at};
 
-const ABOUT: &str = "Turn this on to show your opening hours schedule to your customers.";
-const DAY_ABOUT: &str = "Specify your working hours during the day.";
+fn about() -> &'static str {
+    tr(keys::HOURS_ABOUT)
+}
+fn day_about() -> &'static str {
+    tr(keys::HOURS_ABOUT_DAY)
+}
 
 fn time_field(
     window: &mut Window,
@@ -188,7 +192,7 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_3()
-            .child(div().text_sm().text_color(muted).child(ABOUT))
+            .child(div().text_sm().text_color(muted).child(about()))
             .child(
                 div()
                     .flex()
@@ -370,7 +374,7 @@ impl QuillApp {
                 })),
             );
         }
-        body.child(div().text_xs().text_color(muted).child(DAY_ABOUT))
+        body.child(div().text_xs().text_color(muted).child(day_about()))
     }
 
     pub(super) fn business_zone_body(&mut self, cx: &mut Context<Self>) -> Div {

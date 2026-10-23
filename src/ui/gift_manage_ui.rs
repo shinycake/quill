@@ -321,8 +321,9 @@ pub(super) fn gift_collection_tabs(
                 .unwrap_or_default();
             col = col.child(
                 panel(cx)
-                    .child(div().text_sm().child(format!(
-                        "Delete the collection \u{201C}{name}\u{201D}? The gifts stay on your profile."
+                    .child(div().text_sm().child(tr_with(
+                        keys::Q_LEFTOVERS_DELETE_COLLECTION_SURE,
+                        &[("name", &name.to_string())],
                     )))
                     .child(
                         div()

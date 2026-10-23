@@ -11,7 +11,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{Key, keys, tr, tr_with};
 use quill::state::{
     age_verification_about, age_verification_bot_url, freeze_deadline_label, live_left_label,
     live_strip_label, speech_trial_toast,
@@ -27,16 +27,10 @@ impl Global for SpeechTrialSeen {}
 /// How many running shares the strip lists before it summarizes.
 const LIVE_STRIP_ROWS: usize = 3;
 
-/// The copy of the three paragraphs in the frozen-account dialog.
-const FROZEN_ROWS: [(&str, &str); 2] = [
-    (
-        "Violation of Terms",
-        "Your account was frozen for breaking Telegram's Terms and Conditions.",
-    ),
-    (
-        "Read-Only Mode",
-        "You can access your account but can't send messages or take actions.",
-    ),
+/// The two paragraphs of the frozen-account dialog: title key, text key.
+const FROZEN_ROWS: [(Key, Key); 2] = [
+    (keys::Q_LEFTOVERS_VIOLATION_OF_TERMS, keys::FROZEN_TEXT1),
+    (keys::Q_LEFTOVERS_READ_ONLY_MODE, keys::FROZEN_TEXT2),
 ];
 
 impl QuillApp {
@@ -232,7 +226,7 @@ impl QuillApp {
         };
         let mut body = div().flex().flex_col().gap_3();
         for (title, text) in FROZEN_ROWS {
-            body = body.child(row(title, text.to_string(), cx));
+            body = body.child(row(tr(title), tr(text).to_string(), cx));
         }
         body = body.child(row(tr(keys::Q_OPS_APPEAL_BEFORE_DEACTIVATION), appeal, cx));
         let url = info.appeal_link.clone();

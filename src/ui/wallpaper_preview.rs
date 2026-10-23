@@ -312,8 +312,9 @@ impl QuillApp {
                             .id("wallpaper-preview-link-error")
                             .text_sm()
                             .text_color(super::danger_dark())
-                            .child(format!(
-                                "This wallpaper link is invalid or has expired ({error})."
+                            .child(tr_with(
+                                keys::Q_LEFTOVERS_WALLPAPER_LINK_INVALID,
+                                &[("error", &error.to_string())],
                             )),
                     );
                 }

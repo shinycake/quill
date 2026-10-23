@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::ui::status_note::StatusNote;
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     pub(in crate::ui) fn load_older_action(&mut self, cx: &mut Context<Self>) {
@@ -23,9 +24,13 @@ impl QuillApp {
                         live.driver.fetch_history()
                     };
                     self.connection.set_note(match result {
-                        Ok(Some(_)) => StatusNote::silent("loading older messages"),
-                        Ok(None) => StatusNote::silent("no older messages to load"),
-                        Err(_) => StatusNote::error("could not load history"),
+                        Ok(Some(_)) => {
+                            StatusNote::silent(tr(keys::Q_LEFTOVERS_LOADING_OLDER_MESSAGES))
+                        }
+                        Ok(None) => {
+                            StatusNote::silent(tr(keys::Q_LEFTOVERS_NO_OLDER_MESSAGES_TO_LOAD))
+                        }
+                        Err(_) => StatusNote::error(tr(keys::Q_LEFTOVERS_COULD_NOT_LOAD_HISTORY)),
                     });
                 }
                 cx.notify();

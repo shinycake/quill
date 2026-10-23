@@ -18,8 +18,12 @@ const ABOUT: &str = "Give your customers short links that start a chat with you 
 the first message from them to you.";
 const MESSAGE_ABOUT: &str = "Add a message that will be entered in the message field for anyone \
 who starts a chat with you using this link.";
-const NAME_ABOUT: &str = "Add a name for this link that only you will see.";
-const COPIED: &str = "Chat link copied to clipboard.";
+fn name_about() -> &'static str {
+    tr(keys::CHAT_LINK_NAME_ABOUT)
+}
+fn copied() -> &'static str {
+    tr(keys::CHAT_LINK_COPIED)
+}
 
 impl QuillApp {
     fn business_chat_links(&self) -> Option<Vec<ChatLink>> {
@@ -41,7 +45,7 @@ impl QuillApp {
             format!("https://{link}")
         };
         cx.write_to_clipboard(ClipboardItem::new_string(full));
-        self.business_note(COPIED, cx);
+        self.business_note(copied(), cx);
     }
 
     /// "Create a Link to Chat" or Edit: the box with the message and name.
@@ -336,7 +340,7 @@ impl QuillApp {
                 .child(tr(keys::Q_OPS_YOU_CAN_ALSO_USE_A));
             for (index, link) in plain.into_iter().enumerate() {
                 if index > 0 {
-                    footer = footer.child("or");
+                    footer = footer.child(tr(keys::CONFCALL_LINK_OR));
                 }
                 let copy = link.clone();
                 footer = footer.child(
@@ -373,6 +377,6 @@ impl QuillApp {
             .child(div().text_xs().text_color(muted).child(MESSAGE_ABOUT))
             .child(Textarea::new(&text).aria_label(tr(keys::Q_OPS_PRESET_MESSAGE)))
             .child(Input::new(&name).aria_label(tr(keys::Q_OPS_LINK_NAME)))
-            .child(div().text_xs().text_color(muted).child(NAME_ABOUT))
+            .child(div().text_xs().text_color(muted).child(name_about()))
     }
 }

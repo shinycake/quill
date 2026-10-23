@@ -18,6 +18,7 @@ use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Focusable, TestAppContext, VisualTestContext, px, size};
 use quill::composer::ComposerScheduling;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::local_time::now_unix;
 use quill::settings::CustomKeybinding;
 use quill::telegram::envelope::ChannelMemberStatus;
@@ -209,7 +210,7 @@ fn archive_and_the_recent_actions_apply_to_the_open_chat(cx: &mut TestAppContext
     let vcx = &mut vcx;
     app.update_in(vcx, |app, window, cx| {
         assert!(app.archive_chat_by_key(window, cx));
-        assert_eq!(app.connection.status_note(), "archived");
+        assert_eq!(app.connection.status_note(), tr(keys::ARCHIVED_ADDED));
 
         // A private chat has no recent actions; a channel I own does.
         assert!(!app.admin_log_by_key(window, cx));
@@ -257,7 +258,11 @@ fn the_new_commands_are_bound_to_chords_the_user_picks(cx: &mut TestAppContext) 
     });
     vcx.simulate_keystrokes("ctrl-alt-a");
     let note = app.read_with(vcx, |app, _| app.connection.status_note().to_string());
-    assert_eq!(note, "archived", "the chosen chord archived the open chat");
+    assert_eq!(
+        note,
+        tr(keys::ARCHIVED_ADDED),
+        "the chosen chord archived the open chat"
+    );
     // The dispatchers exist for every command (a missing handler would
     // leave the chord dead).
     vcx.update(|window, cx| {

@@ -221,9 +221,9 @@ impl QuillApp {
                             "account-export-only-my-{section:?}"
                         )))
                         .label(tr(keys::EXPORT_OPTION_ONLY_MY))
-                        .accessibility_label(format!(
-                            "Only my messages in {}",
-                            section.label().to_lowercase()
+                        .accessibility_label(tr_with(
+                            keys::Q_LEFTOVERS_ONLY_MY_MESSAGES_IN,
+                            &[("section", &(section.label().to_lowercase()).to_string())],
                         ))
                         .checked(settings.only_my(section))
                         .disabled(locked)

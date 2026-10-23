@@ -258,6 +258,7 @@ mod emoji_style_demo;
 mod emoji_style_ui;
 mod entity_links;
 mod event_log;
+mod event_log_demo;
 mod export_box;
 mod export_progress;
 mod fact_check;

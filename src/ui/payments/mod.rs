@@ -153,8 +153,9 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(format!(
-                            "Card payments via {name}: paste the credential token the provider issued on its site."
+                        .child(tr_with(
+                            keys::Q_LEFTOVERS_CARD_PAYMENTS_VIA,
+                            &[("name", &name.to_string())],
                         )),
                 );
             }

@@ -893,8 +893,9 @@ impl QuillApp {
                         );
                     }
                     body = body
-                        .child(div().text_xs().text_color(text_muted()).child(format!(
-                            "Please help us by telling what is wrong with the {subject}"
+                        .child(div().text_xs().text_color(text_muted()).child(tr_with(
+                            keys::Q_LEFTOVERS_REPORT_HELP_WITH,
+                            &[("subject", subject)],
                         )))
                         .child(
                             Textarea::new(&this.message_ui.menu_ui.report_text)

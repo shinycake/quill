@@ -147,6 +147,10 @@ pub enum GroupsPurpose {
     GetChatEventLog {
         from_event_id: i64,
     },
+    /// The live poll of an open event log: the newest page, merged into
+    /// the cached one by event id. The cache and `has_more` stay as they
+    /// are, so older pages already loaded are not thrown away.
+    PollChatEventLog,
     /// Phase A1: `setChatSlowModeDelay`. Response is `ok`; the new delay
     /// arrives via `updateSupergroupFullInfo`.
     SetChatSlowModeDelay,
