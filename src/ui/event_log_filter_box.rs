@@ -141,7 +141,14 @@ impl QuillApp {
             .is_some_and(|open| open.draft.can_save());
         div()
             .flex()
+            .justify_end()
             .gap_2()
+            .child(
+                Button::new("event-log-filter-cancel")
+                    .label(tr(keys::CANCEL))
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| this.close_event_log_filter(cx))),
+            )
             .child(
                 Button::new("event-log-filter-save")
                     .label(tr(keys::SETTINGS_SAVE))
@@ -150,12 +157,6 @@ impl QuillApp {
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.save_event_log_filter(chat_id, cx);
                     })),
-            )
-            .child(
-                Button::new("event-log-filter-cancel")
-                    .label(tr(keys::CANCEL))
-                    .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| this.close_event_log_filter(cx))),
             )
             .into_any_element()
     }

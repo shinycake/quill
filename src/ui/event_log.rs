@@ -473,39 +473,38 @@ impl QuillApp {
                 .unwrap_or_else(|| div().into_any_element())
         })
         .size_full();
+        let theme = cx.theme();
         let mut area = div()
             .id("event-log-list")
-            .relative()
+            .flex()
+            .flex_col()
             .flex_1()
             .min_h_0()
-            .w_full()
-            .child(rows_list);
-        if page.has_more && at_top {
-            let theme = cx.theme();
+            .w_full();
+        if page.has_more {
+            // Above the first row while earlier events remain to load.
             area = area.child(
                 div()
-                    .absolute()
-                    .top_1()
-                    .left_0()
-                    .right_0()
                     .flex()
+                    .flex_none()
+                    .items_center()
                     .justify_center()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .px_3()
-                            .py_1()
-                            .rounded_full()
-                            .bg(theme.secondary.opacity(0.9))
-                            .text_xs()
-                            .text_color(theme.secondary_foreground)
-                            .child(Spinner::new().xsmall())
-                            .child(tr(keys::Q_ADMIN_LOG_LOADING_OLDER)),
-                    ),
+                    .gap_2()
+                    .py_1()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(Spinner::new().xsmall())
+                    .child(tr(keys::Q_ADMIN_LOG_LOADING_OLDER)),
             );
         }
+        area = area.child(
+            div()
+                .relative()
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .child(rows_list),
+        );
         area.into_any_element()
     }
 }
