@@ -4,6 +4,7 @@
 use super::app::QuillApp;
 use super::request_share::RequestShareKind;
 use super::*;
+use crate::ui::dialogs::poll::QuizLock;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
@@ -264,6 +265,24 @@ impl QuillApp {
                     );
                 }))
             }
+            KeyboardButtonType::RequestPoll {
+                force_regular,
+                force_quiz,
+            } => {
+                let lock = if *force_quiz {
+                    QuizLock::Quiz
+                } else if *force_regular {
+                    QuizLock::Regular
+                } else {
+                    QuizLock::Free
+                };
+                element.on_click(cx.listener(move |this, _, window, cx| {
+                    if one_time {
+                        this.dismiss_custom_keyboard(chat_id, message_id, cx);
+                    }
+                    this.open_poll_dialog_locked(lock, window, cx);
+                }))
+            }
             _ => element.disabled(true),
         }
     }
@@ -274,7 +293,7 @@ impl QuillApp {
             KeyboardButtonType::Text | KeyboardButtonType::WebApp { .. } => "",
             KeyboardButtonType::RequestPhoneNumber => tr(keys::Q_MISC_SHARE_YOUR_PHONE_NUMBER_WITH),
             KeyboardButtonType::RequestLocation => tr(keys::Q_MISC_SHARING_YOUR_LOCATION_IS_NOT),
-            KeyboardButtonType::RequestPoll => tr(keys::Q_MISC_CREATING_A_POLL_IS_NOT),
+            KeyboardButtonType::RequestPoll { .. } => "",
             KeyboardButtonType::RequestUsers(_) => tr(keys::Q_MISC_CHOOSE_USERS_TO_SHARE_WITH),
             KeyboardButtonType::RequestChat(_) => tr(keys::Q_MISC_CHOOSE_A_CHAT_TO_SHARE),
             KeyboardButtonType::RequestManagedBot(_) => tr(keys::Q_MISC_CREATE_A_BOT_THIS_BOT),

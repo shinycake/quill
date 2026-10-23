@@ -47,6 +47,8 @@ pub struct PaymentsState {
     pub gift_text_length_max: Option<usize>,
     /// TDLib `poll_country_count_max`: countries a poll may be limited to.
     pub poll_countries_max: Option<usize>,
+    /// `poll_open_period_max`: the furthest a poll may close, in seconds.
+    pub poll_open_period_max: Option<i64>,
     /// Slice `parity:bots-payment-recurring`: the fetched
     /// `starSubscriptions`, shown in the Subscriptions dialog.
     pub star_subscriptions: Option<StarSubscriptionsData>,
@@ -133,6 +135,7 @@ impl PaymentsState {
             marketplace_gift: None,
             gift_text_length_max: None,
             poll_countries_max: None,
+            poll_open_period_max: None,
             star_subscriptions: None,
             star_subscriptions_loading: false,
             star_subscriptions_error: None,

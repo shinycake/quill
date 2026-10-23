@@ -3,7 +3,6 @@
 
 use super::app::QuillApp;
 use super::country_box::CountryHost;
-use super::scheduled::poll_deadline_picker;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::status_note::StatusNote;
@@ -14,11 +13,13 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::*;
-use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
-use quill::poll::{POLL_OPTIONS_MAX, POLL_OPTIONS_MIN, chat_allows_polls, voter_count_label};
+use crate::ui::dialogs::poll::QuizLock;
+use quill::poll::{
+    POLL_OPTIONS_MAX, POLL_OPTIONS_MIN, PollDraft, chat_allows_polls, voter_count_label,
+};
 use quill::state::{PollStatsFetch, PollVotersFetch};
 use quill::telegram::envelope::{MessageContent, MessageSender};
 use std::cell::RefCell;
@@ -467,6 +468,18 @@ impl QuillApp {
 
     /// Phase 4.2: open the poll creation dialog above the composer.
     pub(super) fn open_poll_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_poll_dialog_locked(QuizLock::Free, window, cx);
+    }
+
+    /// The poll box, with the type fixed when a bot's request-poll button
+    /// asked for a quiz or a regular poll (tdesktop `kDefaultPollCreateFlags`
+    /// with `disabled |= Quiz`).
+    pub(super) fn open_poll_dialog_locked(
+        &mut self,
+        lock: QuizLock,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // B4: defensive gate — the composer hides the Poll entry when
         // `chatPermissions.can_send_polls` is false (schema 1.8.67 line
         // 1070); this refuses a stale race (permissions changed after
@@ -486,7 +499,11 @@ impl QuillApp {
         if self.deny_send(quill::send_rights::SendKind::Polls, cx) {
             return;
         }
-        self.composer_ui.poll_dialog = Some(PollDialog::new(window, cx));
+        let in_channel = self
+            .session()
+            .and_then(|s| s.open_chat.and_then(|id| s.chats.get(&id.0)))
+            .is_some_and(|chat| chat.is_channel());
+        self.composer_ui.poll_dialog = Some(PollDialog::new(window, cx, in_channel, lock));
         if let Some(dialog) = &self.composer_ui.poll_dialog {
             dialog
                 .question_input
@@ -599,16 +616,8 @@ impl QuillApp {
         if index < dialog.attach.len() {
             dialog.attach.remove(index);
         }
-        // Keep the marked correct-answer row pointing at the same option.
-        if let Some(marked) = dialog.quiz_correct_row {
-            dialog.quiz_correct_row = if marked == index {
-                None
-            } else if marked > index {
-                Some(marked - 1)
-            } else {
-                Some(marked)
-            };
-        }
+        // Keep the marked correct-answer rows pointing at the same options.
+        dialog.forget_correct_row(index);
         cx.notify();
     }
 
@@ -616,10 +625,21 @@ impl QuillApp {
     /// through the driver (same `sendMessage` path as the composer). The
     /// pending reply (if any) is attached like a normal send.
     pub(super) fn submit_poll_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let close_max = self.poll_close_max_secs();
         let draft = match self.composer_ui.poll_dialog.as_ref() {
-            Some(dialog) => dialog.draft(cx),
+            Some(dialog) => PollDraft {
+                close_max,
+                ..dialog.draft(cx)
+            },
             None => return,
         };
+        // A custom deadline that passed while the box was open.
+        if draft.close_date > 0 && draft.close_date <= quill::local_time::now_unix() {
+            self.connection
+                .set_note(StatusNote::error(tr(keys::POLLS_CREATE_DEADLINE_EXPIRED)));
+            cx.notify();
+            return;
+        }
         if self
             .composer_ui
             .poll_dialog
@@ -780,21 +800,23 @@ impl QuillApp {
         if dialog.country_box.is_some() {
             return self.poll_country_panel(cx);
         }
+        if dialog.deadline_box.is_some() {
+            return self.poll_deadline_panel(cx);
+        }
+        let title = if dialog.is_quiz {
+            tr(keys::Q_MEDIA_NEW_QUIZ)
+        } else {
+            tr(keys::POLLS_CREATE_TITLE)
+        };
+        // The fields and settings scroll when the window is short; the
+        // title and the Create / Cancel buttons stay in view.
         let mut panel = div()
-            .id("poll-dialog")
+            .id("poll-dialog-body")
             .flex()
             .flex_col()
             .gap_2()
-            .p_3()
-            .rounded_md()
-            .border_1()
-            .border_color(accent())
-            .bg(bg_canvas())
-            .child(div().text_sm().font_semibold().child(if dialog.is_quiz {
-                tr(keys::Q_MEDIA_NEW_QUIZ)
-            } else {
-                tr(keys::POLLS_CREATE_TITLE)
-            }))
+            .min_h_0()
+            .overflow_y_scroll()
             .child(
                 Textarea::new(&dialog.description_input)
                     .aria_label(tr(keys::Q_MEDIA_POLL_DESCRIPTION))
@@ -806,7 +828,7 @@ impl QuillApp {
                     .h(px(64.)),
             );
         let is_quiz = dialog.is_quiz;
-        let quiz_correct_row = dialog.quiz_correct_row;
+        let quiz_correct_rows = dialog.quiz_correct_rows.clone();
         for (index, input) in dialog.option_inputs.iter().enumerate() {
             let mut row = div()
                 .id(("poll-dialog-option", index as u64))
@@ -814,11 +836,12 @@ impl QuillApp {
                 .items_center()
                 .gap_2();
             if is_quiz {
-                let marked = quiz_correct_row == Some(index);
+                let marked = quiz_correct_rows.contains(&index);
                 row = row.child(
-                    // Phase 6: kit Checkbox, not Radio — a quiz correct answer
+                    // Phase 6: kit Checkbox, not Radio — a correct answer
                     // is toggleable (clicking the marked option clears it),
-                    // and kit Radio cannot deselect itself.
+                    // and kit Radio cannot deselect itself. With "Allow
+                    // Multiple Answers" on, several may be marked.
                     Checkbox::new(format!("poll-quiz-correct-{index}"))
                         .checked(marked)
                         .accessibility_label(format!(
@@ -827,7 +850,7 @@ impl QuillApp {
                         ))
                         .on_click(cx.listener(move |this, &on, _, cx| {
                             if let Some(dialog) = this.composer_ui.poll_dialog.as_mut() {
-                                dialog.quiz_correct_row = if on { Some(index) } else { None };
+                                dialog.set_correct_row(index, on);
                             }
                             cx.notify();
                         })),
@@ -876,23 +899,24 @@ impl QuillApp {
                     .h(px(64.)),
             );
         }
-        panel = panel
-            .child(
-                div().flex().gap_2().child(match &dialog.deadline {
-                    // B15: an absolute deadline replaces the hours field.
-                    Some(picker) => div().flex_1().child(
-                        DatePicker::new(picker).placeholder(tr(keys::Q_MEDIA_PICK_A_DEADLINE)),
-                    ),
-                    None => div().flex_1().child(
-                        Textarea::new(&dialog.duration_input)
-                            .aria_label(tr(keys::Q_MEDIA_POLL_OPEN_DURATION_IN_HOURS))
-                            .h(px(40.)),
-                    ),
-                }),
-            )
-            .child(self.poll_toggle_row(cx));
+        if let Some(settings) = self.poll_settings(cx) {
+            panel = panel.child(settings);
+        }
+        let mut outer = div()
+            .id("poll-dialog")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_3()
+            .min_h_0()
+            .rounded_md()
+            .border_1()
+            .border_color(accent())
+            .bg(bg_canvas())
+            .child(div().text_sm().font_semibold().child(title))
+            .child(panel);
         if dialog.confirming_discard {
-            panel = panel.child(
+            outer = outer.child(
                 div()
                     .flex()
                     .items_center()
@@ -918,7 +942,7 @@ impl QuillApp {
                     ),
             );
         }
-        panel = panel.child(
+        outer = outer.child(
             div()
                 .flex()
                 .gap_2()
@@ -938,7 +962,7 @@ impl QuillApp {
                         })),
                 ),
         );
-        Some(panel.into_any_element())
+        Some(outer.into_any_element())
     }
 }
 
@@ -950,4 +974,5 @@ crate::ui::shell::register_dialogs! {
     ),
 }
 
-mod poll_toggle_row;
+mod poll_deadline;
+mod poll_settings;

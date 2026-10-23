@@ -355,8 +355,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::SendMessage, Some(chat_id));
         // Parity slice 4: sends from a topic view address the open topic.
         let topic_id = self.send_topic(chat_id);
-        // `validate()` above guarantees `quiz_correct` is `Some` in quiz mode.
-        let correct_option_ids: Vec<i32> = vec![draft.quiz_correct.unwrap_or(0) as i32];
+        // `validate()` above guarantees a marked option in quiz mode.
+        let mut correct_option_ids: Vec<i32> = draft
+            .quiz_correct
+            .iter()
+            .map(|index| i32::try_from(*index).unwrap_or(0))
+            .collect();
+        correct_option_ids.sort_unstable();
+        correct_option_ids.dedup();
         let json = send_poll(
             extra,
             chat_id,
@@ -366,7 +372,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 option_media: &option_media,
                 description: &description,
                 is_anonymous: draft.is_anonymous,
-                allows_multiple_answers: draft.allows_multiple_answers && !draft.is_quiz,
+                allows_multiple_answers: draft.allows_multiple_answers,
                 allows_revoting: draft.allows_revoting && !draft.is_quiz,
                 shuffle_options: draft.shuffle_options,
                 country_codes: &country_refs,

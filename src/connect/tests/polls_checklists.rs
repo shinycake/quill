@@ -106,7 +106,7 @@ fn poll_creation_flags_reach_the_wire() {
     // Quizzes never carry "allow adding options".
     let quiz = PollDraft {
         is_quiz: true,
-        quiz_correct: Some(0),
+        quiz_correct: vec![0],
         ..draft.clone()
     };
     driver.send_poll_draft(ChatId(7), &quiz, None).unwrap();
