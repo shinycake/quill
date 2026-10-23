@@ -206,6 +206,43 @@ mod tests {
         watch.observe(sending);
         watch.observe(refused);
         watch.observe(sending);
+        watch.observe(open());
         assert_eq!(watch.observe(CheckoutView::default()), Some("pending"));
+    }
+}
+
+#[cfg(test)]
+#[cfg(all(feature = "demo-capture", unix))]
+#[path = "mini_app_flow_tests.rs"]
+mod flow_tests;
+
+/// The checkout a mini app's `web_app_open_invoice` opens, for `/verify`.
+#[cfg(feature = "demo-capture")]
+mod demo {
+    use super::*;
+    use crate::ui::screenshot_demo::{DemoSpec, register_demos};
+    use quill::telegram::envelope::{PaymentFormData, PaymentFormTypeData};
+
+    register_demos![
+        DemoSpec::chats(
+            "ready-mini-app-invoice",
+            "screenshot demo - the checkout a mini app opened (injected form, nothing is paid)"
+        )
+        .setup(QuillApp::demo_mini_app_invoice),
+    ];
+
+    impl QuillApp {
+        fn demo_mini_app_invoice(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+            if let Some(session) = self.demo_session.as_mut() {
+                session.payments.form = Some(PaymentFormData {
+                    id: 1,
+                    form_type: PaymentFormTypeData::Stars { star_count: 50 },
+                    seller_bot_user_id: 900,
+                    product_title: "Premium skin pack".into(),
+                    product_description: "Ordered from the Quillbot mini app.".into(),
+                });
+            }
+            self.open_payment_dialog(window, cx);
+        }
     }
 }
