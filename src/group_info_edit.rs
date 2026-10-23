@@ -97,11 +97,8 @@ mod tests {
         let photo = ChatPhotoInput::Static {
             path: "/tmp/p.png".into(),
         };
-        let plan = plan_group_info_save(
-            &fields("Group", "About"),
-            &fields("New", ""),
-            Some(&photo),
-        );
+        let plan =
+            plan_group_info_save(&fields("Group", "About"), &fields("New", ""), Some(&photo));
         assert_eq!(
             plan,
             Ok(vec![

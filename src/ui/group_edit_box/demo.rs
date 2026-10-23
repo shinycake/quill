@@ -20,8 +20,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 register_demos![
     DemoSpec::chats("ready-group-edit-box", "screenshot demo — group Edit box")
         .setup(QuillApp::demo_group_edit_box),
-    DemoSpec::chats("ready-channel-edit-box", "screenshot demo — channel Edit box")
-        .setup(QuillApp::demo_channel_edit_box),
+    DemoSpec::chats(
+        "ready-channel-edit-box",
+        "screenshot demo — channel Edit box"
+    )
+    .setup(QuillApp::demo_channel_edit_box),
     DemoSpec::chats(
         "ready-basic-group-edit-box",
         "screenshot demo — basic group Edit box"
@@ -104,7 +107,13 @@ impl QuillApp {
         }
     }
 
-    fn demo_edit_box(&mut self, chat: i64, note: &'static str, window: &mut Window, cx: &mut Context<Self>) {
+    fn demo_edit_box(
+        &mut self,
+        chat: i64,
+        note: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.seed_edit_box();
         self.open_group_edit_box(ChatId(chat), window, cx);
         self.connection.set_note(StatusNote::silent(note));

@@ -93,7 +93,8 @@ fn square_corner(
 fn finish_square(mut image: RgbaImage) -> RgbaImage {
     for pixel in image.pixels_mut() {
         let [r, g, b, a] = pixel.0;
-        let blend = |c: u8| ((u16::from(c) * u16::from(a) + 255 * (255 - u16::from(a))) / 255) as u8;
+        let blend =
+            |c: u8| ((u16::from(c) * u16::from(a) + 255 * (255 - u16::from(a))) / 255) as u8;
         pixel.0 = [blend(r), blend(g), blend(b), 255];
     }
     let (width, height) = image.dimensions();
@@ -265,7 +266,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let placed: Vec<Placed> = editor.placed.iter().map(|(item, _)| item.clone()).collect();
-        let (working, crop, strokes) = (editor.working.clone(), editor.crop, editor.strokes.clone());
+        let (working, crop, strokes) =
+            (editor.working.clone(), editor.crop, editor.strokes.clone());
         drop(editor);
         cx.notify();
         self.run_off_ui_then(
@@ -276,7 +278,11 @@ impl QuillApp {
             },
             move |this, done, cx| {
                 let Some((saved, preview)) = done else {
-                    this.photo_target_note(target, tr(keys::Q_MISC_COULDNT_SAVE_THE_EDITED_PHOTO), cx);
+                    this.photo_target_note(
+                        target,
+                        tr(keys::Q_MISC_COULDNT_SAVE_THE_EDITED_PHOTO),
+                        cx,
+                    );
                     return;
                 };
                 let photo = ChosenPhoto {

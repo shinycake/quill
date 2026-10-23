@@ -339,10 +339,7 @@ mod tests {
             colors: vec![0x112233],
         };
         assert_eq!(emoji.to_json()["@type"], "inputChatPhotoSticker");
-        assert_eq!(
-            emoji.to_json()["sticker"]["type"]["custom_emoji_id"],
-            9
-        );
+        assert_eq!(emoji.to_json()["sticker"]["type"]["custom_emoji_id"], 9);
         assert!(still.is_valid() && clip.is_valid() && emoji.is_valid());
         assert!(
             !ChatPhotoInput::Sticker {

@@ -90,8 +90,7 @@ pub fn toggle_event_log_user(users: &mut Vec<i64>, user_id: i64) {
 mod tests {
     use super::{
         CUSTOM_TITLE_LIMIT, broadcast_features_text, custom_title_about, custom_title_fits,
-        custom_title_placeholder, event_log_about, length_counter,
-        toggle_event_log_user,
+        custom_title_placeholder, event_log_about, length_counter, toggle_event_log_user,
     };
 
     #[test]

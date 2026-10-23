@@ -72,7 +72,10 @@ fn the_box_opens_filled_with_its_rows(cx: &mut TestAppContext) {
     // Kit components register for lookup; the manage rows are plain
     // rows and show in the screenshots instead.
     for id in ["group-edit-photo", "group-edit-save", "group-edit-cancel"] {
-        assert!(vcx.update(|window, _| window.try_find(id).is_some()), "{id}");
+        assert!(
+            vcx.update(|window, _| window.try_find(id).is_some()),
+            "{id}"
+        );
     }
 }
 
@@ -119,11 +122,13 @@ fn escape_discards_the_edits(cx: &mut TestAppContext) {
 fn the_crop_shows_over_the_box_and_hands_it_back(cx: &mut TestAppContext) {
     let (app, shell, mut vcx) = open_demo(cx, "ready-group-photo-crop");
     let vcx = &mut vcx;
-    assert!(shell.read_with(vcx, |s, _| s.open_dialog == Some(DialogKind::ProfilePhotoCrop)));
+    assert!(shell.read_with(vcx, |s, _| s.open_dialog
+        == Some(DialogKind::ProfilePhotoCrop)));
     vcx.update(|window, cx| window.click("photo-editor-done", cx));
     frames(vcx);
     assert!(shell.read_with(vcx, |s, _| s.open_dialog == Some(DialogKind::GroupEditBox)));
     assert!(app.read_with(vcx, |app, _| {
-        app.group_edit_box().is_some_and(|edit| edit.photo.is_some())
+        app.group_edit_box()
+            .is_some_and(|edit| edit.photo.is_some())
     }));
 }

@@ -664,7 +664,7 @@ impl QuillApp {
                 .icon(icon)
                 .label(label)
                 .small()
-                .ghost()
+                .custom(on_layer(cx))
                 .selected(mode == target)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if let Some(live) = this.live.as_mut() {
@@ -695,7 +695,7 @@ impl QuillApp {
                         .icon(gpui_kit::assets::IconName::RotateCcw)
                         .label(tr(keys::Q_MISC_ROTATE))
                         .small()
-                        .ghost()
+                        .custom(on_layer(cx))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.photo_editor_mut(PhotoEditor::rotate, cx);
                         })),
@@ -704,7 +704,7 @@ impl QuillApp {
                     Button::new("photo-editor-flip")
                         .label(tr(keys::PHOTO_EDITOR_MENU_FLIP))
                         .small()
-                        .ghost()
+                        .custom(on_layer(cx))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.photo_editor_mut(PhotoEditor::flip, cx);
                         })),
@@ -713,7 +713,7 @@ impl QuillApp {
                     Button::new("photo-editor-reset-crop")
                         .label(tr(keys::PROFILE_PHOTO_RESET_BUTTON))
                         .small()
-                        .ghost()
+                        .custom(on_layer(cx))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.photo_editor_mut(|editor| editor.crop = editor.initial_crop(), cx);
                         })),
@@ -771,7 +771,7 @@ impl QuillApp {
                             .icon(gpui_kit::assets::IconName::Undo2)
                             .label(tr(keys::Q_MISC_UNDO))
                             .small()
-                            .ghost()
+                            .custom(on_layer(cx))
                             .disabled(editor.strokes.is_empty())
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.photo_editor_mut(
@@ -806,7 +806,7 @@ impl QuillApp {
                         .child(
                             Button::new("photo-editor-cancel")
                                 .label(tr(keys::CANCEL))
-                                .ghost()
+                                .custom(on_layer(cx))
                                 .on_click(
                                     cx.listener(|this, _, _, cx| this.close_photo_editor(cx)),
                                 ),
@@ -859,6 +859,16 @@ impl QuillApp {
                 .into_any_element(),
         )
     }
+}
+
+/// A quiet button on the editor's black layer: white in both themes (a
+/// ghost button takes the theme's dark text in light mode).
+fn on_layer(cx: &App) -> ButtonCustomVariant {
+    ButtonCustomVariant::new(cx)
+        .foreground(gpui_kit::white())
+        .hover(gpui_kit::white().opacity(0.12))
+        .active(gpui_kit::white().opacity(0.2))
+        .shadow(false)
 }
 
 /// A placed picture, with a dashed frame and a resize handle when selected.

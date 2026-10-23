@@ -246,7 +246,9 @@ impl QuillApp {
                 this.open_member_dialog(chat_id, window, cx);
             });
         }
-        if can_restrict {
+        // Channels have no member permissions (tdesktop lists them for
+        // groups only).
+        if can_restrict && !is_channel {
             row!(
                 "g1-open-permissions",
                 I::Shield,
@@ -504,7 +506,6 @@ impl QuillApp {
         }
         section.into_any_element()
     }
-
 }
 
 /// One action of the manage section (`action_row` plus its handler).
@@ -545,4 +546,3 @@ fn management_toggle_row(
         .on_click(on_click)
         .into_any_element()
 }
-

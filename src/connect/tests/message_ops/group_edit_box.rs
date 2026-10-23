@@ -5,13 +5,15 @@ use crate::group_info_edit::GroupInfoEdit;
 use crate::profile_photo_sources::{ChatPhotoInput, PhotoSticker};
 use crate::state::GroupInfoField;
 
-fn basic_group_driver() -> (
+type Fixture = (
     ConnectDriver<Arc<RecordingSender>>,
     Arc<RecordingSender>,
     AtomicU64,
     Arc<dyn DiagnosticSink>,
     std::path::PathBuf,
-) {
+);
+
+fn basic_group_driver() -> Fixture {
     let store = MemorySecretStore::new();
     let (dir, prepared) = prepared_tmp(&store);
     let sink = Arc::new(MemorySink::new());
@@ -85,7 +87,10 @@ fn an_emoji_photo_is_an_input_chat_photo_sticker() {
         },
         colors: vec![0x112233, 0x445566],
     };
-    driver.set_chat_photo(ChatId(9), Some(&photo)).unwrap().unwrap();
+    driver
+        .set_chat_photo(ChatId(9), Some(&photo))
+        .unwrap()
+        .unwrap();
     let last = sent_types(&recorder).pop().unwrap();
     assert_eq!(last["@type"], "setChatPhoto");
     assert_eq!(last["photo"]["@type"], "inputChatPhotoSticker");
@@ -119,7 +124,7 @@ fn a_refused_title_is_recorded_for_the_box() {
     driver
         .save_group_info(ChatId(9), &[GroupInfoEdit::Title("Hikers".into())])
         .unwrap();
-    assert!(driver.session.groups.info_edit_errors.get(&9).is_none());
+    assert!(!driver.session.groups.info_edit_errors.contains_key(&9));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -165,7 +170,10 @@ fn the_basic_group_description_is_kept() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.chat_description(ChatId(9)), Some("Book club"));
+    assert_eq!(
+        driver.session.chat_description(ChatId(9)),
+        Some("Book club")
+    );
     driver
         .ingest(
             copy_and_parse(

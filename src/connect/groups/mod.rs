@@ -12,9 +12,8 @@ use crate::telegram::requests::{
     get_chat_statistics, get_community_full_info, get_forum_topics, get_me, get_supergroup,
     get_supergroup_full_info, join_chat, leave_chat, load_chat_welcome_messages,
     search_chat_messages, set_chat_member_tag, set_chat_message_auto_delete_time,
-    set_chat_slow_mode_delay,
-    set_community_name, set_community_permissions, set_community_photo, toggle_forum_topic_closed,
-    toggle_forum_topic_pinned, toggle_general_forum_topic_hidden,
+    set_chat_slow_mode_delay, set_community_name, set_community_permissions, set_community_photo,
+    toggle_forum_topic_closed, toggle_forum_topic_pinned, toggle_general_forum_topic_hidden,
     toggle_supergroup_aggressive_anti_spam, toggle_supergroup_is_broadcast_group,
     toggle_supergroup_sign_messages,
 };

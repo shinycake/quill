@@ -16,7 +16,11 @@ use quill::local_path::sandboxed_display_path;
 const PHOTO_PX: f32 = 76.0;
 
 impl QuillApp {
-    pub(super) fn group_edit_photo(&self, edit: &GroupEditBox, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn group_edit_photo(
+        &self,
+        edit: &GroupEditBox,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let chat_id = edit.chat_id;
         let title = self
             .session()
@@ -71,17 +75,47 @@ impl QuillApp {
             .p_0()
             .tooltip(tr(keys::PROFILE_SET_PHOTO_BUTTON))
             .accessibility_label(tr(keys::PROFILE_SET_PHOTO_BUTTON))
-            .child(picture)
+            .child(
+                div()
+                    .relative()
+                    .size(px(PHOTO_PX))
+                    .child(picture)
+                    // tdesktop's change-photo badge: the photo is a button.
+                    .child(
+                        div()
+                            .absolute()
+                            .right_0()
+                            .bottom_0()
+                            .size(px(26.))
+                            .rounded_full()
+                            .bg(cx.theme().primary)
+                            .border_2()
+                            .border_color(cx.theme().background)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                Icon::new(IconName::Camera)
+                                    .size(px(14.))
+                                    .text_color(cx.theme().primary_foreground),
+                            ),
+                    ),
+            )
             .dropdown_menu(move |menu, _, _| {
                 let item = |label: &str,
                             icon: IconName,
-                            action: fn(&mut QuillApp, PhotoTarget, &mut Window, &mut Context<QuillApp>)| {
+                            action: fn(
+                    &mut QuillApp,
+                    PhotoTarget,
+                    &mut Window,
+                    &mut Context<QuillApp>,
+                )| {
                     let owner = owner.clone();
-                    PopupMenuItem::new(label.to_string())
-                        .icon(icon)
-                        .on_click(move |_, window, cx| {
+                    PopupMenuItem::new(label.to_string()).icon(icon).on_click(
+                        move |_, window, cx| {
                             let _ = owner.update(cx, |this, cx| action(this, target, window, cx));
-                        })
+                        },
+                    )
                 };
                 menu.item(item(
                     tr(keys::ATTACH_PHOTO_OR_VIDEO),
@@ -99,12 +133,10 @@ impl QuillApp {
                     |this, _, window, cx| this.open_photo_source(SourceMode::Emoji, window, cx),
                 ))
             });
-        let note = edit.photo_note.clone().map(|text| {
-            div()
-                .text_xs()
-                .text_color(cx.theme().danger)
-                .child(text)
-        });
+        let note = edit
+            .photo_note
+            .clone()
+            .map(|text| div().text_xs().text_color(cx.theme().danger).child(text));
         div()
             .flex()
             .flex_col()

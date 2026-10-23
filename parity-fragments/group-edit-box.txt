@@ -1,0 +1,3 @@
+groups-set-photo
+groups-set-title
+groups-set-description

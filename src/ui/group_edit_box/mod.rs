@@ -60,7 +60,10 @@ pub(crate) enum EditBoxState {
     Editing,
     Saving,
     /// TDLib refused the title or the description.
-    Failed { field: GroupInfoField, reason: String },
+    Failed {
+        field: GroupInfoField,
+        reason: String,
+    },
     /// Everything answered without an error: the box is closed.
     Saved,
 }
@@ -236,9 +239,8 @@ impl QuillApp {
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
-                keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A,
-            )));
+            self.connection
+                .set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
             self.admin.group_edit_box = None;
             cx.notify();
             return;
@@ -373,13 +375,14 @@ impl QuillApp {
                 .group_edit_box()
                 .and_then(|edit| this.session()?.chats.get(&edit.chat_id.0))
                 .is_some_and(|chat| chat.is_channel());
-            let dialog = dialog.overlay(true).title(crate::ui::shell::dialog_title(
-                if is_channel {
-                    tr(keys::EDIT_CHANNEL_TITLE)
-                } else {
-                    tr(keys::EDIT_GROUP)
-                },
-            ));
+            let dialog =
+                dialog
+                    .overlay(true)
+                    .title(crate::ui::shell::dialog_title(if is_channel {
+                        tr(keys::EDIT_CHANNEL_TITLE)
+                    } else {
+                        tr(keys::EDIT_GROUP)
+                    }));
             let Some(body) = this.group_edit_box_body(cx) else {
                 return dialog.on_close(on_close);
             };
