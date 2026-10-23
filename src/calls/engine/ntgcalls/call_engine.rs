@@ -151,7 +151,7 @@ impl CallEngine for NtgcallsEngine {
                     .map_or(std::ptr::null(), |value| value.as_ptr()),
             )
         };
-        crate::advanced::debug_mode::debug_log(&format!(
+        crate::advanced::debug_mode::call_log(&format!(
             "[call] {call_id} connect p2p versions {:?} servers {} p2p {} -> {rc}",
             params.library_versions,
             servers.raw.len(),
@@ -186,6 +186,7 @@ impl CallEngine for NtgcallsEngine {
             return Ok(());
         };
         self.call_media.remove(&call_id);
+        self.close_call_sound(call_id, user_id);
         self.callback
             .user_to_call
             .lock_or_recover()
@@ -370,6 +371,17 @@ impl CallEngine for NtgcallsEngine {
 
     fn use_device_playback(&mut self, group_call_id: i32) -> Result<(), EngineError> {
         self.fall_back_to_device(group_call_id)
+    }
+
+    fn call_sound_health(
+        &self,
+        call_id: i32,
+    ) -> Option<crate::calls::stream_audio::watch::PlaybackHealth> {
+        self.call_health(call_id)
+    }
+
+    fn use_device_call_sound(&mut self, call_id: i32) -> Result<(), EngineError> {
+        self.call_sound_to_device(call_id)
     }
 
     fn set_group_muted(&mut self, group_call_id: i32, muted: bool) -> Result<(), EngineError> {

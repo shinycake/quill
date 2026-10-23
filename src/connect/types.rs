@@ -285,6 +285,8 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) group_playback_muted: std::collections::HashSet<i32>,
     pub(crate) call_connect_params: Option<ConnectParams>,
     pub(crate) reconnect_attempts: usize,
+    /// The 1:1 call whose sound is watched (`connect::calls::sound_watch`).
+    pub(crate) call_sound_watch: Option<(i32, crate::calls::stream_audio::watch::PlaybackWatch)>,
     pub(crate) credentials: TelegramCredentials,
     pub(crate) paths: AccountPaths,
     pub(crate) database_key: DatabaseKey,

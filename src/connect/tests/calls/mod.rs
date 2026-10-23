@@ -16,6 +16,7 @@ use std::sync::atomic::AtomicU64;
 
 mod late_engine;
 mod media;
+mod sound_watch;
 
 /// Phase C3a: `join_video_chat` must accept the tracked, unjoined call
 /// (the normal flow: `getGroupCall` creates the tracker, then the

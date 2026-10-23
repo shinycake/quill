@@ -4,8 +4,8 @@ use crate::calls::stream_audio::{StreamPlayer, gain::clamp_volume, quill_plays_s
 use ntgcalls_sys::ntg_audio_description;
 
 pub(super) struct StreamOutput {
-    speaker: Option<String>,
-    player: StreamPlayer,
+    pub(super) speaker: Option<String>,
+    pub(super) player: StreamPlayer,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -142,7 +142,7 @@ impl NtgcallsEngine {
         }
     }
 
-    fn cpal_speaker_name(&self, speaker: Option<&str>) -> Option<String> {
+    pub(super) fn cpal_speaker_name(&self, speaker: Option<&str>) -> Option<String> {
         let id = speaker?;
         self.media_devices()
             .ok()?

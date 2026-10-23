@@ -15,6 +15,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 mod call_engine;
+mod call_sound;
 mod external;
 mod log;
 mod stream_audio;
@@ -36,6 +37,10 @@ pub struct NtgcallsEngine {
     external_gate: Arc<external::ExternalGate>,
     stream_outputs: HashMap<i32, stream_audio::StreamOutput>,
     stream_volume: f32,
+    /// 1:1 calls whose sound Quill plays, by call id (`call_sound.rs`).
+    call_outputs: HashMap<i32, stream_audio::StreamOutput>,
+    /// 1:1 calls moved back to the device's output.
+    device_call_sound: std::collections::HashSet<i32>,
     _driver_thread_only: PhantomData<Rc<()>>,
 }
 
@@ -89,6 +94,8 @@ impl NtgcallsEngine {
             external_gate: Arc::default(),
             stream_outputs: HashMap::new(),
             stream_volume: 1.0,
+            call_outputs: HashMap::new(),
+            device_call_sound: std::collections::HashSet::new(),
             _driver_thread_only: PhantomData,
         })
     }
@@ -486,7 +493,7 @@ impl NtgcallsEngine {
         Ok(())
     }
 
-    fn set_media_sources(&self, call_id: i32) -> Result<(), EngineError> {
+    fn set_media_sources(&mut self, call_id: i32) -> Result<(), EngineError> {
         let config = self
             .call_media
             .get(&call_id)
@@ -559,7 +566,9 @@ impl NtgcallsEngine {
             });
         }
 
-        let mut speaker_audio = audio_description(speaker.as_ref());
+        let mut speaker_audio = self
+            .open_call_sound(call_id, user_id, config.speaker.as_deref())
+            .unwrap_or_else(|| audio_description(speaker.as_ref()));
         // External playback delivers decoded peer video to our frame callback.
         // NULL descriptions disable receiving these tracks altogether.
         let mut peer_camera = ntg_video_description {

@@ -37,6 +37,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             group_playback_muted: Default::default(),
             call_connect_params: None,
             reconnect_attempts: 0,
+            call_sound_watch: None,
             credentials,
             paths: prepared.paths,
             database_key: prepared.database_key,
