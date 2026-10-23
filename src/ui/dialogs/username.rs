@@ -5,8 +5,6 @@ use quill::ids::ChatId;
 /// Slice G1: what a `UsernameDialog` text prompt edits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextPromptKind {
-    /// `setSupergroupUsername` (schema 1.8.67, line 15136).
-    Username,
     /// `setChatMemberTag` custom title (schema 1.8.67, line 13598).
     CustomTitle { user_id: i64 },
     /// Slice G10: `setCommunityName` (schema 1.8.67, line 11811).

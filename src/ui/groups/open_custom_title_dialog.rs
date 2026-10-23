@@ -38,29 +38,7 @@ impl QuillApp {
         };
         let value = dialog.input.read(cx).value().trim().to_string();
         let (kind, chat_id) = (dialog.kind, dialog.chat_id);
-        let note = match kind {
-            TextPromptKind::Username => match self.live.as_mut() {
-                Some(live) => match live.driver.set_supergroup_username(chat_id, &value) {
-                    Ok(_) => {
-                        if value.is_empty() {
-                            tr(keys::Q_PEOPLE_USERNAME_REMOVED).into()
-                        } else {
-                            tr_with(
-                                keys::Q_PEOPLE_USERNAME_SET_TO,
-                                &[("value", &value.to_string())],
-                            )
-                        }
-                    }
-                    Err(_) => {
-                        self.admin.username_dialog = Some(dialog);
-                        tr(keys::Q_PEOPLE_COULD_NOT_SET_USERNAME).into()
-                    }
-                },
-                None => {
-                    self.admin.username_dialog = Some(dialog);
-                    tr(keys::Q_PEOPLE_USERNAMES_NEED_A_LIVE_CONNECTION).into()
-                }
-            },
+        let note: String = match kind {
             TextPromptKind::CustomTitle { user_id } => {
                 // 0-16 characters, no emoji — schema line 13597, TGX
                 // `EditRightsController` enforces the same client-side.
@@ -557,15 +535,11 @@ impl QuillApp {
             let Some(dialog_state) = this.admin.username_dialog.as_ref() else {
                 return dialog
                     .title(crate::ui::shell::dialog_title(tr(
-                        keys::Q_PEOPLE_PUBLIC_USERNAME_2,
+                        keys::Q_PEOPLE_CUSTOM_TITLE,
                     )))
                     .on_close(on_close);
             };
             let (title, hint) = match dialog_state.kind {
-                TextPromptKind::Username => (
-                    tr(keys::Q_PEOPLE_PUBLIC_USERNAME_2),
-                    tr(keys::Q_PEOPLE_PUBLIC_LINK_T_ME_USERNAME),
-                ),
                 TextPromptKind::CustomTitle { .. } => (
                     tr(keys::Q_PEOPLE_CUSTOM_TITLE),
                     tr(keys::Q_PEOPLE_A_TITLE_THAT_MEMBERS_WILL),

@@ -320,6 +320,7 @@ mod group_links_boosts_ui;
 mod group_members;
 mod group_moderation;
 mod group_panels;
+mod group_type_box;
 mod groups;
 mod groups_forum;
 mod groups_welcome;

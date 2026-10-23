@@ -124,11 +124,7 @@ impl QuillApp {
             GroupSettingsAction::HistoryVisible(on) => {
                 driver.set_group_history_visible(chat_id, on)
             }
-            GroupSettingsAction::JoinToSend(on) => driver.set_group_join_to_send(chat_id, on),
             GroupSettingsAction::HiddenMembers(on) => driver.set_group_hidden_members(chat_id, on),
-            GroupSettingsAction::ProtectedContent(on) => {
-                driver.set_chat_protected_content(chat_id, on)
-            }
             GroupSettingsAction::ReactionsAll => driver.set_chat_reactions(
                 chat_id,
                 ChatAvailableReactions::All {
@@ -310,18 +306,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let session = self.session();
-        let is_channel = self.is_channel_chat(chat_id);
         let muted = cx.theme().muted_foreground;
         let mut body = div().flex().flex_col().gap_1();
-        let heading = |text: &'static str| {
-            div()
-                .px_2()
-                .pt_2()
-                .text_xs()
-                .font_semibold()
-                .text_color(muted)
-                .child(text)
-        };
         if let Some(topics) = controls.topics {
             let about = match topics.locked {
                 Some(TopicsLock::TooFewMembers) => tr_with(
@@ -363,27 +349,6 @@ impl QuillApp {
                 cx,
             ));
         }
-        if controls.join_to_send {
-            let on = session.is_some_and(|s| s.chat_join_to_send(chat_id));
-            body =
-                body.child(heading(tr(keys::MANAGE_PEER_SEND_TITLE)))
-                    .child(self.settings_switch(
-                        "b7-join-to-send",
-                        IconName::UserCheck,
-                        tr(keys::Q_PEOPLE_ONLY_MEMBERS),
-                        on,
-                        !busy,
-                        tr(keys::MANAGE_PEER_SEND_ONLY_MEMBERS_ABOUT).into(),
-                        GroupSettingsAction::JoinToSend(!on),
-                        cx,
-                    ));
-            if self.chat_join_by_request(chat_id) {
-                body = body.child(Self::settings_note(
-                    tr(keys::MANAGE_PEER_SEND_APPROVE_MEMBERS_ABOUT),
-                    muted,
-                ));
-            }
-        }
         if controls.hide_members {
             let on = session
                 .and_then(|s| {
@@ -402,28 +367,6 @@ impl QuillApp {
                 GroupSettingsAction::HiddenMembers(!on),
                 cx,
             ));
-        }
-        if controls.protected_content {
-            let on = session.is_some_and(|s| s.chat_has_protected_content(chat_id));
-            body = body
-                .child(heading(tr(keys::Q_PEOPLE_CONTENT_PROTECTION)))
-                .child(
-                    self.settings_switch(
-                        "b7-protected",
-                        IconName::Lock,
-                        tr(keys::Q_PEOPLE_RESTRICT_SAVING_CONTENT),
-                        on,
-                        !busy,
-                        if is_channel {
-                            tr(keys::MANAGE_PEER_NO_FORWARDS_ABOUT_CHANNEL)
-                        } else {
-                            tr(keys::MANAGE_PEER_NO_FORWARDS_ABOUT)
-                        }
-                        .into(),
-                        GroupSettingsAction::ProtectedContent(!on),
-                        cx,
-                    ),
-                );
         }
         if let Some(discussion) = controls.discussion {
             let (label, value) = match discussion {
@@ -462,19 +405,6 @@ impl QuillApp {
                 tr(keys::Q_PEOPLE_REACTIONS),
                 summary,
                 GroupSettingsView::Reactions,
-                cx,
-            ));
-        }
-        if controls.usernames {
-            let count = session
-                .and_then(|s| s.chat_usernames(chat_id))
-                .map_or(0, |lists| lists.active.len());
-            body = body.child(self.settings_link_row(
-                "gl-usernames",
-                IconName::Link,
-                tr(keys::Q_PEOPLE_LINK_ORDER),
-                format!("{count} active"),
-                GroupSettingsView::Usernames,
                 cx,
             ));
         }
@@ -858,11 +788,6 @@ impl QuillApp {
                     tr(keys::MANAGE_DISCUSSION_GROUP).to_string()
                 },
                 self.settings_discussion(chat_id, cx),
-                div().flex().gap_2().child(back).into_any_element(),
-            ),
-            GroupSettingsView::Usernames => (
-                tr(keys::Q_PEOPLE_LINK_ORDER).to_string(),
-                self.settings_usernames(chat_id, cx),
                 div().flex().gap_2().child(back).into_any_element(),
             ),
             GroupSettingsView::Boosts => (

@@ -512,13 +512,26 @@ fn g1_group_admin_shapes_match_1_8_67() {
     // Slice G1: `toggleSupergroupJoinByRequest supergroup_id:int53
     // join_by_request:Bool guard_bot_user_id:int53
     // apply_to_invite_links:Bool = Ok` (schema 1.8.67, line 15188).
-    let v: serde_json::Value =
-        serde_json::from_str(&toggle_supergroup_join_by_request(RequestId(76), 13, true)).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&toggle_supergroup_join_by_request(
+        RequestId(76),
+        13,
+        true,
+        false,
+    ))
+    .unwrap();
     assert_eq!(v["@type"], "toggleSupergroupJoinByRequest");
     assert_eq!(v["supergroup_id"], 13);
     assert!(v["join_by_request"].as_bool() == Some(true));
     assert_eq!(v["guard_bot_user_id"], 0);
     assert!(v["apply_to_invite_links"].as_bool() == Some(false));
+    let v: serde_json::Value = serde_json::from_str(&toggle_supergroup_join_by_request(
+        RequestId(78),
+        13,
+        true,
+        true,
+    ))
+    .unwrap();
+    assert!(v["apply_to_invite_links"].as_bool() == Some(true));
 
     // Slice G1: `setSupergroupUsername supergroup_id:int53
     // username:string = Ok` (schema 1.8.67, line 15136).

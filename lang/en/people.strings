@@ -57,7 +57,6 @@
 "lng_group_invite_context_revoke" = "Revoke";
 "lng_group_invite_copy" = "Copy Link";
 "lng_group_invite_link_expired" = "Expired";
-"lng_group_invite_request_approve" = "Approve New Members";
 "lng_group_requests_dismiss" = "Dismiss";
 "lng_group_stickers" = "Group stickers";
 "lng_info_about_label" = "Description";
@@ -287,7 +286,6 @@
 "qll_people_contact_saved" = "Contact saved";
 "qll_people_contact_shared_with" = "Contact shared with {title}";
 "qll_people_contacts_to_import" = "Contacts to import";
-"qll_people_content_protection" = "Content protection";
 "qll_people_convert" = "Convert";
 "qll_people_converting_to_broadcast_group" = "converting to broadcast group…";
 "qll_people_copy_bio" = "Copy Bio";
@@ -331,8 +329,6 @@
 "qll_people_could_not_save_topic" = "could not save topic";
 "qll_people_could_not_search_members" = "could not search members";
 "qll_people_could_not_set_custom_title" = "could not set custom title";
-"qll_people_could_not_set_username" = "could not set username";
-"qll_people_could_not_toggle_join_requests" = "could not toggle join requests";
 "qll_people_could_not_unban_member" = "could not unban member";
 "qll_people_could_not_update_admin_rights" = "could not update admin rights";
 "qll_people_could_not_update_community_name" = "could not update community name";
@@ -437,7 +433,6 @@
 "qll_people_haddad" = "Haddad";
 "qll_people_hide" = "Hide";
 "qll_people_hide_members" = "Hide Members";
-"qll_people_hide_this_link_from_the" = "Hide this link from the {place} info page?";
 "qll_people_hue" = "Hue";
 "qll_people_idan" = "Idan";
 "qll_people_import" = "Import";
@@ -454,8 +449,6 @@
 "qll_people_item" = "Item";
 "qll_people_item_2" = "Item {emoji}";
 "qll_people_join_requests" = "Join requests";
-"qll_people_join_requests_disabled" = "join requests disabled";
-"qll_people_join_requests_enabled" = "join requests enabled";
 "qll_people_join_requests_need_a_live" = "join requests need a live connection (demo)";
 "qll_people_joined" = "Joined ({joined_count})";
 "qll_people_joined_channel_demo" = "joined channel (demo)";
@@ -474,9 +467,7 @@
 "qll_people_level_boosts#other" = "Level {level} · {count} boosts";
 "qll_people_levi" = "Levi";
 "qll_people_lightness" = "Lightness";
-"qll_people_link_order" = "Link order";
 "qll_people_linked_channel" = "Linked channel";
-"qll_people_links_are_shown_on_the" = "Links are shown on the info page in this order.";
 "qll_people_load_more" = "Load more";
 "qll_people_load_refresh_group_packs" = "Load / refresh group packs";
 "qll_people_loading" = "Loading…";
@@ -493,7 +484,6 @@
 "qll_people_loading_saved_chats" = "Loading saved chats";
 "qll_people_loading_welcome_messages" = "Loading welcome messages…";
 "qll_people_location" = "Location: {value}";
-"qll_people_main_link" = "main link";
 "qll_people_main_profile_photo_updated" = "Main profile photo updated";
 "qll_people_main_tab" = "Main tab";
 "qll_people_main_tab_2" = "Main tab: {label}";
@@ -516,8 +506,6 @@
 "qll_people_members_selected#other" = "{count} members selected";
 "qll_people_month" = "Month";
 "qll_people_more_boosts" = "{left} more boosts";
-"qll_people_move_down" = "Move down";
-"qll_people_move_up" = "Move up";
 "qll_people_name" = "Name";
 "qll_people_name_and_profile_color" = "Name and profile color…";
 "qll_people_name_cannot_be_empty" = "Name cannot be empty";
@@ -538,7 +526,6 @@
 "qll_people_no_contacts_yet" = "No contacts yet.";
 "qll_people_no_eligible_contacts" = "No eligible contacts.";
 "qll_people_no_invite_links" = "No invite links.";
-"qll_people_no_links_to_arrange" = "No links to arrange.";
 "qll_people_no_members" = "No members";
 "qll_people_no_members_found" = "No members found.";
 "qll_people_no_messages" = "No messages";
@@ -563,7 +550,6 @@
 "qll_people_omar" = "Omar";
 "qll_people_on" = "On";
 "qll_people_only_groups_with_more_than" = "Only groups with more than {forum_min_members} members can have topics enabled.";
-"qll_people_only_members" = "Only members";
 "qll_people_open_on_map" = "Open on map";
 "qll_people_open_the_discussion_group" = "Open the discussion group";
 "qll_people_opening_the_camera" = "Opening the camera…";
@@ -597,10 +583,7 @@
 "qll_people_profile_photos_need_a_live" = "profile photos need a live connection (demo)";
 "qll_people_promote_member" = "Promote member";
 "qll_people_promote_members" = "Promote members";
-"qll_people_public_link_t_me_username" = "Public link t.me/username — empty removes it";
-"qll_people_public_username" = "Public username (@{username})";
 "qll_people_public_username_2" = "Public username";
-"qll_people_public_username_empty_remove" = "Public username (empty = remove)";
 "qll_people_react_to_messages" = "React to messages";
 "qll_people_reactions" = "Reactions";
 "qll_people_refresh" = "Refresh";
@@ -638,7 +621,6 @@
 "qll_people_restarting_bot" = "restarting bot…";
 "qll_people_restrict" = "Restrict";
 "qll_people_restrict_members" = "Restrict members";
-"qll_people_restrict_saving_content" = "Restrict saving content";
 "qll_people_restricted_until" = "Restricted until";
 "qll_people_retake" = "Retake";
 "qll_people_retry" = "Retry";
@@ -665,7 +647,6 @@
 "qll_people_send_video_notes" = "Send video notes";
 "qll_people_send_videos" = "Send videos";
 "qll_people_send_voice_notes" = "Send voice notes";
-"qll_people_set_public_username" = "Set public username";
 "qll_people_set_username" = "Set username";
 "qll_people_share_contact" = "Share contact";
 "qll_people_sharon" = "Sharon";
@@ -674,7 +655,6 @@
 "qll_people_show_a_channel_on_your" = "Show a channel on your profile. Only channels you own are listed.";
 "qll_people_show_chats" = "Show chats";
 "qll_people_show_message_authors" = "Show message authors";
-"qll_people_show_this_link_on_the" = "Show this link on the {place} info page?";
 "qll_people_shown_in_the_communities_hub" = "Shown in the communities hub and info panel";
 "qll_people_sign_messages" = "Sign messages";
 "qll_people_signatures_need_a_live_connection" = "signatures need a live connection (demo)";
@@ -702,7 +682,6 @@
 "qll_people_tags" = "Tags";
 "qll_people_take_a_photo" = "Take a photo";
 "qll_people_take_photo" = "Take photo";
-"qll_people_that_link_cant_be_changed" = "That link can't be changed right now.";
 "qll_people_that_setting_isnt_available_for" = "That setting isn't available for you, or it's already being saved.";
 "qll_people_the_camera_picture_was_damaged" = "The camera picture was damaged.";
 "qll_people_the_camera_stopped" = "The camera stopped.";
@@ -753,10 +732,7 @@
 "qll_people_use_an_emoji_or_sticker" = "Use an emoji or sticker as your photo";
 "qll_people_user" = "User {user_id}";
 "qll_people_username_copied_to_clipboard" = "Username copied to clipboard";
-"qll_people_username_removed" = "username removed";
-"qll_people_username_set_to" = "username set to @{value}";
 "qll_people_username_update_requested" = "Username update requested.";
-"qll_people_usernames_need_a_live_connection" = "usernames need a live connection (demo)";
 "qll_people_uses" = "{member_count}/{member_limit} uses";
 "qll_people_video" = "Video";
 "qll_people_video_2" = "Video…";

@@ -508,6 +508,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // B7: the step waiting for this answer (basic group upgrade,
         // history before a discussion link), taken before `apply`.
         let admin_followup = self.capture_admin_followup(&owned);
+        let edit_after_upgrade = self.capture_edit_after_upgrade(&owned);
         let paid_prices_change = Self::changes_paid_prices(&owned.envelope.payload);
         let send_outcome = Self::send_outcome(&owned.envelope.payload);
         self.session.apply(owned);
@@ -520,6 +521,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if let Some((followup, ok)) = admin_followup {
             self.run_admin_followup(followup, ok);
+        }
+        if let Some((edit, ok)) = edit_after_upgrade {
+            self.run_edit_after_upgrade(edit, ok);
         }
         self.maybe_preload_topics(topic_chat, forum_supergroup);
         self.maybe_refresh_forum_topic(topic_refresh);

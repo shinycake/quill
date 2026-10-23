@@ -1,0 +1,4 @@
+# Group and channel Type box: public/private, t.me link with live check
+parity:admin-type-box
+parity:channel-public-link
+parity:admin-link-availability
