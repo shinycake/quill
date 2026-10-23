@@ -322,3 +322,20 @@ fn bank_card_info_applies_only_to_own_request_and_clears_on_error() {
     let lookup = session.payments.bank_card.as_ref().unwrap();
     assert!(!lookup.loading && lookup.info.is_none());
 }
+
+#[test]
+fn poll_open_period_max_option_is_kept() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    assert_eq!(session.payments.poll_open_period_max, None);
+    let option = |value: i64| {
+        format!(
+            r#"{{"@type":"updateOption","name":"poll_open_period_max","value":{{"@type":"optionValueInteger","value":{value}}}}}"#
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &option(864_000));
+    assert_eq!(session.payments.poll_open_period_max, Some(864_000));
+    // A zero is no limit worth keeping: the last real value stays.
+    apply_json(&mut session, &seq, &sink, &option(0));
+    assert_eq!(session.payments.poll_open_period_max, Some(864_000));
+}
