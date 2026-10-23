@@ -636,8 +636,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Delete own story, gated on can_be_deleted; viewer closes when the story leaves the cache; updateStoryDeleted handled (telegram/requests.rs:2584, telegram/envelope.rs:4660) <!-- parity:stories-delete -->
 - [x] Report story (reportStory multi-step flow: option picker → optional/required text → Reported/Failed; state.rs + connect.rs + ui/mod.rs Phase 9.5) <!-- parity:stories-report -->
 - [x] Stealth mode / hide view from poster (activateStoryStealthMode + updateStoryStealthMode state; viewer action-row button reflects active/cooldown; ui/mod.rs Phase 9.5) <!-- parity:stories-stealth-mode -->
-- [ ] Story viewer controls are tdesktop's icon overlay (mute, pause, share, reaction) and a ⋯ menu for the rest (Save, Edit, Cover, Privacy, Delete, Stealth, Copy Link, Repost), not a wrapping row of text buttons <!-- parity:stories-viewer-icon-chrome -->
-- [ ] Story viewers list loads more on scroll, not with a Load more button <!-- parity:stories-viewers-scroll-load -->
+- [x] Story viewer controls are tdesktop's icon overlay (mute, pause, share, reaction) and a ⋯ menu for the rest (Save, Edit, Cover, Privacy, Delete, Stealth, Copy Link, Repost), not a wrapping row of text buttons <!-- parity:stories-viewer-icon-chrome -->
+- [x] Story viewers list loads more on scroll, not with a Load more button <!-- parity:stories-viewers-scroll-load -->
 - [x] Story albums: story page lists/opens albums; create/rename/delete; add/remove/reorder stories; reorder albums (album covers deferred) <!-- parity:stories-albums -->
 - [x] Add Stories to an album by ticking them in a story grid (tdesktop EditAlbumBox), not by typing story ids <!-- parity:stories-albums-picker -->
 - [x] Archive story list via getChatArchivedStories with load-more pagination (DECISIONS.md Phase 9.1 "Out of this slice") <!-- parity:stories-archive -->
