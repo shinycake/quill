@@ -422,3 +422,8 @@ crate::ui::shell::register_dialogs! {
         QuillApp::build_emoji_sets_dialog,
     ),
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "emoji_sets_tests.rs"]
+mod tests;

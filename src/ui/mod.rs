@@ -52,9 +52,6 @@ mod display_events;
 mod earn;
 mod earn_state;
 mod editor_art;
-#[cfg(test)]
-#[cfg(feature = "demo-capture")]
-mod emoji_sets_tests;
 mod esc_stack;
 mod folders_state;
 mod force_reply;
