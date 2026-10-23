@@ -482,13 +482,21 @@ pub(crate) fn parse_profile_photo(photo: &Value) -> Option<ParsedProfilePhoto> {
                 .max_by_key(|size| size.width)
         })
         .or_else(|| sizes.iter().min_by_key(|size| (size.width, size.height)))?;
+    let (thumb_file_id, full_file_id, width, height) =
+        (thumb.file_id, full.file_id, full.width, full.height);
+    let mut files = files;
+    let animation = parse_chat_photo_animation(photo).map(|(animation, file)| {
+        files.push(file);
+        animation
+    });
     Some(ParsedProfilePhoto {
         id: int53(photo.get("id")).ok()?,
         added_date: int53_or_zero(photo.get("added_date")).sat_i32(),
-        thumb_file_id: thumb.file_id,
-        full_file_id: full.file_id,
-        width: full.width,
-        height: full.height,
+        thumb_file_id,
+        full_file_id,
+        width,
+        height,
         files,
+        animation,
     })
 }

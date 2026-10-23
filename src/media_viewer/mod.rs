@@ -195,6 +195,25 @@ pub struct MediaViewerItem {
     pub group: Option<ViewerGroup>,
 }
 
+impl MediaViewerItem {
+    /// A video profile photo: a photo with a clip, which plays muted in a
+    /// loop over the still with no controls (tdesktop
+    /// `PhotoData::videoCanBePlayed`, streamed with `options.loop`).
+    pub fn is_video_photo(&self) -> bool {
+        self.kind == MediaViewerKind::Photo && self.play_file_id.is_some()
+    }
+
+    /// Has a clip the viewer plays.
+    pub fn plays_clip(&self) -> bool {
+        self.kind.is_playable() || self.is_video_photo()
+    }
+
+    /// Its clip restarts by itself, muted, with no transport controls.
+    pub fn loops(&self) -> bool {
+        self.kind.loops() || self.is_video_photo()
+    }
+}
+
 /// Viewer state: the open chat's media list plus the current position.
 /// Empty items = closed.
 #[derive(Debug, Clone, Default)]
@@ -589,6 +608,7 @@ mod tests {
             full_file_id: full,
             width,
             height,
+            animation: None,
         };
         let photos = [photo(901, 11, 12, 800, 600), photo(902, 13, 14, 0, 0)];
         let items = profile_photo_items(&photos, ChatId(0));
@@ -608,6 +628,38 @@ mod tests {
         assert_eq!(viewer.source(), ViewerSource::Chat);
     }
 
+    #[test]
+    fn a_video_photo_loops_its_clip_over_the_still() {
+        let photo = |id, animation| crate::state::ProfilePhoto {
+            id,
+            added_date: 0,
+            thumb_file_id: 11,
+            full_file_id: 12,
+            width: 640,
+            height: 640,
+            animation,
+        };
+        let clip = crate::telegram::envelope::ChatPhotoAnimation {
+            file_id: FileId(19),
+            start_ms: 1500,
+        };
+        let items = profile_photo_items(&[photo(1, Some(clip)), photo(2, None)], ChatId(0));
+        let (video, still) = (&items[0], &items[1]);
+        assert_eq!(video.kind, MediaViewerKind::Photo);
+        assert_eq!(video.play_file_id, Some(FileId(19)));
+        assert_eq!(video.display_file_ids, vec![FileId(12), FileId(11)]);
+        assert!(video.is_video_photo() && video.plays_clip() && video.loops());
+        assert_eq!(
+            controls::decide_viewer_video_start(video, false),
+            controls::ViewerVideoStart::ParkDownload
+        );
+        assert!(!still.is_video_photo() && !still.plays_clip() && !still.loops());
+        assert_eq!(
+            controls::decide_viewer_video_start(still, true),
+            controls::ViewerVideoStart::Nothing
+        );
+    }
+
     fn profile_items(ids: std::ops::Range<i64>) -> Vec<MediaViewerItem> {
         let photos: Vec<crate::state::ProfilePhoto> = ids
             .map(|id| crate::state::ProfilePhoto {
@@ -617,6 +669,7 @@ mod tests {
                 full_file_id: 2,
                 width: 0,
                 height: 0,
+                animation: None,
             })
             .collect();
         profile_photo_items(&photos, ChatId(-100))

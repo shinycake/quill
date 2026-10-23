@@ -249,6 +249,8 @@ pub struct UserProfileExtras {
     /// `public_photo` — shown when the main photo is hidden by privacy
     /// settings; listed last in the gallery as "Public Photo".
     pub public_photo: Option<ParsedProfilePhoto>,
+    /// `photo` — the main photo, for its clip when it is a video.
+    pub photo: Option<ParsedProfilePhoto>,
     /// `business_info`: Telegram Business hours and location.
     pub business: Option<crate::business_info::BusinessInfo>,
     /// `has_sponsored_messages_enabled` (own user): "Do Not Hide Ads".
@@ -287,6 +289,8 @@ pub struct ParsedProfilePhoto {
     /// Largest size's pixel dimensions.
     pub width: i32,
     pub height: i32,
+    /// A video profile photo's clip; its file is in `files`.
+    pub animation: Option<super::ChatPhotoAnimation>,
 }
 
 /// `birthdate` (schema 1.8.67, line 868); the year is optional (0).
@@ -345,6 +349,10 @@ pub(crate) fn parse_user_profile_extras(info: Option<&serde_json::Value>) -> Use
             .and_then(super::users::parse_profile_photo),
         public_photo: info
             .get("public_photo")
+            .filter(|value| !value.is_null())
+            .and_then(super::users::parse_profile_photo),
+        photo: info
+            .get("photo")
             .filter(|value| !value.is_null())
             .and_then(super::users::parse_profile_photo),
         business: crate::business_info::parse_business_info(info.get("business_info")),

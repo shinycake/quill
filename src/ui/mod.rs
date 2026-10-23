@@ -513,6 +513,7 @@ mod ton_wallet_ui_tests;
 mod touch_bar;
 mod translate_ui;
 mod tray_settings;
+mod video_avatar;
 mod video_editor;
 mod video_editor_controls;
 mod video_editor_set;

@@ -379,6 +379,11 @@ impl QuillApp {
             window.close_dialog(cx);
         }
     }
+
+    /// A kit dialog is open (its app-side flag is set).
+    pub(super) fn kit_dialog_open(&self) -> bool {
+        QuillShell::first_open(self).is_some()
+    }
 }
 
 /// Bound every dialog body to the current window and keep its header/footer visible.

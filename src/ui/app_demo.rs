@@ -349,6 +349,7 @@ impl QuillApp {
             folders: super::folders_state::FolderUi::new(),
             windows: super::chat_window::ChatWindows::new(cx),
             peer_qr: super::peer_qr::PeerQrUi::new(cx),
+            video_avatar: Default::default(),
         };
 
         if let Some(chosen) = spell_chosen {

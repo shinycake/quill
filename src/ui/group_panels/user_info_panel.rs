@@ -15,7 +15,11 @@ impl QuillApp {
         photo: Option<&std::path::Path>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let avatar = chat_avatar(title, photo, 96.);
+        let avatar = self.info_cover_avatar(
+            quill::state::PhotoOwner::Chat(chat_id),
+            chat_avatar(title, photo, 96.).into_any_element(),
+            self.info_cover_behind(cx),
+        );
         let has_photo = self
             .session()
             .and_then(|s| s.chats.get(&chat_id.0))
@@ -108,6 +112,11 @@ impl QuillApp {
                 .into_any_element(),
             None => initials_avatar(&name, 96.).into_any_element(),
         };
+        let avatar = self.info_cover_avatar(
+            quill::state::PhotoOwner::User(user_id),
+            avatar,
+            self.info_cover_behind(cx),
+        );
         let is_self = session
             .and_then(|s| s.my_user_id)
             .is_some_and(|me| me == user_id);

@@ -28,6 +28,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         for file_id in panels
             .into_iter()
             .chain(self.session.gif_panel_file_ids_to_download())
+            .chain(self.session.info_cover_file_ids_to_download())
         {
             if let Some(extra) = self.download_file(file_id, INLINE_RESULTS_DOWNLOAD_PRIORITY)? {
                 extras.push(extra);

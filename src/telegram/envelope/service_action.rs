@@ -71,6 +71,8 @@ pub enum ServiceAction {
     ChatPhoto {
         photo: Option<PhotoContent>,
         photo_id: i64,
+        /// The clip of a video photo; its file is cached with the photo's.
+        animation: Option<ChatPhotoAnimation>,
     },
     ChatPhotoDeleted,
     OwnerLeft {
@@ -540,6 +542,12 @@ impl ServiceAction {
             "messageChatChangePhoto" => A::ChatPhoto {
                 photo: chat_photo(value, files),
                 photo_id: value.get("photo").map_or(0, |photo| i(photo, "id")),
+                animation: value.get("photo").and_then(parse_chat_photo_animation).map(
+                    |(animation, file)| {
+                        files.push(file);
+                        animation
+                    },
+                ),
             },
             "messageChatDeletePhoto" => A::ChatPhotoDeleted,
             "messageChatOwnerLeft" => A::OwnerLeft {

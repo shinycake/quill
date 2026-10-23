@@ -62,7 +62,7 @@ impl QuillApp {
         self.viewer
             .state
             .current()
-            .is_some_and(|item| item.kind.loops())
+            .is_some_and(MediaViewerItem::loops)
     }
 
     /// Resume a parked viewer play once `downloadFile` lands the clip.
@@ -89,7 +89,7 @@ impl QuillApp {
             .viewer
             .state
             .current()
-            .is_some_and(|item| item.message_id == message_id && item.kind.is_playable());
+            .is_some_and(|item| item.message_id == message_id && item.plays_clip());
         if !matches {
             self.viewer.pending_play = None;
             return;
@@ -116,7 +116,7 @@ impl QuillApp {
         }
         // A clip with sound ends Picture-in-Picture (tdesktop
         // `startStreamingPlayer`); a silent loop leaves it playing.
-        if !item.kind.loops() {
+        if !item.loops() {
             self.sound_starts(cx);
         }
         self.stop_voice_playback();
@@ -124,14 +124,20 @@ impl QuillApp {
         self.stop_animation_playback();
         self.viewer.player = None;
         self.viewer.gif = None;
-        let looping = item.kind.loops();
+        let looping = item.loops();
         let duration = item.duration_secs.unwrap_or(0).max(0) as f64;
-        // A media-timestamp link opened this clip at a given second.
+        // A media-timestamp link opened this clip at a given second; a
+        // video photo starts at its main frame.
         let start = self
             .viewer
             .pending_seek
             .take_if(|(id, _)| *id == item.message_id)
-            .map_or(0.0, |(_, secs)| secs.max(0.0));
+            .map(|(_, secs)| secs.max(0.0))
+            .or_else(|| {
+                item.is_video_photo()
+                    .then(|| self.viewer_photo_clip_start())
+            })
+            .unwrap_or(0.0);
         self.viewer.video = Some(item.message_id);
         self.viewer.video_path = Some(path.to_path_buf());
         self.playback.error = None;
@@ -330,11 +336,7 @@ pub(super) fn viewer_error_message(
     error: &crate::ui::video_player::PlayerError,
 ) -> String {
     use crate::ui::video_player::ErrorKind;
-    let noun = if item.kind.loops() {
-        "animation"
-    } else {
-        "video"
-    };
+    let noun = if item.loops() { "animation" } else { "video" };
     match error.kind {
         ErrorKind::Unsupported => tr_with(keys::Q_AV_FORMAT_NOT_SUPPORTED, &[("noun", noun)]),
         ErrorKind::Open | ErrorKind::Decode => {

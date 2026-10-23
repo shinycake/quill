@@ -33,6 +33,7 @@ mod signin;
 mod status_toasts;
 mod stories;
 mod topic_states;
+pub(in crate::ui) mod video_avatar;
 pub(in crate::ui) mod video_fixtures;
 
 use quill::composer::{AttachmentKind, ComposerAttachment};

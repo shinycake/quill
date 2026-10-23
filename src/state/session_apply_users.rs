@@ -28,14 +28,7 @@ impl Session {
                     .and_then(|chat_id| self.private_chat_user_id(chat_id))
             });
             if let Some(user_id) = user_id {
-                for photo in [&extras.personal_photo, &extras.public_photo]
-                    .into_iter()
-                    .flatten()
-                {
-                    for file in &photo.files {
-                        self.upsert_file(file.clone(), false);
-                    }
-                }
+                self.cache_profile_photo_files(&extras);
                 let photo_file_id = photo.map(|file| {
                     let id = file.id.0;
                     self.upsert_file(file, false);
@@ -59,6 +52,22 @@ impl Session {
                 } else if pending.user_id.is_some() && self.bots.bot_user_ids.contains(&user_id) {
                     self.bots.bot_info.insert(user_id, bot_info);
                 }
+            }
+        }
+    }
+
+    /// Cache the files of the photos a `userFullInfo` names (every size
+    /// and a video photo's clip).
+    pub(crate) fn cache_profile_photo_files(
+        &mut self,
+        extras: &crate::telegram::envelope::UserProfileExtras,
+    ) {
+        for photo in [&extras.photo, &extras.personal_photo, &extras.public_photo]
+            .into_iter()
+            .flatten()
+        {
+            for file in &photo.files {
+                self.upsert_file(file.clone(), false);
             }
         }
     }

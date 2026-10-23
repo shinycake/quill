@@ -143,7 +143,8 @@ impl QuillApp {
     }
 
     /// MED1: save the viewer media to the downloads folder. Photos save
-    /// the largest local size; videos save the full clip when local,
+    /// the largest local size, a video photo its clip (tdesktop
+    /// `OverlayWidget::saveAs`); videos save the full clip when local,
     /// else the thumbnail.
     pub(in crate::ui) fn save_viewer_media(&mut self, cx: &mut Context<Self>) {
         let Some(item) = self.viewer.state.current().cloned() else {
@@ -155,6 +156,11 @@ impl QuillApp {
         let no_files = quill::state::FileMap::default();
         let files = self.session().map_or(&no_files, |s| &s.media.files);
         let path = match item.kind {
+            MediaViewerKind::Photo if item.is_video_photo() => item
+                .play_file_id
+                .and_then(|id| files.get(&id.0))
+                .and_then(|file| file.usable_path())
+                .map(PathBuf::from),
             MediaViewerKind::Photo => {
                 let roots = self.media_display_roots();
                 viewer_display_path(&item, files, &roots)
@@ -185,7 +191,7 @@ impl QuillApp {
         match path {
             Some(path) => match save_media_to_downloads(&path) {
                 Ok(dest) => {
-                    self.show_saved_toast(dest, item.kind.is_playable(), cx);
+                    self.show_saved_toast(dest, item.plays_clip(), cx);
                 }
                 Err(err) => {
                     self.connection.set_note(StatusNote::error(tr_with(

@@ -21,7 +21,7 @@ pub enum ViewerVideoStart {
 }
 
 pub fn decide_viewer_video_start(item: &MediaViewerItem, clip_local: bool) -> ViewerVideoStart {
-    if !item.kind.is_playable() || item.play_file_id.is_none() {
+    if !item.plays_clip() || item.play_file_id.is_none() {
         return ViewerVideoStart::Nothing;
     }
     if clip_local {

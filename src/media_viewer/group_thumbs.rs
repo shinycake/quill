@@ -472,6 +472,7 @@ mod tests {
                 full_file_id: (10 * n + 2) as i32,
                 width: 640,
                 height: 640,
+                animation: None,
             })
             .collect();
         crate::media_viewer::profile_photo_items(&photos, crate::ids::ChatId(-100))

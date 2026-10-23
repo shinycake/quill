@@ -134,7 +134,7 @@ impl QuillApp {
             // Chat windows draw the playing picture over the thumbnail here;
             // the main window's video layer draws it above the panel.
             let inline_video = (part == ViewerPart::Inline
-                && item.kind.is_playable()
+                && item.plays_clip()
                 && self.viewer.video == Some(item.message_id))
             .then(|| {
                 if let Some(player) = &self.viewer.player {
