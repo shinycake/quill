@@ -58,7 +58,11 @@ impl Session {
             }
             // B10: profile panel fetches keep the reason for a Retry row;
             // refused edits surface as a toast.
-            Some(RequestPurpose::GetProfileChats(_) | RequestPurpose::GetUserProfilePhotos) => {
+            Some(
+                RequestPurpose::GetProfileChats(_)
+                | RequestPurpose::GetUserProfilePhotos
+                | RequestPurpose::GetChatPhotoHistory,
+            ) => {
                 if let Some(pending) = pending {
                     self.fail_profile_fetch(pending, error_reason(err));
                 }

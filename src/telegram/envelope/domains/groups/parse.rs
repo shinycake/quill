@@ -220,6 +220,10 @@ pub(crate) fn parse_groups_payload(
             }))
         }
         "supergroupFullInfo" => Ok(EnvelopePayload::Groups(GroupsPayload::SupergroupFullInfo {
+            photo: value
+                .get("photo")
+                .filter(|photo| !photo.is_null())
+                .and_then(crate::telegram::envelope::users::parse_profile_photo),
             description: value
                 .get("description")
                 .and_then(Value::as_str)
@@ -662,6 +666,10 @@ pub(crate) fn parse_groups_payload(
                 })
                 .unwrap_or_default(),
             bot_commands: parse_group_bot_commands(value.get("bot_commands")),
+            photo: value
+                .get("photo")
+                .filter(|photo| !photo.is_null())
+                .and_then(crate::telegram::envelope::users::parse_profile_photo),
         })),
         "updateNewChatJoinRequest" => Ok(EnvelopePayload::Groups(
             GroupsPayload::UpdateNewChatJoinRequest {

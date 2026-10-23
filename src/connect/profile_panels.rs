@@ -10,7 +10,7 @@ use crate::state::{
 use crate::telegram::requests::{
     create_private_chat, get_chat_similar_chats, get_groups_in_common,
     get_suitable_discussion_chats, get_suitable_personal_chats, get_user_profile_photos,
-    open_chat_similar_chat, report_chat_photo, send_contact, set_birthdate, set_personal_chat,
+    open_chat_similar_chat, send_contact, set_birthdate, set_personal_chat,
     set_profile_photo_previous, set_user_note, set_user_personal_profile_photo,
     suggest_user_profile_photo,
 };
@@ -328,24 +328,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_json_request(
             extra,
             &suggest_user_profile_photo(extra, user_id, photo_path),
-        )
-    }
-
-    /// Report a profile photo (`reportChatPhoto`, line 16107). The private
-    /// chat with a user has the user's id as its chat id.
-    pub fn report_profile_photo(
-        &mut self,
-        user_id: i64,
-        file_id: i32,
-        reason_type: &str,
-    ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.my_user_id == Some(user_id) {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        let extra = self.session.request(RequestPurpose::ReportChatPhoto, None);
-        self.send_json_request(
-            extra,
-            &report_chat_photo(extra, user_id, file_id, reason_type, ""),
         )
     }
 

@@ -143,6 +143,7 @@ fn profile_photos_answer_caches_gallery_and_files() {
     let Some(ProfilePhotosFetch::Loaded {
         total_count,
         photos,
+        ..
     }) = session.users_state.user_profile_photos.get(&31)
     else {
         panic!("gallery not loaded");
@@ -168,6 +169,7 @@ fn set_main_photo_ok_drops_the_own_gallery() {
             ProfilePhotosFetch::Loaded {
                 total_count: 0,
                 photos: Vec::new(),
+                loading_more: false,
             },
         );
     }
@@ -264,12 +266,21 @@ fn user_full_info_keeps_unofficial_flag_and_personal_photo_first_in_gallery() {
             photo_json(9001, 911, 912)
         ),
     );
-    let (gallery, personal) = session.profile_gallery(31).expect("gallery loaded");
-    assert_eq!(personal, Some(9500));
+    let gallery = session
+        .photo_gallery(PhotoOwner::User(31))
+        .expect("gallery loaded");
     assert_eq!(
-        gallery.iter().map(|p| p.id).collect::<Vec<_>>(),
-        [9500, 9001]
+        gallery
+            .photos
+            .iter()
+            .map(|p| (p.photo.id, p.kind))
+            .collect::<Vec<_>>(),
+        [
+            (9500, GalleryPhotoKind::Personal),
+            (9001, GalleryPhotoKind::Main)
+        ]
     );
+    assert_eq!(gallery.total, 2);
     // The personal photo's files are cached for display.
     assert!(session.media.files.contains_key(&952));
 }

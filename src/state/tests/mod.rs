@@ -41,6 +41,7 @@ mod messages_more;
 mod notifications;
 mod notify_os;
 mod payments;
+mod photo_gallery;
 mod premium_hub;
 mod premium_limit;
 mod profile_panels;

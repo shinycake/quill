@@ -334,6 +334,7 @@ impl Session {
                 MessageContent::Action(action) => {
                     if let crate::telegram::envelope::ServiceAction::ChatPhoto {
                         photo: Some(photo),
+                        ..
                     }
                     | crate::telegram::envelope::ServiceAction::SuggestProfilePhoto {
                         photo: Some(photo),

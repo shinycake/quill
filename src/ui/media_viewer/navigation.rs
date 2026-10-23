@@ -221,7 +221,9 @@ impl QuillApp {
         self.ensure_viewer_download(cx);
         self.maybe_autoplay_viewer_video(cx);
         // What TDLib allows for this message (Delete in the toolbar).
-        // Profile photos and poll option media are not messages.
+        // Profile photos and poll option media are not messages; an
+        // earlier group or channel photo has its service message.
+        self.ask_profile_photo_message_actions();
         if !matches!(
             self.viewer.state.source(),
             ViewerSource::Profile | ViewerSource::Poll

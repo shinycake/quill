@@ -113,6 +113,47 @@ pub fn get_user_profile_photos(extra: RequestId, user_id: i64, offset: i32, limi
     .to_string()
 }
 
+/// A page of a group or channel's photo history: `searchChatMessages`
+/// (TDLib 1.8.69, schema line 12793) with `searchMessagesFilterChatPhoto`
+/// (line 6906), newest first from `from_message_id` (0 = the newest).
+/// Answered with `foundChatMessages` of `messageChatChangePhoto`.
+pub fn search_chat_photos(
+    extra: RequestId,
+    chat_id: ChatId,
+    from_message_id: crate::ids::MessageId,
+    limit: i32,
+) -> String {
+    super::search_chat_messages(
+        extra,
+        chat_id,
+        &crate::ids::TopicId::None,
+        "",
+        from_message_id,
+        0,
+        limit,
+        Some(json!({ "@type": "searchMessagesFilterChatPhoto" })),
+    )
+}
+
+/// "Set as Main" for an earlier photo of a group or channel:
+/// `setChatPhoto` (line 14429) with the photo's largest size as an
+/// `inputChatPhotoStatic` file. TDLib finds the file already on the
+/// server and sends it as `inputChatPhoto` without uploading it again
+/// (tdesktop `PeerPhoto::set` sends `inputChatPhoto` too).
+/// `inputChatPhotoPrevious` only takes the current user's own photos.
+pub fn set_chat_photo_from_file(extra: RequestId, chat_id: ChatId, file_id: i32) -> String {
+    json!({
+        "@type": "setChatPhoto",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "photo": {
+            "@type": "inputChatPhotoStatic",
+            "photo": { "@type": "inputFileId", "id": file_id },
+        },
+    })
+    .to_string()
+}
+
 /// `setProfilePhoto` with `inputChatPhotoPrevious` (lines 1038, 14803):
 /// "Set as main photo" for one of the current user's earlier photos.
 pub fn set_profile_photo_previous(extra: RequestId, chat_photo_id: i64) -> String {

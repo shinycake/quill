@@ -30,7 +30,7 @@ const PILL_MAX_WIDTH: f32 = 522.0;
 fn action_photo(content: &MessageContent) -> Option<&PhotoContent> {
     match content {
         MessageContent::Action(action) => match action.as_ref() {
-            ServiceAction::ChatPhoto { photo }
+            ServiceAction::ChatPhoto { photo, .. }
             | ServiceAction::SuggestProfilePhoto { photo, .. } => photo.as_ref(),
             _ => None,
         },

@@ -179,6 +179,9 @@ impl Session {
                         .photo_file_id,
                     photo_file_id,
                 );
+                if old_photo_file_id != photo_file_id {
+                    self.forget_chat_photos(chat_id);
+                }
                 self.replace_avatar(old_photo_file_id, photo_file_id);
             }
             ChatsPayload::UpdateChatPermissions {

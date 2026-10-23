@@ -6,6 +6,37 @@ use gpui_kit::TestSupportExt;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
+    /// A group or channel's info-panel avatar; with a photo it opens the
+    /// photo viewer on it, the earlier photos after it.
+    fn chat_photo_avatar(
+        &self,
+        chat_id: ChatId,
+        title: &str,
+        photo: Option<&std::path::Path>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let avatar = chat_avatar(title, photo, 96.);
+        let has_photo = self
+            .session()
+            .and_then(|s| s.chats.get(&chat_id.0))
+            .is_some_and(|chat| chat.photo_file_id.is_some());
+        if !has_photo {
+            return avatar.into_any_element();
+        }
+        div()
+            .id(("info-panel-chat-photo-open", chat_id.0 as u64))
+            .cursor_pointer()
+            .role(gpui_kit::Role::Button)
+            .aria_label(tr(keys::Q_PEOPLE_VIEW_PHOTOS))
+            .tab_index(0)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.open_peer_photos(quill::state::PhotoOwner::Chat(chat_id), cx)
+            }))
+            .child(avatar)
+            .test_support()
+            .into_any_element()
+    }
+
     /// The elements of a profile header's badges (`Info::Profile::Badge`);
     /// an emoji status plays through `status_glyph` for `owner`.
     fn info_header_badges(
@@ -91,7 +122,9 @@ impl QuillApp {
                 .role(gpui_kit::Role::Button)
                 .aria_label(tr(keys::Q_PEOPLE_VIEW_PROFILE_PHOTOS))
                 .tab_index(0)
-                .on_click(cx.listener(move |this, _, _, cx| this.open_profile_photos(user_id, cx)))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_peer_photos(quill::state::PhotoOwner::User(user_id), cx)
+                }))
                 .child(avatar)
                 .into_any_element()
         } else {
@@ -535,7 +568,7 @@ impl QuillApp {
             .items_center()
             .gap_3()
             .p_4()
-            .child(chat_avatar(&title, photo.as_deref(), 96.))
+            .child(self.chat_photo_avatar(chat_id, &title, photo.as_deref(), cx))
             .child(
                 div()
                     .flex()
@@ -692,7 +725,7 @@ impl QuillApp {
             .items_center()
             .gap_3()
             .p_4()
-            .child(chat_avatar(&title, photo.as_deref(), 96.))
+            .child(self.chat_photo_avatar(chat_id, &title, photo.as_deref(), cx))
             .child(
                 div()
                     .flex()

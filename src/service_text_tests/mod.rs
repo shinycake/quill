@@ -254,9 +254,14 @@ fn chat_photo_change_keeps_the_new_photo_for_the_thumbnail() {
     let MessageContent::Action(action) = content else {
         panic!("a service action");
     };
-    let ServiceAction::ChatPhoto { photo: Some(photo) } = *action else {
+    let ServiceAction::ChatPhoto {
+        photo: Some(photo),
+        photo_id,
+    } = *action
+    else {
         panic!("a chat photo with sizes");
     };
+    assert_eq!(photo_id, 5);
     assert_eq!(photo.sizes.len(), 1);
     assert_eq!(photo.sizes[0].file_id.0, 77);
     assert!(photo.minithumbnail.is_some());

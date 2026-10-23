@@ -24,6 +24,9 @@ pub(super) struct ChromeFacts {
     pub(super) can_set_main: bool,
     pub(super) can_report: bool,
     pub(super) profile_view: bool,
+    /// The profile photo viewer's own header ("Photo 2 of 5", "Group
+    /// Photo", ...).
+    pub(super) header: Option<String>,
 }
 
 impl QuillApp {
@@ -45,6 +48,7 @@ impl QuillApp {
             can_set_main,
             can_report,
             profile_view,
+            header,
         } = facts;
         self.tick_viewer_ttl(ttl, cx);
         let ttl_badge = ttl.and_then(|ttl| self.viewer_ttl_badge(ttl));
@@ -55,7 +59,9 @@ impl QuillApp {
         let sender_line = (!profile_view)
             .then(|| self.viewer_sender_line(item))
             .flatten();
-        let header_label = if total > 1 {
+        let header_label = if let Some(header) = header {
+            header
+        } else if total > 1 {
             format!("{kind_label} {position} of {total}")
         } else {
             kind_label.to_string()
@@ -232,7 +238,7 @@ impl QuillApp {
                             icon_action(
                                 ("media-viewer-set-main", row_id),
                                 gpui_kit::assets::IconName::Images,
-                                tr(keys::Q_AV_SET_AS_MAIN_PHOTO_2),
+                                tr(keys::MEDIAVIEW_SET_USERPIC),
                             )
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.set_viewer_photo_as_main(cx);
@@ -244,7 +250,7 @@ impl QuillApp {
                             icon_action(
                                 ("media-viewer-report", row_id),
                                 gpui_kit::assets::IconName::Flag,
-                                tr(keys::Q_AV_REPORT),
+                                tr(keys::MEDIAVIEW_REPORT_PROFILE_PHOTO),
                             )
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.report_viewer_profile_photo(cx);
