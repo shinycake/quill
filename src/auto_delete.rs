@@ -156,7 +156,10 @@ mod tests {
         assert_eq!(nearest_choice_index(DAY * 365), TTL_CHOICES.len() - 1);
         assert_eq!(nearest_choice_index(DAY * 400), TTL_CHOICES.len() - 1);
         // 10 days (set elsewhere) is closer to 1 week than to 2 weeks.
-        assert_eq!(TTL_CHOICES.get(nearest_choice_index(DAY * 10)), Some(&(DAY * 7)));
+        assert_eq!(
+            TTL_CHOICES.get(nearest_choice_index(DAY * 10)),
+            Some(&(DAY * 7))
+        );
         for (index, choice) in TTL_CHOICES.iter().enumerate() {
             assert_eq!(nearest_choice_index(*choice), index);
         }

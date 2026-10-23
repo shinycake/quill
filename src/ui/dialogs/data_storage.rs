@@ -13,18 +13,18 @@
 //! roaming ← low).
 
 use super::super::app::QuillApp;
+use super::super::index_sliders::{StepSlider, cap_slider_start};
 use super::super::*;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::*;
-use super::super::index_sliders::{StepSlider, cap_slider_start};
 use quill::data_settings::{
     AutoDownloadNetSettings, CapKind, DataStoragePrefs, NO_LIMIT_SIZE_CAP, NetworkKind,
 };
-use quill::limit_steps::cap_at;
 use quill::lang::{keys, tr, tr_with};
+use quill::limit_steps::cap_at;
 /// Slice S4: bytes formatter that handles 0 and GB — the shared
 /// `format_bytes` returns "" for 0 and tops out at MB.
 pub(crate) fn format_storage_bytes(n: i64) -> String {
@@ -102,15 +102,10 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_3()
-            .child(
-                div()
-                    .text_lg()
-                    .font_semibold()
-                    .child(tr_with(
-                        keys::Q_OPS_NETWORK_DOWNLOADS,
-                        &[("network", network.label())],
-                    )),
-            )
+            .child(div().text_lg().font_semibold().child(tr_with(
+                keys::Q_OPS_NETWORK_DOWNLOADS,
+                &[("network", network.label())],
+            )))
             .child(self.data_storage_editor_body(cx, network, &draft))
             .child(
                 div()
@@ -371,7 +366,11 @@ impl QuillApp {
                         } else {
                             quill::data_settings::DEFAULT_ENABLED_CAP
                         };
-                        this.set_step_slider(StepSlider::DataCap(kind), cap_slider_start(start), cx);
+                        this.set_step_slider(
+                            StepSlider::DataCap(kind),
+                            cap_slider_start(start),
+                            cx,
+                        );
                     }
                     this.settings.data_storage_editor = Some((network, draft));
                     cx.notify();

@@ -10,9 +10,9 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::*;
 use gpui_kit::*;
-use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use quill::data_settings::{CapKind, NO_LIMIT_SIZE_CAP};
 use quill::limit_steps::{CAP_STEPS, KEEP_STEPS, SIZE_STEPS, cap_at, cap_index};
 use quill::limit_steps::{keep_limit_at, size_limit_at};
@@ -78,7 +78,12 @@ fn position(value: f32, steps: usize) -> usize {
 
 impl QuillApp {
     /// Create (or recreate) the slider for `key` on step `start`.
-    pub(super) fn set_step_slider(&mut self, key: StepSlider, start: usize, cx: &mut Context<Self>) {
+    pub(super) fn set_step_slider(
+        &mut self,
+        key: StepSlider,
+        start: usize,
+        cx: &mut Context<Self>,
+    ) {
         let top = key.steps().saturating_sub(1);
         let slider = cx.new(|_| {
             SliderState::new()

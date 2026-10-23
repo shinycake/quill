@@ -6,6 +6,7 @@
 //! options of its storage optimizer.
 
 use super::super::app::QuillApp;
+use super::super::index_sliders::StepSlider;
 use super::data_storage::format_storage_bytes;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -14,7 +15,6 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::data_settings::top_chats_by_size;
 use quill::lang::{keys, tr, tr_with, trn_with};
-use super::super::index_sliders::StepSlider;
 use quill::limit_steps::{keep_limit_index, size_limit_index};
 use quill::storage_limits::{StorageOptionValue, keep_label, options_for, size_limit_label};
 use quill::telegram::envelope::{StorageStats, storage_category_entries};
@@ -367,10 +367,8 @@ impl QuillApp {
     /// limit, so that slider has no counterpart.
     pub(super) fn local_storage_limits(&self, cx: &mut Context<Self>) -> Div {
         let (size, keep) = self.storage_slider_limits(cx);
-        let size_value = size.map_or_else(
-            || tr(keys::Q_OPS_NO_LIMIT).to_string(),
-            size_limit_label,
-        );
+        let size_value =
+            size.map_or_else(|| tr(keys::Q_OPS_NO_LIMIT).to_string(), size_limit_label);
         let keep_value = keep.map_or_else(
             || tr(keys::LOCAL_STORAGE_LIMIT_NEVER).to_string(),
             keep_label,

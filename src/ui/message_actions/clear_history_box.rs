@@ -7,8 +7,8 @@ use super::*;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::checkbox::Checkbox;
 use quill::clear_history::{ClearHistoryPlan, ClearTarget, Revoke, plan};
-use quill::state::ChatSummary;
 use quill::lang::{keys, tr_with};
+use quill::state::ChatSummary;
 use std::cell::Cell;
 use std::rc::Rc;
 

@@ -152,7 +152,12 @@ fn custom_mute_is_three_fields_that_start_at_eight_hours(cx: &mut TestAppContext
     let chat_id = open_chat(&app, vcx);
     app.update(vcx, |app, cx| app.open_mute_menu_for(chat_id, true, cx));
     frames(vcx);
-    for id in ["mute-days", "mute-hours", "mute-minutes", "mute-custom-apply"] {
+    for id in [
+        "mute-days",
+        "mute-hours",
+        "mute-minutes",
+        "mute-custom-apply",
+    ] {
         assert!(shown(vcx, id), "{id}");
     }
     let value = app.read_with(vcx, |app, cx| app.mute_time_value(cx));
@@ -167,10 +172,7 @@ fn custom_mute_is_three_fields_that_start_at_eight_hours(cx: &mut TestAppContext
     });
     frames(vcx);
     let value = app.read_with(vcx, |app, cx| app.mute_time_value(cx));
-    assert_eq!(
-        value.map(|v| v.mute_for()),
-        Some(DAY + 2 * 3600 + 30 * 60)
-    );
+    assert_eq!(value.map(|v| v.mute_for()), Some(DAY + 2 * 3600 + 30 * 60));
 
     // All zero reads "Unmute", and applying it lifts the mute.
     app.update_in(vcx, |app, window, cx| {

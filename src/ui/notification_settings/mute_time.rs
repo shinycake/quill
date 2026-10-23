@@ -116,7 +116,6 @@ impl QuillApp {
                 .test_support()
                 .flex()
                 .flex_col()
-                .items_center()
                 .gap_1()
                 .w(px(120.))
                 .child(
@@ -127,6 +126,7 @@ impl QuillApp {
                 .child(
                     div()
                         .text_xs()
+                        .text_center()
                         .text_color(cx.theme().muted_foreground)
                         .child(caption),
                 )
@@ -157,6 +157,7 @@ impl QuillApp {
 }
 
 #[cfg(test)]
+#[cfg(feature = "demo-capture")]
 impl MuteTimeInputs {
     /// Type `days`, `hours` and `minutes` into the fields.
     pub(in crate::ui) fn set_for_test(
@@ -172,7 +173,9 @@ impl MuteTimeInputs {
             (&self.hours, hours),
             (&self.minutes, minutes),
         ] {
-            input.update(cx, |state, cx| state.set_value(text.to_string(), window, cx));
+            input.update(cx, |state, cx| {
+                state.set_value(text.to_string(), window, cx)
+            });
         }
     }
 }
