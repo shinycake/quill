@@ -3,6 +3,7 @@
 
 use super::*;
 use quill::lang::{keys, tr};
+use quill::telegram::envelope::MessageContent;
 
 /// An autoplaying clip's picture, cropped to the media frame. A decoded
 /// image rounds itself; a GPU surface (AVPlayer), which GPUI can't clip,
@@ -92,7 +93,7 @@ pub(super) fn gif_badge() -> Div {
 
 /// A video tile's duration (time left while it autoplays, with a muted
 /// mark) in its bottom-left corner.
-pub(super) fn video_badge(duration: String, muted: bool) -> Div {
+pub(in crate::ui) fn video_badge(duration: String, muted: bool) -> Div {
     div()
         .absolute()
         .bottom_1()
@@ -154,21 +155,51 @@ pub(super) fn note_duration_badge(duration: String, unseen: bool) -> Div {
 /// A hidden spoiler (photo, video or GIF): Telegram Desktop covers it with
 /// a soft preview under drifting "dust"; a click reveals it for good (until
 /// the app restarts). The preview is the inline minithumbnail when there
-/// is one: too small to show detail, it reads as a blur.
+/// is one: too small to show detail, it reads as a blur. A video keeps its
+/// play disc and duration over the cover (tdesktop `Gif::draw`).
 pub(in crate::ui) fn spoiler_cover(
     row_id: u64,
     chat_id: ChatId,
     message_id: MessageId,
-    minithumbnail: Option<&quill::telegram::envelope::MiniThumbnail>,
-    // The file to fetch on reveal (photos), so the picture shows at once.
-    download: Option<FileId>,
-    frame_w: Pixels,
-    frame_h: Pixels,
+    content: &MessageContent,
+    files: &quill::state::FileMap,
+    downloading: &quill::state::DownloadIntents,
+    (frame_w, frame_h): (Pixels, Pixels),
     corners: MediaCorners,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
-    let key = (chat_id.0, message_id.0 as u64, u64::MAX, false);
+    let key = crate::ui::spoiler_fx::media_key(chat_id, message_id);
+    // A photo fetches on reveal, so the picture shows at once.
+    let (minithumbnail, download) = match content {
+        MessageContent::Photo(photo) => (photo.minithumbnail.as_ref(), photo.open_file_id()),
+        MessageContent::Video(video) => (video.minithumbnail.as_ref(), None),
+        MessageContent::Animation(animation) => (animation.minithumbnail.as_ref(), None),
+        _ => (None, None),
+    };
+    let video_marks = match content {
+        MessageContent::Video(video) => {
+            let play_id = video.play_file_id().unwrap_or(FileId(0));
+            let disc = if file_is_downloading(play_id, files, downloading) {
+                MediaDisc::Progress(download_fraction(play_id, files))
+            } else {
+                MediaDisc::Play
+            };
+            Some([
+                video_badge(format_voice_duration(video.duration), false).into_any_element(),
+                div()
+                    .absolute()
+                    .inset_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(media_disc(("spoiler-disc", row_id), disc))
+                    .into_any_element(),
+            ])
+        }
+        _ => None,
+    };
     spoiler_surface(row_id, minithumbnail, frame_w, frame_h, corners)
+        .children(video_marks.into_iter().flatten())
         .role(gpui_kit::Role::Button)
         .aria_label(tr(keys::Q_REST_REVEAL_SPOILER))
         .tab_index(0)
@@ -181,6 +212,28 @@ pub(in crate::ui) fn spoiler_cover(
             }
             cx.notify();
         }))
+        .test_support()
+        .into_any_element()
+}
+
+/// `media` under the cover of its just-revealed spoiler, fading out at
+/// `opacity`.
+pub(in crate::ui) fn fading_spoiler(
+    media: AnyElement,
+    cover: AnyElement,
+    opacity: f32,
+) -> AnyElement {
+    div()
+        .relative()
+        .child(media)
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .opacity(opacity)
+                .child(cover),
+        )
         .into_any_element()
 }
 

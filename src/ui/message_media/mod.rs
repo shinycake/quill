@@ -48,22 +48,22 @@ pub(super) use document::{
     inline_link,
 };
 pub(super) use layout::{
-    MediaCorners, MediaDisc, MediaFrameKind, bubble_outer_width, leads_with_media,
-    media_content_width, media_disc, media_frame_for, single_media_frame, single_media_width,
+    MediaCorners, MediaDisc, MediaFrameKind, bubble_outer_width, download_fraction,
+    leads_with_media, media_content_width, media_disc, media_frame_for, single_media_frame,
+    single_media_width,
 };
 pub(super) use location::{location_row, venue_row};
 pub(super) use picture_file::picture_file_attachment;
 pub(super) use scrubber::{AudioScrubber, HoverHandler, ScrubberFace};
 pub(super) use sticker::{sticker_attachment, sticker_box};
 pub(super) use story_card::{expired_mention_text, story_mention_extras};
-pub(super) use surfaces::{spoiler_cover, spoiler_surface};
+pub(super) use surfaces::{fading_spoiler, spoiler_cover, spoiler_surface, video_badge};
 pub(super) use video_note::{VIDEO_NOTE_DIAMETER, video_note_attachment};
 pub(super) use visual::{animation_attachment, photo_attachment, video_attachment};
 
-use layout::{MEDIA_VISUAL_GROUP, download_fraction};
+use layout::MEDIA_VISUAL_GROUP;
 use surfaces::{
     gif_badge, inline_surface, live_tile, note_duration_badge, round_inline_surface, unseen_ring,
-    video_badge,
 };
 
 pub(super) fn photo_display_path(
