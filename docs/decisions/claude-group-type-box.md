@@ -62,14 +62,18 @@ existing invite links".
   Revoke.
 - Removed the old username prompt and row, and the Edit box's "Approve new
   members" row. Both now live in the Type box.
+- The Group settings dialog loses its "Link order" page and its "Only members"
+  and "Restrict saving content" switches. As in tdesktop, these live only in
+  the Type box, which the owner opens from the same Edit box. The rights those
+  switches used stay in `GroupAdminControls`, because the Type box and the
+  driver still read them. They no longer count toward whether the settings
+  dialog has anything to show.
 
 ## Deviations
 
 - Errors from showing or hiding a username appear inline under the list, not in
   a toast.
 - The limit box list has no chat avatars.
-- The Group settings dialog keeps its own "Link order" page and its content
-  protection / join-to-send switches. Moving those into the Type box is a follow-up.
 - After a basic group upgrades, errors from the follow-up edits land on the new
   chat. The Edit box has already closed by then.
 - The Public / Private choice uses two standalone kit `Radio`s rather than a

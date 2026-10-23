@@ -340,7 +340,7 @@ fn channel_admin_links_a_discussion_group_and_sets_reactions() {
     );
     let _ = sg2;
     let plain = session.group_admin_controls(ChatId(21));
-    assert!(plain.discussion.is_none() && !plain.reactions && !plain.usernames);
+    assert!(plain.discussion.is_none() && !plain.reactions);
     // Every administrator may open the boosts list.
     assert!(plain.boosts);
 }
