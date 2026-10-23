@@ -805,7 +805,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Render custom emoji inside message text <!-- parity:emoji-custom-render --> (inline sticker image at 1.25× text size; thumbnail first, else static WEBP; unresolved falls back to the span text; animated playback still static; live custom emoji unverified)
 - [x] Suggest animated emoji in composer <!-- parity:emoji-suggest-animated --> (composer trailing-emoji → `getAnimatedEmoji` (deduped, stale in-flight dropped) → suggestion row above the composer, tap to send as a sticker; `animatedEmoji` parse into EmojiPanel already existed)
 - [x] Emoji status: recent/trending/default choices, Premium-gated selection and removal, forever/1h/2h/8h/2d/custom expiry; thumbnails and safe retry; live changes unverified <!-- parity:emoji-status -->
-- [ ] Set Emoji Status opens the status selector panel (search, recent, packs) instead of the emoji pack settings, and "Other…" opens a duration picker instead of asking for typed hours <!-- parity:emoji-status-selector -->
+- [x] Set Emoji Status opens the status selector panel (search, recent, packs) instead of the emoji pack settings, and "Other…" opens a duration picker instead of asking for typed hours <!-- parity:emoji-status-selector -->
 - [x] Clear recent emoji statuses after confirmation; refusal preserves history and stale list replies cannot restore cleared entries <!-- parity:emoji-status-clear-recent -->
 - [x] Clear recent emoji <!-- parity:emoji-clear-recent -->
 - [x] Dynamic emoji pack order setting <!-- parity:emoji-dynamic-pack-order --> (partial: backend wired — reorderInstalledStickerSets with stickerTypeCustomEmoji; the dynamic toggle itself is client-side recency ordering, settings UI pending)
