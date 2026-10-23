@@ -168,6 +168,9 @@ impl Session {
             RequestPurpose::Bots(BotsPurpose::AllowBotToSendMessages { bot_user_id }) => {
                 self.bots.web_apps.write_access = Some((bot_user_id, WriteAccessResult::Denied));
             }
+            RequestPurpose::Bots(BotsPurpose::SharePhoneWithMiniApp { bot_user_id }) => {
+                self.bots.web_apps.phone_share = Some((bot_user_id, false));
+            }
             RequestPurpose::Bots(BotsPurpose::ToggleBotEmojiStatusAccess {
                 bot_user_id,
                 allowed,

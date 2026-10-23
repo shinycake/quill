@@ -117,6 +117,8 @@ impl QuillApp {
             privacy_policy_url,
             in_attachment_menu,
             emoji: Default::default(),
+            phone: Default::default(),
+            invoice: None,
         });
         self.ensure_mini_app_poll(cx);
     }
@@ -187,6 +189,8 @@ impl QuillApp {
     /// The session's one-shot answers.
     pub(super) fn poll_mini_app_session(&mut self, cx: &mut Context<Self>) {
         self.poll_emoji_status(cx);
+        self.poll_phone(cx);
+        self.poll_invoice(cx);
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -528,12 +532,7 @@ impl QuillApp {
                 cx.activate(true);
                 cx.notify();
             }
-            WebAppEvent::OpenInvoice { slug } => self.with_window(|window| {
-                window.emit(BridgeReply::invoice_closed(&slug, "cancelled"));
-                window.send(&HostCommand::Toast {
-                    text: tr(keys::Q_MEDIA_PAYMENTS_INSIDE_MINI_APPS_ARENT).into(),
-                });
-            }),
+            WebAppEvent::OpenInvoice { slug } => self.request_mini_app_invoice(slug, cx),
             WebAppEvent::OpenPopup(spec) => self.with_window(|window| {
                 window.show_popup(
                     PopupPurpose::App,
@@ -572,12 +571,7 @@ impl QuillApp {
                     });
                 }
             }
-            WebAppEvent::RequestPhone => self.with_window(|window| {
-                window.emit(BridgeReply::phone_requested(false));
-                window.send(&HostCommand::Toast {
-                    text: tr(keys::Q_MEDIA_SHARING_YOUR_PHONE_NUMBER_WITH).into(),
-                });
-            }),
+            WebAppEvent::RequestPhone => self.request_mini_app_phone(),
             WebAppEvent::RequestEmojiStatusAccess => self.request_emoji_status_access(cx),
             WebAppEvent::SetEmojiStatus {
                 custom_emoji_id,
@@ -746,6 +740,7 @@ impl QuillApp {
                         self.answer_emoji_status_access(&button, cx);
                     }
                     PopupPurpose::EmojiStatus => self.answer_set_emoji_status(&button, cx),
+                    PopupPurpose::Phone => self.answer_phone_prompt(&button, cx),
                 }
             }
         }
@@ -765,6 +760,7 @@ impl QuillApp {
                 self.insert_switch_inline_query(&query, window, cx);
             }
             RenderAction::OpenBotChat { bot_id } => self.open_user_chat(bot_id, window, cx),
+            RenderAction::OpenInvoice { slug } => self.open_mini_app_invoice(slug, window, cx),
         }
     }
 

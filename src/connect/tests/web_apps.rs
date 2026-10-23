@@ -447,3 +447,58 @@ fn attachment_menu_launch_sends_the_chat_context() {
     assert_eq!(sent["is_added"], false);
     assert_eq!(sent["allow_write_access"], false);
 }
+
+fn my_contact() -> crate::telegram::requests::ContactShare {
+    crate::telegram::requests::ContactShare {
+        phone_number: "+15550100".into(),
+        first_name: "Ada".into(),
+        last_name: "L".into(),
+        user_id: 7,
+    }
+}
+
+#[test]
+fn sharing_the_phone_sends_my_contact_card_to_the_bot() {
+    let mut h = Harness::ready();
+    let extra = h
+        .driver
+        .share_phone_with_bot(42, &my_contact())
+        .expect("sent");
+    let sent = h.last("sendMessage");
+    assert_eq!(sent["chat_id"], 42);
+    let content = &sent["input_message_content"];
+    assert_eq!(content["@type"], "inputMessageContact");
+    assert_eq!(content["contact"]["phone_number"], "+15550100");
+    assert_eq!(content["contact"]["user_id"], 7);
+    assert_eq!(h.driver.session.bots.web_apps.phone_share, None);
+    h.ingest(&format!(
+        r#"{{"@type":"message","@extra":"{}","id":9,"chat_id":42,"is_outgoing":true,"date":1700000000,"content":{{"@type":"messageContact","contact":{{"@type":"contact","phone_number":"+15550100","first_name":"Ada","last_name":"L","user_id":7}}}}}}"#,
+        extra.as_extra()
+    ));
+    assert_eq!(h.driver.session.bots.web_apps.phone_share, Some((42, true)));
+}
+
+#[test]
+fn a_refused_phone_share_reports_failure() {
+    let mut h = Harness::ready();
+    let extra = h
+        .driver
+        .share_phone_with_bot(42, &my_contact())
+        .expect("sent");
+    h.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":403,"message":"Bot was blocked by the user"}}"#,
+        extra.as_extra()
+    ));
+    assert_eq!(
+        h.driver.session.bots.web_apps.phone_share,
+        Some((42, false))
+    );
+}
+
+#[test]
+fn a_phone_share_without_a_number_is_not_sent() {
+    let mut h = Harness::ready();
+    let mut contact = my_contact();
+    contact.phone_number = " ".into();
+    assert!(h.driver.share_phone_with_bot(42, &contact).is_err());
+}

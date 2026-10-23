@@ -477,6 +477,12 @@ impl Session {
                     }
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SendMessage) {
                     self.upsert_message(message, true);
+                } else if let Some(RequestPurpose::Bots(BotsPurpose::SharePhoneWithMiniApp {
+                    bot_user_id,
+                })) = pending.map(|p| p.purpose)
+                {
+                    self.bots.web_apps.phone_share = Some((bot_user_id, true));
+                    self.upsert_message(message, true);
                 } else {
                     self.upsert_message(message, false);
                 }

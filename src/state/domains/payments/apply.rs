@@ -57,6 +57,7 @@ impl Session {
                 // Slice P1: `sendPaymentForm` answer (matched by `@extra`).
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::SendPaymentForm) {
                     self.payments.sending = false;
+                    self.payments.verification_started = false;
                     if result.success {
                         self.payments.form_paid = true;
                         self.note_paid_media_unlocked();
@@ -65,6 +66,7 @@ impl Session {
                         // Schema: the URL is for additional payment
                         // credentials verification (e.g. 3-D Secure) — the
                         // UI opens it in the OS browser.
+                        self.payments.verification_started = true;
                         self.payments.verification_url = Some(result.verification_url);
                     } else {
                         self.payments.note = Some("Payment failed".to_string());

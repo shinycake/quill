@@ -114,6 +114,11 @@ pub enum BotsPurpose {
     AllowBotToSendMessages {
         bot_user_id: i64,
     },
+    /// `sendMessage` with the person's own contact, answering a mini app's
+    /// `web_app_request_phone`; the outcome lands in `web_apps.phone_share`.
+    SharePhoneWithMiniApp {
+        bot_user_id: i64,
+    },
     /// `toggleBotCanManageEmojiStatus`: the profile's "Emoji Status" switch
     /// or a mini app's access request. `allowed` is what was asked for.
     ToggleBotEmojiStatusAccess {
