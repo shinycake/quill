@@ -877,6 +877,8 @@ mod camera_note_tests;
 mod clock_notify_tests;
 pub(super) mod demo_feed;
 mod dial;
+#[cfg(feature = "demo-capture")]
+mod history_demo;
 pub(super) mod live_pip;
 #[cfg(feature = "demo-capture")]
 mod live_pip_demo;
