@@ -571,7 +571,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Member lists page past 200 <!-- parity:groups-member-paging -->
 - [ ] Auto-translate toggle locked behind the boost level <!-- parity:admin-autotranslate-boost-lock -->
 - [ ] Sign messages / show authors' profiles dependency in channel settings <!-- parity:admin-signatures-profiles -->
-- [ ] Create group or channel with photo, type and add-members steps <!-- parity:groups-create-steps -->
+- [x] Create group or channel with photo, type and add-members steps <!-- parity:groups-create-steps -->
 
 ### Forums, Saved Messages & threads
 
