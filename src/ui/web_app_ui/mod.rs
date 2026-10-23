@@ -127,6 +127,8 @@ enum PopupPurpose {
     EmojiStatusAccess,
     /// `web_app_set_emoji_status`: "Confirm" sets the status.
     EmojiStatus,
+    /// `web_app_request_phone`: "Share" sends the contact card.
+    Phone,
 }
 
 /// Something only a render (with the `Window`) can do.
@@ -136,6 +138,8 @@ enum RenderAction {
     SwitchInline { query: String },
     /// The menu's "Open bot".
     OpenBotChat { bot_id: i64 },
+    /// `web_app_open_invoice`: the checkout for the slug.
+    OpenInvoice { slug: String },
 }
 
 /// The helper process and the app it shows.
@@ -157,6 +161,8 @@ pub(super) struct MiniAppWindow {
     privacy_policy_url: Option<String>,
     in_attachment_menu: bool,
     emoji: emoji_status::EmojiStatusFlow,
+    phone: phone::PhoneFlow,
+    invoice: Option<invoice::InvoiceWatch>,
 }
 
 impl Drop for MiniAppWindow {
@@ -913,6 +919,8 @@ fn bottom_button(setup: quill::web_app::bridge::ButtonSetup) -> BottomButton {
 mod emoji_status;
 mod helper_pipe;
 mod inline_results_button;
+mod invoice;
+mod phone;
 mod spawn_mini_app_window;
 
 #[cfg(test)]

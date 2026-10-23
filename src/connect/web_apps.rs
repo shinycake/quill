@@ -3,13 +3,14 @@
 //! (`ui/web_app_ui.rs`) owns the window; this only sends and marks the
 //! session so answers find their context.
 use super::*;
+use crate::composer::SendOptions;
 use crate::ids::{ChatId, RequestId};
 use crate::state::{BotsPurpose, RequestPurpose, WebAppPending};
 use crate::telegram::requests::{
-    allow_bot_to_send_messages, can_bot_send_messages, close_web_app, get_attachment_menu_bot,
-    get_grossing_web_app_bots, get_main_web_app, get_web_app_link_url, get_web_app_url,
-    open_web_app, search_web_app, send_web_app_custom_request, send_web_app_data,
-    toggle_bot_can_manage_emoji_status, toggle_bot_is_added_to_attachment_menu,
+    ContactShare, allow_bot_to_send_messages, can_bot_send_messages, close_web_app,
+    get_attachment_menu_bot, get_grossing_web_app_bots, get_main_web_app, get_web_app_link_url,
+    get_web_app_url, open_web_app, search_web_app, send_contact_card, send_web_app_custom_request,
+    send_web_app_data, toggle_bot_can_manage_emoji_status, toggle_bot_is_added_to_attachment_menu,
 };
 use crate::web_app::LaunchSource;
 use crate::web_app::theme::ThemeParams;
@@ -208,6 +209,27 @@ impl<S: JsonSender> ConnectDriver<S> {
         )?;
         self.session.bots.web_apps.write_access = None;
         let json = allow_bot_to_send_messages(extra, bot_user_id);
+        self.send_json_request(extra, &json)
+    }
+
+    /// `sendMessage` with the person's own contact card into the bot's chat,
+    /// what tdesktop's `shareContact` does for `web_app_request_phone`. The
+    /// answer lands in `web_apps.phone_share`.
+    pub fn share_phone_with_bot(
+        &mut self,
+        bot_user_id: i64,
+        contact: &ContactShare,
+    ) -> Result<RequestId, ConnectSendError> {
+        if contact.phone_number.trim().is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let chat_id = ChatId(bot_user_id);
+        let extra = self.web_app_extra(
+            RequestPurpose::Bots(BotsPurpose::SharePhoneWithMiniApp { bot_user_id }),
+            Some(chat_id),
+        )?;
+        self.session.bots.web_apps.phone_share = None;
+        let json = send_contact_card(extra, chat_id, None, contact, None, &SendOptions::default());
         self.send_json_request(extra, &json)
     }
 

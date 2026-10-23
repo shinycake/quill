@@ -524,7 +524,6 @@
 "qll_media_paste_from_the_clipboard" = "Paste from the clipboard?";
 "qll_media_pause" = "Pause";
 "qll_media_paused" = "Paused";
-"qll_media_payments_inside_mini_apps_arent" = "Payments inside mini apps aren't supported yet.";
 "qll_media_photo" = "Photo {file_name}";
 "qll_media_photo_2" = "Photo";
 "qll_media_photo_downloading" = "Photo — downloading…";
@@ -653,7 +652,6 @@
 "qll_media_share" = "Share";
 "qll_media_share_game" = "Share game";
 "qll_media_share_story_to" = "Share story to…";
-"qll_media_sharing_your_phone_number_with" = "Sharing your phone number with mini apps isn't supported yet.";
 "qll_media_show_more" = "Show more ({left})";
 "qll_media_show_on_map" = "Show on map";
 "qll_media_show_stories" = "Show stories";

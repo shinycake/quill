@@ -89,6 +89,8 @@ fn open_window(
         privacy_policy_url: None,
         in_attachment_menu: false,
         emoji: Default::default(),
+        phone: Default::default(),
+        invoice: None,
     });
     received
 }
