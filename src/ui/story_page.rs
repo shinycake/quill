@@ -30,6 +30,12 @@ pub(crate) struct StoryPage {
     pub(crate) picker: Option<AlbumPicker>,
     /// Scroll of the picker's grid: the next page loads near its end.
     pub(crate) picker_scroll: ScrollHandle,
+    /// Scroll of the posted-stories and archive sections: the next page
+    /// loads near their end (`story_albums/paging.rs`).
+    pub(crate) posted_scroll: ScrollHandle,
+    pub(crate) archive_scroll: ScrollHandle,
+    pub(crate) posted_asked: crate::ui::scroll_load::Asked,
+    pub(crate) archive_asked: crate::ui::scroll_load::Asked,
     /// Album id awaiting the second delete click (two-click confirm).
     pub(crate) delete_confirm: Option<i32>,
 }
@@ -51,6 +57,10 @@ impl StoryPage {
             rename_input: input(tr(keys::Q_MEDIA_ALBUM_NAME_1_12_CHARACTERS)),
             picker: None,
             picker_scroll: ScrollHandle::new(),
+            posted_scroll: ScrollHandle::new(),
+            archive_scroll: ScrollHandle::new(),
+            posted_asked: Default::default(),
+            archive_asked: Default::default(),
             delete_confirm: None,
         }
     }

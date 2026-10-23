@@ -277,6 +277,12 @@ crate::ui::screenshot_demo::register_demos![
         .setup(|app, _, _| app.demo_settings(Page::Account)),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-privacy")
         .setup(|app, _, _| app.demo_settings(Page::Privacy)),
+    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-privacy-blocked").setup(
+        |app, _, _| {
+            app.demo_blocked_users();
+            app.demo_settings(Page::Privacy)
+        }
+    ),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-chats")
         .setup(|app, _, _| app.demo_settings(Page::Chats)),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-telegram")
@@ -328,6 +334,38 @@ crate::ui::screenshot_demo::register_demos![
 ];
 
 impl QuillApp {
+    /// Screenshot demo: a long blocked-users list with the next page on its
+    /// way (`ui/scroll_load.rs`).
+    fn demo_blocked_users(&mut self) {
+        let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
+            self.demo_ui.sink.clone();
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        let seq = std::sync::atomic::AtomicU64::new(session.last_seq);
+        let names = [
+            "Maya", "Leo", "Noa", "Omar", "Ines", "Kai", "Ruth", "Sam", "Tara", "Ugo",
+        ];
+        let mut ids = Vec::new();
+        for (ix, name) in names.iter().enumerate() {
+            let id = 9000 + ix as i64;
+            let json = format!(
+                r#"{{"@type":"updateUser","user":{{"id":{id},"first_name":"{name}","last_name":"Blocked","type":{{"@type":"userTypeRegular"}}}}}}"#
+            );
+            if let Some(owned) = quill::telegram::client::copy_and_parse(&json, &seq, &sink) {
+                session.apply(owned);
+            }
+            ids.push(id);
+        }
+        session.settings.blocked_senders = Some(ids);
+        session.settings.blocked_total = 120;
+        session.settings.blocked_loading = true;
+        self.demo_ui.seq.store(
+            seq.load(std::sync::atomic::Ordering::SeqCst),
+            std::sync::atomic::Ordering::SeqCst,
+        );
+    }
+
     /// Screenshot demos: Settings on `page`, signed in as the demo profile.
     fn demo_settings(&mut self, page: Page) {
         if let Some(session) = self.demo_session.as_mut() {

@@ -38,9 +38,6 @@ mod tests;
 
 pub(crate) use state::StickersManagerUi;
 
-/// Distance from the end of the list at which the next page is requested.
-const LOAD_MORE_DISTANCE: f32 = 160.;
-
 /// Which sets the box manages.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Kind {
@@ -342,11 +339,7 @@ impl QuillApp {
     /// The list was scrolled: ask for the next page near its end.
     fn manager_load_more(&mut self, kind: Kind, cx: &mut Context<Self>) {
         let scroll = &self.pickers.sticker_manager.scroll;
-        if !near_end(
-            scroll.bounds().size.height,
-            scroll.max_offset().y,
-            scroll.offset().y,
-        ) {
+        if !crate::ui::scroll_load::scrolled_near_end(scroll) {
             return;
         }
         let view = self.manager_view(kind);
@@ -544,11 +537,6 @@ impl QuillApp {
     }
 }
 
-/// The list is scrolled to within `LOAD_MORE_DISTANCE` of its end.
-fn near_end(viewport_height: Pixels, max_offset_y: Pixels, offset_y: Pixels) -> bool {
-    viewport_height > px(0.) && max_offset_y + offset_y <= px(LOAD_MORE_DISTANCE)
-}
-
 /// With no account behind the window (the screenshot demos), closing the
 /// box applies its changes to the demo session itself.
 fn apply_demo_commit(
@@ -585,24 +573,4 @@ crate::ui::shell::register_dialogs! {
         |app| app.session().is_some_and(|s| s.stickers.masks.open),
         QuillApp::build_mask_sets_dialog,
     ),
-}
-
-#[cfg(test)]
-mod near_end_tests {
-    use super::near_end;
-    use gpui_kit::px;
-
-    #[test]
-    fn the_next_page_is_asked_for_near_the_end_only() {
-        // Offsets run negative as the list scrolls down.
-        assert!(!near_end(px(420.), px(1000.), px(0.)));
-        assert!(!near_end(px(420.), px(1000.), px(-800.)));
-        assert!(near_end(px(420.), px(1000.), px(-850.)));
-        assert!(near_end(px(420.), px(1000.), px(-1000.)));
-    }
-
-    #[test]
-    fn a_list_not_laid_out_yet_asks_for_nothing() {
-        assert!(!near_end(px(0.), px(0.), px(0.)));
-    }
 }

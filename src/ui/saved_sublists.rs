@@ -10,6 +10,7 @@ use super::app::{QuillApp, pane_placeholder};
 use super::chat_row::{chat_avatar, saved_messages_avatar};
 use super::pressable::PressableDiv;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::scroll_load::{load_due, loading_row, scrolled_near_end, watch_scroll};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -22,7 +23,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with, trn};
 use quill::local_path::sandboxed_display_path;
-use quill::state::{SAVED_TAG_LABEL_MAX, clean_tag_label};
+use quill::state::{RequestPurpose, SAVED_TAG_LABEL_MAX, clean_tag_label};
 use quill::telegram::envelope::{
     ReactionType, SavedMessagesTag, SavedMessagesTopic, SavedTopicKind,
 };
@@ -383,6 +384,7 @@ impl QuillApp {
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
+            .track_scroll(&self.dialogs.saved_scroll)
             .p_2()
             .gap_0p5()
             .role(Role::List)
@@ -397,23 +399,45 @@ impl QuillApp {
             };
             list = list.child(self.saved_sublist_row(topic, title, photo, &now, cx));
         }
-        let more = !session.threads.saved.topics_exhausted
-            && (session.threads.saved.topic_count == 0
-                || session.threads.saved.topics.len() < session.threads.saved.topic_count as usize);
-        if more {
-            list = list.child(
-                Button::new("saved-sublists-more")
-                    .label(tr(keys::Q_PEOPLE_LOAD_MORE))
-                    .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        if let Some(live) = this.live.as_mut() {
-                            let _ = live.driver.load_saved_topics();
-                        }
-                        cx.notify();
-                    })),
-            );
+        if Self::saved_topics_in_flight(session) {
+            list = list.child(loading_row("saved-sublists-loading", cx));
         }
-        list.into_any_element()
+        list.on_scroll_wheel(watch_scroll(cx, Self::saved_topics_more))
+            .into_any_element()
+    }
+
+    fn saved_topics_in_flight(session: &quill::state::Session) -> bool {
+        session
+            .requests
+            .has_purpose(RequestPurpose::LoadSavedMessagesTopics)
+    }
+
+    /// The next page of sublists, once the list is scrolled near its end or
+    /// does not fill the pane.
+    fn saved_topics_more(&mut self, cx: &mut Context<Self>, scrolled: bool) {
+        // Paging needs a live connection; a demo session has nothing to ask.
+        if self.live.is_none() {
+            return;
+        }
+        let Some(session) = self.session() else {
+            return;
+        };
+        let saved = &session.threads.saved;
+        let loaded = saved.topics.len();
+        let has_more = !saved.topics_exhausted
+            && (saved.topic_count == 0 || loaded < saved.topic_count as usize);
+        if !load_due(
+            scrolled_near_end(&self.dialogs.saved_scroll),
+            has_more,
+            Self::saved_topics_in_flight(session),
+        ) || !self.dialogs.saved_asked.allow(loaded, scrolled)
+        {
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.load_saved_topics();
+        }
+        cx.notify();
     }
 
     fn saved_sublist_row(

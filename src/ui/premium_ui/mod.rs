@@ -11,6 +11,7 @@
 use super::app::QuillApp;
 use super::chat_theme::{fill_muted, success};
 use super::message_text::format_unix_date_time;
+use super::scroll_load::{loading_row, watch};
 use super::shell::{DialogKind, QuillShell};
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -221,23 +222,8 @@ impl QuillApp {
                 for (ix, tx) in hub.transactions.iter().enumerate() {
                     body = body.child(tx_row(session, ix, tx, cx));
                 }
-                if !hub.tx_offset.is_empty() {
-                    body = body.child(
-                        Button::new("stars-load-more")
-                            .label(if hub.tx_loading {
-                                tr(keys::Q_MONEY_LOADING)
-                            } else {
-                                tr(keys::Q_MONEY_LOAD_MORE)
-                            })
-                            .ghost()
-                            .disabled(hub.tx_loading)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                if let Some(live) = this.live.as_mut() {
-                                    let _ = live.driver.fetch_more_star_transactions();
-                                }
-                                cx.notify();
-                            })),
-                    );
+                if !hub.tx_offset.is_empty() && hub.tx_loading {
+                    body = body.child(loading_row("stars-loading", cx));
                 }
                 body = body.child(star_packs::star_packs_section(session, cx));
                 // tdesktop `BuildCreditsButtons`: stats, gift, earn.
@@ -251,17 +237,22 @@ impl QuillApp {
                         .child(tr(keys::Q_MONEY_YOU_PAY_FOR_STARS_IN)),
                 );
             }
+            let scroll = this.payments.stars_scroll.clone();
+            let body = watch(body, cx, Self::stars_more);
             dialog
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::scrollable_dialog_content_tracked(
+                    Some(scroll),
+                    {
+                        let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                        move |content, _, _| {
+                            let body = body
+                                .borrow_mut()
+                                .take()
+                                .unwrap_or_else(|| div().into_any_element());
+                            content.child(body)
+                        }
+                    },
+                ))
                 .on_close(on_close)
         })
     }
@@ -428,36 +419,26 @@ impl QuillApp {
                     grid = grid.child(gift_tile(session, ix, gift, mine, &roots, cx));
                 }
                 body = body.child(grid);
-                if !hub.gifts_offset.is_empty() {
-                    body = body.child(
-                        Button::new("gifts-load-more")
-                            .label(if hub.gifts_loading {
-                                tr(keys::Q_MONEY_LOADING)
-                            } else {
-                                tr(keys::Q_MONEY_LOAD_MORE)
-                            })
-                            .ghost()
-                            .disabled(hub.gifts_loading)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                if let Some(live) = this.live.as_mut() {
-                                    let _ = live.driver.fetch_more_received_gifts();
-                                }
-                                cx.notify();
-                            })),
-                    );
+                if !hub.gifts_offset.is_empty() && hub.gifts_loading {
+                    body = body.child(loading_row("gifts-loading", cx));
                 }
             }
+            let scroll = this.payments.gifts_scroll.clone();
+            let body = watch(body, cx, Self::gifts_more);
             dialog
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::scrollable_dialog_content_tracked(
+                    Some(scroll),
+                    {
+                        let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                        move |content, _, _| {
+                            let body = body
+                                .borrow_mut()
+                                .take()
+                                .unwrap_or_else(|| div().into_any_element());
+                            content.child(body)
+                        }
+                    },
+                ))
                 .on_close(on_close)
         })
     }
@@ -877,6 +858,7 @@ mod grams_demo;
 mod grams_withdraw;
 mod limit_box;
 mod open_premium;
+mod paging;
 mod promo;
 mod public_links;
 mod purchase;

@@ -1,6 +1,7 @@
 //! Methods moved out of `payments.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::scroll_load::{load_due, loading_row, scrolled_near_end, watch};
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 
@@ -322,35 +323,26 @@ impl QuillApp {
                         cx,
                     ));
                 }
-                if !subs.next_offset.is_empty() {
-                    let label = if session.payments.star_subscriptions_loading {
-                        tr(keys::Q_MONEY_LOADING)
-                    } else {
-                        tr(keys::Q_MONEY_LOAD_MORE)
-                    };
-                    body = body.child(
-                        Button::new("subs-load-more")
-                            .label(label)
-                            .ghost()
-                            .disabled(session.payments.star_subscriptions_loading)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.load_more_subscriptions(cx);
-                            })),
-                    );
+                if !subs.next_offset.is_empty() && session.payments.star_subscriptions_loading {
+                    body = body.child(loading_row("subs-loading", cx));
                 }
             }
-            let body = body.into_any_element();
+            let body = watch(body, cx, Self::subscriptions_more).into_any_element();
+            let scroll = this.payments.subs_scroll.clone();
             dialog
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::scrollable_dialog_content_tracked(
+                    Some(scroll),
+                    {
+                        let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                        move |content, _, _| {
+                            let body = body
+                                .borrow_mut()
+                                .take()
+                                .unwrap_or_else(|| div().into_any_element());
+                            content.child(body)
+                        }
+                    },
+                ))
                 .on_close(on_close)
         })
     }
@@ -381,7 +373,31 @@ impl QuillApp {
 
     /// Slice `parity:bots-payment-recurring`: "Load more" — the next
     /// `getStarSubscriptions` page.
-    pub(in crate::ui) fn load_more_subscriptions(&mut self, cx: &mut Context<Self>) {
+    fn subscriptions_more(&mut self, cx: &mut Context<Self>, scrolled: bool) {
+        // Paging needs a live connection; a demo session has nothing to ask.
+        if self.live.is_none() {
+            return;
+        }
+        let Some(payments) = self.session().map(|s| &s.payments) else {
+            return;
+        };
+        if !payments.subscriptions_open
+            || (payments.star_subscriptions_error.is_some() && !scrolled)
+            || !load_due(
+                scrolled_near_end(&self.payments.subs_scroll),
+                !payments.star_subscriptions_offset.is_empty(),
+                payments.star_subscriptions_loading,
+            )
+            || !self.payments.subs_asked.allow(
+                payments
+                    .star_subscriptions
+                    .as_ref()
+                    .map_or(0, |subs| subs.subscriptions.len()),
+                scrolled,
+            )
+        {
+            return;
+        }
         let sent = self
             .live
             .as_mut()

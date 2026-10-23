@@ -3,6 +3,7 @@
 //! sorted "Programs" list, with the rows the programs box reuses.
 
 use super::*;
+use crate::ui::scroll_load::scrolled_within;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -15,20 +16,10 @@ use quill::lang::{keys, tr, tr_with};
 /// `PeerListContent`'s `PreloadHeightsCount`).
 const PRELOAD_SCREENS: f32 = 3.0;
 
-/// Whether the end of a list is within `PRELOAD_SCREENS` of what is
-/// visible: `max` is the farthest scroll, `offset` the current one and
-/// `visible` the height in view.
-pub(super) fn preload_due(max: Pixels, offset: Pixels, visible: Pixels) -> bool {
-    max <= px(0.) || max - offset <= visible * PRELOAD_SCREENS
-}
-
-/// Whether a scroll handle sits near the end of its content.
+/// Whether a scroll handle sits within `PRELOAD_SCREENS` of the end of its
+/// content (`ui/scroll_load.rs`).
 pub(super) fn near_end(handle: &ScrollHandle) -> bool {
-    preload_due(
-        handle.max_offset().y,
-        -handle.offset().y,
-        handle.bounds().size.height,
-    )
+    scrolled_within(handle, handle.bounds().size.height * PRELOAD_SCREENS)
 }
 
 /// One program in a list: what the row shows and what it opens.
@@ -427,18 +418,5 @@ impl QuillApp {
         if box_more && near_end(&self.earn.box_scroll) {
             let _ = live.driver.more_starref_programs(false, true);
         }
-    }
-}
-
-#[cfg(test)]
-mod unit {
-    use super::preload_due;
-    use gpui_kit::px;
-
-    #[test]
-    fn the_next_page_loads_three_screens_ahead() {
-        assert!(preload_due(px(0.), px(0.), px(500.)));
-        assert!(preload_due(px(3000.), px(1500.), px(500.)));
-        assert!(!preload_due(px(3000.), px(1400.), px(500.)));
     }
 }

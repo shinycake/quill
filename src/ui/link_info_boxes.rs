@@ -57,11 +57,25 @@ pub(super) fn finish(
     footer: AnyElement,
     on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Dialog {
+    finish_tracked(None, dialog, title, body, footer, on_close)
+}
+
+/// `finish` with the body's scroll region tracked by `scroll`, for a long
+/// list that loads its next page near the end (`ui/scroll_load.rs`).
+pub(super) fn finish_tracked(
+    scroll: Option<ScrollHandle>,
+    dialog: Dialog,
+    title: impl Into<SharedString>,
+    body: AnyElement,
+    footer: AnyElement,
+    on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Dialog {
     let body = Rc::new(RefCell::new(Some(body)));
     dialog
         .overlay(true)
         .title(crate::ui::shell::dialog_title(title))
-        .content(crate::ui::shell::scrollable_dialog_content(
+        .content(crate::ui::shell::scrollable_dialog_content_tracked(
+            scroll,
             move |content, _, _| {
                 content.child(
                     body.borrow_mut()

@@ -1,7 +1,11 @@
 //! Methods moved out of `story_albums.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::scroll_load::{loading_row, watch_scroll};
 use quill::lang::{keys, tr, tr_with};
+
+/// The tallest a section of the story page grows before it scrolls.
+const SECTION_MAX_HEIGHT: f32 = 220.;
 
 impl QuillApp {
     /// Phase 9.7: the chat story page overlay — story albums (list +
@@ -305,11 +309,24 @@ impl QuillApp {
                     .text_color(cx.theme().foreground)
                     .child(tr(keys::Q_MEDIA_CHAT_PAGE_STORIES)),
             );
+            let (posted_scroll, archive_scroll) = match self.stories.page.as_ref() {
+                Some(page) => (page.posted_scroll.clone(), page.archive_scroll.clone()),
+                None => Default::default(),
+            };
+            let mut posted_rows = div()
+                .id("story-page-posted")
+                .flex()
+                .flex_col()
+                .gap_2()
+                .max_h(px(SECTION_MAX_HEIGHT))
+                .overflow_y_scroll()
+                .track_scroll(&posted_scroll)
+                .on_scroll_wheel(watch_scroll(cx, Self::story_posted_more));
             for story_id in &chat_page_ids {
                 let story_id = *story_id;
                 let label = label_for(story_id);
                 let is_pinned = pinned.contains(&story_id);
-                chat_page = chat_page.child(
+                posted_rows = posted_rows.child(
                     div()
                         .flex()
                         .items_center()
@@ -339,15 +356,10 @@ impl QuillApp {
                         ),
                 );
             }
-            chat_page = chat_page.child(
-                Button::new("story-page-load-chat-page")
-                    .label(tr(keys::Q_MEDIA_LOAD_MORE))
-                    .ghost()
-                    .text_color(cx.theme().foreground)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.load_more_chat_page_stories(cx);
-                    })),
-            );
+            if self.chat_page_loading() && self.chat_page_has_more() {
+                posted_rows = posted_rows.child(loading_row("story-page-posted-loading", cx));
+            }
+            chat_page = chat_page.child(posted_rows);
             // ---- Archive. ----
             let archived_ids: Vec<i32> = self
                 .session()
@@ -360,9 +372,18 @@ impl QuillApp {
                     .text_color(cx.theme().foreground)
                     .child(tr(keys::Q_MEDIA_ARCHIVE)),
             );
+            let mut archive_rows = div()
+                .id("story-page-archive")
+                .flex()
+                .flex_col()
+                .gap_2()
+                .max_h(px(SECTION_MAX_HEIGHT))
+                .overflow_y_scroll()
+                .track_scroll(&archive_scroll)
+                .on_scroll_wheel(watch_scroll(cx, Self::story_archive_more));
             for story_id in &archived_ids {
                 let label = label_for(*story_id);
-                archive = archive.child(
+                archive_rows = archive_rows.child(
                     div()
                         .px_2()
                         .py_1()
@@ -376,15 +397,10 @@ impl QuillApp {
                         ),
                 );
             }
-            archive = archive.child(
-                Button::new("story-page-load-archive")
-                    .label(tr(keys::Q_MEDIA_LOAD_MORE))
-                    .ghost()
-                    .text_color(cx.theme().foreground)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.load_more_archived_stories(cx);
-                    })),
-            );
+            if self.archived_loading() && self.picker_has_more() {
+                archive_rows = archive_rows.child(loading_row("story-page-archive-loading", cx));
+            }
+            archive = archive.child(archive_rows);
             body = body.child(list).child(chat_page).child(archive);
         }
 

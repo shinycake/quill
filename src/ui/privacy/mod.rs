@@ -8,6 +8,7 @@
 
 use super::app::QuillApp;
 use super::dialogs::GroupConfirmAction;
+use crate::ui::scroll_load::{load_due, loading_row, scrolled_near_end, watch};
 use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
@@ -24,6 +25,10 @@ use quill::telegram::requests::PrivacyWho;
 use quill::telegram::requests_privacy::PrivacySettingKey;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
+
+/// The tallest the blocked-users rows grow before they scroll.
+const BLOCKED_ROWS_HEIGHT: f32 = 360.;
+
 /// Slice S3: Privacy rule editor target — one of the five
 /// `PrivacySettingKey` rules, or one of the two call settings (which
 /// reuse the Phase C2i `call_privacy_*` plumbing instead of the new
@@ -343,31 +348,56 @@ impl QuillApp {
                     .child(tr(keys::Q_PREFS_NO_BLOCKED_USERS)),
             );
         }
-        for user_id in &list {
-            section = section.child(self.blocked_user_row(cx, *user_id));
-        }
-        if (total as usize) > list.len() {
-            let remaining = total as usize - list.len();
+        if !list.is_empty() {
+            let mut rows = div().flex().flex_col();
+            for user_id in &list {
+                rows = rows.child(self.blocked_user_row(cx, *user_id));
+            }
+            if loading && (total as usize) > list.len() {
+                rows = rows.child(loading_row("privacy-blocked-loading", cx));
+            }
             section = section.child(
-                Button::new("privacy-blocked-more")
-                    .small()
-                    .label(tr_with(
-                        keys::Q_PREFS_LOAD_MORE_REMAINING,
-                        &[("remaining", &remaining.to_string())],
-                    ))
-                    .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        if let Some(live) = this.live.as_mut() {
-                            let _ = live.driver.fetch_blocked_senders();
-                        }
-                        cx.notify();
-                    })),
+                div()
+                    .id("privacy-blocked-rows")
+                    .max_h(px(BLOCKED_ROWS_HEIGHT))
+                    .overflow_y_scroll()
+                    .track_scroll(&self.privacy.blocked_scroll)
+                    .child(watch(rows, cx, Self::blocked_more)),
             );
         }
         if self.privacy.block_picker_open {
             section = section.child(self.block_picker(cx, &list));
         }
         section.into_any_element()
+    }
+
+    /// The next page of blocked users, once the rows are scrolled near
+    /// their end (or the loaded ones do not fill the box).
+    fn blocked_more(&mut self, cx: &mut Context<Self>, scrolled: bool) {
+        // Paging needs a live connection; a demo session has nothing to ask.
+        if self.live.is_none() {
+            return;
+        }
+        let Some(settings) = self.session().map(|s| &s.settings) else {
+            return;
+        };
+        let loaded = settings.blocked_senders.as_ref().map_or(0, Vec::len);
+        let has_more =
+            settings.blocked_senders.is_some() && (settings.blocked_total.max(0) as usize) > loaded;
+        if (settings.blocked_error && !scrolled)
+            || !load_due(
+                scrolled_near_end(&self.privacy.blocked_scroll),
+                has_more,
+                settings.blocked_loading,
+            )
+            || !self.privacy.blocked_asked.allow(loaded, scrolled)
+        {
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.fetch_blocked_senders();
+        }
+        cx.notify();
     }
 
     /// Slice S3: one blocked user with two-step Unblock (TGX

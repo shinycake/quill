@@ -6,6 +6,7 @@ use super::pressable::action_row;
 use super::shell::DialogKind;
 use super::shell::QuillShell;
 use super::*;
+use crate::ui::scroll_load::scrolled_near_end;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -26,7 +27,6 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 /// How close to the end of a member list the next page is asked for.
-const LOAD_MORE_DISTANCE: f32 = 120.;
 /// A picker row's userpic (tdesktop `peerListItem.photoSize` is 42; the
 /// rows here are compact).
 const PICKER_AVATAR: f32 = 28.;
@@ -785,9 +785,4 @@ crate::ui::shell::register_dialogs! {
         |app| app.admin.member_dialog.is_some(),
         QuillApp::build_member_dialog,
     ),
-}
-
-pub(super) fn scrolled_near_end(scroll: &ScrollHandle) -> bool {
-    scroll.bounds().size.height > px(0.)
-        && scroll.max_offset().y + scroll.offset().y <= px(LOAD_MORE_DISTANCE)
 }

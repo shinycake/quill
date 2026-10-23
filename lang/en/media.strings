@@ -443,14 +443,12 @@
 "qll_media_live_story" = "🔴 Live story";
 "qll_media_load_archived_stories" = "load archived stories";
 "qll_media_load_chat_page_stories" = "load chat page stories";
-"qll_media_load_more" = "Load more";
 "qll_media_loading" = "Loading…";
 "qll_media_loading_apps" = "Loading apps…";
 "qll_media_loading_emoji_packs" = "Loading emoji packs…";
 "qll_media_loading_members" = "Loading members…";
 "qll_media_loading_more_stickers" = "loading more stickers…";
 "qll_media_loading_more_trending_stickers" = "loading more trending stickers…";
-"qll_media_loading_public_shares" = "Loading public shares…";
 "qll_media_loading_reactions" = "Loading reactions…";
 "qll_media_loading_results" = "Loading results…";
 "qll_media_loading_similar_bots" = "loading similar bots…";

@@ -764,5 +764,6 @@ mod demo;
 #[cfg(feature = "demo-capture")]
 mod picker_tests;
 pub(in crate::ui) use cover_strip::CoverPicker;
+mod paging;
 mod picker;
 mod story_page_overlay;
