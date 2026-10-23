@@ -134,44 +134,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Slice G1: group/channel management section for the info panel.
-    /// Every row is capability-gated (`chat_can_restrict_members`,
-    /// `chat_is_owner`, `chat_can_invite_users`,
-    /// `can_be_deleted_for_all_users`) so buttons only appear when the
-    /// action can succeed. Basic groups get members / permissions /
-    /// invite link / leave / delete; supergroups additionally get
-    /// join-request toggle, username, and the one-way broadcast
-    /// upgrade; channels get members (subscribers), username, invite
-    /// link, leave / delete.
-    /// Slice G2: `(sign_messages, show_message_sender)` for the
-    /// channel's supergroup (`updateSupergroup` flags; unset = off).
-    pub(super) fn sign_flags(&self, chat_id: ChatId) -> (bool, bool) {
-        self.session()
-            .and_then(|session| {
-                session
-                    .chats
-                    .get(&chat_id.0)
-                    .and_then(|chat| match chat.kind {
-                        ChatKind::Supergroup { supergroup_id, .. } => Some((
-                            session
-                                .groups
-                                .supergroup_sign_messages
-                                .get(&supergroup_id)
-                                .copied()
-                                .unwrap_or(false),
-                            session
-                                .groups
-                                .supergroup_show_message_sender
-                                .get(&supergroup_id)
-                                .copied()
-                                .unwrap_or(false),
-                        )),
-                        _ => None,
-                    })
-            })
-            .unwrap_or((false, false))
-    }
-
     /// The info panel's manage entry (tdesktop's "Manage group" /
     /// "Manage channel", which opens the Edit box), and Leave channel for a
     /// channel (`ActionsFiller::fillChannelActions`; groups leave from the

@@ -162,6 +162,14 @@ pub fn all_rows(is_forum: bool) -> Vec<Permission> {
     rows
 }
 
+/// The Edit box's "Permissions 13/14": rows on, and rows in the box
+/// (tdesktop `RestrictionsCountValue`).
+pub fn permissions_count(permissions: &ChatPermissions, is_forum: bool) -> (usize, usize) {
+    let rows = all_rows(is_forum);
+    let on = rows.iter().filter(|row| row.get(permissions)).count();
+    (on, rows.len())
+}
+
 /// How many media rows are on (the "3/10" next to "Send media").
 pub fn media_on(permissions: &ChatPermissions) -> usize {
     MEDIA.iter().filter(|row| row.get(permissions)).count()

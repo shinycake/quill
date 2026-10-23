@@ -87,6 +87,7 @@ pub mod gift_market;
 pub mod giveaway;
 pub mod go_to_message;
 pub mod group_info_edit;
+pub mod group_manage;
 pub mod group_type;
 pub mod icon_badge;
 pub mod ids;

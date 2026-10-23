@@ -1,150 +1,28 @@
-//! The Edit box's manage rows: the Quill Manage dialogs (settings,
-//! members, permissions, invite link, stickers, topics, welcome, ...)
-//! hosted in the box as tdesktop lists them, and Delete at the bottom.
+//! The Edit box's manage rows in tdesktop's order
+//! (`Controller::fillManageSection`): type, discussion, direct messages,
+//! history, topics, color, auto-translate, signatures, then the rows with
+//! counts (reactions, permissions, invite links, administrators, members,
+//! join requests, removed users, recent actions), affiliate programs,
+//! Quill's own rows, stickers and Delete.
 #![deny(clippy::indexing_slicing)]
 
-use crate::ui::GroupConfirmAction;
 use crate::ui::app::QuillApp;
+use crate::ui::dialogs::{GroupSettingsAction, GroupSettingsView, MemberTab};
 use crate::ui::pressable::action_row;
-use crate::ui::status_note::StatusNote;
-use gpui_kit::component::button::*;
+use gpui_kit::assets::IconName as I;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use quill::group_manage::{ReactionsValue, positive_count};
 use quill::group_type::type_row_value;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use quill::state::RequestPurpose;
-use quill::telegram::envelope::{ChannelMemberStatus, ChatKind};
+use quill::state::{DiscussionControl, FORUM_MIN_MEMBERS, ManageRows, TopicsLock};
+use quill::telegram::envelope::ChatKind;
 
 impl QuillApp {
-    fn group_sticker_choices(&self, chat_id: ChatId, cx: &mut Context<Self>) -> AnyElement {
-        // The caller only builds this section with a session.
-        let Some(session) = self.session() else {
-            return div().into_any_element();
-        };
-        let info = session.chats.get(&chat_id.0).and_then(|c| match c.kind {
-            ChatKind::Supergroup { supergroup_id, .. } => {
-                session.supergroup_full_info(supergroup_id)
-            }
-            _ => None,
-        });
-        let busy = [
-            RequestPurpose::SetSupergroupStickerSet,
-            RequestPurpose::SetSupergroupCustomEmojiStickerSet,
-        ]
-        .iter()
-        .any(|p| session.requests.has_purpose_for_chat(*p, chat_id));
-        let loading = [
-            RequestPurpose::GetInstalledStickerSets,
-            RequestPurpose::GetInstalledEmojiSets,
-        ]
-        .iter()
-        .any(|p| session.requests.has_purpose(*p));
-        let mut section = div().flex().flex_col().gap_1().child(
-            Button::new("group-load-sticker-packs")
-                .label(if loading {
-                    tr(keys::Q_PEOPLE_LOADING_PACKS)
-                } else {
-                    tr(keys::Q_PEOPLE_LOAD_REFRESH_GROUP_PACKS)
-                })
-                .ghost()
-                .disabled(loading)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if let Some(live) = this.live.as_mut()
-                        && live.driver.load_group_sticker_choices(chat_id).is_err()
-                    {
-                        this.connection.set_note(StatusNote::error(tr(
-                            keys::Q_PEOPLE_COULD_NOT_LOAD_GROUP_PACKS,
-                        )));
-                    }
-                    cx.notify();
-                })),
-        );
-        if session.stickers.stickers.failed || session.stickers.emoji.failed {
-            section = section.child(
-                div()
-                    .text_sm()
-                    .child(tr(keys::Q_PEOPLE_COULD_NOT_LOAD_PACKS_RETRY)),
-            );
-        }
-        for (custom, title, current, sets) in [
-            (
-                false,
-                tr(keys::GROUP_STICKERS),
-                info.map_or(0, |i| i.sticker_set_id),
-                &session.stickers.stickers.sets,
-            ),
-            (
-                true,
-                tr(keys::EMOJI_GROUP_BADGE),
-                info.map_or(0, |i| i.custom_emoji_sticker_set_id),
-                &session.stickers.emoji.installed_sets,
-            ),
-        ] {
-            let current_label = if current == 0 {
-                tr(keys::Q_PEOPLE_NONE).to_string()
-            } else {
-                sets.iter()
-                    .find(|s| s.id == current)
-                    .map(|s| s.title.clone())
-                    .unwrap_or_else(|| {
-                        tr_with(keys::Q_PEOPLE_PACK, &[("current", &current.to_string())])
-                    })
-            };
-            let mut choices = div()
-                .id(if custom {
-                    "group-emoji-choices"
-                } else {
-                    "group-sticker-choices"
-                })
-                .flex()
-                .flex_col()
-                .gap_1()
-                .max_h(px(160.))
-                .overflow_y_scroll()
-                .child(div().text_sm().child(format!("{title}: {current_label}")));
-            for (id, label) in std::iter::once((0, tr(keys::Q_PEOPLE_REMOVE_PACK).to_string()))
-                .chain(sets.iter().map(|s| (s.id, s.title.clone())))
-            {
-                choices = choices.child(
-                    Button::new(format!("group-pack-{custom}-{id}"))
-                        .label(label)
-                        .ghost()
-                        .selected(id == current)
-                        .disabled(busy || id == current)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if let Some(live) = this.live.as_mut() {
-                                let result = if custom {
-                                    live.driver
-                                        .set_supergroup_custom_emoji_sticker_set(chat_id, id)
-                                } else {
-                                    live.driver.set_supergroup_sticker_set(chat_id, id)
-                                };
-                                this.connection.set_note(match result {
-                                    Ok(Some(_)) => StatusNote::silent(tr(
-                                        keys::Q_PEOPLE_GROUP_PACK_CHANGE_REQUESTED,
-                                    )),
-                                    Ok(None) => StatusNote::info(tr(
-                                        keys::Q_PEOPLE_GROUP_PACK_CHANGE_IS_UNAVAILABLE,
-                                    )),
-                                    Err(_) => StatusNote::error(tr(
-                                        keys::Q_PEOPLE_COULD_NOT_CHANGE_GROUP_PACK,
-                                    )),
-                                });
-                            }
-                            cx.notify();
-                        })),
-                );
-            }
-            section = section.child(choices);
-        }
-        section.into_any_element()
-    }
-
-    /// The Edit box's manage rows under the name and description
-    /// (tdesktop `Controller::fillManageSection`): each Quill Manage
-    /// dialog the viewer's rights allow, then Delete.
+    /// The Edit box's manage rows under the name and description: each
+    /// row the viewer's rights allow, then Delete.
     pub(super) fn group_edit_box_manage_rows(
         &self,
         chat_id: ChatId,
@@ -156,328 +34,228 @@ impl QuillApp {
             .map(|chat| &chat.kind);
         let is_channel = kind.is_some_and(|kind| kind.is_channel());
         let is_basic_group = matches!(kind, Some(ChatKind::BasicGroup { .. }));
-        let can_restrict = session.is_some_and(|s| s.chat_can_restrict_members(chat_id));
         let is_owner = session.is_some_and(|s| s.chat_is_owner(chat_id));
-        let can_invite = session.is_some_and(|s| s.chat_can_invite_users(chat_id));
-        let can_add = session.is_some_and(|s| s.chat_can_add_members(chat_id));
-        let can_delete = session
-            .as_ref()
-            .and_then(|s| s.chats.get(&chat_id.0))
-            .is_some_and(|chat| chat.can_be_deleted_for_all_users);
-        let is_member = session
-            .as_ref()
-            .and_then(|s| s.chats.get(&chat_id.0))
-            .and_then(|chat| chat.my_member_status)
-            .is_some_and(|status| {
-                matches!(
-                    status,
-                    ChannelMemberStatus::Creator
-                        | ChannelMemberStatus::Administrator
-                        | ChannelMemberStatus::Member
-                        | ChannelMemberStatus::Restricted
-                )
-            });
+        let controls = session
+            .map(|s| s.group_admin_controls(chat_id))
+            .unwrap_or_default();
+        let rows = session.map(|s| s.manage_rows(chat_id)).unwrap_or_default();
         let mut section = div().flex().flex_col().w_full().gap_1();
-        use gpui_kit::assets::IconName as I;
-        // Each row is built by a function of its own, so this section's
-        // frame does not hold every row's builder chain at once
-        // (docs/decisions/main-thread-stack.md).
-        macro_rules! row {
-            ($id:expr, $icon:expr, $label:expr, |$this:ident, $window:ident, $cx:ident| $action:block) => {
-                section = section.child(management_row(
-                    $id,
-                    $icon,
-                    $label,
-                    false,
-                    cx.listener(move |$this, _, $window, $cx| $action),
-                    cx,
-                ));
-            };
-        }
-        macro_rules! danger_row {
-            ($id:expr, $icon:expr, $label:expr, |$this:ident, $window:ident, $cx:ident| $action:block) => {
-                section = section.child(management_row(
-                    $id,
-                    $icon,
-                    $label,
-                    true,
-                    cx.listener(move |$this, _, $window, $cx| $action),
-                    cx,
-                ));
-            };
-        }
-        macro_rules! toggle_row {
-            ($id:expr, $icon:expr, $label:expr, $on:expr, |$this:ident, $window:ident, $cx:ident| $action:block) => {
-                section = section.child(management_toggle_row(
-                    $id,
-                    $icon,
-                    $label,
-                    $on,
-                    cx.listener(move |$this, _, $window, $cx| $action),
-                    cx,
-                ));
-            };
-        }
         if is_owner {
             section = section.child(self.group_type_row(chat_id, is_channel, cx));
         }
-        // B7: one entry for the settings the viewer's rights allow
-        // (topics, history, reactions, discussion group, ...).
-        if session.is_some_and(|s| !s.group_admin_controls(chat_id).is_empty()) {
-            row!(
-                "b7-open-settings",
-                I::Settings,
-                if is_channel {
-                    tr(keys::ADMIN_LOG_FILTER_ACTIONS_CHANNEL_SETTINGS_SECTION)
-                } else {
-                    tr(keys::ADMIN_LOG_FILTER_ACTIONS_SETTINGS_SECTION)
-                },
-                |this, _window, cx| {
-                    this.open_group_settings_dialog(chat_id, cx);
-                }
-            );
+        if let Some(discussion) = controls.discussion {
+            section = section.child(self.discussion_row(chat_id, discussion, cx));
         }
-        // Members / subscribers — everyone who can see the panel and
-        // add or restrict may manage; plain members get a read-only
-        // list through the dialog's All tab.
-        if can_add || can_restrict || is_member {
-            let label = if is_channel {
-                tr(keys::Q_PEOPLE_SUBSCRIBERS)
-            } else {
-                tr(keys::Q_PEOPLE_MEMBERS)
+        section = section.children(self.direct_messages_settings_row(chat_id, cx));
+        section = section.children(self.group_history_row(chat_id, cx));
+        if let Some(topics) = controls.topics {
+            let about = match topics.locked {
+                Some(TopicsLock::TooFewMembers) => tr_with(
+                    keys::Q_PEOPLE_ONLY_GROUPS_WITH_MORE_THAN,
+                    &[("forum_min_members", &FORUM_MIN_MEMBERS.to_string())],
+                ),
+                Some(TopicsLock::LinkedDiscussion) => tr(keys::FORUM_TOPICS_NO_DISCUSSION).into(),
+                None if topics.needs_upgrade => tr(keys::Q_PEOPLE_THE_GROUP_CHAT_WILL_BE).into(),
+                None => tr(keys::EDIT_TOPICS_ABOUT).into(),
             };
-            row!("g1-open-members", I::Users, label, |this, window, cx| {
-                this.open_member_dialog(chat_id, window, cx);
-            });
+            let busy = session.is_some_and(|s| s.group_admin_busy(chat_id));
+            section = section.child(self.settings_switch(
+                chat_id,
+                "b7-topics",
+                I::MessagesSquare,
+                tr(keys::ADMIN_LOG_FILTER_TOPICS),
+                topics.enabled,
+                !busy && (topics.enabled || topics.locked.is_none()),
+                about,
+                GroupSettingsAction::Topics(!topics.enabled),
+                cx,
+            ));
         }
-        // Channels have no member permissions (tdesktop lists them for
-        // groups only).
-        if can_restrict && !is_channel {
-            row!(
+        section = section.children(self.chat_appearance_row(chat_id, cx));
+        section = section.children(self.auto_translate_row(chat_id, &rows, cx));
+        section = section.children(self.signature_rows(&rows, cx));
+        section = section.child(self.count_rows(chat_id, is_channel, &rows, cx));
+        section = section.children(self.channel_affiliate_row(chat_id, cx));
+        section = section.child(self.quill_manage_rows(chat_id, is_channel, is_basic_group, cx));
+        section.into_any_element()
+    }
+
+    /// Reactions through Recent actions: the rows tdesktop draws with
+    /// `AddButtonWithCount`.
+    fn count_rows(
+        &self,
+        chat_id: ChatId,
+        is_channel: bool,
+        rows: &ManageRows,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let page = |view: GroupSettingsView| {
+            move |this: &mut QuillApp, _: &ClickEvent, _: &mut Window, cx: &mut Context<QuillApp>| {
+                this.open_group_settings_view(chat_id, view, cx);
+            }
+        };
+        let mut section = div().flex().flex_col().w_full().gap_1();
+        if let Some(value) = rows.reactions {
+            let value = value.map(|value| match value {
+                ReactionsValue::All => tr(keys::MANAGE_PEER_REACTIONS_ON).to_string(),
+                ReactionsValue::Off => tr(keys::MANAGE_PEER_REACTIONS_OFF).to_string(),
+                ReactionsValue::Count(count) => count.to_string(),
+            });
+            section = section.child(value_row(
+                "b7-reactions",
+                I::Heart,
+                tr(keys::MANAGE_PEER_REACTIONS),
+                value,
+                cx.listener(page(GroupSettingsView::Reactions)),
+                cx,
+            ));
+        }
+        section = section.children(self.welcome_row(chat_id, cx));
+        if let Some((on, all)) = rows.permissions {
+            section = section.child(value_row(
                 "g1-open-permissions",
                 I::Shield,
-                tr(keys::Q_PEOPLE_DEFAULT_PERMISSIONS),
-                |this, _window, cx| {
-                    this.open_permissions_dialog(chat_id, cx);
-                }
-            );
+                tr(keys::MANAGE_PEER_PERMISSIONS),
+                Some(format!("{on}/{all}")),
+                cx.listener(move |this, _, _, cx| this.open_permissions_dialog(chat_id, cx)),
+                cx,
+            ));
         }
-        if !is_channel
-            && !is_basic_group
-            && session.is_some_and(|s| s.chat_can_set_sticker_set(chat_id))
-        {
-            section = section.child(self.group_sticker_choices(chat_id, cx));
-        }
-        if can_invite {
-            row!(
-                "g1-replace-invite-link",
+        if let Some(count) = rows.invite_links {
+            section = section.child(value_row(
+                "g1-invite-links",
                 I::Link,
-                tr(keys::Q_PEOPLE_REPLACE_PRIMARY_INVITE_LINK),
-                |this, _window, cx| {
-                    this.replace_primary_invite_link(chat_id, cx);
-                }
-            );
+                tr(keys::MANAGE_PEER_INVITE_LINKS),
+                positive_count(count),
+                cx.listener(page(GroupSettingsView::InviteLinks)),
+                cx,
+            ));
         }
-        if !is_channel && !is_basic_group && is_owner && !self.chat_is_broadcast(chat_id) {
-            row!(
-                "g1-broadcast-upgrade",
-                I::Megaphone,
-                tr(keys::RIGHTS_GIGAGROUP_CONVERT),
-                |this, _window, cx| {
-                    this.open_group_confirm(chat_id, GroupConfirmAction::BroadcastIntro, cx);
-                }
-            );
-            section = section.child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(quill::admin_extras::BROADCAST_ABOUT),
-            );
-        }
-        // Slice G2: channel signatures + show authors (Telegram X
-        // ProfileController: two toggles, gated on `can_change_info`;
-        // disabling signatures also hides authors, mirroring
-        // `ToggleSupergroupSignMessages(id, sign, sign && show)`).
-        if is_channel && session.is_some_and(|session| session.chat_can_change_info(chat_id)) {
-            let (sign, show) = self.sign_flags(chat_id);
-            toggle_row!(
-                "g2-toggle-sign-messages",
-                I::PenLine,
-                tr(keys::Q_PEOPLE_SIGN_MESSAGES),
-                sign,
-                |this, _window, cx| {
-                    let (sign, show) = this.sign_flags(chat_id);
-                    this.set_sign_messages(chat_id, !sign, !sign && show, cx);
-                }
-            );
-            toggle_row!(
-                "g2-toggle-show-authors",
-                I::Eye,
-                tr(keys::Q_PEOPLE_SHOW_MESSAGE_AUTHORS),
-                show && sign,
-                |this, _window, cx| {
-                    let (_, show) = this.sign_flags(chat_id);
-                    // Enabling authors implies signatures (Telegram X forces
-                    // `show = sign && show`).
-                    this.set_sign_messages(chat_id, true, !show, cx);
-                }
-            );
-        }
-        // tdesktop `edit_peer_info_box` "Auto-translate messages": channels,
-        // `toggleSupergroupHasAutomaticTranslation` (needs can_change_info
-        // and boosts; TDLib's refusal rolls the switch back).
-        if is_channel && session.is_some_and(|session| session.chat_can_change_info(chat_id)) {
-            let auto = session.is_some_and(|session| session.chat_auto_translate(chat_id));
-            toggle_row!(
-                "tr-toggle-auto-translate",
-                I::Languages,
-                tr(keys::Q_PEOPLE_AUTO_TRANSLATE_MESSAGES),
-                auto,
-                |this, _window, cx| {
-                    this.set_auto_translate(chat_id, cx);
-                }
-            );
-        }
-        // Slice G2: aggressive anti-spam toggle (supergroups only;
-        // gated on `supergroupFullInfo.can_toggle_aggressive_anti_spam`).
-        if !is_channel
-            && !is_basic_group
-            && session.is_some_and(|session| session.chat_can_toggle_anti_spam(chat_id))
-        {
-            let enabled = self
-                .session()
-                .and_then(|session| {
-                    session
-                        .chats
-                        .get(&chat_id.0)
-                        .and_then(|chat| match chat.kind {
-                            ChatKind::Supergroup { supergroup_id, .. } => session
-                                .groups
-                                .supergroup_anti_spam_enabled
-                                .get(&supergroup_id)
-                                .copied(),
-                            _ => None,
-                        })
-                })
-                .unwrap_or(false);
-            toggle_row!(
-                "g2-toggle-anti-spam",
+        if let Some(count) = rows.administrators {
+            section = section.child(value_row(
+                "g1-administrators",
                 I::ShieldCheck,
-                tr(keys::Q_PEOPLE_AGGRESSIVE_ANTI_SPAM),
-                enabled,
-                |this, _window, cx| {
-                    let enabled = this
-                        .session()
-                        .and_then(|session| {
-                            session
-                                .chats
-                                .get(&chat_id.0)
-                                .and_then(|chat| match chat.kind {
-                                    ChatKind::Supergroup { supergroup_id, .. } => session
-                                        .groups
-                                        .supergroup_anti_spam_enabled
-                                        .get(&supergroup_id)
-                                        .copied(),
-                                    _ => None,
-                                })
-                        })
-                        .unwrap_or(false);
-                    this.set_anti_spam(chat_id, !enabled, cx);
-                }
-            );
+                tr(keys::MANAGE_PEER_ADMINISTRATORS),
+                positive_count(count),
+                cx.listener(page(GroupSettingsView::Administrators)),
+                cx,
+            ));
         }
-        // Slice G2: forum-topic management (admins with
-        // `can_manage_topics` in forum supergroups).
-        if !is_channel
-            && !is_basic_group
-            && session.is_some_and(|session| {
-                session
-                    .chats
-                    .get(&chat_id.0)
-                    .is_some_and(|chat| chat.is_forum_chat())
-                    && session.chat_can_manage_topics(chat_id)
-            })
-        {
-            row!(
-                "g2-open-forum-manage",
-                I::MessagesSquare,
-                tr(keys::RIGHTS_GROUP_TOPICS),
-                |this, window, cx| {
-                    this.open_forum_manage_dialog(chat_id, window, cx);
-                }
-            );
-        }
-        // Slice G2: welcome-message editor (admins with
-        // `can_send_welcome_messages`; the check mark reflects
-        // `Session::chat_has_welcome_messages`).
-        if session.is_some_and(|session| session.chat_can_send_welcome_messages(chat_id)) {
-            let has_welcome = session
-                .as_ref()
-                .and_then(|session| {
-                    session
-                        .groups
-                        .chat_has_welcome_messages
-                        .get(&chat_id.0)
-                        .copied()
-                })
-                .unwrap_or(false);
-            section = section.child(
-                action_row(
-                    "g2-open-welcome",
-                    Some(I::Hand),
-                    tr(keys::Q_PEOPLE_WELCOME_MESSAGE),
-                    false,
-                    cx,
-                )
-                .child(div().flex_1())
-                .when(has_welcome, |this| {
-                    this.child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(tr(keys::Q_PEOPLE_ON)),
-                    )
-                })
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.open_welcome_dialog(chat_id, window, cx);
-                })),
-            );
-        }
-        // The owner hands the chat to someone else (password-confirmed).
-        if self.group_flavor(chat_id).is_some() && session.is_some_and(|s| s.chat_is_owner(chat_id))
-        {
-            row!(
-                "g1-transfer-ownership",
-                I::Crown,
+        if let Some(count) = rows.members {
+            section = section.child(value_row(
+                "g1-open-members",
+                I::Users,
                 if is_channel {
-                    tr(keys::Q_PEOPLE_TRANSFER_CHANNEL_OWNERSHIP)
+                    tr(keys::MANAGE_PEER_SUBSCRIBERS)
                 } else {
-                    tr(keys::RIGHTS_TRANSFER_GROUP)
+                    tr(keys::MANAGE_PEER_MEMBERS)
                 },
-                |this, window, cx| {
-                    this.open_transfer_ownership(chat_id, window, cx);
-                }
-            );
+                positive_count(count),
+                cx.listener(move |this, _, window, cx| {
+                    this.open_member_dialog(chat_id, window, cx);
+                }),
+                cx,
+            ));
         }
-        // `deleteChat` (schema 1.8.67, line 11850): TDLib deletes for
-        // everyone only when `chat.can_be_deleted_for_all_users` —
-        // creator of a group/channel. Last, in the danger color, as in
-        // tdesktop's box.
-        if can_delete {
-            let label = if is_channel {
-                tr(keys::Q_PEOPLE_DELETE_CHANNEL)
-            } else {
-                tr(keys::PROFILE_DELETE_GROUP)
-            };
-            danger_row!("g1-delete-chat", I::Trash, label, |this, _window, cx| {
-                this.open_group_confirm(chat_id, GroupConfirmAction::DeleteChat, cx);
-            });
+        if rows.join_requests > 0 {
+            section = section.child(value_row(
+                "g1-join-requests",
+                I::UserPlus,
+                if is_channel {
+                    tr(keys::MANAGE_PEER_REQUESTS_CHANNEL)
+                } else {
+                    tr(keys::MANAGE_PEER_REQUESTS)
+                },
+                positive_count(rows.join_requests),
+                cx.listener(page(GroupSettingsView::JoinRequests)),
+                cx,
+            ));
+        }
+        if let Some(count) = rows.removed_users {
+            section = section.child(value_row(
+                "g1-removed-users",
+                I::UserX,
+                tr(keys::MANAGE_PEER_REMOVED_USERS),
+                positive_count(count),
+                cx.listener(move |this, _, window, cx| {
+                    this.open_member_dialog(chat_id, window, cx);
+                    this.member_dialog_tab(MemberTab::Banned, cx);
+                }),
+                cx,
+            ));
+        }
+        if rows.recent_actions {
+            section = section.child(value_row(
+                "g1-recent-actions",
+                I::ListClock,
+                tr(keys::MANAGE_PEER_RECENT_ACTIONS),
+                None,
+                cx.listener(page(GroupSettingsView::RecentActions)),
+                cx,
+            ));
         }
         section.into_any_element()
     }
-}
 
-impl QuillApp {
+    /// "Discussion" with the linked group (or "Add a group") in a channel,
+    /// "Linked channel" with its name in a discussion group.
+    fn discussion_row(
+        &self,
+        chat_id: ChatId,
+        discussion: DiscussionControl,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let session = self.session();
+        let title = |id: ChatId| {
+            session
+                .and_then(|s| s.chats.get(&id.0))
+                .map(|chat| chat.title.clone())
+        };
+        let (icon, label, value) = match discussion {
+            DiscussionControl::Channel { linked } => (
+                I::Users,
+                tr(keys::MANAGE_DISCUSSION_GROUP),
+                linked
+                    .and_then(title)
+                    .unwrap_or_else(|| tr(keys::MANAGE_DISCUSSION_GROUP_ADD).to_string()),
+            ),
+            DiscussionControl::Group { channel } => (
+                I::Megaphone,
+                tr(keys::Q_PEOPLE_LINKED_CHANNEL),
+                title(channel).unwrap_or_default(),
+            ),
+        };
+        value_row(
+            "b7-discussion",
+            icon,
+            label,
+            Some(value),
+            cx.listener(move |this, _, _, cx| {
+                this.open_group_settings_view(chat_id, GroupSettingsView::Discussion, cx);
+            }),
+            cx,
+        )
+    }
+
+    /// "Welcome Message", "On" while one is set.
+    fn welcome_row(&self, chat_id: ChatId, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let session = self.session()?;
+        if !session.chat_can_send_welcome_messages(chat_id) {
+            return None;
+        }
+        let on = session.chat_has_welcome_messages_flag(chat_id);
+        Some(value_row(
+            "g2-open-welcome",
+            I::Hand,
+            tr(keys::MANAGE_PEER_WELCOME_MESSAGES),
+            on.then(|| tr(keys::Q_PEOPLE_ON).to_string()),
+            cx.listener(move |this, _, window, cx| {
+                this.open_welcome_dialog(chat_id, window, cx);
+            }),
+            cx,
+        ))
+    }
+
     /// The type row with its value ("Public", "Private", "Private
     /// restricted"), and the reason a saved link was refused.
     fn group_type_row(
@@ -498,7 +276,6 @@ impl QuillApp {
             !is_channel,
         ));
         let failure = edit.and_then(|edit| edit.username_failure(session));
-        let muted = cx.theme().muted_foreground;
         let danger = cx.theme().danger;
         let label = if is_channel {
             tr(keys::MANAGE_PEER_CHANNEL_TYPE)
@@ -508,20 +285,14 @@ impl QuillApp {
         div()
             .flex()
             .flex_col()
-            .child(
-                action_row(
-                    "group-edit-type",
-                    Some(gpui_kit::assets::IconName::Globe),
-                    label,
-                    false,
-                    cx,
-                )
-                .child(div().flex_1())
-                .child(div().text_sm().text_color(muted).child(value))
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.open_group_type_box(window, cx);
-                })),
-            )
+            .child(value_row(
+                "group-edit-type",
+                I::Globe,
+                label,
+                Some(value.to_string()),
+                cx.listener(|this, _, window, cx| this.open_group_type_box(window, cx)),
+                cx,
+            ))
             .children(failure.map(|reason| {
                 div().px_2().text_xs().text_color(danger).child(tr_with(
                     keys::Q_PEOPLE_COULDNT_SAVE_REASON,
@@ -532,10 +303,30 @@ impl QuillApp {
     }
 }
 
-/// One action of the manage section (`action_row` plus its handler).
-fn management_row(
+/// A manage row with its value or count at the end (tdesktop
+/// `AddButtonWithCount` / `AddButtonWithText`).
+pub(super) fn value_row(
     id: &'static str,
-    icon: gpui_kit::assets::IconName,
+    icon: I,
+    label: impl Into<SharedString>,
+    value: Option<String>,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> AnyElement {
+    let muted = cx.theme().muted_foreground;
+    action_row(id, Some(icon), label, false, cx)
+        .child(div().flex_1())
+        .when_some(value, |row, value| {
+            row.child(div().text_sm().text_color(muted).child(value))
+        })
+        .on_click(on_click)
+        .into_any_element()
+}
+
+/// One action of the manage section (`action_row` plus its handler).
+pub(super) fn management_row(
+    id: &'static str,
+    icon: I,
     label: impl Into<SharedString>,
     destructive: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -548,19 +339,24 @@ fn management_row(
 
 /// An on/off setting of the manage section: the row toggles it; the
 /// trailing switch shows the state (it carries no handler of its own, so
-/// the click reaches the row).
-fn management_toggle_row(
+/// the click reaches the row). A locked switch shows a lock before it.
+pub(super) fn management_toggle_row(
     id: &'static str,
-    icon: gpui_kit::assets::IconName,
+    icon: I,
     label: impl Into<SharedString>,
     on: bool,
+    locked: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> AnyElement {
     let label = label.into();
+    let muted = cx.theme().muted_foreground;
     action_row(id, Some(icon), label.clone(), false, cx)
         .aria_selected(on)
         .child(div().flex_1())
+        .when(locked, |row| {
+            row.child(Icon::new(I::Lock).size(px(14.)).text_color(muted))
+        })
         .child(
             gpui_kit::component::switch::Switch::new((id, 1u64))
                 .checked(on)
@@ -568,5 +364,16 @@ fn management_toggle_row(
                 .small(),
         )
         .on_click(on_click)
+        .into_any_element()
+}
+
+/// Gray text under a group of rows (tdesktop `AddDividerText`).
+pub(super) fn divider_text(text: impl Into<SharedString>, cx: &App) -> AnyElement {
+    div()
+        .px_2()
+        .pb_2()
+        .text_xs()
+        .text_color(cx.theme().muted_foreground)
+        .child(text.into())
         .into_any_element()
 }

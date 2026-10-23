@@ -326,9 +326,9 @@ impl QuillApp {
                 cx,
             )
             .on_click(cx.listener(move |this, _, window, cx| {
-                this.close_group_settings_dialog(cx);
+                this.close_group_edit_box(cx);
                 this.close_kit_dialog_if_done(
-                    crate::ui::shell::DialogKind::GroupSettings,
+                    crate::ui::shell::DialogKind::GroupEditBox,
                     window,
                     cx,
                 );

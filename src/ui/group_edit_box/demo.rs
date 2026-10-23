@@ -12,7 +12,8 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
-use quill::state::Session;
+use quill::state::{InviteLinkFetch, InviteLinkList, Session};
+use quill::telegram::envelope::{ParsedBoostFeatures, ParsedBoostLevelFeatures};
 use quill::telegram::client::copy_and_parse;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -64,17 +65,23 @@ fn apply_edit_box_chats(session: &mut Session, sink: &Arc<MemorySink>, seq: &Ato
         seq,
         &[
             format!(
-                r#"{{"@type":"updateSupergroupFullInfo","supergroup_id":{GROUP},"supergroup_full_info":{{"description":"Weekend hikes around the bay. Routes, carpools and photos.","member_count":5}}}}"#
+                r#"{{"@type":"updateSupergroupFullInfo","supergroup_id":{GROUP},"supergroup_full_info":{{"description":"Weekend hikes around the bay. Routes, carpools and photos.","member_count":5,"administrator_count":2}}}}"#
             ),
             format!(
                 r#"{{"@type":"updateNewChat","chat":{{"id":{CHANNEL},"title":"Quill Releases","type":{{"@type":"chatTypeSupergroup","supergroup_id":{CHANNEL},"is_channel":true}},"unread_count":0,"can_be_deleted_for_all_users":true}}}}"#
             ),
             position(CHANNEL),
             format!(
-                r#"{{"@type":"updateSupergroup","supergroup":{{"@type":"supergroup","id":{CHANNEL},"is_channel":true,"status":{CREATOR},"member_count":1830}}}}"#
+                r#"{{"@type":"updateChatAvailableReactions","chat_id":{GROUP},"available_reactions":{{"@type":"chatAvailableReactionsAll","max_reaction_count":11}}}}"#
             ),
             format!(
-                r#"{{"@type":"updateSupergroupFullInfo","supergroup_id":{CHANNEL},"supergroup_full_info":{{"description":"Release notes for every Quill build.","member_count":1830}}}}"#
+                r#"{{"@type":"updateChatAvailableReactions","chat_id":{CHANNEL},"available_reactions":{{"@type":"chatAvailableReactionsSome","reactions":[{{"@type":"reactionTypeEmoji","emoji":"👍"}},{{"@type":"reactionTypeEmoji","emoji":"🔥"}},{{"@type":"reactionTypeEmoji","emoji":"🎉"}}],"max_reaction_count":11}}}}"#
+            ),
+            format!(
+                r#"{{"@type":"updateSupergroup","supergroup":{{"@type":"supergroup","id":{CHANNEL},"is_channel":true,"status":{CREATOR},"member_count":1830,"sign_messages":true,"show_message_sender":false}}}}"#
+            ),
+            format!(
+                r#"{{"@type":"updateSupergroupFullInfo","supergroup_id":{CHANNEL},"supergroup_full_info":{{"description":"Release notes for every Quill build.","member_count":1830,"administrator_count":3,"banned_count":4}}}}"#
             ),
             format!(
                 r#"{{"@type":"updateNewChat","chat":{{"id":{BASIC},"title":"Book club","type":{{"@type":"chatTypeBasicGroup","basic_group_id":{BASIC}}},"unread_count":0,"can_be_deleted_for_all_users":true}}}}"#
@@ -87,6 +94,35 @@ fn apply_edit_box_chats(session: &mut Session, sink: &Arc<MemorySink>, seq: &Ato
                 r#"{{"@type":"updateBasicGroupFullInfo","basic_group_id":{BASIC},"basic_group_full_info":{{"@type":"basicGroupFullInfo","description":"One book a month, we meet on Thursdays.","creator_user_id":777,"members":[]}}}}"#
             ),
         ],
+    );
+}
+
+/// The fetched lists behind the rows' counts, and a channel one boost
+/// level short of auto-translation.
+fn seed_counts(session: &mut Session) {
+    let groups = &mut session.groups;
+    for (chat, links) in [(GROUP, 2), (CHANNEL, 3)] {
+        groups.invite_links.insert(
+            chat,
+            InviteLinkFetch::Loaded(InviteLinkList {
+                total_count: links,
+                links: Vec::new(),
+            }),
+        );
+    }
+    groups.pending_join_request_counts.insert(GROUP, 1);
+    groups.chat_boost_status.insert(CHANNEL, (2, 14));
+    groups.chat_boost_features.insert(
+        CHANNEL,
+        ParsedBoostFeatures {
+            levels: (1..=3)
+                .map(|level| ParsedBoostLevelFeatures {
+                    level,
+                    can_enable_automatic_translation: level >= 3,
+                    ..ParsedBoostLevelFeatures::default()
+                })
+                .collect(),
+        },
     );
 }
 
@@ -104,6 +140,7 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_edit_box_chats(session, &self.demo_ui.sink, &self.demo_ui.seq);
+            seed_counts(session);
         }
     }
 

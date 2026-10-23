@@ -1,30 +1,32 @@
 use quill::ids::ChatId;
 
-/// B7: which page of the group settings dialog is showing.
+/// Which page an Edit box row opened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GroupSettingsView {
-    Main,
     Reactions,
     Discussion,
     ConfirmUpgrade,
     ConfirmUnlink,
     Boosts,
+    InviteLinks,
+    JoinRequests,
+    Administrators,
+    RecentActions,
 }
 
-/// B7: the group / channel settings dialog (topics, history, hidden
-/// members, discussion group, reactions, upgrade, boosts). One dialog,
-/// several pages; who may write, content protection and the links live in
-/// the Type box.
+/// The page dialog over the group / channel Edit box (reactions,
+/// discussion group, invite links, join requests, administrators, recent
+/// actions, boosts, the basic group upgrade). One dialog, one page at a
+/// time; the Edit box shows again when it closes.
 pub struct GroupSettingsDialog {
     pub(crate) chat_id: ChatId,
     pub(crate) view: GroupSettingsView,
 }
 
-/// B7: one change the dialog can request.
+/// One change a page or an Edit box row can request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum GroupSettingsAction {
     Topics(bool),
-    HistoryVisible(bool),
     HiddenMembers(bool),
     ReactionsAll,
     ReactionsNone,

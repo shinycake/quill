@@ -364,12 +364,9 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!(
-                        "When you set up an additional passcode, you'll need to enter it each \
-                         time you access {name}. Message preview will be hidden on the chats \
-                         page.\n\nNote: if you forget it, contents of this chat will be \
-                         lost.\n\nIf you need a global passcode, use Settings > Privacy and \
-                         Security > Passcode Lock."
+                    .child(tr_with(
+                        keys::Q_PEOPLE_SECRET_PASSCODE_ABOUT,
+                        &[("name", &name)],
                     )),
             )
             .into_any_element()
@@ -456,13 +453,6 @@ impl QuillApp {
         if is_channel && let Some(section) = self.similar_channels_section(chat_id, cx) {
             body = body.child(section);
         }
-        // Phase D3a: invite-link + join-request management (admins with
-        // `can_invite_users` only; the sections no-op otherwise).
-        body = body.children(self.invite_links_section(chat_id, cx));
-        body = body.children(self.join_requests_section(chat_id, cx));
-        // Phase D3b: administrator management (owner / admins with
-        // `can_promote_members` only; the section no-ops otherwise).
-        body = body.children(self.administrators_section(chat_id, cx));
         body = body.children(self.channel_balance_row(chat_id, cx));
         // Slice G1: group/channel management — members, permissions,
         // invite link, join requests, username, broadcast upgrade,
@@ -485,9 +475,6 @@ impl QuillApp {
         if is_channel {
             body = body.children(self.channel_report_row(chat_id, cx));
         }
-        // Phase D3c: recent-actions admin log (administrators and the
-        // creator only; the section no-ops otherwise).
-        body = body.children(self.event_log_section(chat_id, cx));
         // Slice G2: channel boost status + boost action.
         body = body.children(self.boost_section(chat_id, cx));
         body = body

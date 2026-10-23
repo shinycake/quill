@@ -8,9 +8,12 @@
 //! (`QuillApp::group_edit_box`).
 #![deny(clippy::indexing_slicing)]
 
+mod extras;
+mod history_box;
 mod manage;
 pub(in crate::ui) mod photo;
 mod title_emoji;
+mod toggles;
 
 use super::app::QuillApp;
 use super::profile_photo_sources::{ChosenPhoto, PhotoSources};
@@ -26,6 +29,7 @@ use gpui_kit::*;
 use quill::group_info_edit::{
     DESCRIPTION_MAX, GroupInfoFields, GroupInfoInvalid, TITLE_MAX, plan_group_info_save,
 };
+use quill::group_manage::Signatures;
 use quill::group_type::{GroupTypeData, plan_group_type_save};
 use quill::ids::{ChatId, RequestId};
 use quill::lang::{keys, tr, tr_with};
@@ -58,6 +62,14 @@ pub(crate) struct GroupEditBox {
     pub(crate) type_box: Option<crate::ui::group_type_box::GroupTypeBox>,
     /// What the Type box's Save chose; sent with this box's Save.
     pub(crate) type_choice: Option<GroupTypeData>,
+    /// The signature switches as the box shows them; sent on Save.
+    pub(crate) signatures: Option<Signatures>,
+    /// The auto-translate switch as the box shows it; sent on Save.
+    pub(crate) auto_translate: Option<bool>,
+    /// What the history box's Save chose; sent with this box's Save.
+    pub(crate) history_visible: Option<bool>,
+    /// The history box, open over this one, with its current choice.
+    pub(crate) history_box: Option<bool>,
 }
 
 /// Where a box is, derived from its requests and TDLib's answers.
@@ -157,6 +169,12 @@ impl QuillApp {
                 }
                 _ => live.driver.fetch_basic_group_members(chat_id),
             };
+            let _ = live.driver.fetch_chat_invite_links(chat_id);
+            let _ = live.driver.fetch_chat_join_requests(chat_id);
+            if is_channel {
+                let _ = live.driver.fetch_chat_boost_status(chat_id);
+                let _ = live.driver.fetch_chat_boost_features(chat_id);
+            }
         }
         let title_input = cx.new(|cx| {
             InputState::new(window, cx)
@@ -205,6 +223,10 @@ impl QuillApp {
             title_emoji: false,
             type_box: None,
             type_choice: None,
+            signatures: None,
+            auto_translate: None,
+            history_visible: None,
+            history_box: None,
         });
         cx.notify();
     }
@@ -212,6 +234,7 @@ impl QuillApp {
     pub(in crate::ui) fn close_group_edit_box(&mut self, cx: &mut Context<Self>) {
         self.close_group_title_emoji(cx);
         self.admin.group_edit_box = None;
+        self.earn.ask_boost = None;
         cx.notify();
     }
 
@@ -267,7 +290,8 @@ impl QuillApp {
             }
             _ => Vec::new(),
         };
-        if edits.is_empty() && type_edits.is_empty() {
+        let toggles = session.map(|s| edit.toggle_edits(s)).unwrap_or_default();
+        if edits.is_empty() && type_edits.is_empty() && toggles.is_empty() {
             self.admin.group_edit_box = None;
             cx.notify();
             return;
@@ -280,6 +304,10 @@ impl QuillApp {
             return;
         };
         let sent = live.driver.save_group_type(chat_id, &type_edits, &edits);
+        let sent = sent.and_then(|mut sent| {
+            sent.extend(self.send_toggle_edits(chat_id, toggles)?);
+            Ok(sent)
+        });
         let Some(edit) = self.admin.group_edit_box.as_mut() else {
             return;
         };

@@ -515,57 +515,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Phase D3c: re-request the event log (bypasses the dedupe cache so
-    /// the Refresh button always hits the server).
-    /// Slice G2: channel signature toggles (info panel → Manage
-    /// channel). Gated on `chat_can_change_info`; the driver no-ops
-    /// (quiet `Ok(None)`) otherwise.
-    pub(super) fn set_sign_messages(
-        &mut self,
-        chat_id: ChatId,
-        sign_messages: bool,
-        show_message_sender: bool,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(live) = self.live.as_mut() {
-            match live
-                .driver
-                .toggle_sign_messages(chat_id, sign_messages, show_message_sender)
-            {
-                Ok(_) => self
-                    .connection
-                    .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_SIGNATURES_UPDATED))),
-                Err(_) => self.connection.set_note(StatusNote::error(tr(
-                    keys::Q_PEOPLE_COULD_NOT_CHANGE_SIGNATURES,
-                ))),
-            }
-        } else {
-            self.connection.set_note(StatusNote::info(tr(
-                keys::Q_PEOPLE_SIGNATURES_NEED_A_LIVE_CONNECTION,
-            )));
-        }
-        cx.notify();
-    }
-
-    /// Flip the channel's "Auto-translate messages" switch.
-    pub(super) fn set_auto_translate(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        let enabled = !self
-            .session()
-            .is_some_and(|session| session.chat_auto_translate(chat_id));
-        if let Some(live) = self.live.as_mut() {
-            self.connection
-                .set_note(match live.driver.toggle_auto_translate(chat_id, enabled) {
-                    Ok(()) => StatusNote::silent(tr(keys::Q_PEOPLE_AUTO_TRANSLATE_UPDATED)),
-                    Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_CHANGE_AUTO_TRANSLATE)),
-                });
-        } else {
-            self.connection.set_note(StatusNote::info(tr(
-                keys::Q_PEOPLE_AUTO_TRANSLATE_NEEDS_A_LIVE,
-            )));
-        }
-        cx.notify();
-    }
-
     /// Slice G2: aggressive anti-spam toggle (info panel → Manage
     /// group). Gated on `supergroupFullInfo.can_toggle_aggressive_anti_spam`.
     pub(super) fn set_anti_spam(&mut self, chat_id: ChatId, enabled: bool, cx: &mut Context<Self>) {

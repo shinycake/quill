@@ -5,6 +5,7 @@
 use super::revenue::ton_amount;
 use super::*;
 use crate::ui::chat_theme::{danger, success};
+use crate::ui::earn_state::AskBoostReason;
 use crate::ui::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
@@ -295,9 +296,22 @@ impl QuillApp {
                 this.close_earn_ask_boost(cx);
             });
         app.update(cx, |this, cx| {
-            let (Some((chat_id, level)), Some(session)) = (this.earn.ask_boost, this.session())
-            else {
+            let (Some(ask), Some(session)) = (this.earn.ask_boost, this.session()) else {
                 return dialog.on_close(on_close);
+            };
+            let (chat_id, level) = (ask.chat_id, ask.level);
+            let (title, needs) = match ask.reason {
+                AskBoostReason::Cpm => (
+                    tr(keys::Q_MONEY_BOOST_CHANNEL).to_string(),
+                    tr_with(
+                        keys::Q_MONEY_YOUR_CHANNEL_NEEDS_TO_REACH,
+                        &[("level", &level.to_string())],
+                    ),
+                ),
+                AskBoostReason::Autotranslate => (
+                    tr(keys::BOOST_CHANNEL_TITLE_AUTOTRANSLATE).to_string(),
+                    trn(keys::BOOST_CHANNEL_NEEDS_LEVEL_AUTOTRANSLATE, level).replace("**", ""),
+                ),
             };
             let link = session
                 .groups
@@ -317,12 +331,9 @@ impl QuillApp {
                         .justify_center()
                         .text_lg()
                         .font_semibold()
-                        .child(tr(keys::Q_MONEY_BOOST_CHANNEL)),
+                        .child(title),
                 )
-                .child(div().text_sm().text_center().child(tr_with(
-                    keys::Q_MONEY_YOUR_CHANNEL_NEEDS_TO_REACH,
-                    &[("level", &level.to_string())],
-                )))
+                .child(div().text_sm().text_center().child(needs))
                 .child(
                     div()
                         .text_sm()

@@ -5,6 +5,16 @@ fn all_on() -> ChatPermissions {
 }
 
 #[test]
+fn the_edit_box_counts_rows_on_out_of_the_rows_shown() {
+    assert_eq!(permissions_count(&all_on(), false), (15, 15));
+    assert_eq!(permissions_count(&all_on(), true), (16, 16));
+    let mut fewer = all_on();
+    fewer.can_send_polls = false;
+    fewer.can_pin_messages = false;
+    assert_eq!(permissions_count(&fewer, false), (13, 15));
+}
+
+#[test]
 fn rows_follow_tdesktop_order_and_topics_only_in_forums() {
     let plain = all_rows(false);
     assert_eq!(plain.len(), 15);

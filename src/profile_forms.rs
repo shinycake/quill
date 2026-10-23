@@ -2,6 +2,8 @@
 //! validation and the copyable profile link.
 #![deny(clippy::indexing_slicing)]
 
+use crate::lang::{keys, tr, tr_with};
+
 /// Why a profile photo is reported (`reportChatPhoto`). tdesktop's report
 /// box offers the same `ReportReason` constructors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,16 +45,16 @@ impl PhotoReportReason {
     }
 
     pub fn label(self) -> &'static str {
-        match self {
-            PhotoReportReason::Spam => "Spam",
-            PhotoReportReason::Violence => "Violence",
-            PhotoReportReason::Pornography => "Pornography",
-            PhotoReportReason::ChildAbuse => "Child abuse",
-            PhotoReportReason::IllegalDrugs => "Illegal drugs",
-            PhotoReportReason::PersonalDetails => "Personal details",
-            PhotoReportReason::Fake => "Fake account",
-            PhotoReportReason::Other => "Other",
-        }
+        tr(match self {
+            PhotoReportReason::Spam => keys::REPORT_REASON_SPAM,
+            PhotoReportReason::Violence => keys::REPORT_REASON_VIOLENCE,
+            PhotoReportReason::Pornography => keys::REPORT_REASON_PORNOGRAPHY,
+            PhotoReportReason::ChildAbuse => keys::REPORT_REASON_CHILD_ABUSE,
+            PhotoReportReason::IllegalDrugs => keys::REPORT_REASON_ILLEGAL_DRUGS,
+            PhotoReportReason::PersonalDetails => keys::REPORT_REASON_PERSONAL_DETAILS,
+            PhotoReportReason::Fake => keys::REPORT_REASON_FAKE,
+            PhotoReportReason::Other => keys::REPORT_REASON_OTHER,
+        })
     }
 }
 
@@ -70,35 +72,30 @@ pub enum PersonalPhotoMode {
 
 impl PersonalPhotoMode {
     pub fn title(self) -> &'static str {
-        match self {
-            PersonalPhotoMode::Set => "Set Profile Photo",
-            PersonalPhotoMode::Suggest => "Suggest Profile Photo",
-            PersonalPhotoMode::Reset => "Reset to Original",
-        }
+        tr(match self {
+            PersonalPhotoMode::Set => keys::PROFILE_SET_PHOTO_FOR,
+            PersonalPhotoMode::Suggest => keys::PROFILE_SUGGEST_PHOTO,
+            PersonalPhotoMode::Reset => keys::PROFILE_PHOTO_RESET,
+        })
     }
 
     /// Confirmation text (`lng_profile_set_personal_sure`,
     /// `lng_profile_suggest_sure`, `lng_profile_photo_reset_sure`).
     pub fn confirm_text(self, name: &str) -> String {
-        match self {
-            PersonalPhotoMode::Set => format!(
-                "Only you will see this photo and it will replace any photo {name} sets for themselves."
-            ),
-            PersonalPhotoMode::Suggest => {
-                format!("You can suggest {name} to set this photo for their Telegram profile.")
-            }
-            PersonalPhotoMode::Reset => {
-                format!("Are you sure you want to reset {name}'s photo to the original?")
-            }
-        }
+        let key = match self {
+            PersonalPhotoMode::Set => keys::PROFILE_SET_PERSONAL_SURE,
+            PersonalPhotoMode::Suggest => keys::PROFILE_SUGGEST_SURE,
+            PersonalPhotoMode::Reset => keys::PROFILE_PHOTO_RESET_SURE,
+        };
+        tr_with(key, &[("user", name)])
     }
 
     pub fn button(self) -> &'static str {
-        match self {
-            PersonalPhotoMode::Set => "Set Photo",
-            PersonalPhotoMode::Suggest => "Suggest",
-            PersonalPhotoMode::Reset => "Reset",
-        }
+        tr(match self {
+            PersonalPhotoMode::Set => keys::Q_PEOPLE_SET_PHOTO_BUTTON,
+            PersonalPhotoMode::Suggest => keys::PROFILE_SUGGEST_BUTTON,
+            PersonalPhotoMode::Reset => keys::PROFILE_PHOTO_RESET_BUTTON,
+        })
     }
 
     /// Whether a picked file is part of the flow.
@@ -107,11 +104,11 @@ impl PersonalPhotoMode {
     }
 
     pub fn done_note(self) -> &'static str {
-        match self {
-            PersonalPhotoMode::Set => "Photo updated",
-            PersonalPhotoMode::Suggest => "Photo suggested",
-            PersonalPhotoMode::Reset => "Photo reset",
-        }
+        tr(match self {
+            PersonalPhotoMode::Set => keys::PROFILE_CHANGED_PHOTO_TITLE,
+            PersonalPhotoMode::Suggest => keys::Q_PEOPLE_PHOTO_SUGGESTED,
+            PersonalPhotoMode::Reset => keys::Q_PEOPLE_PHOTO_RESET_DONE,
+        })
     }
 }
 
@@ -128,9 +125,12 @@ pub fn is_profile_photo_file(path: &std::path::Path) -> bool {
 
 /// The unofficial-client notice on a profile (`lng_profile_unofficial_warning`).
 pub fn unofficial_warning_text(first_name: &str) -> String {
-    format!(
-        "{first_name} uses an unofficial Telegram client. Messages to this user may be less secure."
+    tr_with(
+        keys::PROFILE_UNOFFICIAL_WARNING,
+        &[("icon", ""), ("name", first_name)],
     )
+    .trim()
+    .to_string()
 }
 
 /// First year Telegram accepts in a birthday (tdesktop `Ui::BirthdayYears`
