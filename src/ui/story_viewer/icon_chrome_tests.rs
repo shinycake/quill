@@ -28,7 +28,7 @@ fn open(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
         Root::new(shell, window, cx)
     });
     let app: Entity<QuillApp> = slot.borrow().clone().expect("the app");
-    let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+    let vcx = VisualTestContext::from_window(handle.into(), cx);
     vcx.run_until_parked();
     (app, vcx)
 }
