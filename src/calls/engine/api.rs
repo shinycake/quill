@@ -181,6 +181,23 @@ pub trait CallEngine {
         Ok(())
     }
 
+    /// How 1:1 call `call_id`'s sound plays through the engine's own
+    /// output; `None` when it plays on the device.
+    fn call_sound_health(
+        &self,
+        call_id: i32,
+    ) -> Option<crate::calls::stream_audio::watch::PlaybackHealth> {
+        let _ = call_id;
+        None
+    }
+
+    /// app -> engine; the self-healing fallback: play 1:1 call
+    /// `call_id` on the device from now on.
+    fn use_device_call_sound(&mut self, call_id: i32) -> Result<(), EngineError> {
+        let _ = call_id;
+        Ok(())
+    }
+
     /// Stream mode: engine -> app; register the hook receiving ntgcalls'
     /// broadcast timestamp and part requests. The hook runs on an ntgcalls
     /// thread and must only queue the event.

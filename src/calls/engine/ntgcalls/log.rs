@@ -1,5 +1,6 @@
-//! ntgcalls' own log (its calls code and WebRTC) into Quill's debug log
-//! while debug mode is on, so one real call can be diagnosed afterwards
+//! ntgcalls' own log (its calls code and WebRTC): warnings and errors
+//! into the always-on call log, everything else into Quill's debug log
+//! while debug mode is on, so a real call can be diagnosed afterwards
 //! (`advanced::debug_mode`).
 use crate::advanced::debug_mode;
 use ntgcalls_sys::{
@@ -22,7 +23,10 @@ pub(super) fn install(api: &Loader) {
 }
 
 unsafe extern "C" fn forward(message: ntg_log_message, _: *mut c_void) {
-    if !debug_mode::enabled() {
+    // Warnings and errors always reach the call log; the rest only the
+    // debug log, while it is on.
+    let always = matches!(message.level, NTG_LOG_ERROR | NTG_LOG_WARNING);
+    if !always && !debug_mode::enabled() {
         return;
     }
     // WebRTC's debug level is a firehose of per-packet lines.
@@ -44,10 +48,12 @@ unsafe extern "C" fn forward(message: ntg_log_message, _: *mut c_void) {
     // for the duration of the callback.
     let (file, text) = unsafe { (text(message.file), text(message.message)) };
     let _ = std::panic::catch_unwind(|| {
-        debug_mode::debug_log(&format!(
-            "[call] {source} {level} {file}:{} {text}",
-            message.line
-        ));
+        let line = format!("[call] {source} {level} {file}:{} {text}", message.line);
+        if always {
+            debug_mode::call_log(&line);
+        } else {
+            debug_mode::debug_log(&line);
+        }
     });
 }
 

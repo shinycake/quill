@@ -12,6 +12,8 @@ pub const NO_SOUND_LIMIT: Duration = Duration::from_secs(5);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PlaybackHealth {
     pub frames: u64,
+    /// The loudest sample so far (absolute), so silent frames show.
+    pub peak: u16,
     pub output_failed: bool,
 }
 
@@ -61,6 +63,7 @@ mod tests {
 
     const SILENT: PlaybackHealth = PlaybackHealth {
         frames: 0,
+        peak: 0,
         output_failed: false,
     };
 
@@ -114,6 +117,7 @@ mod tests {
         let mut watch = PlaybackWatch::default();
         let playing = PlaybackHealth {
             frames: 3,
+            peak: 0,
             output_failed: false,
         };
         assert_eq!(watch.observe(start, Live, playing), None);
@@ -129,6 +133,7 @@ mod tests {
         let mut watch = PlaybackWatch::default();
         let playing = PlaybackHealth {
             frames: 40,
+            peak: 0,
             output_failed: false,
         };
         assert_eq!(watch.observe(start, Live, SILENT), None);
@@ -154,6 +159,7 @@ mod tests {
         let mut watch = PlaybackWatch::default();
         let failed = PlaybackHealth {
             frames: 500,
+            peak: 0,
             output_failed: true,
         };
         assert_eq!(

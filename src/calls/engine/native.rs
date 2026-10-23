@@ -140,9 +140,10 @@ pub(crate) unsafe extern "C" fn frames_trampoline(
         // Drop unregisters the callback before releasing the Arc; ntgcalls
         // guarantees the frames array for the duration of this call.
         let shared = unsafe { &*user_data.cast::<CallbackShared>() };
-        // Sound reaches this callback only from a stream Quill plays
-        // (external playback writes PLAYBACK+MICROPHONE); every other
-        // call's sound stays on ntgcalls' device output.
+        // Sound reaches this callback only from a call Quill plays (a
+        // stream or a 1:1 call; external playback writes
+        // PLAYBACK+MICROPHONE); every other call's sound stays on
+        // ntgcalls' device output.
         if mode == NTG_STREAM_MODE_PLAYBACK && device == NTG_STREAM_DEVICE_MICROPHONE {
             if let Some(audio) = shared.stream_audio.load().get(&user_id) {
                 // SAFETY: frames is non-null with frames_len entries

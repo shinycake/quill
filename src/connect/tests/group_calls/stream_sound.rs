@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 const SILENT: PlaybackHealth = PlaybackHealth {
     frames: 0,
+    peak: 0,
     output_failed: false,
 };
 
@@ -84,6 +85,7 @@ fn a_stream_with_sound_stays_on_quills_output() {
         555,
         PlaybackHealth {
             frames: 12,
+            peak: 0,
             output_failed: false,
         },
     );

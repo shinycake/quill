@@ -103,6 +103,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(call) = self.session.calls.active_call.as_mut() {
             call.state = CallState::HangingUp;
         }
+        self.log_call_sound_summary(call_id);
         if let Some(engine) = self.call_engine.as_deref_mut() {
             // Prompt teardown; the later terminal updateCall repeats this
             // idempotently through `pump_call_engine`.

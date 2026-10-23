@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 mod history;
 mod lifecycle;
+mod sound_watch;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase C2b: install the driver-thread call engine and route its
@@ -441,6 +442,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             {
                 summary.reconnect_attempts = self.reconnect_attempts;
             }
+            self.log_call_sound_summary(call_id);
             if let Some(engine) = self.call_engine.as_deref_mut() {
                 let _ = engine.hangup(call_id);
             }
@@ -532,6 +534,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             {
                 continue;
             }
+            crate::advanced::debug_mode::call_log(&format!("[call] {call_id} transport {state:?}"));
             if state == TransportState::Failed {
                 let failure = if self.reconnect_attempts >= 3 {
                     Some("reconnect attempts exhausted".to_string())

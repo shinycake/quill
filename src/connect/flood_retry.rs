@@ -76,6 +76,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let mut changed = self.pump_group_call_streams(now);
         // 1:1 calls: what the engine reported between Telegram updates.
         changed |= self.pump_call_engine_reports();
+        self.watch_call_sound(now);
         if !self.flood_retries.is_empty() {
             let (due, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.flood_retries)
                 .into_iter()

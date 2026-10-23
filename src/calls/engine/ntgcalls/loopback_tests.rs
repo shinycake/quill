@@ -4,7 +4,8 @@
 //! loopback): `QUILL_VERIFY_NATIVE_CALLS=1 QUILL_NTGCALLS_LIB=<lib>
 //! cargo test --no-default-features --lib loopback_p2p -- --nocapture`.
 //!
-//! Every source is external, so no camera, microphone or speaker opens.
+//! Every source is external, so no camera or microphone opens; only
+//! the sound test's callee plays on an output (you hear a tone).
 use super::*;
 use crate::calls::live_video::LiveKey;
 use ntgcalls_sys::{NTG_STREAM_DEVICE_CAMERA, NTG_STREAM_DEVICE_SCREEN, ntg_frame_data};
@@ -281,4 +282,83 @@ fn loopback_p2p_screen_share_mid_call() {
 #[test]
 fn loopback_p2p_screen_share_from_the_start() {
     run(Send::Screen, true);
+}
+
+/// One 10 ms frame of a 440 Hz tone, from sample `start`.
+fn tone(start: usize) -> Vec<u8> {
+    (start..start + crate::calls::engine::EXTERNAL_AUDIO_FRAME_SAMPLES)
+        .map(|n| {
+            let t = n as f32 / 48_000.0;
+            ((t * 440.0 * std::f32::consts::TAU).sin() * 12_000.0) as i16
+        })
+        .flat_map(i16::to_le_bytes)
+        .collect()
+}
+
+/// The caller sends a tone from its external microphone; the callee
+/// connects through [`CallEngine::connect`] as a real call does, so its
+/// sound plays on Quill's output (UI builds) or the device (core builds,
+/// listen for it).
+#[test]
+fn loopback_p2p_sound_reaches_the_callee() {
+    if std::env::var_os("QUILL_VERIFY_NATIVE_CALLS").is_none() {
+        return;
+    }
+    let mut a = side(1, 200, true);
+    let mut b = side(2, 100, false);
+    connect(&mut a, true, Send::Nothing);
+    let params = ConnectParams {
+        encryption_key: KEY.to_vec(),
+        custom_parameters: String::new(),
+        is_outgoing: false,
+        servers: Vec::new(),
+        library_versions: vec!["13.0.0".into()],
+        p2p_allowed: true,
+        mic_input: None,
+        speaker_input: None,
+        camera_input: None,
+    };
+    b.engine
+        .connect(b.call_id, &params)
+        .expect("callee connect");
+    pump(&mut a, &mut b, Duration::from_secs(3), |_| {});
+    let instance = a.engine.instance.expect("instance");
+    let mut clock = crate::calls::capture::CaptureClock::new();
+    let mut sample = 0;
+    pump(&mut a, &mut b, Duration::from_secs(5), |a| {
+        // Three 10 ms frames per 33 ms pump.
+        for _ in 0..3 {
+            let pcm = tone(sample);
+            sample += crate::calls::engine::EXTERNAL_AUDIO_FRAME_SAMPLES;
+            let meta = ntg_frame_data {
+                absolute_capture_timestamp_ms: clock.map(Instant::now()),
+                rotation: ntgcalls_sys::NTG_VIDEO_ROTATION_VIDEO_ROTATION_0,
+                width: 0,
+                height: 0,
+            };
+            // SAFETY: the instance is live; ntgcalls copies the bytes.
+            unsafe {
+                (a.engine.api.ntg_send_external_frame)(
+                    instance.as_ptr(),
+                    a.peer,
+                    ntgcalls_sys::NTG_STREAM_DEVICE_MICROPHONE,
+                    pcm.as_ptr(),
+                    pcm.len(),
+                    meta,
+                )
+            };
+        }
+    });
+    let health = b.engine.call_sound_health(b.call_id);
+    eprintln!(
+        "callee transport {:?}, sound {health:?}",
+        b.transport.lock_or_recover()
+    );
+    let _ = a.engine.hangup(a.call_id);
+    let _ = b.engine.hangup(b.call_id);
+    if cfg!(feature = "ui") {
+        let health = health.expect("Quill plays the call");
+        assert!(health.frames > 100, "the caller's sound arrives");
+        assert!(health.peak > 6_000, "and is the tone, not silence");
+    }
 }

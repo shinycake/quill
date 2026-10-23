@@ -1,7 +1,7 @@
-//! A live stream's sound played by Quill instead of ntgcalls, so it can
-//! have a volume. Only stream-mode calls (channel live streams and live
-//! stories) use it; 1:1 calls and video chats keep WebRTC's own output
-//! and its echo cancellation.
+//! A call's sound played by Quill instead of ntgcalls: stream-mode calls
+//! (channel live streams and live stories), so they can have a volume,
+//! and 1:1 calls, so Quill sees whether the other side's sound arrives.
+//! Video chats keep ntgcalls' device output.
 //!
 //! ntgcalls v3.0.3 hands the decoded audio of an external playback
 //! writer to the frames callback (`stream_manager.cpp`,
@@ -11,7 +11,8 @@
 //! into a [`ring::SampleRing`], and the output (`output`, UI builds)
 //! plays them at the [`gain::Gain`].
 //!
-//! Design: `docs/decisions/stream-volume.md`.
+//! Design: `docs/decisions/stream-volume.md`,
+//! `docs/decisions/call-sound-output.md`.
 #![deny(clippy::indexing_slicing)]
 
 pub mod gain;
@@ -22,7 +23,8 @@ pub mod watch;
 
 use gain::Gain;
 use ring::SampleRing;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::cell::Cell;
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
 use watch::PlaybackHealth;
 
 const RING_CAPACITY_MS: u32 = 200;
@@ -55,6 +57,7 @@ pub struct StreamAudio {
     ring: SampleRing,
     gain: Gain,
     frames: AtomicU64,
+    peak: AtomicU16,
     output_failed: AtomicBool,
 }
 
@@ -68,6 +71,7 @@ impl StreamAudio {
             ),
             gain: Gain::new(volume, muted),
             frames: AtomicU64::new(0),
+            peak: AtomicU16::new(0),
             output_failed: AtomicBool::new(false),
         }
     }
@@ -104,9 +108,14 @@ impl StreamAudio {
         if len == 0 {
             return;
         }
-        self.ring
-            .push_with(len, |index| mixed_sample(frames.clone(), index));
+        let peak = Cell::new(0_u16);
+        self.ring.push_with(len, |index| {
+            let sample = mixed_sample(frames.clone(), index);
+            peak.set(peak.get().max(sample.unsigned_abs()));
+            sample
+        });
         self.frames.fetch_add(1, Ordering::Relaxed);
+        self.peak.fetch_max(peak.get(), Ordering::Relaxed);
     }
 
     pub fn mark_output_failed(&self) {
@@ -116,6 +125,7 @@ impl StreamAudio {
     pub fn health(&self) -> PlaybackHealth {
         PlaybackHealth {
             frames: self.frames.load(Ordering::Relaxed),
+            peak: self.peak.load(Ordering::Relaxed),
             output_failed: self.output_failed.load(Ordering::Relaxed),
         }
     }
@@ -133,9 +143,9 @@ fn mixed_sample<'a>(frames: impl Iterator<Item = &'a [u8]>, index: usize) -> i16
     sum.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16
 }
 
-/// Whether Quill plays streams itself. `QUILL_STREAM_AUDIO_DEVICE=1`
-/// leaves them on ntgcalls' device output; builds without the UI feature
-/// have no output and always do.
+/// Whether Quill plays streams and 1:1 calls itself.
+/// `QUILL_STREAM_AUDIO_DEVICE=1` leaves them on ntgcalls' device output;
+/// builds without the UI feature have no output and always do.
 pub fn quill_plays_streams() -> bool {
     plays_streams_from(
         cfg!(feature = "ui"),
@@ -203,6 +213,17 @@ mod tests {
         assert_eq!(mix(&[&a, &b]), vec![101, -198, i16::MAX]);
         let low = bytes(&[-30_000]);
         assert_eq!(mix(&[&low, &low]), vec![i16::MIN]);
+    }
+
+    #[test]
+    fn health_counts_frames_and_keeps_the_loudest_sample() {
+        let audio = StreamAudio::new(PcmFormat::for_output(48_000, 1), 1.0, false);
+        assert_eq!(audio.health().peak, 0);
+        audio.push_frames([bytes(&[0, 0]).as_slice()]);
+        assert_eq!((audio.health().frames, audio.health().peak), (1, 0));
+        audio.push_frames([bytes(&[300, i16::MIN]).as_slice()]);
+        audio.push_frames([bytes(&[-50]).as_slice()]);
+        assert_eq!((audio.health().frames, audio.health().peak), (3, 32_768));
     }
 
     #[test]

@@ -22,6 +22,8 @@ pub const DEBUG_TDLIB_VERBOSITY: i32 = 4;
 const TDLIB_LOG_MAX_BYTES: u64 = 64 * 1024 * 1024;
 /// Quill's log is moved to `.old` past this size.
 const QUILL_LOG_MAX_BYTES: u64 = 16 * 1024 * 1024;
+/// The call log is small and always on, so it is moved to `.old` sooner.
+const CALL_LOG_MAX_BYTES: u64 = 1024 * 1024;
 
 static ENABLED: OnceLock<AtomicBool> = OnceLock::new();
 
@@ -59,6 +61,12 @@ pub fn log_dir(root: &Path) -> PathBuf {
 
 pub fn quill_log_path(root: &Path) -> PathBuf {
     log_dir(root).join("quill-debug.log")
+}
+
+/// The always-on call log: connection steps, whether the other side's
+/// sound arrived, and the call engine's warnings. No message content.
+pub fn call_log_path(root: &Path) -> PathBuf {
+    log_dir(root).join("calls.log")
 }
 
 pub fn tdlib_log_path(root: &Path) -> PathBuf {
@@ -132,14 +140,25 @@ pub fn debug_log(message: &str) {
     let Some(root) = crate::settings::safe_app_root() else {
         return;
     };
-    append_line(&quill_log_path(&root), message);
+    append_line(&quill_log_path(&root), message, QUILL_LOG_MAX_BYTES);
 }
 
-fn append_line(path: &Path, message: &str) {
+/// One line in the call log, whether or not the debug mode is on, and in
+/// the debug log while it is: a call that goes wrong can be diagnosed
+/// without being repeated.
+pub fn call_log(message: &str) {
+    debug_log(message);
+    let Some(root) = crate::settings::safe_app_root() else {
+        return;
+    };
+    append_line(&call_log_path(&root), message, CALL_LOG_MAX_BYTES);
+}
+
+fn append_line(path: &Path, message: &str, max_bytes: u64) {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    if std::fs::metadata(path).is_ok_and(|m| m.len() > QUILL_LOG_MAX_BYTES) {
+    if std::fs::metadata(path).is_ok_and(|m| m.len() > max_bytes) {
         let _ = std::fs::rename(path, path.with_extension("log.old"));
     }
     let stamp = std::time::SystemTime::now()
@@ -262,11 +281,19 @@ mod tests {
     fn log_lines_append_and_rotate() {
         let dir = temp_dir("lines");
         let path = quill_log_path(&dir);
-        append_line(&path, "first");
-        append_line(&path, "second");
+        append_line(&path, "first", QUILL_LOG_MAX_BYTES);
+        append_line(&path, "second", QUILL_LOG_MAX_BYTES);
         let text = std::fs::read_to_string(&path).unwrap();
         assert_eq!(text.lines().count(), 2);
         assert!(text.lines().next().unwrap().ends_with("] first"));
+        append_line(&path, "third", 8);
+        assert!(
+            std::fs::read_to_string(path.with_extension("log.old"))
+                .unwrap()
+                .contains("] second")
+        );
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(text.lines().count(), 1, "a full log moves aside");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

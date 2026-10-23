@@ -67,6 +67,8 @@ struct MockInner {
     stream_sound: HashMap<i32, crate::calls::stream_audio::watch::PlaybackHealth>,
     stream_volumes: Vec<f32>,
     device_playbacks: Vec<i32>,
+    call_sound: HashMap<i32, crate::calls::stream_audio::watch::PlaybackHealth>,
+    device_call_sounds: Vec<i32>,
     broadcast_timestamps: Vec<(i64, i64)>,
     broadcast_parts: Vec<(i64, BroadcastPartAnswer)>,
     /// External frames pushed through `external_frame_sender`.
@@ -227,6 +229,21 @@ impl MockEngine {
             .lock_or_recover()
             .stream_sound
             .insert(group_call_id, health);
+    }
+
+    pub fn set_call_sound(
+        &self,
+        call_id: i32,
+        health: crate::calls::stream_audio::watch::PlaybackHealth,
+    ) {
+        self.inner
+            .lock_or_recover()
+            .call_sound
+            .insert(call_id, health);
+    }
+
+    pub fn device_call_sounds(&self) -> Vec<i32> {
+        self.inner.lock_or_recover().device_call_sounds.clone()
     }
 
     pub fn stream_volumes(&self) -> Vec<f32> {
@@ -714,6 +731,24 @@ impl CallEngine for MockEngine {
         let mut inner = self.inner.lock_or_recover();
         inner.stream_sound.remove(&group_call_id);
         inner.device_playbacks.push(group_call_id);
+        Ok(())
+    }
+
+    fn call_sound_health(
+        &self,
+        call_id: i32,
+    ) -> Option<crate::calls::stream_audio::watch::PlaybackHealth> {
+        self.inner
+            .lock_or_recover()
+            .call_sound
+            .get(&call_id)
+            .copied()
+    }
+
+    fn use_device_call_sound(&mut self, call_id: i32) -> Result<(), EngineError> {
+        let mut inner = self.inner.lock_or_recover();
+        inner.call_sound.remove(&call_id);
+        inner.device_call_sounds.push(call_id);
         Ok(())
     }
 
