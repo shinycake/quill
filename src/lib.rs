@@ -71,6 +71,8 @@ pub mod emoji_interaction;
 pub mod emoji_replace;
 pub mod emoji_sets_style;
 pub mod emoji_status_selector;
+pub mod event_log_filter;
+pub mod event_log_list;
 pub mod export;
 pub mod fast_buttons;
 pub mod file_prefs;

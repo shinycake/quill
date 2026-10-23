@@ -12,7 +12,6 @@ use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
-use gpui_kit::component::input::TextareaState;
 use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -334,14 +333,7 @@ impl QuillApp {
         // Slice G2: the event-log section's search box (created lazily;
         // its value syncs to the panel chat's stored query). The per-admin
         // filter lives in the session and follows the chat.
-        if self.admin.event_log_search.is_none() {
-            self.admin.event_log_search = Some(cx.new(|cx| {
-                TextareaState::new(window, cx)
-                    .placeholder(tr(keys::Q_PEOPLE_SEARCH_RECENT_ACTIONS))
-                    .auto_grow(1, 1)
-                    .submit_on_enter(false)
-            }));
-        }
+        self.ensure_event_log_search(window, cx);
         if let Some(chat_id) = invite_panel_chat_id {
             let query = self
                 .session()

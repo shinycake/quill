@@ -459,7 +459,8 @@ fn chat_events_parse_handled_actions() {
         events[0].action,
         ChatEventAction::MessageEdited {
             message_id: 55,
-            text: "after".to_owned()
+            text: "after".to_owned(),
+            old_text: "before".to_owned()
         }
     );
     assert_eq!(

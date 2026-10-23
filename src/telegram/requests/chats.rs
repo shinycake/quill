@@ -222,7 +222,7 @@ pub fn delete_chat_history(
 /// when no category is enabled the driver passes `null` (all event
 /// types — the schema's "pass null to get chat events of all types",
 /// line 15252).
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ChatEventLogFilterSet {
     pub message_edits: bool,
     pub message_deletions: bool,

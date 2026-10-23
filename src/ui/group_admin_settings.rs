@@ -17,6 +17,7 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
+use gpui_kit::component::dialog::DialogContent;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -78,6 +79,7 @@ impl QuillApp {
         let channel = self.is_channel_chat(chat_id);
         if view == GroupSettingsView::RecentActions {
             self.start_event_log_poll(chat_id, cx);
+            self.hook_event_log_scroll(cx);
         }
         if let Some(live) = self.live.as_mut() {
             let driver = &mut live.driver;
@@ -686,6 +688,11 @@ impl QuillApp {
                 section(self.event_log_section(chat_id, cx)),
                 done,
             ),
+            GroupSettingsView::RecentActionsFilter => (
+                tr(keys::MANAGE_PEER_RECENT_ACTIONS).to_string(),
+                self.event_log_filter_body(cx),
+                self.event_log_filter_footer(chat_id, cx),
+            ),
             GroupSettingsView::ConfirmUpgrade => (
                 tr(keys::Q_PEOPLE_UPGRADE_TO_SUPERGROUP).to_string(),
                 div()
@@ -793,21 +800,40 @@ impl QuillApp {
                     .title(crate::ui::shell::dialog_title(tr(keys::MENU_SETTINGS)))
                     .on_close(on_close);
             };
+            // The recent actions keep their header in view and scroll the
+            // events themselves, so that page is not wrapped in a scroll.
+            let fixed = this
+                .admin
+                .group_settings_dialog
+                .as_ref()
+                .is_some_and(|dialog| dialog.view == GroupSettingsView::RecentActions);
+            // `content` needs an `Fn` closure, but the body is built once
+            // per dialog render — hand it over through a one-shot cell.
+            let body = Rc::new(RefCell::new(Some(body)));
+            let take = move || {
+                body.borrow_mut()
+                    .take()
+                    .unwrap_or_else(|| div().into_any_element())
+            };
+            let content: Box<dyn Fn(DialogContent, &mut Window, &mut App) -> DialogContent> =
+                if fixed {
+                    Box::new(move |content, window, _| {
+                        let height = (window.viewport_size().height - px(180.))
+                            .max(px(240.))
+                            .min(px(640.));
+                        content
+                            .min_h_0()
+                            .child(div().w_full().h(height).child(take()))
+                    })
+                } else {
+                    Box::new(crate::ui::shell::scrollable_dialog_content(
+                        move |content, _, _| content.child(take()),
+                    ))
+                };
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(title))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body)));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(content)
                 .footer(footer)
                 .on_close(on_close)
         })

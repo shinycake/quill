@@ -37,9 +37,19 @@ pub(crate) struct AdminUi {
     /// Slice G2: event-log search input for the info panel's
     /// "Recent actions" section (created lazily when the panel opens).
     pub(super) event_log_search: Option<Entity<TextareaState>>,
-    /// The scroll position of the recent-actions list: older events load
-    /// when it nears the end, and new ones show live while it is at the top.
-    pub(super) event_log_scroll: ScrollHandle,
+    /// The recent-actions list (oldest event first, newest at the bottom):
+    /// earlier events load when it is scrolled to its top.
+    pub(super) event_log_list: ListState,
+    /// The event ids the list was last built for (`event_log_list::plan_sync`).
+    pub(super) event_log_ids: std::cell::RefCell<Vec<i64>>,
+    /// Counts search edits so only the last one searches.
+    pub(super) event_log_keystroke: u64,
+    /// The list reports its scrolling to the app (set up once).
+    pub(super) event_log_hooked: bool,
+    /// The list length an automatic "load earlier" was last asked for.
+    pub(super) event_log_autoload: std::cell::Cell<usize>,
+    /// The open filter box (Save applies it, Cancel drops it).
+    pub(super) event_log_filter: Option<super::event_log_filter_box::EventLogFilterBox>,
     /// The chat whose recent-actions poll is running (one timer task).
     pub(super) event_log_poll: Option<ChatId>,
     /// B7: group / channel settings dialog (topics, history, reactions,
@@ -71,7 +81,12 @@ impl AdminUi {
             group_confirm_dialog: None,
             forum_manage_dialog: None,
             event_log_search: None,
-            event_log_scroll: ScrollHandle::new(),
+            event_log_list: super::event_log::new_event_log_list(),
+            event_log_ids: std::cell::RefCell::new(Vec::new()),
+            event_log_keystroke: 0,
+            event_log_hooked: false,
+            event_log_autoload: std::cell::Cell::new(0),
+            event_log_filter: None,
             event_log_poll: None,
             group_settings_dialog: None,
             join_requests_dialog: None,

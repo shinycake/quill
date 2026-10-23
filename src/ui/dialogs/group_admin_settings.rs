@@ -12,6 +12,8 @@ pub(crate) enum GroupSettingsView {
     JoinRequests,
     Administrators,
     RecentActions,
+    /// The Filter box over the recent actions.
+    RecentActionsFilter,
 }
 
 /// The page dialog over the group / channel Edit box (reactions,
