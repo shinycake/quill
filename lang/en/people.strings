@@ -55,6 +55,7 @@
 "lng_group_invite_context_delete" = "Delete";
 "lng_group_invite_context_edit" = "Edit";
 "lng_group_invite_context_revoke" = "Revoke";
+"lng_group_invite_copy" = "Copy Link";
 "lng_group_invite_link_expired" = "Expired";
 "lng_group_requests_dismiss" = "Dismiss";
 "lng_group_stickers" = "Group stickers";
