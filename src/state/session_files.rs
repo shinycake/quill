@@ -512,13 +512,7 @@ impl Session {
             }
         }
         if self.stickers.emoji.open {
-            for sticker in self
-                .stickers
-                .emoji
-                .preview
-                .iter()
-                .chain(&self.stickers.emoji.custom_emoji_stickers)
-            {
+            for sticker in &self.stickers.emoji.custom_emoji_stickers {
                 let file_id = sticker.display_file_id();
                 if let Some(file_id) = file_id
                     && self.should_download(file_id)

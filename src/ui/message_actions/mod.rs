@@ -130,6 +130,7 @@ fn confirm_hide_pinned(
 }
 
 mod chat_menu_submenus;
+mod clear_history_box;
 mod close_chat_preview;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]

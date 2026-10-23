@@ -190,7 +190,7 @@ impl QuillApp {
                     .cursor_pointer()
                     .occlude()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.set_status_note(StatusNote::silent(FORCED_MESSAGE), cx);
+                        this.set_status_note(StatusNote::silent(forced_message()), cx);
                     })),
             );
         }
@@ -233,4 +233,6 @@ impl QuillApp {
 }
 
 /// tdesktop `lng_settings_power_turn_off`.
-const FORCED_MESSAGE: &str = "Please turn off Save Power on Low Battery to change these settings.";
+fn forced_message() -> &'static str {
+    tr(keys::SETTINGS_POWER_TURN_OFF)
+}

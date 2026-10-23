@@ -19,7 +19,7 @@ use super::{Preview, SendMenu, tracker};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::*;
 use gpui_kit::{TestSupportExt, *};
-use quill::lang::{keys, tr};
+use quill::lang::{keys, tr, tr_with};
 use quill::message_effects_picker::{
     PREVIEW_BUTTON, PREVIEW_SIDE, PREVIEW_TOGGLE_MS, can_send, preview_origin,
 };
@@ -372,11 +372,10 @@ fn send_button(effect_id: i64, cx: &mut Context<QuillApp>) -> AnyElement {
 /// "Subscribe to Telegram Premium to add this animated effect.", the link
 /// opening the Premium preview of effects.
 fn premium_offer(effect_id: i64, cx: &mut Context<QuillApp>) -> AnyElement {
-    const BEFORE: &str = "Subscribe to ";
-    const LINK: &str = "Telegram Premium";
-    const AFTER: &str = " to add this animated effect.";
-    let text = format!("{BEFORE}{LINK}{AFTER}");
-    let link = BEFORE.len()..BEFORE.len() + LINK.len();
+    let link_text = tr(keys::SEND_AS_PREMIUM_REQUIRED_LINK);
+    let text = tr_with(keys::EFFECT_PREMIUM, &[("link", link_text)]);
+    let start = text.find(link_text).unwrap_or(0);
+    let link = start..start + link_text.len();
     let highlight = HighlightStyle {
         color: Some(accent().into()),
         ..Default::default()

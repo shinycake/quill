@@ -159,9 +159,13 @@ impl QuillApp {
                             .child(if s.is_current {
                                 tr(keys::Q_PREFS_ONLINE).to_string()
                             } else {
-                                format!(
-                                    "Last active: {}",
-                                    format_session_last_active(s.last_active_date)
+                                tr_with(
+                                    keys::Q_LEFTOVERS_LAST_ACTIVE,
+                                    &[(
+                                        "date",
+                                        &(format_session_last_active(s.last_active_date))
+                                            .to_string(),
+                                    )],
                                 )
                             }),
                     ),

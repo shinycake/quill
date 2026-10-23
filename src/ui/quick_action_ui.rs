@@ -7,6 +7,7 @@ use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr};
 use quill::quick_action::{QuickAction, QuickEffect};
 
 impl QuillApp {
@@ -26,7 +27,7 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .font_medium()
-                    .child("Double-click a message to"),
+                    .child(tr(keys::Q_LEFTOVERS_DOUBLE_CLICK_A_MESSAGE_TO)),
             )
             .child(
                 RadioGroup::vertical("media-pref-quick-action-group")

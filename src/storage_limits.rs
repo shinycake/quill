@@ -9,16 +9,7 @@ use crate::telegram::envelope::OptionValue;
 
 const KIB: i64 = 1024;
 const MIB: i64 = 1024 * KIB;
-const GIB: i64 = 1024 * MIB;
 const DAY: i64 = 86_400;
-
-/// Total size limits offered, in bytes. A subset of tdesktop's list
-/// (`TotalSizeLimit`: 200 MB-900 MB, then 1-10 GB), as chips.
-pub const SIZE_LIMITS: [i64; 6] = [200 * MIB, 500 * MIB, GIB, 2 * GIB, 5 * GIB, 10 * GIB];
-
-/// "Clear files older than" choices, in seconds. tdesktop's
-/// `TimeLimitInDays`: 1 week, then months of 31/59/90/.../181/.../365 days.
-pub const KEEP_LIMITS: [i64; 5] = [7 * DAY, 31 * DAY, 90 * DAY, 181 * DAY, 365 * DAY];
 
 /// `storage_max_files_size` is in KiB; this reads as "no size limit"
 /// (`FileGcParameters` shifts it left by 10 bits).
@@ -135,6 +126,8 @@ pub fn keep_label(secs: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const GIB: i64 = 1024 * MIB;
 
     #[test]
     fn limits_read_from_tdlib_options() {

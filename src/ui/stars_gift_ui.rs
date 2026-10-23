@@ -18,7 +18,9 @@ use quill::premium_hub::group_digits;
 use quill::stars_gift::can_gift_stars;
 use quill::telegram::envelope::{ChatKind, format_payment_price};
 
-const TITLE: &str = "Gift Stars";
+fn title() -> &'static str {
+    tr(keys::GIFT_STARS_SUBTITLE)
+}
 /// Rows drawn at once; the search narrows the rest.
 const ROWS_MAX: usize = 100;
 
@@ -160,10 +162,16 @@ impl QuillApp {
                             .cursor_pointer()
                             .tab_index(0)
                             .role(gpui_kit::Role::Button)
-                            .aria_label(format!(
-                                "Gift {} Stars for {}",
-                                group_digits(pack.star_count),
-                                format_payment_price(&pack.currency, pack.amount)
+                            .aria_label(tr_with(
+                                keys::Q_LEFTOVERS_GIFT_STARS_FOR,
+                                &[
+                                    ("count", &(group_digits(pack.star_count)).to_string()),
+                                    (
+                                        "price",
+                                        &(format_payment_price(&pack.currency, pack.amount))
+                                            .to_string(),
+                                    ),
+                                ],
                             ))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.buy_gifted_stars(ix, window, cx);
@@ -285,7 +293,7 @@ impl QuillApp {
             );
             finish(
                 dialog,
-                TITLE,
+                title(),
                 body.into_any_element(),
                 footer.into_any_element(),
                 on_close,

@@ -67,23 +67,18 @@ pub fn format_ttl(secs: i32) -> String {
     }
 }
 
-/// Move `current` one step through [`TTL_CHOICES`]; `delta` is +1 or -1.
-/// A value outside the list (set from another client) snaps to the nearest
-/// choice in the direction of travel; the ends clamp.
-pub fn step(current: i32, delta: i32) -> i32 {
-    let list = &TTL_CHOICES;
-    if delta >= 0 {
-        list.iter()
-            .copied()
-            .find(|&c| c > current)
-            .unwrap_or_else(|| list.last().copied().unwrap_or(current))
-    } else {
-        list.iter()
-            .rev()
-            .copied()
-            .find(|&c| c < current)
-            .unwrap_or(list[0])
+/// The picker position nearest to `secs` (`TimePickerBox` start index). A
+/// value outside the list, or none (`0`), lands on the closest choice, the
+/// later one on a tie.
+pub fn nearest_choice_index(secs: i32) -> usize {
+    let mut best = (0, i64::MAX);
+    for (index, choice) in TTL_CHOICES.iter().enumerate() {
+        let distance = (i64::from(*choice) - i64::from(secs)).abs();
+        if distance <= best.1 {
+            best = (index, distance);
+        }
     }
+    best.0
 }
 
 /// Facts about the chat needed to decide whether the user can edit its
@@ -155,16 +150,19 @@ mod tests {
     }
 
     #[test]
-    fn stepping_walks_the_list_and_clamps() {
-        assert_eq!(step(0, 1), DAY);
-        assert_eq!(step(DAY, 1), DAY * 2);
-        assert_eq!(step(DAY * 6, 1), DAY * 7);
-        assert_eq!(step(DAY * 365, 1), DAY * 365);
-        assert_eq!(step(DAY, -1), DAY);
-        assert_eq!(step(DAY * 7, -1), DAY * 6);
-        // 10 days (set elsewhere) snaps to the neighbours.
-        assert_eq!(step(DAY * 10, 1), DAY * 14);
-        assert_eq!(step(DAY * 10, -1), DAY * 7);
+    fn the_picker_starts_on_the_nearest_choice() {
+        assert_eq!(nearest_choice_index(0), 0);
+        assert_eq!(nearest_choice_index(DAY * 3), 2);
+        assert_eq!(nearest_choice_index(DAY * 365), TTL_CHOICES.len() - 1);
+        assert_eq!(nearest_choice_index(DAY * 400), TTL_CHOICES.len() - 1);
+        // 10 days (set elsewhere) is closer to 1 week than to 2 weeks.
+        assert_eq!(
+            TTL_CHOICES.get(nearest_choice_index(DAY * 10)),
+            Some(&(DAY * 7))
+        );
+        for (index, choice) in TTL_CHOICES.iter().enumerate() {
+            assert_eq!(nearest_choice_index(*choice), index);
+        }
     }
 
     #[test]

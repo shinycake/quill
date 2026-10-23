@@ -463,8 +463,9 @@ impl QuillApp {
                                     .is_some_and(|p| p.chats.toggle_chat(chat_id));
                                 if !added {
                                     this.business_error(
-                                        format!(
-                                            "You can select up to {RECIPIENT_CHATS_MAX} chats."
+                                        tr_with(
+                                            keys::Q_LEFTOVERS_SELECT_UP_TO_CHATS,
+                                            &[("count", &RECIPIENT_CHATS_MAX.to_string())],
                                         ),
                                         cx,
                                     );

@@ -89,7 +89,7 @@ impl QuillApp {
                     .text_xs()
                     .font_semibold()
                     .text_color(muted)
-                    .child("BIRTHDAYS"),
+                    .child(tr(keys::GIFT_SUBTITLE_BIRTHDAYS).to_uppercase()),
             );
         for entry in list {
             let user_id = entry.user_id;

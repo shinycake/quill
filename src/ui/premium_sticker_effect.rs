@@ -41,7 +41,9 @@ const SEEN_FRESH: Duration = Duration::from_millis(1500);
 const MAX_PLAYED: usize = 4096;
 /// The hint a click shows while the effect plays (tdesktop
 /// `lng_sticker_premium_text`).
-pub(super) const HINT: &str = "This set contains Premium stickers like this one.";
+pub(super) fn hint() -> &'static str {
+    tr(keys::STICKER_PREMIUM_TEXT)
+}
 
 type Key = (i64, i64);
 
@@ -283,7 +285,7 @@ impl QuillApp {
                 );
                 cx.notify();
             }
-            Click::Hint => self.set_status_note(StatusNote::info(HINT), cx),
+            Click::Hint => self.set_status_note(StatusNote::info(hint()), cx),
             Click::Nothing => {}
         }
     }

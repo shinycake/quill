@@ -175,10 +175,15 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!(
-                        "Sent {} · received {}",
-                        format_storage_bytes(total.sent),
-                        format_storage_bytes(total.received)
+                    .child(tr_with(
+                        keys::Q_LEFTOVERS_SENT_RECEIVED,
+                        &[
+                            ("sent", &(format_storage_bytes(total.sent)).to_string()),
+                            (
+                                "received",
+                                &(format_storage_bytes(total.received)).to_string(),
+                            ),
+                        ],
                     )),
             );
         let groups = usage.active_groups();
@@ -199,9 +204,12 @@ impl QuillApp {
                     .id("network-usage-since")
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!(
-                        "Network usage since {}",
-                        full_stamp(&civil_local(usage.since_date))
+                    .child(tr_with(
+                        keys::Q_LEFTOVERS_NETWORK_USAGE_SINCE,
+                        &[(
+                            "date",
+                            &(full_stamp(&civil_local(usage.since_date))).to_string(),
+                        )],
                     )),
             );
         }

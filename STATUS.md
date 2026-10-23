@@ -38,7 +38,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Add contact via dialog: phone (required), first/last name -> addContact (ui/mod.rs:9469; telegram/requests.rs:379) <!-- parity:auth-contact-add -->
 - [x] Delete contact (schema: removeContacts; TGX DeleteContactConfirm) <!-- parity:auth-contact-delete -->
 - [x] Import contacts from a file/vCard (schema: importContacts) <!-- parity:auth-contact-import -->
-- [ ] Import contacts by choosing a .vcf file instead of pasting vCard text <!-- parity:auth-contact-import-file -->
+- [x] Import contacts by choosing a .vcf file instead of pasting vCard text <!-- parity:auth-contact-import-file -->
 - [x] Sync contacts toggle + delete synced contacts from servers (TGX SyncContacts*, SyncContactsDeleteInfo) <!-- parity:auth-contact-sync -->
 - [x] Block user with confirmation (TGX QBlockUser/BlockUserConfirm; no block request builders in Quill) <!-- parity:auth-block-user -->
 - [x] Edit name: "Edit profile" dialog on the own info panel sends setName (telegram/requests.rs:4213; connect.rs:8910; ui/mod.rs:18963) <!-- parity:auth-edit-name -->
@@ -303,7 +303,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Per-chat mute/unmute from the list via the row menu (src/ui/mod.rs:5611) <!-- parity:chatlist-list-mute -->
 - [x] Delete chat from the list via deleteChatHistory(remove_from_chat_list:true) — not the destructive deleteChat (src/connect.rs, src/ui/mod.rs) <!-- parity:chatlist-delete-chat -->
 - [x] Clear chat history via deleteChatHistory(remove_from_chat_list:false), gated on delete capabilities (src/connect.rs, src/ui/mod.rs) <!-- parity:chatlist-clear-history -->
-- [ ] Clear history is one confirmation with an "Also delete for {name}" checkbox, not two menu items <!-- parity:chatlist-clear-history-box -->
+- [x] Clear history is one confirmation with an "Also delete for {name}" checkbox, not two menu items <!-- parity:chatlist-clear-history-box -->
 - [x] Saved Messages entry row in the list: opens the existing self chat directly, otherwise createPrivateChat with getOption("my_id") and opens the returned chat (schema td_api.tl:9590; src/connect.rs: create_private_chat_with_self, src/ui/mod.rs: open_saved_messages) <!-- parity:chatlist-saved-messages -->
 - [x] Chat preview on long-press (press-and-hold; hover was deliberately rejected — see DECISIONS.md) <!-- parity:chatlist-chat-preview -->
 - [x] Clear recent searches: Clear button on the Recent heading, clearRecentlyFoundChats with optimistic local clear (TGX SearchManager parity), refusal surfaced as a status note (src/connect.rs: clear_recently_found_chats, src/ui/mod.rs: clear_search_recents) <!-- parity:chatlist-clear-recent-searches -->
@@ -563,7 +563,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Restrict until a custom date and per-right exception lists <!-- parity:admin-restrict-until-custom -->
 - [x] Admin custom title length counter and default "Admin" label <!-- parity:admin-title-counter -->
 - [x] Recent actions: server-side admin filter and explainer <!-- parity:admin-log-extras -->
-- [ ] Recent actions load older events as you scroll, without Load more or Refresh buttons <!-- parity:admin-log-scroll-load -->
+- [x] Recent actions load older events as you scroll, without Load more or Refresh buttons <!-- parity:admin-log-scroll-load -->
 - [x] Group and channel Edit box: photo, name with emoji, description, Save, and the management rows <!-- parity:admin-edit-box -->
 - [x] Crop step after choosing a profile, group or channel photo <!-- parity:admin-photo-crop -->
 - [x] Group and channel photo from the camera, an emoji avatar or a video <!-- parity:groups-photo-sources -->
@@ -636,6 +636,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Delete own story, gated on can_be_deleted; viewer closes when the story leaves the cache; updateStoryDeleted handled (telegram/requests.rs:2584, telegram/envelope.rs:4660) <!-- parity:stories-delete -->
 - [x] Report story (reportStory multi-step flow: option picker → optional/required text → Reported/Failed; state.rs + connect.rs + ui/mod.rs Phase 9.5) <!-- parity:stories-report -->
 - [x] Stealth mode / hide view from poster (activateStoryStealthMode + updateStoryStealthMode state; viewer action-row button reflects active/cooldown; ui/mod.rs Phase 9.5) <!-- parity:stories-stealth-mode -->
+- [ ] Story viewer controls are tdesktop's icon overlay (mute, pause, share, reaction) and a ⋯ menu for the rest (Save, Edit, Cover, Privacy, Delete, Stealth, Copy Link, Repost), not a wrapping row of text buttons <!-- parity:stories-viewer-icon-chrome -->
+- [ ] Story viewers list loads more on scroll, not with a Load more button <!-- parity:stories-viewers-scroll-load -->
 - [x] Story albums: story page lists/opens albums; create/rename/delete; add/remove/reorder stories; reorder albums (album covers deferred) <!-- parity:stories-albums -->
 - [ ] Add Stories to an album by ticking them in a story grid (tdesktop EditAlbumBox), not by typing story ids <!-- parity:stories-albums-picker -->
 - [x] Archive story list via getChatArchivedStories with load-more pagination (DECISIONS.md Phase 9.1 "Out of this slice") <!-- parity:stories-archive -->
@@ -780,7 +782,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Install sticker set (changeStickerSet install) <!-- parity:stickers-install -->
 - [x] Remove sticker set with confirm dialog <!-- parity:stickers-remove -->
 - [x] Archive sticker set + Archived view in settings (restore path) <!-- parity:stickers-archive -->
-- [ ] Stickers and emoji box in Settings: Installed, Masks, Trending and Archived tabs with thumbnail rows, count, remove with Undo, archive, drag reorder, more sets on scroll (the composer picker stays for sending) <!-- parity:stickers-manager-box -->
+- [x] Stickers and emoji box in Settings: Installed, Masks, Trending and Archived tabs with thumbnail rows, count, remove with Undo, archive, drag reorder, more sets on scroll (the composer picker stays for sending) <!-- parity:stickers-manager-box -->
 - [x] Reorder installed sticker sets <!-- parity:stickers-reorder -->
 - [x] Dynamic set order (auto-place recently used sets above others) <!-- parity:stickers-dynamic-order --> (backend + state: sticker sends pass update_order_of_installed_sticker_sets, updateInstalledStickerSets reorders the cached sets in place; picker already lists stored order, no UI change)
 - [x] Open sticker set preview screen (title, stickers grid, install/remove from preview) <!-- parity:stickers-set-preview -->
@@ -803,7 +805,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Insert emoji at cursor in composer text <!-- parity:emoji-insert -->
 - [x] Big emoji rendering for emoji-only messages (Big Emoji setting) <!-- parity:emoji-big -->
 - [x] Custom emoji packs (browse/install/remove, "Emoji Sets" settings screen) <!-- parity:emoji-custom-packs -->
-- [ ] Emoji packs box like the stickers box: tabs, rows with previews, search as you type, packs load and download on their own (no Load, Search or Retry buttons) <!-- parity:emoji-packs-box -->
+- [x] Emoji packs box like the stickers box: tabs, rows with previews, search as you type, packs load and download on their own (no Load, Search or Retry buttons) <!-- parity:emoji-packs-box -->
 - [x] Render custom emoji inside message text <!-- parity:emoji-custom-render --> (inline sticker image at 1.25× text size; thumbnail first, else static WEBP; unresolved falls back to the span text; animated playback still static; live custom emoji unverified)
 - [x] Suggest animated emoji in composer <!-- parity:emoji-suggest-animated --> (composer trailing-emoji → `getAnimatedEmoji` (deduped, stale in-flight dropped) → suggestion row above the composer, tap to send as a sticker; `animatedEmoji` parse into EmojiPanel already existed)
 - [x] Emoji status: recent/trending/default choices, Premium-gated selection and removal, forever/1h/2h/8h/2d/custom expiry; thumbnails and safe retry; live changes unverified <!-- parity:emoji-status -->
@@ -849,7 +851,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] User buttons open the private chat with the user (ui/mod.rs) <!-- parity:bots-inline-user -->
 - [x] Per-button disabled flag on inline buttons (verified: TDLib 1.8.67 exposes `inlineKeyboardButtonTypeDisabled`; `envelope.rs:8791` parses it to `InlineKeyboardButtonType::Disabled`; `inline_keyboard_button` (src/ui/mod.rs:44503) renders it non-interactive via the `element.disabled(true)` fallthrough (44599) — no click handler attached — with tooltip "This button is disabled" (44616)) <!-- parity:bots-inline-disabled-buttons -->
 - [x] Custom reply keyboards rendered above the composer; text sends, one-time hides on tap, contact/location/poll honestly disabled <!-- parity:bots-custom-keyboard -->
-- [ ] Bot keyboard buttons that request a location or a poll work: confirm and send the location; open the poll box with the bot's quiz setting <!-- parity:bots-keyboard-location-poll -->
+- [x] Bot keyboard buttons that request a location or a poll work: confirm and send the location; open the poll box with the bot's quiz setting <!-- parity:bots-keyboard-location-poll -->
 - [x] Force-reply markup focuses the composer with the reply target set <!-- parity:bots-force-reply -->
 - [x] Force-reply keyboards render the reply-keyboard bar (a ↩ {placeholder} ghost button above the composer, kit Button; tap focuses the composer) <!-- parity:bots-force-reply-keyboard -->
 - [x] Stop button for streaming bot drafts (cancel an in-flight streaming bot reply) <!-- parity:bots-streaming-draft-stop -->
@@ -1016,7 +1018,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Message font size (12–20 px), live across message text and captions (`BubbleLook`) <!-- parity:settings-font-size -->
 - [x] Bubble vs plain chat style, live (`BubbleLook.plain` drops bubble bg/rounding) <!-- parity:settings-bubble-style -->
 - [x] Per-chat mute presets (1h / 8h / 2d / forever), live via chat panel (src/ui/mod.rs:11564; connect.rs:5424 `set_chat_mute_for` → `setChatNotificationSettings`) <!-- parity:settings-chat-mute -->
-- [ ] Custom mute duration chosen with a slider and live label, not day/hour step buttons <!-- parity:settings-mute-custom-slider -->
+- [x] Custom mute duration chosen with a slider and live label, not day/hour step buttons <!-- parity:settings-mute-custom-slider -->
 - [x] Per-chat message preview toggle, live (src/ui/mod.rs:13028 `apply_chat_preview`) <!-- parity:settings-chat-preview -->
 - [x] Per-chat custom notification sound picker, live (src/ui/mod.rs:12844; `getSavedNotificationSounds`) <!-- parity:settings-chat-sound -->
 - [x] Default mute per scope (private / groups / channels), live "Notification defaults" dialog (src/ui/mod.rs:13274 `apply_scope_mute`, `setScopeNotificationSettings`) <!-- parity:settings-scope-mute -->
@@ -1075,7 +1077,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] New login alert ("Was this you?") with confirm or terminate <!-- parity:settings-new-login-alert -->
 - [x] Session details box and rename this device <!-- parity:settings-session-details -->
 - [x] Default auto-delete timer for new chats <!-- parity:settings-autodelete-default -->
-- [ ] Custom auto-delete timer chosen with a slider, not minus/plus step buttons <!-- parity:settings-autodelete-custom-slider -->
+- [x] Custom auto-delete timer chosen with a slider, not minus/plus step buttons <!-- parity:settings-autodelete-custom-slider -->
 - [x] Bots and websites: mini-app permissions (Telegram Desktop has no "delete cloud drafts") <!-- parity:settings-bots-websites -->
 - [x] Show 18+ content toggle <!-- parity:settings-sensitive-content -->
 - [x] File open confirmations: extension warning and IP-reveal warning <!-- parity:settings-file-open-confirm -->
@@ -1116,7 +1118,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 
 - [x] Clear cache removes TDLib cached files <!-- parity:data-clear-cache-real -->
 - [x] Storage limits: total size, media cache, clear older than <!-- parity:data-storage-limits -->
-- [ ] Auto-download size limits and the storage size limit use sliders with an "up to N MB" label, not click-to-cycle buttons or preset chips <!-- parity:data-size-sliders -->
+- [x] Auto-download size limits and the storage size limit use sliders with an "up to N MB" label, not click-to-cycle buttons or preset chips <!-- parity:data-size-sliders -->
 - [x] Clear storage per file type and per chat from the breakdown <!-- parity:data-clear-per-type -->
 - [x] Download folder and "ask where to save each file" <!-- parity:data-download-path -->
 - [x] Network usage statistics with reset <!-- parity:data-network-usage -->

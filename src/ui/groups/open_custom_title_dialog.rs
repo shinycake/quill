@@ -199,14 +199,6 @@ impl QuillApp {
                         .map(|sent| {
                             sent_note(sent, tr(keys::Q_PEOPLE_CONVERTING_TO_BROADCAST_GROUP))
                         }),
-                    // Slice CL1: `deleteChatHistory` (schema 1.8.67,
-                    // line 11845). TDLib answers `ok`/`error`
-                    // asynchronously; a refusal surfaces via
-                    // `Session::chat_action_error`.
-                    GroupConfirmAction::ClearHistory { revoke } => live
-                        .driver
-                        .clear_chat_history(dialog.chat_id, revoke)
-                        .map(|sent| sent_note(sent, tr(keys::Q_PEOPLE_CLEARING_HISTORY))),
                     // Slice B2: "Restart bot" — `deleteChatHistory` +
                     // `sendBotStartMessage` (schema lines 11845 / 12216).
                     // The bot user id is read from the session before the
@@ -324,31 +316,10 @@ impl QuillApp {
                         .driver
                         .delete_saved_topic_history(topic_id)
                         .map(|_| tr(keys::Q_PEOPLE_DELETING_SAVED_MESSAGES).to_string()),
-                    GroupConfirmAction::RemoveInstalledStickerSets => {
-                        let ids: Vec<_> = live
-                            .driver
-                            .session
-                            .stickers
-                            .stickers
-                            .sets
-                            .iter()
-                            .map(|set| set.id)
-                            .collect();
-                        live.driver.manage_sticker_sets(&ids, false).map(|sent| {
-                            tr_with(
-                                keys::Q_PEOPLE_REMOVING_STICKER_SETS,
-                                &[("sent", &sent.to_string())],
-                            )
-                        })
-                    }
                     GroupConfirmAction::RemoveEmojiSet { set_id } => live
                         .driver
                         .set_emoji_pack_installed(set_id, false)
                         .map(|id| sent_note(id, tr(keys::Q_PEOPLE_REMOVING_EMOJI_PACK))),
-                    GroupConfirmAction::RemoveStickerSet { set_id } => live
-                        .driver
-                        .manage_sticker_set(set_id, false, false)
-                        .map(|id| sent_note(id, tr(keys::Q_PEOPLE_REMOVING_STICKER_SET))),
                     // Clearing stored payment information waits for TDLib confirmation.
                     GroupConfirmAction::ClearPaymentInfo => live
                         .driver

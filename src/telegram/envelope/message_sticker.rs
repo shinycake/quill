@@ -82,6 +82,13 @@ pub struct StickerSetInfo {
     /// `is_owned`: the current user created the set (tdesktop `AmCreator`),
     /// so the set box offers editing.
     pub is_owned: bool,
+    /// `stickerSetInfo.covers`: the first stickers, for a row preview.
+    pub covers: Vec<StickerItem>,
+    /// The files of `covers`, remembered when the row arrives.
+    pub cover_files: Vec<ParsedFile>,
+    /// `is_viewed`: false while a trending set is new to the user (the
+    /// stickers box shows an unread dot beside its title).
+    pub is_viewed: bool,
 }
 
 pub(crate) fn parse_message_sticker(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
@@ -216,6 +223,18 @@ pub(crate) fn parse_sticker_set_info(value: &Value) -> Option<StickerSetInfo> {
     if value.get("@type").and_then(Value::as_str) != Some("stickerSetInfo") {
         return None;
     }
+    let mut covers = Vec::new();
+    let mut cover_files = Vec::new();
+    for entry in value
+        .get("covers")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let (item, files) = parse_sticker_value(Some(entry));
+        covers.extend(item);
+        cover_files.extend(files);
+    }
     Some(StickerSetInfo {
         id: int64(value.get("id")).unwrap_or(0),
         title: value
@@ -241,6 +260,12 @@ pub(crate) fn parse_sticker_set_info(value: &Value) -> Option<StickerSetInfo> {
             .get("is_owned")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        covers,
+        cover_files,
+        is_viewed: value
+            .get("is_viewed")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
     })
 }
 

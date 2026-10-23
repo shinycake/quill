@@ -87,7 +87,6 @@
 "lng_translate_box_error" = "Translate failed.";
 "lng_translate_settings_choose" = "Do Not Translate";
 "lng_translate_settings_one" = "Please choose at least one language so that it can be used as the \"Translate to\" language.";
-"qll_misc_1_mask" = "1 mask";
 "qll_misc_1_message_selected" = "1 message selected";
 "qll_misc_a_crash_report_was_saved" = "A crash report was saved on this computer.";
 "qll_misc_a_longer_paragraph_used_to" = "A longer paragraph used to force a mixed-height row. Quill is an independent GPUI + TDLib Telegram client. This text should wrap across several lines in the history pane.";
@@ -114,7 +113,6 @@
 "qll_misc_applying" = "Applying…";
 "qll_misc_applying_style" = "Applying style…";
 "qll_misc_archive" = "Archive";
-"qll_misc_archived" = "Archived";
 "qll_misc_archived_chats" = "Archived Chats";
 "qll_misc_attached_files_send_to_upload#one" = "Attached {count} file. Send to upload.";
 "qll_misc_attached_files_send_to_upload#other" = "Attached {count} files. Send to upload.";
@@ -190,9 +188,7 @@
 "qll_misc_could_not_load_full_message" = "could not load full message";
 "qll_misc_could_not_load_icons_reopen" = "Could not load icons. Reopen this box to retry.";
 "qll_misc_could_not_load_masks" = "Could not load masks.";
-"qll_misc_could_not_load_masks_switch" = "Could not load masks. Switch tabs to retry.";
 "qll_misc_could_not_load_more_gifs" = "could not load more GIFs";
-"qll_misc_could_not_load_more_masks" = "Could not load more masks.";
 "qll_misc_could_not_make_the_wallpaper" = "could not make the wallpaper link";
 "qll_misc_could_not_mark_as_read" = "could not mark as read";
 "qll_misc_could_not_mark_mentions_as" = "could not mark mentions as read";
@@ -200,7 +196,6 @@
 "qll_misc_could_not_open_the_wallpaper" = "could not open the wallpaper link";
 "qll_misc_could_not_pin" = "could not pin";
 "qll_misc_could_not_register_check_your" = "could not register — check your name and accept the current terms";
-"qll_misc_could_not_reorder_masks" = "Could not reorder masks.";
 "qll_misc_could_not_reorder_pinned_topics" = "could not reorder pinned topics";
 "qll_misc_could_not_request_a_recovery" = "could not request a recovery code";
 "qll_misc_could_not_save_gif" = "could not save GIF";
@@ -356,12 +351,10 @@
 "qll_misc_link" = "Link";
 "qll_misc_live_location" = "📍 Live location";
 "qll_misc_load_full_message" = "Load full message";
-"qll_misc_loading" = "Loading…";
 "qll_misc_loading_days" = "Loading days…";
 "qll_misc_loading_full_message" = "loading full message…";
 "qll_misc_loading_icons" = "Loading icons";
 "qll_misc_loading_image" = "loading image";
-"qll_misc_loading_masks" = "Loading masks…";
 "qll_misc_loading_scores" = "Loading scores…";
 "qll_misc_loading_statuses" = "Loading statuses";
 "qll_misc_loading_the_day" = "Loading the day…";
@@ -375,7 +368,6 @@
 "qll_misc_make_replies_to_this_stand" = "Make replies to this {group_word} stand out with a pattern.";
 "qll_misc_manage_masks" = "Manage masks";
 "qll_misc_mark_all_as_read" = "Mark all as read";
-"qll_misc_mask_order_unchanged_or_an" = "Mask order unchanged or an update is in progress.";
 "qll_misc_members_can_use_these_emoji" = "Members can use these emoji in the group even without Premium.";
 "qll_misc_mentions_marked_as_read" = "mentions marked as read";
 "qll_misc_messages_selected#one" = "{count} message selected";
@@ -384,7 +376,6 @@
 "qll_misc_messages_selected_2#other" = "{count} messages selected";
 "qll_misc_microphone" = "Microphone";
 "qll_misc_monospace" = "Monospace";
-"qll_misc_more_archived_masks" = "More archived masks";
 "qll_misc_move_down" = "Move Down";
 "qll_misc_move_up" = "Move Up";
 "qll_misc_mute" = "Mute";
@@ -527,7 +518,6 @@
 "qll_misc_resend_code" = "Resend code";
 "qll_misc_reset_profile_color" = "Reset profile color";
 "qll_misc_reset_recent_emoji" = "Reset recent emoji";
-"qll_misc_restore" = "Restore";
 "qll_misc_restore_chat_windows" = "Restore chat windows?";
 "qll_misc_resume" = "Resume";
 "qll_misc_retry" = "Retry";
@@ -538,7 +528,6 @@
 "qll_misc_save_gif" = "Save GIF";
 "qll_misc_saved" = "Saved";
 "qll_misc_saving_gif" = "saving GIF…";
-"qll_misc_saving_mask_order" = "Saving mask order…";
 "qll_misc_saving_the_fact_check" = "saving the fact check…";
 "qll_misc_scores" = "Scores";
 "qll_misc_search" = "Search";
@@ -566,7 +555,6 @@
 "qll_misc_share" = "Share";
 "qll_misc_share_to" = "Share to…";
 "qll_misc_share_your_phone_number_with" = "Share your phone number with the bot";
-"qll_misc_sharing_your_location_is_not" = "Sharing your location is not supported yet";
 "qll_misc_short_line" = "Short line.";
 "qll_misc_show" = "Show";
 "qll_misc_show_all_effects" = "Show all effects";

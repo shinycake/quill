@@ -139,22 +139,57 @@ impl AutoDownloadNetSettings {
         ))
     }
 
-    /// Slice S4: step the photo cap through [`SIZE_CAP_STEPS`] (the
-    /// editor's cap picker is a cycle button).
-    pub fn cycle_photo_cap(&mut self) {
-        self.max_photo_file_size = next_size_cap(self.max_photo_file_size);
+    /// The cap of one media type.
+    pub fn cap(&self, kind: CapKind) -> i64 {
+        match kind {
+            CapKind::Photo => self.max_photo_file_size,
+            CapKind::Video => self.max_video_file_size,
+            CapKind::Other => self.max_other_file_size,
+        }
     }
 
-    /// Slice S4: step the video cap through [`SIZE_CAP_STEPS`].
-    pub fn cycle_video_cap(&mut self) {
-        self.max_video_file_size = next_size_cap(self.max_video_file_size);
+    /// Set the cap of one media type, clamped to what TDLib's wire format
+    /// accepts (`max_photo_file_size` is an int32).
+    pub fn set_cap(&mut self, kind: CapKind, bytes: i64) {
+        let bytes = bytes.clamp(0, NO_LIMIT_SIZE_CAP);
+        match kind {
+            CapKind::Photo => self.max_photo_file_size = bytes,
+            CapKind::Video => self.max_video_file_size = bytes,
+            CapKind::Other => self.max_other_file_size = bytes,
+        }
     }
 
-    /// Slice S4: step the other-files cap through [`SIZE_CAP_STEPS`].
-    pub fn cycle_other_cap(&mut self) {
-        self.max_other_file_size = next_size_cap(self.max_other_file_size);
+    /// Whether `kind` downloads automatically (tdesktop's per-type
+    /// switch: a zero cap is off).
+    pub fn cap_enabled(&self, kind: CapKind) -> bool {
+        self.cap(kind) > 0
+    }
+
+    /// Flip tdesktop's per-type switch: turning it on starts at
+    /// [`DEFAULT_ENABLED_CAP`] (`kDefaultDownloadLimit`).
+    pub fn set_cap_enabled(&mut self, kind: CapKind, enabled: bool) {
+        let bytes = if !enabled {
+            0
+        } else if self.cap(kind) > 0 {
+            self.cap(kind)
+        } else {
+            DEFAULT_ENABLED_CAP
+        };
+        self.set_cap(kind, bytes);
     }
 }
+
+/// The three size caps `setAutoDownloadSettings` carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CapKind {
+    Photo,
+    Video,
+    Other,
+}
+
+/// tdesktop `kDefaultDownloadLimit`: the cap a type starts at when its
+/// switch is turned on while it was off.
+pub const DEFAULT_ENABLED_CAP: i64 = 10 * 1024 * 1024;
 
 /// Slice S4: one chat's row from a `getStorageStatistics` answer
 /// (`storageStatisticsByChat chat_id:int53 size:int53 count:int32
@@ -175,21 +210,6 @@ pub struct StorageChatStats {
 /// 400 — TDLib's `from_json(int32&)` rejects out-of-range values.)
 pub const NO_LIMIT_SIZE_CAP: i64 = i32::MAX as i64;
 
-/// Slice S4: TGX's size-cap steps for the photo/video/file pickers
-/// (TGX `canAutomaticallyDownload` download-limit steps 1/5/15/50/100/500
-/// MiB; MED3 documents the same steps). `0` = Off,
-/// `NO_LIMIT_SIZE_CAP` = No limit.
-pub const SIZE_CAP_STEPS: [i64; 8] = [
-    0,
-    1024 * 1024,
-    5 * 1024 * 1024,
-    15 * 1024 * 1024,
-    50 * 1024 * 1024,
-    100 * 1024 * 1024,
-    500 * 1024 * 1024,
-    NO_LIMIT_SIZE_CAP,
-];
-
 /// Slice S4: label for one size-cap step.
 pub fn size_cap_label(bytes: i64) -> String {
     if bytes <= 0 {
@@ -201,19 +221,6 @@ pub fn size_cap_label(bytes: i64) -> String {
     } else {
         format!("{} MB", bytes / (1024 * 1024))
     }
-}
-
-/// Slice S4: the step after `current` in [`SIZE_CAP_STEPS`], wrapping
-/// around (the cap picker is a cycle button).
-pub fn next_size_cap(current: i64) -> i64 {
-    let idx = SIZE_CAP_STEPS
-        .iter()
-        .position(|&s| s == current)
-        .unwrap_or(4);
-    SIZE_CAP_STEPS
-        .get((idx + 1) % SIZE_CAP_STEPS.len())
-        .copied()
-        .unwrap_or(current)
 }
 
 /// Slice S4: per-account per-network auto-download settings,
@@ -400,11 +407,17 @@ mod tests {
     }
 
     #[test]
-    fn size_cap_cycle_wraps() {
-        assert_eq!(next_size_cap(0), 1024 * 1024);
-        assert_eq!(next_size_cap(NO_LIMIT_SIZE_CAP), 0);
-        // Unknown values snap to the 50 MB step's successor.
-        assert_eq!(next_size_cap(12345), 100 * 1024 * 1024);
+    fn size_caps_label_and_switch() {
+        let mut net = AutoDownloadNetSettings::default();
+        net.set_cap(CapKind::Photo, i64::MAX);
+        assert_eq!(net.cap(CapKind::Photo), NO_LIMIT_SIZE_CAP);
+        net.set_cap_enabled(CapKind::Photo, false);
+        assert!(!net.cap_enabled(CapKind::Photo));
+        net.set_cap_enabled(CapKind::Photo, true);
+        assert_eq!(net.cap(CapKind::Photo), DEFAULT_ENABLED_CAP);
+        net.set_cap(CapKind::Video, 50 * 1024 * 1024);
+        net.set_cap_enabled(CapKind::Video, true);
+        assert_eq!(net.cap(CapKind::Video), 50 * 1024 * 1024);
         assert_eq!(size_cap_label(0), "Off");
         assert_eq!(size_cap_label(NO_LIMIT_SIZE_CAP), "No limit");
         assert_eq!(size_cap_label(15 * 1024 * 1024), "15 MB");

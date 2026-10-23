@@ -758,12 +758,14 @@ impl QuillApp {
                 .and_then(|s| s.my_user_id.and_then(|id| s.user(id)))
                 .is_some_and(|u| u.is_premium);
             let named = this.session().is_some_and(|s| {
-                s.threads.saved
+                s.threads
+                    .saved
                     .tags
                     .iter()
                     .any(|entry| entry.tag == state.tag && !entry.label.is_empty())
             });
-            let glyph = tag_glyph(&state.tag).unwrap_or_else(|| tr(keys::Q_PEOPLE_TAG_2).to_owned());
+            let glyph =
+                tag_glyph(&state.tag).unwrap_or_else(|| tr(keys::Q_PEOPLE_TAG_2).to_owned());
             let body = div()
                 .flex()
                 .flex_col()
@@ -772,11 +774,19 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child(format!(
-                            "You can label your {glyph} tag with a text name. Up to {SAVED_TAG_LABEL_MAX} characters."
+                        .child(tr_with(
+                            keys::Q_LEFTOVERS_SAVED_TAG_LABEL_ABOUT,
+                            &[
+                                ("tag", &glyph.to_string()),
+                                ("max", &SAVED_TAG_LABEL_MAX.to_string()),
+                            ],
                         )),
                 )
-                .child(Textarea::new(&state.input).aria_label(tr(keys::Q_PEOPLE_TAG_NAME)).h(px(36.)))
+                .child(
+                    Textarea::new(&state.input)
+                        .aria_label(tr(keys::Q_PEOPLE_TAG_NAME))
+                        .h(px(36.)),
+                )
                 .when(!premium, |this| {
                     this.child(
                         div()
@@ -790,12 +800,19 @@ impl QuillApp {
                         .flex()
                         .justify_end()
                         .gap_2()
-                        .child(Button::new("saved-tag-cancel").label(tr(keys::CANCEL)).ghost().on_click(
-                            cx.listener(|this, _, window, cx| {
-                                this.close_saved_tag_dialog(cx);
-                                this.close_kit_dialog_if_done(DialogKind::SavedTagName, window, cx);
-                            }),
-                        ))
+                        .child(
+                            Button::new("saved-tag-cancel")
+                                .label(tr(keys::CANCEL))
+                                .ghost()
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.close_saved_tag_dialog(cx);
+                                    this.close_kit_dialog_if_done(
+                                        DialogKind::SavedTagName,
+                                        window,
+                                        cx,
+                                    );
+                                })),
+                        )
                         .child(
                             Button::new("saved-tag-save")
                                 .label(tr(keys::SAVED_SHORT))

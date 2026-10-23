@@ -14,11 +14,6 @@ pub enum GroupConfirmAction {
     BroadcastIntro,
     /// Second step: the permanent consequence, then the conversion runs.
     BroadcastUpgrade,
-    /// Slice CL1: `deleteChatHistory` (schema 1.8.67, line 11845);
-    /// `revoke` clears for everyone (`chat.can_be_deleted_for_all_users`).
-    ClearHistory {
-        revoke: bool,
-    },
     /// Slice CL1: chat-list "Delete chat" — `deleteChatHistory` with
     /// `remove_from_chat_list: true` (Telegram X `Tdlib.deleteChat`),
     /// not the destructive `deleteChat` constructor.
@@ -66,12 +61,8 @@ pub enum GroupConfirmAction {
     /// `deleteSavedOrderInfo` + `deleteSavedCredentials` (schema 1.8.67,
     /// lines 15286 / 15289). The dialog's chat id is a dummy.
     ClearPaymentInfo,
-    RemoveInstalledStickerSets,
     RemoveSavedGif {
         file_id: quill::ids::FileId,
-    },
-    RemoveStickerSet {
-        set_id: i64,
     },
     /// Subsection tabs: the tab menu's "Delete" — `deleteForumTopic`
     /// (schema 1.8.67, line 12736) for the dialog's chat.

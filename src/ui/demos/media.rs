@@ -210,38 +210,49 @@ impl QuillApp {
             apply_ready_gifs(session, &self.demo_ui.sink, &self.demo_ui.seq);
             session.stickers.gifs.open = false;
             session.stickers.emoji.open = true;
-            session.stickers.emoji.installed_sets = [
-                "Downloaded pack",
-                "Downloading pack",
-                "Updated pack",
-                "Installing pack",
-            ]
-            .iter()
-            .enumerate()
-            .map(|(index, title)| quill::telegram::envelope::StickerSetInfo {
-                id: index as i64 + 1,
-                title: (*title).into(),
-                name: (*title).into(),
-                size: 1,
-                is_installed: true,
-                is_official: false,
-                is_owned: false,
-            })
-            .collect();
-            session
-                .stickers
-                .emoji
-                .pack_files
-                .insert(1, vec![quill::ids::FileId(63)]);
-            session
-                .stickers
-                .emoji
-                .pack_files
-                .insert(2, vec![quill::ids::FileId(62)]);
-            session.begin_download(quill::ids::FileId(62));
-            session.stickers.emoji.outdated_packs.insert(3);
-            session.stickers.emoji.mutating_set = Some((4, true));
-            session.settings.media_prefs.recent_emoji_packs = vec![2, 1];
+            let pack = |id: i64, title: &str, emojis: &[&str], installed: bool| {
+                quill::telegram::envelope::StickerSetInfo {
+                    id,
+                    title: title.into(),
+                    name: title.into(),
+                    size: emojis.len() as i32 * 12,
+                    is_installed: installed,
+                    is_official: false,
+                    is_owned: false,
+                    covers: emojis
+                        .iter()
+                        .enumerate()
+                        .map(|(index, emoji)| quill::telegram::envelope::StickerItem {
+                            custom_emoji_id: Some(id * 10 + index as i64),
+                            id: id * 10 + index as i64,
+                            set_id: id,
+                            emoji: (*emoji).into(),
+                            width: 100,
+                            height: 100,
+                            format: quill::telegram::envelope::StickerFormat::Webp,
+                            file_id: quill::ids::FileId(0),
+                            thumb_file_id: None,
+                            thumb_width: 0,
+                            thumb_height: 0,
+                            requires_premium: false,
+                            premium_animation: None,
+                        })
+                        .collect(),
+                    cover_files: Vec::new(),
+                    is_viewed: true,
+                }
+            };
+            session.stickers.emoji.installed_sets = vec![
+                pack(1, "Fun faces", &["😀", "😎", "🤩", "🥳"], true),
+                pack(2, "Animals", &["🐶", "🐱", "🦊", "🐼"], true),
+                pack(3, "Food and drink", &["🍕", "🍣", "🍩", "☕"], true),
+            ];
+            session.stickers.emoji.trending_sets = vec![
+                pack(4, "Travel", &["✈️", "🏝️", "🗺️", "🚆"], false),
+                pack(5, "Weather", &["☀️", "🌧️", "⛄", "🌈"], false),
+                pack(2, "Animals", &["🐶", "🐱", "🦊", "🐼"], true),
+            ];
+            session.settings.media_prefs.recent_emoji_packs = vec![2, 1, 3];
         }
     }
 

@@ -11,3 +11,11 @@
 "qll_location_my_location" = "Show my location";
 "qll_location_map" = "Map. Drag it to move the pin.";
 "qll_location_close_search" = "Close search";
+// A bot keyboard's "request location" button (tdesktop only says it is unavailable; Telegram X confirms, then sends).
+"qll_location_request_title" = "Share your location";
+"qll_location_request_text" = "Do you want to share your current location with {bot_name}?";
+"qll_location_request_locating" = "Finding your location…";
+"qll_location_request_denied" = "Quill isn't allowed to use your location. Turn it on in your system's privacy settings, then try again.";
+"qll_location_request_unavailable" = "Your location isn't available right now. Try again in a moment.";
+"qll_location_request_retry" = "Try Again";
+"qll_location_request_bot_only" = "Only a bot can ask for your location";

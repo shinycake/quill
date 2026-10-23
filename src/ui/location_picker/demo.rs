@@ -34,6 +34,12 @@ fn demo_here() -> Option<GeoPoint> {
     GeoPoint::new(48.860_611, 2.337_644)
 }
 
+/// What the demo's platform answers to a bot's location request; `None`
+/// never answers (`QUILL_DEMO_LOCATION=locating`).
+pub(super) fn locate_outcome() -> Option<GeoOutcome> {
+    demo_outcome()
+}
+
 fn demo_outcome() -> Option<GeoOutcome> {
     match std::env::var("QUILL_DEMO_LOCATION").as_deref() {
         Ok("denied") => Some(GeoOutcome::Denied),

@@ -31,15 +31,12 @@ pub(crate) struct NotifyUi {
     pub(super) mute_chat: Option<ChatId>,
     /// The Mute submenu's "Custom..." duration row is expanded.
     pub(super) mute_custom_open: bool,
-    /// The custom mute duration being edited (tdesktop `ChooseTimeWidget`).
-    pub(super) mute_custom: quill::mute_menu::CustomMute,
+    /// The days / hours / minutes fields of the custom mute duration
+    /// (tdesktop `ChooseTimeWidget`), made when the panel opens.
+    pub(super) mute_time: Option<super::notification_settings::MuteTimeInputs>,
     /// Phase B4: self-destruct / auto-delete timer picker below the
     /// conversation header (`setChatMessageAutoDeleteTime`).
     pub(super) ttl_picker_open: bool,
-    /// The auto-delete picker's "Custom" stepper is expanded.
-    pub(super) ttl_custom_open: bool,
-    /// The custom auto-delete period being edited, in seconds.
-    pub(super) ttl_custom_secs: i32,
     /// Parity slice: the notifications panel's sound picker sub-view is open.
     pub(super) notif_sound_picker_open: bool,
     /// The picker an "Upload Sound" in flight was started from: the new
@@ -89,10 +86,8 @@ impl NotifyUi {
             mute_menu_open: false,
             mute_chat: None,
             mute_custom_open: false,
-            mute_custom: quill::mute_menu::CustomMute::default(),
+            mute_time: None,
             ttl_picker_open: false,
-            ttl_custom_open: false,
-            ttl_custom_secs: 86_400,
             notif_sound_picker_open: false,
             tone_upload_target: None,
             story_sound_picker_open: false,

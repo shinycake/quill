@@ -132,13 +132,19 @@ impl QuillApp {
         body = body
             .child(section_title(tr(keys::GIVEAWAY_ADDITIONAL_PRIZES)))
             .child(Input::new(&form.prize_input).aria_label(tr(keys::Q_MONEY_ADDITIONAL_PRIZE)))
-            .child(about_line(format!(
-                "Turn this on if you want to give the winners your own prizes in addition to {}. Up to {PRIZE_DESCRIPTION_MAX} characters.",
-                if draft.kind == GiveawayKind::Stars {
-                    tr(keys::Q_MONEY_STARS)
-                } else {
-                    tr(keys::Q_MONEY_PREMIUM_SUBSCRIPTIONS)
-                }
+            .child(about_line(tr_with(
+                keys::Q_LEFTOVERS_GIVEAWAY_PRIZES_ABOUT,
+                &[
+                    (
+                        "prize",
+                        (if draft.kind == GiveawayKind::Stars {
+                            tr(keys::Q_MONEY_STARS)
+                        } else {
+                            tr(keys::Q_MONEY_PREMIUM_SUBSCRIPTIONS)
+                        }),
+                    ),
+                    ("max", &PRIZE_DESCRIPTION_MAX.to_string()),
+                ],
             )));
 
         // End date.

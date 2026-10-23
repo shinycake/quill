@@ -6,7 +6,6 @@ use crate::state::request_purpose::flat_purposes;
 /// [`RequestPurpose::Stickers`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StickersPurpose {
-    GetEmojiSet,
     ViewTrendingEmojiSets,
     /// `clickAnimatedEmojiMessage`: the answer is the effect sticker to
     /// play over the message; a 404 means the usual animation is enough.
@@ -180,7 +179,6 @@ pub enum StickersPurpose {
 }
 
 flat_purposes!(Stickers(StickersPurpose) {
-    GetEmojiSet,
     ViewTrendingEmojiSets,
     GetInstalledStickerSets,
     GetArchivedStickerSets,

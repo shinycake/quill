@@ -70,13 +70,11 @@ impl QuillApp {
                     self.appearance_suggest_emoji_section(cx),
                 ]))
                 .child(group(
-                    None,
-                    [self.nav_row(
-                        Nav::ArchivedStickers,
-                        tr(keys::Q_NAVIGATION_ARCHIVED_STICKERS),
-                        None,
-                        cx,
-                    )],
+                    Some(tr(keys::Q_SETTINGS_CHATS_SEC_EMOJI)),
+                    [
+                        self.sticker_suggest_section(cx),
+                        self.nav_row(Nav::ArchivedStickers, tr(keys::STICKERS_YOU_HAVE), None, cx),
+                    ],
                 )),
             Page::Appearance => {
                 self.ensure_wallpapers_loaded(cx);

@@ -18,8 +18,12 @@ use quill::business_settings::BusinessRecipients;
 use quill::lang::{keys, tr, tr_with};
 use std::time::Duration;
 
-const ABOUT: &str = "Add a bot to answer messages on your behalf.";
-const ADD_ABOUT: &str = "Choose a bot to manage your chats automatically.";
+fn about() -> &'static str {
+    tr(keys::CHAT_AUTOMATION_ABOUT)
+}
+fn add_about() -> &'static str {
+    tr(keys::CHAT_AUTOMATION_ADD_ABOUT)
+}
 
 /// What the lookup shows under the username field.
 enum Found {
@@ -356,7 +360,7 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_3()
-            .child(div().text_sm().text_color(muted).child(ABOUT));
+            .child(div().text_sm().text_color(muted).child(about()));
         if !loaded {
             return body.child(
                 div()
@@ -500,7 +504,7 @@ impl QuillApp {
             }
         }
         body = body
-            .child(div().text_xs().text_color(muted).child(ADD_ABOUT))
+            .child(div().text_xs().text_color(muted).child(add_about()))
             .child(self.business_recipients_section(Recipients::Bot, cx));
         // Rights show for the added bot, or the first one found.
         let shown = committed.or(match &found {

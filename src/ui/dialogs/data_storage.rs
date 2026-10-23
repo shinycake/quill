@@ -13,6 +13,7 @@
 //! roaming ← low).
 
 use super::super::app::QuillApp;
+use super::super::index_sliders::{StepSlider, cap_slider_start};
 use super::super::*;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -20,9 +21,10 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::data_settings::{
-    AutoDownloadNetSettings, DataStoragePrefs, NetworkKind, size_cap_label,
+    AutoDownloadNetSettings, CapKind, DataStoragePrefs, NO_LIMIT_SIZE_CAP, NetworkKind,
 };
 use quill::lang::{keys, tr, tr_with};
+use quill::limit_steps::cap_at;
 /// Slice S4: bytes formatter that handles 0 and GB — the shared
 /// `format_bytes` returns "" for 0 and tops out at MB.
 pub(crate) fn format_storage_bytes(n: i64) -> String {
@@ -56,6 +58,8 @@ impl QuillApp {
     pub(crate) fn open_data_storage(&mut self, cx: &mut Context<Self>) {
         self.open_settings(Some(quill::settings_catalog::Page::DataStorage));
         self.settings.data_storage_editor = None;
+        self.settings.index_sliders.remove(StepSlider::StorageSize);
+        self.settings.index_sliders.remove(StepSlider::StorageKeep);
         self.settings.storage_confirm = None;
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.storage_freed = None;
@@ -77,6 +81,7 @@ impl QuillApp {
     /// The Data & Storage settings page: the per-network editor when one
     /// is open, otherwise the overview with a refresh button.
     pub(crate) fn data_storage_page(&mut self, cx: &mut Context<Self>) -> Div {
+        self.ensure_storage_sliders(cx);
         let Some((network, draft)) = self.settings.data_storage_editor else {
             return div()
                 .flex()
@@ -97,12 +102,10 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_3()
-            .child(
-                div()
-                    .text_lg()
-                    .font_semibold()
-                    .child(format!("{} downloads", network.label())),
-            )
+            .child(div().text_lg().font_semibold().child(tr_with(
+                keys::Q_OPS_NETWORK_DOWNLOADS,
+                &[("network", network.label())],
+            )))
             .child(self.data_storage_editor_body(cx, network, &draft))
             .child(
                 div()
@@ -326,6 +329,7 @@ impl QuillApp {
                 "data-storage-net-{}",
                 network.label().replace(' ', "-")
             ))
+            .test_support()
             .role(gpui_kit::Role::Button)
             .aria_label(tr_with(
                 keys::Q_OPS_AUTOMATIC_DOWNLOAD_SETTINGS,
@@ -355,6 +359,19 @@ impl QuillApp {
                     .session()
                     .map(|s| *s.settings.data_storage.for_network(network));
                 if let Some(draft) = draft {
+                    for kind in CAP_KINDS {
+                        let start = draft.cap(kind);
+                        let start = if start > 0 {
+                            start
+                        } else {
+                            quill::data_settings::DEFAULT_ENABLED_CAP
+                        };
+                        this.set_step_slider(
+                            StepSlider::DataCap(kind),
+                            cap_slider_start(start),
+                            cx,
+                        );
+                    }
                     this.settings.data_storage_editor = Some((network, draft));
                     cx.notify();
                 }
@@ -386,9 +403,9 @@ impl QuillApp {
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(format!(
-                                    "Download media automatically on {}",
-                                    network.label().to_lowercase()
+                                .child(tr_with(
+                                    keys::Q_LEFTOVERS_AUTO_DOWNLOAD_ON,
+                                    &[("network", &(network.label().to_lowercase()).to_string())],
                                 )),
                         ),
                 )
@@ -405,27 +422,13 @@ impl QuillApp {
                 ),
         );
         body = body.child(section_header(tr(keys::Q_OPS_MAXIMUM_FILE_SIZE)));
-        body = body.child(self.data_storage_cap_row(
-            cx,
-            "data-storage-cap-photo",
-            tr(keys::Q_OPS_PHOTOS),
-            draft.max_photo_file_size,
-            AutoDownloadNetSettings::cycle_photo_cap,
-        ));
-        body = body.child(self.data_storage_cap_row(
-            cx,
-            "data-storage-cap-video",
-            tr(keys::Q_OPS_VIDEOS),
-            draft.max_video_file_size,
-            AutoDownloadNetSettings::cycle_video_cap,
-        ));
-        body = body.child(self.data_storage_cap_row(
-            cx,
-            "data-storage-cap-other",
-            tr(keys::Q_OPS_OTHER_FILES),
-            draft.max_other_file_size,
-            AutoDownloadNetSettings::cycle_other_cap,
-        ));
+        for (kind, id, title) in [
+            (CapKind::Photo, "photo", tr(keys::Q_OPS_PHOTOS)),
+            (CapKind::Video, "video", tr(keys::Q_OPS_VIDEOS)),
+            (CapKind::Other, "other", tr(keys::Q_OPS_OTHER_FILES)),
+        ] {
+            body = body.child(self.data_storage_cap_row(cx, kind, id, title, draft));
+        }
         body = body.child(
             div()
                 .flex()
@@ -458,33 +461,87 @@ impl QuillApp {
         body
     }
 
-    /// Slice S4: one size-cap cycler row — the current cap as a button
-    /// that steps through the preset sizes.
+    /// One media type of the editor (tdesktop `AutoDownloadBox`): its
+    /// switch, and while it is on the "Limit by size" slider
+    /// (`AddSizeLimitSlider`: `lng_media_size_limit` / `lng_media_size_up_to`).
     fn data_storage_cap_row(
         &self,
         cx: &mut Context<Self>,
+        kind: CapKind,
         id: &'static str,
         title: &str,
-        cap: i64,
-        cycle: fn(&mut AutoDownloadNetSettings),
+        draft: &AutoDownloadNetSettings,
     ) -> Div {
+        let cap = draft.cap(kind);
+        let value = if cap >= NO_LIMIT_SIZE_CAP {
+            tr(keys::Q_OPS_NO_LIMIT).to_string()
+        } else {
+            tr_with(
+                keys::MEDIA_SIZE_UP_TO,
+                &[(
+                    "size",
+                    tr_with(
+                        keys::Q_LEFTOVERS_MB,
+                        &[("cap", &(cap / (1024 * 1024)).to_string())],
+                    )
+                    .as_str(),
+                )],
+            )
+        };
+        let slider = (cap > 0)
+            .then(|| {
+                self.step_slider_row(
+                    StepSlider::DataCap(kind),
+                    cap_slider_id(kind),
+                    tr(keys::MEDIA_SIZE_LIMIT).to_string(),
+                    value,
+                    cx,
+                )
+            })
+            .flatten();
         div()
             .flex()
-            .items_center()
-            .justify_between()
+            .flex_col()
+            .gap_1()
             .py_1()
-            .child(div().text_sm().child(title.to_string()))
             .child(
-                Button::new(id)
-                    .label(size_cap_label(cap))
-                    .ghost()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some((_, draft)) = this.settings.data_storage_editor.as_mut() {
-                            cycle(draft);
-                        }
-                        cx.notify();
-                    })),
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(div().text_sm().child(title.to_string()))
+                    .child(
+                        Switch::new(format!("data-storage-cap-{id}"))
+                            .checked(cap > 0)
+                            .accessibility_label(title.to_string())
+                            .on_click(cx.listener(move |this, &on, _, cx| {
+                                // Switching on resumes at the slider's step.
+                                let index = this
+                                    .settings
+                                    .index_sliders
+                                    .index(StepSlider::DataCap(kind), cx);
+                                if let Some((_, draft)) = this.settings.data_storage_editor.as_mut()
+                                {
+                                    draft.set_cap_enabled(kind, on);
+                                    if let Some(index) = index.filter(|_| on) {
+                                        draft.set_cap(kind, cap_at(index));
+                                    }
+                                }
+                                cx.notify();
+                            })),
+                    ),
             )
+            .children(slider)
+    }
+}
+
+const CAP_KINDS: [CapKind; 3] = [CapKind::Photo, CapKind::Video, CapKind::Other];
+
+fn cap_slider_id(kind: CapKind) -> &'static str {
+    match kind {
+        CapKind::Photo => "data-storage-limit-photo",
+        CapKind::Video => "data-storage-limit-video",
+        CapKind::Other => "data-storage-limit-other",
     }
 }
 

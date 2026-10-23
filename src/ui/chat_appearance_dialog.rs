@@ -796,8 +796,13 @@ impl QuillApp {
                     .flex()
                     .flex_col()
                     .gap_2()
-                    .child(div().text_sm().text_color(danger()).child(format!(
-                        "Level {required} required. This {group_word} is at level {have}."
+                    .child(div().text_sm().text_color(danger()).child(tr_with(
+                        keys::Q_LEFTOVERS_LEVEL_REQUIRED,
+                        &[
+                            ("required", &required.to_string()),
+                            ("group_word", group_word),
+                            ("have", &have.to_string()),
+                        ],
                     )))
                     .child(
                         div().flex().child(

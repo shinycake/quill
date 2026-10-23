@@ -18,6 +18,7 @@ mod downloads;
 mod downloads_derived;
 mod drafts_everywhere;
 mod emoji_interaction;
+mod event_log_poll;
 mod files_bound;
 mod folder_followups;
 mod folder_order;

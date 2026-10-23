@@ -76,6 +76,9 @@ impl QuillApp {
             self.open_boosts_page(chat_id, false);
         }
         let channel = self.is_channel_chat(chat_id);
+        if view == GroupSettingsView::RecentActions {
+            self.start_event_log_poll(chat_id, cx);
+        }
         if let Some(live) = self.live.as_mut() {
             let driver = &mut live.driver;
             let _ = match view {

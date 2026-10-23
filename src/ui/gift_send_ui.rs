@@ -458,9 +458,9 @@ fn selected_gift_panel(
         col = col
             .child(
                 Checkbox::new("send-gift-upgrade")
-                    .label(format!(
-                        "Also pay for the upgrade ({})",
-                        stars(gift.upgrade_star_count)
+                    .label(tr_with(
+                        keys::Q_LEFTOVERS_ALSO_PAY_FOR_UPGRADE,
+                        &[("price", &(stars(gift.upgrade_star_count)).to_string())],
                     ))
                     .checked(pay_upgrade)
                     .on_click(cx.listener(|this, &on, _, cx| {

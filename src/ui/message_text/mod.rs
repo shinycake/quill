@@ -385,7 +385,7 @@ pub(super) fn message_footer_meta(meta: &FooterMeta) -> Option<AnyElement> {
                     div()
                         .id("message-pinned")
                         .role(Role::Label)
-                        .aria_label("pinned")
+                        .aria_label(tr(keys::PINNED_MESSAGE))
                         .opacity(alpha)
                         .child(Icon::new(gpui_kit::assets::IconName::Pin).size(px(12.))),
                 )

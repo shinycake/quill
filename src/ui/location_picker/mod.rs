@@ -115,6 +115,32 @@ impl QuillApp {
         }));
     }
 
+    /// One "where am I" lookup for a caller outside the picker (a bot's
+    /// location request). `then` runs once with the answer; dropping the
+    /// returned task cancels it. The screenshot demo answers from
+    /// `QUILL_DEMO_LOCATION` instead of asking the system.
+    pub(in crate::ui) fn locate_then(
+        &mut self,
+        cx: &mut Context<Self>,
+        then: fn(&mut Self, GeoOutcome, &mut Context<Self>),
+    ) -> Task<()> {
+        if self.live.is_none() {
+            let outcome = demo::locate_outcome();
+            return self.spawn_scoped(cx, async move |this, cx| {
+                if let Some(outcome) = outcome {
+                    let _ = this.update(cx, |this, cx| then(this, outcome, cx));
+                }
+            });
+        }
+        let receiver = geolocation::locate();
+        self.spawn_scoped(cx, async move |this, cx| {
+            let outcome = poll_answer(receiver, LOCATE_TIMEOUT, cx)
+                .await
+                .unwrap_or(GeoOutcome::Unavailable);
+            let _ = this.update(cx, |this, cx| then(this, outcome, cx));
+        })
+    }
+
     pub(in crate::ui) fn location_picker_locate_again(&mut self, cx: &mut Context<Self>) {
         if self.live.is_some() {
             self.locate_for_picker(cx);

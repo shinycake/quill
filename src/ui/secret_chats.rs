@@ -173,7 +173,6 @@ impl QuillApp {
     /// fixture shows the new timer immediately.
     pub(super) fn apply_chat_ttl(&mut self, chat_id: ChatId, secs: i32, cx: &mut Context<Self>) {
         self.notify.ttl_picker_open = false;
-        self.notify.ttl_custom_open = false;
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.set_chat_message_auto_delete_time(chat_id, secs);
             self.connection.set_note(match result {
@@ -191,7 +190,10 @@ impl QuillApp {
             self.connection.set_note(if secs == 0 {
                 StatusNote::silent(tr(keys::Q_OPS_TIMER_OFF))
             } else {
-                StatusNote::silent(format!("timer {}", format_ttl_setting(secs)))
+                StatusNote::silent(tr_with(
+                    keys::Q_LEFTOVERS_TIMER_SET,
+                    &[("time", &format_ttl_setting(secs))],
+                ))
             });
             cx.notify();
         }

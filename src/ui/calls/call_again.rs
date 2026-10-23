@@ -202,7 +202,7 @@ impl QuillApp {
                     .text_xs()
                     .font_medium()
                     .text_color(danger_soft())
-                    .child("missed")
+                    .child(tr(keys::Q_LEFTOVERS_MISSED))
                     .into_any_element()
             } else {
                 div().into_any_element()

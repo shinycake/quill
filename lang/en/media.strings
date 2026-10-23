@@ -50,7 +50,6 @@
 "lng_emoji_add_existing" = "Add an Existing Emoji";
 "lng_emoji_already_in_set" = "This Emoji is already in the Set.";
 "lng_emoji_manage_sets" = "Choose emoji set";
-"lng_emoji_premium_restore" = "Restore";
 "lng_emoji_remove_recent" = "Remove from Recent";
 "lng_emoji_set_is_full" = "This Emoji Set is full.";
 "lng_emoji_status_for_submit" = "Set Status";
@@ -67,6 +66,8 @@
 "lng_media_type_groups" = "Groups";
 "lng_mediaview_date_time" = "{date} at {time}";
 "lng_mediaview_downloads" = "Downloads";
+"lng_custom_emoji_count#one" = "{count} emoji";
+"lng_custom_emoji_count#other" = "{count} emoji";
 "lng_mediaview_hours_ago#one" = "{count} hour ago";
 "lng_mediaview_hours_ago#other" = "{count} hours ago";
 "lng_mediaview_just_now" = "just now";
@@ -123,9 +124,18 @@
 "lng_stickers_box_edit_name_about" = "Choose a name for your set.";
 "lng_stickers_box_edit_name_title" = "Edit Sticker Set Name";
 "lng_stickers_delete_pack_sure" = "Are you sure you want to delete this sticker set for everyone? This cannot be undone.";
+"lng_stickers_count#one" = "{count} sticker";
+"lng_stickers_count#other" = "{count} stickers";
+"lng_stickers_featured_add" = "Add";
+"lng_stickers_featured_installed" = "Added";
 "lng_stickers_featured_tab" = "Trending";
-"lng_stickers_remove_pack_confirm" = "Remove";
+"lng_stickers_installed_tab" = "Stickers";
+"lng_stickers_masks_tab" = "Masks";
+"lng_stickers_return" = "Undo";
 "lng_stickers_set_is_full" = "This Sticker Set is full.";
+"lng_stickers_you_have" = "Manage sticker sets";
+"lng_masks_count#one" = "{count} mask";
+"lng_masks_count#other" = "{count} masks";
 "lng_stories_about_close_friends" = "You are seeing this story because {user} added you to their list of **Close Friends**.";
 "lng_stories_about_close_friends_my" = "Only people from your **Close Friends** list can view this story.";
 "lng_stories_about_contacts" = "Only {user}'s contacts can view this story.";
@@ -153,8 +163,6 @@
 "qll_media_add_details_optional" = "Add details (optional)";
 "qll_media_add_details_or_cancel_the" = "add details or cancel the report";
 "qll_media_add_option" = "Add option";
-"qll_media_add_sets_shown#one" = "Add {count} set shown";
-"qll_media_add_sets_shown#other" = "Add {count} sets shown";
 "qll_media_add_stickers" = "Add {count} Stickers";
 "qll_media_add_stories_to_album" = "add stories to album";
 "qll_media_add_tasks" = "Add Tasks";
@@ -178,14 +186,11 @@
 "qll_media_apps_you_use" = "Apps you use";
 "qll_media_archive" = "Archive";
 "qll_media_archive_stickers" = "Archive Stickers";
-"qll_media_archived_stickers" = "Archived stickers";
-"qll_media_archiving_sticker_set" = "archiving sticker set…";
 "qll_media_asks_to_read_what_you" = "{bot_name} asks to read what you copied.";
 "qll_media_attach" = "Attach";
 "qll_media_attach_a_picture_sticker_or" = "Attach a picture, sticker or link";
 "qll_media_back" = "Back";
 "qll_media_back_to_results" = "Back to results";
-"qll_media_batch_of_updated_pending_failed" = "Batch: {batch_completed} of {batch_total} updated · {len} pending · {batch_failed} failed";
 "qll_media_block_bot" = "Block bot";
 "qll_media_bot" = "Bot";
 "qll_media_bot_2" = "Bot {id}";
@@ -243,7 +248,6 @@
 "qll_media_correct_answer" = "{option_label} · correct answer";
 "qll_media_correct_answer_2" = "· correct answer";
 "qll_media_could_not_add_the_tasks" = "could not add the tasks";
-"qll_media_could_not_archive_sticker_set" = "could not archive sticker set";
 "qll_media_could_not_archive_the_sticker" = "could not archive the sticker set";
 "qll_media_could_not_change_the_bot" = "could not change the bot";
 "qll_media_could_not_change_the_profile" = "Could not change the profile post";
@@ -252,14 +256,11 @@
 "qll_media_could_not_check_posting_eligibility" = "Could not check posting eligibility";
 "qll_media_could_not_clear_recent_stickers" = "could not clear recent stickers";
 "qll_media_could_not_delete_story" = "could not delete story";
-"qll_media_could_not_download_emoji_pack" = "Could not download emoji pack. Refresh the preview and retry.";
 "qll_media_could_not_enable_stealth_mode" = "could not enable stealth mode";
 "qll_media_could_not_install_emoji_pack" = "could not install emoji pack";
 "qll_media_could_not_install_sticker_set" = "could not install sticker set";
 "qll_media_could_not_join_the_live" = "could not join the live story";
 "qll_media_could_not_load_animated_emoji" = "could not load animated emoji suggestion";
-"qll_media_could_not_load_archived_stickers" = "could not load archived stickers";
-"qll_media_could_not_load_emoji_pack" = "could not load emoji pack";
 "qll_media_could_not_load_emoji_packs" = "could not load emoji packs";
 "qll_media_could_not_load_members" = "could not load members";
 "qll_media_could_not_load_more_emoji" = "could not load more emoji packs";
@@ -285,7 +286,6 @@
 "qll_media_could_not_remove_the_bot" = "could not remove the bot";
 "qll_media_could_not_render" = "could not render";
 "qll_media_could_not_render_2" = "{kind_label} — could not render";
-"qll_media_could_not_reorder_sticker_sets" = "could not reorder sticker sets";
 "qll_media_could_not_report_story" = "could not report story";
 "qll_media_could_not_retract_the_vote" = "could not retract the vote";
 "qll_media_could_not_save" = "Could not save: {err}";
@@ -308,7 +308,6 @@
 "qll_media_could_not_send_the_verification" = "Could not send the verification request.";
 "qll_media_could_not_set_story_reaction" = "could not set story reaction";
 "qll_media_could_not_share_the_story" = "Could not share the story here";
-"qll_media_could_not_start_sticker_batch" = "could not start sticker batch; wait for pending updates";
 "qll_media_could_not_stop_poll" = "could not stop poll";
 "qll_media_could_not_stop_the_bot" = "could not stop the bot reply";
 "qll_media_could_not_stop_the_reply" = "Could not stop the reply. Try again.";
@@ -385,7 +384,6 @@
 "qll_media_discard" = "Discard";
 "qll_media_discard_this_poll" = "Discard this poll?";
 "qll_media_done" = "{label} — done";
-"qll_media_download_or_retry_pack" = "Download or retry pack";
 "qll_media_downloading" = "Downloading {name}";
 "qll_media_downloading_2" = "{kind_label} — downloading…";
 "qll_media_downloading_3" = "{sticker_label} — downloading";
@@ -397,8 +395,7 @@
 "qll_media_edit_story" = "Edit story";
 "qll_media_eligible_to_post" = "✓ Eligible to post";
 "qll_media_emoji" = "Emoji";
-"qll_media_emoji_pack_download_requested" = "Emoji pack download requested.";
-"qll_media_emoji_packs_and_status" = "Emoji Packs and Status";
+"qll_media_emoji_packs" = "Emoji Packs";
 "qll_media_emoji_set" = "Emoji set";
 "qll_media_emoji_stickers_and_gifs" = "Emoji, stickers and GIFs";
 "qll_media_enabling_stealth_mode" = "Enabling stealth mode…";
@@ -428,7 +425,6 @@
 "qll_media_installing" = "Installing…";
 "qll_media_installing_emoji_pack" = "installing emoji pack…";
 "qll_media_installing_sticker_set" = "installing sticker set…";
-"qll_media_installing_sticker_sets" = "installing {sent} sticker sets…";
 "qll_media_interactions" = "Interactions";
 "qll_media_is_added_at_the_end" = "\"{suffix}\" is added at the end.";
 "qll_media_is_no_longer_available" = " is no longer available.";
@@ -451,7 +447,6 @@
 "qll_media_load_more" = "Load more";
 "qll_media_loading" = "Loading…";
 "qll_media_loading_apps" = "Loading apps…";
-"qll_media_loading_archived_stickers" = "loading archived stickers…";
 "qll_media_loading_emoji_packs" = "Loading emoji packs…";
 "qll_media_loading_members" = "Loading members…";
 "qll_media_loading_more_stickers" = "loading more stickers…";
@@ -477,8 +472,6 @@
 "qll_media_mini_apps_need_webkitgtk_libwebkit2gtk" = "Mini apps need WebKitGTK (libwebkit2gtk-4.1) installed.";
 "qll_media_mini_apps_open_in_their" = "Mini apps open in their own window. Payments inside them aren't supported yet.";
 "qll_media_more" = "More";
-"qll_media_more_archived_sets" = "More archived sets";
-"qll_media_more_packs" = "More packs";
 "qll_media_more_stickers" = "More stickers";
 "qll_media_more_trending_sets" = "More trending sets";
 "qll_media_myself" = "Myself";
@@ -512,13 +505,11 @@
 "qll_media_no_viewers_yet" = "No viewers yet";
 "qll_media_no_vote_statistics_yet" = "No vote statistics yet.";
 "qll_media_no_voters_yet" = "No voters yet.";
-"qll_media_not_downloaded" = "Not downloaded";
 "qll_media_not_downloaded_2" = "{kind_label} — not downloaded";
 "qll_media_not_supported_in_this_slice" = "{kind_label} — not supported in this slice";
 "qll_media_only_a_bot_can_open" = "Only a bot can open a mini app.";
 "qll_media_only_photos_and_videos_stories" = "Only photos and videos can be posted as stories.";
 "qll_media_open" = "Open";
-"qll_media_open_a_pack_to_preview" = "Open a pack to preview its emoji.";
 "qll_media_open_album_media" = "Open album media";
 "qll_media_open_app" = "Open App";
 "qll_media_open_login_url" = "Open login URL?";
@@ -599,7 +590,6 @@
 "qll_media_recording_video_reply" = "recording video reply";
 "qll_media_recording_voice_reply" = "recording voice reply";
 "qll_media_remove" = "Remove \"{title}\"?";
-"qll_media_remove_all_installed_sets" = "Remove all installed sets…";
 "qll_media_remove_from_favorites" = "Remove from favorites";
 "qll_media_remove_from_menu" = "Remove from menu";
 "qll_media_remove_option" = "Remove option";
@@ -637,7 +627,6 @@
 "qll_media_saved_to" = "Saved to {display}";
 "qll_media_saving" = "Saving…";
 "qll_media_saving_is_not_allowed_for" = "Saving is not allowed for this story";
-"qll_media_saving_sticker_set_order" = "saving sticker set order…";
 "qll_media_search" = "Search";
 "qll_media_search_by_emoji_title_or" = "Search by emoji, title or keyword.";
 "qll_media_search_chats" = "Search chats";
@@ -645,7 +634,6 @@
 "qll_media_search_emoji" = "Search emoji";
 "qll_media_search_emoji_packs" = "Search emoji packs";
 "qll_media_search_members" = "Search members";
-"qll_media_search_packs" = "Search packs";
 "qll_media_search_public_stories_for" = "Search public stories for {tag}";
 "qll_media_search_stickers" = "Search stickers";
 "qll_media_search_story_privacy_exceptions" = "Search story privacy exceptions";
@@ -684,13 +672,10 @@
 "qll_media_stealth_on" = "Stealth on";
 "qll_media_sticker" = "Sticker";
 "qll_media_sticker_2" = "Sticker {emoji}";
-"qll_media_sticker_options" = "Sticker options";
-"qll_media_sticker_order_unchanged_or_update" = "sticker order unchanged or update already pending";
 "qll_media_sticker_set" = "Sticker set";
 "qll_media_sticker_set_added" = "sticker set added";
 "qll_media_sticker_set_removed" = "sticker set removed";
 "qll_media_sticker_set_update_already_in" = "sticker set update already in progress";
-"qll_media_sticker_set_update_already_pending" = "sticker set update already pending";
 "qll_media_stickers" = "{title} · {size} stickers";
 "qll_media_stickers_2" = "Stickers";
 "qll_media_stickers_you_send_appear_here" = "Stickers you send appear here.";
@@ -761,9 +746,7 @@
 "qll_media_unblocked_demo" = "unblocked (demo)";
 "qll_media_unblocking_user" = "unblocking user…";
 "qll_media_unpin" = "Unpin";
-"qll_media_updating" = "Updating…";
 "qll_media_updating_checklist" = "updating checklist…";
-"qll_media_updating_emoji_pack" = "Updating emoji pack…";
 "qll_media_updating_favorite_stickers" = "updating favorite stickers…";
 "qll_media_user" = "User {user_id}";
 "qll_media_venue" = "Venue";

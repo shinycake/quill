@@ -14,8 +14,12 @@ use quill::business_info::BusinessLocation;
 use quill::business_settings::{ADDRESS_MAX, location_to_save};
 use quill::lang::{keys, tr};
 
-const ABOUT: &str = "Display the location of your business on your account.";
-const MAP_FALLBACK: &str = "You can set your location on the map from your mobile device.";
+fn about() -> &'static str {
+    tr(keys::LOCATION_ABOUT)
+}
+fn map_fallback() -> &'static str {
+    tr(keys::LOCATION_FALLBACK)
+}
 
 impl QuillApp {
     pub(super) fn new_location_draft(
@@ -50,7 +54,7 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_3()
-            .child(div().text_sm().text_color(muted).child(ABOUT))
+            .child(div().text_sm().text_color(muted).child(about()))
             .child(Input::new(&address).aria_label(tr(keys::Q_OPS_ADDRESS)))
             .child(
                 div()
@@ -106,7 +110,7 @@ impl QuillApp {
             );
         }
         body.when(point.is_none(), |this| {
-            this.child(div().text_xs().text_color(muted).child(MAP_FALLBACK))
+            this.child(div().text_xs().text_color(muted).child(map_fallback()))
         })
     }
 

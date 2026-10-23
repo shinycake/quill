@@ -256,10 +256,15 @@ impl QuillApp {
                     Some(PathBuf::from(path)),
                 ),
                 OptionMediaSlot::Ready(PollOptionInput::Video { path, duration, .. }) => (
-                    format!(
-                        "Video {} ({})",
-                        file_name(path),
-                        quill::voice::format_voice_duration(*duration)
+                    tr_with(
+                        keys::Q_LEFTOVERS_VIDEO_NAME_SIZE,
+                        &[
+                            ("name", &(file_name(path)).to_string()),
+                            (
+                                "size",
+                                &(quill::voice::format_voice_duration(*duration)).to_string(),
+                            ),
+                        ],
                     ),
                     attach.preview.clone(),
                 ),

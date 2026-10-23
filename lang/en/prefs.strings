@@ -52,9 +52,6 @@
 "lng_launch_svg_warning" = "Opening this file can potentially expose your IP address to its creator. Continue?";
 "lng_mac_menu_copy" = "Copy";
 "lng_mac_menu_select_all" = "Select All";
-"lng_manage_messages_ttl_after1" = "1 day";
-"lng_manage_messages_ttl_after2" = "1 week";
-"lng_manage_messages_ttl_after3" = "1 month";
 "lng_media_type_groups" = "Groups";
 "lng_menu_contacts" = "Contacts";
 "lng_months#one" = "{count} month";
@@ -356,8 +353,6 @@
 "qll_prefs_danger_this_is_the_last" = "Danger: this is the last confirmation prompt. Once you press the button below, all data will be erased from Telegram servers. Using the same phone number will create a new empty account.";
 "qll_prefs_data_saver" = "Data saver";
 "qll_prefs_date_selected_text" = "Date (selected text)";
-"qll_prefs_day" = "− day";
-"qll_prefs_day_2" = "+ day";
 "qll_prefs_default" = "Default";
 "qll_prefs_default_mention_notifications_updated" = "default mention notifications updated…";
 "qll_prefs_default_mention_notifications_updated_2" = "default mention notifications updated";
@@ -394,7 +389,6 @@
 "qll_prefs_dont_share_when_youve_read" = "Don't share when you've read messages";
 "qll_prefs_emoji" = "Emoji";
 "qll_prefs_emoji_sets" = "Emoji Sets";
-"qll_prefs_enable_auto_delete" = "Enable auto-delete";
 "qll_prefs_encryption_key" = "Encryption key";
 "qll_prefs_encryption_key_still_loading" = "Encryption key · still loading…";
 "qll_prefs_enter" = "⏎ Enter";
@@ -454,8 +448,6 @@
 "qll_prefs_hint" = "Hint: {password_hint}";
 "qll_prefs_hint_optional" = "Hint (optional)";
 "qll_prefs_hostname" = "Hostname";
-"qll_prefs_hour" = "− hour";
-"qll_prefs_hour_2" = "+ hour";
 "qll_prefs_how_loud_quill_plays_message" = "How loud Quill plays message and call alert sounds";
 "qll_prefs_http_proxies_cant_be_shared" = "HTTP proxies can't be shared as a link.";
 "qll_prefs_icloud_keychain" = "iCloud Keychain";
@@ -508,7 +500,6 @@
 "qll_prefs_logged_in_2" = "Logged in: {log_in_date}";
 "qll_prefs_login_email_address" = "Login email address";
 "qll_prefs_login_email_confirmation_code" = "Login email confirmation code";
-"qll_prefs_longer" = "Longer";
 "qll_prefs_lower_data_usage_during_telegram" = "Lower data usage during Telegram calls";
 "qll_prefs_make_quill_the_default" = "Make Quill the default";
 "qll_prefs_media_icons" = "Media icons";
@@ -525,7 +516,6 @@
 "qll_prefs_music" = "Music";
 "qll_prefs_mute_for" = "mute for…";
 "qll_prefs_mute_for_2" = "Mute for";
-"qll_prefs_mute_for_3" = "Mute for {label}";
 "qll_prefs_mute_story_notifications" = "Mute story notifications";
 "qll_prefs_muted_forever" = "Muted forever";
 "qll_prefs_muting" = "muting…";
@@ -690,7 +680,6 @@
 "qll_prefs_set_additional_password" = "Set additional password";
 "qll_prefs_set_custom_time" = "Set custom time";
 "qll_prefs_settings" = "Settings…";
-"qll_prefs_shorter" = "Shorter";
 "qll_prefs_show_18_content" = "Show 18+ Content";
 "qll_prefs_show_a_message_of_one" = "Show a message of one to three emoji as big glyphs.";
 "qll_prefs_show_a_photo_video_or" = "Show a photo, video or file icon before the preview text.";

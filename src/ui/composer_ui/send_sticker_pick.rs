@@ -545,9 +545,9 @@ impl QuillApp {
                         .truncate()
                         .text_xs()
                         .text_color(text_muted())
-                        .child(format!(
-                            "Replacing attachment with {}",
-                            replacement.file_name
+                        .child(tr_with(
+                            keys::Q_LEFTOVERS_REPLACING_ATTACHMENT_WITH,
+                            &[("name", &replacement.file_name.to_string())],
                         )),
                 )
                 .when(as_file_toggle, |this| {

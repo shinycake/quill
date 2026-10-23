@@ -19,12 +19,17 @@ use quill::lang::{keys, tr};
 use quill::local_time::now_unix;
 use quill::quick_replies::count_label;
 
-const GREETING_ABOUT: &str =
-    "Greet customers when they message you the first time or after a period of no activity.";
-const AWAY_ABOUT: &str = "Automatically reply with a message when you are away.";
+fn greeting_about() -> &'static str {
+    tr(keys::GREETING_ABOUT)
+}
+fn away_about() -> &'static str {
+    tr(keys::AWAY_ABOUT)
+}
 const PERIOD_ABOUT: &str = "Choose how many days should pass after your last interaction with \
 a recipient to send them a greeting in response to their message.";
-const OFFLINE_ABOUT: &str = "Don't send the away message if you've recently been online.";
+fn offline_about() -> &'static str {
+    tr(keys::AWAY_OFFLINE_ONLY_ABOUT)
+}
 
 /// A date and time picker for the custom away schedule. Unlike the
 /// message scheduler it allows past days (tdesktop's minimum is 2013).
@@ -222,7 +227,7 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_3()
-            .child(div().text_sm().text_color(muted).child(GREETING_ABOUT))
+            .child(div().text_sm().text_color(muted).child(greeting_about()))
             .child(self.business_switch_row(
                 "business-greeting-enable",
                 tr(keys::Q_OPS_SEND_GREETING_MESSAGE),
@@ -291,7 +296,7 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_3()
-            .child(div().text_sm().text_color(muted).child(AWAY_ABOUT))
+            .child(div().text_sm().text_color(muted).child(away_about()))
             .child(self.business_switch_row(
                 "business-away-enable",
                 tr(keys::Q_OPS_SEND_AWAY_MESSAGE),
@@ -376,7 +381,7 @@ impl QuillApp {
                             cx.notify();
                         },
                     ))
-                    .child(div().text_xs().text_color(muted).child(OFFLINE_ABOUT)),
+                    .child(div().text_xs().text_color(muted).child(offline_about())),
             )
             .child(self.business_recipients_section(super::Recipients::Away, cx))
     }

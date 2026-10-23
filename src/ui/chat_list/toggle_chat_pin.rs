@@ -75,9 +75,9 @@ impl QuillApp {
         if self.demo_session.is_some() {
             self.apply_demo_pin(chat_id, !pinned, archived);
             self.connection.set_note(if pinned {
-                StatusNote::silent("unpinned")
+                StatusNote::silent(tr(keys::Q_LEFTOVERS_UNPINNED))
             } else {
-                StatusNote::silent("pinned")
+                StatusNote::silent(tr(keys::Q_LEFTOVERS_PINNED))
             });
             cx.notify();
         }

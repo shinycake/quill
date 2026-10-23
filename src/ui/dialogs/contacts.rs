@@ -19,11 +19,16 @@ pub struct AddContactDialog {
     pub(crate) not_joined: bool,
 }
 
-/// Slice A6: vCard import dialog — the user pastes the file's text and
+/// Slice A6: vCard import dialog — the user chooses a `.vcf` file and
 /// `parse_vcard` (telegram::requests) turns it into `ImportedContact`
-/// cards for `importContacts` (schema 1.8.67, line 14517).
+/// cards for `importContacts` (schema 1.8.67, line 14517). The box renders
+/// from `state` alone.
+#[derive(Default)]
 pub struct ImportContactsDialog {
-    pub(crate) input: Entity<TextareaState>,
+    pub(crate) state: quill::vcard_import::VcardImport,
+    /// Which file choice the pending read belongs to; a read that lands
+    /// after another choice (or after closing) is dropped.
+    pub(crate) pick: u64,
 }
 
 impl AddContactDialog {

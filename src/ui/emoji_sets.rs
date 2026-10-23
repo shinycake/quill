@@ -1,4 +1,7 @@
-//! Custom emoji pack settings, preview and confirmed removal.
+//! The emoji packs box (Settings > Chat Settings > Emoji sets): the packs a
+//! user has, the trending ones and a search, laid out like the stickers box
+//! rows. Packs, their cover previews and the search results load on their
+//! own; a row opens the pack in the sticker set box.
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use super::dialogs::GroupConfirmAction;
@@ -6,20 +9,34 @@ use super::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
-use gpui_kit::component::input::Textarea;
-use gpui_kit::component::switch::Switch;
+use gpui_kit::component::input::Input;
+use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::emoji::EmojiSetTab;
 use quill::ids::ChatId;
-use quill::lang::{keys, tr};
+use quill::lang::{keys, tr, trn};
 use quill::local_path::sandboxed_display_path;
 use quill::state::RequestPurpose;
+use quill::telegram::envelope::StickerSetInfo;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Duration;
+
+/// How long typing pauses before the search goes out.
+const SEARCH_DELAY: Duration = Duration::from_millis(300);
+/// Distance from the end of the list at which the next page is requested.
+const LOAD_MORE_DISTANCE: f32 = 160.;
+/// Cover previews shown on a row.
+const ROW_COVERS: usize = 4;
+const COVER_SIZE: f32 = 28.;
+
+const TABS: [EmojiSetTab; 2] = [EmojiSetTab::Installed, EmojiSetTab::Trending];
 
 impl QuillApp {
     pub(super) fn open_emoji_sets(&mut self, cx: &mut Context<Self>) {
+        self.pickers.emoji_set_return_tab = EmojiSetTab::Installed;
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_emoji_sets().is_err() {
                 self.connection.set_note(StatusNote::error(tr(
@@ -39,7 +56,23 @@ impl QuillApp {
         }
         cx.notify();
     }
-    fn select_emoji_sets_tab(&mut self, tab: EmojiSetTab, cx: &mut Context<Self>) {
+    pub(super) fn select_emoji_sets_tab(
+        &mut self,
+        tab: EmojiSetTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.pickers.emoji_set_keystroke = self.pickers.emoji_set_keystroke.wrapping_add(1);
+        self.pickers.emoji_set_return_tab = tab;
+        self.pickers
+            .emoji_set_search_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.show_emoji_sets_tab(tab, cx);
+    }
+    fn show_emoji_sets_tab(&mut self, tab: EmojiSetTab, cx: &mut Context<Self>) {
+        self.pickers
+            .emoji_set_scroll
+            .set_offset(point(px(0.), px(0.)));
         if let Some(live) = self.live.as_mut() {
             if live.driver.select_emoji_set_tab(tab).is_err() {
                 self.connection.set_note(StatusNote::error(tr(
@@ -51,15 +84,88 @@ impl QuillApp {
         }
         cx.notify();
     }
-    fn preview_emoji_set(&mut self, id: i64, cx: &mut Context<Self>) {
+    /// The search field changed: once typing pauses, the packs matching it
+    /// replace the list; clearing the field brings the last tab back.
+    pub(super) fn emoji_sets_search_typed(&mut self, cx: &mut Context<Self>) {
+        self.pickers.emoji_set_keystroke = self.pickers.emoji_set_keystroke.wrapping_add(1);
+        let keystroke = self.pickers.emoji_set_keystroke;
+        let query = self
+            .pickers
+            .emoji_set_search_input
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
+        if query.is_empty() {
+            let tab = self.pickers.emoji_set_return_tab;
+            if self
+                .session()
+                .is_some_and(|s| s.stickers.emoji.tab == EmojiSetTab::Search)
+            {
+                self.show_emoji_sets_tab(tab, cx);
+            }
+            return;
+        }
+        self.spawn_scoped(cx, async move |this, cx| {
+            cx.background_executor().timer(SEARCH_DELAY).await;
+            this.update(cx, |this, cx| {
+                if this.pickers.emoji_set_keystroke == keystroke {
+                    this.search_emoji_sets_for(&query, cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+    fn search_emoji_sets_for(&mut self, query: &str, cx: &mut Context<Self>) {
+        self.pickers
+            .emoji_set_scroll
+            .set_offset(point(px(0.), px(0.)));
+        if let Some(live) = self.live.as_mut() {
+            if live.driver.search_emoji_packs(query).is_err() {
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_MEDIA_COULD_NOT_SEARCH_EMOJI_PACKS,
+                )));
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            let needle = query.to_lowercase();
+            let emoji = &mut session.stickers.emoji;
+            emoji.tab = EmojiSetTab::Search;
+            emoji.search_query = query.to_string();
+            emoji.found_sets = emoji
+                .installed_sets
+                .iter()
+                .chain(&emoji.trending_sets)
+                .filter(|set| set.title.to_lowercase().contains(&needle))
+                .cloned()
+                .collect();
+        }
+        cx.notify();
+    }
+    fn emoji_sets_load_more(&mut self, cx: &mut Context<Self>) {
+        let scroll = &self.pickers.emoji_set_scroll;
+        let near_end = scroll.bounds().size.height > px(0.)
+            && scroll.max_offset().y + scroll.offset().y <= px(LOAD_MORE_DISTANCE);
+        if !near_end
+            || self
+                .session()
+                .is_none_or(|s| s.stickers.emoji.tab != EmojiSetTab::Trending)
+        {
+            return;
+        }
         if let Some(live) = self.live.as_mut()
-            && live.driver.preview_emoji_pack(id).is_err()
+            && live.driver.more_trending_emoji_packs().is_err()
         {
             self.connection.set_note(StatusNote::error(tr(
-                keys::Q_MEDIA_COULD_NOT_LOAD_EMOJI_PACK,
+                keys::Q_MEDIA_COULD_NOT_LOAD_MORE_EMOJI,
             )));
         }
         cx.notify();
+    }
+    /// Open the pack in the sticker set box, where its emoji can be looked
+    /// at and the pack added or removed.
+    fn preview_emoji_set(&mut self, id: i64, cx: &mut Context<Self>) {
+        self.view_message_sticker_set(id, cx);
     }
     fn install_emoji_set(&mut self, id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
@@ -72,231 +178,210 @@ impl QuillApp {
         }
         cx.notify();
     }
-    fn search_emoji_sets(&mut self, cx: &mut Context<Self>) {
-        let query = self
-            .pickers
-            .emoji_set_search_input
-            .read(cx)
-            .value()
-            .to_string();
-        if let Some(live) = self.live.as_mut()
-            && live.driver.search_emoji_packs(&query).is_err()
-        {
-            self.connection.set_note(StatusNote::error(tr(
-                keys::Q_MEDIA_COULD_NOT_SEARCH_EMOJI_PACKS,
-            )));
+
+    /// One cover preview: the downloaded thumbnail, or the emoji itself
+    /// until it is there.
+    fn emoji_cover(&self, cover: &quill::telegram::envelope::StickerItem) -> AnyElement {
+        let roots = self.media_display_roots();
+        let path = cover
+            .display_file_id()
+            .and_then(|id| {
+                self.session()
+                    .and_then(|s| s.media.files.get(&id.0))
+                    .and_then(|f| f.usable_path())
+            })
+            .and_then(|p| sandboxed_display_path(p, &roots));
+        let cell = div()
+            .size(px(COVER_SIZE))
+            .flex()
+            .items_center()
+            .justify_center();
+        match path {
+            Some(path) => cell
+                .child(
+                    img(path)
+                        .size(px(COVER_SIZE))
+                        .object_fit(ObjectFit::Contain),
+                )
+                .into_any_element(),
+            None => cell.child(cover.emoji.clone()).into_any_element(),
         }
-        cx.notify();
     }
+
+    fn emoji_pack_row(
+        &self,
+        set: &StickerSetInfo,
+        tab: EmojiSetTab,
+        busy: Option<(i64, bool)>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = set.id;
+        let title = if set.title.is_empty() {
+            set.name.clone()
+        } else {
+            set.title.clone()
+        };
+        let working = busy.is_some_and(|(set_id, _)| set_id == id);
+        let action = if tab == EmojiSetTab::Installed {
+            Button::new(format!("emoji-pack-remove-{id}"))
+                .icon(gpui_kit::assets::IconName::X)
+                .ghost()
+                .small()
+                .disabled(working)
+                .tooltip(tr(keys::BOX_REMOVE))
+                .accessibility_label(format!("{} {title}", tr(keys::BOX_REMOVE)))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_group_confirm(
+                        ChatId(0),
+                        GroupConfirmAction::RemoveEmojiSet { set_id: id },
+                        cx,
+                    );
+                }))
+                .into_any_element()
+        } else if set.is_installed {
+            div()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child(tr(keys::Q_MEDIA_INSTALLED))
+                .into_any_element()
+        } else {
+            Button::new(format!("emoji-pack-add-{id}"))
+                .label(tr(keys::STICKERS_FEATURED_ADD))
+                .primary()
+                .small()
+                .loading(working)
+                .disabled(working)
+                .on_click(cx.listener(move |this, _, _, cx| this.install_emoji_set(id, cx)))
+                .into_any_element()
+        };
+        let covers = set
+            .covers
+            .iter()
+            .take(ROW_COVERS)
+            .fold(h_flex().flex_none().gap_1(), |row, cover| {
+                row.child(self.emoji_cover(cover))
+            });
+        h_flex()
+            .id(format!("emoji-pack-row-{id}"))
+            .w_full()
+            .items_center()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .child(
+                Button::new(format!("emoji-pack-open-{id}"))
+                    .ghost()
+                    .flex_1()
+                    .min_w_0()
+                    .h_auto()
+                    .justify_start()
+                    .accessibility_label(title.clone())
+                    .on_click(cx.listener(move |this, _, _, cx| this.preview_emoji_set(id, cx)))
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .min_w_0()
+                            .items_center()
+                            .gap_3()
+                            .child(covers)
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .items_start()
+                                    .child(div().truncate().font_medium().child(title))
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(trn(keys::CUSTOM_EMOJI_COUNT, set.size)),
+                                    ),
+                            ),
+                    ),
+            )
+            .child(action)
+            .into_any_element()
+    }
+
     fn emoji_sets_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
         let no_panel = quill::emoji::EmojiPanel::default();
         let panel = session.map_or(&no_panel, |s| &s.stickers.emoji);
-        let mutating =
-            session.is_some_and(|s| s.requests.has_purpose(RequestPurpose::ChangeEmojiSet));
         let loading = session.is_some_and(|s| {
             s.requests.has_purpose(match panel.tab {
                 EmojiSetTab::Installed => RequestPurpose::GetInstalledEmojiSets,
                 EmojiSetTab::Trending => RequestPurpose::GetTrendingEmojiSets,
                 EmojiSetTab::Search => RequestPurpose::SearchEmojiSets,
-            }) || s.requests.has_purpose(RequestPurpose::GetEmojiSet)
+            })
         });
-        let mut tabs = div().flex().gap_2();
-        for (title, tab) in [
-            (tr(keys::Q_MEDIA_INSTALLED), EmojiSetTab::Installed),
-            (tr(keys::STICKERS_FEATURED_TAB), EmojiSetTab::Trending),
-            (tr(keys::Q_MEDIA_SEARCH), EmojiSetTab::Search),
-        ] {
-            tabs = tabs.child(
-                Button::new(format!("emoji-sets-tab-{title}"))
-                    .label(title)
-                    .selected(panel.tab == tab)
-                    .ghost()
-                    .on_click(
-                        cx.listener(move |this, _, _, cx| this.select_emoji_sets_tab(tab, cx)),
-                    ),
-            );
-        }
-        let sets: Vec<_> = match panel.tab {
+        let owner = cx.entity().downgrade();
+        let tabs = TabBar::new("emoji-sets-tabs")
+            .underline()
+            .children(TABS.iter().map(|tab| {
+                Tab::new().label(match tab {
+                    EmojiSetTab::Installed => tr(keys::Q_MEDIA_INSTALLED),
+                    _ => tr(keys::STICKERS_FEATURED_TAB),
+                })
+            }))
+            .selected_index(
+                TABS.iter()
+                    .position(|tab| *tab == self.pickers.emoji_set_return_tab)
+                    .unwrap_or(0),
+            )
+            .on_click(move |ix, window, cx| {
+                if let Some(tab) = TABS.get(*ix).copied() {
+                    let _ =
+                        owner.update(cx, |this, cx| this.select_emoji_sets_tab(tab, window, cx));
+                }
+            });
+        let sets: Vec<&StickerSetInfo> = match panel.tab {
             EmojiSetTab::Installed => session.map(|s| s.ordered_emoji_packs()).unwrap_or_default(),
             EmojiSetTab::Trending => panel.trending_sets.iter().collect(),
             EmojiSetTab::Search => panel.found_sets.iter().collect(),
         };
-        let mut rows = div().id("emoji-pack-rows").flex().flex_col().gap_2();
-        for set in &sets {
-            let id = set.id;
-            let installed = set.is_installed;
-            let state = session
-                .map(|s| s.emoji_pack_download_state(id))
-                .unwrap_or(tr(keys::Q_MEDIA_NOT_DOWNLOADED));
-            rows = rows.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        Button::new(format!("emoji-pack-preview-{id}"))
-                            .label(set.title.clone())
-                            .ghost()
-                            .on_click(
-                                cx.listener(move |this, _, _, cx| this.preview_emoji_set(id, cx)),
-                            ),
-                    )
-                    .child(div().text_xs().child(format!("{} emoji", set.size)))
-                    .child(
-                        div()
-                            .id(format!("emoji-pack-state-{id}"))
-                            .text_xs()
-                            .role(Role::Label)
-                            .aria_label(state)
-                            .child(state),
-                    )
-                    .child(
-                        Button::new(format!("emoji-pack-manage-{id}"))
-                            .label(if installed {
-                                tr(keys::BOX_REMOVE)
-                            } else {
-                                tr(keys::Q_MEDIA_INSTALL)
-                            })
-                            .disabled(mutating)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if installed {
-                                    this.open_group_confirm(
-                                        ChatId(0),
-                                        GroupConfirmAction::RemoveEmojiSet { set_id: id },
-                                        cx,
-                                    );
-                                } else {
-                                    this.install_emoji_set(id, cx);
-                                }
-                            })),
-                    ),
-            );
-        }
-        if panel.tab == EmojiSetTab::Trending && panel.trending_has_more {
-            rows = rows.child(
-                Button::new("emoji-packs-more")
-                    .label(tr(keys::Q_MEDIA_MORE_PACKS))
-                    .disabled(loading)
-                    .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        if let Some(live) = this.live.as_mut()
-                            && live.driver.more_trending_emoji_packs().is_err()
-                        {
-                            this.connection.set_note(StatusNote::error(tr(
-                                keys::Q_MEDIA_COULD_NOT_LOAD_MORE_EMOJI,
-                            )));
-                        }
-                        cx.notify();
-                    })),
-            );
-        }
-        let mut preview = div().flex().flex_col().gap_2();
-        if let Some(id) = panel.selected_set_id {
-            preview = preview.child(div().font_semibold().child(panel.preview_title.clone()));
-            let roots = self.media_display_roots();
-            let mut grid = div().flex().flex_wrap().gap_2();
-            for item in &panel.preview {
-                let display = item.thumb_file_id.or_else(|| {
-                    (item.format == quill::telegram::envelope::StickerFormat::Webp)
-                        .then_some(item.file_id)
-                });
-                let path = display
-                    .and_then(|id| {
-                        session
-                            .and_then(|s| s.media.files.get(&id.0))
-                            .and_then(|f| f.usable_path())
-                    })
-                    .and_then(|p| sandboxed_display_path(p, &roots));
-                let cell = if let Some(path) = path {
-                    img(path)
-                        .w(px(56.))
-                        .h(px(56.))
-                        .aspect_ratio(px(56.) / px(56.))
-                        .object_fit(ObjectFit::Contain)
-                        .into_any_element()
-                } else {
-                    div()
-                        .w(px(56.))
-                        .h(px(56.))
-                        .child(item.emoji.clone())
-                        .into_any_element()
-                };
-                grid = grid.child(cell);
-            }
-            preview = preview.child(grid);
-            preview = preview.child(
-                Button::new("download-emoji-pack")
-                    .label(tr(keys::Q_MEDIA_DOWNLOAD_OR_RETRY_PACK))
-                    .disabled(
-                        loading || panel.outdated_packs.contains(&id) || panel.preview.is_empty(),
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(live) = this.live.as_mut() {
-                            this.connection
-                                .set_note(match live.driver.download_emoji_pack(id) {
-                                    Ok(()) => StatusNote::silent(tr(
-                                        keys::Q_MEDIA_EMOJI_PACK_DOWNLOAD_REQUESTED,
-                                    )),
-                                    Err(_) => StatusNote::error(tr(
-                                        keys::Q_MEDIA_COULD_NOT_DOWNLOAD_EMOJI_PACK,
-                                    )),
-                                });
-                        }
-                        cx.notify();
-                    })),
-            );
-        }
-        let status = if panel.failed || panel.mutation_failed {
-            tr(keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS)
-        } else if mutating {
-            tr(keys::Q_MEDIA_UPDATING_EMOJI_PACK)
-        } else if loading {
-            tr(keys::Q_MEDIA_LOADING_EMOJI_PACKS)
-        } else if sets.is_empty() {
-            tr(keys::Q_MEDIA_NO_EMOJI_PACKS_FOUND)
+        let rows = sets.iter().fold(v_flex().w_full(), |rows, set| {
+            rows.child(self.emoji_pack_row(set, panel.tab, panel.mutating_set, cx))
+        });
+        let status = if loading && sets.is_empty() {
+            Some(tr(keys::Q_MEDIA_LOADING_EMOJI_PACKS))
+        } else if panel.failed || panel.mutation_failed {
+            Some(tr(keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS))
+        } else if sets.is_empty() && !loading {
+            Some(tr(keys::Q_MEDIA_NO_EMOJI_PACKS_FOUND))
         } else {
-            tr(keys::Q_MEDIA_OPEN_A_PACK_TO_PREVIEW)
+            None
         };
-        div()
-            .id("emoji-sets-settings")
-            .flex()
-            .flex_col()
+        v_flex()
+            .id("emoji-sets-box")
+            .w(px(420.))
+            .max_w_full()
             .gap_2()
-            .max_h(px(460.))
-            .overflow_y_scroll()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        Switch::new("dynamic-emoji-pack-order")
-                            .checked(
-                                session.is_none_or(|s| {
-                                    s.settings.media_prefs.dynamic_emoji_pack_order
-                                }),
-                            )
-                            .accessibility_label(tr(keys::Q_MEDIA_DYNAMIC_EMOJI_PACK_ORDER))
-                            .on_click(cx.listener(|this, &on, _, cx| {
-                                this.set_media_pref(|prefs| prefs.dynamic_emoji_pack_order = on, cx)
-                            })),
-                    )
-                    .child(div().child(tr(keys::Q_MEDIA_DYNAMIC_EMOJI_PACK_ORDER))),
-            )
             .child(tabs)
             .child(
-                Textarea::new(&self.pickers.emoji_set_search_input)
+                Input::new(&self.pickers.emoji_set_search_input)
+                    .cleanable(true)
                     .aria_label(tr(keys::Q_MEDIA_SEARCH_EMOJI_PACKS)),
             )
+            .when_some(status, |body, status| {
+                body.child(
+                    div()
+                        .px_3()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(status),
+                )
+            })
             .child(
-                Button::new("emoji-pack-search")
-                    .label(tr(keys::Q_MEDIA_SEARCH_PACKS))
-                    .on_click(cx.listener(|this, _, _, cx| this.search_emoji_sets(cx))),
+                div()
+                    .id("emoji-pack-rows")
+                    .role(Role::ScrollView)
+                    .aria_label(tr(keys::Q_MEDIA_EMOJI_PACKS))
+                    .h(px(360.))
+                    .overflow_y_scroll()
+                    .track_scroll(&self.pickers.emoji_set_scroll)
+                    .on_scroll_wheel(cx.listener(|this, _, _, cx| this.emoji_sets_load_more(cx)))
+                    .child(rows),
             )
-            .child(div().text_xs().child(status))
-            .child(rows)
-            .child(preview)
             .into_any_element()
     }
     pub(super) fn build_emoji_sets_dialog(
@@ -309,21 +394,22 @@ impl QuillApp {
             this.close_emoji_sets(cx)
         });
         app.update(cx, |this, cx| {
+            if let Some(live) = this.live.as_mut() {
+                let _ = live.driver.ensure_emoji_pack_covers();
+            }
             let body = Rc::new(RefCell::new(Some(this.emoji_sets_panel(cx))));
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(
-                    keys::Q_MEDIA_EMOJI_PACKS_AND_STATUS,
+                    keys::Q_MEDIA_EMOJI_PACKS,
                 )))
-                .content(crate::ui::shell::scrollable_dialog_content(
-                    move |content, _, _| {
-                        content.child(
-                            body.borrow_mut()
-                                .take()
-                                .unwrap_or_else(|| div().into_any_element()),
-                        )
-                    },
-                ))
+                .content(move |content, _, _| {
+                    content.child(
+                        body.borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element()),
+                    )
+                })
                 .on_close(close)
         })
     }
@@ -336,3 +422,8 @@ crate::ui::shell::register_dialogs! {
         QuillApp::build_emoji_sets_dialog,
     ),
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "emoji_sets_tests.rs"]
+mod tests;

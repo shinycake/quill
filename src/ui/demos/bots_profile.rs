@@ -36,6 +36,21 @@ register_demos![
         "screenshot demo — edit profile dialog (injected, no live Telegram)"
     )
     .setup(QuillApp::demo_profile_edit),
+    // The Contacts "Import" box with no file chosen; `QUILL_DEMO_VCF=<path>`
+    // loads that file as if it had been chosen.
+    DemoSpec::chats(
+        "ready-contacts-import",
+        "screenshot demo — Contacts import box (choose a .vcf file)"
+    )
+    .setup(QuillApp::demo_contacts_import),
+    // The bot chat with a "Share location" keyboard as its newest message;
+    // `QUILL_DEMO_LOCATION=found|denied|unavailable|locating` is what the
+    // platform answers when the button is pressed.
+    DemoSpec::chats(
+        "ready-bot-location-request",
+        "screenshot demo — bot keyboard with a Share location button"
+    )
+    .setup(QuillApp::demo_bot_location_request),
 ];
 
 impl QuillApp {
@@ -57,6 +72,25 @@ impl QuillApp {
         self.connection.set_note(StatusNote::silent(
             "screenshot demo — bot keyboards: inline buttons, custom keyboard, force reply",
         ));
+    }
+
+    fn demo_bot_location_request(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+        let keyboard = r#"{"@type":"updateNewMessage","message":{"id":307,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupShowKeyboard","rows":[[{"@type":"keyboardButton","text":"Share location","type":{"@type":"keyboardButtonTypeRequestLocation"}}]],"is_persistent":false,"resize_keyboard":true,"one_time":true,"is_personal":false,"force_reply":false,"input_field_placeholder":""},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Where are you?","entities":[]}}}}"#;
+        if let Some(session) = self.demo_session.as_mut() {
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_bot_chat(session, &self.demo_ui.sink, &self.demo_ui.seq);
+            let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
+                self.demo_ui.sink.clone();
+            if let Some(owned) =
+                quill::telegram::client::copy_and_parse(keyboard, &self.demo_ui.seq, &sink)
+            {
+                session.apply(owned);
+            }
+        }
+    }
+
+    fn demo_contacts_import(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_import_contacts_dialog(window, cx);
     }
 
     fn demo_profile_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {

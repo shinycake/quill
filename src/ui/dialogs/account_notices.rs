@@ -40,10 +40,15 @@ pub(crate) enum AccountNotice {
     AgeVerify,
 }
 
-const TERMS_SORRY: &str = "We're very sorry, but this means we must part ways here. Unlike others, we don't use your data for ad targeting or other commercial purposes. Telegram only stores the information it needs to function as a secure and feature-rich cloud service. You can adjust how we use your data in Privacy & Security settings.\n\nBut if you're generally not OK with Telegram's modest requirements, it won't be possible for us to provide you with this service. You can delete your account now \u{2014} or look around some more and delete it later if you feel you're not happy with the way we use your data.";
-const TERMS_DELETE_WARNING: &str = "Warning, this will irreversibly delete your Telegram account and all the data you store in the Telegram cloud.\n\nImportant: You can Cancel now and export your data first instead of losing it. (To do this, open Settings \u{203a} Data & Storage \u{203a} Export Telegram data.)";
-const PREVENTED_WARNING: &str =
-    "Never send your login code to anyone or you can lose your Telegram account!";
+fn terms_sorry() -> &'static str {
+    tr(keys::TERMS_UPDATE_SORRY)
+}
+fn terms_delete_warning() -> &'static str {
+    tr(keys::Q_LEFTOVERS_TERMS_DELETE_WARNING)
+}
+fn prevented_warning() -> &'static str {
+    tr(keys::UNCONFIRMED_AUTH_DENIED_WARNING)
+}
 
 impl QuillApp {
     /// The notice to show, if any.
@@ -343,7 +348,7 @@ impl QuillApp {
                 )
             }
             TermsStep::DeclineSorry => {
-                let body = div().text_sm().child(TERMS_SORRY);
+                let body = div().text_sm().child(terms_sorry());
                 let footer = div()
                     .flex()
                     .justify_end()
@@ -378,7 +383,7 @@ impl QuillApp {
                     .flex()
                     .flex_col()
                     .gap_2()
-                    .child(div().text_sm().child(TERMS_DELETE_WARNING));
+                    .child(div().text_sm().child(terms_delete_warning()));
                 if let Some(error) = account_error {
                     body = body.child(div().text_xs().text_color(danger()).child(error));
                 }
@@ -502,7 +507,7 @@ impl QuillApp {
                     .text_sm()
                     .font_semibold()
                     .text_color(danger())
-                    .child(PREVENTED_WARNING),
+                    .child(prevented_warning()),
             );
         let footer = div().flex().justify_end().child(
             Button::new("login-prevented-ok")

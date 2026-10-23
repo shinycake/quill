@@ -156,11 +156,15 @@ impl QuillApp {
                     Some(TransportState::Reconnecting) => {
                         tr(keys::Q_OPS_RECONNECTING_AUDIO).to_string()
                     }
-                    Some(TransportState::Failed) => format!(
-                        "Couldn't start audio: {}. The call is up but carries no sound.",
-                        call.transport_error
-                            .as_deref()
-                            .unwrap_or(tr(keys::Q_OPS_UNKNOWN_ERROR))
+                    Some(TransportState::Failed) => tr_with(
+                        keys::Q_LEFTOVERS_AUDIO_START_FAILED,
+                        &[(
+                            "error",
+                            (call
+                                .transport_error
+                                .as_deref()
+                                .unwrap_or(tr(keys::Q_OPS_UNKNOWN_ERROR))),
+                        )],
                     ),
                     Some(TransportState::Closed) => tr(keys::Q_OPS_AUDIO_DISCONNECTED).to_string(),
                     None | Some(TransportState::Connecting) => {
@@ -583,9 +587,12 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!(
-                        "Connected for {}",
-                        Self::call_clock(summary.duration_secs.max(0) as u64)
+                    .child(tr_with(
+                        keys::Q_LEFTOVERS_CALL_CONNECTED_FOR,
+                        &[(
+                            "duration",
+                            &(Self::call_clock(summary.duration_secs.max(0) as u64)).to_string(),
+                        )],
                     )),
             );
         }
@@ -738,13 +745,13 @@ impl QuillApp {
             );
         }
         let mut chips = div().flex().flex_wrap().gap_1();
-        for (index, (_, description)) in CALL_PROBLEMS.iter().enumerate() {
+        for (index, (_, label)) in CALL_PROBLEMS.iter().enumerate() {
             let selected = detail.problems.get(index).copied().unwrap_or(false);
             chips = chips.child(
                 // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
                 Checkbox::new(format!("call-problem-{index}"))
                     .checked(selected)
-                    .label(*description)
+                    .label(tr(*label))
                     .on_click(cx.listener(move |this, &on, _, cx| {
                         if on != selected {
                             this.toggle_rating_problem(index, cx);
