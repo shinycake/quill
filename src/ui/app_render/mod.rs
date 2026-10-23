@@ -56,6 +56,7 @@ impl Render for QuillApp {
         }
         self.schedule_idle_image_trim(cx);
         self.sync_capture_block(window);
+        self.sync_poll_dialog_height(window);
         self.sync_viewer_hdr(window);
         self.sync_speech_trial_hint(cx);
         self.sync_window_title(window);

@@ -104,6 +104,12 @@ impl Session {
                 {
                     self.payments.poll_countries_max = usize::try_from(*limit).ok();
                 }
+                if name == "poll_open_period_max"
+                    && let OptionValue::Integer(limit) = &value
+                    && *limit > 0
+                {
+                    self.payments.poll_open_period_max = Some(*limit);
+                }
                 if name == "gift_text_length_max"
                     && let OptionValue::Integer(limit) = &value
                 {

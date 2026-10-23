@@ -21,14 +21,6 @@ pub const POLL_OPTIONS_MAX: usize = 10;
 pub const QUIZ_EXPLANATION_MAX_CHARS: usize = 200;
 pub const QUIZ_EXPLANATION_MAX_LINE_FEEDS: usize = 2;
 
-/// UI ceiling for the poll auto-close duration (hours). The schema's true
-/// bound is server-provided `getOption("poll_open_period_max")`
-/// (`td_api.tl:6190`), which Quill doesn't cache — TDLib enforces the real
-/// cap server-side.
-// ponytail: cache getOption("poll_open_period_max") at runtime and validate
-// against it instead of this fixed ceiling.
-pub const POLL_OPEN_PERIOD_MAX_HOURS: u32 = 24;
-
 /// Media for a new poll option (`inputPollOption.media`), as tdesktop's
 /// create box offers it: a photo or video from a file, a sticker, a link.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,6 +54,36 @@ pub const POLL_OPTION_MAX_CHARS: usize = 100;
 /// to `ChooseDateTimeBox`).
 pub const POLL_DEADLINE_MIN_SECS: i64 = 60;
 pub const POLL_DEADLINE_MAX_SECS: i64 = 365 * 86_400;
+/// The "Limit Duration" switch starts at a day (`closePeriod = 24 * 3600`).
+pub const POLL_DEFAULT_PERIOD_SECS: i64 = 24 * 3600;
+/// The "Poll ends" menu's presets (`create_poll_box.cpp`).
+pub const POLL_PERIOD_PRESETS: [i64; 5] = [3600, 3 * 3600, 8 * 3600, 24 * 3600, 72 * 3600];
+
+/// How far ahead a poll may close: TDLib's `poll_open_period_max` once it
+/// reported it, tdesktop's year before that.
+pub fn poll_close_max(option: Option<i64>) -> i64 {
+    option
+        .filter(|secs| *secs > POLL_DEADLINE_MIN_SECS)
+        .unwrap_or(POLL_DEADLINE_MAX_SECS)
+}
+
+/// When a poll closes: after a preset span from creation, or at a picked
+/// moment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PollClose {
+    Period(i64),
+    Date(i64),
+}
+
+impl PollClose {
+    /// The closing moment if the poll were created at `now`.
+    pub fn ends_at(self, now: i64) -> i64 {
+        match self {
+            Self::Period(secs) => now.saturating_add(secs),
+            Self::Date(date) => date,
+        }
+    }
+}
 
 /// Fraction of the option's percentage bar, clamped to `[0.0, 1.0]`
 /// (server `vote_percentage` can be stale or out of range).
@@ -284,8 +306,7 @@ pub fn poll_ends_in_label(poll: &Poll, now: i64) -> Option<String> {
 ///
 /// `quiz_correct` is the 0-based index into the *usable* (non-empty,
 /// dialog-order) options; the dialog maps its marked row to it when
-/// freezing. `duration_hours` is the raw dialog text (empty = no
-/// auto-close); `country_codes` are the dialog's parsed, uppercased codes.
+/// freezing. `country_codes` are the dialog's parsed, uppercased codes.
 #[derive(Debug, Clone, Default)]
 pub struct PollDraft {
     pub question: String,
@@ -297,11 +318,10 @@ pub struct PollDraft {
     pub is_anonymous: bool,
     pub allows_multiple_answers: bool,
     pub is_quiz: bool,
-    pub quiz_correct: Option<usize>,
+    pub quiz_correct: Vec<usize>,
     pub quiz_explanation: String,
     pub allows_revoting: bool,
     pub shuffle_options: bool,
-    pub duration_hours: String,
     pub country_codes: Vec<String>,
     /// B15: `inputPollTypeRegular.allow_adding_options` ("Allow Adding
     /// Options"); ignored for quizzes.
@@ -310,9 +330,14 @@ pub struct PollDraft {
     pub hide_results_until_closes: bool,
     /// B15: `members_only` ("Restrict to Subscribers", channels only).
     pub members_only: bool,
-    /// B15: absolute deadline (`close_date`, unix seconds); 0 = none. When
-    /// set it replaces the relative `duration_hours`.
+    /// `open_period`: seconds the poll stays open after it is sent; 0 =
+    /// none. Set by a preset of "Poll ends".
+    pub open_period: i64,
+    /// B15: absolute deadline (`close_date`, unix seconds); 0 = none. Set
+    /// by "Custom"; TDLib takes it or `open_period`, never both.
     pub close_date: i64,
+    /// `poll_open_period_max` as TDLib reported it (0 = not yet).
+    pub close_max: i64,
 }
 
 impl PollDraft {
@@ -353,12 +378,7 @@ impl PollDraft {
         if self.close_date > 0 {
             return 0;
         }
-        let hours: u32 = self.duration_hours.trim().parse().unwrap_or(0);
-        if (1..=POLL_OPEN_PERIOD_MAX_HOURS).contains(&hours) {
-            (hours * 3600) as i32
-        } else {
-            0
-        }
+        self.open_period.clamp(0, i64::from(i32::MAX)) as i32
     }
 
     /// `None` when the draft is valid; otherwise the short user-facing reason.
@@ -384,9 +404,10 @@ impl PollDraft {
             return Some("at most 10 options");
         }
         if self.is_quiz {
-            match self.quiz_correct {
-                Some(index) if index < options.len() => {}
-                _ => return Some("mark the correct option"),
+            let marked = !self.quiz_correct.is_empty()
+                && self.quiz_correct.iter().all(|index| *index < options.len());
+            if !marked {
+                return Some("mark the correct option");
             }
             let explanation_len = self.quiz_explanation.chars().count();
             if explanation_len > QUIZ_EXPLANATION_MAX_CHARS {
@@ -401,14 +422,15 @@ impl PollDraft {
             if self.close_date < now + POLL_DEADLINE_MIN_SECS {
                 return Some("the deadline must be in the future");
             }
-            if self.close_date > now + POLL_DEADLINE_MAX_SECS {
-                return Some("the deadline must be within a year");
+            if self.close_date
+                > now + poll_close_max((self.close_max > 0).then_some(self.close_max))
+            {
+                return Some("the deadline is too far ahead");
             }
-        } else if !self.duration_hours.trim().is_empty() {
-            match self.duration_hours.trim().parse::<u32>() {
-                Ok(hours) if (1..=POLL_OPEN_PERIOD_MAX_HOURS).contains(&hours) => {}
-                _ => return Some("duration must be 1–24 hours"),
-            }
+        } else if self.open_period > 0
+            && self.open_period > poll_close_max((self.close_max > 0).then_some(self.close_max))
+        {
+            return Some("the poll stays open too long");
         }
         for code in &self.country_codes {
             if code.len() != 2 || !code.bytes().all(|b| b.is_ascii_uppercase()) {
@@ -701,7 +723,7 @@ mod tests {
             question: "capital of France?".to_string(),
             options: vec!["Paris".to_string(), "London".to_string()],
             is_quiz: true,
-            quiz_correct: Some(0),
+            quiz_correct: vec![0],
             allows_revoting: false,
             ..Default::default()
         }
@@ -711,11 +733,11 @@ mod tests {
     fn quiz_draft_requires_correct_option() {
         let mut draft = quiz_draft();
         assert_eq!(draft.validate(), None);
-        draft.quiz_correct = None;
+        draft.quiz_correct = Vec::new();
         assert_eq!(draft.validate(), Some("mark the correct option"));
         // Marked row maps outside the usable options (e.g. the marked row
         // was emptied after marking).
-        draft.quiz_correct = Some(7);
+        draft.quiz_correct = vec![7];
         assert_eq!(draft.validate(), Some("mark the correct option"));
     }
 
@@ -742,27 +764,39 @@ mod tests {
     fn duration_bounds() {
         let mut draft = quiz_draft();
         draft.is_quiz = false;
-        draft.quiz_correct = None;
+        draft.quiz_correct = Vec::new();
         assert_eq!(draft.validate(), None);
         assert_eq!(draft.open_period_secs(), 0);
-        draft.duration_hours = "3".to_string();
+        draft.open_period = 3 * 3600;
         assert_eq!(draft.validate(), None);
         assert_eq!(draft.open_period_secs(), 3 * 3600);
-        for bad in ["0", "25", "abc", "1.5", "-2"] {
-            draft.duration_hours = bad.to_string();
-            assert_eq!(
-                draft.validate(),
-                Some("duration must be 1–24 hours"),
-                "input {bad}"
-            );
-        }
+        // TDLib's reported cap wins over the year.
+        draft.close_max = 3600;
+        assert_eq!(draft.validate(), Some("the poll stays open too long"));
+        draft.close_max = 0;
+        draft.open_period = POLL_DEADLINE_MAX_SECS + 1;
+        assert_eq!(draft.validate(), Some("the poll stays open too long"));
+    }
+
+    #[test]
+    fn close_max_prefers_the_option() {
+        assert_eq!(poll_close_max(None), POLL_DEADLINE_MAX_SECS);
+        assert_eq!(poll_close_max(Some(0)), POLL_DEADLINE_MAX_SECS);
+        assert_eq!(poll_close_max(Some(864_000)), 864_000);
+    }
+
+    #[test]
+    fn close_resolves_against_the_clock() {
+        assert_eq!(PollClose::Period(3600).ends_at(1000), 4600);
+        assert_eq!(PollClose::Date(9000).ends_at(1000), 9000);
+        assert!(POLL_PERIOD_PRESETS.contains(&POLL_DEFAULT_PERIOD_SECS));
     }
 
     #[test]
     fn country_codes_must_be_iso() {
         let mut draft = quiz_draft();
         draft.is_quiz = false;
-        draft.quiz_correct = None;
+        draft.quiz_correct = Vec::new();
         draft.country_codes = vec!["US".to_string(), "GB".to_string()];
         assert_eq!(draft.validate(), None);
         draft.country_codes = vec!["USA".to_string()];
@@ -863,7 +897,7 @@ mod tests {
         let now = 1_000_000;
         let mut draft = quiz_draft();
         draft.is_quiz = false;
-        draft.quiz_correct = None;
+        draft.quiz_correct = Vec::new();
         draft.close_date = now + 30;
         assert_eq!(
             draft.validate_at(now),
@@ -872,12 +906,12 @@ mod tests {
         draft.close_date = now + POLL_DEADLINE_MAX_SECS + 1;
         assert_eq!(
             draft.validate_at(now),
-            Some("the deadline must be within a year")
+            Some("the deadline is too far ahead")
         );
         draft.close_date = now + 3600;
         assert_eq!(draft.validate_at(now), None);
         // An absolute deadline replaces the relative duration.
-        draft.duration_hours = "5".into();
+        draft.open_period = 5 * 3600;
         assert_eq!(draft.validate_at(now), None);
         assert_eq!(draft.open_period_secs(), 0);
     }

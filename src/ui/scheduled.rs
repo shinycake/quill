@@ -168,21 +168,6 @@ pub(super) fn picked_unix(date: &Entity<DatePickerState>, cx: &App) -> Option<i6
         .map(|civil| civil_to_unix(&civil))
 }
 
-/// B15: the poll dialog's absolute-deadline picker (`close_date`): days
-/// from today to a year ahead, opening one day out, like tdesktop's
-/// `ChooseDateTimeBox` with `min = now + 60s`, `max = now + 365d`.
-pub(super) fn poll_deadline_picker(
-    window: &mut Window,
-    cx: &mut Context<QuillApp>,
-) -> Entity<DatePickerState> {
-    new_date_time_picker(
-        window,
-        cx,
-        now_unix() + 24 * 3600,
-        quill::poll::POLL_DEADLINE_MAX_SECS,
-    )
-}
-
 impl QuillApp {
     /// Reminder wording in Saved Messages (the chat with yourself),
     /// schedule wording everywhere else (`SendMenu::Type::Reminder`).

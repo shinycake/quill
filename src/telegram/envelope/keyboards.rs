@@ -124,7 +124,12 @@ pub enum KeyboardButtonType {
     Text,
     RequestPhoneNumber,
     RequestLocation,
-    RequestPoll,
+    /// `keyboardButtonTypeRequestPoll`: the poll box, with the type forced
+    /// to a quiz or a regular poll when the bot asks.
+    RequestPoll {
+        force_regular: bool,
+        force_quiz: bool,
+    },
     /// `keyboardButtonTypeRequestUsers` (schema 1.8.67, line 3735).
     RequestUsers(RequestUsersSpec),
     /// `keyboardButtonTypeRequestChat` (schema 1.8.67, line 3751).
@@ -295,7 +300,18 @@ pub(crate) fn parse_keyboard_button(value: &Value) -> KeyboardButton {
         "keyboardButtonTypeText" => KeyboardButtonType::Text,
         "keyboardButtonTypeRequestPhoneNumber" => KeyboardButtonType::RequestPhoneNumber,
         "keyboardButtonTypeRequestLocation" => KeyboardButtonType::RequestLocation,
-        "keyboardButtonTypeRequestPoll" => KeyboardButtonType::RequestPoll,
+        "keyboardButtonTypeRequestPoll" => KeyboardButtonType::RequestPoll {
+            force_regular: value
+                .get("type")
+                .and_then(|t| t.get("force_regular"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            force_quiz: value
+                .get("type")
+                .and_then(|t| t.get("force_quiz"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        },
         "keyboardButtonTypeRequestUsers" => {
             let t = value.get("type");
             let flag = |name: &str| t.and_then(|t| t.get(name)).and_then(Value::as_bool);
