@@ -105,6 +105,7 @@ pub mod live_story;
 pub mod local_path;
 pub mod local_time;
 pub mod locks;
+pub mod emoji_status_selector;
 pub mod main_menu;
 pub mod marketplace;
 pub mod media_capture;

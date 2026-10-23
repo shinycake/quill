@@ -774,8 +774,9 @@ impl Render for QuillApp {
             .when_some(self.message_ui.menu, |this, menu| {
                 this.child(self.message_menu_overlay(menu, cx))
             })
-            // The expanded reaction selector, where the menu was.
-            .when_some(self.pickers.media_panel.reaction, |this, target| {
+            // The expanded reaction selector, where the menu was, or the
+            // emoji status selector under the main menu.
+            .when_some(self.pickers.media_panel.selector_anchor(), |this, position| {
                 let panel = self.media_panel(cx);
                 this.child(
                     div()
@@ -794,7 +795,7 @@ impl Render for QuillApp {
                         )
                         .child(
                             anchored()
-                                .position(target.position)
+                                .position(position)
                                 .snap_to_window_with_margin(px(8.))
                                 .child(panel),
                         ),

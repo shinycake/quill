@@ -42,18 +42,6 @@ pub fn emoji_status_label(has_status: bool) -> &'static str {
     })
 }
 
-/// The "For ..." durations offered on a status, in seconds from now
-/// (tdesktop's `PickUntilBox` list; "Other..." asks for hours).
-pub const EMOJI_STATUS_DURATIONS: [(&str, i32); 4] = [
-    ("For 1 hour", 3_600),
-    ("For 2 hours", 7_200),
-    ("For 8 hours", 28_800),
-    ("For 2 days", 172_800),
-];
-
-/// The entry that asks for a custom number of hours.
-pub const EMOJI_STATUS_OTHER: &str = "Other...";
-
 /// `emojiStatus.expiration_date` for a status set `duration_secs` from
 /// `now_secs`: `0` for no expiry, `None` when the date does not fit the
 /// 32-bit TDLib field.
@@ -95,7 +83,6 @@ mod tests {
         assert_eq!(emoji_status_expiration(1_000, 0), Some(0));
         assert_eq!(emoji_status_expiration(1_000, 3_600), Some(4_600));
         assert_eq!(emoji_status_expiration(i32::MAX as u64, 60), None);
-        assert_eq!(EMOJI_STATUS_DURATIONS[3], ("For 2 days", 172_800));
     }
 
     #[test]

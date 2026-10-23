@@ -169,7 +169,7 @@ impl QuillApp {
                 }
             }
             NavigationAction::MyStories => self.open_my_stories(window, cx),
-            NavigationAction::EmojiStatus => self.open_emoji_status_picker(cx),
+            NavigationAction::EmojiStatus => self.open_emoji_status_picker(window, cx),
             NavigationAction::MyGroups => self.open_my_chats(false, cx),
             NavigationAction::MyChannels => self.open_my_chats(true, cx),
             NavigationAction::Contacts => self.open_contacts_tab(cx),

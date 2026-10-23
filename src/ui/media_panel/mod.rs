@@ -58,6 +58,8 @@ pub(super) enum PanelCell {
         source: StickerSource,
         ix: usize,
     },
+    /// The emoji status selector's first cell: removes the status.
+    StatusRemove,
     /// A set whose contents haven't loaded yet.
     Placeholder {
         set_id: i64,
@@ -96,6 +98,7 @@ pub(super) struct PanelSection {
 pub(super) struct PanelKey {
     tab: PanelTab,
     reaction: bool,
+    status: bool,
     query: String,
     session_revision: u64,
     recent_emoji: usize,
@@ -117,6 +120,10 @@ pub(super) struct MediaPanel {
     pub open: bool,
     /// Set while the panel picks a reaction instead of composing.
     pub reaction: Option<ReactionTarget>,
+    /// Set while the panel is the emoji status selector.
+    pub status: Option<status::StatusTarget>,
+    /// The "Set Status for..." box, once a status asked for a custom time.
+    pub until: Option<status_time_box::StatusUntil>,
     pub tab: PanelTab,
     pub list: ListState,
     /// Rows that touched the viewport at the list's last layout, read
@@ -141,6 +148,8 @@ impl Default for MediaPanel {
         Self {
             open: false,
             reaction: None,
+            status: None,
+            until: None,
             tab: PanelTab::default(),
             list: ListState::new(0, ListAlignment::Top, px(400.)),
             on_screen: OnScreenRows::default(),
@@ -338,6 +347,7 @@ impl QuillApp {
         if self.pickers.media_panel.reaction.take().is_some() {
             self.pickers.media_panel.key = None;
         }
+        self.close_status_selector();
         if let Some(live) = self.live.as_mut() {
             live.driver.close_gif_panel();
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -386,6 +396,13 @@ impl QuillApp {
 
     pub(super) fn panel_query(&self, cx: &App) -> String {
         match self.pickers.media_panel.tab {
+            PanelTab::Emoji if self.pickers.media_panel.status.is_some() => self
+                .pickers
+                .status_search_input
+                .read(cx)
+                .value()
+                .trim()
+                .to_string(),
             PanelTab::Emoji if self.pickers.media_panel.reaction.is_some() => self
                 .pickers
                 .reaction_search_input
@@ -423,6 +440,7 @@ impl QuillApp {
         let key = PanelKey {
             tab: self.pickers.media_panel.tab,
             reaction: self.pickers.media_panel.reaction.is_some(),
+            status: self.pickers.media_panel.status.is_some(),
             query: query.clone(),
             session_revision: self.session().map_or(0, |s| s.revision),
             recent_emoji: self
@@ -450,6 +468,7 @@ impl QuillApp {
             .is_none_or(|old| old.category != key.category);
         let (rows, sections) = match key.tab {
             PanelTab::Emoji if key.reaction => self.build_reaction_rows(&query),
+            PanelTab::Emoji if key.status => self.build_status_rows(&query),
             PanelTab::Emoji => self.build_emoji_rows(&query),
             PanelTab::Stickers => self.build_sticker_rows(&query),
             PanelTab::Gifs => (Vec::new(), Vec::new()),
@@ -581,79 +600,6 @@ impl QuillApp {
         // Custom emoji packs after the standard emoji.
         if let Some(session) = session.filter(|_| !unicode_only) {
             push_custom_packs(&mut rows, &mut sections, session, None);
-        }
-        (rows, sections)
-    }
-
-    /// Telegram Desktop's full reaction selector: every reaction the
-    /// message allows, then (when the chat allows custom emoji) the
-    /// installed custom emoji packs. The search filters both.
-    fn build_reaction_rows(&self, query: &str) -> (Vec<PanelRow>, Vec<PanelSection>) {
-        use quill::state::ReactionChoice;
-        let mut rows = Vec::new();
-        let mut sections = Vec::new();
-        let (Some(session), Some(target)) = (self.session(), self.pickers.media_panel.reaction)
-        else {
-            return (rows, sections);
-        };
-        let Some(options) = session
-            .stickers
-            .message_reaction_options
-            .ready_for(target.chat_id, target.message_id)
-        else {
-            return (rows, sections);
-        };
-        // Emoji matching the search (variation selectors ignored).
-        let strip = |e: &str| e.replace('\u{fe0f}', "");
-        let matches: Option<std::collections::HashSet<String>> = (!query.is_empty()).then(|| {
-            quill::emoji_catalog::search(None, query)
-                .map(|entry| strip(entry.emoji))
-                .chain(
-                    session
-                        .stickers
-                        .emoji
-                        .keyword_emojis
-                        .iter()
-                        .map(|e| strip(e)),
-                )
-                .collect()
-        });
-        let wanted = |emoji: &str| {
-            matches
-                .as_ref()
-                .is_none_or(|set| set.contains(&strip(emoji)))
-        };
-        let cells: Vec<PanelCell> = options
-            .all()
-            .into_iter()
-            .filter_map(|choice| match choice {
-                ReactionChoice::Emoji(emoji) => wanted(&emoji)
-                    .then(|| PanelCell::Emoji(super::reactions::emoji_presentation(&emoji).into())),
-                ReactionChoice::CustomEmoji(id) => {
-                    let (ix, sticker) = session
-                        .stickers
-                        .emoji
-                        .custom_emoji_stickers
-                        .iter()
-                        .enumerate()
-                        .find(|(_, item)| item.custom_emoji_id == Some(id))?;
-                    wanted(&sticker.emoji).then_some(PanelCell::Custom {
-                        source: StickerSource::CustomEmoji,
-                        ix,
-                    })
-                }
-            })
-            .collect();
-        if !cells.is_empty() {
-            sections.push(PanelSection {
-                label: tr(keys::Q_MISC_REACTIONS).into(),
-                icon: SectionIcon::Glyph(gpui_kit::assets::IconName::Heart),
-                first_row: rows.len(),
-            });
-            push_grid(&mut rows, cells, EMOJI_COLS, false);
-        }
-        if options.allow_custom_emoji {
-            push_custom_packs(&mut rows, &mut sections, session, matches.as_ref());
         }
         (rows, sections)
     }
@@ -839,6 +785,7 @@ impl QuillApp {
                             }
                             None => placeholder_cell(STICKER_CELL, cx),
                         },
+                        PanelCell::StatusRemove => self.status_remove_cell(id, cx),
                         PanelCell::Placeholder { set_id } => {
                             need_sets.push(set_id);
                             placeholder_cell(if sticker { STICKER_CELL } else { EMOJI_CELL }, cx)
@@ -992,6 +939,14 @@ fn placeholder_cell(size: f32, cx: &App) -> AnyElement {
 
 mod categories;
 mod custom_emoji_cell;
+mod reaction_rows;
+mod status;
+mod status_time_box;
+#[cfg(feature = "demo-capture")]
+mod status_demo;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod status_tests;
 pub(in crate::ui) use custom_emoji_cell::section_chip;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]

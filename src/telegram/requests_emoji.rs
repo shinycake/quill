@@ -27,6 +27,39 @@ pub fn set_emoji_status(
     .to_string()
 }
 
+/// `setEmojiStatus` with a collectible: the status type is the upgraded gift
+/// the selector's Collectibles section listed (`emojiStatusTypeUpgradedGift`).
+pub fn set_collectible_emoji_status(
+    extra: RequestId,
+    gift: &crate::telegram::UpgradedGiftEmojiStatus,
+    expiration_date: i32,
+) -> String {
+    json!({
+        "@type": "setEmojiStatus",
+        "@extra": extra.as_extra(),
+        "emoji_status": {
+            "@type": "emojiStatus",
+            "type": {
+                "@type": "emojiStatusTypeUpgradedGift",
+                "upgraded_gift_id": gift.upgraded_gift_id.to_string(),
+                "gift_title": gift.gift_title,
+                "gift_name": gift.gift_name,
+                "model_custom_emoji_id": gift.model_custom_emoji_id.to_string(),
+                "symbol_custom_emoji_id": gift.symbol_custom_emoji_id.to_string(),
+                "backdrop_colors": {
+                    "@type": "upgradedGiftBackdropColors",
+                    "center_color": gift.backdrop_center_color,
+                    "edge_color": gift.backdrop_edge_color,
+                    "symbol_color": gift.backdrop_symbol_color,
+                    "text_color": gift.backdrop_text_color,
+                },
+            },
+            "expiration_date": expiration_date,
+        },
+    })
+    .to_string()
+}
+
 /// Slice S10: `getRecentEmojiStatuses` (TDLib 1.8.67, line 13957).
 /// Response is `emojiStatuses`.
 pub fn get_recent_emoji_statuses(extra: RequestId) -> String {
