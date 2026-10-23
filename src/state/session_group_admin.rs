@@ -87,17 +87,19 @@ pub struct GroupAdminControls {
     pub reactions: bool,
     /// Offer the explicit "Upgrade to supergroup" action.
     pub upgrade: bool,
-    /// Owner of a supergroup or channel with more than one username to
-    /// manage (tdesktop's "Link order" list).
-    pub usernames: bool,
     /// Administrator of a supergroup or channel: boosts list and link.
     pub boosts: bool,
 }
 
 impl GroupAdminControls {
-    /// Nothing to show.
+    /// Nothing for the settings dialog to show. Join-to-send and content
+    /// protection are rights the Type box uses; the dialog doesn't show them.
     pub fn is_empty(&self) -> bool {
-        *self == Self::default()
+        Self {
+            join_to_send: false,
+            protected_content: false,
+            ..*self
+        } == Self::default()
     }
 }
 
@@ -304,10 +306,6 @@ impl Session {
             }
             _ => GroupAdminControls::default(),
         };
-        controls.usernames = owner
-            && self
-                .chat_usernames(chat_id)
-                .is_some_and(|lists| lists.is_manageable());
         controls.boosts = self.chat_can_view_boosts(chat_id);
         controls
     }

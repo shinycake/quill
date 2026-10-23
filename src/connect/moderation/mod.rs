@@ -224,29 +224,38 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(Some(extra))
     }
 
-    /// Slice G1: `toggleSupergroupJoinByRequest` (schema 1.8.67, line
-    /// 15188) — whether directly joining the supergroup needs admin
-    /// approval. Requires the `can_restrict_members` administrator right
-    /// (line 15182); not for broadcast groups or channels. Applied
-    /// optimistically; `updateSupergroup` confirms.
+    /// `toggleSupergroupJoinByRequest` (schema/td_api.tl:16284) — whether
+    /// directly joining the supergroup or channel needs admin approval
+    /// (tdesktop "Approve new members" / "Approve new subscribers").
+    /// Requires the `can_restrict_members` administrator right; not for
+    /// broadcast groups. Applied optimistically; `updateSupergroup`
+    /// confirms.
     pub fn toggle_supergroup_join_by_request(
         &mut self,
         chat_id: ChatId,
         join_by_request: bool,
+        apply_to_invite_links: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let supergroup_id = match self.session.chats.get(&chat_id.0) {
             Some(chat) => match chat.kind {
-                ChatKind::Supergroup {
-                    supergroup_id,
-                    is_channel: false,
-                } => supergroup_id,
+                ChatKind::Supergroup { supergroup_id, .. } => supergroup_id,
                 _ => return Ok(None),
             },
             None => return Ok(None),
         };
+        if self
+            .session
+            .groups
+            .supergroup_is_broadcast
+            .get(&supergroup_id)
+            .copied()
+            .unwrap_or(false)
+        {
+            return Ok(None);
+        }
         if !self.session.chat_can_restrict_members(chat_id) {
             return Ok(None);
         }
@@ -259,6 +268,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra,
             supergroup_id,
             join_by_request,
+            apply_to_invite_links,
         )) {
             self.session.requests.take(extra);
             return Err(err);

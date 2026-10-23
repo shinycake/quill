@@ -26,6 +26,7 @@ use gpui_kit::*;
 use quill::group_info_edit::{
     DESCRIPTION_MAX, GroupInfoFields, GroupInfoInvalid, TITLE_MAX, plan_group_info_save,
 };
+use quill::group_type::{GroupTypeData, plan_group_type_save};
 use quill::ids::{ChatId, RequestId};
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{GroupInfoField, Session};
@@ -53,6 +54,10 @@ pub(crate) struct GroupEditBox {
     saving: Option<Vec<RequestId>>,
     /// Save found the name empty (tdesktop `validateTitle`).
     title_empty: bool,
+    /// The Type box, open over this one.
+    pub(crate) type_box: Option<crate::ui::group_type_box::GroupTypeBox>,
+    /// What the Type box's Save chose; sent with this box's Save.
+    pub(crate) type_choice: Option<GroupTypeData>,
 }
 
 /// Where a box is, derived from its requests and TDLib's answers.
@@ -86,6 +91,17 @@ impl GroupEditBox {
                 reason: error.reason.clone(),
             },
             _ => EditBoxState::Saved,
+        }
+    }
+
+    /// Why TDLib refused the link of the last Save.
+    pub(crate) fn username_failure(&self, session: Option<&Session>) -> Option<String> {
+        match self.state(session) {
+            EditBoxState::Failed {
+                field: GroupInfoField::Username,
+                reason,
+            } => Some(reason),
+            _ => None,
         }
     }
 
@@ -187,6 +203,8 @@ impl QuillApp {
             saving: None,
             title_empty: false,
             title_emoji: false,
+            type_box: None,
+            type_choice: None,
         });
         cx.notify();
     }
@@ -237,7 +255,19 @@ impl QuillApp {
             // The field's counter is already red; Save waits.
             Err(GroupInfoInvalid::DescriptionTooLong) => return,
         };
-        if edits.is_empty() {
+        let basic = matches!(
+            session
+                .and_then(|s| s.chats.get(&chat_id.0))
+                .map(|chat| &chat.kind),
+            Some(ChatKind::BasicGroup { .. })
+        );
+        let type_edits = match (&edit.type_choice, session) {
+            (Some(wanted), Some(session)) => {
+                plan_group_type_save(&session.group_type_current(chat_id), wanted, basic)
+            }
+            _ => Vec::new(),
+        };
+        if edits.is_empty() && type_edits.is_empty() {
             self.admin.group_edit_box = None;
             cx.notify();
             return;
@@ -249,7 +279,7 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        let sent = live.driver.save_group_info(chat_id, &edits);
+        let sent = live.driver.save_group_type(chat_id, &type_edits, &edits);
         let Some(edit) = self.admin.group_edit_box.as_mut() else {
             return;
         };
@@ -257,10 +287,10 @@ impl QuillApp {
             Ok(sent) => {
                 // The photo uploads after the box closes, as in tdesktop.
                 edit.photo = None;
-                if sent.text.is_empty() {
+                if sent.is_empty() {
                     self.admin.group_edit_box = None;
                 } else {
-                    edit.saving = Some(sent.text);
+                    edit.saving = Some(sent);
                 }
             }
             Err(err) => {

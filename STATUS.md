@@ -562,9 +562,9 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Group and channel Edit box: photo, name with emoji, description, Save, and the management rows <!-- parity:admin-edit-box -->
 - [x] Crop step after choosing a profile, group or channel photo <!-- parity:admin-photo-crop -->
 - [x] Group and channel photo from the camera, an emoji avatar or a video <!-- parity:groups-photo-sources -->
-- [ ] Group and channel type box: public or private, link with live availability check <!-- parity:admin-type-box -->
-- [ ] Channels can set a public link <!-- parity:channel-public-link -->
-- [ ] Public link availability and validation messages (checkChatUsername) <!-- parity:admin-link-availability -->
+- [x] Group and channel type box: public or private, link with live availability check <!-- parity:admin-type-box -->
+- [x] Channels can set a public link <!-- parity:channel-public-link -->
+- [x] Public link availability and validation messages (checkChatUsername) <!-- parity:admin-link-availability -->
 - [ ] Group and channel info action buttons: Mute, Join, Discuss, Manage, Video chat, Gift, Report, Leave <!-- parity:groups-info-action-row -->
 - [x] Permissions box grouped like tdesktop, with media sub-permissions, slow mode and boost unrestrict <!-- parity:admin-permissions-groups -->
 - [x] Add an exception and add a removed user from the permissions screens <!-- parity:admin-exceptions-add -->

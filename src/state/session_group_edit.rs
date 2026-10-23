@@ -74,20 +74,35 @@ impl Session {
         let Some(pending) = pending else {
             return;
         };
-        let field = match pending.purpose {
-            RequestPurpose::SetChatTitle => GroupInfoField::Title,
-            RequestPurpose::SetChatDescription => GroupInfoField::Description,
-            RequestPurpose::SetChatPhoto => GroupInfoField::Photo,
+        let (field, reason) = match pending.purpose {
+            RequestPurpose::SetChatTitle => (
+                GroupInfoField::Title,
+                super::request_errors::error_reason(err),
+            ),
+            RequestPurpose::SetChatDescription => (
+                GroupInfoField::Description,
+                super::request_errors::error_reason(err),
+            ),
+            RequestPurpose::SetChatPhoto => (
+                GroupInfoField::Photo,
+                super::request_errors::error_reason(err),
+            ),
+            RequestPurpose::SetSupergroupUsername if err.premium_limit.is_some() => return,
+            RequestPurpose::SetSupergroupUsername => {
+                match crate::group_type::username_save_problem(err.server_type.as_deref()) {
+                    Some(problem) => (
+                        GroupInfoField::Username,
+                        crate::lang::tr(problem.text()).to_string(),
+                    ),
+                    None => return,
+                }
+            }
             _ => return,
         };
         if let Some(chat_id) = pending.chat_id {
-            self.groups.info_edit_errors.insert(
-                chat_id.0,
-                GroupInfoEditError {
-                    field,
-                    reason: super::request_errors::error_reason(err),
-                },
-            );
+            self.groups
+                .info_edit_errors
+                .insert(chat_id.0, GroupInfoEditError { field, reason });
         }
     }
 }

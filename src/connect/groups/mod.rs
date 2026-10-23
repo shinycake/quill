@@ -25,6 +25,7 @@ mod boost_flow;
 mod boosts;
 mod community;
 mod forum;
+mod group_type;
 mod info_edit;
 mod supergroup;
 mod welcome;

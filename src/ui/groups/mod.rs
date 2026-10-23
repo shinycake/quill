@@ -595,17 +595,6 @@ impl QuillApp {
             })
     }
 
-    /// Slice G1: cached public username for a supergroup/channel chat.
-    pub(super) fn chat_username(&self, chat_id: ChatId) -> String {
-        self.chat_supergroup_id(chat_id)
-            .and_then(|id| {
-                self.session()
-                    .and_then(|session| session.supergroup_username(id))
-                    .map(str::to_string)
-            })
-            .unwrap_or_default()
-    }
-
     /// Slice G1: cached join-by-request flag for a supergroup chat.
     pub(super) fn chat_join_by_request(&self, chat_id: ChatId) -> bool {
         self.chat_supergroup_id(chat_id).is_some_and(|id| {
@@ -826,24 +815,6 @@ impl QuillApp {
             },
             None => StatusNote::info(tr(keys::Q_PEOPLE_COMMUNITY_PERMISSIONS_NEED_A_LIVE)),
         });
-        cx.notify();
-    }
-
-    pub(super) fn open_username_dialog(
-        &mut self,
-        chat_id: ChatId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let current = self.chat_username(chat_id);
-        self.admin.username_dialog = Some(UsernameDialog::new(
-            window,
-            cx,
-            chat_id,
-            TextPromptKind::Username,
-            &current,
-            tr(keys::Q_PEOPLE_PUBLIC_USERNAME_EMPTY_REMOVE),
-        ));
         cx.notify();
     }
 }
