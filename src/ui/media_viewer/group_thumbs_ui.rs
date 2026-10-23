@@ -1,15 +1,17 @@
-//! An album's thumbnail strip, the bottom row of the viewer's bottom band
-//! (tdesktop `GroupThumbs`). `quill::media_viewer::group_strip` lays it out
-//! from the viewer state; this draws it, slides it to a new current thumb,
-//! and opens the item of a clicked one.
+//! The thumbnail strip of an album or a profile photo gallery, the bottom
+//! row of the viewer's bottom band (tdesktop `GroupThumbs`).
+//! `quill::media_viewer::group_strip` lays it out from the viewer state;
+//! this draws it, slides it to a new current thumb, opens the item of a
+//! clicked one, and fetches the profile photo thumbs it shows.
 #![deny(clippy::indexing_slicing)]
 
 use super::geometry::{CAPTION_GAP, lane_width};
 use super::*;
 use crate::ui::image_budget::{Fit, sized_media};
+use quill::connect::THUMB_DOWNLOAD_PRIORITY;
 use quill::media_viewer::{
     GROUP_STRIP_PADDING, GROUP_THUMB_HEIGHT, GROUP_THUMB_SLIDE_MS, GROUP_THUMB_WIDTH_MAX,
-    GroupStrip, ThumbFrame, strip_frames,
+    GroupStrip, ThumbFrame, strip_frames, thumb_file_ids,
 };
 
 /// What a thumb shows until its picture is local (or if it fails to load).
@@ -61,7 +63,7 @@ impl QuillApp {
                 continue;
             };
             pictures.entry(position).or_insert_with(|| ThumbPicture {
-                path: files.and_then(|files| viewer_display_path(item, files, &roots)),
+                path: files.and_then(|files| thumb_path(item, files, &roots)),
                 natural: item.natural_size,
                 label: item.kind.label(),
             });
@@ -96,6 +98,29 @@ impl QuillApp {
         Some(row.into_any_element())
     }
 
+    /// Ask for the profile photo thumbs the strip shows that are not local
+    /// yet, at the width the last frame laid it out in. Opening, a step
+    /// and the poll loop call it; the driver drops what is local or on its
+    /// way.
+    pub(in crate::ui) fn download_viewer_strip_thumbs(&mut self) {
+        let Some(lane) = self.viewer.extra.strip_lane else {
+            return;
+        };
+        let wanted = self.viewer.state.strip_downloads(lane);
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        for file_id in wanted {
+            if live
+                .driver
+                .download_file(file_id, THUMB_DOWNLOAD_PRIORITY)
+                .is_err()
+            {
+                break;
+            }
+        }
+    }
+
     /// A click on a thumb: open its item, as the arrows do.
     fn open_viewer_group_item(&mut self, index: usize, cx: &mut Context<Self>) {
         self.viewer.state.go_to(index);
@@ -103,6 +128,20 @@ impl QuillApp {
         self.reset_viewer_item_state(cx);
         cx.notify();
     }
+}
+
+/// The local picture a thumb draws, if any (`thumb_file_ids` order).
+fn thumb_path(
+    item: &MediaViewerItem,
+    files: &quill::state::FileMap,
+    roots: &[PathBuf],
+) -> Option<PathBuf> {
+    thumb_file_ids(item).into_iter().find_map(|id| {
+        files
+            .get(&id.0)
+            .and_then(|file| file.usable_path())
+            .and_then(|path| sandboxed_display_path(path, roots))
+    })
 }
 
 /// One thumb at its place in the row (`half` from the row's left edge to

@@ -157,6 +157,7 @@ impl QuillApp {
         let Some(owner) = self.viewer.extra.profile_owner else {
             return false;
         };
+        self.download_viewer_strip_thumbs();
         let gallery = self.session().and_then(|s| s.photo_gallery(owner));
         let mut changed = false;
         if let Some(gallery) = &gallery
