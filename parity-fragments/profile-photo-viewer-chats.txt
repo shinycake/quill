@@ -1,2 +1,0 @@
-# Profile photo viewer for groups, channels and users: current photo, history, paging, delete
-parity:profile-photo-gallery
