@@ -834,6 +834,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.maybe_download_chat_list_photos()?;
         self.maybe_download_profile_thumbs()?;
         let _ = self.refresh_stale_playlists();
+        self.pump_sticker_manager();
         let _ = self.maybe_download_attach_bot_icons();
         let _ = self.pump_location_picker();
         // Phase B1: secret chats whose state never arrived via

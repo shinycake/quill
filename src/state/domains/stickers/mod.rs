@@ -3,12 +3,14 @@ mod apply;
 mod creator;
 mod error;
 mod interaction;
+mod manager;
 mod masks;
 mod message_effects;
 mod purpose;
 mod state;
 
 pub use creator::*;
+pub use manager::*;
 pub use masks::*;
 pub use purpose::*;
 

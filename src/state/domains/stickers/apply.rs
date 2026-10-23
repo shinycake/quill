@@ -19,6 +19,9 @@ impl Session {
                 self.stickers.reaction_options_stale = true;
             }
             StickersPayload::StickerSets { sets, .. } => {
+                for set in &sets {
+                    self.remember_files(&set.cover_files);
+                }
                 if matches!(
                     pending.map(|p| p.purpose),
                     Some(RequestPurpose::Stickers(
@@ -111,6 +114,9 @@ impl Session {
                 is_premium,
                 total_count,
             } => {
+                for set in &sets {
+                    self.remember_files(&set.cover_files);
+                }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingStickerSets) {
                     self.stickers.stickers.trending_total = total_count.max(0) as usize;
                     self.accept_trending_sticker_sets(sets, is_premium);

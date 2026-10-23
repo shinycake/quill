@@ -73,6 +73,7 @@ impl QuillApp {
                     is_owned: true,
                     covers: Vec::new(),
                     cover_files: Vec::new(),
+                    is_viewed: true,
                 });
             let mut view = StickerSetView::loading(78);
             view.stage = StickerSetViewStage::Ready {

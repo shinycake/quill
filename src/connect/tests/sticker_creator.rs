@@ -361,6 +361,7 @@ fn an_emoji_set_toasts_emoji_added_even_without_a_box() {
             is_owned: true,
             covers: Vec::new(),
             cover_files: Vec::new(),
+            is_viewed: true,
         });
     assert_eq!(
         driver.session.owned_sticker_set(88),

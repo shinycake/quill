@@ -94,6 +94,7 @@ mod stars_gift;
 mod stats;
 mod sticker_categories;
 mod sticker_creator;
+mod sticker_manager;
 mod stickers;
 mod stories;
 mod story_insights;

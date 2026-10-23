@@ -239,6 +239,7 @@ impl QuillApp {
                         })
                         .collect(),
                     cover_files: Vec::new(),
+                    is_viewed: true,
                 }
             };
             session.stickers.emoji.installed_sets = vec![

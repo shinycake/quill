@@ -16,7 +16,7 @@ const STRIP_STICKERS: usize = 24;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Send one mask request unless the same one is already in flight.
-    fn mask_request(
+    pub(super) fn mask_request(
         &mut self,
         purpose: RequestPurpose,
         build: impl FnOnce(RequestId) -> String,
