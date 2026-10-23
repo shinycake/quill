@@ -378,7 +378,8 @@ impl Session {
                     matches!(chat.kind, ChatKind::BasicGroup { basic_group_id: id } if id == basic_group_id)
                 })
                 .map(|chat| PhotoOwner::Chat(chat.id)),
-            InfoPanelTarget::Statistics(_)
+            InfoPanelTarget::SavedMessages
+            | InfoPanelTarget::Statistics(_)
             | InfoPanelTarget::Community(_)
             | InfoPanelTarget::Earn(_) => None,
         }

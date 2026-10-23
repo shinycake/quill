@@ -160,7 +160,7 @@ impl QuillApp {
                 this.chat_list.menu = None;
                 if let Some(target) = this
                     .session()
-                    .and_then(|session| session.info_panel_target_for_chat(chat_id))
+                    .and_then(|session| session.chat_info_target(chat_id))
                 {
                     this.open_info_panel_target(target, window, cx);
                 }

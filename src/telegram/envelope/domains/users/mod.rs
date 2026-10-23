@@ -18,6 +18,8 @@ pub enum UsersPayload {
     UpdateUserStatus {
         user_id: UserId,
         status: UserStatusKind,
+        /// `by_my_privacy_settings` of the status.
+        hidden_by_me: bool,
     },
     /// `users` — `getContacts` response (schema 1.8.67, line 2471). Only
     /// the ids are authoritative here; the user objects themselves arrive
@@ -70,6 +72,8 @@ pub enum UsersPayload {
         blocked: bool,
         /// `share_theme`: the QR box's saved theme.
         share_theme: crate::peer_qr::theme::ShareTheme,
+        /// `rating`, `pending_rating` and `pending_rating_date`.
+        ratings: crate::stars_rating::UserRatings,
     },
     /// `updateUserFullInfo` — full info changed (schema 1.8.67, line 10744);
     /// the user id is explicit here.
@@ -86,6 +90,8 @@ pub enum UsersPayload {
         blocked: bool,
         /// `share_theme`, as above.
         share_theme: crate::peer_qr::theme::ShareTheme,
+        /// The ratings, as above.
+        ratings: crate::stars_rating::UserRatings,
     },
     /// `profileShareThemeBackdrops`: the `getProfileShareThemeBackdrops`
     /// answer.

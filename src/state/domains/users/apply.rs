@@ -30,10 +30,15 @@ impl Session {
                     self.bots.bot_info.remove(&user_id.0);
                 }
             }
-            UsersPayload::UpdateUserStatus { user_id, status } => {
+            UsersPayload::UpdateUserStatus {
+                user_id,
+                status,
+                hidden_by_me,
+            } => {
                 // Phase 6: live online / last-seen for the contacts list.
                 if let Some(user) = self.users.get_mut(&user_id.0) {
                     user.status = status;
+                    user.status_hidden_by_me = hidden_by_me;
                 }
             }
             UsersPayload::Users { user_ids } => {
@@ -153,6 +158,7 @@ impl Session {
                 photo_id,
                 blocked,
                 share_theme,
+                ratings,
             } => {
                 // The answer names no user: the request does (as in
                 // `apply_user_full_info`).
@@ -172,7 +178,12 @@ impl Session {
                 }
                 self.apply_user_full_info(
                     bot_info, bio, photo, photo_id, blocked, extras, pending, extra, seq,
-                )
+                );
+                if let Some(info) =
+                    user_id.and_then(|id| self.users_state.user_full_infos.get_mut(&id))
+                {
+                    info.ratings = ratings;
+                }
             }
             UsersPayload::UpdateUserFullInfo {
                 user_id,
@@ -183,6 +194,7 @@ impl Session {
                 photo_id,
                 blocked,
                 share_theme,
+                ratings,
             } => {
                 self.keep_share_theme(
                     crate::peer_qr::theme::ThemeOwner::User(user_id.0),
@@ -203,6 +215,7 @@ impl Session {
                         photo_id,
                         blocked,
                         extras,
+                        ratings,
                     },
                 );
             }

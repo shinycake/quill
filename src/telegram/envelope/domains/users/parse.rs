@@ -32,6 +32,9 @@ pub(crate) fn parse_users_payload(
         "updateUserStatus" => Ok(EnvelopePayload::Users(UsersPayload::UpdateUserStatus {
             user_id: UserId(int53(value.get("user_id"))?),
             status: parse_user_status(value.get("status")),
+            hidden_by_me: crate::telegram::envelope::users::status_hidden_by_me(
+                value.get("status"),
+            ),
         })),
         // `foundUsers` (`getGrossingWebAppBots`) carries the same ids.
         "users" | "foundUsers" => Ok(EnvelopePayload::Users(UsersPayload::Users {
@@ -86,6 +89,7 @@ pub(crate) fn parse_users_payload(
             photo_id: int53(value.get("photo").and_then(|p| p.get("id"))).ok(),
             blocked: is_block_list_main(value.get("block_list")),
             share_theme: crate::peer_qr::theme::parse_share_theme(value.get("share_theme")),
+            ratings: crate::stars_rating::parse_user_ratings(Some(value)),
         })),
         "updateUserFullInfo" => Ok(EnvelopePayload::Users(UsersPayload::UpdateUserFullInfo {
             user_id: UserId(int53(value.get("user_id"))?),
@@ -118,6 +122,7 @@ pub(crate) fn parse_users_payload(
                     .get("user_full_info")
                     .and_then(|info| info.get("share_theme")),
             ),
+            ratings: crate::stars_rating::parse_user_ratings(value.get("user_full_info")),
         })),
         "profileShareThemeBackdrops" => Ok(EnvelopePayload::Users(
             UsersPayload::ProfileShareThemeBackdrops(parse_share_theme_backdrops(value)),

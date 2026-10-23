@@ -18,6 +18,8 @@ pub struct UserFullInfoData {
     pub blocked: bool,
     /// Birthday and groups in common (`userFullInfo`).
     pub extras: crate::telegram::envelope::UserProfileExtras,
+    /// The Stars rating (`rating`, `pending_rating`).
+    pub ratings: crate::stars_rating::UserRatings,
 }
 
 /// B10: which chat-id list a profile panel fetched. The key of

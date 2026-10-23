@@ -101,6 +101,10 @@ fn title_follows_the_peer_and_a_verified_channel_shows_its_badge(cx: &mut TestAp
     );
     assert_eq!(
         titled(InfoPanelTarget::User(777)),
+        Some(tr(keys::INFO_USER_TITLE))
+    );
+    assert_eq!(
+        titled(InfoPanelTarget::SavedMessages),
         Some(tr(keys::SAVED_MESSAGES))
     );
     let badges = app.read_with(vcx, |app, _| {

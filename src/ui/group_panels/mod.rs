@@ -223,8 +223,15 @@ impl QuillApp {
                     if live.driver.session.my_user_id != Some(user_id) {
                         let _ = live.driver.fetch_groups_in_common(user_id);
                     }
+                    // The cover's story ring, for someone outside the story
+                    // lists TDLib keeps current.
+                    if !live.driver.session.stories.tray.contains_key(&user_id) {
+                        let _ = live.driver.get_chat_active_stories(ChatId(user_id));
+                    }
                     live.driver.fetch_user_full_info(user_id).map(|_| ())
                 }
+                // The Saved Messages cover counts its chats.
+                InfoPanelTarget::SavedMessages => live.driver.load_saved_topics().map(|_| ()),
                 InfoPanelTarget::Supergroup(supergroup_id) => {
                     let mut result = live
                         .driver
@@ -375,7 +382,9 @@ impl QuillApp {
         let counts = session
             .open_chat
             .filter(|chat_id| {
-                session.info_panel_target_for_chat(*chat_id) == session.users_state.open_info_panel
+                let open = session.users_state.open_info_panel;
+                session.chat_info_target(*chat_id) == open
+                    || session.info_panel_target_for_chat(*chat_id) == open
             })
             .and_then(|chat_id| session.media.chat_media_counts.get(&chat_id.0));
         let icons = [
@@ -554,6 +563,12 @@ impl QuillApp {
                 tr(person_info_title(self.session()?, user_id)),
                 self.user_info_panel(user_id, cx),
             ),
+            InfoPanelTarget::SavedMessages => (
+                tr(keys::SAVED_MESSAGES),
+                self.saved_messages_cover(cx)
+                    .children(self.media_counts_section(0, cx))
+                    .into_any_element(),
+            ),
             InfoPanelTarget::Supergroup(supergroup_id) => (
                 tr(supergroup_info_title(self.session()?, supergroup_id)),
                 self.supergroup_info_panel(supergroup_id, cx),
@@ -667,11 +682,13 @@ mod link_rows;
 mod user_info_panel;
 
 /// The info panel title of a person (`Info::Profile::Widget::title`):
-/// Saved Messages for the viewer, Bot Info for a bot, else User Info.
+/// Bot Info for a bot, else User Info, yourself included (Saved Messages
+/// titles only the Saved Messages chat's info).
 pub(super) fn person_info_title(session: &Session, user_id: i64) -> quill::lang::Key {
-    if session.my_user_id == Some(user_id) {
-        keys::SAVED_MESSAGES
-    } else if session.user(user_id).is_some_and(|u| u.is_bot) {
+    if session
+        .user(user_id)
+        .is_some_and(|u| u.is_bot && !u.is_support)
+    {
         keys::INFO_BOT_TITLE
     } else {
         keys::INFO_USER_TITLE
