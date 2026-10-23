@@ -21,6 +21,7 @@ pub(crate) fn parse_bots_payload(
             let inline_query_id = int64(value.get("inline_query_id")).unwrap_or(0);
             let mut results = Vec::new();
             let mut animations = Vec::new();
+            let mut venues = Vec::new();
             let mut files: Vec<ParsedFile> = Vec::new();
             if let Some(entries) = value.get("results").and_then(Value::as_array) {
                 for entry in entries {
@@ -37,6 +38,7 @@ pub(crate) fn parse_bots_payload(
                             animations.push(item);
                         }
                     }
+                    venues.extend(crate::location_picker::venues::parse_venue_result(entry));
                 }
             }
             // An animation's thumbnail arrives with its result and again
@@ -52,6 +54,7 @@ pub(crate) fn parse_bots_payload(
                         .map(parse_inline_query_results_button),
                     results,
                     animations,
+                    venues,
                     files,
                     next_offset: value
                         .get("next_offset")

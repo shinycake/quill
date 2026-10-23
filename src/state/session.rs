@@ -112,6 +112,8 @@ pub struct Session {
     pub payments: Box<PaymentsState>,
     /// Read-only TON wallet state (`crate::ton_wallet`).
     pub ton_wallet: crate::ton_wallet::TonWalletState,
+    /// Send Location's map picker and venue bot (`crate::location_picker`).
+    pub location: crate::location_picker::LocationSharing,
     /// Global search, search in chat and date jumps.
     /// Declared in `src/state/domains/search/state.rs`.
     pub search: SearchDomainState,

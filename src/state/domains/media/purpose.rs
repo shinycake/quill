@@ -50,6 +50,8 @@ pub enum MediaPurpose {
     /// `getMapThumbnailFile` for a location or venue message. Response is
     /// `file`; the tile's file id is kept per place (`Session::map_thumbs`).
     GetMapThumbnailFile,
+    /// Send Location's map picker: its venue bot, venues, tiles and icons.
+    LocationPicker(crate::location_picker::LocationPickerPurpose),
 }
 
 flat_purposes!(Media(MediaPurpose) {
