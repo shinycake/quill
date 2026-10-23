@@ -130,7 +130,6 @@
 "qll_leftovers_sent_received" = "Sent {sent} · received {received}";
 "qll_leftovers_share_contact_with" = "Share {name}'s contact with {chat}?";
 "qll_leftovers_stars_balance_is" = "Your balance is ★{amount}.";
-"qll_leftovers_sticker_set_size" = "{count} stickers";
 "qll_leftovers_stickers" = "stickers";
 "qll_leftovers_terms_delete_warning" = "Warning, this will irreversibly delete your Telegram account and all the data you store in the Telegram cloud.\n\nImportant: You can Cancel now and export your data first instead of losing it. (To do this, open Settings › Data & Storage › Export Telegram data.)";
 "qll_leftovers_thinking" = "Thinking…";

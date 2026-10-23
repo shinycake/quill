@@ -29,6 +29,8 @@ pub(crate) struct PickerUi {
     pub(super) gif_keystroke: u64,
     pub(super) gif_scroll: ScrollHandle,
     pub(super) sticker_search_input: Entity<TextareaState>,
+    /// The stickers manager box: removals, dragged order and scroll.
+    pub(super) sticker_manager: super::stickers_manager::StickersManagerUi,
 }
 
 impl PickerUi {
@@ -93,6 +95,7 @@ impl PickerUi {
             gif_keystroke: 0,
             gif_scroll: ScrollHandle::new(),
             sticker_search_input,
+            sticker_manager: Default::default(),
         }
     }
 }

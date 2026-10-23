@@ -1,41 +1,22 @@
 //! Sticker collection picker and set management.
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
-use super::dialogs::GroupConfirmAction;
 use super::pressable::PressableDiv;
 use super::*;
-use super::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
-use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Textarea;
-use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu, PopupMenuItem};
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::ids::{ChatId, FileId};
+use quill::ids::FileId;
 use quill::lang::{keys, tr, tr_with, trn};
 use quill::local_path::sandboxed_display_path;
 use quill::state::StickersPurpose;
 use quill::state::{RequestPurpose, StickerTab};
-use std::cell::RefCell;
-use std::rc::Rc;
 
 impl QuillApp {
-    fn batch_install_sticker_sets(&mut self, ids: &[i64], cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            self.connection
-                .set_note(match live.driver.manage_sticker_sets(ids, true) {
-                    Ok(sent) => StatusNote::silent(tr_with(
-                        keys::Q_MEDIA_INSTALLING_STICKER_SETS,
-                        &[("sent", &sent.to_string())],
-                    )),
-                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_START_STICKER_BATCH)),
-                });
-        }
-        cx.notify();
-    }
-
     pub(super) fn sync_sticker_suggestions(&mut self, text: &str, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut()
             && live.driver.update_sticker_suggestions(text).is_err()
@@ -85,7 +66,7 @@ impl QuillApp {
         Some(row.into_any_element())
     }
 
-    fn set_sticker_suggest_mode(
+    pub(super) fn set_sticker_suggest_mode(
         &mut self,
         mode: quill::sticker_suggest::StickerSuggestMode,
         cx: &mut Context<Self>,
@@ -306,73 +287,6 @@ impl QuillApp {
         )
     }
 
-    pub(super) fn open_archived_stickers(&mut self, cx: &mut Context<Self>) {
-        self.settings.sticker_settings_open = true;
-        if let Some(live) = self.live.as_mut() {
-            live.driver.session.stickers.stickers.open = true;
-        } else if let Some(session) = self.demo_session.as_mut() {
-            session.stickers.stickers.open = true;
-        }
-        self.select_sticker_tab(StickerTab::Archived, cx);
-    }
-
-    pub(super) fn build_archived_stickers_dialog(
-        app: &Entity<QuillApp>,
-        shell: &Entity<QuillShell>,
-        dialog: Dialog,
-        cx: &mut App,
-    ) -> Dialog {
-        let on_close =
-            QuillShell::on_close_kind(app, shell, DialogKind::ArchivedStickers, |this, _, cx| {
-                this.close_sticker_panel(cx)
-            });
-        app.update(cx, |this, cx| {
-            let body = Rc::new(RefCell::new(Some(
-                this.sticker_picker_panel(cx).into_any_element(),
-            )));
-            dialog
-                .overlay(true)
-                .title(crate::ui::shell::dialog_title(tr(
-                    keys::Q_MEDIA_ARCHIVED_STICKERS,
-                )))
-                .content(crate::ui::shell::scrollable_dialog_content(
-                    move |content, _, _| {
-                        content.child(
-                            body.borrow_mut()
-                                .take()
-                                .unwrap_or_else(|| div().into_any_element()),
-                        )
-                    },
-                ))
-                .on_close(on_close)
-        })
-    }
-
-    fn more_archived_stickers(&mut self, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            self.connection
-                .set_note(match live.driver.fetch_archived_stickers(true) {
-                    Ok(_) => StatusNote::info(tr(keys::Q_MEDIA_LOADING_ARCHIVED_STICKERS)),
-                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_LOAD_ARCHIVED_STICKERS)),
-                });
-        }
-        cx.notify();
-    }
-
-    fn archive_sticker_set(&mut self, set_id: i64, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            self.connection
-                .set_note(match live.driver.manage_sticker_set(set_id, false, true) {
-                    Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MEDIA_ARCHIVING_STICKER_SET)),
-                    Ok(None) => {
-                        StatusNote::silent(tr(keys::Q_MEDIA_STICKER_SET_UPDATE_ALREADY_PENDING))
-                    }
-                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_ARCHIVE_STICKER_SET)),
-                });
-        }
-        cx.notify();
-    }
-
     fn select_sticker_tab(&mut self, tab: StickerTab, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.connection
@@ -449,27 +363,13 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn install_sticker_set(&mut self, set_id: i64, cx: &mut Context<Self>) {
+    pub(super) fn install_sticker_set(&mut self, set_id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.connection
                 .set_note(match live.driver.manage_sticker_set(set_id, true, false) {
                     Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MEDIA_INSTALLING_STICKER_SET)),
                     Ok(None) => StatusNote::silent(tr(keys::Q_MEDIA_STICKER_SET_UPDATE_ALREADY_IN)),
                     Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_INSTALL_STICKER_SET)),
-                });
-        }
-        cx.notify();
-    }
-
-    fn reorder_sticker_set(&mut self, source: i64, target: i64, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            self.connection
-                .set_note(match live.driver.reorder_sticker_set(source, target) {
-                    Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MEDIA_SAVING_STICKER_SET_ORDER)),
-                    Ok(None) => {
-                        StatusNote::silent(tr(keys::Q_MEDIA_STICKER_ORDER_UNCHANGED_OR_UPDATE))
-                    }
-                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_REORDER_STICKER_SETS)),
                 });
         }
         cx.notify();
@@ -498,37 +398,13 @@ impl QuillApp {
         let button = Button::new(format!("sticker-{prefix}-action-{set_id}"))
             .disabled(pending)
             .ghost();
-        if set.is_installed {
-            button
-                .label(if pending {
-                    tr(keys::Q_MEDIA_UPDATING)
-                } else {
-                    tr(keys::STICKERS_REMOVE_PACK_CONFIRM)
-                })
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.open_group_confirm(
-                        ChatId(0),
-                        GroupConfirmAction::RemoveStickerSet { set_id },
-                        cx,
-                    )
-                }))
-        } else {
-            button
-                .label(if pending {
-                    tr(keys::Q_MEDIA_INSTALLING)
-                } else if self.session().is_some_and(|s| {
-                    s.stickers
-                        .stickers
-                        .archived
-                        .iter()
-                        .any(|set| set.id == set_id)
-                }) {
-                    tr(keys::EMOJI_PREMIUM_RESTORE)
-                } else {
-                    tr(keys::Q_MEDIA_INSTALL)
-                })
-                .on_click(cx.listener(move |this, _, _, cx| this.install_sticker_set(set_id, cx)))
-        }
+        button
+            .label(if pending {
+                tr(keys::Q_MEDIA_INSTALLING)
+            } else {
+                tr(keys::Q_MEDIA_INSTALL)
+            })
+            .on_click(cx.listener(move |this, _, _, cx| this.install_sticker_set(set_id, cx)))
     }
 
     pub(super) fn sticker_picker_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -550,7 +426,6 @@ impl QuillApp {
             (StickerTab::Favorites, tr(keys::Q_MEDIA_FAVORITES)),
             (StickerTab::Trending, tr(keys::STICKERS_FEATURED_TAB)),
             (StickerTab::Search, tr(keys::Q_MEDIA_SEARCH)),
-            (StickerTab::Archived, tr(keys::STICKERS_ARCHIVED_TAB)),
         ] {
             tabs = tabs.child(
                 Button::new(format!("sticker-tab-{tab:?}"))
@@ -561,16 +436,17 @@ impl QuillApp {
                     .on_click(cx.listener(move |this, _, _, cx| this.select_sticker_tab(tab, cx))),
             );
         }
-        let mode = self
-            .session()
-            .map(|s| s.settings.media_prefs.sticker_suggest_mode)
-            .unwrap_or_default();
+        let on_recent = panel.tab == StickerTab::Recent && !panel.recent.is_empty();
+        let clear_recent = Button::new("clear-recent-stickers")
+            .label(tr(keys::Q_MEDIA_CLEAR_RECENT_STICKERS))
+            .ghost()
+            .small()
+            .on_click(cx.listener(|this, _, _, cx| this.clear_recent_stickers(cx)));
         let query = panel.search_query.to_lowercase();
         let mut seen = std::collections::HashSet::new();
         let visible_sets: Vec<_> = match panel.tab {
             StickerTab::Installed => panel.sets.iter().collect(),
             StickerTab::Trending => panel.trending.iter().collect(),
-            StickerTab::Archived => panel.archived.iter().collect(),
             StickerTab::Search => panel
                 .found_sets
                 .iter()
@@ -583,88 +459,6 @@ impl QuillApp {
                 .collect(),
             _ => vec![],
         };
-        let batch_ids: Vec<_> = visible_sets
-            .iter()
-            .filter(|set| !set.is_installed)
-            .map(|set| set.id)
-            .collect();
-        let batch_idle = panel.batch_pending.is_empty();
-        let can_remove_all = panel.tab == StickerTab::Installed && !panel.sets.is_empty();
-        let on_recent = panel.tab == StickerTab::Recent && !panel.recent.is_empty();
-        // Panel management lives in an overflow menu so the picker stays a
-        // picker: emoji suggestions, clear recent, batch install/remove.
-        let owner = cx.entity().downgrade();
-        let more_menu = Button::new("sticker-panel-more")
-            .icon(IconName::Ellipsis)
-            .ghost()
-            .small()
-            .tooltip(tr(keys::Q_MEDIA_STICKER_OPTIONS))
-            .accessibility_label(tr(keys::Q_MEDIA_STICKER_OPTIONS))
-            .dropdown_menu(move |mut menu, _, _| {
-                use quill::sticker_suggest::StickerSuggestMode;
-                menu = menu.label(tr(keys::Q_MEDIA_SUGGEST_STICKERS_BY_EMOJI));
-                for (value, label) in [
-                    (
-                        StickerSuggestMode::InstalledAndRecommended,
-                        tr(keys::Q_MEDIA_INSTALLED_AND_RECOMMENDED),
-                    ),
-                    (
-                        StickerSuggestMode::InstalledOnly,
-                        tr(keys::Q_MEDIA_INSTALLED_ONLY),
-                    ),
-                    (StickerSuggestMode::None, tr(keys::SETTINGS_COLOR_EMOJI_OFF)),
-                ] {
-                    let owner = owner.clone();
-                    menu = menu.item(PopupMenuItem::new(label).checked(mode == value).on_click(
-                        move |_, _, cx| {
-                            let _ = owner
-                                .update(cx, |this, cx| this.set_sticker_suggest_mode(value, cx));
-                        },
-                    ));
-                }
-                menu = menu.separator();
-                if on_recent {
-                    let owner = owner.clone();
-                    menu = menu.item(
-                        PopupMenuItem::new(tr(keys::Q_MEDIA_CLEAR_RECENT_STICKERS)).on_click(
-                            move |_, _, cx| {
-                                let _ = owner.update(cx, |this, cx| this.clear_recent_stickers(cx));
-                            },
-                        ),
-                    );
-                }
-                if !batch_ids.is_empty() {
-                    let owner = owner.clone();
-                    let ids = batch_ids.clone();
-                    menu = menu.item(
-                        PopupMenuItem::new(trn(keys::Q_MEDIA_ADD_SETS_SHOWN, ids.len()))
-                            .disabled(!batch_idle)
-                            .on_click(move |_, _, cx| {
-                                let ids = ids.clone();
-                                let _ = owner.update(cx, |this, cx| {
-                                    this.batch_install_sticker_sets(&ids, cx)
-                                });
-                            }),
-                    );
-                }
-                if can_remove_all {
-                    let owner = owner.clone();
-                    menu = menu.item(
-                        PopupMenuItem::new(tr(keys::Q_MEDIA_REMOVE_ALL_INSTALLED_SETS))
-                            .disabled(!batch_idle)
-                            .on_click(move |_, _, cx| {
-                                let _ = owner.update(cx, |this, cx| {
-                                    this.open_group_confirm(
-                                        ChatId(0),
-                                        GroupConfirmAction::RemoveInstalledStickerSets,
-                                        cx,
-                                    );
-                                });
-                            }),
-                    );
-                }
-                menu
-            });
         for set in &visible_sets {
             let set_id = set.id;
             let selected = panel.selected_set_id == Some(set_id);
@@ -673,36 +467,17 @@ impl QuillApp {
             } else {
                 set.title.clone()
             };
-            let row = div()
-                .id(format!("sticker-set-drag-{set_id}"))
-                .child(
-                    Button::new(format!("sticker-set-{set_id}"))
-                        .label(title.clone())
-                        .ghost()
-                        .small()
-                        .selected(selected)
-                        .tooltip(tr_with(
-                            keys::Q_LEFTOVERS_STICKER_SET_SIZE,
-                            &[("count", &set.size.to_string())],
-                        ))
-                        .on_click(
-                            cx.listener(move |this, _, _, cx| this.select_sticker_set(set_id, cx)),
-                        ),
-                )
-                .when(panel.tab == StickerTab::Installed, |row| {
-                    row.cursor_move()
-                        .on_drag(
-                            StickerSetDrag {
-                                id: set_id,
-                                title: title.clone(),
-                            },
-                            |drag: &StickerSetDrag, _, _, cx| cx.new(|_| drag.clone()),
-                        )
-                        .on_drop(cx.listener(move |this, drag: &StickerSetDrag, _, cx| {
-                            this.reorder_sticker_set(drag.id, set_id, cx);
-                        }))
-                });
-            sets = sets.child(row);
+            sets = sets.child(
+                Button::new(format!("sticker-set-{set_id}"))
+                    .label(title)
+                    .ghost()
+                    .small()
+                    .selected(selected)
+                    .tooltip(trn(keys::STICKERS_COUNT, set.size))
+                    .on_click(
+                        cx.listener(move |this, _, _, cx| this.select_sticker_set(set_id, cx)),
+                    ),
+            );
         }
         if panel.tab == StickerTab::Trending && panel.trending_next_offset < panel.trending_total {
             sets = sets.child(
@@ -710,14 +485,6 @@ impl QuillApp {
                     .label(tr(keys::Q_MEDIA_MORE_TRENDING_SETS))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| this.more_trending_stickers(cx))),
-            );
-        }
-        if panel.tab == StickerTab::Archived && panel.archived_has_more {
-            sets = sets.child(
-                Button::new("more-archived-stickers")
-                    .label(tr(keys::Q_MEDIA_MORE_ARCHIVED_SETS))
-                    .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| this.more_archived_stickers(cx))),
             );
         }
         let mut grid = div().id("sticker-grid").flex().flex_wrap().gap_2();
@@ -788,25 +555,9 @@ impl QuillApp {
                         ("size", &set.size.to_string()),
                     ],
                 )))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_1()
-                        .child(self.sticker_set_action(set, "preview", cx))
-                        .when(set.is_installed, |row| {
-                            let set_id = set.id;
-                            row.child(
-                                Button::new(format!("archive-set-{set_id}"))
-                                    .label(tr(keys::Q_MEDIA_ARCHIVE))
-                                    .ghost()
-                                    .small()
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.archive_sticker_set(set_id, cx)
-                                    })),
-                            )
-                        }),
-                );
+                .when(!set.is_installed, |row| {
+                    row.child(self.sticker_set_action(set, "preview", cx))
+                });
             if panel.tab == StickerTab::Search {
                 preview = preview.child(
                     Button::new("sticker-search-back")
@@ -884,17 +635,22 @@ impl QuillApp {
                     .gap_2()
                     .child(tabs)
                     .child(
-                        div().flex().items_center().gap_1().child(more_menu).child(
-                            Button::new("close-sticker-picker")
-                                .icon(gpui_kit::assets::IconName::X)
-                                .ghost()
-                                .small()
-                                .tooltip(tr(keys::Q_MEDIA_CLOSE_STICKERS))
-                                .accessibility_label(tr(keys::Q_MEDIA_CLOSE_STICKERS))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.close_sticker_panel(cx);
-                                })),
-                        ),
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .children(on_recent.then_some(clear_recent))
+                            .child(
+                                Button::new("close-sticker-picker")
+                                    .icon(gpui_kit::assets::IconName::X)
+                                    .ghost()
+                                    .small()
+                                    .tooltip(tr(keys::Q_MEDIA_CLOSE_STICKERS))
+                                    .accessibility_label(tr(keys::Q_MEDIA_CLOSE_STICKERS))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.close_sticker_panel(cx);
+                                    })),
+                            ),
                     ),
             )
             .when_some(status, |body, status| {
@@ -904,17 +660,6 @@ impl QuillApp {
                         .text_color(cx.theme().muted_foreground)
                         .child(status),
                 )
-            })
-            .when(panel.batch_total > 0, |body| {
-                body.child(div().text_sm().child(tr_with(
-                    keys::Q_MEDIA_BATCH_OF_UPDATED_PENDING_FAILED,
-                    &[
-                        ("batch_completed", &panel.batch_completed.to_string()),
-                        ("batch_total", &panel.batch_total.to_string()),
-                        ("len", &(panel.batch_pending.len()).to_string()),
-                        ("batch_failed", &panel.batch_failed.to_string()),
-                    ],
-                )))
             })
             .when(panel.tab == StickerTab::Search, |body| {
                 body.child(
@@ -950,24 +695,6 @@ impl QuillApp {
     }
 }
 
-#[derive(Clone)]
-struct StickerSetDrag {
-    id: i64,
-    title: String,
-}
-
-impl Render for StickerSetDrag {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .px_3()
-            .py_2()
-            .rounded_md()
-            .bg(cx.theme().accent.opacity(0.15))
-            .text_sm()
-            .child(self.title.clone())
-    }
-}
-
 /// The greeting a chat shows: stable per chat (tdesktop picks at random
 /// once per intro; keeping it by chat id avoids flicker on re-render).
 fn greeting_pick(
@@ -978,14 +705,6 @@ fn greeting_pick(
         return None;
     }
     list.get(chat_id.unsigned_abs() as usize % list.len())
-}
-
-crate::ui::shell::register_dialogs! {
-    ArchivedStickers => DialogSpec::new(
-        5000,
-        |app| app.settings.sticker_settings_open,
-        QuillApp::build_archived_stickers_dialog,
-    ),
 }
 
 #[cfg(test)]

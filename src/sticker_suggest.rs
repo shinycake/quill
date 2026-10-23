@@ -239,6 +239,7 @@ mod tests {
                 is_owned: false,
                 covers: Vec::new(),
                 cover_files: Vec::new(),
+                is_viewed: true,
             },
             StickerSetInfo {
                 id: 78,
@@ -250,6 +251,7 @@ mod tests {
                 is_owned: false,
                 covers: Vec::new(),
                 cover_files: Vec::new(),
+                is_viewed: true,
             },
         ];
         let answer = |extra: u64| {

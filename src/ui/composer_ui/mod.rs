@@ -229,7 +229,10 @@ impl QuillApp {
     }
 
     pub(super) fn close_sticker_panel(&mut self, cx: &mut Context<Self>) {
-        self.settings.sticker_settings_open = false;
+        if self.settings.sticker_settings_open {
+            self.close_stickers_manager(cx);
+            return;
+        }
         if let Some(live) = self.live.as_mut() {
             live.driver.close_sticker_panel();
         } else if let Some(session) = self.demo_session.as_mut() {

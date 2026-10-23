@@ -202,29 +202,9 @@ impl QuillApp {
                         tr(keys::Q_PEOPLE_REMOVE_THIS_GIF_FROM_YOUR).to_string(),
                         tr(keys::BOX_REMOVE).to_string(),
                     ),
-                    GroupConfirmAction::RemoveInstalledStickerSets => (
-                        tr(keys::Q_PEOPLE_REMOVE_INSTALLED_STICKER_SETS).to_string(),
-                        tr_with(
-                            keys::Q_PEOPLE_REMOVE_ALL_INSTALLED_STICKER_SETS,
-                            &[(
-                                "unwrap_or",
-                                &(this
-                                    .session()
-                                    .map(|s| s.stickers.stickers.sets.len())
-                                    .unwrap_or(0))
-                                .to_string(),
-                            )],
-                        ),
-                        tr(keys::Q_PEOPLE_REMOVE_ALL).to_string(),
-                    ),
                     GroupConfirmAction::RemoveEmojiSet { .. } => (
                         tr(keys::Q_PEOPLE_REMOVE_EMOJI_PACK).to_string(),
                         tr(keys::Q_PEOPLE_REMOVE_THIS_EMOJI_PACK_YOU).to_string(),
-                        tr(keys::BOX_REMOVE).to_string(),
-                    ),
-                    GroupConfirmAction::RemoveStickerSet { .. } => (
-                        tr(keys::Q_PEOPLE_REMOVE_STICKER_SET).to_string(),
-                        tr(keys::Q_PEOPLE_REMOVE_THIS_STICKER_SET_FROM).to_string(),
                         tr(keys::BOX_REMOVE).to_string(),
                     ),
                     GroupConfirmAction::RemoveMember { user_id } => {
@@ -276,8 +256,6 @@ impl QuillApp {
                     | GroupConfirmAction::RemoveSavedGif { .. }
                     | GroupConfirmAction::DeleteForumTopic { .. }
                     | GroupConfirmAction::DeleteSavedSublist { .. }
-                    | GroupConfirmAction::RemoveInstalledStickerSets
-                    | GroupConfirmAction::RemoveStickerSet { .. }
                     | GroupConfirmAction::RemoveEmojiSet { .. }
                     | GroupConfirmAction::DeleteCommunity { .. }
                     | GroupConfirmAction::RemoveMember { .. }

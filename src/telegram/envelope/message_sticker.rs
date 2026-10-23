@@ -86,6 +86,9 @@ pub struct StickerSetInfo {
     pub covers: Vec<StickerItem>,
     /// The files of `covers`, remembered when the row arrives.
     pub cover_files: Vec<ParsedFile>,
+    /// `is_viewed`: false while a trending set is new to the user (the
+    /// stickers box shows an unread dot beside its title).
+    pub is_viewed: bool,
 }
 
 pub(crate) fn parse_message_sticker(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
@@ -259,6 +262,10 @@ pub(crate) fn parse_sticker_set_info(value: &Value) -> Option<StickerSetInfo> {
             .unwrap_or(false),
         covers,
         cover_files,
+        is_viewed: value
+            .get("is_viewed")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
     })
 }
 

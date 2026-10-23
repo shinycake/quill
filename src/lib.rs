@@ -224,6 +224,7 @@ pub mod sticker_playback;
 pub mod sticker_set_box;
 pub mod sticker_suggest;
 pub mod sticker_video;
+pub mod stickers_manager;
 pub mod storage_limits;
 pub mod stories_menu;
 pub mod stories_pull;
