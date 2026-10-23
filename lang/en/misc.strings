@@ -236,7 +236,6 @@
 "qll_misc_cover_cleared" = "cover cleared";
 "qll_misc_cover_will_be_saved_with" = "Cover {shown_name} will be saved with the edit";
 "qll_misc_create_account" = "Create account";
-"qll_misc_creating_a_poll_is_not" = "Creating a poll is not supported yet";
 "qll_misc_creating_account" = "Creating account…";
 "qll_misc_crop" = "Crop";
 "qll_misc_custom" = "Custom";

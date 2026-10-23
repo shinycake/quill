@@ -160,10 +160,7 @@ impl QuillApp {
         };
         match entry {
             HeaderEntry::ViewProfile(_) => {
-                if let Some(target) = self
-                    .session()
-                    .and_then(|s| s.info_panel_target_for_chat(chat_id))
-                {
+                if let Some(target) = self.session().and_then(|s| s.chat_info_target(chat_id)) {
                     self.open_info_panel_target(target, window, cx);
                 }
             }

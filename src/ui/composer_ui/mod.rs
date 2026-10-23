@@ -485,9 +485,9 @@ impl QuillApp {
                 .item(
                     PopupMenuItem::new(tr(keys::LOCATION_TITLE))
                         .icon(IconName::Map)
-                        .on_click(move |_, window, cx| {
-                            let _ = location_owner
-                                .update(cx, |this, cx| this.open_share_location_panel(window, cx));
+                        .on_click(move |_, _, cx| {
+                            let _ =
+                                location_owner.update(cx, |this, cx| this.open_location_picker(cx));
                         }),
                 )
                 .map(|mut menu| {

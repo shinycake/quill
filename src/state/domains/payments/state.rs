@@ -43,10 +43,16 @@ pub struct PaymentsState {
     /// `sendPaymentForm` — the UI takes it on the next poll and opens it
     /// in the OS browser (3-D Secure and similar).
     pub verification_url: Option<String>,
+    /// The last `sendPaymentForm` answer asked for a verification step.
+    /// Unlike `verification_url` nothing drains it; a mini app's checkout
+    /// reads it to report `pending`.
+    pub verification_started: bool,
     pub marketplace_gift: Option<crate::marketplace::GiftPurchase>,
     pub gift_text_length_max: Option<usize>,
     /// TDLib `poll_country_count_max`: countries a poll may be limited to.
     pub poll_countries_max: Option<usize>,
+    /// `poll_open_period_max`: the furthest a poll may close, in seconds.
+    pub poll_open_period_max: Option<i64>,
     /// Slice `parity:bots-payment-recurring`: the fetched
     /// `starSubscriptions`, shown in the Subscriptions dialog.
     pub star_subscriptions: Option<StarSubscriptionsData>,
@@ -130,9 +136,11 @@ impl PaymentsState {
             unlocked_notice: None,
             receipt_error: None,
             verification_url: None,
+            verification_started: false,
             marketplace_gift: None,
             gift_text_length_max: None,
             poll_countries_max: None,
+            poll_open_period_max: None,
             star_subscriptions: None,
             star_subscriptions_loading: false,
             star_subscriptions_error: None,

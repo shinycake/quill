@@ -50,6 +50,7 @@ impl Session {
             bots: Box::new(BotsState::new()),
             payments: Box::new(PaymentsState::new()),
             ton_wallet: Default::default(),
+            location: Default::default(),
             search: SearchDomainState::new(),
             my_user_id: None,
             users: HashMap::new(),

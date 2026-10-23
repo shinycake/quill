@@ -326,6 +326,8 @@ pub enum GroupsPayload {
         boosts_per_gift: i32,
         ton_explorer_url: Option<String>,
         ton_usd_rate: Option<f64>,
+        /// `stars_usd_withdraw_rate_x1000` / 1000.
+        stars_usd_rate: Option<f64>,
         starref_join: bool,
         starref_setup: bool,
         /// `settings_display_passkeys` and `passkeys_account_passkeys_max`

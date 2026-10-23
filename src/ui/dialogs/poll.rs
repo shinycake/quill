@@ -4,7 +4,9 @@ use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
-use quill::poll::{POLL_OPTIONS_MIN, PollDraft, PollOptionInput};
+use quill::poll::{
+    POLL_DEFAULT_PERIOD_SECS, POLL_OPTIONS_MIN, PollClose, PollDraft, PollOptionInput,
+};
 
 /// What an option of the new poll carries beside its text.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -43,12 +45,57 @@ pub(crate) struct OptionAttach {
     pub(crate) preview: Option<std::path::PathBuf>,
 }
 
+/// What the box was opened with: tdesktop's `chosen`/`disabled` flags.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum QuizLock {
+    /// A person's own poll: both types are open.
+    #[default]
+    Free,
+    /// A bot's request button with `force_quiz`.
+    Quiz,
+    /// A bot's request button with `force_regular`.
+    Regular,
+}
+
+impl QuizLock {
+    /// What a request-poll button asks for (`force_quiz` wins).
+    pub(crate) fn from_button(force_regular: bool, force_quiz: bool) -> Self {
+        if force_quiz {
+            Self::Quiz
+        } else if force_regular {
+            Self::Regular
+        } else {
+            Self::Free
+        }
+    }
+}
+
+/// The switches of the settings section, to tell an untouched box from one
+/// with input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PollToggles {
+    anonymous: bool,
+    multiple: bool,
+    add_options: bool,
+    revoting: bool,
+    shuffle: bool,
+    quiz: bool,
+    subscribers: bool,
+    by_country: bool,
+    limit_duration: bool,
+    hide_results: bool,
+}
+
+/// The custom deadline box: a date and time picker under "Deadline".
+pub(crate) struct DeadlineBox {
+    pub(crate) picker: Entity<DatePickerState>,
+}
+
 /// Phase 4.2: poll creation dialog above the composer. Textarea entities are
 /// created when the dialog opens (option rows are dynamic); the dialog
-/// freezes into a validated `PollDraft` on "Create poll".
-/// Slice B3: description, quiz mode (correct-option radio + explanation),
-/// revoting/shuffle toggles, auto-close duration (hours), country
-/// restriction, and a discard-confirmation when closing with unsent input.
+/// freezes into a validated `PollDraft` on "Create poll". The settings
+/// follow tdesktop's `CreatePollBox`: switch rows, with "Limit Duration"
+/// opening the "Poll ends" row and "Hide results".
 pub struct PollDialog {
     pub(crate) description_input: Entity<TextareaState>,
     pub(crate) question_input: Entity<TextareaState>,
@@ -56,29 +103,39 @@ pub struct PollDialog {
     /// The media of each option, by the same index as `option_inputs`.
     pub(crate) attach: Vec<OptionAttach>,
     pub(crate) explanation_input: Entity<TextareaState>,
-    pub(crate) duration_input: Entity<TextareaState>,
     /// The allowed countries (ISO codes), picked in the country box.
     /// tdesktop's "Limit by Country" switch (channels); off keeps no codes.
     pub(crate) limit_by_country: bool,
     pub(crate) country_codes: Vec<String>,
     pub(crate) country_box: Option<crate::ui::country_box::CountryBox>,
+    /// The opposite of tdesktop's "Show Who Voted".
     pub(crate) is_anonymous: bool,
     pub(crate) allows_multiple_answers: bool,
     pub(crate) is_quiz: bool,
-    /// Dialog-row index marked as the quiz's correct option (`None` = unset).
-    pub(crate) quiz_correct_row: Option<usize>,
+    /// A bot's request button fixed the type.
+    pub(crate) lock: QuizLock,
+    /// A broadcast channel: votes are always anonymous and options cannot
+    /// be added.
+    pub(crate) in_channel: bool,
+    /// Dialog-row indexes marked as the quiz's correct options.
+    pub(crate) quiz_correct_rows: Vec<usize>,
     pub(crate) allows_revoting: bool,
     pub(crate) shuffle_options: bool,
     /// B15: "Allow Adding Options" (`inputPollTypeRegular.allow_adding_options`).
     pub(crate) allow_adding_options: bool,
-    /// B15: "Hide results" (`hide_results_until_closes`).
+    /// "Hide results" (`hide_results_until_closes`), under "Limit Duration".
     pub(crate) hide_results_until_closes: bool,
     /// B15: "Restrict to Subscribers" (`members_only`, channels only).
     pub(crate) members_only: bool,
-    /// B15: absolute deadline picker (`close_date`); `Some` while the
-    /// "Set a deadline" toggle is on.
-    pub(crate) deadline: Option<Entity<DatePickerState>>,
+    /// "Limit Duration" is on: the poll closes at `close`.
+    pub(crate) limit_duration: bool,
+    pub(crate) close: PollClose,
+    /// The custom deadline box, while it is open.
+    pub(crate) deadline_box: Option<DeadlineBox>,
     pub(crate) confirming_discard: bool,
+    /// The window's height at the last frame, to cap the panel.
+    pub(crate) viewport_height: Pixels,
+    baseline: Option<PollToggles>,
 }
 
 /// B15: the inline "Add an Option" panel for an open poll that allows it
@@ -92,7 +149,14 @@ pub struct PollAddOption {
 }
 
 impl PollDialog {
-    pub(crate) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
+    /// A fresh box with tdesktop's defaults (`kDefaultPollCreateFlags`):
+    /// who voted shown, several answers, adding options and shuffling on.
+    pub(crate) fn new(
+        window: &mut Window,
+        cx: &mut Context<QuillApp>,
+        in_channel: bool,
+        lock: QuizLock,
+    ) -> Self {
         let mut textarea = |cx: &mut Context<QuillApp>, placeholder: &str, rows: (usize, usize)| {
             cx.new(|cx| {
                 TextareaState::new(window, cx)
@@ -108,7 +172,6 @@ impl PollDialog {
             tr(keys::Q_MEDIA_QUIZ_EXPLANATION_OPTIONAL_200_MAX),
             (1, 3),
         );
-        let duration_input = textarea(cx, tr(keys::Q_MEDIA_CLOSE_AFTER_HOURS_OPTIONAL), (1, 1));
         let option_inputs = (0..POLL_OPTIONS_MIN)
             .map(|index| {
                 textarea(
@@ -121,7 +184,7 @@ impl PollDialog {
                 )
             })
             .collect();
-        Self {
+        let mut dialog = Self {
             description_input,
             question_input,
             attach: (0..POLL_OPTIONS_MIN)
@@ -129,21 +192,43 @@ impl PollDialog {
                 .collect(),
             option_inputs,
             explanation_input,
-            duration_input,
             limit_by_country: false,
             country_codes: Vec::new(),
             country_box: None,
-            is_anonymous: true,
-            allows_multiple_answers: false,
-            is_quiz: false,
-            quiz_correct_row: None,
-            allows_revoting: true,
-            shuffle_options: false,
-            allow_adding_options: false,
+            is_anonymous: in_channel,
+            allows_multiple_answers: true,
+            is_quiz: lock == QuizLock::Quiz,
+            lock,
+            in_channel,
+            quiz_correct_rows: Vec::new(),
+            allows_revoting: lock != QuizLock::Quiz,
+            shuffle_options: true,
+            allow_adding_options: !in_channel && lock != QuizLock::Quiz,
             hide_results_until_closes: false,
             members_only: false,
-            deadline: None,
+            limit_duration: false,
+            close: PollClose::Period(POLL_DEFAULT_PERIOD_SECS),
+            deadline_box: None,
             confirming_discard: false,
+            viewport_height: window.viewport_size().height,
+            baseline: None,
+        };
+        dialog.baseline = Some(dialog.toggles());
+        dialog
+    }
+
+    fn toggles(&self) -> PollToggles {
+        PollToggles {
+            anonymous: self.is_anonymous,
+            multiple: self.allows_multiple_answers,
+            add_options: self.allow_adding_options,
+            revoting: self.allows_revoting,
+            shuffle: self.shuffle_options,
+            quiz: self.is_quiz,
+            subscribers: self.members_only,
+            by_country: self.limit_by_country,
+            limit_duration: self.limit_duration,
+            hide_results: self.hide_results_until_closes,
         }
     }
 
@@ -156,18 +241,28 @@ impl PollDialog {
             .iter()
             .map(|input| crate::ui::composer_field::field_doc(input.read(cx)).to_markup())
             .collect();
-        // Map the marked row to its index among the usable (non-empty) options.
-        let quiz_correct = self.quiz_correct_row.and_then(|row| {
-            options
-                .iter()
-                .enumerate()
-                .filter(|(_, option)| !option.trim().is_empty())
-                .position(|(index, _)| index == row)
-        });
+        // Map the marked rows to their indexes among the usable
+        // (non-empty) options.
+        let usable: Vec<usize> = options
+            .iter()
+            .enumerate()
+            .filter(|(_, option)| !option.trim().is_empty())
+            .map(|(index, _)| index)
+            .collect();
+        let quiz_correct = self
+            .quiz_correct_rows
+            .iter()
+            .filter_map(|row| usable.iter().position(|index| index == row))
+            .collect();
         let country_codes = if self.limit_by_country {
             self.country_codes.clone()
         } else {
             Vec::new()
+        };
+        let (open_period, close_date) = match (self.limit_duration, self.close) {
+            (true, PollClose::Period(secs)) => (secs, 0),
+            (true, PollClose::Date(date)) => (0, date),
+            (false, _) => (0, 0),
         };
         PollDraft {
             question: value(&self.question_input),
@@ -185,29 +280,14 @@ impl PollDialog {
             quiz_explanation: value(&self.explanation_input),
             allows_revoting: self.allows_revoting,
             shuffle_options: self.shuffle_options,
-            duration_hours: value(&self.duration_input),
             country_codes,
             allow_adding_options: self.allow_adding_options,
-            hide_results_until_closes: self.hide_results_until_closes,
+            hide_results_until_closes: self.limit_duration && self.hide_results_until_closes,
             members_only: self.members_only,
-            close_date: self.deadline_unix(cx).unwrap_or(0),
+            open_period,
+            close_date,
+            close_max: 0,
         }
-    }
-
-    /// The picked absolute deadline as unix seconds, if the toggle is on
-    /// and the picker holds a readable date.
-    pub(crate) fn deadline_unix(&self, cx: &App) -> Option<i64> {
-        let picker = self.deadline.as_ref()?;
-        picker
-            .read(cx)
-            .date_time()
-            .start()
-            .and_then(|value| {
-                quill::schedule::parse_picker_stamp(
-                    &value.format(tr(keys::Q_MEDIA_Y_M_D_H_M)).to_string(),
-                )
-            })
-            .map(|civil| quill::schedule::civil_to_unix(&civil))
     }
 
     /// A picked video is still being read: sending now would drop it.
@@ -220,15 +300,7 @@ impl PollDialog {
     /// `true` when closing would lose user input (drives the discard prompt).
     pub(crate) fn is_dirty(&self, cx: &App) -> bool {
         let value = |input: &Entity<TextareaState>| input.read(cx).value();
-        !self.is_anonymous
-            || self.allows_multiple_answers
-            || self.is_quiz
-            || !self.allows_revoting
-            || self.shuffle_options
-            || self.allow_adding_options
-            || self.hide_results_until_closes
-            || self.members_only
-            || self.deadline.is_some()
+        Some(self.toggles()) != self.baseline
             || self
                 .attach
                 .iter()
@@ -236,8 +308,6 @@ impl PollDialog {
             || !value(&self.question_input).trim().is_empty()
             || !value(&self.description_input).trim().is_empty()
             || !value(&self.explanation_input).trim().is_empty()
-            || !value(&self.duration_input).trim().is_empty()
-            || self.limit_by_country
             || self
                 .option_inputs
                 .iter()

@@ -226,7 +226,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Share a contact card from a profile <!-- parity:composer-share-contact -->
 - [x] Create checklists <!-- parity:composer-checklist -->
 - [x] Attachment-menu bots in the attach menu <!-- parity:composer-attach-bots -->
-- [ ] Send Location opens a map picker: drag the map to place the pin, zoom, send my current location, nearby and searched places (no typed coordinates) <!-- parity:composer-location-picker -->
+- [x] Send Location opens a map picker: drag the map to place the pin, zoom, send my current location, nearby and searched places (no typed coordinates) <!-- parity:composer-location-picker -->
 - [x] Drop zones: send quickly versus as documents; dropped folder becomes an archive <!-- parity:composer-drop-modes -->
 - [x] Send box options: HD photo toggle, GIF with caption, paid media price, video cover <!-- parity:composer-send-options -->
 - [x] Link preview options popover: choose link, move up or down, shrink or enlarge <!-- parity:composer-link-options -->
@@ -303,6 +303,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Per-chat mute/unmute from the list via the row menu (src/ui/mod.rs:5611) <!-- parity:chatlist-list-mute -->
 - [x] Delete chat from the list via deleteChatHistory(remove_from_chat_list:true) — not the destructive deleteChat (src/connect.rs, src/ui/mod.rs) <!-- parity:chatlist-delete-chat -->
 - [x] Clear chat history via deleteChatHistory(remove_from_chat_list:false), gated on delete capabilities (src/connect.rs, src/ui/mod.rs) <!-- parity:chatlist-clear-history -->
+- [ ] Clear history is one confirmation with an "Also delete for {name}" checkbox, not two menu items <!-- parity:chatlist-clear-history-box -->
 - [x] Saved Messages entry row in the list: opens the existing self chat directly, otherwise createPrivateChat with getOption("my_id") and opens the returned chat (schema td_api.tl:9590; src/connect.rs: create_private_chat_with_self, src/ui/mod.rs: open_saved_messages) <!-- parity:chatlist-saved-messages -->
 - [x] Chat preview on long-press (press-and-hold; hover was deliberately rejected — see DECISIONS.md) <!-- parity:chatlist-chat-preview -->
 - [x] Clear recent searches: Clear button on the Recent heading, clearRecentlyFoundChats with optimistic local clear (TGX SearchManager parity), refusal surfaced as a status note (src/connect.rs: clear_recently_found_chats, src/ui/mod.rs: clear_search_recents) <!-- parity:chatlist-clear-recent-searches -->
@@ -393,11 +394,11 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Private chat "Restrict saving content" toggle (toggleChatHasProtectedContent) <!-- parity:profile-private-no-forwards -->
 - [x] Link and location rows on group and channel profiles <!-- parity:profile-link-row -->
 - [x] "N members, M online" status on group profiles <!-- parity:profile-members-online -->
-- [ ] Bot profiles show monthly users <!-- parity:profile-bot-monthly-users -->
-- [ ] Story ring on the profile avatar that opens the stories <!-- parity:profile-story-ring -->
-- [ ] Stars rating pill on user profiles <!-- parity:profile-stars-rating -->
-- [ ] Premium "Show last seen" button on hidden last-seen profiles <!-- parity:profile-show-last-seen -->
-- [ ] Saved Messages profile cover <!-- parity:profile-saved-messages-cover -->
+- [x] Bot profiles show monthly users <!-- parity:profile-bot-monthly-users -->
+- [x] Story ring on the profile avatar that opens the stories <!-- parity:profile-story-ring -->
+- [x] Stars rating pill on user profiles <!-- parity:profile-stars-rating -->
+- [x] Premium "Show last seen" button on hidden last-seen profiles <!-- parity:profile-show-last-seen -->
+- [x] Saved Messages profile cover <!-- parity:profile-saved-messages-cover -->
 
 ### Media
 
@@ -501,7 +502,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Slow-mode bypass when viewer boosts meet the unrestrict threshold (src/state.rs:3034) <!-- parity:groups-slow-mode-boost-bypass -->
 - [x] Invite-link list with expiry/humanised "Never expires"/"Expired" labels and pending-join-request counts (src/ui/mod.rs:8397) <!-- parity:groups-invite-link-list -->
 - [x] Create invite link dialog — name, expiration, member limit, join-request toggle (src/ui/mod.rs:222) <!-- parity:groups-invite-link-create -->
-- [ ] Invite link expiry and usage limit use presets (1 hour, 1 day, 1 week, no limit, custom date) instead of typed days and member counts <!-- parity:groups-invite-link-presets -->
+- [x] Invite link expiry and usage limit use presets (1 hour, 1 day, 1 week, no limit, custom date) instead of typed days and member counts <!-- parity:groups-invite-link-presets -->
 - [x] Edit, copy and revoke invite links (src/ui/mod.rs:6341) <!-- parity:groups-invite-link-edit-revoke -->
 - [x] Primary invite link displayed with replace via `replacePrimaryChatInviteLink` (src/ui/mod.rs) <!-- parity:groups-invite-link-primary -->
 - [x] Join-request list with approve/decline buttons and pending-count badge (src/ui/mod.rs:8596) <!-- parity:groups-join-requests -->
@@ -779,6 +780,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Install sticker set (changeStickerSet install) <!-- parity:stickers-install -->
 - [x] Remove sticker set with confirm dialog <!-- parity:stickers-remove -->
 - [x] Archive sticker set + Archived view in settings (restore path) <!-- parity:stickers-archive -->
+- [ ] Stickers and emoji box in Settings: Installed, Masks, Trending and Archived tabs with thumbnail rows, count, remove with Undo, archive, drag reorder, more sets on scroll (the composer picker stays for sending) <!-- parity:stickers-manager-box -->
 - [x] Reorder installed sticker sets <!-- parity:stickers-reorder -->
 - [x] Dynamic set order (auto-place recently used sets above others) <!-- parity:stickers-dynamic-order --> (backend + state: sticker sends pass update_order_of_installed_sticker_sets, updateInstalledStickerSets reorders the cached sets in place; picker already lists stored order, no UI change)
 - [x] Open sticker set preview screen (title, stickers grid, install/remove from preview) <!-- parity:stickers-set-preview -->
@@ -866,7 +868,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Inline mode: type @bot in composer, inline query results list, send an inline result (`getInlineQueryResults` backend from S9; this slice adds: `@bot query` trigger parse, bot resolution via local user cache with `searchPublicChat` fallback, 100ms-debounced queries, results dropdown with keyboard/mouse pick + next-page loading, `sendInlineQueryResultMessage` send, secret-chat alert on the typed path) <!-- parity:bots-inline-mode -->
 - [x] Games: send / play, high scores (no game code at all) — render `messageGame` as a card (thumbnail/title/text/description); Play reuses the B1 `press_game_button` flow (`callbackQueryPayloadGame` → answer URL opens in OS browser); inline high-score panel via `getGameHighScores` keyed on the current user (toggle open/close); bot profile panel gets a Games section (games cached per bot from `messageGame` traffic in the shared `upsert_message` choke point) with Send buttons → `sendMessage`+`inputMessageGame`; chat-list preview `🎮 {title}` <!-- parity:bots-games -->
 - [x] Poll creation dialog: question, add/remove options (2–10), validation errors, anonymous + multiple-answer toggles (ui/mod.rs:14860, poll.rs:112) <!-- parity:bots-poll-create -->
-- [ ] Poll time limit is a Limit Duration switch with a deadline date and time picker, not typed hours <!-- parity:bots-poll-deadline-picker -->
+- [x] Poll time limit is a Limit Duration switch with a deadline date and time picker, not typed hours <!-- parity:bots-poll-deadline-picker -->
 - [x] Create quiz polls: quiz-mode toggle, mark correct option (radio), quiz explanation (0–200 chars, ≤2 line feeds); sends `inputPollTypeQuiz` (ui/mod.rs, poll.rs, requests.rs) <!-- parity:bots-poll-create-quiz -->
 - [x] Poll description field (shown above the poll title) (ui/mod.rs, requests.rs) <!-- parity:bots-poll-description -->
 - [x] Poll duration setting: auto-close after N hours (1–24 UI ceiling, `open_period`; true max is server `getOption("poll_open_period_max")`) (ui/mod.rs, poll.rs) <!-- parity:bots-poll-duration -->
@@ -902,8 +904,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Owned bots management and create a bot <!-- parity:bots-owned-manage -->
 - [x] Bot earnings and affiliate programs <!-- parity:bots-earn-affiliate -->
 - [x] "Apps" tab in search with popular mini apps <!-- parity:bots-apps-tab -->
-- [ ] Mini apps can open invoices (openInvoice): run the checkout and report paid, failed, pending or cancelled back to the app <!-- parity:bots-webapp-invoice -->
-- [ ] Mini apps can ask to share your phone number, with a confirmation box <!-- parity:bots-webapp-share-phone -->
+- [x] Mini apps can open invoices (openInvoice): run the checkout and report paid, failed, pending or cancelled back to the app <!-- parity:bots-webapp-invoice -->
+- [x] Mini apps can ask to share your phone number, with a confirmation box <!-- parity:bots-webapp-share-phone -->
 - [x] Add an option to an open poll and "Allow adding options" when creating <!-- parity:polls-add-option -->
 - [x] Poll creation extras: hide results until close, restrict to subscribers, absolute deadline <!-- parity:polls-create-extras -->
 - [x] Links and media in poll options <!-- parity:polls-option-media -->
@@ -1014,6 +1016,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Message font size (12–20 px), live across message text and captions (`BubbleLook`) <!-- parity:settings-font-size -->
 - [x] Bubble vs plain chat style, live (`BubbleLook.plain` drops bubble bg/rounding) <!-- parity:settings-bubble-style -->
 - [x] Per-chat mute presets (1h / 8h / 2d / forever), live via chat panel (src/ui/mod.rs:11564; connect.rs:5424 `set_chat_mute_for` → `setChatNotificationSettings`) <!-- parity:settings-chat-mute -->
+- [ ] Custom mute duration chosen with a slider and live label, not day/hour step buttons <!-- parity:settings-mute-custom-slider -->
 - [x] Per-chat message preview toggle, live (src/ui/mod.rs:13028 `apply_chat_preview`) <!-- parity:settings-chat-preview -->
 - [x] Per-chat custom notification sound picker, live (src/ui/mod.rs:12844; `getSavedNotificationSounds`) <!-- parity:settings-chat-sound -->
 - [x] Default mute per scope (private / groups / channels), live "Notification defaults" dialog (src/ui/mod.rs:13274 `apply_scope_mute`, `setScopeNotificationSettings`) <!-- parity:settings-scope-mute -->
@@ -1072,6 +1075,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] New login alert ("Was this you?") with confirm or terminate <!-- parity:settings-new-login-alert -->
 - [x] Session details box and rename this device <!-- parity:settings-session-details -->
 - [x] Default auto-delete timer for new chats <!-- parity:settings-autodelete-default -->
+- [ ] Custom auto-delete timer chosen with a slider, not minus/plus step buttons <!-- parity:settings-autodelete-custom-slider -->
 - [x] Bots and websites: mini-app permissions (Telegram Desktop has no "delete cloud drafts") <!-- parity:settings-bots-websites -->
 - [x] Show 18+ content toggle <!-- parity:settings-sensitive-content -->
 - [x] File open confirmations: extension warning and IP-reveal warning <!-- parity:settings-file-open-confirm -->
@@ -1112,6 +1116,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 
 - [x] Clear cache removes TDLib cached files <!-- parity:data-clear-cache-real -->
 - [x] Storage limits: total size, media cache, clear older than <!-- parity:data-storage-limits -->
+- [ ] Auto-download size limits and the storage size limit use sliders with an "up to N MB" label, not click-to-cycle buttons or preset chips <!-- parity:data-size-sliders -->
 - [x] Clear storage per file type and per chat from the breakdown <!-- parity:data-clear-per-type -->
 - [x] Download folder and "ask where to save each file" <!-- parity:data-download-path -->
 - [x] Network usage statistics with reset <!-- parity:data-network-usage -->

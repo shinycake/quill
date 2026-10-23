@@ -111,6 +111,9 @@ pub struct StoryManageState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InfoPanelTarget {
     User(i64),
+    /// The Saved Messages chat's own info (tdesktop `Info::Key` for
+    /// `Data::SavedMessages`), as opposed to your user profile.
+    SavedMessages,
     Supergroup(i64),
     /// Slice G1: basic-group info panel, keyed by basic group id.
     BasicGroup(i64),

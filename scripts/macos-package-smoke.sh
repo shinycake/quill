@@ -35,6 +35,8 @@ cat > "$DIST/Contents/Info.plist" <<PLIST
   <key>NSMicrophoneUsageDescription</key><string>Quill uses your microphone for voice and video calls.</string>
   <key>NSCameraUsageDescription</key><string>Quill uses your camera for video calls, video messages, and scanning login QR codes to link devices.</string>
   <key>NSBluetoothAlwaysUsageDescription</key><string>Quill uses Bluetooth to connect to your phone when you add or use a passkey from it with a QR code.</string>
+  <key>NSLocationUsageDescription</key><string>Quill shows where you are on the map when you open Send Location in a chat.</string>
+  <key>NSLocationWhenInUseUsageDescription</key><string>Quill shows where you are on the map when you open Send Location in a chat.</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>CFBundleURLTypes</key>
   <array>

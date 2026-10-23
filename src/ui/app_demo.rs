@@ -317,6 +317,7 @@ impl QuillApp {
             privacy: super::privacy_state::PrivacyState::new(window, cx),
             search_ui: super::search_state::SearchUi::new(search_input, chat_search_input),
             media_search: super::shared_media_search_state::SharedMediaSearchUi::new(window, cx),
+            location_ui: Default::default(),
             share: super::share_state::ShareUi::new(window, cx, forward_search_input),
             start_files: super::start_files_state::StartFilesUi::new(window, cx),
             focus_sidebar: cx.focus_handle(),
@@ -350,6 +351,7 @@ impl QuillApp {
             windows: super::chat_window::ChatWindows::new(cx),
             peer_qr: super::peer_qr::PeerQrUi::new(cx),
             video_avatar: Default::default(),
+            profile_cover: Default::default(),
         };
 
         if let Some(chosen) = spell_chosen {

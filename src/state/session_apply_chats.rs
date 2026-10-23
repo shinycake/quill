@@ -56,6 +56,22 @@ impl Session {
             self.remember_files(std::slice::from_ref(file));
         }
         self.apply_business_bot_exact(&kind, pending);
+        if pending.map(|p| p.purpose)
+            == Some(RequestPurpose::Media(MediaPurpose::LocationPicker(
+                crate::location_picker::LocationPickerPurpose::ResolveVenueBot,
+            )))
+        {
+            // tdesktop takes only an inline bot (`isBotInlineGeo`).
+            let bot = match &kind {
+                ChatKind::Private { user_id } => self
+                    .users
+                    .get(&user_id.0)
+                    .filter(|user| user.is_bot && user.is_inline)
+                    .map(|_| user_id.0),
+                _ => None,
+            };
+            self.location.venue_bot_resolved(bot);
+        }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ResolveGifSearchBot) {
             self.stickers.gifs.search_bot_user_id = match &kind {
                 ChatKind::Private { user_id }

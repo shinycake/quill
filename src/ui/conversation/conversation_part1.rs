@@ -272,10 +272,6 @@ impl QuillApp {
                         .when_some(self.share_content_panel(cx), |this, panel| {
                             this.child(panel)
                         })
-                        // Phase D3a: invite-link creation dialog above the composer.
-                        .when_some(self.invite_link_dialog_panel(cx), |this, panel| {
-                            this.child(panel)
-                        })
                         // Phase D3b: admin-management dialog above the composer.
                         .when_some(self.admin_dialog_panel(cx), |this, panel| this.child(panel))
                         // B1: bot custom keyboard (`replyMarkupShowKeyboard`)

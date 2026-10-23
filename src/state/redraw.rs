@@ -84,12 +84,16 @@ pub fn redraw_need(session: &Session, envelope: &Envelope) -> RedrawNeed {
             RedrawNeed::Now
         }
         P::Common(CommonPayload::UpdateOption { .. }) => RedrawNeed::Later,
-        P::Users(UsersPayload::UpdateUserStatus { user_id, status }) => {
+        P::Users(UsersPayload::UpdateUserStatus {
+            user_id,
+            status,
+            hidden_by_me,
+        }) => {
             let Some(user) = session.user(user_id.0) else {
                 // The reducer only updates users it knows.
                 return RedrawNeed::Nothing;
             };
-            if user.status == *status {
+            if user.status == *status && user.status_hidden_by_me == *hidden_by_me {
                 RedrawNeed::Nothing
             } else if shows_user(session, *user_id) {
                 RedrawNeed::Now

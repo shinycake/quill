@@ -85,4 +85,7 @@ pub struct WebApps {
     pub grossing_loading: bool,
     /// One-shot: `sendWebAppData` outcome (`Ok` or a failure message).
     pub data_sent: Option<Result<(), String>>,
+    /// One-shot: the contact card sent for `web_app_request_phone` was
+    /// taken by TDLib (`true`) or refused (`false`), `(bot_user_id, sent)`.
+    pub phone_share: Option<(i64, bool)>,
 }

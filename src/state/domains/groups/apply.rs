@@ -198,6 +198,7 @@ impl Session {
                 boosts_per_gift,
                 ton_explorer_url,
                 ton_usd_rate,
+                stars_usd_rate,
                 starref_join,
                 starref_setup,
                 passkeys,
@@ -217,6 +218,9 @@ impl Session {
                 }
                 if ton_usd_rate.is_some() {
                     self.ton_wallet.ton_usd_rate = ton_usd_rate;
+                }
+                if stars_usd_rate.is_some() {
+                    self.groups.stars_usd_rate = stars_usd_rate;
                 }
                 // Every app config answer carries the affiliate switches.
                 let limits = &mut self.payments.earn.limits;

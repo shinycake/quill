@@ -10,6 +10,13 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
+        if let Some(RequestPurpose::Media(MediaPurpose::LocationPicker(
+            crate::location_picker::LocationPickerPurpose::SearchVenues { generation },
+        ))) = pending.map(|p| p.purpose)
+        {
+            self.location.venues_answered(generation, page.venues);
+            return;
+        }
         if let Some(RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
             chat_id,
             bot_user_id,

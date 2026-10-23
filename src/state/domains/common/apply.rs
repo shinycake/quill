@@ -104,6 +104,12 @@ impl Session {
                 {
                     self.payments.poll_countries_max = usize::try_from(*limit).ok();
                 }
+                if name == "poll_open_period_max"
+                    && let OptionValue::Integer(limit) = &value
+                    && *limit > 0
+                {
+                    self.payments.poll_open_period_max = Some(*limit);
+                }
                 if name == "gift_text_length_max"
                     && let OptionValue::Integer(limit) = &value
                 {
@@ -122,6 +128,9 @@ impl Session {
                         "notification_sound_duration_max" => {
                             self.messages.tone_limits.max_duration =
                                 (*limit).clamp(0, i64::from(i32::MAX)) as i32
+                        }
+                        "subscription_star_count_max" if *limit > 0 => {
+                            self.groups.subscription_star_max = Some(*limit)
                         }
                         "supergroup_size_max" => {
                             self.groups.supergroup_size_max =
@@ -148,6 +157,12 @@ impl Session {
                         self.stickers.gifs.search_bot_username = username;
                         self.stickers.gifs.search_bot_user_id = None;
                     }
+                }
+                if name == "venue_search_bot_username" {
+                    self.location.set_venue_bot_username(match &value {
+                        OptionValue::String(name) => name.clone(),
+                        _ => String::new(),
+                    });
                 }
                 if name == "message_caption_length_max"
                     && let OptionValue::Integer(limit) = value

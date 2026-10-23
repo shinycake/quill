@@ -44,6 +44,7 @@ mod language;
 mod link_info;
 mod links_boosts;
 mod live;
+mod location_picker;
 mod marketplace;
 mod masks;
 mod media;

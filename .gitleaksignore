@@ -1,0 +1,4 @@
+# Reviewed false positive: the TDLib app-config option name stars_usd_withdraw_rate_x1000 in a
+# test fixture, flagged as generic-api-key. The line was renamed in a later commit;
+# this pins the earlier commit so the PR scan passes without rewriting history.
+0f0e2a31b42233aa1b7e443e5f15407d82b8b4b8:src/invite_link_form/tests.rs:generic-api-key:258

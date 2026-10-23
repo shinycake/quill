@@ -561,7 +561,7 @@ fn driver_poll_draft_guards_and_request_shape() {
         allows_multiple_answers: false,
         allows_revoting: false,
         shuffle_options: true,
-        duration_hours: "2".into(),
+        open_period: 2 * 3600,
         country_codes: vec!["US".into()],
         ..Default::default()
     };
@@ -619,9 +619,9 @@ fn driver_quiz_draft_sends_quiz_type() {
         question: "Capital of France?".into(),
         options: vec!["Paris".into(), "London".into()],
         is_quiz: true,
-        quiz_correct: Some(0),
+        quiz_correct: vec![1, 0, 1],
         quiz_explanation: "think Eiffel".into(),
-        allows_multiple_answers: true, // normalized off for quizzes
+        allows_multiple_answers: true, // a quiz may have several right answers
         allows_revoting: true,         // normalized off for quizzes
         ..Default::default()
     };
@@ -635,11 +635,11 @@ fn driver_quiz_draft_sends_quiz_type() {
     assert_eq!(content["type"]["@type"], "inputPollTypeQuiz");
     assert_eq!(
         content["type"]["correct_option_ids"],
-        serde_json::json!([0])
+        serde_json::json!([0, 1])
     );
     assert_eq!(content["type"]["explanation"]["text"], "think Eiffel");
     assert!(content["type"]["explanation_media"].is_null());
-    assert_eq!(content["allows_multiple_answers"], false);
+    assert_eq!(content["allows_multiple_answers"], true);
     assert_eq!(content["allows_revoting"], false);
     assert!(!sink.rendered().contains("CANARY"));
     let _ = std::fs::remove_dir_all(&dir);
