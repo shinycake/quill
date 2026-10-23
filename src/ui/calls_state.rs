@@ -38,6 +38,9 @@ pub(crate) struct CallUi {
     /// Phase C2i: pending "call again" / profile-call confirmation when
     /// the confirm-before-calling pref is on: `(user_id, is_video)`.
     pub(super) confirm: Option<(i64, bool)>,
+    /// The Calls tab's scroll region, read to load older calls on scroll.
+    pub(super) history_scroll: ScrollHandle,
+    pub(super) history_asked: super::scroll_load::Asked,
     /// A call waiting on microphone (and camera) permission before its
     /// `createCall`: `(user_id, is_video)`.
     pub(super) dialing: Option<(i64, bool)>,
@@ -71,6 +74,8 @@ impl CallUi {
             sounds: super::call_sounds::CallSounds::new(audio_output),
             sound_marks: Default::default(),
             confirm: None,
+            history_scroll: ScrollHandle::new(),
+            history_asked: Default::default(),
             dialing: None,
             mic_test: None,
         }

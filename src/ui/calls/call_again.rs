@@ -1,6 +1,7 @@
 //! Methods moved out of `calls.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::scroll_load::{load_due, loading_row, scrolled_near_end};
 use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
 use quill::lang::{keys, tr};
@@ -34,6 +35,38 @@ impl QuillApp {
             return;
         }
         self.dial_user(user_id, is_video, cx);
+    }
+
+    /// The next page of call history, once the Calls tab is scrolled near
+    /// its end or the loaded calls do not fill it.
+    pub(in crate::ui) fn calls_history_more(&mut self, cx: &mut Context<Self>, scrolled: bool) {
+        // Paging needs a live connection; a demo session has nothing to ask.
+        if self.live.is_none() {
+            return;
+        }
+        let Some(session) = self.session() else {
+            return;
+        };
+        let calls = &session.calls;
+        let loaded = calls.recent_calls.len();
+        if !load_due(
+            scrolled_near_end(&self.calls.history_scroll),
+            !calls.recent_calls_offset.is_empty(),
+            calls.recent_calls_loading,
+        ) || calls.recent_calls_error && !scrolled
+            || !self.calls.history_asked.allow(loaded, scrolled)
+        {
+            return;
+        }
+        if let Some(live) = self.live.as_mut()
+            && let Err(err) = live.driver.fetch_more_call_history()
+        {
+            self.connection.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_CALL_HISTORY,
+                &err,
+            )));
+        }
+        cx.notify();
     }
 
     /// Recent calls; preferences live in Settings.
@@ -119,22 +152,7 @@ impl QuillApp {
                 list = list.child(self.recent_call_row(entry, cx));
             }
             if has_more {
-                list = list.child(
-                    Button::new("calls-load-more")
-                        .label(tr(keys::Q_OPS_LOAD_MORE))
-                        .ghost()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(live) = this.live.as_mut()
-                                && let Err(err) = live.driver.fetch_more_call_history()
-                            {
-                                this.connection.set_note(StatusNote::error(user_error_for(
-                                    keys::Q_NOTES_FAILED_CALL_HISTORY,
-                                    &err,
-                                )));
-                            }
-                            cx.notify();
-                        })),
-                );
+                list = list.child(loading_row("calls-loading-more", cx));
             }
         }
         list

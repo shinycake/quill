@@ -122,6 +122,11 @@ impl QuillApp {
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
+                    .track_scroll(&self.calls.history_scroll)
+                    .on_scroll_wheel(crate::ui::scroll_load::watch_scroll(
+                        cx,
+                        Self::calls_history_more,
+                    ))
                     .child(self.calls_list(cx)),
             );
         }
