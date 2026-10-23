@@ -68,6 +68,8 @@ pub struct ProfilePhoto {
     pub full_file_id: i32,
     pub width: i32,
     pub height: i32,
+    /// A video photo's clip (cached in `Session::files` too).
+    pub animation: Option<crate::telegram::envelope::ChatPhotoAnimation>,
 }
 
 impl ProfilePhoto {
@@ -81,6 +83,7 @@ impl ProfilePhoto {
             full_file_id: photo.full_file_id.0,
             width: photo.width,
             height: photo.height,
+            animation: photo.animation,
         }
     }
 }

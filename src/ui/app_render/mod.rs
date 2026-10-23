@@ -101,6 +101,7 @@ impl Render for QuillApp {
         if self.frame.window_active.replace(active) != active {
             self.playback.inline_videos.set_window_active(active);
         }
+        self.sync_video_avatar(active, window.scale_factor(), cx);
         self.viewer_follow_window_fullscreen(window);
         self.frame.media_roots_frame.borrow_mut().take();
         // Spoiler specks painted last frame keep drifting.

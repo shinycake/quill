@@ -6,7 +6,8 @@ use crate::telegram::envelope::PollOptionMedia;
 /// B10: viewer items for a profile photo gallery. The item's `message_id`
 /// is the `chatPhoto.id` ("Set as main photo" reads it back) and its chat
 /// the group or channel the photos belong to (`ChatId(0)` for a user);
-/// both sizes are display candidates, the largest first.
+/// both sizes are display candidates, the largest first. A video photo
+/// plays its clip over the still ([`MediaViewerItem::loops`]).
 pub fn profile_photo_items<'a>(
     photos: impl IntoIterator<Item = &'a crate::state::ProfilePhoto>,
     chat_id: ChatId,
@@ -21,9 +22,9 @@ pub fn profile_photo_items<'a>(
             kind: MediaViewerKind::Photo,
             display_file_ids: vec![FileId(photo.full_file_id), FileId(photo.thumb_file_id)],
             download_file_id: FileId(photo.full_file_id),
-            play_file_id: None,
+            play_file_id: photo.animation.map(|animation| animation.file_id),
             duration_secs: None,
-            mime_type: None,
+            mime_type: photo.animation.map(|_| "video/mp4".to_string()),
             start_timestamp: None,
             caption: String::new(),
             caption_entities: Vec::new(),

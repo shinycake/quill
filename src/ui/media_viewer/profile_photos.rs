@@ -34,6 +34,13 @@ impl QuillApp {
         Some((gallery, photo))
     }
 
+    /// Where the video photo on screen starts playing (its main frame).
+    pub(super) fn viewer_photo_clip_start(&self) -> f64 {
+        self.viewer_gallery_photo()
+            .and_then(|(_, photo)| photo.photo.animation)
+            .map_or(0.0, |animation| animation.start_secs())
+    }
+
     pub(in crate::ui) fn profile_photo_facts(&self) -> Option<ProfilePhotoFacts> {
         let (gallery, photo) = self.viewer_gallery_photo()?;
         let session = self.session()?;

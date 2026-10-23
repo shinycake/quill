@@ -420,6 +420,10 @@ mod fullscreen;
 #[cfg(feature = "demo-capture")]
 mod live_pip_follow;
 
+/// Video profile photos on the info cover and in the viewer.
+#[cfg(feature = "demo-capture")]
+mod video_avatar;
+
 /// The viewer on a clip that is still opening: the transport shows it,
 /// and closing then drops the player without a crash.
 #[cfg(feature = "demo-capture")]

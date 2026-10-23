@@ -144,6 +144,8 @@ pub struct QuillApp {
     pub(super) windows: super::chat_window::ChatWindows,
     /// The QR code box (`ui/peer_qr`).
     pub(super) peer_qr: super::peer_qr::PeerQrUi,
+    /// The info cover's video profile photo (`ui/video_avatar`).
+    pub(super) video_avatar: super::video_avatar::VideoAvatarUi,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

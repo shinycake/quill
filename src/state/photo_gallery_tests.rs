@@ -10,6 +10,7 @@ fn photo(id: i64) -> ProfilePhoto {
         full_file_id: 2,
         width: 100,
         height: 100,
+        animation: None,
     }
 }
 

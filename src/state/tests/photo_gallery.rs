@@ -258,6 +258,7 @@ fn own_photos_delete_and_set_main_but_never_report() {
         full_file_id: 2,
         width: 640,
         height: 640,
+        animation: None,
     };
     let list = [photo(1), photo(2)];
     let own = user_gallery(777, &list, 2, Some(1), None, None);

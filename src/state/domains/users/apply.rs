@@ -189,6 +189,7 @@ impl Session {
                     share_theme,
                 );
                 self.bots.bot_info.insert(user_id.0, bot_info);
+                self.cache_profile_photo_files(&extras);
                 let photo_file_id = photo.map(|file| {
                     let id = file.id.0;
                     self.upsert_file(file, false);

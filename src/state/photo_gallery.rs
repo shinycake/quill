@@ -8,7 +8,8 @@
 
 use super::*;
 use crate::telegram::envelope::{
-    MessageContent, ParsedMessage, ParsedProfilePhoto, PhotoContent, ServiceAction,
+    ChatPhotoAnimation, MessageContent, ParsedMessage, ParsedProfilePhoto, PhotoContent,
+    ServiceAction,
 };
 
 /// The Telegram service notifications account: its photos are never
@@ -48,7 +49,11 @@ pub enum PhotoDelete {
 impl ProfilePhoto {
     /// The gallery entry of a `messageChatChangePhoto` photo: the grid
     /// size and the largest one, as `parse_profile_photo` picks them.
-    pub fn from_photo_content(id: i64, photo: &PhotoContent) -> Option<Self> {
+    pub fn from_photo_content(
+        id: i64,
+        photo: &PhotoContent,
+        animation: Option<ChatPhotoAnimation>,
+    ) -> Option<Self> {
         let full = photo.largest_size()?;
         let thumb = photo.thumb_size().unwrap_or(full);
         Some(Self {
@@ -58,6 +63,7 @@ impl ProfilePhoto {
             full_file_id: full.file_id.0,
             width: full.width,
             height: full.height,
+            animation,
         })
     }
 }
@@ -189,13 +195,14 @@ fn photo_change(message: &ParsedMessage) -> Option<ChatPhotoChange> {
     let ServiceAction::ChatPhoto {
         photo: Some(photo),
         photo_id,
+        animation,
     } = action.as_ref()
     else {
         return None;
     };
     Some(ChatPhotoChange {
         message_id: message.id,
-        photo: ProfilePhoto::from_photo_content(*photo_id, photo)?,
+        photo: ProfilePhoto::from_photo_content(*photo_id, photo, *animation)?,
         is_outgoing: message.is_outgoing,
     })
 }
@@ -328,6 +335,74 @@ impl Session {
                 }
             }
         }
+    }
+
+    /// The clip `owner`'s profile cover plays (tdesktop
+    /// `TopBar::updateVideoUserpic`): the shown photo's, when it is a video
+    /// photo. A user's shown photo is the one you set for them, else their
+    /// own. Saved Messages shows its icon, never a clip.
+    pub fn cover_animation(&self, owner: PhotoOwner) -> Option<ChatPhotoAnimation> {
+        match owner {
+            PhotoOwner::User(user_id) => {
+                if self.my_user_id == Some(user_id) {
+                    return None;
+                }
+                let extras = &self.user_full_info(user_id)?.extras;
+                extras
+                    .personal_photo
+                    .as_ref()
+                    .or(extras.photo.as_ref())?
+                    .animation
+            }
+            PhotoOwner::Chat(chat_id) => {
+                self.users_state
+                    .chat_current_photos
+                    .get(&chat_id.0)?
+                    .as_ref()?
+                    .animation
+            }
+        }
+    }
+
+    /// Whose photo the open info panel's cover shows.
+    pub fn info_panel_photo_owner(&self) -> Option<PhotoOwner> {
+        match self.users_state.open_info_panel? {
+            InfoPanelTarget::User(user_id) => Some(PhotoOwner::User(user_id)),
+            InfoPanelTarget::Supergroup(supergroup_id) => self
+                .supergroup_chat(supergroup_id)
+                .map(|chat| PhotoOwner::Chat(chat.id)),
+            InfoPanelTarget::BasicGroup(basic_group_id) => self
+                .chats
+                .values()
+                .find(|chat| {
+                    matches!(chat.kind, ChatKind::BasicGroup { basic_group_id: id } if id == basic_group_id)
+                })
+                .map(|chat| PhotoOwner::Chat(chat.id)),
+            InfoPanelTarget::Statistics(_)
+            | InfoPanelTarget::Community(_)
+            | InfoPanelTarget::Earn(_) => None,
+        }
+    }
+
+    /// The clip the open info panel's cover plays, and whose it is. `None`
+    /// once the panel closes, which stops its player, and while GIF
+    /// autoplay is off or data saver is on (the cover keeps its still).
+    pub fn info_cover_animation(&self) -> Option<(PhotoOwner, ChatPhotoAnimation)> {
+        let prefs = &self.settings.media_prefs;
+        if !prefs.autoplay_gifs || prefs.data_saver {
+            return None;
+        }
+        let owner = self.info_panel_photo_owner()?;
+        Some((owner, self.cover_animation(owner)?))
+    }
+
+    /// The open cover's clip while it is not downloaded yet.
+    pub fn info_cover_file_ids_to_download(&self) -> Vec<FileId> {
+        self.info_cover_animation()
+            .map(|(_, animation)| animation.file_id)
+            .filter(|file_id| self.should_download(*file_id))
+            .into_iter()
+            .collect()
     }
 
     /// Keep a group or channel's current photo from its full info.

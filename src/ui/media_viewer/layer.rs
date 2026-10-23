@@ -311,7 +311,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<Entity<ViewerVideoLayer>> {
         let content = match (&self.viewer.player, &self.viewer.gif) {
-            _ if !item.kind.is_playable() || self.viewer.video != Some(item.message_id) => {
+            _ if !item.plays_clip() || self.viewer.video != Some(item.message_id) => {
                 LayerContent::Nothing
             }
             (Some(player), _) => LayerContent::Player(player.downgrade()),
