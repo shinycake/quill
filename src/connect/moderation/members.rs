@@ -320,6 +320,42 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(Some(extra))
     }
 
+    /// "Delete" on the Removed users list (tdesktop `removeKicked`): the
+    /// user leaves the list and may join again, but is not added back.
+    pub fn remove_from_banned(
+        &mut self,
+        chat_id: ChatId,
+        user_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let is_supergroup = matches!(
+            self.session.chats.get(&chat_id.0),
+            Some(chat) if matches!(chat.kind, ChatKind::Supergroup { .. })
+        );
+        if !is_supergroup || !self.session.chat_can_restrict_members(chat_id) {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::Groups(GroupsPurpose::SetChatMemberStatus {
+            user_id,
+            kind: MemberStatusChange::Unban,
+        });
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        let member_id = MessageSenderRef::User(user_id).to_value();
+        let status = chat_member_status_left_json();
+        if let Err(err) = self.sender.send_json(&set_chat_member_status(
+            extra, chat_id.0, &member_id, &status,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
     /// "Remove from group" (tdesktop `kickParticipant`). A basic group uses
     /// `banChatMember`; a supergroup or channel member is banned for good
     /// (they show under Banned and cannot rejoin until unbanned), with no

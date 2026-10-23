@@ -117,6 +117,10 @@ impl Session {
                             self.messages.tone_limits.max_duration =
                                 (*limit).clamp(0, i64::from(i32::MAX)) as i32
                         }
+                        "supergroup_size_max" => {
+                            self.groups.supergroup_size_max =
+                                i32::try_from(*limit).unwrap_or(i32::MAX)
+                        }
                         "notification_sound_count_max" => {
                             self.messages.tone_limits.max_count =
                                 usize::try_from(*limit).unwrap_or(0)

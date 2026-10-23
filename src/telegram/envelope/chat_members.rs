@@ -67,6 +67,13 @@ pub struct ParsedChatMember {
     /// `chatMemberStatusRestricted`: the member's own rights and when the
     /// restriction ends. `None` for every other status.
     pub restriction: Option<MemberRestriction>,
+    /// `chatMember.inviter_user_id`: who invited, promoted or banned the
+    /// member; 0 when unknown. The Exceptions and Removed users lists say
+    /// "Restricted by" / "Removed by" this user.
+    pub inviter_user_id: i64,
+    /// `chatMember.joined_chat_date`: when the member joined, was promoted
+    /// or was banned (unix seconds).
+    pub joined_chat_date: i32,
 }
 
 /// A member's personal restriction (`chatMemberStatusRestricted`, TDLib
@@ -517,6 +524,15 @@ pub(crate) fn parse_chat_member(value: Option<&Value>) -> Option<ParsedChatMembe
             .and_then(Value::as_bool)
             .unwrap_or(false),
         restriction: parse_member_restriction(value.get("status")),
+        inviter_user_id: value
+            .get("inviter_user_id")
+            .and_then(Value::as_i64)
+            .unwrap_or(0),
+        joined_chat_date: value
+            .get("joined_chat_date")
+            .and_then(Value::as_i64)
+            .and_then(|date| i32::try_from(date).ok())
+            .unwrap_or(0),
     })
 }
 
@@ -605,6 +621,27 @@ pub(crate) fn parse_can_transfer_ownership_result(
             })
         }
         _ => None,
+    }
+}
+
+/// The moderation counts of a `supergroupFullInfo`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SupergroupMemberCounts {
+    pub restricted: i32,
+    pub banned: i32,
+}
+
+impl SupergroupMemberCounts {
+    pub(crate) fn parse(info: Option<&Value>) -> Self {
+        let count = |name: &str| {
+            info.and_then(|info| info.get(name))
+                .and_then(Value::as_i64)
+                .map_or(0, |n| i32::try_from(n.max(0)).unwrap_or(i32::MAX))
+        };
+        Self {
+            restricted: count("restricted_count"),
+            banned: count("banned_count"),
+        }
     }
 }
 

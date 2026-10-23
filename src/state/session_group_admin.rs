@@ -27,6 +27,12 @@ pub enum AdminFollowup {
     EnableTopicsAfterUpgrade { old: ChatId, tabs: bool },
     /// The basic group `old` was upgraded: set the history visibility.
     HistoryAfterUpgrade { old: ChatId, visible: bool },
+    /// The basic group `old` was upgraded: save the permissions box into
+    /// the supergroup (slow mode and boosters need one).
+    PermissionsAfterUpgrade {
+        old: ChatId,
+        save: crate::permissions_box::PermissionsSave,
+    },
     /// The group's history is now visible: link it to `channel`
     /// (TDLib: `toggleSupergroupIsAllHistoryAvailable` must come first).
     LinkAfterHistory { channel: ChatId, group: ChatId },

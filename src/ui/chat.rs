@@ -5,9 +5,9 @@ use super::app::QuillApp;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr_with};
 use quill::state::unix_ms_now;
-use quill::telegram::envelope::{ChannelMemberStatus, ChatKind};
+use quill::telegram::envelope::ChatKind;
 use std::time::Duration;
 
 impl QuillApp {
@@ -100,65 +100,5 @@ impl QuillApp {
             }
         })
         .detach();
-    }
-
-    /// Phase A1: whether the viewer may change slow mode in a supergroup:
-    /// creator, or administrator with the explicit `can_restrict_members`
-    /// right (`setChatSlowModeDelay` requirement, schema 1.8.67 line
-    /// 13551). Shared by the info-panel selector and `set_slow_mode_delay`
-    /// (defense in depth — the request must never fire unauthorized).
-    pub(super) fn can_change_slow_mode(&self, supergroup_id: i64) -> bool {
-        let session = match self.session() {
-            Some(session) => session,
-            None => return false,
-        };
-        let status = session.supergroup_own_status(supergroup_id);
-        status == Some(ChannelMemberStatus::Creator)
-            || (status == Some(ChannelMemberStatus::Administrator)
-                && session.supergroup_can_restrict_members(supergroup_id))
-    }
-
-    /// Phase A1: admin slow-mode control (`setChatSlowModeDelay`, TDLib
-    /// 1.8.67 line 13551) from the group info panel. The new delay
-    /// arrives via `updateSupergroupFullInfo`; the panel re-renders then.
-    pub(super) fn set_slow_mode_delay(
-        &mut self,
-        chat_id: ChatId,
-        slow_mode_delay: i32,
-        cx: &mut Context<Self>,
-    ) {
-        let supergroup_id = self
-            .session()
-            .and_then(|s| match s.chats.get(&chat_id.0)?.kind {
-                ChatKind::Supergroup {
-                    supergroup_id,
-                    is_channel: false,
-                } => Some(supergroup_id),
-                _ => None,
-            });
-        if supergroup_id.is_none_or(|id| !self.can_change_slow_mode(id)) {
-            self.connection.set_note(StatusNote::info(tr(
-                keys::Q_REST_SLOW_MODE_NEEDS_THE_RESTRICT,
-            )));
-            cx.notify();
-            return;
-        }
-        if let Some(live) = self.live.as_mut() {
-            match live
-                .driver
-                .set_chat_slow_mode_delay(chat_id, slow_mode_delay)
-            {
-                Ok(_) => self
-                    .connection
-                    .set_note(StatusNote::info(tr(keys::Q_REST_SLOW_MODE_UPDATED))),
-                Err(_) => self.connection.set_note(StatusNote::error(tr(
-                    keys::Q_REST_COULD_NOT_CHANGE_SLOW_MODE,
-                ))),
-            }
-        } else {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_REST_SLOW_MODE_NEEDS_A_LIVE)));
-        }
-        cx.notify();
     }
 }

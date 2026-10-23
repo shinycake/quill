@@ -28,6 +28,7 @@ fn supergroup_full_info_parsed() {
             sticker_set_id,
             custom_emoji_sticker_set_id,
             admin: _,
+            member_counts: _,
             bot_commands: _,
             share_theme: _,
         }) => {

@@ -121,6 +121,7 @@ mod session_message_story;
 mod session_new;
 mod session_notifications;
 mod session_peer_color;
+mod session_permissions_box;
 mod session_privacy_data;
 mod session_profile_panels;
 mod session_proxy;

@@ -1,6 +1,5 @@
 //! Methods moved out of `group_panels.rs` to keep files under 1000 lines.
 
-use super::slow_mode::SlowModeSlider;
 use super::*;
 use gpui_kit::TestSupportExt;
 use quill::lang::{keys, tr, tr_with};
@@ -432,35 +431,6 @@ impl QuillApp {
         {
             body =
                 body.child(self.bot_verification_row(text, verification.icon_custom_emoji_id, cx));
-        }
-        // Phase A1: slow-mode admin control (`setChatSlowModeDelay`,
-        // schema 1.8.67 line 13551 — allowed values 0/5/10/30/60/300/900/
-        // 3600, supergroups only, requires `can_restrict_members`).
-        // Creators hold all rights implicitly; administrators need the
-        // explicit `can_restrict_members` right (lines 2500/1092). The new
-        // delay arrives via `updateSupergroupFullInfo`.
-        if !is_channel && self.can_change_slow_mode(supergroup_id) {
-            let current_delay = info.as_ref().map(|i| i.slow_mode_delay).unwrap_or(0);
-            let app = cx.entity().downgrade();
-            let slider = SlowModeSlider::new(chat_id.0, current_delay, move |delay, cx| {
-                app.update(cx, |this, cx| this.set_slow_mode_delay(chat_id, delay, cx))
-                    .ok();
-            });
-            body = body.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .w_full()
-                    .gap_1()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_semibold()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(tr(keys::Q_PEOPLE_SLOW_MODE)),
-                    )
-                    .child(slider),
-            );
         }
         // Phase D2: statistics entry point — shown only when
         // `supergroupFullInfo.can_get_statistics` is true (schema 1.8.67,

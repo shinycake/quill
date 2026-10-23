@@ -129,6 +129,11 @@ pub enum MemberAction {
     Ban,
     /// "Remove from group": the member leaves and may come back.
     Remove,
+    /// "Add to group" on the Removed users list (tdesktop
+    /// `unkickParticipant`): add the removed user back.
+    AddToGroup,
+    /// "Delete" on the Removed users list (tdesktop `removeKicked`): take
+    /// the user off the list without adding them back.
     Unban,
     Unrestrict,
 }
@@ -145,6 +150,7 @@ pub struct MemberMenuContext {
     pub viewer_can_promote: bool,
     pub viewer_can_restrict: bool,
     pub viewer_can_manage_tags: bool,
+    pub viewer_can_add: bool,
     /// The member list belongs to the chat that is open in the composer
     /// (needed for Mention and Search messages).
     pub chat_is_open: bool,
@@ -194,6 +200,9 @@ pub fn member_menu_actions(ctx: &MemberMenuContext) -> Vec<MemberAction> {
     }
     if ctx.target_status == ChannelMemberStatus::Banned {
         if ctx.viewer_can_restrict && ctx.flavor != GroupFlavor::BasicGroup {
+            if ctx.viewer_can_add && ctx.flavor == GroupFlavor::Supergroup {
+                out.push(MemberAction::AddToGroup);
+            }
             out.push(MemberAction::Unban);
         }
         return out;
@@ -392,6 +401,7 @@ mod tests {
             viewer_can_promote: true,
             viewer_can_restrict: true,
             viewer_can_manage_tags: true,
+            viewer_can_add: false,
             chat_is_open: true,
         }
     }
@@ -484,6 +494,18 @@ mod tests {
         let mut c = ctx(GroupFlavor::Supergroup, S::Banned);
         c.viewer_can_restrict = false;
         assert!(member_menu_actions(&c).is_empty());
+    }
+
+    #[test]
+    fn a_removed_user_can_be_added_back_where_the_viewer_may_add() {
+        let mut c = ctx(GroupFlavor::Supergroup, S::Banned);
+        c.viewer_can_add = true;
+        assert_eq!(
+            member_menu_actions(&c),
+            vec![MemberAction::AddToGroup, MemberAction::Unban]
+        );
+        c.flavor = GroupFlavor::Channel;
+        assert_eq!(member_menu_actions(&c), vec![MemberAction::Unban]);
     }
 
     #[test]

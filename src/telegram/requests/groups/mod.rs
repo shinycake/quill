@@ -268,6 +268,12 @@ pub fn chat_member_status_member_json() -> Value {
     })
 }
 
+/// `chatMemberStatusLeft`: what a removed user becomes when they are
+/// taken off the Removed users list (tdesktop `removeKicked`).
+pub fn chat_member_status_left_json() -> Value {
+    json!({ "@type": "chatMemberStatusLeft" })
+}
+
 /// Phase D3b: `getSupergroupMembers` (TDLib 1.8.67,
 /// `schema/td_api.tl:15238`):
 /// `getSupergroupMembers supergroup_id:int53 filter:SupergroupMembersFilter

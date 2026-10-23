@@ -382,7 +382,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.upgrade_with(chat_id, None)
     }
 
-    fn upgrade_with(
+    pub(crate) fn upgrade_with(
         &mut self,
         chat_id: ChatId,
         followup: Option<AdminFollowup>,
@@ -429,28 +429,34 @@ impl<S: JsonSender> ConnectDriver<S> {
         let result = match followup {
             // The history toggle may be a no-op or lack the right; the
             // link request reports the real error either way.
-            AdminFollowup::LinkAfterHistory { channel, group } => {
-                self.send_discussion_link(channel, group)
-            }
+            AdminFollowup::LinkAfterHistory { channel, group } => self
+                .send_discussion_link(channel, group)
+                .map(|sent| sent.is_some()),
             _ if !ok => return,
             AdminFollowup::EnableTopicsAfterUpgrade { old, tabs } => {
                 match self.session.upgraded_chat_for(old) {
-                    Some(new) if self.session.chat_is_owner(new) => {
-                        self.send_forum_toggle(new, true, tabs)
-                    }
-                    _ => Ok(None),
+                    Some(new) if self.session.chat_is_owner(new) => self
+                        .send_forum_toggle(new, true, tabs)
+                        .map(|sent| sent.is_some()),
+                    _ => Ok(false),
+                }
+            }
+            AdminFollowup::PermissionsAfterUpgrade { old, save } => {
+                match self.session.upgraded_chat_for(old) {
+                    Some(new) => self.send_permissions_save(new, save),
+                    None => Ok(false),
                 }
             }
             AdminFollowup::HistoryAfterUpgrade { old, visible } => {
                 match self.session.upgraded_chat_for(old) {
-                    Some(new) if self.session.chat_is_owner(new) => {
-                        self.send_group_toggle(new, GroupToggle::HistoryVisible, visible)
-                    }
-                    _ => Ok(None),
+                    Some(new) if self.session.chat_is_owner(new) => self
+                        .send_group_toggle(new, GroupToggle::HistoryVisible, visible)
+                        .map(|sent| sent.is_some()),
+                    _ => Ok(false),
                 }
             }
         };
-        if !matches!(result, Ok(Some(_))) {
+        if !matches!(result, Ok(true)) {
             self.session.chats_state.chat_action_error = Some(if linking {
                 "could not link the discussion group".to_string()
             } else {
