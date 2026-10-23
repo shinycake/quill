@@ -502,7 +502,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Slow-mode bypass when viewer boosts meet the unrestrict threshold (src/state.rs:3034) <!-- parity:groups-slow-mode-boost-bypass -->
 - [x] Invite-link list with expiry/humanised "Never expires"/"Expired" labels and pending-join-request counts (src/ui/mod.rs:8397) <!-- parity:groups-invite-link-list -->
 - [x] Create invite link dialog — name, expiration, member limit, join-request toggle (src/ui/mod.rs:222) <!-- parity:groups-invite-link-create -->
-- [ ] Invite link expiry and usage limit use presets (1 hour, 1 day, 1 week, no limit, custom date) instead of typed days and member counts <!-- parity:groups-invite-link-presets -->
+- [x] Invite link expiry and usage limit use presets (1 hour, 1 day, 1 week, no limit, custom date) instead of typed days and member counts <!-- parity:groups-invite-link-presets -->
 - [x] Edit, copy and revoke invite links (src/ui/mod.rs:6341) <!-- parity:groups-invite-link-edit-revoke -->
 - [x] Primary invite link displayed with replace via `replacePrimaryChatInviteLink` (src/ui/mod.rs) <!-- parity:groups-invite-link-primary -->
 - [x] Join-request list with approve/decline buttons and pending-count badge (src/ui/mod.rs:8596) <!-- parity:groups-join-requests -->
