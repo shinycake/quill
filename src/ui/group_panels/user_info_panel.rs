@@ -1,6 +1,7 @@
 //! Methods moved out of `group_panels.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::profile_panels::action_row::ProfilePeer;
 use gpui_kit::TestSupportExt;
 use quill::lang::{keys, tr, tr_with};
 
@@ -197,7 +198,7 @@ impl QuillApp {
         let in_own_chat = session
             .and_then(|s| s.open_chat.map(|chat| (s, chat)))
             .is_some_and(|(s, chat)| s.private_chat_user_id(chat) == Some(user_id));
-        if let Some(tiles) = self.user_profile_action_row(user_id, cx) {
+        if let Some(tiles) = self.profile_action_row(ProfilePeer::User(user_id), cx) {
             body = body.child(tiles);
         }
         if let Some(warning) = self.unofficial_client_warning(user_id, cx) {
@@ -409,8 +410,9 @@ impl QuillApp {
             .map(|i| i.description.clone())
             .unwrap_or_default();
         let members = info.as_ref().map(|i| i.member_count).unwrap_or(0);
-        let mut body =
-            self.supergroup_identity(supergroup_id, chat_id, title, is_channel, members, cx);
+        let mut body = self.supergroup_identity(chat_id, title.clone(), is_channel, members, cx);
+        body = body.children(self.profile_action_row(ProfilePeer::Chat(chat_id), cx));
+        body = body.children(self.group_link_card(supergroup_id, chat_id, &title, cx));
         if !description.is_empty() {
             // tdesktop strips external links from a group's description.
             let entities = info
@@ -495,13 +497,12 @@ impl QuillApp {
         body.into_any_element()
     }
 
-    /// The top of `supergroup_info_panel`: avatar, title with badges,
-    /// member count and username. A method of its own, so the panel's
+    /// The top of `supergroup_info_panel`: avatar, title with badges and
+    /// the member count with how many are online. A method of its own, so the panel's
     /// frame does not also hold this builder chain
     /// (docs/decisions/main-thread-stack.md).
     fn supergroup_identity(
         &self,
-        supergroup_id: i64,
         chat_id: ChatId,
         title: String,
         is_channel: bool,
@@ -509,10 +510,13 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Div {
         let session = self.session();
-        let username = session
-            .and_then(|s| s.supergroup_username(supergroup_id))
-            .filter(|name| !name.is_empty())
-            .map(|name| name.to_string());
+        let online = session
+            .and_then(|s| {
+                s.chats
+                    .get(&chat_id.0)
+                    .and_then(|c| s.group_member_counts(c))
+            })
+            .map_or(0, |(_, online)| online);
         // Parity slice: the panel avatar reuses the chat-list avatar (photo
         // or colored initials).
         let roots = self.media_display_roots();
@@ -569,83 +573,11 @@ impl QuillApp {
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
                             .when(members > 0, |this| {
-                                this.child(quill::inline_members::members_title(
-                                    members, is_channel,
+                                this.child(quill::inline_members::member_status_line(
+                                    members, is_channel, online,
                                 ))
                             }),
-                    )
-                    .when_some(username, |this, name| {
-                        // tdesktop's username row: click copies, the
-                        // right-click menu offers Copy Username and Copy Link.
-                        // A collectible username opens its Fragment box.
-                        let collectible = session.is_some_and(|s| {
-                            s.groups
-                                .supergroup_username_lists
-                                .get(&supergroup_id)
-                                .is_some_and(|lists| lists.collectible.contains(&name))
-                        });
-                        let owner_name = title.clone();
-                        let owner = cx.entity().downgrade();
-                        let mention = format!("@{name}");
-                        let actions = [
-                            CopyAction {
-                                text: mention.clone(),
-                                menu: tr(keys::Q_PEOPLE_COPY_USERNAME),
-                                toast: tr(keys::Q_PEOPLE_USERNAME_COPIED_TO_CLIPBOARD),
-                            },
-                            CopyAction {
-                                text: quill::profile_forms::profile_link(&name),
-                                menu: tr(keys::GROUP_INVITE_COPY),
-                                toast: tr(keys::STAR_REF_LINK_COPIED_TITLE),
-                            },
-                        ];
-                        let tapped = actions[0].clone();
-                        let qr_peer = quill::peer_qr::state::QrPeer::Chat(chat_id.0);
-                        this.child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_1()
-                                .child(
-                                    div()
-                                        .id("group-username")
-                                        .text_sm()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .cursor_pointer()
-                                        .child(mention)
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            if collectible {
-                                                let name = tapped.text.trim_start_matches('@');
-                                                let link = quill::profile_forms::profile_link(name);
-                                                this.open_collectible_info(
-                                                    name,
-                                                    &owner_name,
-                                                    Some(chat_id),
-                                                    link,
-                                                    cx,
-                                                );
-                                            } else {
-                                                this.copy_profile_text(
-                                                    &tapped.text,
-                                                    tapped.toast,
-                                                    cx,
-                                                );
-                                            }
-                                        }))
-                                        .context_menu(move |menu, _, _| {
-                                            copy_menu(menu, &owner, &actions)
-                                        }),
-                                )
-                                .child(div().debug_selector(|| "group-username-qr".into()).child(
-                                    crate::ui::peer_qr::qr_row_button(
-                                        "group-username-qr",
-                                        cx.listener(move |this, _, _, cx| {
-                                            this.open_peer_qr_box(qr_peer, cx)
-                                        }),
-                                    ),
-                                )),
-                        )
-                    }),
+                    ),
             )
     }
 
@@ -684,6 +616,14 @@ impl QuillApp {
                 SupergroupMembersFetch::Loaded { total_count, .. } => Some(*total_count),
                 _ => None,
             });
+        let online = self
+            .session()
+            .and_then(|s| {
+                s.chats
+                    .get(&chat_id.0)
+                    .and_then(|c| s.group_member_counts(c))
+            })
+            .map_or(0, |(_, online)| online);
         let roots = self.media_display_roots();
         let photo = self
             .session()
@@ -715,10 +655,13 @@ impl QuillApp {
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
                             .when_some(member_count, |this, count| {
-                                this.child(quill::inline_members::members_title(count, false))
+                                this.child(quill::inline_members::member_status_line(
+                                    count, false, online,
+                                ))
                             }),
                     ),
             );
+        body = body.children(self.profile_action_row(ProfilePeer::Chat(chat_id), cx));
         // `basicGroupFullInfo.description`, plain text.
         let description = self
             .session()

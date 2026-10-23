@@ -55,7 +55,6 @@
 "lng_group_invite_context_delete" = "Delete";
 "lng_group_invite_context_edit" = "Edit";
 "lng_group_invite_context_revoke" = "Revoke";
-"lng_group_invite_copy" = "Copy Link";
 "lng_group_invite_link_expired" = "Expired";
 "lng_group_invite_request_approve" = "Approve New Members";
 "lng_group_requests_dismiss" = "Dismiss";
@@ -109,7 +108,6 @@
 "lng_profile_action_short_more" = "More";
 "lng_profile_action_short_mute" = "Mute";
 "lng_profile_action_short_unmute" = "Unmute";
-"lng_profile_add_contact" = "Add Contact";
 "lng_profile_block_bot" = "Stop and block bot";
 "lng_profile_block_user" = "Block user";
 "lng_profile_bot_help" = "Bot Help";
@@ -717,8 +715,6 @@
 "qll_people_this_community" = "this community";
 "qll_people_this_number_is_not_tied" = "This number is not tied to a SIM card and was acquired on ";
 "qll_people_this_topic" = "this topic";
-"qll_people_this_user_cant_be_called" = "This user can't be called.";
-"qll_people_this_user_doesnt_support_video" = "This user doesn't support video calls.";
 "qll_people_this_users_privacy_settings_dont" = "This user's privacy settings don't allow calls.";
 "qll_people_this_will_remove_your_contacts" = "This will remove your contacts from the Telegram servers. If 'Sync contacts' is enabled, contacts will be re-synced.";
 "qll_people_title_must_be_1_128" = "title must be 1–128 characters";
@@ -758,7 +754,6 @@
 "qll_people_username_update_requested" = "Username update requested.";
 "qll_people_usernames_need_a_live_connection" = "usernames need a live connection (demo)";
 "qll_people_uses" = "{member_count}/{member_limit} uses";
-"qll_people_video" = "Video";
 "qll_people_video_2" = "Video…";
 "qll_people_video_avatars" = "Video avatars";
 "qll_people_view_photos" = "View photos";

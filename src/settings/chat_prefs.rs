@@ -67,6 +67,10 @@ pub struct ChatPrefs {
     /// account setting.
     #[serde(default)]
     pub profile_media_tabs_expanded: bool,
+    /// How many times the Disable Sharing box was shown; tdesktop shows it
+    /// three times, then the menu entry acts at once.
+    #[serde(default)]
+    pub disable_sharing_box_shown: u32,
 }
 
 impl Default for ChatPrefs {
@@ -78,6 +82,7 @@ impl Default for ChatPrefs {
             suggest_emoji: true,
             replace_emoji: true,
             profile_media_tabs_expanded: false,
+            disable_sharing_box_shown: 0,
         }
     }
 }

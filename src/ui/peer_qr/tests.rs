@@ -237,7 +237,7 @@ fn profile_rows_open_a_user_or_group_box(cx: &mut TestAppContext) {
         app.open_info_panel_target(InfoPanelTarget::Supergroup(777), window, cx);
     });
     frames(vcx);
-    click(vcx, "group-username-qr");
+    click(vcx, "group-link-qr");
     assert_eq!(
         subject(&app, vcx),
         Some(QrSubject::Peer(QrPeer::Chat(GROUP_CHAT)))

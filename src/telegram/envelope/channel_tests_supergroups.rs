@@ -29,6 +29,7 @@ fn supergroup_full_info_parsed() {
             custom_emoji_sticker_set_id,
             admin: _,
             member_counts: _,
+            profile: _,
             bot_commands: _,
             share_theme: _,
         }) => {

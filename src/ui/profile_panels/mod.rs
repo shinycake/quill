@@ -455,7 +455,9 @@ mod bot_rows_tests;
 mod change_phone_dialog;
 pub(in crate::ui) mod common_groups;
 mod details_card;
+mod disable_sharing;
 mod main_profile_tab_dialog;
+mod more_menu;
 mod photo_delete;
 mod photo_viewer;
 mod submit_personal_photo;
@@ -463,6 +465,9 @@ mod submit_personal_photo;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod about_text_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod action_row_tests;
 
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]

@@ -292,7 +292,7 @@ fn parse_hours(value: Option<&Value>) -> Option<OpeningHours> {
     (!hours.is_empty()).then_some(hours)
 }
 
-fn parse_location(value: Option<&Value>) -> Option<BusinessLocation> {
+pub(crate) fn parse_location(value: Option<&Value>) -> Option<BusinessLocation> {
     let value = value.filter(|v| !v.is_null())?;
     let address = value
         .get("address")

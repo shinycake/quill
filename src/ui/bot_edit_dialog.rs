@@ -62,7 +62,12 @@ impl QuillApp {
         )
     }
 
-    fn open_bot_edit(&mut self, bot_id: i64, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn open_bot_edit(
+        &mut self,
+        bot_id: i64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(live) = self.live.as_mut() else {
             self.connection
                 .set_note(StatusNote::info(tr(keys::Q_MEDIA_DEMO_MODE_EDITING_A_BOT)));

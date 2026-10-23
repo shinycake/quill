@@ -72,7 +72,7 @@ impl QuillApp {
         rows
     }
 
-    fn business_location_row(
+    pub(in crate::ui) fn business_location_row(
         &self,
         location: &business_info::BusinessLocation,
         cx: &mut Context<Self>,
@@ -123,6 +123,7 @@ impl QuillApp {
                     cx,
                 ),
             }))
+            .test_support()
             .into_any_element()
     }
 

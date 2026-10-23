@@ -1,0 +1,31 @@
+// The buttons under a profile's name, its More menu, the link row and the
+// Disable Sharing box (tdesktop info_profile_top_bar.cpp,
+// window_peer_menu.cpp, info_profile_actions.cpp).
+"lng_profile_action_short_discuss" = "Discuss";
+"lng_profile_action_short_join" = "Join";
+"lng_profile_action_short_report" = "Report";
+"lng_profile_action_short_leave" = "Leave";
+"lng_profile_action_short_manage" = "Manage";
+"lng_profile_action_short_live_stream" = "Live stream";
+"lng_profile_action_short_video_chat" = "Video chat";
+"lng_info_usernames_label" = "also";
+"lng_group_invite_share" = "Share Link";
+"lng_info_add_as_contact" = "Add to contacts";
+"lng_profile_gift_premium" = "Gift Premium";
+"lng_manage_channel_title" = "Manage Channel";
+"lng_stories_archive_button" = "Story Archive";
+"lng_stats_title" = "Statistics";
+"lng_boosts_title" = "Boosts";
+"lng_channel_earn_title" = "Monetization";
+"lng_edit_channel_personal_channel" = "Set as Personal Channel";
+"lng_profile_view_discussion" = "View discussion";
+"lng_channel_add_users" = "Add users";
+"lng_disable_sharing" = "Disable Sharing";
+"lng_enable_sharing" = "Enable Sharing";
+"lng_disable_sharing_title" = "Disable Sharing";
+"lng_disable_sharing_no_forwarding" = "No Forwarding";
+"lng_disable_sharing_no_forwarding_about" = "Disable message forwarding to other chats.";
+"lng_disable_sharing_no_saving" = "No Saving";
+"lng_disable_sharing_no_saving_about" = "Disable copying texts and saving photos and videos to gallery.";
+"lng_disable_sharing_unlock" = "Unlock with Telegram Premium";
+"lng_disable_sharing_button" = "Disable Sharing";

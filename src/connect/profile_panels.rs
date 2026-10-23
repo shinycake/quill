@@ -74,9 +74,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    /// `createPrivateChat` for a bot whose profile opened without a chat
-    /// (a bot met in a group), so Help, Settings, Report and Restart work
-    /// on the first tap. The chat is added to the session, not opened.
+    /// `createPrivateChat` for a user whose profile opened without a chat
+    /// (someone met in a group), so Mute, the bot's Help and Settings and
+    /// the More menu's chat entries work on the first tap. The chat is
+    /// added to the session, not opened.
     pub fn ensure_private_chat(
         &mut self,
         user_id: i64,
@@ -84,12 +85,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let is_bot = self.session.user(user_id).is_some_and(|user| user.is_bot);
         let listed = self.session.chats.values().any(|chat| {
             matches!(&chat.kind, crate::telegram::envelope::ChatKind::Private { user_id: peer } if peer.0 == user_id)
         });
         let purpose = RequestPurpose::EnsurePrivateChat;
-        if !is_bot || listed || self.session.requests.has_purpose_for_user(purpose, user_id) {
+        if self.session.my_user_id == Some(user_id)
+            || self.session.user(user_id).is_none()
+            || listed
+            || self.session.requests.has_purpose_for_user(purpose, user_id)
+        {
             return Ok(None);
         }
         let extra = self.session.request_for_user(purpose, user_id);

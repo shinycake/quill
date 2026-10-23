@@ -12,6 +12,10 @@
 use crate::telegram::envelope::{MessageSender, StickerContent, parse_sticker_value};
 use serde_json::Value;
 
+/// `premiumFeatureProtectPrivateChatContent`'s title, which the Disable
+/// Sharing upsell opens.
+pub const NO_FORWARDS_TITLE: &str = "Protect private chat content";
+
 fn int(value: Option<&Value>) -> i64 {
     value
         .and_then(|v| v.as_i64().or_else(|| v.as_str()?.parse().ok()))
@@ -743,7 +747,7 @@ pub fn feature_row(constructor: &str) -> Option<PremiumFeatureRow> {
             "Charge Stars for messages from people outside your contacts.",
         ),
         "premiumFeatureProtectPrivateChatContent" => (
-            "Protect private chat content",
+            NO_FORWARDS_TITLE,
             "Restrict forwarding and saving of your private chats.",
         ),
         "premiumFeatureTextComposition" => (

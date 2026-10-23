@@ -269,6 +269,9 @@ pub enum GroupsPayload {
         /// `restricted_count` / `banned_count`: the permissions box's
         /// Exceptions and Removed users rows.
         member_counts: SupergroupMemberCounts,
+        /// `location` / `can_send_gift`: the profile's location row and
+        /// Gift button.
+        profile: SupergroupProfileFacts,
     },
     /// Slice (communities backend core): `updateCommunity` (schema 1.8.67,
     /// line 10726) — the update carries the full `community` object and is
@@ -498,6 +501,9 @@ pub enum GroupsPayload {
         /// `restricted_count` / `banned_count`: the permissions box's
         /// Exceptions and Removed users rows.
         member_counts: SupergroupMemberCounts,
+        /// `location` / `can_send_gift`: the profile's location row and
+        /// Gift button.
+        profile: SupergroupProfileFacts,
     },
     /// `updateBasicGroupFullInfo` (schema 1.8.67): the description and the
     /// commands of the group's bots are kept.
