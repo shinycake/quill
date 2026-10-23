@@ -31,7 +31,6 @@ pub enum SpecialConfirm {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpecialStep {
     Ask(SpecialConfirm),
-    /// Open the restrict box on the member.
     Restrict,
     /// Ban the member (`ChannelData::KickedRestrictedRights`).
     Kick,
@@ -53,7 +52,6 @@ pub fn pick_step(
         _ => false,
     };
     match role {
-        // An exception that already exists is edited directly.
         SpecialRole::Restricted if admin => SpecialStep::Ask(SpecialConfirm::SureBanAdmin),
         SpecialRole::Restricted => SpecialStep::Restrict,
         SpecialRole::Kicked if admin => SpecialStep::Ask(SpecialConfirm::SureBanAdmin),
@@ -105,7 +103,6 @@ mod tests {
             confirmed_step(SpecialRole::Restricted, SpecialConfirm::SureBanAdmin),
             Some(SpecialStep::Restrict)
         );
-        // tdesktop skips the second question once the admin one is answered.
         assert_eq!(
             confirmed_step(SpecialRole::Kicked, SpecialConfirm::SureBanAdmin),
             Some(SpecialStep::Kick)

@@ -103,7 +103,6 @@ fn a_save_sends_each_changed_setting_once() {
     rig.owned_supergroup();
     let counts = rig.driver.session.chat_member_counts(ChatId(13));
     assert_eq!((counts.restricted, counts.banned), (2, 1));
-    // Turning text off turns links off with it.
     let permissions = toggle(current(&rig), Permission::SendText, false);
     let save = PermissionsSave::new(permissions, 30, 2);
     assert!(matches!(

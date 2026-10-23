@@ -188,8 +188,6 @@ impl QuillApp {
                 );
             dialog
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render: hand it over through a one-shot cell.
                     let body = Rc::new(RefCell::new(Some(body)));
                     move |content, _, _| {
                         let body = body
@@ -411,8 +409,6 @@ impl QuillApp {
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.update_permissions_box(cx, |dialog| {
                                 dialog.lock_hint = None;
-                                // tdesktop `AddInnerToggle`: on while any
-                                // row is on; a click flips the whole group.
                                 dialog.permissions = set_media(dialog.permissions, count == 0);
                             });
                         })),

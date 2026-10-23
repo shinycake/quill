@@ -624,7 +624,6 @@ pub(crate) fn parse_can_transfer_ownership_result(
     }
 }
 
-/// The moderation counts of a `supergroupFullInfo`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SupergroupMemberCounts {
     pub restricted: i32,

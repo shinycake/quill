@@ -58,19 +58,19 @@ pub(super) fn slow_mode_about(seconds: i32) -> String {
 #[derive(Clone, Copy)]
 pub(super) struct SliderKeys {
     slider: &'static str,
-    synced: &'static str,
+    reported: &'static str,
     release: &'static str,
 }
 
 pub(super) const SLOW_MODE_KEYS: SliderKeys = SliderKeys {
     slider: "slow-mode-slider",
-    synced: "slow-mode-synced",
+    reported: "slow-mode-reported",
     release: "slow-mode-release",
 };
 
 pub(super) const BOOSTS_KEYS: SliderKeys = SliderKeys {
     slider: "boosts-slider",
-    synced: "boosts-synced",
+    reported: "boosts-reported",
     release: "boosts-release",
 };
 
@@ -133,30 +133,26 @@ impl RenderOnce for StopsSlider {
         let slider = window.use_keyed_state((self.keys.slider, self.chat), cx, |_, _| {
             SliderState::new().min(0.0).max(last).step(1.0)
         });
-        let synced = window.use_keyed_state((self.keys.synced, self.chat), cx, |_, _| i32::MIN);
+        let reported = window.use_keyed_state((self.keys.reported, self.chat), cx, |_, _| i32::MIN);
         #[cfg(test)]
         if let Some(probe) = &self.probe {
             *probe.borrow_mut() = Some(slider.clone());
         }
-        // Report a release once per change, and only when it differs from
-        // the value passed in.
         let on_change = self.on_change.clone();
-        let release_synced = synced.clone();
+        let release_reported = reported.clone();
         let stops = self.stops;
         let _subscription = window.use_keyed_state((self.keys.release, self.chat), cx, |_, cx| {
             cx.subscribe(&slider, move |_, _, event: &SliderEvent, cx| {
                 if let SliderEvent::Release(position) = event {
                     let value = value_for(stops, position.end());
-                    if value != *release_synced.read(cx) {
+                    if value != *release_reported.read(cx) {
                         on_change(value, cx);
                     }
                 }
             })
         });
-        // Follow the value passed in; it only changes once a release was
-        // reported, so a drag is never interrupted.
-        if *synced.read(cx) != self.value {
-            synced.update(cx, |synced, _| *synced = self.value);
+        if *reported.read(cx) != self.value {
+            reported.update(cx, |reported, _| *reported = self.value);
             let index = stop_index(self.stops, self.value) as f32;
             slider.update(cx, |state, cx| state.set_value(index, window, cx));
         }

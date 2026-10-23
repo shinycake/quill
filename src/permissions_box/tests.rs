@@ -153,7 +153,6 @@ fn boosters_count_only_while_something_is_restricted() {
         PermissionsSave::new(no_photos, 0, 2).unrestrict_boost_count,
         2
     );
-    // Rows outside sending (pin, info) are not send restrictions.
     let no_pin = toggle(all_on(), Permission::PinMessages, false);
     assert!(!has_send_restrictions(&no_pin, 0));
 }

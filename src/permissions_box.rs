@@ -225,7 +225,6 @@ impl AdminGrants {
     };
 }
 
-/// What the box needs to know about the chat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BoxContext {
     pub is_forum: bool,
@@ -267,7 +266,6 @@ fn disabled_by_admin(row: Permission, grants: AdminGrants) -> bool {
     }
 }
 
-/// The lock on a row, if any.
 pub fn lock(context: &BoxContext, row: Permission) -> Option<Lock> {
     if disabled_by_admin(row, context.grants) {
         return Some(Lock::CantEdit);

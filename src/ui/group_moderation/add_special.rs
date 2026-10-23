@@ -49,7 +49,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// The search text changed: search the members as tdesktop does.
     pub(in crate::ui) fn search_add_special(&mut self, cx: &mut Context<Self>) {
         let Some(dialog) = self.admin.add_special.as_ref() else {
             return;
@@ -89,7 +88,6 @@ impl QuillApp {
         self.load_more_members(chat_id, filter, &query, &scroll);
     }
 
-    /// A member was picked.
     fn add_special_pick(
         &mut self,
         member: &ParsedChatMember,
@@ -106,7 +104,6 @@ impl QuillApp {
         self.run_special_step(user_id, step, window, cx);
     }
 
-    /// The question was answered with its confirm button.
     fn add_special_confirmed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(dialog) = self.admin.add_special.as_mut() else {
             return;
@@ -196,8 +193,6 @@ impl QuillApp {
             };
             dialog
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render: hand it over through a one-shot cell.
                     let body = Rc::new(RefCell::new(Some(body)));
                     move |content, _, _| {
                         let body = body
@@ -211,7 +206,6 @@ impl QuillApp {
         })
     }
 
-    /// The search field and the members.
     fn add_special_list(&self, state: &AddSpecialDialog, cx: &mut Context<Self>) -> AnyElement {
         let muted = cx.theme().muted_foreground;
         let (filter, _) = Self::add_special_filter(state, cx);
@@ -242,7 +236,6 @@ impl QuillApp {
                 list = list.child(div().px_2().text_sm().text_color(muted).child(error));
             }
             Some(SupergroupMembersFetch::Loaded { members, .. }) => {
-                // tdesktop excludes the viewer (`_excludeSelf`).
                 let rows: Vec<ParsedChatMember> = members
                     .into_iter()
                     .filter(|member| {
@@ -366,8 +359,6 @@ impl QuillApp {
 }
 
 crate::ui::shell::register_dialogs! {
-    // Above the member dialog it is opened from, below the restrict box
-    // it opens.
     AddSpecial => DialogSpec::new(
         4295,
         |app| app.admin.add_special.is_some(),

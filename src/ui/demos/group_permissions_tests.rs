@@ -51,6 +51,15 @@ fn click_start(vcx: &mut VisualTestContext, id: &'static str) {
     vcx.run_until_parked();
 }
 
+fn settle_animation(vcx: &mut VisualTestContext) {
+    for _ in 0..40 {
+        vcx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
+        vcx.update(|window, _| window.refresh());
+        vcx.run_until_parked();
+    }
+}
+
 fn saved(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> ChatPermissions {
     app.read_with(vcx, |app, _| {
         app.session()
@@ -74,19 +83,12 @@ fn a_media_permission_is_toggled_and_saved(cx: &mut TestAppContext) {
                 .is_some_and(|d| d.media_open)
         );
     });
-    // Let the group finish opening (a spring, frame by frame).
-    for _ in 0..40 {
-        vcx.executor()
-            .advance_clock(std::time::Duration::from_millis(16));
-        vcx.update(|window, _| window.refresh());
-        vcx.run_until_parked();
-    }
+    settle_animation(vcx);
     click_start(vcx, "permission-photos");
     app.read_with(vcx, |app, _| {
         let staged = app.admin.permissions_dialog.as_ref().map(|d| d.permissions);
         assert!(staged.is_some_and(|p| p.can_send_photos), "staged");
     });
-    // Staged only: the chat keeps its value until Save.
     assert!(!saved(&app, vcx).can_send_photos);
     click(vcx, "permissions-save");
     let permissions = saved(&app, vcx);
@@ -103,7 +105,6 @@ fn a_media_permission_is_toggled_and_saved(cx: &mut TestAppContext) {
 fn adding_an_exception_opens_the_restrict_box_after_the_admin_question(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "group-add-exception");
     let vcx = &mut vcx;
-    // An admin the viewer promoted: asked first.
     click(vcx, "add-special-1");
     app.read_with(vcx, |app, _| {
         let picker = app.admin.add_special.as_ref().expect("the picker");
@@ -111,7 +112,6 @@ fn adding_an_exception_opens_the_restrict_box_after_the_admin_question(cx: &mut 
         assert!(app.admin.restrict_dialog.is_none());
     });
     click(vcx, "add-special-back");
-    // A plain member opens the restrict box straight away, over the picker.
     click(vcx, "add-special-5");
     app.read_with(vcx, |app, _| {
         let restrict = app

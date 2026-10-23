@@ -315,7 +315,6 @@ impl QuillApp {
                     // channel) — not success. Keep the dialog open and
                     // say so instead of claiming it happened.
                     Ok(Some(_)) => {
-                        // The pick is done: the picker it came from closes.
                         self.admin.add_special = None;
                         if dialog.ban {
                             StatusNote::silent(tr(keys::Q_PEOPLE_MEMBER_BANNED))
@@ -451,7 +450,6 @@ impl QuillApp {
                         .placeholder(tr(keys::Q_PEOPLE_PICK_A_DATE_AND_TIME)),
                 );
             }
-            // tdesktop `EditRestrictedBox`: who set the exception, and when.
             if !dialog_state.ban
                 && let Some(line) =
                     this.restricted_by_line(dialog_state.chat_id, dialog_state.user_id)
@@ -676,7 +674,6 @@ impl QuillApp {
 }
 
 crate::ui::shell::register_dialogs! {
-    // Above the member dialog it is opened from.
     Restrict => DialogSpec::new(
         4290,
         |app| app.admin.restrict_dialog.is_some(),

@@ -282,7 +282,6 @@ impl QuillApp {
                 );
             }
             // Member rows.
-            // tdesktop puts "Add exception" / "Remove user" above these lists.
             let add_special = match tab {
                 MemberTab::Restricted if can_restrict => Some((
                     SpecialRole::Restricted,
@@ -590,9 +589,6 @@ impl QuillApp {
             None if query.trim().is_empty() => MemberListFilter::Recent,
             None => MemberListFilter::Search,
         };
-        // Slice G1 fix-up: a Restricted/Banned tab left open after
-        // the viewer lost restrict rights has no fetchable page —
-        // fall back to Recent instead of spinning forever.
         if !session.chat_can_restrict_members(dialog.chat_id)
             && matches!(
                 filter,
@@ -630,10 +626,7 @@ impl QuillApp {
         query: &str,
         scroll: &ScrollHandle,
     ) {
-        // Not laid out yet, or not near the end.
-        if scroll.bounds().size.height <= px(0.)
-            || scroll.max_offset().y + scroll.offset().y > px(LOAD_MORE_DISTANCE)
-        {
+        if !scrolled_near_end(scroll) {
             return;
         }
         let loaded = self.session().and_then(|session| {
@@ -700,8 +693,6 @@ impl QuillApp {
                     &[("chat_id", &chat_id.to_string())],
                 ),
             });
-        // tdesktop `ParticipantsBoxController`: the Exceptions and Removed
-        // users lists say who set them.
         let tab = self.admin.member_dialog.as_ref().map(|dialog| dialog.tab);
         let set_by = self.member_set_by(member);
         let status_label = match (tab, set_by, member.restriction) {
@@ -775,4 +766,9 @@ crate::ui::shell::register_dialogs! {
         |app| app.admin.member_dialog.is_some(),
         QuillApp::build_member_dialog,
     ),
+}
+
+fn scrolled_near_end(scroll: &ScrollHandle) -> bool {
+    scroll.bounds().size.height > px(0.)
+        && scroll.max_offset().y + scroll.offset().y <= px(LOAD_MORE_DISTANCE)
 }

@@ -22,7 +22,6 @@ pub(crate) struct AdminUi {
     pub(super) community: CommunityUi,
     /// Slice G1: member-management dialog (tabs + add section).
     pub(super) member_dialog: Option<MemberDialog>,
-    /// The group permissions box.
     pub(super) permissions_dialog: Option<PermissionsDialog>,
     /// The "Add exception" / "Remove user" picker over the member dialog.
     pub(super) add_special: Option<AddSpecialDialog>,
