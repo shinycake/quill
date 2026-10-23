@@ -233,6 +233,7 @@ mod composer_ui;
 mod composer_unicode;
 mod connect_ui;
 mod contacts;
+mod contacts_import;
 mod context_menu_keys;
 mod conversation;
 mod custom_emoji_card;

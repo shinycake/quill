@@ -184,9 +184,8 @@ impl QuillApp {
     }
 
     /// B1: one custom keyboard button. `Text` sends the text; `WebApp` opens
-    /// the mini app window (`ui/web_app_ui.rs`); request
-    /// contact/location/poll/user/chat/bot variants stay disabled with
-    /// honest tooltips — Quill has no permission/selection flows for them.
+    /// the mini app window (`ui/web_app_ui.rs`); the request buttons open
+    /// their share boxes (`ui/request_share.rs`) or the poll box.
     pub(super) fn custom_keyboard_button(
         chat_id: ChatId,
         message_id: MessageId,
@@ -233,6 +232,11 @@ impl QuillApp {
                             cx,
                         ),
                     }
+                }))
+            }
+            KeyboardButtonType::RequestLocation => {
+                element.on_click(cx.listener(move |this, _, _, cx| {
+                    this.press_request_location(chat_id, message_id, one_time, cx);
                 }))
             }
             KeyboardButtonType::RequestUsers(spec) => {
@@ -286,7 +290,7 @@ impl QuillApp {
         match kind {
             KeyboardButtonType::Text | KeyboardButtonType::WebApp { .. } => "",
             KeyboardButtonType::RequestPhoneNumber => tr(keys::Q_MISC_SHARE_YOUR_PHONE_NUMBER_WITH),
-            KeyboardButtonType::RequestLocation => tr(keys::Q_MISC_SHARING_YOUR_LOCATION_IS_NOT),
+            KeyboardButtonType::RequestLocation => "",
             KeyboardButtonType::RequestPoll { .. } => "",
             KeyboardButtonType::RequestUsers(_) => tr(keys::Q_MISC_CHOOSE_USERS_TO_SHARE_WITH),
             KeyboardButtonType::RequestChat(_) => tr(keys::Q_MISC_CHOOSE_A_CHAT_TO_SHARE),

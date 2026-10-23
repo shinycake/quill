@@ -10,12 +10,12 @@ use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
-use gpui_kit::component::input::{Textarea, TextareaState};
+use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{ContactRow, InfoPanelTarget};
-use quill::telegram::requests::{VCARD_IMPORT_LIMIT, parse_vcard};
+
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -41,24 +41,8 @@ impl QuillApp {
             let Some(dialog_state) = this.dialogs.import_contacts_dialog.as_ref() else {
                 return dialog.on_close(on_close);
             };
-            let body = div()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(tr(keys::Q_PEOPLE_PASTE_THE_CONTENTS_OF_A)),
-                )
-                .child(
-                    div().flex_1().child(
-                        Textarea::new(&dialog_state.input)
-                            .aria_label(tr(keys::Q_PEOPLE_CONTACTS_TO_IMPORT))
-                            .h(px(220.)),
-                    ),
-                )
-                .into_any_element();
+            let can_import = dialog_state.state.can_import();
+            let body = Self::import_contacts_body(&dialog_state.state, cx).into_any_element();
             let footer = div()
                 .flex()
                 .justify_end()
@@ -75,6 +59,8 @@ impl QuillApp {
                 .child(
                     Button::new("import-contacts-submit")
                         .label(tr(keys::Q_PEOPLE_IMPORT))
+                        .primary()
+                        .disabled(!can_import)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.submit_import_contacts_dialog(window, cx);
                             this.close_kit_dialog_if_done(DialogKind::ImportContacts, window, cx);
@@ -360,98 +346,6 @@ impl QuillApp {
             // works in screenshots.
             session.settings.contact_prefs.sync_enabled = next;
         }
-        cx.notify();
-    }
-
-    /// Slice A6: show the vCard import dialog (paste the file's text;
-    /// TGX reads `.vcf` files and only imports phone-number cards).
-    pub(super) fn open_import_contacts_dialog(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder(tr(keys::Q_PEOPLE_PASTE_VCARD_VCF_TEXT))
-                .auto_grow(4, 12)
-                .submit_on_enter(false)
-        });
-        self.dialogs.import_contacts_dialog = Some(ImportContactsDialog { input });
-        cx.notify();
-    }
-
-    /// Slice A6: parse the pasted vCard text and send `importContacts`
-    /// (schema 1.8.67, line 14517); cards without phone numbers are
-    /// skipped and reported, and cards past the `VCARD_IMPORT_LIMIT`
-    /// cap are truncated with the dropped count reported in the status
-    /// note. Keeps the dialog open when nothing usable was pasted so the
-    /// user can fix the text.
-    pub(super) fn submit_import_contacts_dialog(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(dialog) = self.dialogs.import_contacts_dialog.as_ref() else {
-            return;
-        };
-        let text = dialog.input.read(cx).text().to_string();
-        let (contacts, skipped, truncated) = parse_vcard(&text);
-        if contacts.is_empty() {
-            self.connection.set_note(StatusNote::silent(tr(
-                keys::Q_PEOPLE_NO_PHONE_NUMBER_CONTACTS_FOUND,
-            )));
-            cx.notify();
-            return;
-        }
-        if let Some(live) = self.live.as_mut() {
-            match live.driver.import_contacts(&contacts) {
-                Ok(Some(_)) => {
-                    self.connection.set_note(if skipped == 0 && truncated == 0 {
-                        StatusNote::silent(tr(keys::Q_PEOPLE_IMPORTING_CONTACTS))
-                    } else {
-                        let mut details = Vec::new();
-                        if skipped > 0 {
-                            details.push(tr_with(
-                                keys::Q_PEOPLE_SKIPPED_WITHOUT_PHONE,
-                                &[("skipped", &skipped.to_string())],
-                            ));
-                        }
-                        if truncated > 0 {
-                            details.push(format!(
-                                "{truncated} over the {VCARD_IMPORT_LIMIT}-card limit"
-                            ));
-                        }
-                        StatusNote::silent(tr_with(
-                            keys::Q_PEOPLE_IMPORTING_CONTACTS_2,
-                            &[("join", &(details.join(", ")).to_string())],
-                        ))
-                    });
-                }
-                Ok(None) => {
-                    self.connection.set_note(StatusNote::silent(tr(
-                        keys::Q_PEOPLE_REQUEST_ALREADY_IN_FLIGHT,
-                    )));
-                    cx.notify();
-                    return;
-                }
-                Err(err) => {
-                    self.connection.set_note(StatusNote::error(user_error_for(
-                        keys::Q_NOTES_FAILED_IMPORT_CONTACTS,
-                        &err,
-                    )));
-                    cx.notify();
-                    return;
-                }
-            }
-        }
-        self.dialogs.import_contacts_dialog = None;
-        cx.notify();
-        let _ = window;
-    }
-
-    /// Slice A6: dismiss the import dialog.
-    pub(super) fn close_import_contacts_dialog(&mut self, cx: &mut Context<Self>) {
-        self.dialogs.import_contacts_dialog = None;
         cx.notify();
     }
 
