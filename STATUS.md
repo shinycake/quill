@@ -559,9 +559,9 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Restrict until a custom date and per-right exception lists <!-- parity:admin-restrict-until-custom -->
 - [x] Admin custom title length counter and default "Admin" label <!-- parity:admin-title-counter -->
 - [x] Recent actions: server-side admin filter and explainer <!-- parity:admin-log-extras -->
-- [ ] Group and channel Edit box: photo, name with emoji, description, Save, and the management rows <!-- parity:admin-edit-box -->
-- [ ] Crop step after choosing a profile, group or channel photo <!-- parity:admin-photo-crop -->
-- [ ] Group and channel photo from the camera, an emoji avatar or a video <!-- parity:groups-photo-sources -->
+- [x] Group and channel Edit box: photo, name with emoji, description, Save, and the management rows <!-- parity:admin-edit-box -->
+- [x] Crop step after choosing a profile, group or channel photo <!-- parity:admin-photo-crop -->
+- [x] Group and channel photo from the camera, an emoji avatar or a video <!-- parity:groups-photo-sources -->
 - [ ] Group and channel type box: public or private, link with live availability check <!-- parity:admin-type-box -->
 - [ ] Channels can set a public link <!-- parity:channel-public-link -->
 - [ ] Public link availability and validation messages (checkChatUsername) <!-- parity:admin-link-availability -->
