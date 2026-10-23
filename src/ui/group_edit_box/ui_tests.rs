@@ -260,7 +260,10 @@ fn author_profiles_show_only_while_signing(cx: &mut TestAppContext) {
     let signatures = app.read_with(vcx, |app, _| {
         app.group_edit_box().and_then(|edit| edit.signatures)
     });
-    assert_eq!(signatures.map(|s| (s.sign, s.profiles)), Some((false, false)));
+    assert_eq!(
+        signatures.map(|s| (s.sign, s.profiles)),
+        Some((false, false))
+    );
     vcx.update(|window, cx| window.click(("g2-toggle-sign-messages", 1u64), cx));
     frames(vcx);
     assert!(shown(vcx, "g2-toggle-show-authors"));
@@ -296,7 +299,8 @@ fn the_history_box_hands_its_choice_to_save(cx: &mut TestAppContext) {
         })
     });
     frames(vcx);
-    assert!(shell.read_with(vcx, |s, _| s.open_dialog == Some(DialogKind::GroupHistoryBox)));
+    assert!(shell.read_with(vcx, |s, _| s.open_dialog
+        == Some(DialogKind::GroupHistoryBox)));
     vcx.update(|window, cx| {
         window
             .within("group-history-visibility")

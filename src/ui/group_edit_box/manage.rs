@@ -90,7 +90,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let page = |view: GroupSettingsView| {
-            move |this: &mut QuillApp, _: &ClickEvent, _: &mut Window, cx: &mut Context<QuillApp>| {
+            move |this: &mut QuillApp,
+                  _: &ClickEvent,
+                  _: &mut Window,
+                  cx: &mut Context<QuillApp>| {
                 this.open_group_settings_view(chat_id, view, cx);
             }
         };

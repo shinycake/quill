@@ -47,10 +47,7 @@ impl QuillApp {
     /// The value the row showed when the box opened.
     fn history_box_saved(&self) -> Option<bool> {
         let edit = self.group_edit_box()?;
-        let control = self
-            .session()?
-            .group_admin_controls(edit.chat_id)
-            .history?;
+        let control = self.session()?.group_admin_controls(edit.chat_id).history?;
         Some(edit.history_visible.unwrap_or(control.visible))
     }
 

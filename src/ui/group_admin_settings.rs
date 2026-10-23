@@ -492,13 +492,16 @@ impl QuillApp {
                             muted,
                         ))
                         .child(
-                            action_row("b7-unlink", Some(IconName::Ban), tr(keys::MANAGE_DISCUSSION_GROUP_UNLINK), true, cx)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.set_group_settings_view(
-                                        GroupSettingsView::ConfirmUnlink,
-                                        cx,
-                                    );
-                                })),
+                            action_row(
+                                "b7-unlink",
+                                Some(IconName::Ban),
+                                tr(keys::MANAGE_DISCUSSION_GROUP_UNLINK),
+                                true,
+                                cx,
+                            )
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.set_group_settings_view(GroupSettingsView::ConfirmUnlink, cx);
+                            })),
                         );
                 } else {
                     body = body.child(Self::settings_note(
@@ -698,7 +701,11 @@ impl QuillApp {
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.group_settings_action(GroupSettingsAction::Upgrade, cx);
                                 this.close_group_settings_dialog(cx);
-                                this.close_kit_dialog_if_done(DialogKind::GroupSettings, window, cx);
+                                this.close_kit_dialog_if_done(
+                                    DialogKind::GroupSettings,
+                                    window,
+                                    cx,
+                                );
                             })),
                     )
                     .child(close("b7-back", tr(keys::CANCEL), cx))

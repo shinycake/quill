@@ -61,10 +61,10 @@ impl Session {
                 _ => 0,
             }
         });
-        let reactions = self
-            .group_admin_controls(chat_id)
-            .reactions
-            .then(|| self.chat_available_reactions(chat_id).map(ReactionsValue::of));
+        let reactions = self.group_admin_controls(chat_id).reactions.then(|| {
+            self.chat_available_reactions(chat_id)
+                .map(ReactionsValue::of)
+        });
         let permissions = |is_forum: bool| {
             let defaults = chat.permissions.unwrap_or_else(ChatPermissions::all);
             permissions_count(&defaults, is_forum)
@@ -115,8 +115,7 @@ impl Session {
                         .then(|| permissions(chat.is_forum_chat())),
                     invite_links,
                     administrators: (!is_channel || admin).then_some(counts.administrators),
-                    members: (admin || (!is_channel && member && !hidden))
-                        .then_some(members_total),
+                    members: (admin || (!is_channel && member && !hidden)).then_some(members_total),
                     join_requests: pending,
                     removed_users: ((is_channel || broadcast_group) && admin && can_restrict)
                         .then_some(counts.banned),

@@ -132,22 +132,30 @@ impl QuillApp {
     ) -> Option<AnyElement> {
         let state = self.edit_box_signatures(rows)?;
         let set = |next: Signatures| {
-            move |this: &mut QuillApp, _: &ClickEvent, _: &mut Window, cx: &mut Context<QuillApp>| {
+            move |this: &mut QuillApp,
+                  _: &ClickEvent,
+                  _: &mut Window,
+                  cx: &mut Context<QuillApp>| {
                 if let Some(edit) = this.group_edit_box_mut() {
                     edit.signatures = Some(next);
                 }
                 cx.notify();
             }
         };
-        let mut column = div().flex().flex_col().w_full().gap_1().child(management_toggle_row(
-            "g2-toggle-sign-messages",
-            I::PenLine,
-            tr(keys::EDIT_SIGN_MESSAGES),
-            state.sign,
-            false,
-            cx.listener(set(state.toggle_sign())),
-            cx,
-        ));
+        let mut column = div()
+            .flex()
+            .flex_col()
+            .w_full()
+            .gap_1()
+            .child(management_toggle_row(
+                "g2-toggle-sign-messages",
+                I::PenLine,
+                tr(keys::EDIT_SIGN_MESSAGES),
+                state.sign,
+                false,
+                cx.listener(set(state.toggle_sign())),
+                cx,
+            ));
         if state.shows_profiles() {
             column = column.child(management_toggle_row(
                 "g2-toggle-show-authors",
@@ -175,7 +183,11 @@ impl QuillApp {
     ) -> Option<AnyElement> {
         let control = self.session()?.group_admin_controls(chat_id).history?;
         let edit = self.group_edit_box()?;
-        if edit.type_choice.as_ref().is_some_and(|choice| choice.public) {
+        if edit
+            .type_choice
+            .as_ref()
+            .is_some_and(|choice| choice.public)
+        {
             return None;
         }
         let visible = edit.history_visible.unwrap_or(control.visible);
