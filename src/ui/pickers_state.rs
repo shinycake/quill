@@ -51,6 +51,8 @@ impl PickerUi {
         .detach();
         let emoji_set_search_input = cx
             .new(|cx| InputState::new(window, cx).placeholder(tr(keys::Q_MISC_SEARCH_EMOJI_PACKS)));
+        // window-scope: the packs box lives in the main window only, and
+        // `emoji_sets_search_typed` runs its search through `spawn_scoped`.
         cx.subscribe(
             &emoji_set_search_input,
             |this, _, event: &InputEvent, cx| {
