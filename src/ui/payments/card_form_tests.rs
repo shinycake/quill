@@ -14,6 +14,7 @@ use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Focusable, TestAppContext, VisualTestContext, px, size};
 use quill::payment_card::CardField;
 use quill::payment_card::transport::{HttpRequest, HttpResponse, Transport, TransportError};
+use quill::telegram::envelope::PasswordState;
 use std::sync::{Arc, Mutex};
 
 const TOKEN: &str =
@@ -338,7 +339,22 @@ fn provider_errors_keep_the_form_open(cx: &mut TestAppContext) {
         let form = dialog.card_form.as_ref().expect("still on the card form");
         assert!(!form.is_tokenizing(), "Done works again");
         assert!(dialog.new_card.is_none());
+        assert_eq!(
+            form.notice.as_ref().map(|notice| notice.as_ref()),
+            Some(quill::lang::tr(quill::lang::keys::PAYMENTS_CARD_DECLINED))
+        );
     });
+    assert!(
+        vcx.update(|window, _| window.try_find("payment-card-notice").is_some()),
+        "the refusal shows inside the checkout"
+    );
+    // Done again drops the old refusal while the provider answers.
+    let cleared = app.update_in(&mut vcx, |app, window, cx| {
+        app.submit_card_form(window, cx);
+        app.card_form().is_some_and(|form| form.notice.is_none())
+    });
+    assert!(cleared);
+    draw(&mut vcx);
 
     let (app, mut vcx) = open_checkout(cx, true, false, Recorded::new(402, BAD_CVC));
     open_card_form(&app, &mut vcx);
@@ -346,6 +362,24 @@ fn provider_errors_keep_the_form_open(cx: &mut TestAppContext) {
     press_done(&app, &mut vcx);
     assert!(invalid(&app, CardField::Cvc, &mut vcx));
     assert!(focused(&app, CardField::Cvc, &mut vcx));
+}
+
+fn prompt_shown(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
+    vcx.update(|_, cx| {
+        app.read(cx)
+            .payments
+            .dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.password_prompt)
+    })
+}
+
+fn pay_enabled(vcx: &mut VisualTestContext) -> Option<bool> {
+    vcx.update(|window, _| {
+        window
+            .try_find("p1-payment-pay")
+            .map(|pay| pay.disabled() != Some(true))
+    })
 }
 
 #[gpui_kit::test]
@@ -357,14 +391,101 @@ fn saving_without_a_password_asks_to_turn_it_on(cx: &mut TestAppContext) {
     fill_visa(&app, &mut vcx);
     app.update_in(&mut vcx, |app, _, cx| app.toggle_card_save(true, cx));
     press_done(&app, &mut vcx);
-    let prompt = vcx.update(|_, cx| {
-        app.read(cx)
-            .payments
-            .dialog
-            .as_ref()
-            .is_some_and(|dialog| dialog.password_prompt)
+    assert!(prompt_shown(&app, &mut vcx));
+    assert_eq!(
+        pay_enabled(&mut vcx),
+        Some(false),
+        "answer the prompt first"
+    );
+
+    // Another method drops the prompt; the new card again asks again.
+    vcx.update(|window, cx| window.within("payment-method").click(1usize, cx));
+    draw(&mut vcx);
+    assert!(!prompt_shown(&app, &mut vcx));
+    assert_eq!(pay_enabled(&mut vcx), Some(true));
+    vcx.update(|window, cx| window.within("payment-method").click(2usize, cx));
+    draw(&mut vcx);
+    assert!(prompt_shown(&app, &mut vcx));
+
+    // Continue: Two-Step Verification over the checkout, which keeps the card.
+    vcx.update(|window, cx| window.click("payment-card-password-continue", cx));
+    draw(&mut vcx);
+    let (twofa_open, card_kept) = vcx.update(|_, cx| {
+        let app = app.read(cx);
+        let dialog = app.payments.dialog.as_ref();
+        (
+            app.twofa.open,
+            dialog.is_some_and(|dialog| {
+                dialog.new_card.is_some()
+                    && dialog.credential_choice == PaymentCredentialChoice::NewCard
+            }),
+        )
     });
-    assert!(prompt);
+    assert!(twofa_open);
+    assert!(card_kept, "the checkout and its new card stay");
+    assert_eq!(pay_enabled(&mut vcx), None, "Two-Step Verification shows");
+    assert!(!vcx.update(|_, cx| app.read(cx).checkout_can_save_credentials()));
+
+    // A password set there lets the card be saved; closing comes back.
+    app.update_in(&mut vcx, |app, _, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.auth_state.password_state = Some(PasswordState {
+                has_password: true,
+                password_hint: String::new(),
+                has_recovery_email_address: false,
+                has_passport_data: false,
+                pending_email_pattern: None,
+                pending_email_code_length: 0,
+                login_email_address_pattern: String::new(),
+                pending_reset_date: 0,
+            });
+        }
+        app.twofa.open = false;
+        cx.notify();
+    });
+    draw(&mut vcx);
+    assert_eq!(pay_enabled(&mut vcx), Some(true), "back on the checkout");
+    assert!(vcx.update(|_, cx| app.read(cx).checkout_can_save_credentials()));
+    vcx.update(|window, cx| window.within("payment-method").click(2usize, cx));
+    draw(&mut vcx);
+    assert!(!prompt_shown(&app, &mut vcx), "nothing left to ask");
+}
+
+#[gpui_kit::test]
+fn a_delete_that_changes_nothing_leaves_no_snapshot(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_checkout(cx, true, false, Recorded::new(200, TOKEN));
+    open_card_form(&app, &mut vcx);
+    vcx.simulate_input("4242");
+    draw(&mut vcx);
+    // Delete at the end of the text has nothing to remove.
+    vcx.simulate_keystrokes("delete");
+    draw(&mut vcx);
+    let pending = vcx.update(|_, cx| {
+        app.read(cx)
+            .card_form()
+            .and_then(|form| form.input(CardField::Number))
+            .is_some_and(|input| input.has_delete_snapshot())
+    });
+    assert!(!pending);
+    assert_eq!(value(&app, CardField::Number, &mut vcx), "4242");
+    // A Backspace that does edit still steps over the separator.
+    vcx.simulate_input("4");
+    draw(&mut vcx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        if let Some(input) = app
+            .card_form()
+            .and_then(|form| form.input(CardField::Number))
+        {
+            input.state.update(cx, |state, cx| {
+                state.set_selected_range(5..5, cx);
+                state.focus(window, cx);
+            });
+        }
+    });
+    draw(&mut vcx);
+    vcx.simulate_keystrokes("backspace");
+    draw(&mut vcx);
+    assert_eq!(value(&app, CardField::Number, &mut vcx), "4244");
 }
 
 #[gpui_kit::test]

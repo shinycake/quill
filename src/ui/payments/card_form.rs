@@ -8,9 +8,7 @@
 use crate::ui::app::QuillApp;
 use crate::ui::country_box::{CountryBox, CountryHost};
 use crate::ui::dialogs::{NewCard, PaymentCredentialChoice};
-use gpui_kit::component::WindowExt;
 use gpui_kit::component::input::{InputEvent, InputState};
-use gpui_kit::component::notification::Notification;
 use gpui_kit::*;
 use quill::country_select::CountryMode;
 use quill::lang::{keys, tr, tr_with};
@@ -26,6 +24,7 @@ use quill::payment_card::{
 };
 use quill::telegram::envelope::PaymentFormTypeData;
 use std::sync::Arc;
+use zeroize::Zeroizing;
 
 /// One text field of the form.
 pub(crate) struct CardInput {
@@ -35,6 +34,14 @@ pub(crate) struct CardInput {
     pub(crate) invalid: bool,
     /// The text just before a Backspace or Delete (see `field_edit`).
     before_delete: Option<EditSnapshot>,
+}
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+impl CardInput {
+    pub(crate) fn has_delete_snapshot(&self) -> bool {
+        self.before_delete.is_some()
+    }
 }
 
 /// Editing, or waiting for the provider's token (Done is busy then and
@@ -58,6 +65,10 @@ pub(crate) struct CardForm {
     /// "Save Information for future use", when the form allows saving.
     pub(crate) save: Option<bool>,
     pub(crate) phase: CardPhase,
+    /// The provider's last refusal ("Your card was declined."), shown in
+    /// the form until Done is pressed again or it is closed. Error ids
+    /// only, never card data.
+    pub(crate) notice: Option<SharedString>,
 }
 
 impl CardForm {
@@ -89,10 +100,13 @@ impl CardForm {
         matches!(self.phase, CardPhase::Tokenizing { .. })
     }
 
-    fn value(&self, field: CardField, cx: &App) -> String {
-        self.input(field)
-            .map(|input| input.state.read(cx).value().to_string())
-            .unwrap_or_default()
+    /// A copy of the field's text, wiped when dropped.
+    fn value(&self, field: CardField, cx: &App) -> Zeroizing<String> {
+        Zeroizing::new(
+            self.input(field)
+                .map(|input| input.state.read(cx).value().to_string())
+                .unwrap_or_default(),
+        )
     }
 
     /// tdesktop's `EditCard::collect`.
@@ -103,9 +117,9 @@ impl CardForm {
             digits_of(&self.value(CardField::Cvc, cx)),
             month,
             year,
-            self.value(CardField::Name, cx),
+            std::mem::take(&mut *self.value(CardField::Name, cx)),
             self.country_iso.clone(),
-            self.value(CardField::Zip, cx),
+            std::mem::take(&mut *self.value(CardField::Zip, cx)),
         )
     }
 }
@@ -206,6 +220,7 @@ impl QuillApp {
             default_country,
             save: can_save.then_some(false),
             phase: CardPhase::Editing,
+            notice: None,
         };
         if let Some(dialog) = self.payments.dialog.as_mut() {
             dialog.card_form = Some(card_form);
@@ -336,6 +351,17 @@ impl QuillApp {
         if let Some(input) = self.card_form_mut().and_then(|form| form.input_mut(field)) {
             input.before_delete = Some(snapshot);
         }
+        // The input handles the key after this capture handler and emits
+        // its Change in this same effect cycle. A defer queued from a defer
+        // runs after that Change, so a press that changed nothing (at the
+        // start or end of the text) leaves no snapshot for later typing.
+        cx.defer_in(window, move |_, window, cx| {
+            cx.defer_in(window, move |this, _, _| {
+                if let Some(input) = this.card_form_mut().and_then(|form| form.input_mut(field)) {
+                    input.before_delete = None;
+                }
+            });
+        });
         if at_front && let Some(previous) = self.neighbour_field(field, -1) {
             self.focus_card_field(previous, window, cx);
         }
@@ -352,7 +378,7 @@ impl QuillApp {
         let Some(form) = self.card_form_mut() else {
             return;
         };
-        let number = digits_of(&form.value(CardField::Number, cx));
+        let number = Zeroizing::new(digits_of(&form.value(CardField::Number, cx)));
         let Some(input) = form.input_mut(field) else {
             return;
         };
@@ -367,7 +393,7 @@ impl QuillApp {
         };
         input.invalid = result.invalid() && !result.finished();
         if result.value() != now.value() || result.cursor() != now.cursor() {
-            let value = result.value().to_string();
+            let value = Zeroizing::new(result.value().to_string());
             let cursor = byte_index(&value, result.cursor());
             input.state.update(cx, |state, cx| {
                 if state.value().as_ref() != value.as_str() {
@@ -481,6 +507,9 @@ impl QuillApp {
         }
         let provider = form.provider.clone();
         let transport = self.card_transport();
+        if let Some(form) = self.card_form_mut() {
+            form.notice = None;
+        }
         let tokenizing = cx
             .background_executor()
             .spawn(async move { tokenize(&provider, &card, transport.as_ref()) });
@@ -542,7 +571,16 @@ impl QuillApp {
                 tr_with(keys::Q_PAYMENT_CARD_SMARTGLOCAL_ERROR, &[("id", &id)])
             }
         };
-        window.push_notification(Notification::new().message(text), cx);
+        if let Some(form) = self.card_form_mut() {
+            form.notice = Some(text.into());
+        }
+        cx.notify();
+    }
+
+    pub(in crate::ui) fn dismiss_card_notice(&mut self, cx: &mut Context<Self>) {
+        if let Some(form) = self.card_form_mut() {
+            form.notice = None;
+        }
         cx.notify();
     }
 
@@ -550,16 +588,7 @@ impl QuillApp {
     /// without a password first asks to set one (tdesktop's
     /// `Form::setPaymentCredentials`).
     fn use_new_card(&mut self, credentials: NewCredentials, cx: &mut Context<Self>) {
-        let (can_save, need_password) = self
-            .session()
-            .and_then(|s| s.payments.form.as_ref())
-            .and_then(|form| match &form.form_type {
-                PaymentFormTypeData::Regular(regular) => {
-                    Some((regular.can_save_credentials, regular.need_password))
-                }
-                _ => None,
-            })
-            .unwrap_or((false, false));
+        let ask_password = self.needs_password_to_save();
         let Some(dialog) = self.payments.dialog.as_mut() else {
             return;
         };
@@ -571,7 +600,40 @@ impl QuillApp {
         dialog.new_card = Some(NewCard { credentials, save });
         dialog.credential_choice = PaymentCredentialChoice::NewCard;
         dialog.card_form = None;
-        dialog.password_prompt = save && !can_save && need_password;
+        dialog.password_prompt = save && ask_password;
         cx.notify();
+    }
+
+    /// The checkout can save a card on the server: it says so, or it only
+    /// lacked a password and the account has one now (tdesktop's
+    /// `Form::setHasPassword`, fed by the cloud password state).
+    pub(in crate::ui) fn checkout_can_save_credentials(&self) -> bool {
+        let Some(session) = self.session() else {
+            return false;
+        };
+        let Some(PaymentFormTypeData::Regular(regular)) =
+            session.payments.form.as_ref().map(|form| &form.form_type)
+        else {
+            return false;
+        };
+        let has_password = session
+            .auth_state
+            .password_state
+            .as_ref()
+            .is_some_and(|state| state.has_password);
+        regular.can_save_credentials || (regular.need_password && has_password)
+    }
+
+    /// Saving the new card needs a password the account does not have yet
+    /// (tdesktop's `requestNewPassword`).
+    pub(in crate::ui) fn needs_password_to_save(&self) -> bool {
+        let need_password = self
+            .session()
+            .and_then(|s| s.payments.form.as_ref())
+            .is_some_and(|form| match &form.form_type {
+                PaymentFormTypeData::Regular(regular) => regular.need_password,
+                _ => false,
+            });
+        need_password && !self.checkout_can_save_credentials()
     }
 }

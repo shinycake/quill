@@ -6,7 +6,8 @@ use super::card_form::{CardForm, CardInput, placeholder};
 use crate::ui::app::QuillApp;
 use crate::ui::country_box::CountryHost;
 use crate::ui::dialogs::{PaymentCredentialChoice, PaymentDialog};
-use crate::ui::shell::DialogKind;
+use gpui_kit::TestSupportExt;
+use gpui_kit::component::alert::Alert;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::{Cancel, Confirm};
@@ -61,12 +62,29 @@ impl QuillApp {
         self.checkout_card_entry().is_some()
     }
 
-    /// "Continue" on the password prompt: leave the checkout for the
-    /// Two-Step Verification settings.
-    fn set_password_for_card(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.close_payment_dialog(cx);
-        self.close_kit_dialog_if_done(DialogKind::PaymentForm, window, cx);
+    /// "Continue" on the password prompt: Two-Step Verification opens over
+    /// the checkout, which keeps the new card and comes back when it closes
+    /// (tdesktop's `panelSetPassword`). A password set there lets the card
+    /// be saved (see `checkout_can_save_credentials`).
+    fn set_password_for_card(&mut self, cx: &mut Context<Self>) {
+        if let Some(dialog) = self.payments.dialog.as_mut() {
+            dialog.password_prompt = false;
+        }
         self.open_twofa(cx);
+    }
+
+    /// A method picked from the list. Picking another method drops the
+    /// password prompt; picking the new card again asks again when it still
+    /// cannot be saved (tdesktop's `Form::chooseSavedMethod`).
+    fn choose_payment_method(&mut self, choice: PaymentCredentialChoice, cx: &mut Context<Self>) {
+        let ask_password = self.needs_password_to_save();
+        if let Some(dialog) = self.payments.dialog.as_mut() {
+            let saving_new_card = choice == PaymentCredentialChoice::NewCard
+                && dialog.new_card.as_ref().is_some_and(|card| card.save);
+            dialog.password_prompt = saving_new_card && ask_password;
+            dialog.credential_choice = choice;
+        }
+        cx.notify();
     }
 
     fn dismiss_card_password_prompt(&mut self, cx: &mut Context<Self>) {
@@ -119,12 +137,7 @@ impl QuillApp {
                     .children(radios)
                     .on_click(cx.listener(move |this, &index: &usize, window, cx| {
                         match choices.get(index) {
-                            Some(Some(choice)) => {
-                                if let Some(dialog) = this.payments.dialog.as_mut() {
-                                    dialog.credential_choice = choice.clone();
-                                }
-                                cx.notify();
-                            }
+                            Some(Some(choice)) => this.choose_payment_method(choice.clone(), cx),
                             Some(None) => this.enter_new_card(window, cx),
                             None => {}
                         }
@@ -166,8 +179,8 @@ impl QuillApp {
                             .label(tr(keys::CONTINUE))
                             .primary()
                             .small()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.set_password_for_card(window, cx);
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.set_password_for_card(cx);
                             })),
                     ),
             )
@@ -234,6 +247,13 @@ impl QuillApp {
                     .label(tr(keys::PAYMENTS_SAVE_INFORMATION))
                     .on_click(cx.listener(|this, &on, _, cx| this.toggle_card_save(on, cx))),
             );
+        }
+        if let Some(notice) = &form.notice {
+            // Inside the checkout, as tdesktop's panel toast: a window
+            // toast would paint under the dialog.
+            let alert = Alert::error("payment-card-notice-alert", notice.clone())
+                .on_close(cx.listener(|this, _: &ClickEvent, _, cx| this.dismiss_card_notice(cx)));
+            body = body.child(div().id("payment-card-notice").child(alert).test_support());
         }
         let busy = form.is_tokenizing();
         body.child(

@@ -337,7 +337,8 @@ impl QuillApp {
                     dialog.new_card.is_some() || self.can_enter_new_card()
                 }
             };
-            terms_ok && order_ok && creds_ok
+            // The password prompt is tdesktop's modal box: answer it first.
+            terms_ok && order_ok && creds_ok && !dialog.password_prompt
         };
         let pay = Button::new("p1-payment-pay")
             .label(tr_with(
@@ -427,7 +428,8 @@ impl QuillApp {
 
     /// Slice P1: "Pay" in the checkout dialog — `sendPaymentForm`
     /// (schema 1.8.67, line 15277). A new card is sent as the provider's
-    /// token, saved only when the form allows saving (tdesktop's `send`).
+    /// token, saved only when the form allows saving, counting a password
+    /// set since the form loaded (tdesktop's `send`).
     pub(super) fn submit_payment(&mut self, cx: &mut Context<Self>) {
         let snapshot = self.session().map(|session| {
             (
@@ -451,6 +453,9 @@ impl QuillApp {
         let PaymentFormTypeData::Regular(regular) = &form.form_type else {
             return;
         };
+        if dialog.password_prompt {
+            return;
+        }
         let invoice = &regular.invoice;
         let needs_order = invoice.need_name
             || invoice.need_phone_number
@@ -467,7 +472,7 @@ impl QuillApp {
             (PaymentCredentialChoice::Saved(id), _) => input_credentials_saved(id),
             (PaymentCredentialChoice::NewCard, Some(card)) => input_credentials_new(
                 card.credentials.data(),
-                card.save && regular.can_save_credentials,
+                card.save && self.checkout_can_save_credentials(),
             ),
             (PaymentCredentialChoice::NewCard, None) => return,
         };

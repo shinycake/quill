@@ -92,3 +92,32 @@ fn values_handed_on() {
     assert_eq!(parse_expiry("04"), (4, 2000));
     assert_eq!(parse_expiry(""), (0, 2000));
 }
+
+#[test]
+fn upper_case_that_lengthens_the_name_moves_the_caret() {
+    // "straße|" -> "STRASSE|": the caret stays after what was typed.
+    let name = edit_holder_name(&typed("straße"));
+    assert_eq!(shown(&name), ("STRASSE", 7));
+    // "ß|e" -> "SS|E".
+    let name = edit_holder_name(&FieldText::new("ße", 1));
+    assert_eq!(shown(&name), ("SSE", 2));
+}
+
+#[test]
+fn a_year_too_large_saturates() {
+    assert_eq!(parse_expiry("04/4294967295"), (4, u32::MAX));
+}
+
+#[test]
+fn the_caret_keeps_its_place_when_the_text_regroups() {
+    // "4242|42424" typed without spaces: the caret stays after digit four.
+    let result = edit_card_number(None, &FieldText::new("424242424", 4));
+    assert_eq!(shown(&result), ("4242 4242 4", 5));
+    // A 19-digit number takes a space before its last three digits.
+    let long = edit_card_number(None, &typed("4242424242424242424"));
+    assert_eq!(shown(&long), ("4242 4242 4242 4242 424", 23));
+    // "5|" becomes "05/|"; "1|23" becomes "1|2/3".
+    assert_eq!(shown(&edit_expiry(None, &typed("5"), TODAY)), ("05/", 3));
+    let mid = edit_expiry(None, &FieldText::new("123", 1), TODAY);
+    assert_eq!(shown(&mid), ("12/3", 1));
+}

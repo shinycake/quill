@@ -4,8 +4,19 @@
 //!
 //! The card goes to the payment provider, never to Telegram: the provider
 //! answers with a one-time token, and `sendPaymentForm` carries that token
-//! as `inputCredentialsNew`. Card data lives only in [`CardDetails`] and
-//! the request body, both wiped on drop, and is never logged or stored.
+//! as `inputCredentialsNew`. Card data is never logged, stored or put in
+//! an error.
+//!
+//! Wiped on drop: [`CardDetails`]; the request body
+//! ([`transport::HttpRequest::body`]) and the Stripe and Smart Glocal
+//! bodies it is built from; every copy the field formatter and the checks
+//! make ([`field_edit::FieldText`], its char buffers, the validator's digit
+//! strings) and the card form's reads of its fields. Each is built at its
+//! final size, so no reallocation leaves an old buffer behind.
+//!
+//! Not wiped: the text inside the kit's `InputState` fields (the kit owns
+//! it, with its undo history) and whatever `ureq` and rustls copy while
+//! sending the request.
 #![deny(clippy::indexing_slicing)]
 
 pub mod field_edit;

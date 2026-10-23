@@ -57,6 +57,9 @@
   (`CountryHost::PaymentCard`), starting on the account's phone country.
 - Esc on the card form returns to the checkout; Esc in its country box
   returns to the card form.
+- A Backspace or Delete that changes nothing (at the start or end of a
+  field) leaves no snapshot behind, so later typing is never read as a
+  delete.
 
 ## Where Quill differs, and why
 
@@ -70,11 +73,23 @@
   `docs/decisions/codex-miniapp-webview.md`); moving these two pages into
   it, with `payment_form_submit` wired to `inputCredentialsNew`, is the
   follow-up that closes the gap.
-- "Continue" on the Two-Step Verification prompt closes the checkout and
-  opens Quill's Two-Step Verification settings. tdesktop opens its
-  password box on top of the payment panel. The entered card is not kept.
-- The prompt is an inline panel under the payment method list, not a
-  separate box, because the checkout is already a kit dialog.
+- The Two-Step Verification prompt is an inline panel under the payment
+  method list, not a separate box, because the checkout is already a kit
+  dialog. Pay stays disabled while it shows, as tdesktop's modal box
+  blocks the panel. "Continue" opens Quill's Two-Step Verification dialog
+  over the checkout (the kit shows one dialog at a time, so it takes the
+  checkout's place); the checkout and the entered card come back when it
+  closes. A password set there lets the card be saved: the form's
+  `can_save_credentials` counts the account's password state, as
+  tdesktop's `setHasPassword` does. Picking another method drops the
+  prompt; picking the new card again asks again while it still cannot be
+  saved (`chooseSavedMethod`).
+- Provider refusals ("Your card was declined.", "Stripe Error: <id>")
+  show as a kit `Alert` at the bottom of the card form, cleared by the next
+  Done or its close button. tdesktop shows a toast inside the payment
+  panel; Quill's window toasts (the kit `Notification` and the status
+  toast) paint under kit dialogs, which draw in a deferred layer, so a toast
+  would be hidden behind the checkout.
 - Errors from an unreadable answer use tdesktop's ids ("InvalidJson",
   "InvalidJsonRoot", "InvalidTokenJson"). Qt's JSON parse error code is
   not appended, since serde reports errors differently.
@@ -84,10 +99,14 @@
 
 ## Card data
 
-- Card data is held in `CardDetails` and the request body, both
-  `Zeroize` on drop, and in the tokenizer's `Zeroizing` buffers. Nothing
-  logs, persists or puts it in a status note; `Debug` prints neither the
-  card nor the token data.
-- The text inside the kit `InputState` fields cannot be wiped (the kit
-  owns the rope). The form is dropped as soon as the card is tokenized or
+- Nothing logs, persists or puts card data in a status note; `Debug`
+  prints neither the card nor the token data.
+- Wiped on drop: `CardDetails`, the request body and the Stripe and
+  Smart Glocal bodies it is built from, every copy the field formatter and
+  the validator make (`FieldText`, its char buffers, digit strings) and the
+  card form's reads of its fields (`Zeroizing`). These are built at their
+  final size, so a growing `String` never leaves an unwiped buffer behind.
+- Not wiped: the text inside the kit `InputState` fields (the kit owns
+  the rope and its undo history) and whatever `ureq` and rustls copy while
+  sending. The form is dropped as soon as the card is tokenized or
   cancelled, and the fields are never written anywhere else.

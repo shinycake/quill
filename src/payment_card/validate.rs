@@ -2,6 +2,9 @@
 //! `stripe/stripe_card_validator.cpp`, which both native providers use.
 #![deny(clippy::indexing_slicing)]
 
+use std::fmt::Write as _;
+use zeroize::Zeroizing;
+
 /// The card networks the BIN table knows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CardBrand {
@@ -166,8 +169,14 @@ fn is_numeric(value: &str) -> bool {
     value.chars().all(|c| c.is_ascii_digit())
 }
 
-fn remove_whitespace(value: &str) -> String {
-    value.chars().filter(|c| !c.is_whitespace()).collect()
+/// The text without spaces, wiped when dropped: it is a copy of the card.
+fn remove_whitespace(value: &str) -> Zeroizing<String> {
+    let kept = value.chars().filter(|c| !c.is_whitespace());
+    let mut digits = Zeroizing::new(String::with_capacity(
+        kept.clone().map(char::len_utf8).sum(),
+    ));
+    digits.extend(kept);
+    digits
 }
 
 fn most_specific(digits: &str) -> &'static BinRange {
@@ -237,22 +246,19 @@ pub fn validate_card(number: &str) -> Validation {
 
 /// `ValidateExpireDate` over the field text ("MM/YY", any partial form).
 pub fn validate_expiry(date: &str, today: YearMonth) -> Validation {
-    let digits: String = remove_whitespace(date).replace('/', "");
-    if !is_numeric(&digits) {
+    let date = remove_whitespace(date);
+    let typed = || date.chars().filter(|c| *c != '/');
+    if !typed().all(|c| c.is_ascii_digit()) {
         return Validation::INVALID;
     }
-    let mut chars = digits.chars();
-    let Some(first) = chars.next() else {
-        return Validation::INCOMPLETE;
-    };
-    if chars.next().is_none() {
+    if typed().nth(1).is_none() {
         return Validation::INCOMPLETE;
     }
-    let normalized = if first > '1' {
-        format!("0{digits}")
-    } else {
-        digits
-    };
+    // Months 2-9 typed as one digit take a leading zero.
+    let lead = typed().next().is_some_and(|first| first > '1');
+    let mut normalized = Zeroizing::new(String::with_capacity(date.len() + 1));
+    normalized.extend(lead.then_some('0'));
+    normalized.extend(typed());
     let month = prefix_number(&normalized, 2);
     if !(1..=12).contains(&month) {
         return Validation::INVALID;
@@ -276,7 +282,9 @@ pub fn validate_parsed_expiry(month: u32, year: u32, today: YearMonth) -> Valida
     if year / 100 != 20 {
         return ValidationState::Invalid;
     }
-    validate_expiry(&format!("{month:02}{:02}", year % 100), today).state
+    let mut date = Zeroizing::new(String::with_capacity(8));
+    let _ = write!(date, "{month:02}{:02}", year % 100);
+    validate_expiry(&date, today).state
 }
 
 fn max_cvc_length(brand: CardBrand) -> usize {
