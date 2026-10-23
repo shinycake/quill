@@ -11,6 +11,7 @@
 "qll_notes_couldnt_submit_the_password" = "Couldn't submit the password.";
 "qll_notes_couldnt_submit_the_phone_number" = "Couldn't submit the phone number.";
 "qll_notes_email_submitted" = "Email submitted. Waiting for Telegram.";
+"qll_notes_failed_save_group_info" = "Couldn't save the changes.";
 "qll_notes_flood_wait#one" = "Too many attempts. Try again in {count} second.";
 "qll_notes_flood_wait#other" = "Too many attempts. Try again in {count} seconds.";
 "qll_notes_no_connection" = "Couldn't reach Telegram. Check your connection and try again.";

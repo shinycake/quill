@@ -230,7 +230,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<Option<RequestId>, ConnectSendError> {
         match delete {
             PhotoDelete::Own { photo_id } => self.delete_profile_photo(photo_id).map(Some),
-            PhotoDelete::ChatPhoto { chat_id } => self.set_group_photo(chat_id, None),
+            PhotoDelete::ChatPhoto { chat_id } => self.set_chat_photo(chat_id, None),
             PhotoDelete::Message {
                 chat_id,
                 message_id,

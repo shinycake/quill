@@ -238,7 +238,9 @@ impl QuillApp {
         if self.route_story_reply_emoji(emoji.as_ref(), window, cx) {
             return;
         }
-        if self.route_poll_option_emoji(emoji.as_ref(), window, cx) {
+        if self.route_poll_option_emoji(emoji.as_ref(), window, cx)
+            || self.route_group_title_emoji(emoji.as_ref(), window, cx)
+        {
             return;
         }
         self.composer.update(cx, |input, cx| {
@@ -267,6 +269,10 @@ impl QuillApp {
         if let Some(id) = item.custom_emoji_id
             && self.react_from_panel(quill::state::ReactionChoice::CustomEmoji(id), cx)
         {
+            return;
+        }
+        // A chat title takes standard emoji only (tdesktop `PeerTitle`).
+        if self.group_title_emoji_active() {
             return;
         }
         if !self.session().is_some_and(|s| s.my_is_premium()) {
@@ -324,7 +330,8 @@ impl QuillApp {
         let tab = self.pickers.media_panel.tab;
         // A live story comment takes emoji only (tdesktop's video stream
         // field has no sticker or GIF tabs).
-        let emoji_only = self.live_story_shown().is_some() && self.story_reply_panel_active();
+        let emoji_only = (self.live_story_shown().is_some() && self.story_reply_panel_active())
+            || self.group_title_emoji_active();
         let tabs = div().flex().items_center().gap_1().children(
             [
                 (PanelTab::Emoji, tr(keys::SWITCH_EMOJI)),

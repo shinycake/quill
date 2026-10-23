@@ -9,12 +9,6 @@ pub enum TextPromptKind {
     Username,
     /// `setChatMemberTag` custom title (schema 1.8.67, line 13598).
     CustomTitle { user_id: i64 },
-    /// Slice G8: `setChatTitle` (schema 1.8.67, line 13430) — 1–128
-    /// chars, gated on `can_change_info` (basic groups: every member).
-    GroupTitle,
-    /// Slice G8: `setChatDescription` (schema 1.8.67, line 13533) —
-    /// 0–255 chars, empty clears; same gate as the title.
-    GroupDescription,
     /// Slice G10: `setCommunityName` (schema 1.8.67, line 11811).
     /// `chat_id` on the dialog is unused for this kind; the community
     /// id rides the variant.

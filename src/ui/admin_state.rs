@@ -43,6 +43,8 @@ pub(crate) struct AdminUi {
     pub(super) join_requests_dialog: Option<super::chat_bars::JoinRequestsDialog>,
     /// Slice G2: chat welcome-message editor.
     pub(super) welcome_dialog: Option<WelcomeDialog>,
+    /// The group or channel Edit box (`group_edit_box/`).
+    pub(super) group_edit_box: Option<super::group_edit_box::GroupEditBox>,
 }
 
 impl AdminUi {
@@ -65,6 +67,7 @@ impl AdminUi {
             group_settings_dialog: None,
             join_requests_dialog: None,
             welcome_dialog: None,
+            group_edit_box: None,
         }
     }
 }

@@ -32,8 +32,9 @@ impl QuillApp {
                         (
                             if is_channel { tr(keys::PROFILE_DELETE_CHANNEL) } else { tr(keys::PROFILE_DELETE_GROUP) }
                                 .to_string(),
-                            quill::admin_extras::delete_chat_text(is_channel).to_string(),
-                            tr(keys::GROUP_INVITE_CONTEXT_DELETE).to_string(),
+                            if is_channel { tr(keys::SURE_DELETE_CHANNEL) } else { tr(keys::SURE_DELETE_GROUP) }
+                                .to_string(),
+                            tr(keys::BOX_DELETE).to_string(),
                         )
                     }
                     GroupConfirmAction::RemoveFromList => {

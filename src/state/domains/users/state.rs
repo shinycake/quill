@@ -69,6 +69,10 @@ pub struct UsersState {
     pub profile_photo_emoji_icons: Vec<StickerItem>,
     /// The builder request failed.
     pub profile_photo_emoji_icons_failed: bool,
+    /// `getDefaultChatPhotoCustomEmojiStickers` answer: the emoji the
+    /// builder offers for a group or channel photo.
+    pub chat_photo_emoji_icons: Vec<StickerItem>,
+    pub chat_photo_emoji_icons_failed: bool,
     /// Gifts with wearable colors (`getReceivedGifts` with
     /// `exclude_without_colors`), for the color editor.
     pub wearable_gifts: Vec<crate::premium_hub::ReceivedGift>,
@@ -155,6 +159,8 @@ impl UsersState {
             background_emoji_icons_failed: false,
             profile_photo_emoji_icons: Vec::new(),
             profile_photo_emoji_icons_failed: false,
+            chat_photo_emoji_icons: Vec::new(),
+            chat_photo_emoji_icons_failed: false,
             wearable_gifts: Vec::new(),
             wearable_gifts_loaded: false,
             secret_chat_states: HashMap::new(),

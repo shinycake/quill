@@ -532,6 +532,7 @@ impl Session {
             // Slice G1: `getBasicGroupFullInfo` answer — replaces the
             // cached basic-group member list.
             GroupsPayload::BasicGroupFullInfo {
+                description,
                 members,
                 bot_commands,
                 photo,
@@ -543,6 +544,9 @@ impl Session {
                     if let Some(chat) = self.chats.get(&chat_id.0)
                         && let ChatKind::BasicGroup { basic_group_id } = chat.kind
                     {
+                        self.groups
+                            .basic_group_descriptions
+                            .insert(basic_group_id, description);
                         self.store_group_bot_commands(
                             GroupCommandsKey::BasicGroup(basic_group_id),
                             bot_commands,
@@ -560,8 +564,12 @@ impl Session {
             }
             GroupsPayload::UpdateBasicGroupFullInfo {
                 basic_group_id,
+                description,
                 bot_commands,
             } => {
+                self.groups
+                    .basic_group_descriptions
+                    .insert(basic_group_id, description);
                 self.store_group_bot_commands(
                     GroupCommandsKey::BasicGroup(basic_group_id),
                     bot_commands,

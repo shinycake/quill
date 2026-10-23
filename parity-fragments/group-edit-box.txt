@@ -1,0 +1,6 @@
+groups-set-photo
+groups-set-title
+groups-set-description
+admin-edit-box
+admin-photo-crop
+groups-photo-sources
