@@ -47,6 +47,9 @@ pub(crate) struct PaymentUi {
     /// (`gift_transfer_view`).
     pub(super) transfer_people:
         std::cell::RefCell<Option<super::gift_transfer_view::CandidateCache>>,
+    /// Where card tokenization is sent instead of the provider (tests).
+    pub(super) card_transport:
+        Option<std::sync::Arc<dyn quill::payment_card::transport::Transport>>,
 }
 
 impl PaymentUi {
@@ -137,6 +140,7 @@ impl PaymentUi {
             grams_withdraw_password,
             grams_withdraw_password_focused: false,
             transfer_people: std::cell::RefCell::new(None),
+            card_transport: None,
         }
     }
 }

@@ -80,8 +80,8 @@ pub fn validate_order_info(
     .to_string()
 }
 
-/// Slice P1: `inputCredentialsNew` (schema:4680) — a credential token the
-/// user obtained on the provider's site (e.g. a Stripe `tok_*`).
+/// `inputCredentialsNew` (schema:5204): the provider token JSON a card
+/// tokenization produced (`payment_card`), e.g. `{"id":"tok_…","type":"card"}`.
 pub fn input_credentials_new(data: &str, allow_save: bool) -> Value {
     json!({
         "@type": "inputCredentialsNew",

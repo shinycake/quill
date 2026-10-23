@@ -89,7 +89,6 @@
 "qll_leftovers_call_problem_pixelated_video" = "Pixelated video";
 "qll_leftovers_call_problem_silent_local" = "Silent — I couldn't hear the other side";
 "qll_leftovers_call_problem_silent_remote" = "Silent — the other side couldn't hear me";
-"qll_leftovers_card_payments_via" = "Card payments via {name}: paste the credential token the provider issued on its site.";
 "qll_leftovers_clear_selected_sure" = "Clear {count} selected {kind} ({size})?";
 "qll_leftovers_collectible_models#one" = "This collectible features {count} unique model.";
 "qll_leftovers_collectible_models#other" = "This collectible features {count} unique models.";

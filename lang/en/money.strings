@@ -602,8 +602,6 @@
 "qll_money_my_gifts" = "My gifts";
 "qll_money_my_programs" = "My Programs";
 "qll_money_name_the_new_collection" = "Name the new collection";
-"qll_money_needs_a_2_step_verification" = " (needs a 2-step verification password)";
-"qll_money_new_card_provider_token" = "New card (provider token)";
 "qll_money_new_collection" = "+ New collection";
 "qll_money_no_active_subscriptions" = "No active subscriptions.";
 "qll_money_no_collectibles_yet" = "No collectibles yet.";
@@ -627,7 +625,6 @@
 "qll_money_only_new" = "Only new {who}";
 "qll_money_open_a_chat_with_a" = "Open a chat with a person or a channel to choose who gets the gift.";
 "qll_money_open_app" = "Open App";
-"qll_money_open_provider_payment_page" = "Open provider payment page";
 "qll_money_open_sticker_set" = "Open sticker set";
 "qll_money_optional_up_to_characters" = "Optional. Up to {max} characters.";
 "qll_money_outgoing" = "Outgoing";
@@ -640,7 +637,6 @@
 "qll_money_payment_receipt" = "Payment receipt";
 "qll_money_payment_received" = "💸 Payment received — {total_amount}";
 "qll_money_payment_successful" = "✅ Payment successful — {total_amount}";
-"qll_money_payment_token" = "Payment token";
 "qll_money_personal_comment" = "Personal comment";
 "qll_money_phone_number" = "Phone number";
 "qll_money_pick_a_date_and_time" = "Pick a date and time.";
@@ -664,7 +660,6 @@
 "qll_money_private_shares" = "Private shares";
 "qll_money_processing" = "Processing…";
 "qll_money_programs" = "Programs";
-"qll_money_provider_credential_token" = "Provider credential token";
 "qll_money_public_share" = "public share";
 "qll_money_public_shares" = "Public shares";
 "qll_money_public_shares_2" = "public shares";
@@ -701,7 +696,6 @@
 "qll_money_retry" = "Retry";
 "qll_money_review_request" = "Review request";
 "qll_money_revoke_link" = "Revoke Link";
-"qll_money_save_card" = "Save card{caption}";
 "qll_money_save_message" = "Save message";
 "qll_money_save_price" = "Save price";
 "qll_money_schedule_message" = "Schedule message";

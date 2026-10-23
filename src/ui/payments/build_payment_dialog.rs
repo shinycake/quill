@@ -20,9 +20,7 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let dialog = dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title(tr(
-                    keys::PAYMENTS_CHECKOUT_TITLE,
-                )));
+                .title(crate::ui::shell::dialog_title(this.checkout_title()));
             let Some(session) = this.session() else {
                 return dialog.on_close(on_close.clone());
             };
@@ -92,11 +90,8 @@ impl QuillApp {
                         form,
                         dialog_state,
                         &regular.invoice,
-                        &regular.provider,
                         &regular.additional_options,
                         &regular.saved_credentials,
-                        regular.can_save_credentials,
-                        regular.need_password,
                         session,
                         cx,
                     );
@@ -118,6 +113,28 @@ impl QuillApp {
                 }))
                 .on_close(on_close)
         })
+    }
+
+    /// The checkout's title, "New Card" while the card form is open, with
+    /// " (Test)" on a test invoice (tdesktop's `Panel::setTitle`).
+    fn checkout_title(&self) -> String {
+        let title = if self.card_form().is_some() {
+            tr(keys::PAYMENTS_CARD_TITLE)
+        } else {
+            tr(keys::PAYMENTS_CHECKOUT_TITLE)
+        };
+        let is_test = self
+            .session()
+            .and_then(|session| session.payments.form.as_ref())
+            .is_some_and(|form| match &form.form_type {
+                PaymentFormTypeData::Regular(regular) => regular.invoice.is_test,
+                _ => false,
+            });
+        if is_test {
+            tr_with(keys::Q_PAYMENT_TEST_TITLE, &[("title", title)])
+        } else {
+            title.to_string()
+        }
     }
 
     /// kit Phase 2 (redo): payment receipt hosted in a kit `Dialog` via

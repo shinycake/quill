@@ -393,3 +393,44 @@ fn bank_card_info_parses_title_and_actions() {
         other => panic!("{other:?}"),
     }
 }
+
+fn provider_of(provider_json: &str) -> PaymentProviderKind {
+    let json = format!(
+        r#"{{"@type":"paymentForm","@extra":"30","id":9,"type":{{"@type":"paymentFormTypeRegular","invoice":{{"@type":"invoice","currency":"USD","price_parts":[],"max_tip_amount":0,"suggested_tip_amounts":[],"recurring_payment_terms_of_service_url":"","terms_of_service_url":"","is_test":true,"need_name":false,"need_phone_number":false,"need_email_address":false,"need_shipping_address":false,"send_phone_number_to_provider":false,"send_email_address_to_provider":false,"is_flexible":false}},"payment_provider_user_id":5,"payment_provider":{provider_json},"additional_payment_options":[],"saved_order_info":null,"saved_credentials":[],"can_save_credentials":true,"need_password":false}},"seller_bot_user_id":21,"product_info":{{"@type":"productInfo","title":"Mug","description":{{"@type":"formattedText","text":"","entities":[]}},"photo":null}}}}"#
+    );
+    match parse_envelope(&json).unwrap().payload {
+        EnvelopePayload::Payments(PaymentsPayload::PaymentForm(form)) => match form.form_type {
+            PaymentFormTypeData::Regular(regular) => regular.provider,
+            other => panic!("{other:?}"),
+        },
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn card_providers_keep_their_tokenization_keys() {
+    assert_eq!(
+        provider_of(
+            r#"{"@type":"paymentProviderStripe","publishable_key":"pk_test_123","need_country":true,"need_postal_code":true,"need_cardholder_name":false}"#
+        ),
+        PaymentProviderKind::Stripe {
+            publishable_key: "pk_test_123".into(),
+            need_country: true,
+            need_postal_code: true,
+            need_cardholder_name: false,
+        }
+    );
+    assert_eq!(
+        provider_of(
+            r#"{"@type":"paymentProviderSmartGlocal","public_token":"pub_1","tokenize_url":"https://tgb.smart-glocal.com/cds/v1/tokenize/card"}"#
+        ),
+        PaymentProviderKind::SmartGlocal {
+            public_token: "pub_1".into(),
+            tokenize_url: "https://tgb.smart-glocal.com/cds/v1/tokenize/card".into(),
+        }
+    );
+    assert_eq!(
+        provider_of(r#"{"@type":"paymentProviderFuture"}"#),
+        PaymentProviderKind::Unsupported
+    );
+}

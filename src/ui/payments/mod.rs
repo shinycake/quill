@@ -18,7 +18,7 @@ use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{LoginUrlRequest, Session};
 use quill::telegram::envelope::{
-    LoginUrlInfo, PaymentFormData, PaymentFormTypeData, PaymentProviderKind, StarSubscriptionData,
+    LoginUrlInfo, PaymentFormData, PaymentFormTypeData, StarSubscriptionData,
     StarSubscriptionPricing, StarSubscriptionTypeData, format_payment_price, price_parts_total,
 };
 use quill::telegram::requests::{input_credentials_new, input_credentials_saved};
@@ -54,6 +54,13 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The provider's 3-D Secure page opens in the OS browser and the
+    /// checkout closes, as tdesktop does when it cannot show a web view.
+    pub(super) fn open_payment_verification(&mut self, url: &str, cx: &mut Context<Self>) {
+        self.open_message_url(url, cx);
+        self.close_payment_dialog(cx);
+    }
+
     /// Slice P1: close the receipt dialog.
     pub(super) fn close_payment_receipt(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
@@ -72,11 +79,8 @@ impl QuillApp {
         form: &PaymentFormData,
         dialog: &PaymentDialog,
         invoice: &quill::telegram::envelope::InvoiceForm,
-        provider: &PaymentProviderKind,
         additional_options: &[quill::telegram::envelope::PaymentOption],
         saved_credentials: &[quill::telegram::envelope::SavedCredential],
-        can_save_credentials: bool,
-        need_password: bool,
         session: &Session,
         cx: &mut Context<Self>,
     ) -> Div {
@@ -85,6 +89,9 @@ impl QuillApp {
                 self.country_box_view(CountryHost::Payment, tr(keys::PAYMENTS_ADDRESS_COUNTRY), cx)
         {
             return body.child(view);
+        }
+        if let Some(card_form) = &dialog.card_form {
+            return body.child(self.card_form_view(card_form, cx));
         }
         let total = price_parts_total(&invoice.price_parts);
         let mut header = div().flex().flex_col().gap_1().child(
@@ -134,32 +141,6 @@ impl QuillApp {
                 .child(div().child(format_payment_price(&invoice.currency, total))),
         );
         body = body.child(prices);
-        // Provider + additional options: Quill has no embedded web view,
-        // so web payments open in the OS browser (schema:4689).
-        match provider {
-            PaymentProviderKind::Web { url } => {
-                let url = url.clone();
-                body = body.child(
-                    Button::new("p1-payment-provider-open")
-                        .label(tr(keys::Q_MONEY_OPEN_PROVIDER_PAYMENT_PAGE))
-                        .ghost()
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.open_message_url(&url, cx);
-                        })),
-                );
-            }
-            PaymentProviderKind::Token { name } => {
-                body = body.child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(tr_with(
-                            keys::Q_LEFTOVERS_CARD_PAYMENTS_VIA,
-                            &[("name", &name.to_string())],
-                        )),
-                );
-            }
-        }
         for (index, option) in additional_options.iter().enumerate() {
             let url = option.url.clone();
             let title = option.title.clone();
@@ -305,87 +286,7 @@ impl QuillApp {
                     ),
             );
         }
-        // Credentials: saved credentials or a fresh provider token.
-        // Phase 6: one kit RadioGroup for the whole credential choice
-        // (was: buttons with a ◉/○ prefix). Controlled: the chosen index
-        // writes the value.
-        let cred_ids: Vec<Option<String>> = saved_credentials
-            .iter()
-            .map(|cred| Some(cred.id.clone()))
-            .chain(std::iter::once(None))
-            .collect();
-        let cred_selected = cred_ids.iter().position(|id| match id {
-            Some(id) => dialog.credential_choice == PaymentCredentialChoice::Saved(id.clone()),
-            None => dialog.credential_choice == PaymentCredentialChoice::NewToken,
-        });
-        let mut creds = div()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .child(
-                div()
-                    .text_xs()
-                    .font_semibold()
-                    .child(tr(keys::PAYMENTS_PAYMENT_METHOD)),
-            )
-            .child(
-                RadioGroup::vertical("p1-payment-cred")
-                    .selected_index(cred_selected)
-                    .children(
-                        saved_credentials
-                            .iter()
-                            .map(|cred| {
-                                Radio::new(format!("p1-payment-cred-{}", cred.id))
-                                    .label(cred.title.clone())
-                            })
-                            .chain(std::iter::once(
-                                Radio::new("p1-payment-cred-new")
-                                    .label(tr(keys::Q_MONEY_NEW_CARD_PROVIDER_TOKEN)),
-                            )),
-                    )
-                    .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
-                        if let Some(dialog) = this.payments.dialog.as_mut()
-                            && let Some(choice) = cred_ids.get(ix)
-                        {
-                            dialog.credential_choice = match choice {
-                                Some(id) => PaymentCredentialChoice::Saved(id.clone()),
-                                None => PaymentCredentialChoice::NewToken,
-                            };
-                        }
-                        cx.notify();
-                    })),
-            );
-        let use_token = dialog.credential_choice == PaymentCredentialChoice::NewToken;
-        if use_token {
-            creds = creds.child(
-                div().child(
-                    Textarea::new(&dialog.token_input)
-                        .aria_label(tr(keys::Q_MONEY_PAYMENT_TOKEN))
-                        .h(px(36.)),
-                ),
-            );
-            if can_save_credentials {
-                let checked = dialog.allow_save_credentials;
-                let caption = if need_password {
-                    tr(keys::Q_MONEY_NEEDS_A_2_STEP_VERIFICATION)
-                } else {
-                    ""
-                };
-                creds = creds.child(
-                    // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
-                    Checkbox::new("p1-payment-save-creds")
-                        .checked(checked)
-                        .label(tr_with(keys::Q_MONEY_SAVE_CARD, &[("caption", caption)]))
-                        .on_click(cx.listener(|this, &on, _, cx| {
-                            if let Some(dialog) = this.payments.dialog.as_mut() {
-                                dialog.allow_save_credentials = on;
-                            }
-                            cx.notify();
-                        })),
-                );
-            }
-        }
-        body = body.child(creds);
+        body = body.child(self.payment_method_section(dialog, saved_credentials, cx));
         if !invoice.terms_url.is_empty() {
             let checked = dialog.terms_accepted;
             let url = invoice.terms_url.clone();
@@ -432,9 +333,12 @@ impl QuillApp {
             let order_ok = !needs_order || session.payments.validated.is_some();
             let creds_ok = match &dialog.credential_choice {
                 PaymentCredentialChoice::Saved(_) => true,
-                PaymentCredentialChoice::NewToken => !dialog.token(cx).trim().is_empty(),
+                PaymentCredentialChoice::NewCard => {
+                    dialog.new_card.is_some() || self.can_enter_new_card()
+                }
             };
-            terms_ok && order_ok && creds_ok
+            // The password prompt is tdesktop's modal box: answer it first.
+            terms_ok && order_ok && creds_ok && !dialog.password_prompt
         };
         let pay = Button::new("p1-payment-pay")
             .label(tr_with(
@@ -451,6 +355,15 @@ impl QuillApp {
             pay.label(tr(keys::PAYMENTS_DATE_LABEL)).disabled(true)
         } else if can_pay {
             pay.on_click(cx.listener(|this, _, window, cx| {
+                if this
+                    .payments
+                    .dialog
+                    .as_ref()
+                    .is_some_and(|dialog| this.needs_card_entry(dialog))
+                {
+                    this.enter_new_card(window, cx);
+                    return;
+                }
                 this.submit_payment(cx);
                 this.close_kit_dialog_if_done(DialogKind::PaymentForm, window, cx);
             }))
@@ -514,8 +427,9 @@ impl QuillApp {
     }
 
     /// Slice P1: "Pay" in the checkout dialog — `sendPaymentForm`
-    /// (schema 1.8.67, line 15277). The credential token is read from the
-    /// input and never stored; only the submission uses it.
+    /// (schema 1.8.67, line 15277). A new card is sent as the provider's
+    /// token, saved only when the form allows saving, counting a password
+    /// set since the form loaded (tdesktop's `send`).
     pub(super) fn submit_payment(&mut self, cx: &mut Context<Self>) {
         let snapshot = self.session().map(|session| {
             (
@@ -539,6 +453,9 @@ impl QuillApp {
         let PaymentFormTypeData::Regular(regular) = &form.form_type else {
             return;
         };
+        if dialog.password_prompt {
+            return;
+        }
         let invoice = &regular.invoice;
         let needs_order = invoice.need_name
             || invoice.need_phone_number
@@ -551,12 +468,13 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        let credentials = match &dialog.credential_choice {
-            PaymentCredentialChoice::Saved(id) => input_credentials_saved(id),
-            PaymentCredentialChoice::NewToken => input_credentials_new(
-                &dialog.token(cx),
-                dialog.allow_save_credentials && regular.can_save_credentials,
+        let credentials = match (&dialog.credential_choice, &dialog.new_card) {
+            (PaymentCredentialChoice::Saved(id), _) => input_credentials_saved(id),
+            (PaymentCredentialChoice::NewCard, Some(card)) => input_credentials_new(
+                card.credentials.data(),
+                card.save && self.checkout_can_save_credentials(),
             ),
+            (PaymentCredentialChoice::NewCard, None) => return,
         };
         let order_info_id = validated
             .as_ref()
@@ -847,3 +765,9 @@ crate::ui::shell::register_dialogs! {
 }
 
 mod build_payment_dialog;
+pub(crate) mod card_form;
+mod card_form_demo;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod card_form_tests;
+mod card_form_view;

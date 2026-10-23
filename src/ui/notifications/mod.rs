@@ -678,14 +678,13 @@ impl QuillApp {
             progressed = true;
         }
         // Slice P1: a `paymentResult` verification URL — the provider's
-        // page the buyer must complete (schema:4740). Open it in the OS
-        // browser; the success/failure note is already on the session.
+        // page the buyer must complete (schema:4740).
         if let Some(url) = self
             .live
             .as_mut()
             .and_then(|live| live.driver.session.payments.verification_url.take())
         {
-            self.open_message_url(&url, cx);
+            self.open_payment_verification(&url, cx);
             progressed = true;
         }
         // Slice P1 fix-up: a failed `getPaymentReceipt` surfaces in the

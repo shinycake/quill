@@ -48,8 +48,11 @@ pub(super) fn shipping_form() -> PaymentFormData {
                 need_shipping_address: true,
                 is_flexible: false,
             },
-            provider: PaymentProviderKind::Token {
-                name: "Stripe".into(),
+            provider: PaymentProviderKind::Stripe {
+                publishable_key: "pk_test_demo".into(),
+                need_country: false,
+                need_postal_code: false,
+                need_cardholder_name: false,
             },
             additional_options: Vec::new(),
             saved_order_info: OrderInfoData::default(),
