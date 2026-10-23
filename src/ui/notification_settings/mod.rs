@@ -32,6 +32,11 @@ mod reactions;
 mod scope;
 mod scoped_volume;
 mod sounds;
+mod tone_upload;
+mod tone_upload_demo;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod tone_upload_tests;
 mod ttl_picker;
 mod volume;
 

@@ -46,6 +46,9 @@ pub struct SettingsState {
     /// Parity slice: `updateSavedNotificationSounds` arrived since the last
     /// fetch — the driver refetches on the next ingest.
     pub saved_sounds_stale: bool,
+    /// "Upload Sound": the file in flight, or how it ended until the
+    /// screen has reacted.
+    pub tone_upload: crate::tone_upload::ToneUpload,
     /// Parity slice: `getScopeNotificationSettings` results per scope; used
     /// for `use_default_*` fallback (e.g. default sound) and the scope
     /// defaults settings view.
@@ -242,6 +245,7 @@ impl SettingsState {
             saved_notification_sounds: Vec::new(),
             saved_sounds_loaded: false,
             saved_sounds_stale: false,
+            tone_upload: crate::tone_upload::ToneUpload::Idle,
             scope_notification_settings: HashMap::new(),
             notification_exceptions: HashMap::new(),
             notification_exceptions_loading: HashSet::new(),

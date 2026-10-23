@@ -242,6 +242,7 @@ pub mod text_split;
 pub mod theme_colorize;
 pub mod thread_guard;
 pub mod ton_wallet;
+pub mod tone_upload;
 pub mod top_people;
 pub mod topic_info;
 pub mod translate;

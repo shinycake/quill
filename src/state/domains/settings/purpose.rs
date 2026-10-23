@@ -99,6 +99,13 @@ pub enum SettingsPurpose {
     /// (`addSavedNotificationSound`). Response is `notificationSound`; the
     /// saved list refetches.
     AddSavedNotificationSound,
+    /// "Upload Sound" in the sound picker (`addSavedNotificationSound`
+    /// with a local file). Response is `notificationSound`; the new sound
+    /// is selected by the screen that asked.
+    UploadSavedNotificationSound,
+    /// A saved sound's "Delete" (`removeSavedNotificationSound`). Response
+    /// is `ok`; the saved list refetches.
+    RemoveSavedNotificationSound,
     /// `getSupportUser` (Settings > Ask a Question). Response is `user`;
     /// the id is parked in `Session::user_chat_to_open` and the driver
     /// opens the chat.
@@ -309,6 +316,8 @@ flat_purposes!(Settings(SettingsPurpose) {
     ReportWebProxyCarrier,
     DisconnectAllWebsites,
     AddSavedNotificationSound,
+    UploadSavedNotificationSound,
+    RemoveSavedNotificationSound,
     GetSupportUser,
     GetNewChatPrivacy,
     SetGiftSettings,

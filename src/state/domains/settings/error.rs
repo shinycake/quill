@@ -15,6 +15,7 @@ impl Session {
             || self.apply_business_error(err, pending.map(|p| p.purpose))
             || self.apply_business_extra_error(err, pending.map(|p| p.purpose))
             || self.apply_passkeys_error(err, pending.map(|p| p.purpose))
+            || self.apply_tone_upload_error(err, pending.map(|p| p.purpose))
         {
             return;
         }

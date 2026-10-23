@@ -400,7 +400,8 @@ impl QuillApp {
             .pending_notifications
             .is_empty()
             || live.driver.session.bots.pending_force_reply.is_some()
-            || !live.driver.session.settings.pending_sound_plays.is_empty();
+            || !live.driver.session.settings.pending_sound_plays.is_empty()
+            || live.driver.session.settings.tone_upload.is_settled();
         // Parity slice: the selected folder tab may have been deleted or
         // removed remotely (`updateChatFolders`); fall back to Main.
         if let Some(folder_id) = self.folders.tab
@@ -877,6 +878,7 @@ impl QuillApp {
                 .notification_sounds
                 .play(NotificationSound::File(path));
         }
+        self.settle_tone_upload(cx);
     }
 
     /// Incoming-call notifications: answer the picks, then announce a new

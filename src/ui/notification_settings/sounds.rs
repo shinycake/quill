@@ -255,6 +255,7 @@ impl QuillApp {
             SoundPickerTarget::Scope(scope) => format!("scope-sound-list-{scope:?}"),
             SoundPickerTarget::Reaction => "reaction-sound-list".to_string(),
         };
+        let list_id_text = list_id.clone();
         let mut list = div().id(list_id).flex().flex_col().gap_1().py_1();
         list = list.child(self.sound_picker_row(
             cx,
@@ -291,6 +292,9 @@ impl QuillApp {
                 &subtitle,
                 Some(sound.id),
             ));
+        }
+        for part in self.tone_upload_footer(cx, target, &list_id_text) {
+            list = list.child(part);
         }
         list.into_any_element()
     }
@@ -382,10 +386,13 @@ impl QuillApp {
                     })),
             );
         }
-        row.on_click(cx.listener(move |this, _, _, cx| {
+        let row = row.on_click(cx.listener(move |this, _, _, cx| {
             this.apply_sound_choice(target, choice, cx);
-        }))
-        .into_any_element()
+        }));
+        match preview_sound_id {
+            Some(sound_id) => self.with_tone_menu(cx, row, sound_id),
+            None => row.into_any_element(),
+        }
     }
 
     /// Parity slice: apply a picker choice to its target.

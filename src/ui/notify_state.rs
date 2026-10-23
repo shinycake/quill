@@ -42,6 +42,9 @@ pub(crate) struct NotifyUi {
     pub(super) ttl_custom_secs: i32,
     /// Parity slice: the notifications panel's sound picker sub-view is open.
     pub(super) notif_sound_picker_open: bool,
+    /// The picker an "Upload Sound" in flight was started from: the new
+    /// sound is selected there.
+    pub(super) tone_upload_target: Option<SoundPickerTarget>,
     /// Parity slice (`parity:stories-notify-settings`): the notifications
     /// panel's story-sound picker sub-view is open.
     pub(super) story_sound_picker_open: bool,
@@ -91,6 +94,7 @@ impl NotifyUi {
             ttl_custom_open: false,
             ttl_custom_secs: 86_400,
             notif_sound_picker_open: false,
+            tone_upload_target: None,
             story_sound_picker_open: false,
             defaults_sound_picker: None,
             defaults_exceptions_scope: None,
