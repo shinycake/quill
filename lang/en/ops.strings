@@ -604,7 +604,6 @@
 "qll_ops_error_2" = "Error: {line}";
 "qll_ops_exclude_chats" = "Exclude Chats";
 "qll_ops_excluded_chats" = "Excluded chats";
-"qll_ops_expires_in_days_0_never" = "Expires in days (0 = never)";
 "qll_ops_export_from" = "Export from";
 "qll_ops_export_here" = "Export here";
 "qll_ops_export_telegram_data" = "Export Telegram data…";
@@ -732,7 +731,6 @@
 "qll_ops_maximum_file_size" = "Maximum file size";
 "qll_ops_media" = "Media";
 "qll_ops_media_size_limit" = "Media size limit";
-"qll_ops_member_limit_0_unlimited" = "Member limit (0 = unlimited)";
 "qll_ops_members" = "Members";
 "qll_ops_members_can_edit_the_chat" = "Members can edit the chat list";
 "qll_ops_mention" = "Mention";
@@ -961,7 +959,6 @@
 "qll_ops_speaker" = "Speaker";
 "qll_ops_stars" = "Stars";
 "qll_ops_stars_month" = "{star_count} Stars / month";
-"qll_ops_stars_per_month_0_free" = "Stars per month (0 = free link)";
 "qll_ops_stars_to_unlock" = "Stars to Unlock";
 "qll_ops_stars_to_unlock_2" = "Stars to unlock";
 "qll_ops_start_page" = "Start Page";

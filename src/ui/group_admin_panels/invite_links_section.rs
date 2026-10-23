@@ -55,7 +55,7 @@ impl QuillApp {
                     gpui_kit::assets::IconName::Plus,
                     tr(keys::Q_PEOPLE_CREATE_INVITE_LINK),
                     cx.listener(move |this, _, window, cx| {
-                        this.open_invite_link_dialog(chat_id, window, cx);
+                        this.open_invite_link_box(chat_id, None, window, cx);
                     }),
                 )),
         );
@@ -150,8 +150,8 @@ impl QuillApp {
         let copy_link = link.invite_link.clone();
         let revoke_link = link.invite_link.clone();
         let details_link = link.invite_link.clone();
-        let rename_link = link.invite_link.clone();
-        let rename_name = link.name.clone();
+        let editable = !link.is_primary && !link.is_revoked;
+        let edit_link = link.clone();
         let joined_count = link.member_count;
         let subscription = link.subscription_pricing.clone();
         let members_block = self.invite_link_members_block(chat_id, &link.invite_link, cx);
@@ -247,18 +247,12 @@ impl QuillApp {
                         this.open_invite_link_qr(&qr_link, cx);
                     }),
                 ))
-                .when(subscription.is_some(), |actions| {
+                .when(editable, |actions| {
                     actions.child(ghost_text_button(
-                        format!("invite-link-rename-{index}"),
-                        tr(keys::Q_PEOPLE_RENAME),
+                        format!("invite-link-edit-{index}"),
+                        tr(keys::GROUP_INVITE_CONTEXT_EDIT),
                         cx.listener(move |this, _, window, cx| {
-                            this.open_subscription_link_rename(
-                                chat_id,
-                                &rename_link,
-                                &rename_name,
-                                window,
-                                cx,
-                            );
+                            this.open_invite_link_box(chat_id, Some(&edit_link), window, cx);
                         }),
                     ))
                 })

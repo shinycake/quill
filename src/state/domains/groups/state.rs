@@ -143,6 +143,12 @@ pub struct GroupsState {
     /// TDLib option `supergroup_size_max` (0 until it arrives): the
     /// permissions box offers a broadcast group near it.
     pub supergroup_size_max: i32,
+    /// TDLib option `subscription_star_count_max`: the dearest monthly
+    /// fee of a channel invite link.
+    pub subscription_star_max: Option<i64>,
+    /// App config `stars_usd_withdraw_rate_x1000` / 1000: US cents per
+    /// Star, for the dollar hint next to a link's monthly fee.
+    pub stars_usd_rate: Option<f64>,
     /// Slice G2: available boost slot ids from `getAvailableChatBoostSlots`
     /// (schema 1.8.67, line 13914), keyed by chat id. The driver consumes
     /// them to chain `boostChat` once per boost intent.
@@ -315,6 +321,8 @@ impl GroupsState {
             chat_boost_features: HashMap::new(),
             unrestrict_boost_pending: HashMap::new(),
             supergroup_size_max: 0,
+            subscription_star_max: None,
+            stars_usd_rate: None,
             boost_slots_by_chat: HashMap::new(),
             boost_intent: None,
             boost_box: None,

@@ -492,6 +492,7 @@ pub(crate) fn parse_groups_payload(
                 boosts_per_gift: boosts_per_gift(value),
                 ton_explorer_url: crate::ton_wallet::address::explorer_url_from_config(value),
                 ton_usd_rate: crate::ton_wallet::fiat::ton_usd_rate_from_config(value),
+                stars_usd_rate: crate::invite_link_form::stars_usd_rate_from_config(value),
                 starref_join,
                 starref_setup,
                 passkeys: crate::passkeys::config_from_app_config(value),
