@@ -14,7 +14,7 @@ impl QuillApp {
         let mode = std::env::var("QUILL_DEMO_POLL").unwrap_or_default();
         let channel = mode == "channel";
         if let Some(session) = self.demo_session.as_mut() {
-            let chat = if channel { 13 } else { 1 };
+            let chat = if channel { 13 } else { 11 };
             if channel && let Some(chat) = session.chats.get_mut(&13) {
                 chat.my_member_status =
                     Some(quill::telegram::envelope::ChannelMemberStatus::Creator);
