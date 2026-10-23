@@ -45,6 +45,8 @@ pub struct PaymentsState {
     pub verification_url: Option<String>,
     pub marketplace_gift: Option<crate::marketplace::GiftPurchase>,
     pub gift_text_length_max: Option<usize>,
+    /// TDLib `poll_country_count_max`: countries a poll may be limited to.
+    pub poll_countries_max: Option<usize>,
     /// Slice `parity:bots-payment-recurring`: the fetched
     /// `starSubscriptions`, shown in the Subscriptions dialog.
     pub star_subscriptions: Option<StarSubscriptionsData>,
@@ -130,6 +132,7 @@ impl PaymentsState {
             verification_url: None,
             marketplace_gift: None,
             gift_text_length_max: None,
+            poll_countries_max: None,
             star_subscriptions: None,
             star_subscriptions_loading: false,
             star_subscriptions_error: None,

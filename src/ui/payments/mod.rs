@@ -2,6 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::country_box::CountryHost;
 use super::message_text::format_unix_date_time;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
@@ -79,6 +80,12 @@ impl QuillApp {
         session: &Session,
         cx: &mut Context<Self>,
     ) -> Div {
+        if dialog.country_box.is_some()
+            && let Some(view) =
+                self.country_box_view(CountryHost::Payment, tr(keys::PAYMENTS_ADDRESS_COUNTRY), cx)
+        {
+            return body.child(view);
+        }
         let total = price_parts_total(&invoice.price_parts);
         let mut header = div().flex().flex_col().gap_1().child(
             div()
@@ -207,11 +214,12 @@ impl QuillApp {
                 div()
                     .flex()
                     .gap_2()
-                    .child(
-                        div()
-                            .flex_1()
-                            .child(field(&dialog.country_input, tr(keys::Q_MONEY_COUNTRY_CODE))),
-                    )
+                    .child(div().flex_1().child(self.country_field_button(
+                        CountryHost::Payment,
+                        tr(keys::PAYMENTS_ADDRESS_COUNTRY),
+                        self.country_display_name(&dialog.country_iso),
+                        cx,
+                    )))
                     .child(
                         div()
                             .flex_1()

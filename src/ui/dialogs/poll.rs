@@ -57,7 +57,9 @@ pub struct PollDialog {
     pub(crate) attach: Vec<OptionAttach>,
     pub(crate) explanation_input: Entity<TextareaState>,
     pub(crate) duration_input: Entity<TextareaState>,
-    pub(crate) countries_input: Entity<TextareaState>,
+    /// The allowed countries (ISO codes), picked in the country box.
+    pub(crate) country_codes: Vec<String>,
+    pub(crate) country_box: Option<crate::ui::country_box::CountryBox>,
     pub(crate) is_anonymous: bool,
     pub(crate) allows_multiple_answers: bool,
     pub(crate) is_quiz: bool,
@@ -105,7 +107,6 @@ impl PollDialog {
             (1, 3),
         );
         let duration_input = textarea(cx, tr(keys::Q_MEDIA_CLOSE_AFTER_HOURS_OPTIONAL), (1, 1));
-        let countries_input = textarea(cx, tr(keys::Q_MEDIA_COUNTRIES_E_G_US_GB), (1, 1));
         let option_inputs = (0..POLL_OPTIONS_MIN)
             .map(|index| {
                 textarea(
@@ -127,7 +128,8 @@ impl PollDialog {
             option_inputs,
             explanation_input,
             duration_input,
-            countries_input,
+            country_codes: Vec::new(),
+            country_box: None,
             is_anonymous: true,
             allows_multiple_answers: false,
             is_quiz: false,
@@ -159,12 +161,7 @@ impl PollDialog {
                 .filter(|(_, option)| !option.trim().is_empty())
                 .position(|(index, _)| index == row)
         });
-        let country_codes = value(&self.countries_input)
-            .split(|c: char| c == ',' || c.is_whitespace())
-            .map(str::trim)
-            .filter(|code| !code.is_empty())
-            .map(|code| code.to_ascii_uppercase())
-            .collect();
+        let country_codes = self.country_codes.clone();
         PollDraft {
             question: value(&self.question_input),
             description: value(&self.description_input),
@@ -233,7 +230,7 @@ impl PollDialog {
             || !value(&self.description_input).trim().is_empty()
             || !value(&self.explanation_input).trim().is_empty()
             || !value(&self.duration_input).trim().is_empty()
-            || !value(&self.countries_input).trim().is_empty()
+            || !self.country_codes.is_empty()
             || self
                 .option_inputs
                 .iter()

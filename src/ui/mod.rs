@@ -43,6 +43,7 @@ mod composer_sends;
 mod composer_state;
 mod composer_targets;
 mod composer_thumb;
+mod country_box;
 mod connection_state;
 pub(crate) mod crash_notice;
 mod demo_state;

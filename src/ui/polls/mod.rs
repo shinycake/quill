@@ -2,6 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::country_box::CountryHost;
 use super::scheduled::poll_deadline_picker;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
@@ -765,6 +766,9 @@ impl QuillApp {
     #[inline(never)]
     fn poll_dialog_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.composer_ui.poll_dialog.as_ref()?;
+        if dialog.country_box.is_some() {
+            return self.poll_country_panel(cx);
+        }
         let mut panel = div()
             .id("poll-dialog")
             .flex()
@@ -877,13 +881,12 @@ impl QuillApp {
                                 .h(px(40.)),
                         ),
                     })
-                    .child(
-                        div().flex_1().child(
-                            Textarea::new(&dialog.countries_input)
-                                .aria_label(tr(keys::Q_MEDIA_POLL_COUNTRY_CODES))
-                                .h(px(40.)),
-                        ),
-                    ),
+                    .child(div().flex_1().child(self.country_field_button(
+                        CountryHost::Poll,
+                        tr(keys::POLLS_CREATE_ALLOWED_COUNTRIES),
+                        self.country_summary(&dialog.country_codes),
+                        cx,
+                    ))),
             )
             .child(self.poll_toggle_row(cx));
         if dialog.confirming_discard {

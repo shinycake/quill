@@ -17,7 +17,9 @@ pub struct PaymentDialog {
     pub(crate) street2_input: Entity<TextareaState>,
     pub(crate) city_input: Entity<TextareaState>,
     pub(crate) state_input: Entity<TextareaState>,
-    pub(crate) country_input: Entity<TextareaState>,
+    /// The shipping country's ISO code, picked in the country box.
+    pub(crate) country_iso: String,
+    pub(crate) country_box: Option<crate::ui::country_box::CountryBox>,
     pub(crate) postal_input: Entity<TextareaState>,
     pub(crate) token_input: Entity<TextareaState>,
     pub(crate) credential_choice: PaymentCredentialChoice,
@@ -53,7 +55,8 @@ impl PaymentDialog {
             street2_input: input(cx, tr(keys::Q_MONEY_STREET_ADDRESS_LINE_2_OPTIONAL)),
             city_input: input(cx, tr(keys::PAYMENTS_ADDRESS_CITY)),
             state_input: input(cx, tr(keys::Q_MONEY_STATE)),
-            country_input: input(cx, tr(keys::Q_MONEY_COUNTRY_CODE_E_G_US)),
+            country_iso: String::new(),
+            country_box: None,
             postal_input: input(cx, tr(keys::Q_MONEY_POSTAL_CODE)),
             token_input: input(cx, tr(keys::Q_MONEY_PROVIDER_CREDENTIAL_TOKEN)),
             credential_choice: PaymentCredentialChoice::NewToken,
@@ -92,7 +95,7 @@ impl PaymentDialog {
 
     /// Prefill the order fields from the form's `saved_order_info`
     /// (schema:4720) so returning buyers don't retype.
-    fn prefill(&self, order: &OrderInfoData, window: &mut Window, cx: &mut Context<QuillApp>) {
+    fn prefill(&mut self, order: &OrderInfoData, window: &mut Window, cx: &mut Context<QuillApp>) {
         let mut set = |input: &Entity<TextareaState>, value: &str| {
             if !value.is_empty() {
                 input.update(cx, |input, cx| input.set_value(value, window, cx));
@@ -106,7 +109,7 @@ impl PaymentDialog {
         set(&self.street2_input, &addr.street_line2);
         set(&self.city_input, &addr.city);
         set(&self.state_input, &addr.state);
-        set(&self.country_input, &addr.country_code);
+        self.country_iso = addr.country_code.to_ascii_uppercase();
         set(&self.postal_input, &addr.postal_code);
     }
 
@@ -118,7 +121,7 @@ impl PaymentDialog {
             phone_number: value(&self.phone_input),
             email_address: value(&self.email_input),
             shipping_address: AddressData {
-                country_code: value(&self.country_input),
+                country_code: self.country_iso.clone(),
                 state: value(&self.state_input),
                 city: value(&self.city_input),
                 street_line1: value(&self.street1_input),
