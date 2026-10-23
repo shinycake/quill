@@ -19,8 +19,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::local_path::sandboxed_display_path;
 use quill::story_extras::{
-    CloseFriendsEdit, can_save_story, can_share_story, hide_label, profile_label, story_link,
-    video_finished, video_progress,
+    CloseFriendsEdit, can_save_story, story_link, video_finished, video_progress,
 };
 use quill::story_viewer::StoryViewerKind;
 use quill::telegram::envelope::{ChatKind, StoryListView};
@@ -291,7 +290,7 @@ impl QuillApp {
     }
 
     /// The stories tray list of the current story's chat.
-    fn story_chat_hidden(&self, chat_id: i64) -> bool {
+    pub(super) fn story_chat_hidden(&self, chat_id: i64) -> bool {
         self.session()
             .and_then(|s| s.stories.tray.get(&chat_id))
             .is_some_and(|tray| tray.list == Some(StoryListView::Archive))
@@ -532,105 +531,13 @@ impl QuillApp {
         }
     }
 
-    /// The viewer's extra actions row: sound, share, link, save, hide,
-    /// profile. Gated by what TDLib allows for the current story.
+    /// What the ⋯ menu entries open under the story: the share panel, the
+    /// close-friends editor, the notice and the story-page operation.
     pub(super) fn story_more_row(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(item) = self.stories.viewer.current() else {
+        if self.stories.viewer.current().is_none() {
             return div().into_any_element();
-        };
-        let story = self.current_story();
-        let can_share = story.as_ref().is_some_and(can_share_story);
-        let can_save = story.as_ref().is_some_and(can_save_story);
-        let own = story.as_ref().is_some_and(|story| story.can_be_deleted);
-        let can_toggle_profile = story
-            .as_ref()
-            .is_some_and(|story| story.can_toggle_is_posted_to_chat_page);
-        let posted = story
-            .as_ref()
-            .is_some_and(|story| story.is_posted_to_chat_page);
-        let hidden = self.story_chat_hidden(item.chat_id.0);
-        let is_video = item.kind == StoryViewerKind::Video;
-        let mut row = div()
-            .flex()
-            .flex_row()
-            .flex_wrap()
-            .gap_2()
-            .items_center()
-            .justify_center();
-        if is_video {
-            let label = if self.stories.muted {
-                tr(keys::Q_MEDIA_SOUND_OFF)
-            } else {
-                tr(keys::Q_MEDIA_SOUND_ON)
-            };
-            row = row.child(
-                Button::new("story-mute")
-                    .label(label)
-                    .custom(chrome::ghost(cx))
-                    .on_click(cx.listener(|this, _, _, cx| this.toggle_story_mute(cx))),
-            );
         }
-        row = row.child(
-            Button::new("story-pause")
-                .label(if self.stories.pause.is_paused() {
-                    tr(keys::Q_MEDIA_RESUME)
-                } else {
-                    tr(keys::Q_MEDIA_PAUSE)
-                })
-                .custom(chrome::ghost(cx))
-                .on_click(cx.listener(|this, _, _, cx| this.toggle_story_pause(cx))),
-        );
-        if can_share {
-            row = row.child(
-                Button::new("story-share")
-                    .label(tr(keys::Q_MEDIA_SHARE))
-                    .custom(chrome::ghost(cx))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.toggle_story_share(window, cx);
-                    })),
-            );
-        }
-        row = row.child(
-            Button::new("story-copy-link")
-                .label(tr(keys::CONTEXT_COPY_LINK))
-                .custom(chrome::ghost(cx))
-                .on_click(cx.listener(|this, _, _, cx| this.copy_story_link(cx))),
-        );
-        if can_save {
-            row = row.child(
-                Button::new("story-save-media")
-                    .label(tr(keys::SETTINGS_SAVE))
-                    .custom(chrome::ghost(cx))
-                    .on_click(cx.listener(|this, _, _, cx| this.save_story_media(cx))),
-            );
-        }
-        if !own {
-            row = row.child(
-                Button::new("story-hide-peer")
-                    .label(hide_label(hidden))
-                    .custom(chrome::ghost(cx))
-                    .on_click(cx.listener(|this, _, _, cx| this.toggle_hide_story_peer(cx))),
-            );
-        }
-        if own {
-            row = row.child(
-                Button::new("story-close-friends")
-                    .label(tr(keys::Q_MEDIA_CLOSE_FRIENDS))
-                    .custom(chrome::ghost(cx))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.open_close_friends_editor(window, cx);
-                    })),
-            );
-        }
-        if can_toggle_profile {
-            row = row.child(
-                Button::new("story-profile")
-                    .label(profile_label(posted))
-                    .custom(chrome::ghost(cx))
-                    .on_click(cx.listener(|this, _, _, cx| this.toggle_story_profile(cx))),
-            );
-        }
-        let mut column = div().flex().flex_col().gap_2().items_center().child(row);
+        let mut column = div().flex().flex_col().gap_2().items_center();
         if self.stories.share_open {
             column = column.child(self.story_share_panel(cx));
         }

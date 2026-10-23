@@ -282,8 +282,6 @@ impl QuillApp {
                 cx,
             )
         });
-        // Phase 9.2: own-story interaction counters under the caption.
-        let counts: Option<String> = self.story_viewer_counts().filter(|_| !live_watch);
         let live_volume = self.live_story_volume(cx);
         let live_header = self.live_story_header(live_volume, cx);
         let live_composer = self.live_story_composer(cx);
@@ -337,42 +335,18 @@ impl QuillApp {
                             .children(
                                 live_header.map(|controls| div().flex_shrink_0().child(controls)),
                             )
-                            .child(
-                                div()
-                                    .id("story-viewer-close")
-                                    .flex_shrink_0()
-                                    .role(gpui_kit::Role::Button)
-                                    .aria_label(tr(keys::Q_MEDIA_CLOSE_STORY_VIEWER))
-                                    .tab_index(0)
-                                    .cursor_pointer()
-                                    .pressable(cx.theme())
-                                    .px_2()
-                                    .py_1()
-                                    .rounded_md()
-                                    .text_color(chrome::fg())
-                                    .child(tr(keys::CLOSE))
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.close_story_viewer(cx);
-                                    })),
-                            ),
+                            .child(self.story_header_buttons(live_watch, cx)),
                     )
                     .child(visual)
                     .when_some(caption, |this, caption| {
                         this.child(div().text_color(chrome::fg()).child(caption))
                     })
-                    .when_some(counts, |this, counts| {
-                        this.child(
-                            div()
-                                .text_xs()
-                                .text_color(chrome::secondary())
-                                .child(counts),
-                        )
-                    })
                     // Phase 9.5: "Reposted from ...", a link to the origin
                     // ("edited" is in the header).
                     .children(self.story_meta_row(cx))
                     .when(!live_watch, |this| {
-                        this.child(self.story_more_row(cx))
+                        this.child(self.story_bottom_bar(cx))
+                            .child(self.story_more_row(cx))
                             .child(self.story_action_row(cx))
                     })
                     .children(live_composer)

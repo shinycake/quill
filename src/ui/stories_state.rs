@@ -40,6 +40,8 @@ pub(crate) struct StoryUi {
     /// Phase 9.5: viewers panel open in the viewer overlay
     /// (`getStoryInteractions`).
     pub(super) viewers_open: bool,
+    /// The viewers list's scroll position: the next page loads near its end.
+    pub(super) viewers_scroll: ScrollHandle,
     /// The statistics panel of the story open in the viewer.
     pub(super) stats_open: bool,
     /// Phase 9.5: report flow UI open in the viewer overlay
@@ -154,6 +156,7 @@ impl StoryUi {
             reply_input: story_reply_input,
             live: super::story_viewer::LiveStoryUi::new(window, cx),
             viewers_open: false,
+            viewers_scroll: ScrollHandle::new(),
             stats_open: false,
             report_open: false,
             report_text_input: story_report_text_input,

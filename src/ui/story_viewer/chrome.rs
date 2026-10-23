@@ -57,6 +57,11 @@ pub(in crate::ui) fn frame_bg() -> Hsla {
     rgb(BG).into()
 }
 
+/// A chosen heart reaction.
+pub(in crate::ui) fn heart() -> Hsla {
+    rgb(0xff5a6e).into()
+}
+
 /// The gold of the Stars icon on the Stars button and in the toast.
 pub(in crate::ui) fn stars_gold() -> Hsla {
     rgb(0xffb800).into()
