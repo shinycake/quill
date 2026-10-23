@@ -1,2 +1,0 @@
-parity:admin-autotranslate-boost-lock
-parity:admin-signatures-profiles
