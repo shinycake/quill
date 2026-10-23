@@ -225,6 +225,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Share a contact card from a profile <!-- parity:composer-share-contact -->
 - [x] Create checklists <!-- parity:composer-checklist -->
 - [x] Attachment-menu bots in the attach menu <!-- parity:composer-attach-bots -->
+- [ ] Send Location opens a map picker: drag the map to place the pin, zoom, send my current location, nearby and searched places (no typed coordinates) <!-- parity:composer-location-picker -->
 - [x] Drop zones: send quickly versus as documents; dropped folder becomes an archive <!-- parity:composer-drop-modes -->
 - [x] Send box options: HD photo toggle, GIF with caption, paid media price, video cover <!-- parity:composer-send-options -->
 - [x] Link preview options popover: choose link, move up or down, shrink or enlarge <!-- parity:composer-link-options -->
@@ -632,6 +633,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Report story (reportStory multi-step flow: option picker → optional/required text → Reported/Failed; state.rs + connect.rs + ui/mod.rs Phase 9.5) <!-- parity:stories-report -->
 - [x] Stealth mode / hide view from poster (activateStoryStealthMode + updateStoryStealthMode state; viewer action-row button reflects active/cooldown; ui/mod.rs Phase 9.5) <!-- parity:stories-stealth-mode -->
 - [x] Story albums: story page lists/opens albums; create/rename/delete; add/remove/reorder stories; reorder albums (album covers deferred) <!-- parity:stories-albums -->
+- [ ] Add Stories to an album by ticking them in a story grid (tdesktop EditAlbumBox), not by typing story ids <!-- parity:stories-albums-picker -->
 - [x] Archive story list via getChatArchivedStories with load-more pagination (DECISIONS.md Phase 9.1 "Out of this slice") <!-- parity:stories-archive -->
 - [x] Pinned stories on chat page (getChatPostedToChatPageStories + setChatPinnedStories full-list semantics) <!-- parity:stories-pinned -->
 - [x] Clickable story areas (location, venue, suggested reaction, message, link, weather, gift) — parsed from `story.areas` (telegram/envelope.rs), rendered as clickable chips on the viewer, taps perform each area's action (ui/mod.rs Phase 9.8) <!-- parity:stories-areas-view -->
@@ -658,6 +660,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Honest pending / succeeded / failed states (`Posting` is set when the `postStory` answer lands; `updateStoryPostSucceeded`/`PostFailed` applied to the composer status line, DECISIONS.md 9.3) <!-- parity:stories-post-status -->
 - [x] Edit own story content / caption / areas (editStory, td_api.tl:13732, wired in viewer+composer, Phase 9.5) <!-- parity:stories-edit -->
 - [x] Edit story cover frame (editStoryCover, td_api.tl:13738, viewer cover editor, Phase 9.5) <!-- parity:stories-edit-cover -->
+- [ ] Choose a video story's cover on a frame strip with a preview, not by typing seconds <!-- parity:stories-cover-frame-strip -->
 - [x] Change a posted story's privacy settings (setStoryPrivacySettings, td_api.tl:13743, viewer privacy editor, Phase 9.5) <!-- parity:stories-post-change-privacy -->
 - [x] Post stories on behalf of a channel/supergroup (getChatsToPostStories, canPostStory target chat, Phase 9.5) <!-- parity:stories-post-as-channel -->
 - [x] Admin story rights management (post / edit / delete others' stories; TGX strings RightStories*; covered by the existing admin-rights UI which reads/writes can_post/edit/delete_stories) <!-- parity:stories-admin-rights -->
@@ -798,6 +801,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Render custom emoji inside message text <!-- parity:emoji-custom-render --> (inline sticker image at 1.25× text size; thumbnail first, else static WEBP; unresolved falls back to the span text; animated playback still static; live custom emoji unverified)
 - [x] Suggest animated emoji in composer <!-- parity:emoji-suggest-animated --> (composer trailing-emoji → `getAnimatedEmoji` (deduped, stale in-flight dropped) → suggestion row above the composer, tap to send as a sticker; `animatedEmoji` parse into EmojiPanel already existed)
 - [x] Emoji status: recent/trending/default choices, Premium-gated selection and removal, forever/1h/2h/8h/2d/custom expiry; thumbnails and safe retry; live changes unverified <!-- parity:emoji-status -->
+- [ ] Set Emoji Status opens the status selector panel (search, recent, packs) instead of the emoji pack settings, and "Other…" opens a duration picker instead of asking for typed hours <!-- parity:emoji-status-selector -->
 - [x] Clear recent emoji statuses after confirmation; refusal preserves history and stale list replies cannot restore cleared entries <!-- parity:emoji-status-clear-recent -->
 - [x] Clear recent emoji <!-- parity:emoji-clear-recent -->
 - [x] Dynamic emoji pack order setting <!-- parity:emoji-dynamic-pack-order --> (partial: backend wired — reorderInstalledStickerSets with stickerTypeCustomEmoji; the dynamic toggle itself is client-side recency ordering, settings UI pending)
@@ -864,6 +868,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Shuffle options toggle (`shuffle_options`) (ui/mod.rs, requests.rs) <!-- parity:bots-poll-shuffle -->
 - [x] Show voters toggle (verified: TGX implements it as the inverse of `is_anonymous`; the poll dialog's "Anonymous voting" checkbox (src/ui/mod.rs:33786) drives `PollDialog.is_anonymous` (325, default true at 360), frozen into `PollDraft` (392), sent via `connect.rs:10777` as `"is_anonymous": poll.is_anonymous` in the `inputMessagePoll` payload (`requests.rs:4184`); voter-list display is the already-checked `bots-poll-voters` box) <!-- parity:bots-poll-show-voters -->
 - [x] Country restriction setting: comma-separated ISO codes (`country_codes`; count cap is server-enforced `poll_country_count_max`, channel-only) (ui/mod.rs, poll.rs, requests.rs) <!-- parity:bots-poll-countries -->
+- [ ] Poll country restriction picked from a searchable country list, not typed ISO codes <!-- parity:bots-poll-country-picker -->
 - [x] Poll discard-confirmation prompt when closing the dialog with unsent input (ui/mod.rs) <!-- parity:bots-poll-discard -->
 - [x] Voting: single, multiple, retract-when-revoting, quiz answering, closed-poll blocked, optimistic UI with rollback on failure (poll.rs:51, connect.rs:5287) <!-- parity:bots-poll-vote -->
 - [x] Live poll updates applied in place via updatePoll (state.rs:3962) <!-- parity:bots-poll-live-update -->
@@ -876,6 +881,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Poll stopped service message <!-- parity:bots-poll-service-message -->
 - [x] Invoice message rendering: product card with title, description, total price, TEST badge; paid invoices link to their receipt (ui/mod.rs) <!-- parity:bots-payment-invoice -->
 - [x] Payment checkout flow: getPaymentForm dialog, validateOrderInfo with shipping options, saved/new credentials, terms consent, sendPaymentForm; provider/additional-option/verification URLs open in the OS browser; Stars forms honestly declined (envelope.rs, requests.rs, connect.rs, state.rs, ui/mod.rs) <!-- parity:bots-payment-checkout -->
+- [ ] Shipping address country picked from a searchable country list, not a typed country code <!-- parity:bots-payment-country-picker -->
 - [x] Payment receipts: getPaymentReceipt dialog from paid invoices ("View receipt") plus messagePaymentSuccessful/messagePaymentSuccessfulBot rows (ui/mod.rs) <!-- parity:bots-payment-receipt -->
 - [x] Recurring payments: ⭐ Subscriptions dialog — `getStarSubscriptions` list with pagination + star balance, `editStarSubscription` cancel/re-enable (inline confirm), `reuseStarSubscription` to rejoin the chat of an active channel subscription when the type's `can_reuse` is set (expired channel subs renew via the type's `invite_link`, opened in the OS browser); mutations refetch from the authoritative `ok`, never optimistic; recurring-invoice terms (`recurring_payment_terms_of_service_url`) surfaced in the checkout dialog <!-- parity:bots-payment-recurring -->
 - [x] Clear payment/shipping info (privacy) <!-- parity:bots-payment-clear -->
