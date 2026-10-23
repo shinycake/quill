@@ -394,11 +394,11 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Private chat "Restrict saving content" toggle (toggleChatHasProtectedContent) <!-- parity:profile-private-no-forwards -->
 - [x] Link and location rows on group and channel profiles <!-- parity:profile-link-row -->
 - [x] "N members, M online" status on group profiles <!-- parity:profile-members-online -->
-- [ ] Bot profiles show monthly users <!-- parity:profile-bot-monthly-users -->
-- [ ] Story ring on the profile avatar that opens the stories <!-- parity:profile-story-ring -->
-- [ ] Stars rating pill on user profiles <!-- parity:profile-stars-rating -->
-- [ ] Premium "Show last seen" button on hidden last-seen profiles <!-- parity:profile-show-last-seen -->
-- [ ] Saved Messages profile cover <!-- parity:profile-saved-messages-cover -->
+- [x] Bot profiles show monthly users <!-- parity:profile-bot-monthly-users -->
+- [x] Story ring on the profile avatar that opens the stories <!-- parity:profile-story-ring -->
+- [x] Stars rating pill on user profiles <!-- parity:profile-stars-rating -->
+- [x] Premium "Show last seen" button on hidden last-seen profiles <!-- parity:profile-show-last-seen -->
+- [x] Saved Messages profile cover <!-- parity:profile-saved-messages-cover -->
 
 ### Media
 
