@@ -67,11 +67,7 @@ impl QuillApp {
     pub(crate) fn minimize_to_tray(&self) -> bool {
         self.appearance.minimize_to_tray
     }
-    /// Opens Settings on `page`. The System page's default-app row is drawn
-    /// from the link handler's cache, so this is where it is read (on
-    /// macOS, on this thread, once).
     pub(super) fn open_settings_on(&mut self, page: quill::settings_catalog::Page) {
-        quill::link_handler::read_now();
         self.open_settings(Some(page));
     }
 
