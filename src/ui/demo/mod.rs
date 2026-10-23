@@ -414,6 +414,29 @@ fn history_anim_fixture(wanted: &[HistoryAnim]) -> Vec<String> {
                         .to_string(),
                     false,
                 ));
+                // A spoiler video, then a spoiler album (photo + video).
+                let clip = file(46, "demo-clip-12s.mp4");
+                let still = file(49, "demo-gif-still-wide.jpg");
+                let video = |clip: &str, album: &str| {
+                    format!(
+                        r#"{{"@type":"messageVideo","video":{{"@type":"video","duration":12,"width":640,"height":360,"file_name":"clip.mp4","mime_type":"video/mp4","has_stickers":false,"supports_streaming":true,"minithumbnail":{{"@type":"minithumbnail","width":40,"height":30,"data":"{DEMO_MINITHUMB}"}},"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":320,"height":180,"file":{still}}},"video":{clip}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":"{album}","entities":[]}},"show_caption_above_media":false,"has_spoiler":true,"is_secret":false}}"#
+                    )
+                };
+                out.push(message(video(&clip, ""), false));
+                let photo = demo_file_json(50, &demo_thumb_png_path(), true);
+                for (album_id, content) in [
+                    (
+                        90_101,
+                        format!(
+                            r#"{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"minithumbnail":{{"@type":"minithumbnail","width":40,"height":30,"data":"{DEMO_MINITHUMB}"}},"sizes":[{{"@type":"photoSize","type":"m","photo":{photo},"width":320,"height":240,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"show_caption_above_media":false,"has_spoiler":true,"is_secret":false}}"#
+                        ),
+                    ),
+                    (90_102, video(&file(51, "demo-clip.mp4"), "Spoiler album")),
+                ] {
+                    out.push(format!(
+                        r#"{{"@type":"updateNewMessage","message":{{"id":{album_id},"chat_id":11,"is_outgoing":false,"date":1790633000,"media_album_id":"90100","content":{content}}}}}"#
+                    ));
+                }
             }
             HistoryAnim::Stickers => {
                 for (file_id, name, format, outgoing) in [

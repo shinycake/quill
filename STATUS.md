@@ -1128,7 +1128,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Try IPv6 option <!-- parity:data-ipv6 -->
 - [x] Export Telegram data box: types, media sizes, date range, HTML and JSON <!-- parity:data-export-full -->
 - [x] Chat export as HTML with media, date range and senders <!-- parity:data-chat-export-html -->
-- [x] Install beta versions <!-- parity:data-install-beta -->
+- [x] Install beta versions: dropped on purpose (2026-10-23, owner): Quill follows the stable channel only <!-- parity:data-install-beta -->
 - [x] Experimental settings page <!-- parity:data-experimental -->
 - [x] Tray icon and taskbar icon toggles, monochrome tray icon <!-- parity:data-tray-toggles -->
 - [x] Explicit "when window is closed: run in background or quit" choice <!-- parity:data-window-close -->
@@ -1141,7 +1141,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Global keyboard shortcuts: 22 bindings wired in `bind_keys` (Quit, focus sidebar/composer, chat search, media viewer nav/zoom) (src/ui/mod.rs:125) <!-- parity:platform-keyboard-shortcuts -->
 - [x] Keyboard shortcuts reference/help overlay listing all bindings <!-- parity:platform-shortcuts-reference -->
 - [x] Customizable key bindings <!-- parity:platform-custom-keybindings -->
-- [ ] Long lists load the next page on scroll with a spinner row everywhere (giveaway winners, subscriptions, Stars and gifts history, privacy exceptions, saved sublists, shared media, story pages and insights), never a Load more button; one shared helper <!-- parity:platform-scroll-load-everywhere -->
+- [x] Long lists load the next page on scroll with a spinner row everywhere (giveaway winners, subscriptions, Stars and gifts history, privacy exceptions, saved sublists, shared media, story pages and insights), never a Load more button; one shared helper <!-- parity:platform-scroll-load-everywhere -->
 - [x] Screen-reader accessible labels/roles on UI elements (partial: #287 adds conversation text/link/spoiler roles and named controls; native macOS AX actions verified; other flows remain to audit) <!-- parity:platform-screen-reader-labels -->
 - [ ] VoiceOver support (partial: macOS AccessKit tree and native AX actions verified by #287; spoken VoiceOver navigation across all flows remains unverified) <!-- parity:platform-voiceover -->
 - [x] High-contrast theme/mode <!-- parity:platform-high-contrast -->
@@ -1158,7 +1158,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Manual "Check for updates" action in Settings/menu <!-- parity:platform-update-check-manual -->
 - [x] Update-available UI: non-intrusive banner/dialog showing the new version and release notes <!-- parity:platform-update-available-ui -->
 - [x] One-click download, install, and restart (replace own binary, relaunch; user confirms — no silent auto-install) <!-- parity:platform-update-install -->
-- [x] Opt-in "Install updates automatically" (off by default): downloads and stages a release, installs it at the next start; Linux and Windows (#994) <!-- parity:platform-update-auto-install -->
+- [x] Updates download automatically (no switches): one button goes Update Quill, the download with progress, Restart to update, in Settings and at the bottom of the chat list; a downloaded update also installs at the next start; macOS, Linux and Windows <!-- parity:platform-update-auto-install -->
 - [x] macOS in-place update of Quill.app behind the same setting: strict signature, designated-requirement and checksum checks before the swap, rollback, location checks (#1008) <!-- parity:platform-update-macos-bundle -->
 - [x] Honest updater states: already up to date, no network, download/install failed with retry (partial: #282 implements release-check states and retry; download/install failure states remain) <!-- parity:platform-update-states -->
 - [x] Outdated-feature placeholder: placeholder card with one-tap update button when the app can't render a new feature <!-- parity:platform-update-placeholder --> (merged #294: readable unsupported-message card and official release/download action; expired media has an expiry notice without an update action; native AX proof)

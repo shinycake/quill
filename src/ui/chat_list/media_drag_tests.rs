@@ -429,23 +429,23 @@ fn a_lifted_photo_released_over_the_history_does_not_reply(cx: &mut TestAppConte
 }
 
 #[gpui_kit::test]
-fn an_album_video_tile_centres_its_play_button_inside_the_tile(cx: &mut TestAppContext) {
+fn an_album_video_tile_centres_its_play_disc_inside_the_tile(cx: &mut TestAppContext) {
     let (_app, mut vcx) = open(cx, "ready-albums");
     let vcx = &mut vcx;
     let row = 812u64 * 64;
     let (tile, play) = vcx.update(|window, _| {
         (
             window.find(("album-tile", row)).bounds(),
-            window.find(("album-play-slot", row)).bounds(),
+            window.find(("album-disc", row)).bounds(),
         )
     });
     assert!(
         tile.contains(&play.origin) && tile.contains(&play.bottom_right()),
-        "the Play button {play:?} sits inside the tile {tile:?}"
+        "the play disc {play:?} sits inside the tile {tile:?}"
     );
     let (t, p) = (tile.center(), play.center());
     assert!(
         (t.x - p.x).abs() <= px(1.) && (t.y - p.y).abs() <= px(1.),
-        "the Play button is centred: {p:?} vs {t:?}"
+        "the play disc is centred: {p:?} vs {t:?}"
     );
 }

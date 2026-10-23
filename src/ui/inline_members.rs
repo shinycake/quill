@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::scroll_load::scrolled_near_end;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::ChatId;
@@ -11,9 +12,6 @@ use quill::inline_members::{MoreAction, next_more};
 use quill::lang::{keys, tr};
 use quill::state::{InfoPanelTarget, MemberListFilter, SupergroupMembersFetch};
 use quill::telegram::envelope::ChatKind;
-
-/// Rows are asked for when this close to the end of the list.
-const PREFETCH: f32 = 160.;
 
 /// What kind of group the info panel is showing.
 #[derive(Clone, Copy)]
@@ -181,13 +179,8 @@ impl QuillApp {
         if shown >= loaded && loaded as i32 >= total {
             return;
         }
-        let handle = &self.inline_members.scroll;
         // Not laid out yet: the next render asks again.
-        if handle.bounds().size.height <= px(0.) {
-            return;
-        }
-        let left = handle.max_offset().y + handle.offset().y;
-        if left > px(PREFETCH) {
+        if !scrolled_near_end(&self.inline_members.scroll) {
             return;
         }
         let in_flight = self.live.as_ref().is_some_and(|live| {

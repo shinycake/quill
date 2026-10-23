@@ -82,8 +82,8 @@ struct InstallResult {
     failed: bool,
 }
 
-/// Why "Install updates automatically" is off here. Each reason has its own
-/// hint under the switch.
+/// Why this copy cannot replace itself. Each reason has its own line in the
+/// update section.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Unavailable {
     /// Not a package Quill updates: a plain cargo build, a renamed
@@ -110,7 +110,7 @@ pub enum Unavailable {
 impl Unavailable {
     pub fn hint(self) -> Key {
         match self {
-            Self::NotPackaged => keys::Q_OPS_INSTALL_UPDATES_AUTOMATICALLY_UNAVAILABLE,
+            Self::NotPackaged => keys::Q_OPS_SELF_UPDATE_NOT_PACKAGED,
             Self::Translocated => keys::Q_OPS_SELF_UPDATE_TRANSLOCATED,
             Self::DiskImage => keys::Q_OPS_SELF_UPDATE_DISK_IMAGE,
             Self::ReadOnly => keys::Q_OPS_SELF_UPDATE_READ_ONLY,
@@ -530,7 +530,10 @@ fn clear_interrupted_update(exe: &Path, layout: &Layout) {
 }
 
 #[cfg(feature = "ui")]
-pub fn download_and_stage(release: &ReleaseInfo) -> Result<PathBuf, &'static str> {
+pub fn download_and_stage(
+    release: &ReleaseInfo,
+    progress: &crate::updater::DownloadProgress,
+) -> Result<PathBuf, &'static str> {
     // Screenshot demos and UI tests that force the answer never download.
     #[cfg(any(test, feature = "demo-capture"))]
     if FORCED_AVAILABLE
@@ -602,7 +605,10 @@ pub fn download_and_stage(release: &ReleaseInfo) -> Result<PathBuf, &'static str
         let mut file = options.open(&archive).map_err(
             |_| "Could not stage update beside the executable. Check folder permissions and retry.",
         )?;
-        let mut reader = response.body_mut().as_reader().take(asset.size + 1);
+        let mut reader = Counted {
+            inner: response.body_mut().as_reader().take(asset.size + 1),
+            progress,
+        };
         let size = std::io::copy(&mut reader, &mut file)
             .map_err(|_| "Download interrupted or disk full. Retry the update.")?;
         file.sync_all()
@@ -650,6 +656,20 @@ pub fn download_and_stage(release: &ReleaseInfo) -> Result<PathBuf, &'static str
         let _ = fs::remove_file(&plan_path);
     }
     result
+}
+
+/// A reader that adds what it reads to the download's progress.
+struct Counted<'a, R> {
+    inner: R,
+    progress: &'a crate::updater::DownloadProgress,
+}
+
+impl<R: Read> Read for Counted<'_, R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let read = self.inner.read(buf)?;
+        self.progress.add(read as u64);
+        Ok(read)
+    }
 }
 
 /// Hands the staged update at `plan` (from [`download_and_stage`]) to the

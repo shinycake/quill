@@ -12,8 +12,8 @@ use super::message_media::{
     sticker_attachment, venue_row, video_attachment, video_note_attachment, voice_note_row,
 };
 use super::message_media::{
-    DocOrigin, MediaCorners, file_is_downloading, leads_with_media, media_content_width,
-    photo_display_path, single_media_frame, single_media_width, spoiler_cover,
+    DocOrigin, MediaCorners, fading_spoiler, leads_with_media, media_content_width,
+    single_media_frame, single_media_width, spoiler_cover,
 };
 use super::message_payments::{
     inline_keyboard, invoice_body, payment_received_row, payment_success_row,
@@ -34,13 +34,12 @@ use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::FileId;
 use quill::ids::{ChatId, MessageId};
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::state::{HistoryMessage, OutboxReceipt, Session, unix_ms_now};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{MessageContent, effective_content};
 use quill::text::TextEntity;
-use quill::voice::format_voice_duration;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -188,6 +187,8 @@ pub(super) fn album_history_row(
     // Settings → Appearance: font size + bubble/plain style.
     look: BubbleLook,
     session: Option<&Session>,
+    // Revealed spoilers: tiles keep their cover until clicked.
+    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let Some(first) = messages.first() else {
@@ -242,6 +243,11 @@ pub(super) fn album_history_row(
             media_roots,
             0,
             super::forward_drag_source::drag_for_media(session, message),
+            super::spoiler_fx::media_cover(
+                &message.content,
+                super::spoiler_fx::media_key(message.chat_id, message.id),
+                revealed,
+            ),
             cx,
         );
         mosaic = mosaic.child(tile);
@@ -273,7 +279,6 @@ pub(super) fn album_history_row(
     chrome.media_width = Some(media_content_width(px(box_w as f32), px(0.), media_max));
     chrome.footer_overlay = !has_caption;
     chrome.actions = Some(message_actions_button(first.chat_id, first.id, cx));
-    let revealed = std::collections::HashSet::new();
     let emoji: HashMap<i64, ImageSource> = HashMap::new();
     let layered: HashMap<i64, super::anim_layer::LayeredClip> = HashMap::new();
     let extra = div()
@@ -296,7 +301,7 @@ pub(super) fn album_history_row(
                         &entities,
                         (chat_id.0, message_id.0 as u64),
                         true,
-                        &revealed,
+                        revealed,
                         look.font,
                         &emoji,
                         &layered,
@@ -442,219 +447,6 @@ fn message_actions_button(
     )
 }
 
-pub(super) fn album_tile(
-    message: &HistoryMessage,
-    part: &quill::album::AlbumRect,
-    mosaic: (i32, i32),
-    mosaic_corners: MediaCorners,
-    files: &quill::state::FileMap,
-    downloading: &quill::state::DownloadIntents,
-    media_roots: &[PathBuf],
-    // Which item of the message the tile is (a bought paid-media album
-    // holds several under one message id); 0 for ordinary albums.
-    item_offset: usize,
-    // What a press on the tile that moves picks up, when it may.
-    drag: Option<quill::forward_drag::ForwardDrag>,
-    cx: &mut Context<QuillApp>,
-) -> AnyElement {
-    let row_id = (message.id.0 as u64)
-        .wrapping_mul(64)
-        .wrapping_add(item_offset as u64);
-    let corners = mosaic_corners.tile(
-        part.x <= 0,
-        part.y <= 0,
-        part.x + part.width >= mosaic.0,
-        part.y + part.height >= mosaic.1,
-    );
-    let chat_id = message.chat_id;
-    let message_id = message.id;
-    // Parity slice 5: tiles open the fullscreen media viewer. The Play
-    // button inside video tiles keeps its history-row playback — its
-    // handler stops propagation, so the tile click never double-fires
-    // (kit buttons do not).
-    let frame = div()
-        .id(("album-tile", row_id))
-        .test_support()
-        .w(px(part.width as f32))
-        .h(px(part.height as f32))
-        .map(|this| corners.round(this))
-        .overflow_hidden()
-        .role(gpui_kit::Role::Button)
-        .aria_label(tr(keys::Q_MEDIA_OPEN_ALBUM_MEDIA))
-        .tab_index(0)
-        .cursor_pointer()
-        .on_click(cx.listener(move |this, _, _, cx| {
-            this.open_media_viewer_at(chat_id, message_id, item_offset, cx);
-        }));
-    let tile =
-        match &message.content {
-            MessageContent::Photo(photo) => {
-                if let Some(path) = photo_display_path(photo, files, media_roots) {
-                    frame
-                        .child(
-                            img(super::image_budget::sized_media(
-                                &path,
-                                (px(part.width as f32), px(part.height as f32)),
-                                photo
-                                    .largest_size()
-                                    .or_else(|| photo.thumb_size())
-                                    .map(|size| (size.width, size.height)),
-                                super::image_budget::Fit::Cover,
-                            ))
-                            .id(("album-photo", row_id))
-                            .w(px(part.width as f32))
-                            .h(px(part.height as f32))
-                            .aspect_ratio(part.width.max(1) as f32 / part.height.max(1) as f32)
-                            .map(|this| corners.round(this))
-                            .object_fit(ObjectFit::Cover)
-                            .with_fallback(move || {
-                                div()
-                                    .size_full()
-                                    .map(|this| corners.round(this))
-                                    .bg(fill_muted())
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(tr(keys::Q_MEDIA_PHOTO_2))
-                                    .into_any_element()
-                            }),
-                        )
-                        .into_any_element()
-                } else {
-                    let open_id = photo.open_file_id().unwrap_or(FileId(0));
-                    let downloading_now = file_is_downloading(open_id, files, downloading);
-                    frame
-                        .bg(fill_muted())
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(div().text_xs().text_color(text_bright()).child(
-                            if downloading_now {
-                                tr(keys::Q_MEDIA_PHOTO_DOWNLOADING)
-                            } else {
-                                tr(keys::Q_MEDIA_PHOTO_2)
-                            },
-                        ))
-                        .into_any_element()
-                }
-            }
-            MessageContent::Video(video) => {
-                let play_id = video.play_file_id().unwrap_or(FileId(0));
-                let thumb_id = video.thumb_file_id().unwrap_or(FileId(0));
-                let message_id = message.id;
-                let visual = [thumb_id, play_id].into_iter().find_map(|id| {
-                    if id.0 == 0 {
-                        return None;
-                    }
-                    files
-                        .get(&id.0)
-                        .and_then(|file| file.usable_path())
-                        .and_then(|path| sandboxed_display_path(path, media_roots))
-                });
-                let duration = format_voice_duration(video.duration);
-                let picture = if let Some(path) = visual {
-                    img(super::image_budget::sized_media(
-                        &path,
-                        (px(part.width as f32), px(part.height as f32)),
-                        Some((video.width, video.height)),
-                        super::image_budget::Fit::Cover,
-                    ))
-                    .id(("album-video", row_id))
-                    .w(px(part.width as f32))
-                    .h(px(part.height as f32))
-                    .aspect_ratio(part.width.max(1) as f32 / part.height.max(1) as f32)
-                    .map(|this| corners.round(this))
-                    .object_fit(ObjectFit::Cover)
-                    .with_fallback(move || {
-                        div()
-                            .size_full()
-                            .map(|this| corners.round(this))
-                            .bg(success_bg())
-                            .into_any_element()
-                    })
-                    .into_any_element()
-                } else {
-                    div()
-                        .size_full()
-                        .map(|this| corners.round(this))
-                        .bg(success_bg())
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(text_on_fill())
-                                .child(tr(keys::Q_MEDIA_VIDEO)),
-                        )
-                        .into_any_element()
-                };
-                frame
-                    .child(picture)
-                    .child(
-                        div()
-                            .absolute()
-                            .bottom(px(4.))
-                            .left(px(4.))
-                            .px_1()
-                            .rounded_sm()
-                            .bg(bg_tile())
-                            .text_xs()
-                            .text_color(text_bright())
-                            .child(tr_with(
-                                keys::Q_MEDIA_VIDEO_2,
-                                &[("duration", &duration.to_string())],
-                            )),
-                    )
-                    .child(
-                        // Laid over the whole tile and centred, so the button
-                        // never joins the flow below the picture (where the
-                        // tile's clip hid it).
-                        div()
-                            .absolute()
-                            .top_0()
-                            .left_0()
-                            .size_full()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(
-                                div().id(("album-play-slot", row_id)).test_support().child(
-                                    Button::new(format!("album-play-{row_id}"))
-                                        .label(tr(keys::Q_MEDIA_PLAY))
-                                        // The press bubbles, so the tile's drag can start
-                                        // from the button; a click stops here instead of
-                                        // also opening the viewer through the tile's own
-                                        // click.
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            cx.stop_propagation();
-                                            this.open_media_viewer_at(
-                                                chat_id,
-                                                message_id,
-                                                item_offset,
-                                                cx,
-                                            );
-                                        })),
-                                ),
-                            ),
-                    )
-                    .into_any_element()
-            }
-            _ => frame.into_any_element(),
-        };
-    // A press on a tile that moves picks up that one message (`GroupPart`),
-    // not the album; the tile's own click stays on `frame`, inside.
-    let spot = div()
-        .id(("album-drag", row_id))
-        .absolute()
-        .left(px(part.x as f32))
-        .top(px(part.y as f32))
-        .w(px(part.width as f32))
-        .h(px(part.height as f32))
-        .child(tile);
-    super::forward_drag_source::draggable(spot, drag).into_any_element()
-}
-
 /// A service message ("X joined", "pinned a message", timers, screenshots)
 /// as a centered translucent pill, Telegram Desktop style
 /// (`msgServicePadding`, semibold) and matching the day separators.
@@ -698,6 +490,8 @@ pub(in crate::ui) mod bubble_width;
 mod reaction_chip_row;
 pub(in crate::ui) mod text_measure;
 use reaction_chip_row::reaction_chip_row;
+mod album_tile;
+pub(in crate::ui) use album_tile::album_tile;
 mod community_rows;
 mod fast_share;
 mod session_history_row;

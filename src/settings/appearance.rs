@@ -193,8 +193,6 @@ pub struct AppearancePrefs {
     /// the Windows tray shows a one-color glyph that matches the taskbar.
     #[serde(default = "default_true")]
     pub tray_icon_monochrome: bool,
-    #[serde(default = "default_true")]
-    pub check_updates_on_launch: bool,
     /// tdesktop `nativeWindowFrame` ("Use system window frame", Linux and
     /// Windows): the operating system draws the title bar. Off by default.
     #[serde(default)]
@@ -258,7 +256,6 @@ impl Default for AppearancePrefs {
             show_tray_icon: true,
             show_taskbar_icon: true,
             tray_icon_monochrome: true,
-            check_updates_on_launch: true,
             native_window_frame: false,
         }
     }
@@ -416,7 +413,6 @@ mod tests {
             show_tray_icon: false,
             show_taskbar_icon: false,
             tray_icon_monochrome: false,
-            check_updates_on_launch: false,
             native_window_frame: true,
         };
         save_appearance_prefs(&paths, &prefs).unwrap();

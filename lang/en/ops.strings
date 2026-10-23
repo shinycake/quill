@@ -390,8 +390,6 @@
 "qll_ops_chats_selected#other" = "{count} chats selected";
 "qll_ops_chats_with_protected_content_were" = "{protected_chats} chats with protected content were left out.";
 "qll_ops_check_for_updates" = "Check for updates";
-"qll_ops_check_for_updates_on_launch" = "Check for updates on launch";
-"qll_ops_check_github_releases_automatically_on" = "Check GitHub Releases automatically on launch.";
 "qll_ops_checking" = "Checking…";
 "qll_ops_checking_the_video" = "Checking the video…";
 "qll_ops_choose_a_chat_to_forward" = "choose a chat to forward to";
@@ -565,7 +563,6 @@
 "qll_ops_download_canceled" = "Download canceled.";
 "qll_ops_download_failed" = "Download failed";
 "qll_ops_download_folder" = "Download folder";
-"qll_ops_download_install_and_restart" = "Download, install and restart";
 "qll_ops_download_paused" = "download paused";
 "qll_ops_download_resumed" = "download resumed";
 "qll_ops_download_settings_unavailable" = "Download settings unavailable.";
@@ -658,9 +655,7 @@
 "qll_ops_incoming_voice_call" = "Incoming voice call";
 "qll_ops_india" = "India";
 "qll_ops_info_2" = "ℹ Info";
-"qll_ops_install_the_release_package_from" = "Install the release package from GitHub for this installation.";
-"qll_ops_install_updates_automatically" = "Install updates automatically";
-"qll_ops_install_updates_automatically_unavailable" = "Not available for this installation: it cannot replace itself.";
+"qll_ops_self_update_not_packaged" = "This copy of Quill cannot update itself. Download new versions from GitHub.";
 "qll_ops_self_update_translocated" = "macOS opened Quill from a temporary copy. Move Quill.app to your Applications folder and open it from there.";
 "qll_ops_self_update_disk_image" = "Quill is running from a disk image. Drag Quill.app to your Applications folder and open it from there.";
 "qll_ops_self_update_read_only" = "Quill is on a read-only disk, so it cannot replace itself.";
@@ -670,7 +665,6 @@
 "qll_ops_self_update_checking" = "Checking whether this installation can update itself…";
 "qll_ops_update_signed_differently" = "This copy of Quill is signed differently from the release, so it updates manually. Install the release package from GitHub.";
 "qll_ops_update_failed_verification" = "The downloaded app did not pass verification. Nothing was installed.";
-"qll_ops_install_updates_automatically_hint" = "Quill downloads new versions in the background and installs them the next time it starts.";
 "qll_ops_invite_links" = "{active} invite links";
 "qll_ops_invite_links_need_a_live" = "invite links need a live connection (demo)";
 "qll_ops_is_calling" = "{name} is calling ({kind})";
@@ -818,6 +812,9 @@
 "qll_ops_quill" = "Quill {quill_version_app}";
 "qll_ops_quill_updates" = "Quill updates";
 "qll_ops_restart_to_update" = "Restart to update";
+"qll_ops_update_quill" = "Update Quill";
+"qll_ops_downloading_update" = "Downloading update {progress}…";
+"qll_ops_installing_update" = "Installing update…";
 "qll_ops_update_ready_restart" = "Quill {release_version} is ready. Restart to apply.";
 "qll_ops_quote" = "Quote";
 "qll_ops_quote_part_of_message" = "Quote Part of Message";

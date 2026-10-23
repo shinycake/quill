@@ -48,7 +48,7 @@ impl QuillApp {
         let MessageContent::Animation(animation) = &row.message.content else {
             return;
         };
-        if animation.is_secret || animation.has_spoiler {
+        if animation.is_secret || self.media_spoiler_covered(&row.message) {
             return;
         }
         // MP4 GIFs autoplay on the shared player (`inline_video`); only

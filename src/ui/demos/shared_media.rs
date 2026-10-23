@@ -254,12 +254,13 @@ fn fill_tab(
     messages: Vec<Value>,
 ) {
     let generation = session.media.shared_media.begin_fetch(tab);
+    let next_from = i64::from(std::env::var_os("QUILL_DEMO_SHARED_MEDIA_LOADING_MORE").is_some());
     let extra = session.request(
         RequestPurpose::GetSharedMedia { tab, generation },
         Some(ChatId(CHAT)),
     );
     let answer = json!({ "@type": "foundChatMessages", "@extra": extra.0,
-        "total_count": messages.len(), "next_from_message_id": 0, "messages": messages });
+        "total_count": messages.len(), "next_from_message_id": next_from, "messages": messages });
     if let Some(owned) = copy_and_parse(&answer.to_string(), seq, sink) {
         session.apply(owned);
     }
@@ -287,6 +288,10 @@ impl QuillApp {
             session.open_chat(ChatId(CHAT));
             session.media.shared_media.open_for_tab(ChatId(CHAT), tab);
             fill_tab(session, &sink, &seq, tab, tab_messages(tab));
+            // QUILL_DEMO_SHARED_MEDIA_LOADING_MORE=1 shows the next page on its way.
+            if std::env::var_os("QUILL_DEMO_SHARED_MEDIA_LOADING_MORE").is_some() {
+                let _ = session.media.shared_media.begin_fetch_more(tab);
+            }
             // QUILL_DEMO_SHARED_MEDIA_SELECT=2 ticks the first two rows.
             let ticked: usize = std::env::var("QUILL_DEMO_SHARED_MEDIA_SELECT")
                 .ok()

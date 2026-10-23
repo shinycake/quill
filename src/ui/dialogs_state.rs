@@ -67,6 +67,10 @@ pub(crate) struct DialogUi {
     pub(super) account_export_seen: Option<quill::export::account::AccountProgress>,
     /// Saved Messages: "Add Name" / "Edit Name" for a tag.
     pub(super) saved_tag_dialog: Option<super::saved_sublists::SavedTagDialog>,
+    /// The Saved Messages sublist list, which pages near its end
+    /// (`scroll_load`).
+    pub(super) saved_scroll: ScrollHandle,
+    pub(super) saved_asked: super::scroll_load::Asked,
     /// Phase C2i: rating detail draft for the call-end card — the star
     /// tap opens the problems checklist + comment field instead of
     /// sending immediately.
@@ -114,6 +118,8 @@ impl DialogUi {
             account_export_progress_hidden: false,
             account_export_seen: None,
             saved_tag_dialog: None,
+            saved_scroll: ScrollHandle::new(),
+            saved_asked: Default::default(),
             rating_detail: None,
             rating_comment_input,
             business_hours: Default::default(),

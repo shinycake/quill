@@ -8,6 +8,7 @@ use super::app::QuillApp;
 use super::giveaway_create_ui::{about_line, boosts_text, choice, section_title};
 use super::giveaway_info_ui::day_text;
 use super::giveaway_state::{GiveawayForm, GiveawayPage};
+use super::scroll_load::{load_due, loading_row, scrolled_near_end, watch};
 use gpui_base::Disableable;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -409,8 +410,36 @@ impl QuillApp {
             .unwrap_or_default()
     }
 
-    /// The next page of the members list.
-    fn load_more_award(&mut self, cx: &mut Context<Self>) {
+    /// The next page of the members list, once the reader is near its end
+    /// (or the page left it short of the view). A failed page is retried by
+    /// scrolling again, not on its own.
+    fn giveaway_more_members(&mut self, cx: &mut Context<Self>, scrolled: bool) {
+        // Paging needs a live connection; a demo session has nothing to ask.
+        if self.live.is_none() {
+            return;
+        }
+        let on_users = self
+            .giveaway
+            .form
+            .as_ref()
+            .is_some_and(|f| f.page == GiveawayPage::Users);
+        let Some(list) = self.session().map(|s| &s.payments.giveaway.award_members) else {
+            return;
+        };
+        if !on_users
+            || (list.error.is_some() && !scrolled)
+            || !load_due(
+                scrolled_near_end(&self.payments.pick_scroll),
+                list.can_load_more(),
+                list.loading,
+            )
+            || !self
+                .payments
+                .giveaway_asked
+                .allow(list.user_ids.len(), scrolled)
+        {
+            return;
+        }
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.load_more_award_members();
         }
@@ -527,15 +556,8 @@ impl QuillApp {
                             .child(tr(keys::Q_MONEY_NO_MEMBERS_FOUND)),
                     );
                 }
-                if list.can_load_more() || list.error.is_some() {
-                    body = body.child(
-                        Button::new("giveaway-award-more")
-                            .label(tr(keys::Q_MONEY_LOAD_MORE))
-                            .ghost()
-                            .small()
-                            .disabled(list.loading)
-                            .on_click(cx.listener(|this, _, _, cx| this.load_more_award(cx))),
-                    );
+                if list.loading && shown > 0 {
+                    body = body.child(loading_row("giveaway-award-loading", cx));
                 }
             }
             GiveawayPage::Countries => {
@@ -598,10 +620,12 @@ impl QuillApp {
         }
         if form.page == GiveawayPage::Users {
             // Scrolling the list asks for the next page as well.
-            return body
-                .id("giveaway-award-list")
-                .on_scroll_wheel(cx.listener(|this, _, _, cx| this.load_more_award(cx)))
-                .into_any_element();
+            return watch(
+                body.id("giveaway-award-list"),
+                cx,
+                Self::giveaway_more_members,
+            )
+            .into_any_element();
         }
         body.into_any_element()
     }

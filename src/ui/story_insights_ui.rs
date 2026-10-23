@@ -9,6 +9,7 @@
 use super::app::QuillApp;
 use super::chat_row::initials_avatar;
 use super::chat_theme::{accent, bg_canvas, border, danger, text_menu, text_muted};
+use super::scroll_load::{load_due, loading_row, scrolled_near_end, watch_scroll};
 use super::statistics::format_stat_count;
 use super::statistics_graph::stat_graph_block;
 use crate::ui::status_note::StatusNote;
@@ -57,6 +58,69 @@ impl QuillApp {
             self.connection.set_note(StatusNote::silent(tr(
                 keys::Q_MEDIA_DEMO_STORY_STATISTICS_RUN_WITH,
             )));
+        }
+        cx.notify();
+    }
+
+    /// The statistics panel is near its end: ask for the next public shares.
+    fn story_forwards_more(&mut self, cx: &mut Context<Self>, scrolled: bool) {
+        // Paging needs a live connection; a demo session has nothing to ask.
+        if self.live.is_none() {
+            return;
+        }
+        let current = self
+            .stories
+            .viewer
+            .current()
+            .map(|item| (item.chat_id, item.story_id));
+        let Some(state) = self
+            .session()
+            .and_then(|s| s.stories.insights.as_ref())
+            .filter(|state| current == Some((ChatId(state.chat_id), state.story_id)))
+        else {
+            return;
+        };
+        if !self.stories.stats_open
+            || (state.forwards_error.is_some() && !scrolled)
+            || !load_due(
+                scrolled_near_end(&self.stories.stats_scroll),
+                !state.forwards_next_offset.is_empty(),
+                state.forwards_loading,
+            )
+            || !self
+                .stories
+                .stats_asked
+                .allow(state.forwards.len(), scrolled)
+        {
+            return;
+        }
+        self.load_more_story_forwards(cx);
+    }
+
+    /// The public-story hits are near their end: ask for the next page.
+    fn found_stories_more(&mut self, cx: &mut Context<Self>, scrolled: bool) {
+        // Paging needs a live connection; a demo session has nothing to ask.
+        if self.live.is_none() {
+            return;
+        }
+        let Some(search) = self.session().and_then(|s| s.stories.search.as_ref()) else {
+            return;
+        };
+        if (search.error.is_some() && !scrolled)
+            || !load_due(
+                scrolled_near_end(&self.stories.found_scroll),
+                !search.next_offset.is_empty(),
+                search.loading,
+            )
+            || !self
+                .stories
+                .found_asked
+                .allow(search.stories.len(), scrolled)
+        {
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.load_more_found_stories();
         }
         cx.notify();
     }
@@ -121,6 +185,8 @@ impl QuillApp {
             .w(px(360.))
             .max_h(px(420.))
             .overflow_y_scroll()
+            .track_scroll(&self.stories.stats_scroll)
+            .on_scroll_wheel(watch_scroll(cx, Self::story_forwards_more))
             .p_2()
             .rounded_md()
             .bg(bg_canvas())
@@ -296,20 +362,9 @@ impl QuillApp {
             panel = panel.child(div().text_sm().text_color(danger()).child(error));
         }
         if state.forwards_loading {
-            panel = panel.child(
-                div()
-                    .text_sm()
-                    .text_color(text_muted())
-                    .child(tr(keys::Q_MEDIA_LOADING_PUBLIC_SHARES)),
-            );
-        } else if !state.forwards_next_offset.is_empty() {
-            panel = panel.child(
-                Button::new("story-forwards-more")
-                    .label(tr(keys::Q_MEDIA_LOAD_MORE))
-                    .small()
-                    .on_click(cx.listener(|this, _, _, cx| this.load_more_story_forwards(cx))),
-            );
+            panel = panel.child(loading_row("story-forwards-loading", cx));
         } else if state.forwards.is_empty()
+            && state.forwards_next_offset.is_empty()
             && matches!(state.statistics, StoryStatsFetch::Loaded(_))
         {
             panel = panel.child(
@@ -459,6 +514,15 @@ impl QuillApp {
             keys::Q_MEDIA_STORIES_FOR,
             &[("label", (search.query.label()))],
         )));
+        let mut rows = div()
+            .id("found-stories-rows")
+            .flex()
+            .flex_col()
+            .gap_1()
+            .max_h(px(260.))
+            .overflow_y_scroll()
+            .track_scroll(&self.stories.found_scroll)
+            .on_scroll_wheel(watch_scroll(cx, Self::found_stories_more));
         for (index, (chat_id, story_id)) in search.stories.iter().enumerate() {
             let name = self.chat_title_or_id(*chat_id);
             let date = self
@@ -466,7 +530,7 @@ impl QuillApp {
                 .and_then(|s| s.stories.stories.get(&(*chat_id, *story_id)))
                 .map(|story| story.date)
                 .unwrap_or(0);
-            block = block.child(
+            rows = rows.child(
                 div()
                     .id(("found-story", index as u64))
                     .flex()
@@ -498,29 +562,21 @@ impl QuillApp {
                     ),
             );
         }
+        if search.loading && !search.stories.is_empty() {
+            rows = rows.child(loading_row("found-stories-loading", cx));
+        }
+        block = block.child(rows);
         if let Some(error) = search.error.clone() {
             block = block.child(div().text_sm().text_color(danger()).child(error));
         }
-        if search.loading {
+        if search.loading && search.stories.is_empty() {
             block = block.child(
                 div()
                     .text_sm()
                     .text_color(text_muted())
                     .child(tr(keys::Q_MEDIA_SEARCHING_STORIES)),
             );
-        } else if !search.next_offset.is_empty() {
-            block = block.child(
-                Button::new("found-stories-more")
-                    .label(tr(keys::Q_MEDIA_LOAD_MORE))
-                    .small()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        if let Some(live) = this.live.as_mut() {
-                            let _ = live.driver.load_more_found_stories();
-                        }
-                        cx.notify();
-                    })),
-            );
-        } else if search.stories.is_empty() && search.error.is_none() {
+        } else if search.stories.is_empty() && !search.loading && search.error.is_none() {
             block = block.child(
                 div()
                     .text_sm()

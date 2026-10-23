@@ -36,6 +36,11 @@ impl QuillApp {
             ),
             PaneMode::Ready => self.sidebar_ready(list, focus_visible, window, cx),
         };
+        let list = if mode == PaneMode::Ready {
+            list.children(self.chat_list_update_button(cx))
+        } else {
+            list
+        };
         if mode == PaneMode::Ready {
             if self.folder_rail_active() {
                 return div()

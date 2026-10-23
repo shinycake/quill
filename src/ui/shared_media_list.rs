@@ -6,6 +6,7 @@
 
 use super::app::QuillApp;
 use super::pressable::PressableDiv;
+use super::scroll_load::{load_due, loading_row, scrolled_near_end, watch_scroll};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::ContextMenuExt as _;
@@ -36,6 +37,9 @@ impl QuillApp {
             .id(("shared-media-items", tab.index() as u64))
             .flex_1()
             .overflow_y_scroll()
+            .when_some(self.shared_media_grid.list_scroll(tab), |list, scroll| {
+                list.track_scroll(scroll)
+            })
             .py_1();
         if let Some(bar) = self.shared_media_date_bar(tab, cx) {
             list = list.child(bar);
@@ -134,20 +138,47 @@ impl QuillApp {
                 row.into_any_element()
             });
         }
-        if state.can_load_more() {
-            list = list.child(
-                div().flex().justify_center().py_2().child(
-                    Button::new(("shared-media-load-more", tab.index() as u64))
-                        .ghost()
-                        .label(tr(keys::Q_OPS_LOAD_MORE))
-                        .accessibility_label(tr(keys::Q_OPS_LOAD_MORE_SHARED_MEDIA))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.load_more_shared_media_ui(tab, cx);
-                        })),
-                ),
-            );
+        if state.loading_more {
+            list = list.child(loading_row(
+                ("shared-media-loading", tab.index() as u64),
+                cx,
+            ));
         }
-        list.into_any_element()
+        list.on_scroll_wheel(watch_scroll(cx, Self::shared_media_more))
+            .into_any_element()
+    }
+
+    /// The next page of the open list tab, once it is scrolled near its end
+    /// or does not fill the panel. A failed page is not retried on its own.
+    fn shared_media_more(&mut self, cx: &mut Context<Self>, scrolled: bool) {
+        // Paging needs a live connection; a demo session has nothing to ask.
+        if self.live.is_none() {
+            return;
+        }
+        let Some(media) = self.session().map(|s| &s.media.shared_media) else {
+            return;
+        };
+        let tab = media.active_tab;
+        let Some(state) = media.tab_at(tab) else {
+            return;
+        };
+        let (Some(scroll), Some(asked)) = (
+            self.shared_media_grid.list_scroll(tab),
+            self.shared_media_grid.list_asked(tab),
+        ) else {
+            return;
+        };
+        if !media.open
+            || !load_due(
+                scrolled_near_end(scroll),
+                state.can_load_more(),
+                state.loading_more,
+            )
+            || !asked.allow(state.items.len(), scrolled)
+        {
+            return;
+        }
+        self.load_more_shared_media_ui(tab, cx);
     }
 
     /// The strip above a list that was reloaded from a picked date, with a

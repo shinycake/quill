@@ -11,7 +11,7 @@
 
 use super::app::QuillApp;
 use super::giveaway_state::{GiveawayForm, GiveawayPage};
-use super::link_info_boxes::finish;
+use super::link_info_boxes::finish_tracked;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use gpui_base::{Disableable, StyledExt};
@@ -601,7 +601,15 @@ impl QuillApp {
                         })),
                 )
             };
-            finish(dialog, title(), body, footer.into_any_element(), on_close)
+            let scroll = Some(this.payments.pick_scroll.clone());
+            finish_tracked(
+                scroll,
+                dialog,
+                title(),
+                body,
+                footer.into_any_element(),
+                on_close,
+            )
         })
     }
 }

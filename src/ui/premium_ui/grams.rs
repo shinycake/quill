@@ -12,6 +12,7 @@ use super::sticker_tile;
 use crate::ui::app::QuillApp;
 use crate::ui::chat_theme::success;
 use crate::ui::message_text::format_unix_date_time;
+use crate::ui::scroll_load::{loading_row, watch};
 use crate::ui::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
@@ -245,9 +246,13 @@ impl QuillApp {
                 Some(tx) => receipt(session, tx, &roots, cx),
                 None => overview(session, grams, &roots, cx),
             };
-            let body = Rc::new(RefCell::new(Some(body)));
+            let scroll = this.payments.grams_scroll.clone();
+            let body = Rc::new(RefCell::new(Some(
+                watch(body, cx, Self::grams_more).into_any_element(),
+            )));
             dialog
-                .content(crate::ui::shell::scrollable_dialog_content(
+                .content(crate::ui::shell::scrollable_dialog_content_tracked(
+                    Some(scroll),
                     move |content, _, _| {
                         let body = body
                             .borrow_mut()
@@ -345,7 +350,7 @@ fn overview(
     body.into_any_element()
 }
 
-/// The tabs (or the "All Transactions" title), the rows and "Load more".
+/// The tabs (or the "All Transactions" title), the rows and the loading row.
 fn history(
     session: &Session,
     grams: &GramsHub,
@@ -410,23 +415,8 @@ fn history(
     for tx in &grams.entries {
         col = col.child(tx_row(session, tx, roots, cx));
     }
-    if grams.has_more() {
-        col = col.child(
-            Button::new("grams-load-more")
-                .label(if grams.loading {
-                    tr(keys::Q_MONEY_LOADING)
-                } else {
-                    tr(keys::Q_MONEY_LOAD_MORE)
-                })
-                .ghost()
-                .disabled(grams.loading)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    if let Some(live) = this.live.as_mut() {
-                        let _ = live.driver.fetch_more_grams();
-                    }
-                    cx.notify();
-                })),
-        );
+    if grams.has_more() && grams.loading {
+        col = col.child(loading_row("grams-loading", cx));
     }
     col.into_any_element()
 }
