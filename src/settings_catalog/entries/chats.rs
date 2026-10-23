@@ -1,7 +1,7 @@
 //! Chats page entries.
 
 use crate::lang::keys;
-use crate::settings_catalog::{Entry, Page};
+use crate::settings_catalog::{Entry, Page, Platforms};
 
 const P: Page = Page::Chats;
 
@@ -107,6 +107,14 @@ pub(super) const ENTRIES: &[Entry] = &[
     Entry::new("chats.spellcheck", P, keys::Q_PREFS_CHECK_SPELLING)
         .section(keys::Q_PREFS_SPELLING)
         .keywords(&["typos", "autocorrect", "grammar"]),
+    Entry::new(
+        "chats.system_text_replace",
+        P,
+        keys::SETTINGS_SYSTEM_TEXT_REPLACE,
+    )
+    .section(keys::Q_PREFS_SPELLING)
+    .keywords(&["text replacements", "shortcuts", "substitutions", "replace"])
+    .only(Platforms::MACOS),
     Entry::new(
         "chats.spellcheck_languages",
         P,

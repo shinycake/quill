@@ -205,6 +205,7 @@
 "lng_settings_show_sessions" = "Active sessions";
 "lng_settings_skip_in_focus" = "Respect system Focus mode";
 "lng_settings_suggestion_password_step_finish_about" = "You still remember your password.";
+"lng_settings_system_text_replace" = "System text replacements";
 "lng_settings_top_peers_about" = "Display people you message frequently at the top of the search section for quick access.";
 "lng_settings_ttl_after_off" = "Off";
 "lng_settings_ttl_after_subtitle" = "Self-destruct timer";
@@ -780,6 +781,7 @@
 "qll_prefs_updating" = "Updating…";
 "qll_prefs_updating_session_setting" = "Updating session setting…";
 "qll_prefs_use_less_data_for_calls" = "Use less data for calls";
+"qll_prefs_use_the_shortcuts_from_keyboard" = "Use the shortcuts from System Settings › Keyboard › Text Replacements.";
 "qll_prefs_use_the_system_window_frame" = "Use the system window frame";
 "qll_prefs_used_when_a_chat_keeps" = "Used when a chat keeps the default setting.";
 "qll_prefs_user" = "User {user_id}";

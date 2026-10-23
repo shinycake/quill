@@ -26,8 +26,9 @@ use std::time::Duration;
 
 use objc2::rc::autoreleasepool;
 use objc2_app_kit::NSSpellChecker;
-use objc2_foundation::{NSLocale, NSRange, NSString};
+use objc2_foundation::{NSLocale, NSRange, NSString, NSTextCheckingType};
 use quill::spellcheck::{Script, SpellBackend, locale_script, spelling_languages};
+use quill::system_text_replace::Found;
 
 /// `NSNotFound` (`NSIntegerMax`) as an `NSRange.location`.
 const NOT_FOUND: usize = isize::MAX as usize;
@@ -264,4 +265,42 @@ impl SpellBackend for SystemSpellBackend {
             checker.ignoreWord_inSpellDocumentWithTag(&NSString::from_str(&word), tag);
         });
     }
+}
+
+/// The user's text replacement (System Settings → Keyboard → Text
+/// Replacements) whose shortcut ends `text`, as tdesktop's
+/// `Platform::FindSystemTextReplace` asks for it. Blocks; call it off the
+/// UI thread.
+pub(super) fn find_system_text_replace(text: &str) -> Option<Found> {
+    let text = text.to_string();
+    with_checker(move |checker, tag| {
+        let ns_text = NSString::from_str(&text);
+        let length = utf16_len(&text);
+        // SAFETY: no options, orthography or word count are asked for;
+        // null and `None` are allowed for all three.
+        let results = unsafe {
+            checker.checkString_range_types_options_inSpellDocumentWithTag_orthography_wordCount(
+                &ns_text,
+                NSRange::new(0, length),
+                NSTextCheckingType::Replacement.0,
+                None,
+                tag,
+                None,
+                std::ptr::null_mut(),
+            )
+        };
+        results.iter().find_map(|result| {
+            let range = result.range();
+            (result.resultType() == NSTextCheckingType::Replacement
+                && range.location.checked_add(range.length) == Some(length))
+            .then(|| {
+                result.replacementString().map(|with| Found {
+                    match_utf16: range.length,
+                    replacement: with.to_string(),
+                })
+            })
+            .flatten()
+        })
+    })
+    .flatten()
 }
