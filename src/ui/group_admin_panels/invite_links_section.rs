@@ -17,12 +17,12 @@ impl QuillApp {
         &self,
         chat_id: ChatId,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> Option<AnyElement> {
         let can_manage = self
             .session()
             .is_some_and(|session| session.chat_can_invite_users(chat_id));
         if !can_manage {
-            return div().into_any_element();
+            return None;
         }
         let fetch = self
             .session()
@@ -114,7 +114,7 @@ impl QuillApp {
             section = section.child(counts);
         }
         section = section.child(self.revoked_invite_links_block(chat_id, cx));
-        section.into_any_element()
+        Some(section.into_any_element())
     }
 
     /// One invite link of `invite_links_section`: name, uses and expiry,
@@ -285,12 +285,12 @@ impl QuillApp {
         &self,
         chat_id: ChatId,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> Option<AnyElement> {
         let can_manage = self
             .session()
             .is_some_and(|session| session.chat_can_invite_users(chat_id));
         if !can_manage {
-            return div().into_any_element();
+            return None;
         }
         let fetch = self
             .session()
@@ -434,7 +434,7 @@ impl QuillApp {
                 }
             }
         }
-        section.into_any_element()
+        Some(section.into_any_element())
     }
 
     /// Phase D3b: administrator management section for the channel /
@@ -450,12 +450,12 @@ impl QuillApp {
         &self,
         chat_id: ChatId,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> Option<AnyElement> {
         if !self
             .session()
             .is_some_and(|session| session.chat_can_manage_admins(chat_id))
         {
-            return div().into_any_element();
+            return None;
         }
         let fetch = self
             .session()
@@ -543,7 +543,7 @@ impl QuillApp {
                 }
             }
         }
-        section.into_any_element()
+        Some(section.into_any_element())
     }
 
     /// Phase D3b: one row of the administrators list — name, custom

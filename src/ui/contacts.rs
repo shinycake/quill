@@ -193,6 +193,11 @@ impl QuillApp {
                                 .h(px(40.)),
                         ),
                 )
+                .children(this.contact_photo_rows(
+                    dialog_state.user_id,
+                    crate::ui::profile_panels::contact_photo_rows::PhotoRowsHost::AddContact,
+                    cx,
+                ))
                 .into_any_element();
             let footer = div()
                 .flex()

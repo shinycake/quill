@@ -153,6 +153,7 @@ pub mod premium_hub;
 pub mod premium_limits;
 pub mod presence;
 pub mod privacy;
+pub mod profile_actions;
 pub mod profile_forms;
 pub mod profile_photo_camera;
 pub mod profile_photo_gradient;

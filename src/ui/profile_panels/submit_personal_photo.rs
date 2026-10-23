@@ -399,7 +399,12 @@ impl QuillApp {
                         tr(keys::Q_PEOPLE_LAST_NAME),
                         &dialog.last_name_input,
                     ))
-                    .child(labeled(tr(keys::Q_PEOPLE_NOTE), &dialog.note_input));
+                    .child(labeled(tr(keys::Q_PEOPLE_NOTE), &dialog.note_input))
+                    .children(self.contact_photo_rows(
+                        user_id,
+                        super::contact_photo_rows::PhotoRowsHost::EditContact,
+                        cx,
+                    ));
                 if show_share {
                     body = body
                         .child(

@@ -82,6 +82,7 @@ mod poll_option_menu;
 mod polls_checklists;
 mod premium_purchase;
 mod privacy_data;
+mod profile_actions;
 mod profile_music;
 mod profile_panels;
 mod profile_photos;

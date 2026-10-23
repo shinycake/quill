@@ -150,6 +150,13 @@ impl QuillApp {
         self.go_to_feature_preview(EFFECTS_FEATURE, cx);
     }
 
+    /// Disable Sharing without Premium: the Premium dialog on that feature
+    /// (tdesktop `ShowPremiumPreviewBox(PremiumFeature::NoForwards)`).
+    pub(in crate::ui) fn show_premium_no_forwards_preview(&mut self, cx: &mut Context<Self>) {
+        self.open_premium(cx);
+        self.go_to_feature_preview(quill::premium_hub::NO_FORWARDS_TITLE, cx);
+    }
+
     /// Page the open Premium dialog to the feature titled `title`: at once
     /// when the feature list is known, else as soon as it arrives.
     fn go_to_feature_preview(&mut self, title: &'static str, cx: &mut Context<Self>) {

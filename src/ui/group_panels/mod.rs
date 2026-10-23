@@ -588,34 +588,6 @@ impl QuillApp {
     }
 }
 
-/// Labeled icon tile for an info panel's primary actions.
-pub(in crate::ui) fn info_tile(
-    id: &'static str,
-    icon: gpui_kit::assets::IconName,
-    label: &'static str,
-    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    cx: &App,
-) -> impl IntoElement {
-    div()
-        .id(id)
-        .flex()
-        .flex_col()
-        .items_center()
-        .gap_1()
-        .w(px(76.))
-        .py_2()
-        .rounded_lg()
-        .bg(cx.theme().secondary)
-        .cursor_pointer()
-        .hover(|style| style.bg(cx.theme().secondary_hover))
-        .role(gpui_kit::Role::Button)
-        .aria_label(label)
-        .tab_index(0)
-        .on_click(on_click)
-        .child(Icon::new(icon).size(px(18.)).text_color(cx.theme().primary))
-        .child(div().text_xs().child(label))
-}
-
 /// `+15550101031` → `+1 555 010 1031`-style grouping for readability;
 /// numbers that don't look like E.164 pass through unchanged.
 pub(super) fn format_phone(raw: &str) -> String {
@@ -694,6 +666,7 @@ mod info_title_tests;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod invite_disclosure_tests;
+mod link_rows;
 mod user_info_panel;
 
 /// The info panel title of a person (`Info::Profile::Widget::title`):

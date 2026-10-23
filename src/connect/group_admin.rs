@@ -210,7 +210,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         .map(Some)
     }
 
-    /// `toggleChatHasProtectedContent` (owner only).
+    /// `toggleChatHasProtectedContent`: the owner of a group or channel,
+    /// or either person in a private chat.
     pub fn set_chat_protected_content(
         &mut self,
         chat_id: ChatId,
@@ -219,7 +220,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.group_admin_controls(chat_id).protected_content {
+        if !self.session.group_admin_controls(chat_id).protected_content
+            && self.session.private_sharing_disabled(chat_id).is_none()
+        {
             return Ok(None);
         }
         let purpose = RequestPurpose::ToggleChatHasProtectedContent;

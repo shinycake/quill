@@ -117,6 +117,7 @@ fn chat_prefs_roundtrip_and_missing_file() {
         suggest_emoji: false,
         replace_emoji: false,
         profile_media_tabs_expanded: true,
+        disable_sharing_box_shown: 2,
     };
     save_chat_prefs(&paths, &prefs).unwrap();
     assert_eq!(load_chat_prefs(&paths), prefs);

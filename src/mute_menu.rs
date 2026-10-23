@@ -95,6 +95,16 @@ pub fn sound_toggle_label(sound_disabled: bool) -> &'static str {
     }
 }
 
+/// "1 hour", "8 hours", "2 days": `Ui::FormatMuteFor`.
+pub fn mute_period_text(seconds: i32) -> String {
+    let day = 24 * 3600;
+    if seconds % day == 0 {
+        crate::lang::trn(crate::lang::keys::DAYS, seconds / day)
+    } else {
+        crate::lang::trn(crate::lang::keys::HOURS, seconds / 3600)
+    }
+}
+
 /// The `(use_default_sound, sound_id)` the toggle applies.
 pub fn sound_toggle_target(sound_disabled: bool) -> (bool, i64) {
     if sound_disabled {

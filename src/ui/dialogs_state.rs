@@ -75,6 +75,8 @@ pub(crate) struct DialogUi {
     pub(super) rating_comment_input: Entity<TextareaState>,
     /// Business hours row of a profile: expanded schedule and time zone.
     pub(super) business_hours: super::profile_business::BusinessHoursUi,
+    /// The Disable Sharing box for this private chat.
+    pub(super) disable_sharing: Option<quill::ids::ChatId>,
 }
 
 impl DialogUi {
@@ -115,6 +117,7 @@ impl DialogUi {
             rating_detail: None,
             rating_comment_input,
             business_hours: Default::default(),
+            disable_sharing: None,
         }
     }
 }

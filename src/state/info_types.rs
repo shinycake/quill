@@ -217,6 +217,8 @@ pub struct SupergroupFullInfoData {
     pub description_entities: Vec<crate::text::TextEntity>,
     /// Restricted and banned member counts (the permissions box rows).
     pub member_counts: crate::telegram::envelope::SupergroupMemberCounts,
+    /// The profile's location row and Gift button.
+    pub profile: crate::telegram::envelope::SupergroupProfileFacts,
 }
 
 impl Default for SupergroupFullInfoData {
@@ -238,6 +240,7 @@ impl Default for SupergroupFullInfoData {
             admin: Default::default(),
             description_entities: Vec::new(),
             member_counts: Default::default(),
+            profile: Default::default(),
         }
     }
 }

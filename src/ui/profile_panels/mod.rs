@@ -70,9 +70,9 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Edit contact / Share contact rows of a profile (tdesktop's profile
-    /// menu: "Edit contact" for contacts, "Share this contact" when the
-    /// phone number is known).
+    /// Share this contact and Edit contact under a person's profile
+    /// (tdesktop `ActionsFiller::fillUserActions`: share when the phone is
+    /// known, then edit for a contact).
     pub(super) fn profile_contact_actions(
         &self,
         user_id: i64,
@@ -83,73 +83,12 @@ impl QuillApp {
         if session.my_user_id == Some(user_id) || user.is_bot {
             return None;
         }
+        let share = !user.phone_number.is_empty();
+        if !share && !user.is_contact {
+            return None;
+        }
         let mut column = div().flex().flex_col().w_full().gap_0p5();
-        let mut any = false;
-        if user.is_contact {
-            any = true;
-            column = column.child(
-                action_row(
-                    "info-panel-edit-contact",
-                    Some(gpui_kit::assets::IconName::Pencil),
-                    tr(keys::INFO_EDIT_CONTACT),
-                    false,
-                    cx,
-                )
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.open_edit_contact_dialog(user_id, window, cx);
-                })),
-            );
-        }
-        if user.is_contact {
-            any = true;
-            column = column.child(
-                action_row(
-                    "info-panel-set-photo",
-                    Some(gpui_kit::assets::IconName::Image),
-                    PersonalPhotoMode::Set.title(),
-                    false,
-                    cx,
-                )
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.start_personal_photo(user_id, PersonalPhotoMode::Set, cx);
-                })),
-            );
-        }
-        if !user.is_bot {
-            any = true;
-            column = column.child(
-                action_row(
-                    "info-panel-suggest-photo",
-                    Some(gpui_kit::assets::IconName::ImagePlus),
-                    PersonalPhotoMode::Suggest.title(),
-                    false,
-                    cx,
-                )
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.start_personal_photo(user_id, PersonalPhotoMode::Suggest, cx);
-                })),
-            );
-        }
-        if session
-            .user_full_info(user_id)
-            .is_some_and(|info| info.extras.personal_photo.is_some())
-        {
-            any = true;
-            column = column.child(
-                action_row(
-                    "info-panel-reset-photo",
-                    Some(gpui_kit::assets::IconName::RotateCcw),
-                    PersonalPhotoMode::Reset.title(),
-                    false,
-                    cx,
-                )
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.start_personal_photo(user_id, PersonalPhotoMode::Reset, cx);
-                })),
-            );
-        }
-        if !user.phone_number.is_empty() {
-            any = true;
+        if share {
             column = column.child(
                 action_row(
                     "info-panel-share-contact",
@@ -163,7 +102,22 @@ impl QuillApp {
                 })),
             );
         }
-        any.then(|| column.into_any_element())
+        if user.is_contact {
+            column = column.child(
+                action_row(
+                    "info-panel-edit-contact",
+                    Some(gpui_kit::assets::IconName::Pencil),
+                    tr(keys::INFO_EDIT_CONTACT),
+                    false,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_edit_contact_dialog(user_id, window, cx);
+                }))
+                .test_support(),
+            );
+        }
+        Some(column.into_any_element())
     }
 
     /// tdesktop's divider note under the cover when the user runs an
@@ -454,8 +408,11 @@ pub(super) mod bot_rows;
 mod bot_rows_tests;
 mod change_phone_dialog;
 pub(in crate::ui) mod common_groups;
+pub(in crate::ui) mod contact_photo_rows;
 mod details_card;
+mod disable_sharing;
 mod main_profile_tab_dialog;
+mod more_menu;
 mod photo_delete;
 mod photo_viewer;
 mod submit_personal_photo;
@@ -463,6 +420,9 @@ mod submit_personal_photo;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod about_text_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod action_row_tests;
 
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]

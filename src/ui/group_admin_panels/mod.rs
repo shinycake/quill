@@ -20,7 +20,11 @@ impl QuillApp {
     /// failed-with-retry, loaded "Level N · M boosts". `getChatBoostStatus`
     /// errors when boosts are unavailable for the chat — the failure
     /// renders instead of a fake number.
-    pub(super) fn boost_section(&self, chat_id: ChatId, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn boost_section(
+        &self,
+        chat_id: ChatId,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let is_channel = self.session().is_some_and(|session| {
             session.chats.get(&chat_id.0).is_some_and(|chat| {
                 matches!(
@@ -33,7 +37,7 @@ impl QuillApp {
             })
         });
         if !is_channel {
-            return div().into_any_element();
+            return None;
         }
         let status = self
             .session()
@@ -110,7 +114,7 @@ impl QuillApp {
                 );
             }
         }
-        section.into_any_element()
+        Some(section.into_any_element())
     }
 
     /// Slice G2: re-request the boost status (bypasses the cache).
@@ -169,8 +173,10 @@ impl QuillApp {
     }
 
     /// The info panel's manage entry (tdesktop's "Manage group" /
-    /// "Manage channel", which opens the Edit box) and Leave. A member
-    /// without the box still gets the member list.
+    /// "Manage channel", which opens the Edit box), and Leave channel for a
+    /// channel (`ActionsFiller::fillChannelActions`; groups leave from the
+    /// action row and More). A member without the box still gets the
+    /// member list.
     pub(super) fn group_management_section(
         &self,
         chat_id: ChatId,
@@ -228,16 +234,12 @@ impl QuillApp {
                 })),
             );
         }
-        if is_member {
+        if is_member && is_channel {
             section = section.child(
                 action_row(
                     "g1-leave-chat",
                     Some(I::LogOut),
-                    if is_channel {
-                        tr(keys::Q_PEOPLE_LEAVE_CHANNEL)
-                    } else {
-                        tr(keys::PROFILE_LEAVE_GROUP)
-                    },
+                    tr(keys::Q_PEOPLE_LEAVE_CHANNEL),
                     true,
                     cx,
                 )
@@ -247,7 +249,8 @@ impl QuillApp {
                     if !this.open_owner_leave(chat_id, window, cx) {
                         this.open_group_confirm(chat_id, GroupConfirmAction::LeaveChat, cx);
                     }
-                })),
+                }))
+                .test_support(),
             );
         }
         section.into_any_element()

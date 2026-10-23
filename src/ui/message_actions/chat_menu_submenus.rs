@@ -10,7 +10,7 @@ use crate::ui::menu_states::{ChatMenuState, ChatMenuSubmenu};
 use gpui_kit::TestSupportExt;
 use gpui_kit::assets::IconName;
 use quill::chatlist_menu::{ExitEntry, exit_entry, mute_offered};
-use quill::lang::{keys, tr, tr_with, trn};
+use quill::lang::{keys, tr, tr_with};
 use quill::state::ChatSummary;
 use quill::telegram::envelope::{
     ChannelMemberStatus, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER,
@@ -26,16 +26,6 @@ const PANEL_PADDING: f32 = 4.;
 const MUTE_ROW_ORDER: u8 = 30;
 /// Sort order of the Add to folder row.
 const FOLDERS_ROW_ORDER: u8 = 45;
-
-/// "1 hour", "8 hours", "2 days": `Ui::FormatMuteFor`.
-fn period_text(seconds: i32) -> String {
-    let day = 24 * 3600;
-    if seconds % day == 0 {
-        trn(keys::DAYS, seconds / day)
-    } else {
-        trn(keys::HOURS, seconds / 3600)
-    }
-}
 
 /// One menu row: icon, label, optional trailing marker. Danger rows read
 /// in the attention colour. `key` places it among the menu's keyboard items
@@ -281,7 +271,10 @@ impl QuillApp {
                     IconName::BellOff,
                     tr_with(
                         keys::MUTE_MENU_DURATION_ANY,
-                        &[("duration", period_text(seconds).as_str())],
+                        &[(
+                            "duration",
+                            quill::mute_menu::mute_period_text(seconds).as_str(),
+                        )],
                     ),
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {

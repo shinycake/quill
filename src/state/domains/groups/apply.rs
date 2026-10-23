@@ -33,6 +33,7 @@ impl Session {
                 bot_commands,
                 share_theme,
                 member_counts,
+                profile,
             } => {
                 let full_info_group = pending
                     .filter(|p| p.purpose == RequestPurpose::GetSupergroupFullInfo)
@@ -66,6 +67,7 @@ impl Session {
                     self.set_direct_messages_chat(supergroup_id, direct_messages_chat_id);
                     self.merge_full_admin(supergroup_id, admin);
                     self.set_supergroup_member_counts(supergroup_id, member_counts);
+                    self.set_supergroup_profile_facts(supergroup_id, profile);
                     self.keep_share_theme(
                         crate::peer_qr::theme::ThemeOwner::Supergroup(supergroup_id),
                         share_theme,
@@ -95,6 +97,7 @@ impl Session {
                 bot_commands,
                 share_theme,
                 member_counts,
+                profile,
             } => {
                 self.keep_share_theme(
                     crate::peer_qr::theme::ThemeOwner::Supergroup(supergroup_id),
@@ -126,6 +129,7 @@ impl Session {
                 self.set_direct_messages_chat(supergroup_id, direct_messages_chat_id);
                 self.merge_full_admin(supergroup_id, admin);
                 self.set_supergroup_member_counts(supergroup_id, member_counts);
+                self.set_supergroup_profile_facts(supergroup_id, profile);
             }
             // Slice (communities backend core): `communityId` (schema 1.8.67,
             // line 2264) is the `createCommunity` response — the driver

@@ -16,6 +16,16 @@ impl Session {
         }
     }
 
+    pub(crate) fn set_supergroup_profile_facts(
+        &mut self,
+        supergroup_id: i64,
+        facts: crate::telegram::envelope::SupergroupProfileFacts,
+    ) {
+        if let Some(info) = self.groups.supergroup_full_infos.get_mut(&supergroup_id) {
+            info.profile = facts;
+        }
+    }
+
     /// The chat as the box sees it; `None` for chats it does not open on
     /// (channels and private chats).
     pub fn permissions_box_context(&self, chat_id: ChatId) -> Option<BoxContext> {

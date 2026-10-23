@@ -13,6 +13,31 @@ impl Session {
         })
     }
 
+    /// Whether sharing is disabled in the private chat with another person
+    /// (`toggleChatHasProtectedContent`); `None` for other chats, bots
+    /// and Saved Messages, where it cannot be toggled.
+    pub fn private_sharing_disabled(&self, chat_id: ChatId) -> Option<bool> {
+        let user_id = self.private_chat_user_id(chat_id)?;
+        let other_person = self.my_user_id != Some(user_id) && !self.is_bot_user(user_id);
+        other_person.then(|| self.chat_has_protected_content(chat_id))
+    }
+
+    /// The private chat with `user_id`, listed or not.
+    pub fn private_chat_with(&self, user_id: i64) -> Option<ChatId> {
+        self.chats
+            .values()
+            .find(|chat| matches!(chat.kind, ChatKind::Private { user_id: peer } if peer.0 == user_id))
+            .map(|chat| chat.id)
+    }
+
+    /// Whether the viewer owns or administers the group or channel.
+    pub fn chat_owner_or_admin(&self, chat_id: ChatId) -> bool {
+        matches!(
+            self.group_own_status(chat_id),
+            Some(ChannelMemberStatus::Creator | ChannelMemberStatus::Administrator)
+        )
+    }
+
     /// Whether the viewer is known not to be in the chat (left or banned),
     /// which is when tdesktop shows Join Channel.
     pub fn chat_not_joined(&self, chat_id: ChatId) -> bool {
