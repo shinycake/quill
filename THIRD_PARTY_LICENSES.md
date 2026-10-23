@@ -8757,7 +8757,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [ctutils 0.4.3](https://github.com/RustCrypto/utils)
+- [ctutils 0.4.5](https://github.com/RustCrypto/utils)
 
 ````text
 Copyright (c) 2025-2026 The RustCrypto Project Developers
