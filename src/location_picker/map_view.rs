@@ -22,6 +22,18 @@ fn world_size(zoom: u8) -> f64 {
     256. * f64::from(1u32 << zoom.min(MAX_ZOOM))
 }
 
+/// The shortest horizontal offset in a world `world` pixels wide that
+/// repeats across the antimeridian.
+fn nearest_wrapped(dx: f64, world: f64) -> f64 {
+    if dx > world / 2. {
+        dx - world
+    } else if dx < -world / 2. {
+        dx + world
+    } else {
+        dx
+    }
+}
+
 /// A position in world pixels at some zoom.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WorldPoint {
@@ -46,7 +58,6 @@ pub fn unproject(world: WorldPoint, zoom: u8) -> GeoPoint {
     GeoPoint::new(latitude, longitude).unwrap_or(GeoPoint::ORIGIN)
 }
 
-/// What the map shows: the point under the pin and the zoom.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MapView {
     center: GeoPoint,
@@ -165,13 +176,7 @@ impl TileKey {
         let factor = 2f64.powi(i32::from(view.zoom) - i32::from(self.zoom));
         let center = project(view.center, view.zoom);
         let world = world_size(view.zoom);
-        let mut dx = self.x as f64 * factor - center.x;
-        // The nearer copy across the antimeridian.
-        if dx > world / 2. {
-            dx -= world;
-        } else if dx < -world / 2. {
-            dx += world;
-        }
+        let dx = nearest_wrapped(self.x as f64 * factor - center.x, world);
         let dy = self.y as f64 * factor - center.y;
         let width = f64::from(self.size.width) * factor;
         let height = f64::from(self.size.height) * factor;
@@ -184,7 +189,6 @@ impl TileKey {
     }
 }
 
-/// [`TileKey::placement`]'s answer.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TilePlacement {
     pub left: f32,
@@ -194,7 +198,6 @@ pub struct TilePlacement {
 }
 
 impl TilePlacement {
-    /// Whether any of it shows in a map of `size`.
     pub fn visible_in(&self, size: MapSize) -> bool {
         self.left < size.width as f32
             && self.top < size.height as f32
@@ -228,7 +231,6 @@ mod tests {
 
     #[test]
     fn projection_matches_tdlib_pixels() {
-        // TDLib's formula for (0, 0) at zoom 13: the middle of the world.
         let world = project(GeoPoint::ORIGIN, 13);
         assert_eq!(world.x as i64, 256 * 8192 / 2);
         assert_eq!(world.y as i64, 256 * 8192 / 2);
@@ -277,7 +279,6 @@ mod tests {
         assert!((place.left).abs() <= 1.);
         assert!((place.top).abs() <= 1.);
         assert_eq!(place.width, 364.);
-        // The request names the same pixel again.
         assert_eq!(
             TileKey::for_view(&MapView::new(key.request_center(), 15), SIZE),
             key

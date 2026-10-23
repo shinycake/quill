@@ -9,11 +9,8 @@ use super::map_view::{MapSize, MapView, START_ZOOM, TileKey};
 use super::venues::{Venue, VenueList, normalize_query};
 use crate::ids::{ChatId, FileId};
 
-/// Tiles kept for drawing while the map moves; older ones are forgotten.
 const TILE_CAP: usize = 24;
 
-/// What the platform said about the user's location (shown honestly in
-/// the venue list while it waits for a place).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HereState {
     Locating,
@@ -35,15 +32,11 @@ pub enum AddressLine<'a> {
 #[derive(Debug, Default)]
 struct Address {
     text: String,
-    /// An address was shown once ("Loading…" from then on while empty).
-    had: bool,
-    /// The address taken away when the pin started moving; it comes back
-    /// if the pin settles on the same place.
-    saved: String,
+    shown_once: bool,
+    hidden_while_moving: String,
     resolving_for: Option<GeoPoint>,
     /// Resolve this once the pin rests (tdesktop `kResolveAddressDelay`).
     postponed: Option<GeoPoint>,
-    /// Resolve this now; the UI takes it and runs the geocoder.
     job: Option<GeoPoint>,
 }
 
@@ -53,9 +46,7 @@ struct VenueSearch {
     /// tdesktop `_venuesRequestLocation` / `_venuesRequestQuery`.
     request: Option<(GeoPoint, String)>,
     initial_query: String,
-    /// Bumped by every new request; answers of older ones are dropped.
     generation: u64,
-    /// The current request still has to go out.
     needs_send: bool,
     cache: Vec<(String, GeoPoint, Vec<Venue>)>,
     /// Where a search looks (tdesktop `_venuesSearchLocation`); a search
@@ -63,7 +54,6 @@ struct VenueSearch {
     search_location: Option<GeoPoint>,
     search_query: Option<String>,
     search_shown: bool,
-    /// Where the list was before the search took over.
     no_search_location: Option<GeoPoint>,
     /// The search waits for typing to pause (tdesktop `kSearchDebounceDelay`).
     debounce: bool,
@@ -149,17 +139,14 @@ impl LocationPicker {
         &self.venues.list
     }
 
-    /// "Places in this area" floats over the map.
     pub fn places_in_area_shown(&self) -> bool {
         self.places_in_area
     }
 
-    /// The search field is offered (a place to search around is known).
     pub fn can_search(&self) -> bool {
         self.venues.search_location.is_some()
     }
 
-    /// A non-empty search replaces the map with its results.
     pub fn search_shown(&self) -> bool {
         self.venues.search_shown
     }
@@ -172,7 +159,7 @@ impl LocationPicker {
     pub fn address_line(&self) -> AddressLine<'_> {
         if !self.address.text.is_empty() {
             AddressLine::Text(&self.address.text)
-        } else if self.address.had {
+        } else if self.address.shown_once {
             AddressLine::Loading
         } else {
             AddressLine::Hidden
@@ -201,7 +188,7 @@ impl LocationPicker {
         }
         self.moving = true;
         if !self.address.text.is_empty() {
-            self.address.saved = std::mem::take(&mut self.address.text);
+            self.address.hidden_while_moving = std::mem::take(&mut self.address.text);
         }
         self.address.postponed = None;
         self.places_in_area = false;
@@ -220,9 +207,10 @@ impl LocationPicker {
         }
         self.moving = false;
         let location = self.view.center();
-        if same_place(self.address.resolving_for, Some(location)) && !self.address.saved.is_empty()
+        if same_place(self.address.resolving_for, Some(location))
+            && !self.address.hidden_while_moving.is_empty()
         {
-            self.address.text = std::mem::take(&mut self.address.saved);
+            self.address.text = std::mem::take(&mut self.address.hidden_while_moving);
             self.address.postponed = None;
         } else {
             self.address.postponed = Some(location);
@@ -267,7 +255,7 @@ impl LocationPicker {
             .map(|name| name.trim().to_string())
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| point.coordinates_label());
-        self.address.had = true;
+        self.address.shown_once = true;
     }
 
     /// tdesktop `resolveCurrentLocation`'s callback. A new exact fix flies
@@ -305,7 +293,6 @@ impl LocationPicker {
         }
     }
 
-    /// "Places in this area" was clicked.
     pub fn search_places_in_area(&mut self) {
         self.places_in_area = false;
         self.request_venues(self.view.center(), "");
@@ -384,8 +371,6 @@ impl LocationPicker {
         self.venues.needs_send = true;
     }
 
-    /// The venue query that still has to go out: its generation, place and
-    /// normalized text.
     pub(super) fn venue_query_to_send(&self) -> Option<(u64, GeoPoint, String)> {
         let (point, query) = self.venues.request.as_ref()?;
         self.venues
@@ -399,7 +384,6 @@ impl LocationPicker {
         }
     }
 
-    /// The bot's answer to request `generation` (stale answers are dropped).
     pub(super) fn venues_answered(&mut self, generation: u64, venues: Vec<Venue>) {
         if generation != self.venues.generation {
             return;
@@ -411,7 +395,6 @@ impl LocationPicker {
         self.apply_venues(venues);
     }
 
-    /// The request failed (or there is no bot to ask): nothing found.
     pub(super) fn venues_failed(&mut self, generation: u64) {
         if generation == self.venues.generation {
             self.venues.needs_send = false;
@@ -429,7 +412,6 @@ impl LocationPicker {
         };
     }
 
-    /// The tile the map still needs: the one centred on a resting view.
     pub(super) fn tile_to_request(&self) -> Option<TileKey> {
         if self.moving {
             return None;
@@ -453,8 +435,6 @@ impl LocationPicker {
         }
     }
 
-    /// TDLib named the file of request `extra`; `false` when it was not a
-    /// tile of this picker.
     pub(super) fn tile_answered(&mut self, extra: u64, file_id: Option<FileId>) -> bool {
         let Some(entry) = self
             .tiles
@@ -467,7 +447,6 @@ impl LocationPicker {
         true
     }
 
-    /// The request never left: forget it so it is asked again.
     pub(super) fn tile_unsent(&mut self, key: TileKey) {
         self.tiles.retain(|(known, _)| *known != key);
     }
@@ -486,12 +465,10 @@ impl LocationPicker {
                 _ => None,
             })
             .collect();
-        // Other zooms under this zoom's tiles; the current key on top.
         tiles.sort_by_key(|(key, _)| (key.zoom == self.view.zoom(), Some(*key) == current));
         tiles
     }
 
-    /// Venue types the list shows, for their icons.
     pub(super) fn listed_venue_types(&self) -> Vec<String> {
         let VenueList::Found(venues) = &self.venues.list else {
             return Vec::new();

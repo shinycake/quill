@@ -25,7 +25,6 @@ use quill::location_picker::{GeoOutcome, GeoPoint};
 use std::cell::RefCell;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-/// The open lookup's answer channel; taken by the first answer.
 struct Ivars {
     answer: RefCell<Option<Sender<GeoOutcome>>>,
 }
@@ -108,9 +107,6 @@ impl Delegate {
         unsafe { msg_send![super(this), init] }
     }
 
-    /// Also called once right after the manager is made: CoreLocation
-    /// reports the current status to a new delegate anyway, and calling it
-    /// here covers systems that do not.
     fn authorization_changed(&self, manager: &CLLocationManager) {
         if !self.ivars().waiting() {
             return;

@@ -27,14 +27,11 @@ const SETTLE_DELAY: Duration = Duration::from_millis(500);
 const RESOLVE_ADDRESS_DELAY: Duration = Duration::from_secs(3);
 /// tdesktop `kSearchDebounceDelay`.
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(900);
-/// How often a platform answer is looked for, and how long it may take.
 const POLL: Duration = Duration::from_millis(100);
 const LOCATE_TIMEOUT: Duration = Duration::from_secs(30);
 const GEOCODE_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// Wait for a platform answer without blocking the UI thread; `None` when
-/// it never came.
-async fn answer_of<T>(receiver: Receiver<T>, timeout: Duration, cx: &mut AsyncApp) -> Option<T> {
+async fn poll_answer<T>(receiver: Receiver<T>, timeout: Duration, cx: &mut AsyncApp) -> Option<T> {
     let started = Instant::now();
     loop {
         match receiver.try_recv() {
@@ -61,13 +58,11 @@ impl QuillApp {
         }
     }
 
-    /// The picker is open: derived from `Session::location`.
     pub(in crate::ui) fn location_picker_open(&self) -> bool {
         self.location_sharing()
             .is_some_and(|sharing| sharing.picker().is_some())
     }
 
-    /// The attach menu's Location.
     pub(in crate::ui) fn open_location_picker(&mut self, cx: &mut Context<Self>) {
         let Some(chat_id) = self.share_target() else {
             self.connection.set_note(StatusNote::error(tr(
@@ -110,18 +105,16 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Ask the platform where the user is (tdesktop does it on open).
     fn locate_for_picker(&mut self, cx: &mut Context<Self>) {
         let receiver = geolocation::locate();
         self.location_ui.locate = Some(self.spawn_scoped(cx, async move |this, cx| {
-            let outcome = answer_of(receiver, LOCATE_TIMEOUT, cx)
+            let outcome = poll_answer(receiver, LOCATE_TIMEOUT, cx)
                 .await
                 .unwrap_or(GeoOutcome::Unavailable);
             let _ = this.update(cx, |this, cx| this.location_picker_geolocated(outcome, cx));
         }));
     }
 
-    /// "Show my location": ask again, and fly there once it answers.
     pub(in crate::ui) fn location_picker_locate_again(&mut self, cx: &mut Context<Self>) {
         if self.live.is_some() {
             self.locate_for_picker(cx);
@@ -162,8 +155,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Look up the address of `point`. Without a keyless geocoder (and in
-    /// the demo) the picker shows the coordinates.
     fn resolve_address(&mut self, point: GeoPoint, cx: &mut Context<Self>) {
         let lookup = if self.live.is_some() {
             geolocation::reverse_geocode(point)
@@ -180,7 +171,7 @@ impl QuillApp {
             return;
         };
         self.location_ui.geocode = Some(self.spawn_scoped(cx, async move |this, cx| {
-            let address = answer_of(receiver, GEOCODE_TIMEOUT, cx).await.flatten();
+            let address = poll_answer(receiver, GEOCODE_TIMEOUT, cx).await.flatten();
             let _ = this.update(cx, |this, cx| {
                 if let Some(picker) = this
                     .location_sharing_mut()
@@ -239,7 +230,6 @@ impl QuillApp {
         self.sync_location_picker(cx);
     }
 
-    /// The map area's size (tiles are asked at it).
     pub(in crate::ui) fn location_map_measured(
         &mut self,
         size: quill::location_picker::MapSize,
@@ -269,7 +259,6 @@ impl QuillApp {
         self.sync_location_picker(cx);
     }
 
-    /// The search field's text changed, or it closed (`None`).
     pub(in crate::ui) fn location_search_changed(
         &mut self,
         query: Option<String>,
@@ -300,7 +289,6 @@ impl QuillApp {
         self.sync_location_picker(cx);
     }
 
-    /// "Send This Location": the place under the pin.
     pub(in crate::ui) fn send_picked_location(&mut self, cx: &mut Context<Self>) {
         let Some(point) = self
             .location_sharing()
@@ -320,7 +308,6 @@ impl QuillApp {
         });
     }
 
-    /// A venue from the list.
     pub(in crate::ui) fn send_picked_venue(&mut self, venue: Venue, cx: &mut Context<Self>) {
         self.send_from_picker(cx, |live, chat_id, reply_to, options| {
             live.driver

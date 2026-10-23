@@ -46,7 +46,6 @@ fn frames(vcx: &mut VisualTestContext) {
     }
 }
 
-/// Run the picker's timers (settle, address, search debounce).
 fn wait(vcx: &mut VisualTestContext, time: Duration) {
     vcx.executor().advance_clock(time);
     frames(vcx);

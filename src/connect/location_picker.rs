@@ -27,7 +27,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.location.close();
     }
 
-    /// The platform's answer to "where am I".
     pub fn location_picker_geolocated(
         &mut self,
         outcome: GeoOutcome,

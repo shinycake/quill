@@ -27,11 +27,9 @@ register_demos![
 
 const DEMO_BOT: i64 = 7_000_001;
 const DEMO_CHAT: quill::ids::ChatId = quill::ids::ChatId(11);
-/// File ids and request extras of the demo's map images.
 const FIRST_TILE_FILE: i32 = 7_400_000;
 static NEXT_EXTRA: AtomicU64 = AtomicU64::new(1 << 40);
 
-/// Where the demo user is: the Louvre's courtyard.
 fn demo_here() -> Option<GeoPoint> {
     GeoPoint::new(48.860_611, 2.337_644)
 }
@@ -45,7 +43,6 @@ fn demo_outcome() -> Option<GeoOutcome> {
     }
 }
 
-/// Places around `at`, as the venue bot would list them.
 fn demo_venues(at: GeoPoint, query: &str) -> Vec<Venue> {
     const PLACES: [(&str, &str, &str, f64, f64); 6] = [
         (
@@ -121,7 +118,6 @@ fn apply_json(app: &mut QuillApp, json: &str) {
     });
 }
 
-/// The picker opened in the demo: a venue bot and the platform's answer.
 pub(super) fn start(app: &mut QuillApp) {
     let Some(session) = app.demo_session.as_mut() else {
         return;
@@ -132,14 +128,12 @@ pub(super) fn start(app: &mut QuillApp) {
     }
 }
 
-/// "Show my location" in the demo: the same answer again.
 pub(super) fn locate_again(app: &mut QuillApp) {
     if let (Some(session), Some(outcome)) = (app.demo_session.as_mut(), demo_outcome()) {
         session.location.geolocated(outcome);
     }
 }
 
-/// Answer what the picker asked for, as TDLib would.
 pub(super) fn pump(app: &mut QuillApp) {
     let tile = demo_media_allowlist()
         .join("demo-map-tile.png")

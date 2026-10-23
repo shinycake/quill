@@ -19,8 +19,6 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::location_picker::{AddressLine, HereState, Venue, VenueList};
-use std::cell::RefCell;
-use std::rc::Rc;
 
 /// tdesktop `pickLocationWindow` width and the list rows' height
 /// (`pickLocationRowHeight`).
@@ -136,8 +134,6 @@ impl QuillApp {
             .into_any_element()
     }
 
-    /// The round icon of a list row: an image on a coloured circle, or a
-    /// glyph when there is no image yet.
     fn location_row_icon(&self, color: Hsla, image: Option<std::path::PathBuf>) -> AnyElement {
         let circle = div()
             .size(px(ICON_SIZE))
@@ -271,7 +267,6 @@ impl QuillApp {
             .into_any_element()
     }
 
-    /// The venue list in each of tdesktop's states.
     fn location_venues(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let Some(picker) = self.session().and_then(|session| session.location.picker()) else {
             return Vec::new();
@@ -382,10 +377,10 @@ impl QuillApp {
             QuillShell::on_close_kind(app, shell, DialogKind::LocationPicker, |this, _, cx| {
                 this.close_location_picker(cx);
             });
+        let body_of = app.downgrade();
         app.update(cx, |this, cx| {
             let searching = this.location_ui.search.is_some();
             let title = this.location_title(cx);
-            let body = Rc::new(RefCell::new(Some(this.location_body(cx))));
             dialog
                 .w(px(WINDOW_WIDTH))
                 .px_0()
@@ -393,12 +388,9 @@ impl QuillApp {
                 .overlay(true)
                 .keyboard(!searching)
                 .title(title)
-                .content(move |content, _, _| {
-                    let body = body
-                        .borrow_mut()
-                        .take()
-                        .unwrap_or_else(|| div().into_any_element());
-                    content.px_0().child(body)
+                .content(move |content, _, cx| {
+                    let body = body_of.update(cx, |this, cx| this.location_body(cx)).ok();
+                    content.px_0().children(body)
                 })
                 .on_close(on_close)
         })

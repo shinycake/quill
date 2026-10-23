@@ -160,7 +160,6 @@ fn a_resting_map_asks_for_its_tile_once_and_downloads_it() {
             .any(|request| request["file_id"] == 92)
     );
 
-    // Dragging asks for nothing until the map rests again.
     if let Some(picker) = f.driver.session.location.picker_mut() {
         let moved = picker.view().panned(150., 0.);
         picker.moved_to(moved);

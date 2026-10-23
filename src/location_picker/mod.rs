@@ -35,7 +35,6 @@ pub enum LocationPickerPurpose {
     VenueIcon,
 }
 
-/// A request the driver should send for the picker.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PickerRequest {
     ResolveVenueBot {
@@ -77,7 +76,6 @@ enum VenueBot {
     Unknown,
     Resolving,
     Found(i64),
-    /// No option, or the name is not an inline geo bot.
     Missing,
 }
 
@@ -98,7 +96,6 @@ pub struct LocationSharing {
     icons: HashMap<String, IconState>,
 }
 
-/// Venue icons remembered; past it the map restarts empty.
 const ICON_CAP: usize = 256;
 
 impl LocationSharing {
@@ -132,7 +129,6 @@ impl LocationSharing {
         self.picker = None;
     }
 
-    /// The platform's answer to "where am I".
     pub fn geolocated(&mut self, outcome: GeoOutcome) {
         let changed = match outcome {
             GeoOutcome::Found(point) => !geo::same_place(self.last_exact, Some(point)),
@@ -197,7 +193,6 @@ impl LocationSharing {
         out
     }
 
-    /// `request` went out as `extra`.
     pub fn request_sent(&mut self, request: &PickerRequest, extra: u64) {
         match request {
             PickerRequest::MapTile { key, .. } => {
@@ -213,7 +208,6 @@ impl LocationSharing {
         }
     }
 
-    /// `request` could not be sent.
     pub fn request_unsent(&mut self, request: &PickerRequest) {
         match request {
             PickerRequest::ResolveVenueBot { .. } => {

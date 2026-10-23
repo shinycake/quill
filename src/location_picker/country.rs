@@ -5,8 +5,6 @@
 
 use super::geo::GeoPoint;
 
-/// `(ISO 3166-1 alpha-2, min longitude, min latitude, max longitude, max latitude)`,
-/// sorted by code.
 const BOUNDS: &[(&str, f64, f64, f64, f64)] = &[
     ("AE", 51.58, 22.5, 56.4, 26.06),
     ("AF", 60.53, 29.32, 75.16, 38.49),

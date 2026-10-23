@@ -53,7 +53,6 @@ fn locale_region(locale: &str) -> Option<String> {
     Some(region.to_string())
 }
 
-/// tdesktop's address line: the parts that exist, joined by commas.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn join_address(parts: &[Option<String>]) -> Option<String> {
     let joined = parts

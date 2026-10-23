@@ -112,7 +112,6 @@ fn settling_elsewhere_offers_places_and_postpones_the_address() {
     picker.resolve_postponed();
     let job = picker.take_address_job().expect("resolve after the pause");
     assert!(job.same_place(&moved.center()));
-    // The answer for an older place is ignored.
     picker.address_resolved(point(0., 0.), Some("Elsewhere".into()));
     assert_eq!(picker.address_line(), AddressLine::Hidden);
     picker.search_places_in_area();
@@ -172,7 +171,6 @@ fn search_debounces_and_restores_the_nearby_list() {
     assert!(!picker.search_shown());
     assert_eq!(picker.venues(), &VenueList::Found(vec![venue("Near")]));
     assert_eq!(picker.venue_query_to_send(), None);
-    // The same search again comes from the cache, without a timer.
     picker.search_changed(Some("pizza".into()));
     assert!(!picker.search_debounce_pending());
 }

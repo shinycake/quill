@@ -19,11 +19,8 @@ use quill::state::Session;
 /// tdesktop `pickLocationMapHeight` / `pickLocationCollapsedHeight`.
 pub(super) const MAP_HEIGHT: f32 = 220.;
 pub(super) const MAP_COLLAPSED: f32 = 92.;
-/// How far the pin lifts while the map moves.
 const PIN_LIFT: f32 = 24.;
-/// One arrow-key step.
 const KEY_PAN: f64 = 80.;
-/// Pixel scrolling worth one zoom step; a wheel line is a whole step.
 const SCROLL_PER_STEP: f32 = 120.;
 
 /// The Mapbox marker tdesktop shows (27×41, tip at 13.5,35).
@@ -53,7 +50,6 @@ fn paint_pin(center: Point<Pixels>, lift: f32, color: Hsla, dot: Hsla, window: &
     );
 }
 
-/// The tile images to draw: path and where, oldest first.
 fn tile_images(
     session: &Session,
     roots: &[std::path::PathBuf],
@@ -113,7 +109,6 @@ impl QuillApp {
         self.location_zoom_by(steps, cx);
     }
 
-    /// Scroll and pinch add up until they are worth a whole zoom step.
     fn location_zoom_by(&mut self, steps: f32, cx: &mut Context<Self>) {
         if !steps.is_finite() {
             return;
@@ -154,7 +149,6 @@ impl QuillApp {
         true
     }
 
-    /// The map at `height` (it collapses as the list scrolls).
     pub(super) fn location_map(&self, height: f32, cx: &mut Context<Self>) -> AnyElement {
         let Some(session) = self.session() else {
             return div().into_any_element();

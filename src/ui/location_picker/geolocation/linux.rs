@@ -21,7 +21,6 @@ const LOCATION: &str = "org.freedesktop.GeoClue2.Location";
 const DESKTOP_ID: &str = "org.shinycake.quill";
 /// `GCLUE_ACCURACY_LEVEL_EXACT`.
 const ACCURACY_EXACT: u32 = 8;
-/// How long to wait for the first fix.
 const FIX_TIMEOUT: Duration = Duration::from_secs(20);
 
 fn denied(error: &zbus::Error) -> bool {
