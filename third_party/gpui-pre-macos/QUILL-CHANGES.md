@@ -46,6 +46,12 @@ the sender's picture and an inline reply field, which GPUI's
   a temporary file and attached as a `UNNotificationAttachment` (the center
   moves attached files into its own store). The delegate reads
   `UNTextInputNotificationResponse.userText` into the side channel.
+- `src/system_notifications.rs`: the notification center lives on one
+  worker thread (`gpui-notifications`). Creating it (about 130 ms on the
+  first post), copying and validating the picture, registering categories
+  and every post or dismiss are round trips to `usernoted` that used to run
+  on the main thread; the main thread now only queues the job. A single
+  thread keeps posts and dismissals in order.
 - `src/gpui_macos.rs`: declares the new module.
 
 Each changed source file starts with a comment saying so. The changes are

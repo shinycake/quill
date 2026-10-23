@@ -1,26 +1,33 @@
 // Modified by the Quill project (2026) from gpui-pre-macos 0.3.9 (Apache-2.0):
 // inline text-input actions, typed-text responses and an image attachment,
-// through `notification_extras`. See third_party/gpui-pre-macos/QUILL-CHANGES.md.
+// through `notification_extras`, and every notification-center call on a
+// worker thread. See third_party/gpui-pre-macos/QUILL-CHANGES.md.
 //! System notifications through the `UNUserNotificationCenter` API.
 //!
 //! Everything here runs lazily: nothing touches the notification center (and
 //! so nothing can trigger the authorization prompt or the framework's
 //! not-in-a-bundle abort) until the application posts a notification or
 //! registers a response callback.
+//!
+//! The center is driven from one worker thread (Quill): posting copies the
+//! picture and makes `usernoted` validate it, and every call is a round trip
+//! to that daemon, none of which may hold up the main thread. One thread
+//! keeps the calls in order, so a dismiss never overtakes the post it undoes.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::Path;
 use std::rc::Rc;
+use std::sync::mpsc;
 
 use block2::RcBlock;
 use futures::StreamExt as _;
-use futures::channel::mpsc;
+use futures::channel::mpsc::{UnboundedSender, unbounded};
 use gpui::{
     ForegroundExecutor, SharedString, SystemNotification, SystemNotificationAction,
     SystemNotificationResponse, Task,
 };
-use objc2::rc::Retained;
+use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::{Bool, ProtocolObject};
 use objc2::{AnyThread, DefinedClass, define_class, msg_send};
 use objc2_foundation::{
@@ -35,7 +42,9 @@ use objc2_user_notifications::{
     UNUserNotificationCenterDelegate,
 };
 
-use crate::notification_extras::{TextInputAction, store_reply_text, take_notification_extras};
+use crate::notification_extras::{
+    NotificationExtras, TextInputAction, store_reply_text, take_notification_extras,
+};
 
 /// The actions of one notification category: the buttons, and which of them
 /// is a text field (Quill).
@@ -45,16 +54,22 @@ type ResponseCallback = Rc<RefCell<Option<Box<dyn FnMut(SystemNotificationRespon
 
 pub(crate) struct SystemNotificationState {
     initialized: bool,
-    center: Option<NotificationCenter>,
+    worker: Option<mpsc::Sender<Job>>,
     callback: ResponseCallback,
     _response_task: Option<Task<()>>,
+}
+
+/// What the worker thread does with the notification center, in order.
+enum Job {
+    Show(SystemNotification, NotificationExtras),
+    Dismiss(String),
 }
 
 impl SystemNotificationState {
     pub(crate) fn new() -> Self {
         Self {
             initialized: false,
-            center: None,
+            worker: None,
             callback: Rc::new(RefCell::new(None)),
             _response_task: None,
         }
@@ -62,16 +77,16 @@ impl SystemNotificationState {
 
     pub(crate) fn show(&mut self, executor: &ForegroundExecutor, notification: SystemNotification) {
         self.initialize(executor);
-        if let Some(center) = &self.center {
-            center.show(notification);
-        }
+        // Quill: the sender image and the inline reply field registered for
+        // this tag, taken now so a later registration for the same tag is
+        // not picked up by this post.
+        let extras = take_notification_extras(&notification.tag);
+        self.send(Job::Show(notification, extras));
     }
 
     pub(crate) fn dismiss(&mut self, executor: &ForegroundExecutor, tag: &str) {
         self.initialize(executor);
-        if let Some(center) = &self.center {
-            center.dismiss(tag);
-        }
+        self.send(Job::Dismiss(tag.to_string()));
     }
 
     pub(crate) fn on_response(
@@ -83,15 +98,23 @@ impl SystemNotificationState {
         *self.callback.borrow_mut() = Some(callback);
     }
 
+    /// A job for the worker. Once the worker is gone (not in an app bundle,
+    /// or the thread could not start) notifications are dropped.
+    fn send(&self, job: Job) {
+        if let Some(worker) = &self.worker {
+            worker.send(job).ok();
+        }
+    }
+
     fn initialize(&mut self, executor: &ForegroundExecutor) {
         if self.initialized {
             return;
         }
         self.initialized = true;
 
-        let (sender, mut receiver) = mpsc::unbounded();
-        self.center = NotificationCenter::new(sender);
-        if self.center.is_none() {
+        let (sender, mut receiver) = unbounded();
+        self.worker = spawn_worker(sender);
+        if self.worker.is_none() {
             return;
         }
 
@@ -113,6 +136,33 @@ impl SystemNotificationState {
     }
 }
 
+/// Start the thread that owns the notification center and runs every job
+/// in the order it was sent. The thread ends at once when the center cannot
+/// be used (not running from an app bundle).
+fn spawn_worker(responses: UnboundedSender<SystemNotificationResponse>) -> Option<mpsc::Sender<Job>> {
+    let (jobs, queue) = mpsc::channel::<Job>();
+    let spawned = std::thread::Builder::new()
+        .name("gpui-notifications".to_string())
+        .spawn(move || {
+            let Some(center) = autoreleasepool(|_| NotificationCenter::new(responses)) else {
+                return;
+            };
+            while let Ok(job) = queue.recv() {
+                autoreleasepool(|_| match job {
+                    Job::Show(notification, extras) => center.show(notification, extras),
+                    Job::Dismiss(tag) => center.dismiss(&tag),
+                });
+            }
+        });
+    match spawned {
+        Ok(_) => Some(jobs),
+        Err(error) => {
+            log::warn!("system notifications disabled: no worker thread: {error}");
+            None
+        }
+    }
+}
+
 struct NotificationCenter {
     center: Retained<UNUserNotificationCenter>,
     /// The center's `delegate` property is weak; keeping the delegate retained
@@ -126,7 +176,7 @@ struct NotificationCenter {
 }
 
 impl NotificationCenter {
-    fn new(sender: mpsc::UnboundedSender<SystemNotificationResponse>) -> Option<Self> {
+    fn new(sender: UnboundedSender<SystemNotificationResponse>) -> Option<Self> {
         // `UNUserNotificationCenter` raises `NSInternalInconsistencyException`
         // ("bundleProxyForCurrentProcess is nil"), aborting the process, when
         // the binary isn't part of an app bundle — which is how dev builds run
@@ -172,12 +222,8 @@ impl NotificationCenter {
             );
     }
 
-    fn show(&self, notification: SystemNotification) {
+    fn show(&self, notification: SystemNotification, extras: NotificationExtras) {
         self.request_authorization();
-
-        // Quill: the sender image and the inline reply field registered for
-        // this tag.
-        let extras = take_notification_extras(&notification.tag);
 
         let content = UNMutableNotificationContent::new();
         content.setTitle(&NSString::from_str(&notification.title));
@@ -316,7 +362,7 @@ fn image_attachment(image: &Path) -> Option<Retained<UNNotificationAttachment>> 
 }
 
 struct DelegateIvars {
-    sender: mpsc::UnboundedSender<SystemNotificationResponse>,
+    sender: UnboundedSender<SystemNotificationResponse>,
 }
 
 define_class!(
@@ -383,7 +429,7 @@ define_class!(
 );
 
 impl NotificationResponseDelegate {
-    fn new(sender: mpsc::UnboundedSender<SystemNotificationResponse>) -> Retained<Self> {
+    fn new(sender: UnboundedSender<SystemNotificationResponse>) -> Retained<Self> {
         let this = Self::alloc().set_ivars(DelegateIvars { sender });
         // SAFETY: `NSObject`'s `init` is its designated initializer.
         unsafe { msg_send![super(this), init] }
