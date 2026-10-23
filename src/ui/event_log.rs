@@ -96,12 +96,16 @@ impl QuillApp {
     /// description, and relative timestamp, plus "Load more" while older
     /// pages exist. Unhandled event types render as generic rows — never
     /// faked details.
-    pub(super) fn event_log_section(&self, chat_id: ChatId, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn event_log_section(
+        &self,
+        chat_id: ChatId,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         if !self
             .session()
             .is_some_and(|session| session.chat_can_view_event_log(chat_id))
         {
-            return div().into_any_element();
+            return None;
         }
         let fetch = self
             .session()
@@ -245,7 +249,7 @@ impl QuillApp {
                 }
             }
         }
-        section.into_any_element()
+        Some(section.into_any_element())
     }
 
     /// Administrators to offer as filter chips: the loaded administrator

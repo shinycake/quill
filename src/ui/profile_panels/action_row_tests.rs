@@ -177,3 +177,27 @@ fn a_channel_subscriber_gets_discuss_and_gift(cx: &mut TestAppContext) {
         "the cap keeps Leave for More"
     );
 }
+
+#[gpui_kit::test]
+fn the_contact_photo_rows_live_in_the_edit_contact_box(cx: &mut TestAppContext) {
+    let (_app, mut vcx) = open_demo(cx, "ready-profile-user");
+    let vcx = &mut vcx;
+    assert!(!shown(vcx, "contact-photo-set"), "not in the panel");
+    assert!(!shown(vcx, "contact-photo-suggest"), "not in the panel");
+    vcx.update(|window, cx| window.click("info-panel-edit-contact", cx));
+    frames(vcx);
+    assert!(shown(vcx, "contact-photo-set"));
+    assert!(shown(vcx, "contact-photo-suggest"));
+}
+
+#[gpui_kit::test]
+fn only_a_channel_keeps_a_leave_row(cx: &mut TestAppContext) {
+    let (_app, mut vcx) = open_demo(cx, "ready-profile-group");
+    assert!(shown(&mut vcx, "info-panel-leave"));
+    assert!(
+        !shown(&mut vcx, "g1-leave-chat"),
+        "the group leaves from the buttons"
+    );
+    let (_app, mut vcx) = open_demo(cx, "ready-profile-channel");
+    assert!(shown(&mut vcx, "g1-leave-chat"));
+}

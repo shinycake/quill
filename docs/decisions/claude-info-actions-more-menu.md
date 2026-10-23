@@ -46,6 +46,34 @@
   supergroups and basic groups.
 - Five strings that the old row used are gone from `people.strings`.
 
+## The list under the details (review follow-up)
+
+tdesktop still draws the action list under a profile's details next to the
+top bar. `InnerWidget::setupContent` adds `SetupActions` unconditionally
+(`info_profile_inner_widget.cpp` lines 378-383). What that list holds:
+
+- Users (`ActionsFiller::fillUserActions`, `info_profile_actions.cpp`
+  lines 3204-3223): Share this contact, Edit contact, Delete contact, a
+  bot's Report, then Block.
+- Broadcast channels (`fillChannelActions`, lines 3225-3234): Join, Leave
+  channel, and Report when the viewer is not the owner.
+- Supergroups and basic groups: nothing, because `fill()` returns `nullptr`
+  for them (lines 3236-3257).
+
+So Quill keeps the user rows in tdesktop's order and the channel rows. It
+removes these:
+
+- **"Leave group" row.** A group now leaves from the Leave button and More.
+- **Set, Suggest and Reset Profile Photo rows.** tdesktop has them in
+  `EditContactBox` (`edit_contact_box.cpp` around line 615), so Quill now
+  shows them in the Edit contact box, and in the Add contact box for
+  someone who is not a contact.
+
+The empty gap between Description and Members on a group had a cause in
+the layout. The invite-links, join-requests, administrators, event-log
+and boost sections returned an empty `div` when they had nothing to show.
+Each empty `div` still took the body's `gap_3`. They now return `None`.
+
 ## Deviations
 
 - These More entries are left out: add bot to group, send money (TON),
@@ -73,6 +101,8 @@
   - More lists the contact entries and opens the Disable Sharing box.
   - The group shows Link, QR, Location and online counts.
   - The channel gets Discuss and Gift.
+- `the_contact_photo_rows_live_in_the_edit_contact_box` and
+  `only_a_channel_keeps_a_leave_row` cover the follow-up.
 - `/verify` captures were read back for the `ready-profile-user`, `-group`
   and `-channel` demos in light and dark. They also cover the More menu
   (user and group), the Mute menu and the Disable Sharing box.

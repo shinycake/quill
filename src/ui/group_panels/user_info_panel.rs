@@ -265,14 +265,30 @@ impl QuillApp {
         if let Some(section) = self.groups_in_common_section(user_id, groups_in_common, cx) {
             body = body.child(section);
         }
-        // Slice A6: contact management for any other user — Delete
-        // contact (`removeContacts`) and Block/Unblock
-        // (`setMessageSenderBlockList`; state from `userFullInfo.block_list`).
-        // Destructive, so they sit last as plain danger rows.
+        // Delete contact, a bot's Report, then Block, in the order of
+        // tdesktop `ActionsFiller::fillUserActions`.
         if !is_self && user.is_some() {
             let blocked = info.as_ref().is_some_and(|i| i.blocked);
             let is_bot = user.as_ref().is_some_and(|u| u.is_bot);
             let mut danger = div().flex().flex_col().w_full().gap_0p5();
+            if user.as_ref().is_some_and(|u| u.is_contact) {
+                danger = danger.child(
+                    action_row(
+                        "info-panel-delete-contact",
+                        Some(gpui_kit::assets::IconName::UserX),
+                        tr(keys::INFO_DELETE_CONTACT),
+                        true,
+                        cx,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.open_group_confirm(
+                            ChatId(0),
+                            GroupConfirmAction::DeleteContact { user_id },
+                            cx,
+                        );
+                    })),
+                );
+            }
             danger = danger.children(self.bot_report_row(user_id, cx));
             danger = danger.child(
                 action_row(
@@ -303,24 +319,6 @@ impl QuillApp {
                 }))
                 .test_support(),
             );
-            if user.as_ref().is_some_and(|u| u.is_contact) {
-                danger = danger.child(
-                    action_row(
-                        "info-panel-delete-contact",
-                        Some(gpui_kit::assets::IconName::UserX),
-                        tr(keys::INFO_DELETE_CONTACT),
-                        true,
-                        cx,
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.open_group_confirm(
-                            ChatId(0),
-                            GroupConfirmAction::DeleteContact { user_id },
-                            cx,
-                        );
-                    })),
-                );
-            }
             body = body.child(danger);
         }
         // Phase B2: encryption-key section — only when the open chat is a
@@ -460,11 +458,11 @@ impl QuillApp {
         }
         // Phase D3a: invite-link + join-request management (admins with
         // `can_invite_users` only; the sections no-op otherwise).
-        body = body.child(self.invite_links_section(chat_id, cx));
-        body = body.child(self.join_requests_section(chat_id, cx));
+        body = body.children(self.invite_links_section(chat_id, cx));
+        body = body.children(self.join_requests_section(chat_id, cx));
         // Phase D3b: administrator management (owner / admins with
         // `can_promote_members` only; the section no-ops otherwise).
-        body = body.child(self.administrators_section(chat_id, cx));
+        body = body.children(self.administrators_section(chat_id, cx));
         body = body.children(self.channel_balance_row(chat_id, cx));
         // Slice G1: group/channel management — members, permissions,
         // invite link, join requests, username, broadcast upgrade,
@@ -489,9 +487,9 @@ impl QuillApp {
         }
         // Phase D3c: recent-actions admin log (administrators and the
         // creator only; the section no-ops otherwise).
-        body = body.child(self.event_log_section(chat_id, cx));
+        body = body.children(self.event_log_section(chat_id, cx));
         // Slice G2: channel boost status + boost action.
-        body = body.child(self.boost_section(chat_id, cx));
+        body = body.children(self.boost_section(chat_id, cx));
         body = body
             .children(self.inline_members_block(InfoPanelTarget::Supergroup(supergroup_id), cx));
         body.into_any_element()
