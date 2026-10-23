@@ -214,10 +214,7 @@ impl QuillApp {
             .session()
             .is_some_and(|s| s.users_state.open_info_panel.is_some())
         {
-            match self
-                .session()
-                .and_then(|s| s.info_panel_target_for_chat(chat_id))
-            {
+            match self.session().and_then(|s| s.chat_info_target(chat_id)) {
                 Some(target) => self.open_info_panel_target(target, window, cx),
                 None => self.close_info_panel(cx),
             }

@@ -78,20 +78,13 @@ impl QuillApp {
         let is_self = session
             .and_then(|s| s.my_user_id)
             .is_some_and(|me| me == user_id);
-        let facts = quill::profile_cover::CoverFacts::for_user(is_self);
-        if facts.saved_messages {
-            return self
-                .saved_messages_cover(cx)
-                .children(self.media_counts_section(0, cx))
-                .into_any_element();
-        }
         let user = session.and_then(|s| s.user(user_id)).cloned();
         let info = session.and_then(|s| s.user_full_info(user_id)).cloned();
         let name = user
             .as_ref()
             .map(|u| u.display_name())
             .unwrap_or_else(|| tr_with(keys::Q_PEOPLE_USER, &[("user_id", &user_id.to_string())]));
-        let status = user.as_ref().map(|u| self.user_cover_status(u, facts, cx));
+        let status = user.as_ref().map(|u| self.user_cover_status(u, cx));
         let roots = self.media_display_roots();
         let photo_path: Option<PathBuf> = session
             .and_then(|s| {
@@ -218,7 +211,10 @@ impl QuillApp {
         }
         // tdesktop's "Change colors" (`addThemeEdit`): the chat's theme and
         // wallpaper, for the private chat open right now.
-        if in_own_chat && let Some(chat) = session.and_then(|s| s.open_chat) {
+        if !is_self
+            && in_own_chat
+            && let Some(chat) = session.and_then(|s| s.open_chat)
+        {
             body = body.child(
                 action_row(
                     "info-panel-chat-look",
@@ -252,7 +248,7 @@ impl QuillApp {
         }
         // Delete contact, a bot's Report, then Block, in the order of
         // tdesktop `ActionsFiller::fillUserActions`.
-        if user.is_some() {
+        if !is_self && user.is_some() {
             let blocked = info.as_ref().is_some_and(|i| i.blocked);
             let is_bot = user.as_ref().is_some_and(|u| u.is_bot);
             let mut danger = div().flex().flex_col().w_full().gap_0p5();

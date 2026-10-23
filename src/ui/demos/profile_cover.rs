@@ -1,7 +1,7 @@
 //! Screenshot demos: the profile cover facts. A bot with its monthly
 //! users, a contact with unread stories and a Stars rating, a contact
-//! whose last seen the viewer's own privacy hides, and the viewer's own
-//! profile as Saved Messages.
+//! whose last seen the viewer's own privacy hides, the viewer's own
+//! profile with a pending rating, and the Saved Messages chat's info.
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
@@ -31,8 +31,13 @@ register_demos![
     )
     .setup(QuillApp::demo_cover_last_seen),
     DemoSpec::chats(
+        "ready-info-cover-self",
+        "screenshot demo — your own profile, pending rating"
+    )
+    .setup(QuillApp::demo_cover_self),
+    DemoSpec::chats(
         "ready-info-cover-saved",
-        "screenshot demo — your own info, Saved Messages"
+        "screenshot demo — the Saved Messages chat's info"
     )
     .setup(QuillApp::demo_cover_saved),
 ];
@@ -79,7 +84,7 @@ pub(in crate::ui) fn apply_cover_fixture(
     session.my_user_id = Some(COVER_ME);
     let mut jsons = vec![
         format!(
-            r#"{{"@type":"updateUser","user":{{"id":{COVER_ME},"first_name":"Demo","last_name":"Viewer","phone_number":"15550109600","is_contact":false,"type":{{"@type":"userTypeRegular"}}}}}}"#
+            r#"{{"@type":"updateUser","user":{{"id":{COVER_ME},"first_name":"Demo","last_name":"Viewer","phone_number":"15550109600","is_contact":false,"status":{{"@type":"userStatusOnline","expires":4102444800}},"usernames":{{"@type":"usernames","active_usernames":["demoviewer"],"disabled_usernames":[],"editable_username":"demoviewer"}},"type":{{"@type":"userTypeRegular"}}}}}}"#
         ),
         format!(
             r#"{{"@type":"updateUser","user":{{"id":{COVER_BOT},"first_name":"Forecast","usernames":{{"@type":"usernames","active_usernames":["forecastbot"],"disabled_usernames":[],"editable_username":"forecastbot"}},"type":{{"@type":"userTypeBot","can_be_edited":false,"can_join_groups":true,"can_read_all_group_messages":false,"has_main_web_app":false,"has_topics":false,"allows_users_to_create_topics":false,"can_manage_bots":false,"is_inline":false,"inline_query_placeholder":"","supports_guest_queries":false,"is_guard":false,"need_location":false,"can_connect_to_business":false,"can_be_added_to_attachment_menu":false,"active_user_count":1284567}}}}}}"#
@@ -115,6 +120,15 @@ pub(in crate::ui) fn apply_cover_fixture(
     ));
     jsons.push(full_info(
         session,
+        COVER_ME,
+        &format!(
+            "{}{}",
+            r#""bio":{"@type":"formattedText","text":"Testing Quill.","entities":[]},"rating":{"@type":"userRating","level":3,"is_maximum_level_reached":false,"rating":420,"current_level_rating":300,"next_level_rating":800},"pending_rating":{"@type":"userRating","level":4,"is_maximum_level_reached":false,"rating":905,"current_level_rating":800,"next_level_rating":1500},"pending_rating_date":"#,
+            quill::local_time::now_unix() + 3 * 86_400
+        ),
+    ));
+    jsons.push(full_info(
+        session,
         COVER_HIDDEN,
         r#""bio":{"@type":"formattedText","text":"Mostly offline.","entities":[]}"#,
     ));
@@ -124,7 +138,7 @@ pub(in crate::ui) fn apply_cover_fixture(
 impl QuillApp {
     fn demo_cover(
         &mut self,
-        user_id: i64,
+        target: InfoPanelTarget,
         note: &'static str,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -133,14 +147,14 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_cover_fixture(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.open_info_panel_target(InfoPanelTarget::User(user_id), window, cx);
+        self.open_info_panel_target(target, window, cx);
         self.connection.set_note(StatusNote::silent(note));
         cx.notify();
     }
 
     fn demo_cover_bot(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.demo_cover(
-            COVER_BOT,
+            InfoPanelTarget::User(COVER_BOT),
             "screenshot demo — bot info, monthly users",
             window,
             cx,
@@ -149,7 +163,7 @@ impl QuillApp {
 
     fn demo_cover_stories(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.demo_cover(
-            COVER_STORIES,
+            InfoPanelTarget::User(COVER_STORIES),
             "screenshot demo — contact info, story ring and rating",
             window,
             cx,
@@ -158,8 +172,17 @@ impl QuillApp {
 
     fn demo_cover_last_seen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.demo_cover(
-            COVER_HIDDEN,
+            InfoPanelTarget::User(COVER_HIDDEN),
             "screenshot demo — contact info, last seen hidden by you",
+            window,
+            cx,
+        );
+    }
+
+    fn demo_cover_self(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.demo_cover(
+            InfoPanelTarget::User(COVER_ME),
+            "screenshot demo — your own profile, pending rating",
             window,
             cx,
         );
@@ -167,8 +190,8 @@ impl QuillApp {
 
     fn demo_cover_saved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.demo_cover(
-            COVER_ME,
-            "screenshot demo — your own info, Saved Messages",
+            InfoPanelTarget::SavedMessages,
+            "screenshot demo — the Saved Messages chat's info",
             window,
             cx,
         );

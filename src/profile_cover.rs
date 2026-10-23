@@ -4,7 +4,9 @@
 //! (`Info::Profile::TopBar`, `info_profile_top_bar.cpp`).
 #![deny(clippy::indexing_slicing)]
 
+use crate::ids::ChatId;
 use crate::lang::{keys, tr, trn_decimal};
+use crate::state::{InfoPanelTarget, Session};
 use crate::telegram::envelope::{ParsedUser, UserStatusKind};
 
 /// `kServiceNotificationsId` and the old notifications account
@@ -121,32 +123,19 @@ pub fn shows_last_seen_button(user: &ParsedUser, viewer: Viewer) -> bool {
         && user.status != UserStatusKind::Online
 }
 
-/// Which facts the cover shows, by what the profile is
-/// (`TopBar` with and without `_savedMessages`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CoverFacts {
-    /// "Saved Messages" with the bookmark avatar instead of the person.
-    pub saved_messages: bool,
-    /// The action tiles, the details card and the rows under them.
-    pub details: bool,
-    /// The Stars rating pill, when the person has a rating.
-    pub rating: bool,
-    /// The story ring, when the person has active stories.
-    pub story_ring: bool,
-    /// A click on the avatar opens the person's photos or stories.
-    pub avatar_opens: bool,
-}
-
-impl CoverFacts {
-    /// Your own profile is Saved Messages, as tdesktop opens it
-    /// (`Info::Memento::Default` with `savedSublistsInfo`).
-    pub fn for_user(is_self: bool) -> Self {
-        Self {
-            saved_messages: is_self,
-            details: !is_self,
-            rating: !is_self,
-            story_ring: !is_self,
-            avatar_opens: !is_self,
+impl Session {
+    /// The info panel a chat's own header and menus open. The Saved
+    /// Messages chat opens its Saved Messages info, every other chat what
+    /// `info_panel_target_for_chat` gives (tdesktop `TopBarWidget::infoClicked`
+    /// and `Info::Memento::Default`, which turn your own peer into the
+    /// `Data::SavedMessages` key only from the chat itself; `showPeerInfo`
+    /// keeps the user profile).
+    pub fn chat_info_target(&self, chat_id: ChatId) -> Option<InfoPanelTarget> {
+        match self.info_panel_target_for_chat(chat_id)? {
+            InfoPanelTarget::User(user_id) if self.my_user_id == Some(user_id) => {
+                Some(InfoPanelTarget::SavedMessages)
+            }
+            target => Some(target),
         }
     }
 }
@@ -240,16 +229,6 @@ mod tests {
         assert!(!shows_last_seen_button(&person, me));
         person.is_bot = true;
         assert!(!shows_last_seen_button(&person, viewer()));
-    }
-
-    #[test]
-    fn own_profile_is_saved_messages_without_facts() {
-        let saved = CoverFacts::for_user(true);
-        assert!(saved.saved_messages);
-        assert!(!saved.details && !saved.rating && !saved.story_ring && !saved.avatar_opens);
-        let other = CoverFacts::for_user(false);
-        assert!(!other.saved_messages);
-        assert!(other.details && other.rating && other.story_ring && other.avatar_opens);
     }
 
     #[test]

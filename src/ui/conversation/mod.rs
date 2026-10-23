@@ -57,8 +57,7 @@ impl QuillApp {
         // (user profile) and supergroups/channels (group info). Other chat
         // kinds keep the plain title.
         let info_target = actions.and_then(|(chat_id, _, _, _)| {
-            self.session()
-                .and_then(|s| s.info_panel_target_for_chat(chat_id))
+            self.session().and_then(|s| s.chat_info_target(chat_id))
         });
         // A comment / reply thread titles the header "Discussion" with the
         // reply count as its status line (tdesktop `TopBarWidget` in

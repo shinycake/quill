@@ -431,3 +431,32 @@ fn hidden_last_seen_and_rating_reach_the_cover() {
         .and_then(|info| info.ratings.rating);
     assert_eq!(rating.map(|r| (r.level, r.rating)), Some((2, 40)));
 }
+
+#[test]
+fn only_the_saved_messages_chat_opens_the_saved_messages_info() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.my_user_id = Some(30);
+    for (id, title) in [(30, "Me"), (31, "Ada")] {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"{title}","type":{{"@type":"chatTypePrivate","user_id":{id}}}}}}}"#
+            ),
+        );
+    }
+    assert_eq!(
+        session.chat_info_target(ChatId(30)),
+        Some(InfoPanelTarget::SavedMessages)
+    );
+    assert_eq!(
+        session.chat_info_target(ChatId(31)),
+        Some(InfoPanelTarget::User(31))
+    );
+    assert_eq!(
+        session.info_panel_target_for_chat(ChatId(30)),
+        Some(InfoPanelTarget::User(30))
+    );
+}

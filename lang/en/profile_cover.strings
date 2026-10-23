@@ -25,6 +25,16 @@
 "lng_stars_rating_negative_label" = "Negative Rating";
 "lng_stars_rating_negative" = "A negative rating indicates that **{name}'s** payments are unreliable.";
 "lng_stars_rating_about" = "This rating reflects **{name}'s** activity on Telegram. What affects it:";
+"lng_stars_rating_about_your" = "This rating reflects your activity on Telegram. What affects it:";
+"lng_stars_rating_negative_your#one" = "A negative rating indicates that your payments are unreliable. Spend **{count} Star** to fix this issue.";
+"lng_stars_rating_negative_your#other" = "A negative rating indicates that your payments are unreliable. Spend **{count} Stars** to fix this issue.";
+"lng_stars_rating_future" = "Future Rating";
+"lng_stars_rating_updates#one" = "in {count} day";
+"lng_stars_rating_updates#other" = "in {count} days";
+"lng_stars_rating_pending#one" = "The rating will update {when}.\n{count} point is pending. {link}";
+"lng_stars_rating_pending#other" = "The rating will update {when}.\n{count} points are pending. {link}";
+"lng_stars_rating_pending_preview" = "Preview {arrow}";
+"lng_stars_rating_pending_back" = "Back {arrow}";
 "lng_stars_title_gifts_telegram" = "Gifts from Telegram";
 "lng_stars_about_gifts_telegram" = "{emoji} 100% of the Stars spent on gifts purchased from Telegram.";
 "lng_stars_title_gifts_users" = "Gifts and Posts from Users";

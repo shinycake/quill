@@ -1,7 +1,7 @@
 //! A person's profile cover facts (tdesktop `Info::Profile::TopBar`):
 //! the story ring around the avatar, the status line with the Stars
 //! rating pill and the hidden last seen button, and the Saved Messages
-//! cover your own profile shows. What shows is `quill::profile_cover`.
+//! cover of the Saved Messages chat. What shows is `quill::profile_cover`.
 #![deny(clippy::indexing_slicing)]
 
 mod last_seen_box;
@@ -21,7 +21,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, trn};
-use quill::profile_cover::{CoverFacts, Viewer, saved_chats_status, shows_last_seen_button};
+use quill::profile_cover::{Viewer, saved_chats_status, shows_last_seen_button};
 use quill::stars_rating::StarsRating;
 use quill::state::PhotoOwner;
 use quill::story_ring::UNREAD_WIDTH;
@@ -35,6 +35,8 @@ pub(super) struct ProfileCoverUi {
     pub(super) rating_box: Option<i64>,
     /// The person whose "Show Your Last Seen" box is open.
     pub(super) last_seen_box: Option<i64>,
+    /// The rating box shows your pending rating ("Future Rating").
+    pub(super) rating_preview: bool,
 }
 
 /// The ring's box around the cover: the photo keeps its size inside it.
@@ -100,14 +102,11 @@ impl QuillApp {
     pub(in crate::ui) fn user_cover_status(
         &self,
         user: &ParsedUser,
-        facts: CoverFacts,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let session = self.session();
-        let rating = facts
-            .rating
-            .then(|| session.and_then(|s| s.user_full_info(user.id)))
-            .flatten()
+        let rating = session
+            .and_then(|s| s.user_full_info(user.id))
             .and_then(|info| info.ratings.rating);
         let viewer = Viewer {
             is_self: session.and_then(|s| s.my_user_id) == Some(user.id),
@@ -150,8 +149,8 @@ impl QuillApp {
             .into_any_element()
     }
 
-    /// Your own profile's cover: Saved Messages, its bookmark avatar and
-    /// how many chats it holds (tdesktop `TopBar` with `_savedMessages`).
+    /// The Saved Messages chat's info cover: its bookmark avatar and how
+    /// many chats it holds (tdesktop `TopBar` with `_savedMessages`).
     pub(in crate::ui) fn saved_messages_cover(&self, cx: &mut Context<Self>) -> Div {
         let saved = self.session().map(|s| &s.threads.saved);
         let status = saved_chats_status(
@@ -198,6 +197,7 @@ fn rating_pill(user_id: i64, rating: StarsRating, cx: &mut Context<QuillApp>) ->
         .accessibility_label(label)
         .on_click(cx.listener(move |this, _, _, cx| {
             this.profile_cover.rating_box = Some(user_id);
+            this.profile_cover.rating_preview = false;
             cx.notify();
         }));
     let button = if rating.is_negative() {

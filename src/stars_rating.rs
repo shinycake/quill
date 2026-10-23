@@ -150,6 +150,19 @@ pub fn bubble_count(count: i64, scale: i64) -> String {
     }
 }
 
+impl PendingRating {
+    /// Whole days until the pending rating applies, at least one
+    /// (tdesktop `AboutRatingBox`: `(date - now + 43200) / 86400`).
+    pub fn days_left(self, now: i64) -> i64 {
+        ((i64::from(self.date) - now + 43_200) / 86_400).max(1)
+    }
+
+    /// Points the pending rating adds to `current`.
+    pub fn points_over(self, current: StarsRating) -> i64 {
+        self.value.rating.saturating_sub(current.rating)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,6 +236,17 @@ mod tests {
         assert_eq!(bar.left_level, None);
         assert_eq!(bar.right_level, None);
         assert!((bar.ratio - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn pending_counts_days_and_points() {
+        let pending = PendingRating {
+            value: rating(3, 140, 90, 200, false),
+            date: 1_000_000 + 2 * 86_400,
+        };
+        assert_eq!(pending.days_left(1_000_000), 2);
+        assert_eq!(pending.days_left(1_000_000 + 3 * 86_400), 1);
+        assert_eq!(pending.points_over(rating(2, 40, 30, 90, false)), 100);
     }
 
     #[test]

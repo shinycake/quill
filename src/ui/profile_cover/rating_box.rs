@@ -14,8 +14,8 @@ use gpui_kit::component::tag::Tag;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use quill::lang::{Key, keys, tr, tr_with, trn};
-use quill::stars_rating::{StarsRating, bubble_count};
+use quill::lang::{Key, keys, tr, tr_with, trn, trn_decimal, trn_with};
+use quill::stars_rating::{PendingRating, StarsRating, bubble_count};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -49,21 +49,50 @@ const EFFECTS: [Effect; 3] = [
     },
 ];
 
+/// What the open box shows.
+struct RatingView {
+    /// The person's first name; `None` on your own profile ("your").
+    name: Option<String>,
+    rating: StarsRating,
+    /// Your own rating's pending change (TDLib sends it for you only).
+    pending: Option<PendingRating>,
+    /// The pending rating is on the bar ("Future Rating").
+    preview: bool,
+}
+
+impl RatingView {
+    fn shown(&self) -> StarsRating {
+        match self.pending {
+            Some(pending) if self.preview => pending.value,
+            _ => self.rating,
+        }
+    }
+}
+
 impl QuillApp {
     /// The person and rating of the open box; `None` closes it.
-    fn rating_box_target(&self) -> Option<(String, StarsRating)> {
+    fn rating_box_target(&self) -> Option<RatingView> {
         let user_id = self.profile_cover.rating_box?;
         let session = self.session()?;
-        let rating = session.user_full_info(user_id)?.ratings.rating?;
-        let name = session
-            .user(user_id)
-            .map(|user| user.first_name.clone())
-            .unwrap_or_default();
-        Some((name, rating))
+        let ratings = session.user_full_info(user_id)?.ratings;
+        let is_self = session.my_user_id == Some(user_id);
+        let name = (!is_self).then(|| {
+            session
+                .user(user_id)
+                .map(|user| user.first_name.clone())
+                .unwrap_or_default()
+        });
+        Some(RatingView {
+            name,
+            rating: ratings.rating?,
+            pending: ratings.pending.filter(|_| is_self),
+            preview: self.profile_cover.rating_preview,
+        })
     }
 
     fn close_rating_box(&mut self, cx: &mut Context<Self>) {
         self.profile_cover.rating_box = None;
+        self.profile_cover.rating_preview = false;
         cx.notify();
     }
 
@@ -80,7 +109,7 @@ impl QuillApp {
         let target = app.read(cx).rating_box_target();
         app.update(cx, |_, cx| {
             let body = target
-                .map(|(name, rating)| rating_body(&name, rating, cx))
+                .map(|view| rating_body(&view, cx))
                 .unwrap_or_else(|| div().into_any_element());
             let footer = div().flex().w_full().child(
                 div()
@@ -116,12 +145,29 @@ impl QuillApp {
     }
 }
 
-fn rating_body(name: &str, rating: StarsRating, cx: &mut Context<QuillApp>) -> AnyElement {
+fn rating_body(view: &RatingView, cx: &mut Context<QuillApp>) -> AnyElement {
     let theme = cx.theme();
     let (muted, danger, accent) = (theme.muted_foreground, theme.danger, theme.primary);
-    let bar = rating.bar();
-    let negative = rating.is_negative();
-    let name = super::unmarked(name);
+    let shown = view.shown();
+    let bar = shown.bar();
+    let negative = shown.is_negative();
+    let name = view.name.as_deref().map(super::unmarked);
+    let negative_text = match &name {
+        None if shown.rating < 0 => trn_decimal(keys::STARS_RATING_NEGATIVE_YOUR, -shown.rating),
+        _ => tr_with(
+            keys::STARS_RATING_NEGATIVE,
+            &[("name", name.as_deref().unwrap_or_default())],
+        ),
+    };
+    let about = match &name {
+        Some(name) => tr_with(keys::STARS_RATING_ABOUT, &[("name", name)]),
+        None => tr(keys::STARS_RATING_ABOUT_YOUR).to_string(),
+    };
+    let title = if view.preview && view.pending.is_some() {
+        keys::STARS_RATING_FUTURE
+    } else {
+        keys::STARS_RATING_TITLE
+    };
     let level = |level: Option<i32>| level.map(|level| trn(keys::BOOST_LEVEL, level));
     let scale = bar.stars.max(bar.next_stars);
     let count = (!(negative && bar.stars == 0)).then(|| {
@@ -178,10 +224,7 @@ fn rating_body(name: &str, rating: StarsRating, cx: &mut Context<QuillApp>) -> A
                 div()
                     .text_color(danger)
                     .text_center()
-                    .child(bold_marked(&tr_with(
-                        keys::STARS_RATING_NEGATIVE,
-                        &[("name", &name)],
-                    ))),
+                    .child(bold_marked(&negative_text)),
             )
         })
         .child(
@@ -190,18 +233,72 @@ fn rating_body(name: &str, rating: StarsRating, cx: &mut Context<QuillApp>) -> A
                 .text_center()
                 .text_lg()
                 .font_semibold()
-                .child(tr(keys::STARS_RATING_TITLE)),
+                .child(tr(title)),
+        )
+        .children(
+            view.pending
+                .map(|pending| pending_row(pending, view.rating, view.preview, cx)),
         )
         .child(
             div()
                 .text_center()
                 .text_color(muted)
-                .child(bold_marked(&tr_with(
-                    keys::STARS_RATING_ABOUT,
-                    &[("name", &name)],
-                ))),
+                .child(bold_marked(&about)),
         )
         .children(EFFECTS.iter().map(|effect| effect_row(effect, cx)))
+        .into_any_element()
+}
+
+/// "The rating will update in N days. M points are pending." and the
+/// Preview / Back toggle (tdesktop `aboutPending`).
+fn pending_row(
+    pending: PendingRating,
+    current: StarsRating,
+    preview: bool,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let points = pending.points_over(current);
+    let when = trn(
+        keys::STARS_RATING_UPDATES,
+        pending.days_left(quill::local_time::now_unix()),
+    );
+    let grouped = quill::premium_hub::group_digits(points);
+    let text = trn_with(
+        keys::STARS_RATING_PENDING,
+        points,
+        &[("count", &grouped), ("when", &when), ("link", "")],
+    );
+    let toggle = if preview {
+        keys::STARS_RATING_PENDING_BACK
+    } else {
+        keys::STARS_RATING_PENDING_PREVIEW
+    };
+    div()
+        .flex()
+        .flex_col()
+        .items_center()
+        .gap_1()
+        .text_sm()
+        .text_center()
+        .text_color(cx.theme().muted_foreground)
+        .children(
+            text.lines()
+                .map(|line| div().child(line.trim().to_string())),
+        )
+        .child(
+            div()
+                .debug_selector(|| "rating-box-preview".to_string())
+                .child(
+                    Button::new("rating-box-preview")
+                        .label(tr_with(toggle, &[("arrow", "›")]))
+                        .ghost()
+                        .xsmall()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.profile_cover.rating_preview = !this.profile_cover.rating_preview;
+                            cx.notify();
+                        })),
+                ),
+        )
         .into_any_element()
 }
 

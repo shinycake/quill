@@ -1,15 +1,19 @@
 //! The cover's story ring opens the stories, the rating pill and the
-//! "when?" button open their boxes, and your own profile is Saved Messages.
+//! "when?" button open their boxes, and only the Saved Messages chat's
+//! info is the Saved Messages cover.
 
 use crate::ui::app::QuillApp;
-use crate::ui::demos::profile_cover::{COVER_HIDDEN, COVER_STORIES};
+use crate::ui::demos::profile_cover::{COVER_HIDDEN, COVER_ME, COVER_STORIES};
 use crate::ui::keybindings::bind_keys;
+use crate::ui::navigation::NavigationAction;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, px, size};
+use quill::ids::ChatId;
 use quill::lang::{keys, tr};
+use quill::state::InfoPanelTarget;
 
 fn new_app(
     cx: &mut TestAppContext,
@@ -101,10 +105,61 @@ fn hidden_last_seen_offers_to_show_yours(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn your_own_profile_is_saved_messages(cx: &mut TestAppContext) {
+fn the_saved_messages_chat_info_is_the_saved_cover(cx: &mut TestAppContext) {
     let (_app, _shell, mut vcx) = new_app(cx, "ready-info-cover-saved");
     assert!(find(&mut vcx, "saved-messages-cover"));
     assert!(!find(&mut vcx, "profile-cover-avatar"));
     assert!(!find(&mut vcx, "profile-rating"));
     assert!(!find(&mut vcx, "profile-cover-when"));
+}
+
+#[gpui_kit::test]
+fn only_the_saved_chat_turns_your_profile_into_saved_messages(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx, "ready-info-cover-self");
+    let open = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.session().and_then(|s| s.users_state.open_info_panel)
+        })
+    };
+    assert_eq!(open(&app, &mut vcx), Some(InfoPanelTarget::User(COVER_ME)));
+    assert!(!find(&mut vcx, "saved-messages-cover"));
+    assert!(find(&mut vcx, "profile-rating"));
+
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.select_listed_chat(ChatId(COVER_ME), window, cx)
+        })
+    });
+    frames(&mut vcx);
+    assert_eq!(open(&app, &mut vcx), Some(InfoPanelTarget::SavedMessages));
+    assert!(find(&mut vcx, "saved-messages-cover"));
+    assert!(!find(&mut vcx, "profile-rating"));
+
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.navigate(NavigationAction::MyProfile, window, cx)
+        })
+    });
+    frames(&mut vcx);
+    assert_eq!(open(&app, &mut vcx), Some(InfoPanelTarget::User(COVER_ME)));
+    assert!(!find(&mut vcx, "saved-messages-cover"));
+    assert!(find(&mut vcx, "profile-rating"));
+}
+
+#[gpui_kit::test]
+fn your_rating_box_previews_the_pending_rating(cx: &mut TestAppContext) {
+    let (app, shell, mut vcx) = new_app(cx, "ready-info-cover-self");
+    click(&mut vcx, "profile-rating");
+    assert_eq!(dialog(&shell, &mut vcx), Some(DialogKind::StarsRating));
+    click(&mut vcx, "rating-box-preview");
+    assert!(app.read_with(&vcx, |app, _| app.profile_cover.rating_preview));
+    click(&mut vcx, "rating-box-preview");
+    assert!(!app.read_with(&vcx, |app, _| app.profile_cover.rating_preview));
+}
+
+#[gpui_kit::test]
+fn others_have_no_pending_rating(cx: &mut TestAppContext) {
+    let (_app, _shell, mut vcx) = new_app(cx, "ready-info-cover-stories");
+    click(&mut vcx, "profile-rating");
+    assert!(!find(&mut vcx, "rating-box-preview"));
 }
