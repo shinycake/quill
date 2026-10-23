@@ -28,7 +28,9 @@ use std::rc::Rc;
 /// How many chats the chooser lists at once.
 const CHOICES: usize = 60;
 /// `lng_forward_send_files_cant`.
-const NO_FILES_HERE: &str = "Sorry, no way to send media here :(";
+fn no_files_here() -> &'static str {
+    tr(keys::FORWARD_SEND_FILES_CANT)
+}
 
 impl QuillApp {
     /// Runs from the poll loop: once signed in and unlocked, files that
@@ -108,7 +110,7 @@ impl QuillApp {
         let session = self.session()?;
         let summary = session.chats.get(&chat.0)?;
         (!SendRights::for_chat(session, summary, now_unix()).allows_any_file())
-            .then_some(NO_FILES_HERE)
+            .then_some(no_files_here())
     }
 
     /// A chat was picked. A chat that takes no files keeps the chooser open

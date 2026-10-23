@@ -44,8 +44,9 @@ impl QuillApp {
                             .id("folder-invite-error")
                             .text_sm()
                             .text_color(danger_dark())
-                            .child(format!(
-                                "This folder link is invalid or has expired ({error})."
+                            .child(tr_with(
+                                keys::Q_LEFTOVERS_FOLDER_LINK_INVALID,
+                                &[("error", &error.to_string())],
                             )),
                     );
                 } else {

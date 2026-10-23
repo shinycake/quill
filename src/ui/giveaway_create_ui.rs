@@ -34,7 +34,9 @@ use quill::telegram::envelope::{
     format_payment_price,
 };
 
-const TITLE: &str = "Boosts via Gifts";
+fn title() -> &'static str {
+    tr(keys::GIVEAWAY_NEW_TITLE)
+}
 
 /// "5 Telegram Premium subscriptions for 3 months", or the Stars prize.
 pub(super) fn prepaid_summary(prize: GiveawayPrize, winners: i32) -> String {
@@ -528,7 +530,7 @@ impl QuillApp {
             let Some(form) = this.giveaway.form.as_ref() else {
                 return dialog
                     .overlay(true)
-                    .title(crate::ui::shell::dialog_title(TITLE))
+                    .title(crate::ui::shell::dialog_title(title()))
                     .on_close(on_close.clone());
             };
             let draft = this.settled_draft();
@@ -599,7 +601,7 @@ impl QuillApp {
                         })),
                 )
             };
-            finish(dialog, TITLE, body, footer.into_any_element(), on_close)
+            finish(dialog, title(), body, footer.into_any_element(), on_close)
         })
     }
 }

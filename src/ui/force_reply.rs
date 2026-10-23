@@ -24,6 +24,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::*;
 use quill::force_reply::active_force_reply;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr};
 use quill::state::ForceReplyTarget;
 use quill::telegram::envelope::{ReplyKeyboard, ReplyMarkup};
 impl QuillApp {
@@ -115,7 +116,7 @@ impl QuillApp {
         let (_, message_id, placeholder) = self.open_chat_force_reply()?;
         let prompt = placeholder.trim();
         let label = if prompt.is_empty() {
-            "↩ Reply requested".to_string()
+            tr(keys::Q_LEFTOVERS_REPLY_REQUESTED).to_string()
         } else {
             format!("↩ {prompt}")
         };

@@ -7,7 +7,9 @@ use super::*;
 use quill::lang::{keys, tr};
 
 /// `lng_change_phone_error`.
-pub(super) const CHANGE_PHONE_ERROR: &str = "You can only change your phone number using mobile Telegram apps. Please use an official Telegram app on your phone to update your number.";
+pub(super) fn change_phone_error() -> &'static str {
+    tr(keys::CHANGE_PHONE_ERROR)
+}
 
 impl QuillApp {
     pub(in crate::ui) fn open_change_phone_dialog(&mut self, cx: &mut Context<Self>) {
@@ -20,7 +22,7 @@ impl QuillApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> Option<(String, AnyElement, AnyElement)> {
-        let body = div().text_sm().child(CHANGE_PHONE_ERROR);
+        let body = div().text_sm().child(change_phone_error());
         let footer = Button::new("change-phone-close")
             .label(tr(keys::BOX_OK))
             .on_click(cx.listener(|this, _, window, cx| {
@@ -37,12 +39,12 @@ impl QuillApp {
 
 #[cfg(test)]
 mod tests {
-    use super::CHANGE_PHONE_ERROR;
+    use super::change_phone_error;
 
     #[test]
     fn note_matches_tdesktop_string() {
         assert_eq!(
-            CHANGE_PHONE_ERROR,
+            change_phone_error(),
             "You can only change your phone number using mobile Telegram apps. Please use an official Telegram app on your phone to update your number."
         );
     }

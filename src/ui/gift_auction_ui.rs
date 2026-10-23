@@ -27,7 +27,7 @@ use quill::gift_market::{
     bought_link, bought_title, change_recipient_text, info_rows, join_button, nice_countdown,
     seconds_left, send_about, set_auction_about_shown, variants_link,
 };
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr, tr_with, trn_decimal};
 use quill::local_time::now_unix;
 use quill::premium_hub::group_digits;
 use quill::state::Session;
@@ -509,10 +509,9 @@ impl QuillApp {
         let mut body = div().flex().flex_col().gap_3();
         if let Some(preview) = session.payments.gift_market.previews.get(&gift_id) {
             let count = preview.models.len();
-            body = body.child(div().text_sm().text_color(muted).child(format!(
-                "This collectible features {} unique {}.",
-                group_digits(count as i64),
-                if count == 1 { "model" } else { "models" }
+            body = body.child(div().text_sm().text_color(muted).child(trn_decimal(
+                keys::Q_LEFTOVERS_COLLECTIBLE_MODELS,
+                count as i64,
             )));
             let mut grid = div().flex().flex_wrap().gap_2();
             for (ix, model) in preview.models.iter().enumerate() {

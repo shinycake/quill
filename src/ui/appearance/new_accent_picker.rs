@@ -95,7 +95,7 @@ impl QuillApp {
             row = row.child(self.appearance_swatch(
                 format!("appearance-wallpaper-{color:06x}"),
                 color,
-                name,
+                tr(name),
                 current == Some(color),
                 cx,
                 move |this, cx| {

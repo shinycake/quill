@@ -851,9 +851,9 @@ impl QuillApp {
                     // Multiple Answers" on, several may be marked.
                     Checkbox::new(format!("poll-quiz-correct-{index}"))
                         .checked(marked)
-                        .accessibility_label(format!(
-                            "Mark option {} as the correct answer",
-                            index + 1
+                        .accessibility_label(tr_with(
+                            keys::Q_LEFTOVERS_MARK_OPTION_CORRECT,
+                            &[("number", &(index + 1).to_string())],
                         ))
                         .on_click(cx.listener(move |this, &on, _, cx| {
                             if let Some(dialog) = this.composer_ui.poll_dialog.as_mut() {

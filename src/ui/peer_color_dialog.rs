@@ -705,14 +705,19 @@ impl QuillApp {
                     .justify_center()
                     .cursor_pointer()
                     .role(Role::Button)
-                    .aria_label(format!(
-                        "Wear {}{}",
-                        gift.headline(),
-                        if selected {
-                            tr(keys::Q_MISC_SELECTED)
-                        } else {
-                            ""
-                        }
+                    .aria_label(tr_with(
+                        keys::Q_LEFTOVERS_WEAR_ITEM,
+                        &[
+                            ("name", &gift.headline().to_string()),
+                            (
+                                "selected",
+                                if selected {
+                                    tr(keys::Q_MISC_SELECTED)
+                                } else {
+                                    ""
+                                },
+                            ),
+                        ],
                     ))
                     .tab_index(0)
                     .on_click(cx.listener(move |this, _, _, cx| {

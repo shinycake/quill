@@ -82,10 +82,12 @@ impl QuillApp {
             .map_or(1000, |earn| earn.limits.withdrawal_min());
         if typed < min {
             // tdesktop `lng_bot_earn_credits_out_minimal`.
-            self.connection.set_note(StatusNote::error(format!(
-                "You cannot withdraw less than {} {}.",
-                group_digits(min),
-                if min == 1 { "star" } else { "stars" }
+            self.connection.set_note(StatusNote::error(tr_with(
+                keys::Q_LEFTOVERS_WITHDRAW_MINIMUM,
+                &[
+                    ("amount", &(group_digits(min)).to_string()),
+                    ("currency", (if min == 1 { "star" } else { "stars" })),
+                ],
             )));
             cx.notify();
             return;

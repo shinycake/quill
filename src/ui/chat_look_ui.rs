@@ -649,10 +649,14 @@ impl QuillApp {
                     // else the pending theme's, else the account's.
                     let pending_theme = session.and_then(|s| {
                         state.theme.as_ref().and_then(|n| {
-                            s.chats_state.emoji_chat_themes.iter().find(|t| &t.name == n)
+                            s.chats_state
+                                .emoji_chat_themes
+                                .iter()
+                                .find(|t| &t.name == n)
                         })
                     });
-                    let outgoing_fill = pending_theme.map(|t| OutgoingFill::from_theme(t.settings(dark), dark));
+                    let outgoing_fill =
+                        pending_theme.map(|t| OutgoingFill::from_theme(t.settings(dark), dark));
                     let mut wallpaper = None;
                     if let Some(path) = &state.file {
                         wallpaper = Some(super::wallpaper::Wallpaper::Image {
@@ -662,17 +666,27 @@ impl QuillApp {
                         });
                     } else if let Some(id) = state.background {
                         wallpaper = session.and_then(|s| {
-                            let bg = s.chats_state.installed_backgrounds.iter().flatten().find(|b| b.id == id)?;
+                            let bg = s
+                                .chats_state
+                                .installed_backgrounds
+                                .iter()
+                                .flatten()
+                                .find(|b| b.id == id)?;
                             session_wallpaper(s, bg)
                         });
                     } else if !state.remove_wallpaper
                         && let Some(s) = session
-                        && let Some(bg) = s.chats_state.chat_backgrounds.get(&chat_id).map(|c| &c.background)
+                        && let Some(bg) = s
+                            .chats_state
+                            .chat_backgrounds
+                            .get(&chat_id)
+                            .map(|c| &c.background)
                     {
                         wallpaper = session_wallpaper(s, bg);
                     }
                     // tdesktop dims photo wallpapers only, in dark mode.
-                    let photo = matches!(wallpaper, Some(super::wallpaper::Wallpaper::Image { .. }));
+                    let photo =
+                        matches!(wallpaper, Some(super::wallpaper::Wallpaper::Image { .. }));
                     let dimming = if dark && photo {
                         state.dimming.clamp(0, 100) as u8
                     } else {
@@ -696,14 +710,24 @@ impl QuillApp {
                             .flex()
                             .flex_col()
                             .gap_1()
-                            .child(div().font_semibold().text_sm().child(tr(keys::Q_MISC_THEME)))
+                            .child(
+                                div()
+                                    .font_semibold()
+                                    .text_sm()
+                                    .child(tr(keys::Q_MISC_THEME)),
+                            )
                             .child(this.chat_look_theme_row(&state, cx)),
                     );
                     let mut wall = div()
                         .flex()
                         .flex_col()
                         .gap_2()
-                        .child(div().font_semibold().text_sm().child(tr(keys::Q_MISC_WALLPAPER)))
+                        .child(
+                            div()
+                                .font_semibold()
+                                .text_sm()
+                                .child(tr(keys::Q_MISC_WALLPAPER)),
+                        )
                         .child(this.chat_look_wallpaper_grid(&state, cx))
                         .child(
                             div().flex().child(
@@ -716,7 +740,8 @@ impl QuillApp {
                                     })),
                             ),
                         );
-                    if dark && photo
+                    if dark
+                        && photo
                         && let Some(slider) = &state.dimming_slider
                     {
                         wall = wall.child(
@@ -724,9 +749,9 @@ impl QuillApp {
                                 .flex()
                                 .flex_col()
                                 .gap_1()
-                                .child(div().text_sm().child(format!(
-                                    "Dimming in dark mode: {}%",
-                                    state.dimming.clamp(0, 100)
+                                .child(div().text_sm().child(tr_with(
+                                    keys::Q_LEFTOVERS_WALLPAPER_DIMMING,
+                                    &[("percent", &(state.dimming.clamp(0, 100)).to_string())],
                                 )))
                                 .child(Slider::new(slider).bg(cx.theme().primary)),
                         );
@@ -760,7 +785,10 @@ impl QuillApp {
                         wall = wall.child(if premium {
                             Checkbox::new("chat-look-both")
                                 .checked(state.both)
-                                .label(tr_with(keys::Q_MISC_ALSO_SET_FOR, &[("name", &name.to_string())]))
+                                .label(tr_with(
+                                    keys::Q_MISC_ALSO_SET_FOR,
+                                    &[("name", &name.to_string())],
+                                ))
                                 .on_click(cx.listener(|this, &on, _, cx| {
                                     if let Some(d) = this.dialogs.chat_look_dialog.as_mut() {
                                         d.both = on;
@@ -772,19 +800,25 @@ impl QuillApp {
                             div()
                                 .text_xs()
                                 .text_color(muted)
-                                .child(format!(
-                                    "The wallpaper is set for you only. Telegram Premium can set it for {name} too."
+                                .child(tr_with(
+                                    keys::Q_LEFTOVERS_WALLPAPER_FOR_YOU_ONLY,
+                                    &[("name", &name.to_string())],
                                 ))
                                 .into_any_element()
                         });
                     }
-                    if let Some(error) = session.and_then(|s| s.chats_state.background_error.clone()) {
+                    if let Some(error) =
+                        session.and_then(|s| s.chats_state.background_error.clone())
+                    {
                         wall = wall.child(
                             div()
                                 .id("chat-look-error")
                                 .text_sm()
                                 .text_color(super::danger_dark())
-                                .child(tr_with(keys::Q_MISC_COULDNT_CHANGE_THE_CHAT_LOOK, &[("error", &error.to_string())])),
+                                .child(tr_with(
+                                    keys::Q_MISC_COULDNT_CHANGE_THE_CHAT_LOOK,
+                                    &[("error", &error.to_string())],
+                                )),
                         );
                     }
                     let applying = state.awaiting.is_some();
@@ -809,7 +843,11 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("chat-look-apply")
-                                .label(if applying { tr(keys::Q_MISC_APPLYING) } else { tr(keys::Q_MISC_APPLY) })
+                                .label(if applying {
+                                    tr(keys::Q_MISC_APPLYING)
+                                } else {
+                                    tr(keys::Q_MISC_APPLY)
+                                })
                                 .primary()
                                 .disabled(!changed || applying)
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -818,7 +856,11 @@ impl QuillApp {
                                 })),
                         )
                         .into_any_element();
-                    (tr(keys::Q_MISC_CHAT_COLORS_AND_WALLPAPER), body.child(wall).into_any_element(), footer)
+                    (
+                        tr(keys::Q_MISC_CHAT_COLORS_AND_WALLPAPER),
+                        body.child(wall).into_any_element(),
+                        footer,
+                    )
                 }
             };
             let body = Rc::new(RefCell::new(Some(body)));
@@ -826,13 +868,15 @@ impl QuillApp {
                 .overlay(true)
                 .width(px(440.))
                 .title(super::shell::dialog_title(title))
-                .content(super::shell::scrollable_dialog_content(move |content, _, _| {
-                    let body = body
-                        .borrow_mut()
-                        .take()
-                        .unwrap_or_else(|| div().into_any_element());
-                    content.child(body)
-                }))
+                .content(super::shell::scrollable_dialog_content(
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    },
+                ))
                 .footer(footer)
                 .on_close(on_close)
         })

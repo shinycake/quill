@@ -2,9 +2,12 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::group_members::scrolled_near_end;
+use crate::ui::dialogs::group_admin_settings::GroupSettingsView;
 use crate::ui::lean_buttons::ghost_text_button;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::input::Textarea;
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
@@ -14,6 +17,14 @@ use quill::telegram::envelope::{
     ChannelMemberStatus, ChatEventAction, MessageSender, ParsedChatEvent,
 };
 use quill::telegram::requests::ChatEventLogFilterSet;
+use std::time::Duration;
+
+/// How often an open recent-actions page asks for new events (tdesktop's
+/// `kNewEventsCheckInterval`).
+const EVENT_LOG_POLL_INTERVAL: Duration = Duration::from_secs(5);
+/// The height of the scrolling list of events.
+const EVENT_LOG_LIST_HEIGHT: f32 = 420.;
+
 impl QuillApp {
     /// Slice G2: apply the event-log search box value (the driver
     /// stores it per chat; an empty box clears it).
@@ -70,6 +81,68 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The list scrolled: close to its end, the next older page is asked
+    /// for (the driver does nothing while one is already on its way or the
+    /// log is exhausted).
+    fn event_log_scrolled(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if scrolled_near_end(&self.admin.event_log_scroll) {
+            self.load_more_event_log(chat_id, cx);
+        }
+    }
+
+    /// Keep an open recent-actions page live: every few seconds the newest
+    /// events are fetched and join the top of the list. A reader who has
+    /// scrolled down is left alone (the rows would jump under them); the
+    /// poll catches up once the list is back at the top.
+    pub(super) fn start_event_log_poll(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if self.live.is_none() || self.admin.event_log_poll == Some(chat_id) {
+            return;
+        }
+        self.admin.event_log_poll = Some(chat_id);
+        self.spawn_scoped(cx, async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(EVENT_LOG_POLL_INTERVAL)
+                    .await;
+                let keep = this
+                    .update(cx, |this, cx| this.event_log_poll_tick(chat_id, cx))
+                    .unwrap_or(false);
+                if !keep {
+                    break;
+                }
+            }
+            let _ = this.update(cx, |this, _| {
+                if this.admin.event_log_poll == Some(chat_id) {
+                    this.admin.event_log_poll = None;
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// One poll step; `false` once the page is closed.
+    fn event_log_poll_tick(&mut self, chat_id: ChatId, cx: &mut Context<Self>) -> bool {
+        let open = self
+            .admin
+            .group_settings_dialog
+            .as_ref()
+            .is_some_and(|dialog| {
+                dialog.chat_id == chat_id && dialog.view == GroupSettingsView::RecentActions
+            });
+        if !open {
+            return false;
+        }
+        let at_top = self.admin.event_log_scroll.offset().y > px(-4.);
+        if at_top
+            && self.frame.window_active.get()
+            && let Some(live) = self.live.as_mut()
+        {
+            let _ = live.driver.poll_chat_event_log(chat_id);
+            cx.notify();
+        }
+        true
+    }
+
     /// Phase D3c: fetch the next older page of the event log.
     pub(super) fn load_more_event_log(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
@@ -118,26 +191,13 @@ impl QuillApp {
             .w_full()
             .gap_1()
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .w_full()
-                    .gap_1()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_semibold()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(tr(keys::Q_OPS_RECENT_ACTIONS)),
-                    )
-                    .child(div().flex_1())
-                    .child(ghost_text_button(
-                        "event-log-refresh",
-                        tr(keys::Q_OPS_REFRESH),
-                        cx.listener(move |this, _, _, cx| {
-                            this.refresh_event_log(chat_id, cx);
-                        }),
-                    )),
+                div().flex().items_center().w_full().gap_1().child(
+                    div()
+                        .text_xs()
+                        .font_semibold()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(tr(keys::Q_OPS_RECENT_ACTIONS)),
+                ),
             );
         section = section.child(
             div()
@@ -234,18 +294,38 @@ impl QuillApp {
                             }),
                     );
                 } else {
+                    let mut list = div()
+                        .id("event-log-list")
+                        .flex()
+                        .flex_col()
+                        .w_full()
+                        .gap_1()
+                        .max_h(px(EVENT_LOG_LIST_HEIGHT))
+                        .overflow_y_scroll()
+                        .track_scroll(&self.admin.event_log_scroll)
+                        .on_scroll_wheel(
+                            cx.listener(move |this, _, _, cx| this.event_log_scrolled(chat_id, cx)),
+                        );
                     for event in page.events.iter() {
-                        section = section.child(self.event_log_row(event, cx));
+                        list = list.child(self.event_log_row(event, cx));
                     }
                     if page.has_more {
-                        section = section.child(ghost_text_button(
-                            "event-log-load-more",
-                            tr(keys::Q_OPS_LOAD_MORE),
-                            cx.listener(move |this, _, _, cx| {
-                                this.load_more_event_log(chat_id, cx);
-                            }),
-                        ));
+                        list = list.child(
+                            div()
+                                .id("event-log-loading-older")
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .w_full()
+                                .gap_2()
+                                .py_2()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(Spinner::new().small())
+                                .child(tr(keys::Q_OPS_LOADING)),
+                        );
                     }
+                    section = section.child(list);
                 }
             }
         }

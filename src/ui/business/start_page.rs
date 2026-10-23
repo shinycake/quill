@@ -16,7 +16,9 @@ use quill::local_path::sandboxed_display_path;
 use quill::state::StickerTab;
 use quill::telegram::envelope::StickerItem;
 
-const ABOUT: &str = "You can customize the message people see before they start a chat with you.";
+fn about() -> &'static str {
+    tr(keys::CHAT_INTRO_ABOUT)
+}
 
 impl QuillApp {
     pub(super) fn new_start_page_draft(
@@ -261,7 +263,7 @@ impl QuillApp {
                     this.business_go(View::StickerPick, window, cx);
                 })),
             )
-            .child(div().text_xs().text_color(muted).child(ABOUT))
+            .child(div().text_xs().text_color(muted).child(about()))
             .when(!page.is_empty(), |this| {
                 this.child(
                     crate::ui::pressable::action_row(

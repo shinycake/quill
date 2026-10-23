@@ -23,9 +23,9 @@ use quill::lang::{keys, tr, tr_with};
 use quill::poll::validate_new_option;
 use quill::telegram::envelope::{MessageContent, MessageSender};
 
-const PREMIUM_CREATE: &str = "Only subscribers of Telegram Premium can create Checklists.";
-const PREMIUM_ADD: &str = "Only subscribers of Telegram Premium can add tasks.";
-const PREMIUM_MARK: &str = "Only subscribers of Telegram Premium can mark tasks as done.";
+fn premium_only(key: quill::lang::Key) -> String {
+    tr_with(key, &[("link", tr(keys::TODO_PREMIUM_LINK))])
+}
 
 impl QuillApp {
     /// Whether the attach menu offers "Checklist" in the open chat
@@ -44,7 +44,8 @@ impl QuillApp {
 
     pub(super) fn open_checklist_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.checklist_creation_allowed() {
-            self.connection.set_note(StatusNote::info(PREMIUM_CREATE));
+            self.connection
+                .set_note(StatusNote::info(premium_only(keys::TODO_CREATE_PREMIUM)));
             cx.notify();
             return;
         }
@@ -66,7 +67,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if !self.session().is_some_and(|s| s.my_is_premium()) {
-            self.connection.set_note(StatusNote::info(PREMIUM_ADD));
+            self.connection
+                .set_note(StatusNote::info(premium_only(keys::TODO_ADD_PREMIUM)));
             cx.notify();
             return;
         }
@@ -188,7 +190,8 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             if !live.driver.session.my_is_premium() {
-                self.connection.set_note(StatusNote::info(PREMIUM_MARK));
+                self.connection
+                    .set_note(StatusNote::info(premium_only(keys::TODO_MARK_PREMIUM)));
                 cx.notify();
                 return;
             }

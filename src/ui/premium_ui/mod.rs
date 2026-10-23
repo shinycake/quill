@@ -816,9 +816,9 @@ fn gift_details(
                         .p_2()
                         .rounded_md()
                         .bg(cx.theme().secondary)
-                        .child(div().text_sm().child(format!(
-                            "Convert this gift to {} Stars? The gift will be removed from your profile. This cannot be undone.",
-                            gift.sell_star_count
+                        .child(div().text_sm().child(tr_with(
+                            keys::Q_LEFTOVERS_CONVERT_GIFT_SURE,
+                            &[("count", &gift.sell_star_count.to_string())],
                         )))
                         .child(
                             div()

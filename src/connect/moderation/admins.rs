@@ -170,6 +170,40 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         from_event_id: i64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.send_chat_event_log_request(
+            chat_id,
+            from_event_id,
+            GroupsPurpose::GetChatEventLog { from_event_id },
+        )
+    }
+
+    /// The live poll of an open event log (tdesktop checks every five
+    /// seconds): the newest page, merged into the loaded one so events
+    /// that happened since appear at the top. Does nothing until a page
+    /// is loaded, and while a poll is still in flight.
+    pub fn poll_chat_event_log(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !matches!(
+            self.session.groups.event_logs.get(&chat_id.0),
+            Some(ChatEventLogFetch::Loaded(_))
+        ) || self.session.requests.has_purpose_for_chat(
+            RequestPurpose::Groups(GroupsPurpose::PollChatEventLog),
+            chat_id,
+        ) {
+            return Ok(None);
+        }
+        self.send_chat_event_log_request(chat_id, 0, GroupsPurpose::PollChatEventLog)
+    }
+
+    fn send_chat_event_log_request(
+        &mut self,
+        chat_id: ChatId,
+        from_event_id: i64,
+        purpose: GroupsPurpose,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        let polling = purpose == GroupsPurpose::PollChatEventLog;
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -177,6 +211,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         if from_event_id == 0
+            && !polling
             && matches!(
                 self.session.groups.event_logs.get(&chat_id.0),
                 Some(ChatEventLogFetch::Loading | ChatEventLogFetch::Loaded(_))
@@ -184,10 +219,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        if self.session.requests.has_event_log_in_flight(chat_id) {
+        if !polling && self.session.requests.has_event_log_in_flight(chat_id) {
             return Ok(None);
         }
-        if from_event_id == 0 {
+        if from_event_id == 0 && !polling {
             self.session
                 .groups
                 .event_logs
@@ -214,10 +249,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .get(&chat_id.0)
             .cloned()
             .unwrap_or_default();
-        let extra = self.session.request(
-            RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id }),
-            Some(chat_id),
-        );
+        let extra = self
+            .session
+            .request(RequestPurpose::Groups(purpose), Some(chat_id));
         if let Err(err) = self.sender.send_json(&get_chat_event_log(
             extra,
             chat_id.0,
@@ -228,7 +262,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             &user_ids,
         )) {
             self.session.requests.take(extra);
-            if from_event_id == 0 {
+            if from_event_id == 0 && !polling {
                 self.session.groups.event_logs.remove(&chat_id.0);
             }
             return Err(err);

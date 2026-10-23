@@ -345,16 +345,19 @@ impl QuillApp {
             );
             body = body.child(Slider::new(&boxed.slider).bg(cx.theme().primary));
             if already > 0 {
-                body = body.child(div().text_xs().text_color(muted).child(format!(
-                    "You sent {} to support this post.",
-                    if already == 1 {
-                        tr(keys::Q_MONEY_1_STAR).to_string()
-                    } else {
-                        tr_with(
-                            keys::Q_MONEY_STARS_4,
-                            &[("group_digits", &(group_digits(already)).to_string())],
-                        )
-                    }
+                body = body.child(div().text_xs().text_color(muted).child(tr_with(
+                    keys::Q_LEFTOVERS_YOU_SENT_TO_SUPPORT,
+                    &[(
+                        "amount",
+                        &if already == 1 {
+                            tr(keys::Q_MONEY_1_STAR).to_string()
+                        } else {
+                            tr_with(
+                                keys::Q_MONEY_STARS_4,
+                                &[("group_digits", &(group_digits(already)).to_string())],
+                            )
+                        },
+                    )],
                 )));
             }
             body = body.child(

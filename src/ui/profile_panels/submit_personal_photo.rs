@@ -663,9 +663,12 @@ impl QuillApp {
                         .unwrap_or_default()
                 };
                 if let Some(chat_id) = target {
-                    let body = div().text_sm().child(format!(
-                        "Share {name}'s contact with {}?",
-                        chat_title(chat_id)
+                    let body = div().text_sm().child(tr_with(
+                        keys::Q_LEFTOVERS_SHARE_CONTACT_WITH,
+                        &[
+                            ("name", &name.to_string()),
+                            ("chat", &(chat_title(chat_id)).to_string()),
+                        ],
                     ));
                     let footer = div()
                         .flex()

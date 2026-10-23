@@ -2,6 +2,7 @@ use super::super::app::QuillApp;
 use gpui_kit::component::input::InputState;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 
 /// Where the ownership dialog is. tdesktop splits this over
 /// `select_future_owner_box.cpp` (leaving as owner) and
@@ -35,7 +36,7 @@ impl OwnershipDialog {
     ) -> Self {
         let password_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("2-step verification password")
+                .placeholder(tr(keys::Q_LEFTOVERS_2_STEP_VERIFICATION_PASSWORD))
                 .masked(true)
                 .submit_on_enter(false)
         });

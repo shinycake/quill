@@ -190,9 +190,12 @@ impl QuillApp {
                     div()
                         .font_semibold()
                         .text_color(cx.theme().foreground)
-                        .child(format!(
-                            "Couldn't load {}.",
-                            active_tab.label_in(is_channel).to_lowercase()
+                        .child(tr_with(
+                            keys::Q_LEFTOVERS_COULD_NOT_LOAD_MEDIA,
+                            &[(
+                                "tab",
+                                &(active_tab.label_in(is_channel).to_lowercase()).to_string(),
+                            )],
                         )),
                 )
                 .when(!error.is_empty(), |this| {

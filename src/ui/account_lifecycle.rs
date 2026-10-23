@@ -49,7 +49,9 @@ pub(crate) fn format_account_ttl(days: i32) -> String {
 /// (the checklist item); the multi-device note is TGX-mobile context and
 /// doesn't apply to this single-account client. `%1$s` (the account name)
 /// is skipped — the dialog already sits in the account section.
-pub(crate) const LOGOUT_WARNING_COPY: &str = "Remember, logging out kills all your Secret Chats. Downloaded media will be erased from this device.";
+pub(crate) fn logout_warning_copy() -> &'static str {
+    tr(keys::Q_LEFTOVERS_LOGOUT_WARNING)
+}
 
 /// TGX option labels (`xMonths` plural): "1 month", "3 months", ….
 fn ttl_option_label(months: u8) -> String {
@@ -582,7 +584,7 @@ impl QuillApp {
     /// for one row). The button arms the inline confirm banner (the
     /// delete-account pattern — kit dialogs never stack, so the
     /// confirmation is inline); the banner carries the TGX `SignOutHint2`
-    /// warning (`LOGOUT_WARNING_COPY`).
+    /// warning (`logout_warning_copy()`).
     fn account_logout_body(&self, cx: &mut Context<Self>, mut body: Div) -> Div {
         body = body
             .child(
@@ -638,7 +640,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(LOGOUT_WARNING_COPY),
+                    .child(logout_warning_copy()),
             )
             .child(
                 div()
@@ -701,7 +703,7 @@ mod tests {
         // The checklist item is the warning copy: secret chats die,
         // downloaded media erased. Pin both sentences so a future edit
         // can't silently drop one.
-        let copy = super::LOGOUT_WARNING_COPY;
+        let copy = super::logout_warning_copy();
         assert!(copy.contains("Secret Chats"));
         assert!(copy.contains("Downloaded media"));
         assert!(copy.contains("logging out"));

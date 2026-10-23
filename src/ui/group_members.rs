@@ -787,7 +787,7 @@ crate::ui::shell::register_dialogs! {
     ),
 }
 
-fn scrolled_near_end(scroll: &ScrollHandle) -> bool {
+pub(super) fn scrolled_near_end(scroll: &ScrollHandle) -> bool {
     scroll.bounds().size.height > px(0.)
         && scroll.max_offset().y + scroll.offset().y <= px(LOAD_MORE_DISTANCE)
 }

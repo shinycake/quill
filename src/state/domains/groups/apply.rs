@@ -615,32 +615,7 @@ impl Session {
             // event id, schema 1.8.67 line 15252). A full page sets
             // `has_more`; a short page exhausts the log.
             GroupsPayload::ChatEvents { events } => {
-                if let Some(pending) = pending
-                    && let RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id }) =
-                        pending.purpose
-                    && let Some(chat_id) = pending.chat_id
-                {
-                    let has_more = events.len() as i32 >= CHAT_EVENT_LOG_PAGE_SIZE;
-                    let mut merged = match (from_event_id, self.groups.event_logs.get(&chat_id.0)) {
-                        (0, _) => events,
-                        (_, Some(ChatEventLogFetch::Loaded(page))) => {
-                            let mut merged = page.events.clone();
-                            crate::state::paging::append_new_by_id(&mut merged, events, |event| {
-                                event.id
-                            });
-                            merged
-                        }
-                        _ => events,
-                    };
-                    merged.sort_by_key(|event| std::cmp::Reverse(event.id));
-                    self.groups.event_logs.insert(
-                        chat_id.0,
-                        ChatEventLogFetch::Loaded(ChatEventLogPage {
-                            events: merged,
-                            has_more,
-                        }),
-                    );
-                }
+                self.apply_chat_events(events, pending);
             }
             // Phase D3a: `updateNewChatJoinRequest` (schema 1.8.67, line
             // 11210) — a new join request arrived. Prepend it to the cached

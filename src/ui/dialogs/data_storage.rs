@@ -403,9 +403,9 @@ impl QuillApp {
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(format!(
-                                    "Download media automatically on {}",
-                                    network.label().to_lowercase()
+                                .child(tr_with(
+                                    keys::Q_LEFTOVERS_AUTO_DOWNLOAD_ON,
+                                    &[("network", &(network.label().to_lowercase()).to_string())],
                                 )),
                         ),
                 )
@@ -478,7 +478,14 @@ impl QuillApp {
         } else {
             tr_with(
                 keys::MEDIA_SIZE_UP_TO,
-                &[("size", format!("{} MB", cap / (1024 * 1024)).as_str())],
+                &[(
+                    "size",
+                    tr_with(
+                        keys::Q_LEFTOVERS_MB,
+                        &[("cap", &(cap / (1024 * 1024)).to_string())],
+                    )
+                    .as_str(),
+                )],
             )
         };
         let slider = (cap > 0)
