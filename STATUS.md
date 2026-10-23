@@ -639,7 +639,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Story viewer controls are tdesktop's icon overlay (mute, pause, share, reaction) and a ⋯ menu for the rest (Save, Edit, Cover, Privacy, Delete, Stealth, Copy Link, Repost), not a wrapping row of text buttons <!-- parity:stories-viewer-icon-chrome -->
 - [ ] Story viewers list loads more on scroll, not with a Load more button <!-- parity:stories-viewers-scroll-load -->
 - [x] Story albums: story page lists/opens albums; create/rename/delete; add/remove/reorder stories; reorder albums (album covers deferred) <!-- parity:stories-albums -->
-- [ ] Add Stories to an album by ticking them in a story grid (tdesktop EditAlbumBox), not by typing story ids <!-- parity:stories-albums-picker -->
+- [x] Add Stories to an album by ticking them in a story grid (tdesktop EditAlbumBox), not by typing story ids <!-- parity:stories-albums-picker -->
 - [x] Archive story list via getChatArchivedStories with load-more pagination (DECISIONS.md Phase 9.1 "Out of this slice") <!-- parity:stories-archive -->
 - [x] Pinned stories on chat page (getChatPostedToChatPageStories + setChatPinnedStories full-list semantics) <!-- parity:stories-pinned -->
 - [x] Clickable story areas (location, venue, suggested reaction, message, link, weather, gift) — parsed from `story.areas` (telegram/envelope.rs), rendered as clickable chips on the viewer, taps perform each area's action (ui/mod.rs Phase 9.8) <!-- parity:stories-areas-view -->
@@ -666,7 +666,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Honest pending / succeeded / failed states (`Posting` is set when the `postStory` answer lands; `updateStoryPostSucceeded`/`PostFailed` applied to the composer status line, DECISIONS.md 9.3) <!-- parity:stories-post-status -->
 - [x] Edit own story content / caption / areas (editStory, td_api.tl:13732, wired in viewer+composer, Phase 9.5) <!-- parity:stories-edit -->
 - [x] Edit story cover frame (editStoryCover, td_api.tl:13738, viewer cover editor, Phase 9.5) <!-- parity:stories-edit-cover -->
-- [ ] Choose a video story's cover on a frame strip with a preview, not by typing seconds <!-- parity:stories-cover-frame-strip -->
+- [x] Choose a video story's cover on a frame strip with a preview, not by typing seconds <!-- parity:stories-cover-frame-strip -->
 - [x] Change a posted story's privacy settings (setStoryPrivacySettings, td_api.tl:13743, viewer privacy editor, Phase 9.5) <!-- parity:stories-post-change-privacy -->
 - [x] Post stories on behalf of a channel/supergroup (getChatsToPostStories, canPostStory target chat, Phase 9.5) <!-- parity:stories-post-as-channel -->
 - [x] Admin story rights management (post / edit / delete others' stories; TGX strings RightStories*; covered by the existing admin-rights UI which reads/writes can_post/edit/delete_stories) <!-- parity:stories-admin-rights -->
