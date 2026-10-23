@@ -50,6 +50,7 @@ impl QuillApp {
         picks_go_to_story(self.stories.reply_open, self.stories.reply_panel)
             && self.pickers.media_panel.open
             && self.pickers.media_panel.reaction.is_none()
+            && self.pickers.media_panel.status.is_none()
     }
 
     /// A recording started from the story reply row is in progress.

@@ -37,47 +37,88 @@ impl<S: JsonSender> ConnectDriver<S> {
                 crate::telegram::requests_emoji::get_default_emoji_statuses
                     as fn(RequestId) -> String,
             ),
+            (
+                RequestPurpose::GetUpgradedGiftEmojiStatuses,
+                crate::telegram::requests_emoji::get_upgraded_gift_emoji_statuses
+                    as fn(RequestId) -> String,
+            ),
         ] {
             self.emoji_set_request(purpose, build)?;
         }
         Ok(())
     }
 
+    /// The status selector closed: stop resolving its choices.
+    pub fn close_emoji_status_choices(&mut self) {
+        self.session.stickers.emoji.status_open = false;
+    }
+
+    /// Checks a status change and returns the `expiration_date` to send.
+    /// Removing a status needs no Premium; setting one does.
+    fn status_change_expiration(
+        &self,
+        custom_emoji_id: Option<i64>,
+        duration_secs: i32,
+    ) -> Result<i32, ConnectSendError> {
+        let premium = self
+            .session
+            .my_user_id
+            .and_then(|id| self.session.user(id))
+            .is_some_and(|u| u.is_premium);
+        if duration_secs < 0 || custom_emoji_id.is_some_and(|id| id <= 0 || !premium) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if custom_emoji_id.is_none() {
+            return Ok(0);
+        }
+        crate::main_menu::emoji_status_expiration(crate::state::unix_ms_now() / 1000, duration_secs)
+            .ok_or(ConnectSendError::InvalidRequest)
+    }
+
+    fn status_change_busy(&self) -> bool {
+        let requests = &self.session.requests;
+        requests.has_purpose(RequestPurpose::SetEmojiStatus)
+            || requests.has_purpose(RequestPurpose::ClearRecentEmojiStatuses)
+    }
+
+    /// Set a collectible (upgraded gift) status for `duration_secs`
+    /// (`0` keeps it). `custom_emoji_id` is the gift model's emoji, the
+    /// cell the selector showed. `Ok(None)`: another change is in flight.
+    pub fn change_collectible_emoji_status(
+        &mut self,
+        custom_emoji_id: i64,
+        duration_secs: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        let gift = self
+            .session
+            .stickers
+            .emoji
+            .upgraded_gift_statuses
+            .iter()
+            .filter_map(|item| item.gift.clone())
+            .find(|gift| gift.model_custom_emoji_id == custom_emoji_id)
+            .ok_or(ConnectSendError::InvalidRequest)?;
+        let expiration = self.status_change_expiration(Some(custom_emoji_id), duration_secs)?;
+        if self.status_change_busy() {
+            return Ok(None);
+        }
+        self.session.stickers.emoji.status_note = None;
+        self.session.stickers.emoji.pending_status_emoji = None;
+        self.emoji_set_request(RequestPurpose::SetEmojiStatus, |extra| {
+            crate::telegram::requests_emoji::set_collectible_emoji_status(extra, &gift, expiration)
+        })
+    }
+
+    /// `custom_emoji_id: None` removes the status.
     pub fn change_emoji_status(
         &mut self,
         custom_emoji_id: Option<i64>,
         duration_secs: i32,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if duration_secs < 0
-            || custom_emoji_id.is_some_and(|id| id <= 0)
-            || !self
-                .session
-                .my_user_id
-                .and_then(|id| self.session.user(id))
-                .is_some_and(|u| u.is_premium)
-        {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::SetEmojiStatus)
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::ClearRecentEmojiStatuses)
-        {
+        let expiration = self.status_change_expiration(custom_emoji_id, duration_secs)?;
+        if self.status_change_busy() {
             return Ok(None);
         }
-        let expiration = if custom_emoji_id.is_none() {
-            0
-        } else {
-            crate::main_menu::emoji_status_expiration(
-                crate::state::unix_ms_now() / 1000,
-                duration_secs,
-            )
-            .ok_or(ConnectSendError::InvalidRequest)?
-        };
         self.session.stickers.emoji.status_note = None;
         let request = self.emoji_set_request(RequestPurpose::SetEmojiStatus, |extra| {
             crate::telegram::requests_emoji::set_emoji_status(extra, custom_emoji_id, expiration)
@@ -120,7 +161,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     pub(crate) fn maybe_resolve_emoji_status_choices(&mut self) -> Result<(), ConnectSendError> {
         if !self.chats_path_active()
-            || !((self.session.stickers.emoji.open && self.session.stickers.emoji.status_open)
+            || !(self.session.stickers.emoji.status_open
                 || self.session.stickers.emoji.chat_status_open)
             || self
                 .session
@@ -159,6 +200,14 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .chat_default_status_ids
                     .iter()
                     .copied(),
+            )
+            .chain(
+                self.session
+                    .stickers
+                    .emoji
+                    .upgraded_gift_statuses
+                    .iter()
+                    .filter_map(|item| item.gift.as_ref().map(|g| g.model_custom_emoji_id)),
             )
             .filter(|id| {
                 *id > 0

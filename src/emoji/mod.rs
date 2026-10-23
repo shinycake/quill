@@ -34,7 +34,6 @@ pub struct EmojiPanel {
     pub pack_files: std::collections::HashMap<i64, Vec<crate::ids::FileId>>,
     pub outdated_packs: std::collections::HashSet<i64>,
     pub status_open: bool,
-    pub status_duration_secs: i32,
     pub status_note: Option<String>,
     pub status_resolution_attempted: std::collections::HashSet<i64>,
     pub open: bool,

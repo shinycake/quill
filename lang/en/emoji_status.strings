@@ -1,0 +1,13 @@
+// emoji_status: the emoji status selector and its "Set Status for..." box (tdesktop English).
+"lng_cancel" = "Cancel";
+"lng_emoji_status_for_submit" = "Set Status";
+"lng_emoji_status_for_title" = "Set Status for...";
+"lng_emoji_status_menu_duration_any" = "Set Status for {duration}";
+"lng_emoji_status_remove" = "Remove Status";
+"lng_manage_messages_ttl_after_custom" = "Custom";
+"lng_weeks#one" = "{count} week";
+"lng_weeks#other" = "{count} weeks";
+"qll_emoji_status_collectibles" = "Collectibles";
+"qll_emoji_status_search" = "Search emoji statuses";
+"qll_emoji_status_selector" = "Emoji status";
+"qll_emoji_status_time_picker" = "Status duration";

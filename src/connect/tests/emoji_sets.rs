@@ -339,6 +339,45 @@ fn emoji_status_choices_resolution_timing_and_confirmed_clear() {
         driver.session.stickers.emoji.status_note.as_deref(),
         Some("Recent emoji statuses cleared.")
     );
+    // The selector also lists the collectibles, and sets one as its gift.
+    driver.load_emoji_status_choices().unwrap();
+    let gifts = request_id("getUpgradedGiftEmojiStatuses");
+    ingest(
+        &mut driver,
+        json!({"@type":"emojiStatuses","@extra":gifts.as_extra(),"emoji_statuses":[{"@type":"emojiStatus","type":{"@type":"emojiStatusTypeUpgradedGift","upgraded_gift_id":"41","gift_title":"Plush","gift_name":"Plush-1","model_custom_emoji_id":"5555","symbol_custom_emoji_id":"5556","backdrop_colors":{"@type":"upgradedGiftBackdropColors","center_color":1,"edge_color":2,"symbol_color":3,"text_color":4}},"expiration_date":0}]}),
+    );
+    assert!(driver.change_collectible_emoji_status(777, 0).is_err());
+    let gift = driver
+        .change_collectible_emoji_status(5555, 3600)
+        .unwrap()
+        .unwrap();
+    let sent = sent_request(&recorder, "setEmojiStatus");
+    let kind = &sent["emoji_status"]["type"];
+    assert_eq!(kind["@type"], "emojiStatusTypeUpgradedGift");
+    assert_eq!(kind["upgraded_gift_id"], "41");
+    assert_eq!(kind["model_custom_emoji_id"], "5555");
+    assert_eq!(kind["backdrop_colors"]["edge_color"], 2);
+    assert!(sent["emoji_status"]["expiration_date"].as_u64().unwrap() > 0);
+    assert!(
+        driver
+            .change_collectible_emoji_status(5555, 0)
+            .unwrap()
+            .is_none(),
+        "one change at a time"
+    );
+    ingest(&mut driver, json!({"@type":"ok","@extra":gift.as_extra()}));
+    // Without Premium a status cannot be set, but it can be removed.
+    ingest(
+        &mut driver,
+        json!({"@type":"updateUser","user":{"@type":"user","id":7,"first_name":"Test","last_name":"","phone_number":"","is_premium":false,"type":{"@type":"userTypeRegular"}}}),
+    );
+    assert!(driver.change_emoji_status(Some(91), 0).is_err());
+    assert!(driver.change_collectible_emoji_status(5555, 0).is_err());
+    let removed = driver.change_emoji_status(None, 0).unwrap().unwrap();
+    ingest(
+        &mut driver,
+        json!({"@type":"ok","@extra":removed.as_extra()}),
+    );
     driver.session.auth = AuthorizationState::WaitPhoneNumber;
     assert!(driver.load_emoji_status_choices().is_err());
     assert!(driver.clear_recent_emoji_statuses().is_err());

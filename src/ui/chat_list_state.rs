@@ -58,8 +58,6 @@ pub(crate) struct ChatListUi {
     pub(super) archive_hint_open: bool,
     /// The main menu's My Groups (`false`) or My Channels (`true`) list is open.
     pub(super) my_chats_open: Option<bool>,
-    /// Status picked with "Other..." in the duration menu, waiting for hours.
-    pub(super) status_other_for: Option<i64>,
     /// Phase 6: sidebar tab — `true` shows the contacts list instead of
     /// the chat list.
     pub(super) contacts_tab_open: bool,
@@ -110,7 +108,6 @@ impl ChatListUi {
             filter: ChatListFilter::All,
             archive_hint_open: false,
             my_chats_open: None,
-            status_other_for: None,
             contacts_tab_open: false,
             calls_tab_open: false,
             forum_chats_peek: false,

@@ -9,7 +9,8 @@ use quill::lang::{keys, tr};
 pub(crate) struct PickerUi {
     /// The composer's emoji / sticker / GIF popover.
     pub(super) media_panel: super::media_panel::MediaPanel,
-    pub(super) emoji_status_hours_input: Entity<TextareaState>,
+    /// The emoji status selector's search (cleared on each open).
+    pub(super) status_search_input: Entity<TextareaState>,
     pub(super) emoji_set_search_input: Entity<TextareaState>,
     pub(super) emoji_search_input: Entity<TextareaState>,
     /// The reaction selector's own search (cleared on each open).
@@ -30,11 +31,17 @@ impl PickerUi {
         emoji_search_input: Entity<TextareaState>,
         reaction_search_input: Entity<TextareaState>,
     ) -> Self {
-        let emoji_status_hours_input = cx.new(|cx| {
+        let status_search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder(tr(keys::Q_MISC_CUSTOM_DURATION_IN_HOURS))
+                .placeholder(tr(keys::Q_EMOJI_STATUS_SEARCH))
                 .auto_grow(1, 1)
         });
+        cx.subscribe(&status_search_input, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        })
+        .detach();
         let emoji_set_search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder(tr(keys::Q_MISC_SEARCH_EMOJI_PACKS))
@@ -60,7 +67,7 @@ impl PickerUi {
         });
         Self {
             media_panel: super::media_panel::MediaPanel::default(),
-            emoji_status_hours_input,
+            status_search_input,
             emoji_set_search_input,
             emoji_search_input,
             reaction_search_input,

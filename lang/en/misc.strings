@@ -241,7 +241,6 @@
 "qll_misc_crop" = "Crop";
 "qll_misc_custom" = "Custom";
 "qll_misc_custom_accent_color" = "Custom accent color";
-"qll_misc_custom_duration_in_hours" = "Custom duration in hours";
 "qll_misc_custom_emoji" = "Custom emoji";
 "qll_misc_custom_emoji_reactions_need_telegram" = "Custom emoji reactions need Telegram Premium";
 "qll_misc_custom_themes" = "Custom themes";
@@ -279,7 +278,6 @@
 "qll_misc_email_telegram_support" = "Email Telegram support";
 "qll_misc_enable_notifications" = "Enable notifications";
 "qll_misc_enter_phone_number" = "enter phone number";
-"qll_misc_enter_the_hours_below_then" = "Enter the hours below, then press Use custom duration.";
 "qll_misc_enter_the_verification_code_from" = "enter the verification code from Telegram";
 "qll_misc_enter_your_two_step_verification" = "enter your two-step verification password";
 "qll_misc_export" = "Export…";
