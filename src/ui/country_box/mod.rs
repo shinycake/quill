@@ -203,8 +203,9 @@ impl QuillApp {
         self.close_country_box(host, cx);
     }
 
-    /// The form-field row that opens the box: the value, or the label while
-    /// nothing is chosen.
+    /// The field row that opens the box (tdesktop's read-only country
+    /// field): the name, or the muted label while nothing is chosen, with a
+    /// chevron. A kit `Button` keeps it focusable and Enter-activated.
     pub(super) fn country_field_button(
         &self,
         host: CountryHost,
@@ -212,15 +213,32 @@ impl QuillApp {
         value: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let text = if value.is_empty() {
-            label.to_string()
-        } else {
-            format!("{label}: {value}")
-        };
+        let muted = cx.theme().muted_foreground;
+        let empty = value.is_empty();
+        let text = if empty { label.to_string() } else { value };
         Button::new(SharedString::from(format!("country-field-{}", host.id())))
-            .label(text)
             .outline()
             .w_full()
+            .h(px(36.))
+            .px_3()
+            .justify_start()
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex_1()
+                            .overflow_hidden()
+                            .text_left()
+                            .when(empty, |this| this.text_color(muted))
+                            .child(text),
+                    )
+                    .child(Icon::new(IconName::ChevronDown).small().text_color(muted)),
+            )
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.open_country_box(host, window, cx);
             }))

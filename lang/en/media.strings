@@ -817,3 +817,6 @@
 "lng_polls_create_countries_count#other" = "{count} countries";
 "lng_polls_create_countries_limit#one" = "You can choose up to {count} country.";
 "lng_polls_create_countries_limit#other" = "You can choose up to {count} countries.";
+"lng_polls_create_limit_by_country" = "Limit by Country";
+"lng_polls_create_limit_by_country_about" = "Only users from selected countries can vote.";
+"lng_polls_create_choose_country" = "Please choose at least one country.";

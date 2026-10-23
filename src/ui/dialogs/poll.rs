@@ -58,6 +58,8 @@ pub struct PollDialog {
     pub(crate) explanation_input: Entity<TextareaState>,
     pub(crate) duration_input: Entity<TextareaState>,
     /// The allowed countries (ISO codes), picked in the country box.
+    /// tdesktop's "Limit by Country" switch (channels); off keeps no codes.
+    pub(crate) limit_by_country: bool,
     pub(crate) country_codes: Vec<String>,
     pub(crate) country_box: Option<crate::ui::country_box::CountryBox>,
     pub(crate) is_anonymous: bool,
@@ -128,6 +130,7 @@ impl PollDialog {
             option_inputs,
             explanation_input,
             duration_input,
+            limit_by_country: false,
             country_codes: Vec::new(),
             country_box: None,
             is_anonymous: true,
@@ -161,7 +164,11 @@ impl PollDialog {
                 .filter(|(_, option)| !option.trim().is_empty())
                 .position(|(index, _)| index == row)
         });
-        let country_codes = self.country_codes.clone();
+        let country_codes = if self.limit_by_country {
+            self.country_codes.clone()
+        } else {
+            Vec::new()
+        };
         PollDraft {
             question: value(&self.question_input),
             description: value(&self.description_input),
@@ -230,7 +237,7 @@ impl PollDialog {
             || !value(&self.description_input).trim().is_empty()
             || !value(&self.explanation_input).trim().is_empty()
             || !value(&self.duration_input).trim().is_empty()
-            || !self.country_codes.is_empty()
+            || self.limit_by_country
             || self
                 .option_inputs
                 .iter()

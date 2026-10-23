@@ -19,6 +19,14 @@ fn open_requested() -> bool {
     std::env::var("QUILL_DEMO_COUNTRY").is_ok_and(|mode| mode == "open")
 }
 
+/// Open the demo channel as its owner, so the composer and poll show.
+pub(super) fn open_demo_channel(session: &mut quill::state::Session) {
+    if let Some(chat) = session.chats.get_mut(&13) {
+        chat.my_member_status = Some(quill::telegram::envelope::ChannelMemberStatus::Creator);
+    }
+    session.open_chat(quill::ids::ChatId(13));
+}
+
 pub(super) fn shipping_form() -> PaymentFormData {
     PaymentFormData {
         id: 1,
@@ -57,8 +65,12 @@ pub(super) fn shipping_form() -> PaymentFormData {
 
 impl QuillApp {
     fn demo_country_poll(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(session) = self.demo_session.as_mut() {
+            open_demo_channel(session);
+        }
         self.open_poll_dialog(window, cx);
         if let Some(dialog) = self.composer_ui.poll_dialog.as_mut() {
+            dialog.limit_by_country = true;
             dialog.country_codes = vec!["US".into(), "GB".into()];
         }
         if open_requested() {

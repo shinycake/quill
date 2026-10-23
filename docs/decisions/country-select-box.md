@@ -30,8 +30,12 @@
 - Giveaway: its form already picks countries from a list with checkboxes
   (`GiveawayPage::Countries`), not typed, so it was left as is. It is not on the
   shared box yet; `parity:premium-giveaways` is untouched.
-- Deviation: tdesktop gates the poll country row behind a toggle and only for
-  broadcast channels; Quill keeps its existing always-visible row.
+- The poll follows `create_poll_box.cpp`: a "Limit by Country" switch (with
+  tdesktop's about line) shown in broadcast channels only; the "Allowed
+  Countries" row appears under it while on, turning it off clears the codes,
+  and creating with it on and no country shows "Please choose at least one
+  country." The shipping field is a left-aligned, input-height row with a
+  chevron (muted "Country" when empty), as in `payments_edit_information.cpp`.
 
 ## How verified
 
