@@ -92,7 +92,12 @@ impl QuillApp {
 
     /// The poll's panel while its deadline box is open.
     pub(in crate::ui) fn poll_deadline_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let deadline = self.composer_ui.poll_dialog.as_ref()?.deadline_box.as_ref()?;
+        let deadline = self
+            .composer_ui
+            .poll_dialog
+            .as_ref()?
+            .deadline_box
+            .as_ref()?;
         Some(
             div()
                 .id("poll-dialog")
@@ -146,7 +151,10 @@ mod tests {
     #[test]
     fn the_picker_starts_where_the_choice_is() {
         assert_eq!(deadline_start(PollClose::Date(5000), 1000), 5000);
-        assert_eq!(deadline_start(PollClose::Date(500), 1000), 1000 + POLL_DEFAULT_PERIOD_SECS);
+        assert_eq!(
+            deadline_start(PollClose::Date(500), 1000),
+            1000 + POLL_DEFAULT_PERIOD_SECS
+        );
         assert_eq!(deadline_start(PollClose::Period(3600), 1000), 4600);
     }
 

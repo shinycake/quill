@@ -422,7 +422,8 @@ impl PollDraft {
             if self.close_date < now + POLL_DEADLINE_MIN_SECS {
                 return Some("the deadline must be in the future");
             }
-            if self.close_date > now + poll_close_max((self.close_max > 0).then_some(self.close_max))
+            if self.close_date
+                > now + poll_close_max((self.close_max > 0).then_some(self.close_max))
             {
                 return Some("the deadline is too far ahead");
             }

@@ -63,7 +63,11 @@ fn the_box_opens_with_tdesktops_defaults(cx: &mut TestAppContext) {
             assert!(window.try_find(id).is_some(), "{id} is shown");
         }
         // Channel-only rows and the duration's own rows stay hidden.
-        for id in ["poll-toggle-subscribers", "poll-toggle-country", "poll-ends"] {
+        for id in [
+            "poll-toggle-subscribers",
+            "poll-toggle-country",
+            "poll-ends",
+        ] {
             assert!(window.try_find(id).is_none(), "{id} is hidden");
         }
     });
@@ -87,7 +91,9 @@ fn set_correct_answer_turns_off_what_a_quiz_cannot_have(cx: &mut TestAppContext)
     });
     // The locked "Allow Adding Options" row ignores a click.
     vcx.update(|window, cx| window.click("poll-toggle-add-options", cx));
-    app.update(&mut vcx, |app, _| assert!(!dialog(app).allow_adding_options));
+    app.update(&mut vcx, |app, _| {
+        assert!(!dialog(app).allow_adding_options)
+    });
 }
 
 #[gpui_kit::test]
@@ -205,7 +211,10 @@ fn cancelling_the_deadline_box_keeps_the_choice(cx: &mut TestAppContext) {
 fn the_duration_cap_comes_from_tdlib(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update(&mut vcx, |app, _| {
-        assert_eq!(app.poll_close_max_secs(), quill::poll::POLL_DEADLINE_MAX_SECS);
+        assert_eq!(
+            app.poll_close_max_secs(),
+            quill::poll::POLL_DEADLINE_MAX_SECS
+        );
         if let Some(session) = app.demo_session.as_mut() {
             session.payments.poll_open_period_max = Some(7 * 86_400);
         }
@@ -250,19 +259,19 @@ fn the_request_poll_button_opens_the_box_for_the_type_it_asks_for(cx: &mut TestA
                 Some((
                     MessageId(500),
                     ReplyKeyboard {
-                    rows: vec![vec![KeyboardButton {
-                        text: "Make a poll".into(),
-                        kind: KeyboardButtonType::RequestPoll {
-                            force_regular,
-                            force_quiz,
-                        },
-                    }]],
-                    is_persistent: false,
-                    resize_keyboard: false,
-                    one_time: false,
-                    is_personal: false,
-                    force_reply: false,
-                    placeholder: String::new(),
+                        rows: vec![vec![KeyboardButton {
+                            text: "Make a poll".into(),
+                            kind: KeyboardButtonType::RequestPoll {
+                                force_regular,
+                                force_quiz,
+                            },
+                        }]],
+                        is_persistent: false,
+                        resize_keyboard: false,
+                        one_time: false,
+                        is_personal: false,
+                        force_reply: false,
+                        placeholder: String::new(),
                     },
                 )),
             );

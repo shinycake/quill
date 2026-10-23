@@ -5,6 +5,7 @@ use super::app::QuillApp;
 use super::country_box::CountryHost;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::dialogs::poll::QuizLock;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -16,7 +17,6 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
-use crate::ui::dialogs::poll::QuizLock;
 use quill::poll::{
     POLL_OPTIONS_MAX, POLL_OPTIONS_MIN, PollDraft, chat_allows_polls, voter_count_label,
 };

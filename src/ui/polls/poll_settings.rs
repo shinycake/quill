@@ -80,7 +80,13 @@ impl PollDialog {
             .quiz_correct_rows
             .iter()
             .filter(|marked| **marked != removed)
-            .map(|marked| if *marked > removed { marked - 1 } else { *marked })
+            .map(|marked| {
+                if *marked > removed {
+                    marked - 1
+                } else {
+                    *marked
+                }
+            })
             .collect();
     }
 }
@@ -129,16 +135,12 @@ impl QuillApp {
     /// The whole settings section, under its "Settings" title.
     pub(in crate::ui) fn poll_settings(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.composer_ui.poll_dialog.as_ref()?;
-        let mut section = div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(
-                div()
-                    .text_sm()
-                    .font_semibold()
-                    .child(tr(keys::POLLS_CREATE_SETTINGS)),
-            );
+        let mut section = div().flex().flex_col().gap_2().child(
+            div()
+                .text_sm()
+                .font_semibold()
+                .child(tr(keys::POLLS_CREATE_SETTINGS)),
+        );
         if !dialog.in_channel {
             section = section.child(self.poll_switch_row(
                 "poll-toggle-who-voted",
