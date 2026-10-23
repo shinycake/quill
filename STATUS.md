@@ -387,10 +387,10 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Public (fallback) photo as the last entry in a user's photos <!-- parity:viewer-public-photo -->
 - [x] Photo viewer pages past 100 photos and the counter uses the total <!-- parity:viewer-photos-paging -->
 - [ ] Video avatars play on the profile cover and in the photo viewer <!-- parity:profile-video-avatar -->
-- [ ] Profile "More" menu in the info section (tdesktop FillDialogsEntryMenu, Section::Profile) <!-- parity:profile-more-menu -->
-- [ ] Private chat "Restrict saving content" toggle (toggleChatHasProtectedContent) <!-- parity:profile-private-no-forwards -->
-- [ ] Link and location rows on group and channel profiles <!-- parity:profile-link-row -->
-- [ ] "N members, M online" status on group profiles <!-- parity:profile-members-online -->
+- [x] Profile "More" menu in the info section (tdesktop FillDialogsEntryMenu, Section::Profile) <!-- parity:profile-more-menu -->
+- [x] Private chat "Restrict saving content" toggle (toggleChatHasProtectedContent) <!-- parity:profile-private-no-forwards -->
+- [x] Link and location rows on group and channel profiles <!-- parity:profile-link-row -->
+- [x] "N members, M online" status on group profiles <!-- parity:profile-members-online -->
 - [ ] Bot profiles show monthly users <!-- parity:profile-bot-monthly-users -->
 - [ ] Story ring on the profile avatar that opens the stories <!-- parity:profile-story-ring -->
 - [ ] Stars rating pill on user profiles <!-- parity:profile-stars-rating -->
@@ -565,7 +565,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Group and channel type box: public or private, link with live availability check <!-- parity:admin-type-box -->
 - [x] Channels can set a public link <!-- parity:channel-public-link -->
 - [x] Public link availability and validation messages (checkChatUsername) <!-- parity:admin-link-availability -->
-- [ ] Group and channel info action buttons: Mute, Join, Discuss, Manage, Video chat, Gift, Report, Leave <!-- parity:groups-info-action-row -->
+- [x] Group and channel info action buttons: Mute, Join, Discuss, Manage, Video chat, Gift, Report, Leave <!-- parity:groups-info-action-row -->
 - [x] Permissions box grouped like tdesktop, with media sub-permissions, slow mode and boost unrestrict <!-- parity:admin-permissions-groups -->
 - [x] Add an exception and add a removed user from the permissions screens <!-- parity:admin-exceptions-add -->
 - [x] Member lists page past 200 <!-- parity:groups-member-paging -->
