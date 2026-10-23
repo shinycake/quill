@@ -1,2 +1,0 @@
-# Send Location map picker: native map from TDLib map images, venues, search, platform location
-parity:composer-location-picker

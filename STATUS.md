@@ -226,7 +226,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Share a contact card from a profile <!-- parity:composer-share-contact -->
 - [x] Create checklists <!-- parity:composer-checklist -->
 - [x] Attachment-menu bots in the attach menu <!-- parity:composer-attach-bots -->
-- [ ] Send Location opens a map picker: drag the map to place the pin, zoom, send my current location, nearby and searched places (no typed coordinates) <!-- parity:composer-location-picker -->
+- [x] Send Location opens a map picker: drag the map to place the pin, zoom, send my current location, nearby and searched places (no typed coordinates) <!-- parity:composer-location-picker -->
 - [x] Drop zones: send quickly versus as documents; dropped folder becomes an archive <!-- parity:composer-drop-modes -->
 - [x] Send box options: HD photo toggle, GIF with caption, paid media price, video cover <!-- parity:composer-send-options -->
 - [x] Link preview options popover: choose link, move up or down, shrink or enlarge <!-- parity:composer-link-options -->
