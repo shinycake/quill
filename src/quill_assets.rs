@@ -152,7 +152,9 @@ gpui_kit::assets::icon_assets!(
         Monitor,
         // The QR code box (`ui::peer_qr`).
         QrCode,
-        TimerOff
+        TimerOff,
+        // Send Location's Show my location (`ui::location_picker`).
+        LocateFixed
     ]
 );
 

@@ -155,6 +155,12 @@ impl Session {
                         self.stickers.gifs.search_bot_user_id = None;
                     }
                 }
+                if name == "venue_search_bot_username" {
+                    self.location.set_venue_bot_username(match &value {
+                        OptionValue::String(name) => name.clone(),
+                        _ => String::new(),
+                    });
+                }
                 if name == "message_caption_length_max"
                     && let OptionValue::Integer(limit) = value
                 {

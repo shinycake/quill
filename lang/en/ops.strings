@@ -703,8 +703,6 @@
 "qll_ops_kb" = "{n_1024} KB";
 "qll_ops_keep" = "Keep";
 "qll_ops_last_name" = "Last name";
-"qll_ops_latitude" = "Latitude";
-"qll_ops_latitude_e_g_37_7749" = "Latitude, e.g. 37.7749";
 "qll_ops_learn_more" = "Learn more";
 "qll_ops_leave_no_trace_on_our" = "Leave no trace on our servers";
 "qll_ops_leaves" = "Leaves";
@@ -728,8 +726,6 @@
 "qll_ops_loading_secret_chat" = "🔒 Loading secret chat…";
 "qll_ops_loading_the_gift" = "Loading the gift…";
 "qll_ops_log_out" = "Log out";
-"qll_ops_longitude" = "Longitude";
-"qll_ops_longitude_e_g_122_4194" = "Longitude, e.g. -122.4194";
 "qll_ops_lower_data_usage_during_telegram" = "Lower data usage during Telegram calls";
 "qll_ops_make_paid" = "Make paid";
 "qll_ops_marketplace_collectible_gift" = "Marketplace collectible gift";
@@ -929,7 +925,6 @@
 "qll_ops_send_away_message" = "Send Away Message";
 "qll_ops_send_contact" = "Send Contact";
 "qll_ops_send_greeting_message" = "Send Greeting Message";
-"qll_ops_send_location" = "Send Location";
 "qll_ops_send_message_as" = "Send message as…";
 "qll_ops_send_now" = "Send now";
 "qll_ops_send_the_code_again" = "Send the code again";
@@ -1006,7 +1001,6 @@
 "qll_ops_the_chosen_folder_is_missing" = "The chosen folder is missing, so the default one is used.";
 "qll_ops_the_end_time_must_be" = "The end time must be after the start time.";
 "qll_ops_the_greeting_message_stays_off" = "The greeting message stays off until it has messages.";
-"qll_ops_the_location_is_sent_once" = "The location is sent once; it does not follow you.";
 "qll_ops_the_media_will_unlock_for" = "The media will unlock for {price} Stars";
 "qll_ops_the_time_zones_are_still" = "The time zones are still loading.";
 "qll_ops_this_cant_be_undone" = "This can't be undone.";

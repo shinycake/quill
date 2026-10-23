@@ -14,6 +14,8 @@ pub struct InlineQueryResultsPage {
     /// entries, parsed to `AnimationItem`s for the GIF panel search. The
     /// per-result summaries above carry the same entries' grid image.
     pub animations: Vec<AnimationItem>,
+    /// `inlineQueryResultVenue` entries, for Send Location's venue list.
+    pub venues: Vec<crate::location_picker::Venue>,
     /// Files referenced by the results (grid images) and by `animations`
     /// (same `remember_files` shape as S8's `Stickers` payload).
     pub files: Vec<ParsedFile>,

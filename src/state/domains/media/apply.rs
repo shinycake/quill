@@ -1,4 +1,5 @@
 //! Applies TDLib updates and answers for files, downloads, uploads and the shared-media gallery.
+use crate::location_picker::LocationPickerPurpose;
 use crate::state::*;
 use crate::telegram::envelope::MediaPayload;
 
@@ -33,6 +34,13 @@ impl Session {
                     && pending.purpose == RequestPurpose::GetMapThumbnailFile
                 {
                     self.media.map_thumbs.answered(pending.id, file.id.0);
+                }
+                if let Some(pending) = pending
+                    && let RequestPurpose::Media(MediaPurpose::LocationPicker(
+                        LocationPickerPurpose::MapTile | LocationPickerPurpose::VenueIcon,
+                    )) = pending.purpose
+                {
+                    self.location.file_answered(pending.id.0, Some(file.id));
                 }
                 let paths = self.media.files.paths_revision();
                 self.upsert_file(file, true);

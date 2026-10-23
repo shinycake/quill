@@ -56,6 +56,8 @@ pub struct QuillApp {
     pub(super) auth_ui: super::auth_state::AuthUi,
     /// Search fields: global search and search in chat (`ui/search_state.rs`).
     pub(super) search_ui: super::search_state::SearchUi,
+    /// Send Location's map gesture, search field and timers (`ui/location_picker/state.rs`).
+    pub(super) location_ui: super::location_picker::state::LocationPickerUi,
     /// The gallery's search field (`ui/shared_media_search_state.rs`).
     pub(super) media_search: super::shared_media_search_state::SharedMediaSearchUi,
     /// Forwarding and the share box (`ui/share_state.rs`).

@@ -74,6 +74,7 @@ ui = [
     "dep:dispatch2",
     "dep:jxl-oxide",
     "dep:objc2-core-bluetooth",
+    "dep:objc2-core-location",
     "dep:async-io",
     "dep:futures-lite",
 ]
@@ -252,6 +253,8 @@ objc2-core-foundation = { version = "0.3.2", optional = true, default-features =
 objc2-core-bluetooth = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CBAdvertisementData", "CBCentralManager", "CBCentralManagerConstants", "CBManager", "CBPeer", "CBPeripheral", "CBUUID", "dispatch2"] }
 # Badge authorization (the Dock draws badges only for apps allowed to badge).
 objc2-user-notifications = { version = "0.3", optional = true }
+# Send Location's "where am I" and the pin's address (src/ui/location_picker/geolocation/macos.rs).
+objc2-core-location = { version = "0.3.2", optional = true, default-features = false, features = ["std", "block2", "CLLocationManager", "CLLocationManagerDelegate", "CLLocation", "CLGeocoder", "CLPlacemark", "CLError"] }
 # OS notifications: the inline reply field and the sender picture ride beside
 # GPUI's `SystemNotification` through the Quill patch in the vendored platform
 # crate (`notification_extras`, docs/decisions/codex-notify-native.md). Same
@@ -304,7 +307,9 @@ windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalizati
     "Foundation_Metadata", "Graphics", "Graphics_Capture", "Graphics_DirectX", "Graphics_DirectX_Direct3D11",
     "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common",
     "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_System_WinRT", "Win32_System_WinRT_Direct3D11",
-    "Win32_System_WinRT_Graphics_Capture"] }
+    "Win32_System_WinRT_Graphics_Capture",
+    # Send Location (src/ui/location_picker/geolocation/windows.rs).
+    "Devices_Geolocation"] }
 # OS notifications: the inline reply field and the sender picture ride beside
 # GPUI's `SystemNotification` through the Quill patch in the vendored platform
 # crate (`notification_extras`, docs/decisions/codex-notify-native.md). Same

@@ -1,4 +1,5 @@
 //! Failed requests for files, downloads, uploads and the shared-media gallery.
+use crate::location_picker::LocationPickerPurpose;
 use crate::state::*;
 
 impl Session {
@@ -17,6 +18,19 @@ impl Session {
             && pending.purpose == RequestPurpose::GetMapThumbnailFile
         {
             self.media.map_thumbs.failed(pending.id);
+        }
+        if let Some(pending) = pending
+            && let RequestPurpose::Media(MediaPurpose::LocationPicker(purpose)) = pending.purpose
+        {
+            match purpose {
+                LocationPickerPurpose::ResolveVenueBot => self.location.venue_bot_failed(),
+                LocationPickerPurpose::SearchVenues { generation } => {
+                    self.location.venues_failed(generation)
+                }
+                LocationPickerPurpose::MapTile | LocationPickerPurpose::VenueIcon => {
+                    self.location.file_answered(pending.id.0, None)
+                }
+            }
         }
         // Slice media-shared-gallery: failed gallery-tab fetch — the
         // tab shows the failed state with Retry, never the spinner
