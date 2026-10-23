@@ -1,2 +1,0 @@
-# Recent actions load older events on scroll, no Load more / Refresh buttons
-parity:admin-log-scroll-load
