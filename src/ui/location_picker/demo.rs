@@ -4,6 +4,7 @@
 //! a fixed list around the pin, filtered by the search text.
 //! `QUILL_DEMO_LOCATION` picks what the platform says: `found` (default),
 //! `denied`, `unavailable` or `locating` (no answer yet).
+//! `QUILL_DEMO_LOCATION_SEARCH` opens the search with that text.
 #![deny(clippy::indexing_slicing)]
 
 use super::super::app::QuillApp;
@@ -185,10 +186,17 @@ pub(super) fn pump(app: &mut QuillApp) {
 }
 
 impl QuillApp {
-    fn demo_location_picker(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+    fn demo_location_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
             session.open_chat(DEMO_CHAT);
         }
         self.open_location_picker(cx);
+        if let Ok(text) = std::env::var("QUILL_DEMO_LOCATION_SEARCH") {
+            self.location_search_open(window, cx);
+            if let Some(input) = self.location_ui.search.clone() {
+                input.update(cx, |input, cx| input.set_value(text.clone(), window, cx));
+            }
+            self.location_search_changed(Some(text), cx);
+        }
     }
 }

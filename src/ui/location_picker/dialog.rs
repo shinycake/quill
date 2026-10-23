@@ -39,7 +39,7 @@ fn venue_color(venue_type: &str) -> Hsla {
 }
 
 impl QuillApp {
-    fn location_search_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn location_search_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let input = cx.new(|cx| InputState::new(window, cx).placeholder(tr(keys::DLG_FILTER)));
         cx.subscribe_in(
             &input,
@@ -72,6 +72,7 @@ impl QuillApp {
         if let Some(search) = self.location_ui.search.as_ref() {
             return h_flex()
                 .w_full()
+                .pl_4()
                 .pr_8()
                 .gap_1()
                 .debug_selector(|| "location-search".to_string())
@@ -110,6 +111,7 @@ impl QuillApp {
             .is_some_and(|picker| picker.can_search());
         h_flex()
             .w_full()
+            .pl_4()
             .pr_8()
             .justify_between()
             .items_center()
@@ -238,7 +240,13 @@ impl QuillApp {
             .child(
                 v_flex()
                     .min_w_0()
-                    .child(div().text_sm().truncate().child(venue.title.clone()))
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .truncate()
+                            .child(venue.title.clone()),
+                    )
                     .child(
                         div()
                             .text_xs()
