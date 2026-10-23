@@ -1091,7 +1091,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Events: contact joined Telegram, pinned messages <!-- parity:notify-events -->
 - [x] Include muted chats in folder counters <!-- parity:notify-muted-counters -->
 - [x] Sender avatar in OS notifications (partial: Linux shipped; macOS and Windows need an image field on GPUI SystemNotification) <!-- parity:notify-avatar -->
-- [ ] Upload a custom notification sound from a file (tdesktop RingtonesBox "Upload Sound") <!-- parity:notify-upload-sound -->
+- [x] Upload a custom notification sound from a file (tdesktop RingtonesBox "Upload Sound") <!-- parity:notify-upload-sound -->
 
 ### Settings: appearance & chat
 
