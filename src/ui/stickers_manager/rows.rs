@@ -196,7 +196,13 @@ impl QuillApp {
             });
         let heading = div().truncate().font_medium().child(title.clone());
         let heading = if row.tab == ManagerTab::Trending && !set.is_viewed {
-            Badge::new().dot().child(heading).into_any_element()
+            h_flex()
+                .min_w_0()
+                .items_center()
+                .gap_1()
+                .child(heading)
+                .child(Badge::new().dot().child(div().size(px(8.))))
+                .into_any_element()
         } else {
             heading.into_any_element()
         };

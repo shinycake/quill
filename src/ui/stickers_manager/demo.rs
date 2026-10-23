@@ -17,6 +17,11 @@ register_demos![
         "screenshot demo — the stickers manager box"
     )
     .setup(QuillApp::demo_stickers_manager),
+    DemoSpec::chats(
+        "ready-masks-manager",
+        "screenshot demo — the masks manager box"
+    )
+    .setup(QuillApp::demo_masks_manager),
 ];
 
 /// A set whose cover is the demo picture `cover_file`.
@@ -62,6 +67,21 @@ fn demo_set(
 }
 
 impl QuillApp {
+    fn demo_masks_manager(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.demo_stickers_manager(window, cx);
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        let stickers = &mut session.stickers;
+        stickers.stickers.open = false;
+        stickers.masks.installed = stickers.stickers.sets.iter().take(3).cloned().collect();
+        stickers.masks.installed_loaded = true;
+        stickers.masks.archived = stickers.stickers.archived.iter().take(1).cloned().collect();
+        stickers.masks.archived_loaded = true;
+        stickers.masks.open = true;
+        self.settings.sticker_settings_open = false;
+    }
+
     fn demo_stickers_manager(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         let Some(session) = self.demo_session.as_mut() else {
             return;
