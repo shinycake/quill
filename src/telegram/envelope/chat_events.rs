@@ -11,7 +11,12 @@ use serde_json::Value;
 pub enum ChatEventAction {
     /// `chatEventMessageEdited` (line 7764). `text` is a short excerpt of
     /// the new message's text (empty for non-text content).
-    MessageEdited { message_id: i64, text: String },
+    MessageEdited {
+        message_id: i64,
+        text: String,
+        /// The text before the edit (`old_message`).
+        old_text: String,
+    },
     /// `chatEventMessageDeleted` (line 7767).
     MessageDeleted { message_id: i64, text: String },
     /// `chatEventMessagePinned` (line 7770).
@@ -92,7 +97,10 @@ pub struct ParsedChatEvent {
     pub action: ChatEventAction,
 }
 
-/// Phase D3c: short text excerpt of a `message` object inside a
+/// Longest message text kept for a log entry's message bubble.
+const MESSAGE_EXCERPT_CHARS: usize = 1000;
+
+/// Phase D3c: text excerpt of a `message` object inside a
 /// `chatEvent*` action (edited/deleted/pinned). Only `messageText`
 /// content yields text; anything else is an empty string so the UI
 /// falls back to an honest media-neutral phrasing.
@@ -109,8 +117,8 @@ pub(crate) fn chat_event_message_excerpt(message: Option<&Value>) -> (i64, Strin
         .and_then(|text| text.get("text"))
         .and_then(Value::as_str)
         .unwrap_or("");
-    let mut excerpt: String = raw.chars().take(80).collect();
-    if raw.chars().count() > 80 {
+    let mut excerpt: String = raw.chars().take(MESSAGE_EXCERPT_CHARS).collect();
+    if raw.chars().count() > MESSAGE_EXCERPT_CHARS {
         excerpt.push('…');
     }
     (id, excerpt)
@@ -155,7 +163,12 @@ pub(crate) fn parse_chat_event_action(value: Option<&Value>) -> ChatEventAction 
     match type_name.as_str() {
         "chatEventMessageEdited" => {
             let (message_id, text) = chat_event_message_excerpt(value.get("new_message"));
-            ChatEventAction::MessageEdited { message_id, text }
+            let (_, old_text) = chat_event_message_excerpt(value.get("old_message"));
+            ChatEventAction::MessageEdited {
+                message_id,
+                text,
+                old_text,
+            }
         }
         "chatEventMessageDeleted" => {
             let (message_id, text) = chat_event_message_excerpt(value.get("message"));

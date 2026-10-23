@@ -1,7 +1,7 @@
 //! `ready-event-log`: the recent-actions page of a channel the viewer
 //! administers, with a first page loaded and older events still to come
 //! (the spinner row at the end). `QUILL_DEMO_EVENT_LOG=exhausted` shows
-//! the end of the log without the spinner. Injected, no live Telegram.
+//! the end of the log without the spinner, `=empty` a log with no events. Injected, no live Telegram.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
@@ -64,10 +64,10 @@ fn seed_event_log_session(sink: Arc<MemorySink>) -> Session {
         "Poll closes on Friday.",
     ];
     let mut events = Vec::new();
-    let count = if std::env::var("QUILL_DEMO_EVENT_LOG").is_ok_and(|v| v == "exhausted") {
-        48
-    } else {
-        100
+    let count = match std::env::var("QUILL_DEMO_EVENT_LOG").as_deref() {
+        Ok("exhausted") => 48,
+        Ok("empty") => 0,
+        _ => 100,
     };
     for ix in 0..count {
         let id = 1_000 - ix;
@@ -108,7 +108,8 @@ fn seed_event_log_session(sink: Arc<MemorySink>) -> Session {
 }
 
 impl QuillApp {
-    fn demo_event_log(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn demo_event_log(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.ensure_event_log_search(window, cx);
         self.open_group_settings_view(CHANNEL, GroupSettingsView::RecentActions, cx);
     }
 }

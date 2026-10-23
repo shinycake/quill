@@ -115,6 +115,33 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// Store both halves of the Recent actions filter at once (the filter
+    /// box's Save): `None` / empty mean every type / every admin. The UI
+    /// follows with `refresh_chat_event_log`.
+    pub fn set_chat_event_log_filter(
+        &mut self,
+        chat_id: ChatId,
+        categories: Option<ChatEventLogFilterSet>,
+        admins: Vec<i64>,
+    ) {
+        match categories.filter(|set| set.any_enabled()) {
+            Some(set) => {
+                self.session.groups.event_log_filters.insert(chat_id.0, set);
+            }
+            None => {
+                self.session.groups.event_log_filters.remove(&chat_id.0);
+            }
+        }
+        if admins.is_empty() {
+            self.session.groups.event_log_users.remove(&chat_id.0);
+        } else {
+            self.session
+                .groups
+                .event_log_users
+                .insert(chat_id.0, admins);
+        }
+    }
+
     /// Show every admin again.
     pub fn clear_chat_event_log_users(&mut self, chat_id: ChatId) {
         self.session.groups.event_log_users.remove(&chat_id.0);

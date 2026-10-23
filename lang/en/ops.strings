@@ -306,8 +306,6 @@
 "qll_ops_age_verification" = "Age Verification";
 "qll_ops_agree_continue" = "Agree & Continue";
 "qll_ops_all_accounts" = "All accounts";
-"qll_ops_all_admins" = "✓ All admins";
-"qll_ops_all_admins_2" = "All admins";
 "qll_ops_already_local_or_in_progress" = "already local or in progress";
 "qll_ops_and_more" = "and {len} more";
 "qll_ops_answer" = "Answer";
@@ -445,7 +443,6 @@
 "qll_ops_could_not_change_screen_share" = "could not change screen share state: {err}";
 "qll_ops_could_not_change_the_sender" = "could not change the sender";
 "qll_ops_could_not_change_timer" = "could not change timer";
-"qll_ops_could_not_clear_filters" = "could not clear filters";
 "qll_ops_could_not_close_secret_chat" = "could not close secret chat";
 "qll_ops_could_not_decline_the_call" = "could not decline the call";
 "qll_ops_could_not_delete_invite_link" = "could not delete invite link";
@@ -454,7 +451,6 @@
 "qll_ops_could_not_delete_the_message" = "Could not delete the message.";
 "qll_ops_could_not_delete_the_shortcut" = "Could not delete the shortcut.";
 "qll_ops_could_not_download_please_try" = "Could not download. Please try again.";
-"qll_ops_could_not_filter_recent_actions" = "could not filter recent actions";
 "qll_ops_could_not_forward_messages" = "could not forward messages";
 "qll_ops_could_not_forward_to_chat" = "could not forward to {failed} chat(s)";
 "qll_ops_could_not_hang_up_the" = "could not hang up the call";
@@ -535,13 +531,11 @@
 "qll_ops_delete_shortcut" = "Delete Shortcut";
 "qll_ops_delete_this_secret_chat" = "Delete this secret chat?";
 "qll_ops_delete_with_all_messages" = "Delete with all messages?";
-"qll_ops_deleted_a_message" = "deleted a message";
 "qll_ops_deleted_an_invite_link" = "deleted an invite link";
 "qll_ops_deleted_invite_link" = "deleted invite link {quote}";
 "qll_ops_deleting" = "Deleting…";
 "qll_ops_deleting_invite_link" = "deleting invite link…";
 "qll_ops_deleting_revoked_links" = "deleting revoked links…";
-"qll_ops_deletions" = "Deletions";
 "qll_ops_demo_addfiletodownloads_runs_with_live" = "demo — addFileToDownloads runs with live TDLib";
 "qll_ops_demo_call_accept_no_live" = "demo: call accept (no live Telegram)";
 "qll_ops_demo_call_hang_up_no" = "demo: call hang up (no live Telegram)";
@@ -586,10 +580,8 @@
 "qll_ops_edit_my_tag" = "Edit my tag";
 "qll_ops_edit_name" = "✏️ Edit name";
 "qll_ops_edit_video" = "Edit video";
-"qll_ops_edited_a_message" = "edited a message";
 "qll_ops_edited_an_invite_link" = "edited an invite link";
 "qll_ops_editing_a_message" = "Editing a message.";
-"qll_ops_edits" = "Edits";
 "qll_ops_email_reset_requested_waiting_for" = "email reset requested — waiting for Telegram";
 "qll_ops_end_answer" = "End & answer";
 "qll_ops_end_time" = "End Time";
@@ -616,14 +608,12 @@
 "qll_ops_files_2#one" = "{count} file · {format_storage_bytes}";
 "qll_ops_files_2#other" = "{count} files · {format_storage_bytes}";
 "qll_ops_files_saved_left_out_of" = "{files} files saved, {skipped} left out of the export.";
-"qll_ops_filter_event_log" = "Filter event log";
 "qll_ops_finding_out_who_becomes_the" = "Finding out who becomes the next owner…";
 "qll_ops_first_name" = "First name";
 "qll_ops_folder" = "Folder";
 "qll_ops_folder_name_1_12_characters" = "Folder name (1–12 characters)";
 "qll_ops_for" = "{noun} for {when}, {repeat_period_text}";
 "qll_ops_format" = "Format";
-"qll_ops_forum" = "Forum";
 "qll_ops_forward" = "Forward";
 "qll_ops_forward_1_message_from" = "Forward 1 message from {from_title}";
 "qll_ops_forward_bar_ready_press_send" = "forward bar ready — press Send";
@@ -667,7 +657,6 @@
 "qll_ops_incoming_video_call" = "Incoming video call";
 "qll_ops_incoming_voice_call" = "Incoming voice call";
 "qll_ops_india" = "India";
-"qll_ops_info" = "Info";
 "qll_ops_info_2" = "ℹ Info";
 "qll_ops_install_the_release_package_from" = "Install the release package from GitHub for this installation.";
 "qll_ops_install_updates_automatically" = "Install updates automatically";
@@ -684,7 +673,6 @@
 "qll_ops_install_updates_automatically_hint" = "Quill downloads new versions in the background and installs them the next time it starts.";
 "qll_ops_invite_links" = "{active} invite links";
 "qll_ops_invite_links_need_a_live" = "invite links need a live connection (demo)";
-"qll_ops_invites" = "Invites";
 "qll_ops_is_calling" = "{name} is calling ({kind})";
 "qll_ops_is_calling_2" = "{caller} is calling {account_name}.";
 "qll_ops_is_now_the_owner_of_channel" = "{name} is now the owner of the channel.";
@@ -697,14 +685,12 @@
 "qll_ops_joined_via_an_approved_join" = "joined via an approved join request";
 "qll_ops_joined_via_an_invite_link" = "joined via an invite link";
 "qll_ops_joined_via_invite_link" = "joined via invite link {quote}";
-"qll_ops_joins" = "Joins";
 "qll_ops_jumped_to_message" = "jumped to message";
 "qll_ops_kb" = "{n_1024} KB";
 "qll_ops_keep" = "Keep";
 "qll_ops_last_name" = "Last name";
 "qll_ops_learn_more" = "Learn more";
 "qll_ops_leave_no_trace_on_our" = "Leave no trace on our servers";
-"qll_ops_leaves" = "Leaves";
 "qll_ops_let_members_add_and_remove" = "Let members add and remove community chats";
 "qll_ops_lifted_restrictions_on" = "lifted restrictions on {name}";
 "qll_ops_link_name" = "Link name";
@@ -770,8 +756,6 @@
 "qll_ops_no_matching_chats" = "No matching chats.";
 "qll_ops_no_network_usage_data_yet" = "No network usage data yet.";
 "qll_ops_no_pending_requests" = "No pending requests";
-"qll_ops_no_recent_actions" = "No recent actions.";
-"qll_ops_no_recent_actions_by_the" = "No recent actions by the selected admins.";
 "qll_ops_no_recent_calls" = "No recent calls.";
 "qll_ops_no_release_notes_were_provided" = "No release notes were provided.";
 "qll_ops_no_revoked_links" = "No revoked links.";
@@ -821,14 +805,11 @@
 "qll_ops_photos" = "Photos";
 "qll_ops_pick_a_date_and_time" = "Pick a date and time";
 "qll_ops_pick_the_part_to_quote" = "pick the part to quote";
-"qll_ops_pinned_a_message" = "pinned a message";
-"qll_ops_pins" = "Pins";
 "qll_ops_please_enter_your_two_step" = "Please enter your Two-Step Verification password to complete the transfer.";
 "qll_ops_poll_results_dark_mode_wins" = "Poll results: dark mode wins by a mile.";
 "qll_ops_preset_message" = "Preset message";
 "qll_ops_previous_month" = "Previous month";
 "qll_ops_promoted_to_administrator" = "promoted {name} to administrator";
-"qll_ops_promotions" = "Promotions";
 "qll_ops_purchase_refused_review_the_quote" = "Purchase refused. Review the quote and comment length, then retry.";
 "qll_ops_quick_replies_are_a_telegram" = "Quick replies are a Telegram Premium feature.";
 "qll_ops_quick_replies_need_a_live" = "Quick replies need a live session.";
@@ -843,7 +824,6 @@
 "qll_ops_quoted" = "Quoted";
 "qll_ops_random" = "Random";
 "qll_ops_recent" = "Recent";
-"qll_ops_recent_actions" = "Recent actions";
 "qll_ops_recent_actions_need_a_live" = "recent actions need a live connection (demo)";
 "qll_ops_recent_calls" = "Recent calls";
 "qll_ops_recipient" = "Recipient: {recipient_name}";
@@ -874,7 +854,6 @@
 "qll_ops_reset_to_default" = "Reset to Default";
 "qll_ops_restrict_user" = "Restrict user";
 "qll_ops_restricted" = "Restricted";
-"qll_ops_restrictions" = "Restrictions";
 "qll_ops_resume_download" = "Resume download";
 "qll_ops_retry" = "Retry";
 "qll_ops_retry_download" = "Retry download";
@@ -957,7 +936,6 @@
 "qll_ops_spain" = "Spain";
 "qll_ops_speak_to_see_your_microphones" = "Speak to see your microphone's level";
 "qll_ops_speaker" = "Speaker";
-"qll_ops_stars" = "Stars";
 "qll_ops_stars_month" = "{star_count} Stars / month";
 "qll_ops_stars_to_unlock" = "Stars to Unlock";
 "qll_ops_stars_to_unlock_2" = "Stars to unlock";
@@ -981,7 +959,6 @@
 "qll_ops_subscribe_to_telegram_premium_to" = "Subscribe to Telegram Premium to be able to comment on behalf of your channels in group chats.";
 "qll_ops_switch" = "Switch";
 "qll_ops_systemuifont" = ".SystemUIFont";
-"qll_ops_tags" = "Tags";
 "qll_ops_tdlib_debug_log_did_not" = "TDLib debug log did not start: {error}";
 "qll_ops_telegram" = "Telegram";
 "qll_ops_telegram_ad_platform" = "Telegram Ad Platform";
@@ -1023,7 +1000,6 @@
 "qll_ops_united_states" = "United States";
 "qll_ops_unknown_error" = "unknown error";
 "qll_ops_unlock_for_stars" = "Unlock for {stars} Stars";
-"qll_ops_unpinned_a_message" = "unpinned a message";
 "qll_ops_unrestrict" = "Unrestrict";
 "qll_ops_up_to_characters_paid_message" = "Up to {l} characters. Paid-message recipients may require an empty comment.";
 "qll_ops_upload_call_log" = "Upload call log";
