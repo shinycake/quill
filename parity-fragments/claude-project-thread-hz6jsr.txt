@@ -1,0 +1,2 @@
+# macOS system text replacements in the composer
+parity:platform-system-text-replace

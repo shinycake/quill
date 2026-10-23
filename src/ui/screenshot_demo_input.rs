@@ -164,6 +164,22 @@ async fn run_step(step: &str, demo_window: AnyWindowHandle, cx: &mut AsyncApp) {
         pause(cx, 120).await;
         return;
     }
+    // `t:text` types text one character at a time, as the system's text
+    // input delivers typed characters to the focused field.
+    if let Some(text) = step.strip_prefix("t:") {
+        for ch in text.chars() {
+            let keystroke = Keystroke {
+                modifiers: Modifiers::default(),
+                key: ch.to_string(),
+                key_char: Some(ch.to_string()),
+            };
+            let _ = demo_window.update(cx, |_, window, cx| {
+                window.dispatch_keystroke(keystroke, cx);
+            });
+            pause(cx, 60).await;
+        }
+        return;
+    }
     // `w:` sends one phased trackpad scroll event ([`wheel_step`]).
     if let Some(wheel) = step.strip_prefix("w:") {
         if let Some(event) = wheel_step(wheel) {

@@ -61,6 +61,11 @@ pub struct ChatPrefs {
     /// default on): `:-)`, `<3` and `:name:` become emoji as you type.
     #[serde(default = "default_true")]
     pub replace_emoji: bool,
+    /// Telegram Desktop's "System text replacements" (`systemTextReplace`,
+    /// default on, macOS only): the user's Keyboard → Text Replacements
+    /// apply as they type in the composer (`system_text_replace`).
+    #[serde(default = "default_true")]
+    pub system_text_replace: bool,
     /// tdesktop's `profile-media-tabs-expanded` experimental option
     /// (default off): the shared-media gallery shows Photos and Videos as
     /// two tabs instead of one Media tab. A local client option, not an
@@ -81,6 +86,7 @@ impl Default for ChatPrefs {
             spellcheck_enabled: true,
             suggest_emoji: true,
             replace_emoji: true,
+            system_text_replace: true,
             profile_media_tabs_expanded: false,
             disable_sharing_box_shown: 0,
         }

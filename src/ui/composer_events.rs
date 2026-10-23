@@ -1,6 +1,7 @@
-//! The compose field and what typing in it does: markdown and instant
-//! replacements, the typing indicator, the draft, the `/`, `@`, `#` and
-//! `:emoji` menus, inline mode, spell check, sticker suggestions, and Enter.
+//! The compose field and what typing in it does: markdown, instant and
+//! system text replacements, the typing indicator, the draft, the `/`,
+//! `@`, `#` and `:emoji` menus, inline mode, spell check, sticker
+//! suggestions, and Enter.
 //! One wiring for the main window's composer and every chat window's.
 #![deny(clippy::indexing_slicing)]
 
@@ -82,6 +83,9 @@ impl QuillApp {
                 // `**bold**` typed: the markers became formatting.
                 text = state.read(cx).value().to_string();
                 self.composer_ui.prev_text = text.clone();
+            } else {
+                // A macOS text replacement shortcut ended by this keystroke.
+                self.queue_system_text_replace(&prev, &text, window, cx);
             }
             self.sync_composer_typing(&text);
             self.note_open_draft(true, cx);

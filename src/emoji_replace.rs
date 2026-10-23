@@ -47,7 +47,7 @@ const EMOTICONS: &[(&str, &str)] = &[
 
 /// Whether `new` is `prev` with exactly one character typed right before
 /// `caret` (a paste or an IME commit never replaces, as in tdesktop).
-fn typed_one_char(prev: &str, new: &str, caret: usize) -> bool {
+pub(crate) fn typed_one_char(prev: &str, new: &str, caret: usize) -> bool {
     let Some(head) = new.get(..caret) else {
         return false;
     };

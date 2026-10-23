@@ -71,6 +71,7 @@ order after the window is ready):
 | `mid:x,y` | middle click |
 | `r:x,y` | right click (context menus) |
 | `k:key` | one key press, GPUI key names (`escape`, `enter`, `space`, `cmd-f`) |
+| `t:text` | type text into the focused field, one character at a time (spaces kept) |
 | `w:x,y,dx,dy,s\|m\|e[,cmd]` | one phased trackpad scroll event (`cmd` holds Cmd, Ctrl off macOS) |
 | `z:x,y,delta` | one trackpad pinch centred on the point (positive `delta` zooms in) |
 | `p:ms` | pause |

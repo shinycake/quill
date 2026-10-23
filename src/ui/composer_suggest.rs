@@ -159,18 +159,7 @@ impl QuillApp {
             range.start,
             self.chat_prefs.replace_emoji,
         )?;
-        // Never inside code or a code block (`processInstantReplaces`
-        // returns early over `kTagCode` and `IsTagPre`).
-        let caret = range.start;
-        let in_code = super::composer_field::field_doc(self.composer.read(cx))
-            .spans
-            .iter()
-            .any(|span| {
-                matches!(span.tag, ComposerTag::Code | ComposerTag::Pre(_))
-                    && span.range.start < caret
-                    && caret <= span.range.end
-            });
-        if in_code {
+        if self.composer_caret_in_code(range.start, cx) {
             return None;
         }
         let original = text.get(replace.range.clone())?.to_string();
@@ -189,6 +178,21 @@ impl QuillApp {
             )),
         });
         Some(new_text)
+    }
+
+    /// Whether `caret` is inside inline code or a code block: no instant
+    /// or system replacement happens there (`processInstantReplaces` and
+    /// `processSystemTextReplaces` return early over `kTagCode` and
+    /// `IsTagPre`).
+    pub(super) fn composer_caret_in_code(&self, caret: usize, cx: &App) -> bool {
+        super::composer_field::field_doc(self.composer.read(cx))
+            .spans
+            .iter()
+            .any(|span| {
+                matches!(span.tag, ComposerTag::Code | ComposerTag::Pre(_))
+                    && span.range.start < caret
+                    && caret <= span.range.end
+            })
     }
 
     /// Esc / blur: close the popup. True when it was showing.

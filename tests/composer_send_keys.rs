@@ -116,6 +116,7 @@ fn chat_prefs_roundtrip_and_missing_file() {
         spellcheck_enabled: false,
         suggest_emoji: false,
         replace_emoji: false,
+        system_text_replace: false,
         profile_media_tabs_expanded: true,
         disable_sharing_box_shown: 2,
     };

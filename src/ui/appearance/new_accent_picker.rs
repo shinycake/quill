@@ -480,6 +480,9 @@ impl QuillApp {
                     })),
             );
         let mut control = div().flex().flex_col().gap_2().child(row);
+        if cfg!(target_os = "macos") {
+            control = control.child(self.system_text_replace_row(cx));
+        }
         if checked && !self.spell.info.available.is_empty() {
             let active = self.spell.info.active.clone();
             let mut chips = div().flex().flex_wrap().gap_2().child(self.appearance_chip(
@@ -524,6 +527,43 @@ impl QuillApp {
             "",
             control.into_any_element(),
         )
+    }
+
+    /// tdesktop "System text replacements" (`systemTextReplace`, macOS
+    /// only): the user's Keyboard → Text Replacements apply in the composer.
+    fn system_text_replace_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_sm()
+                            .child(tr(keys::SETTINGS_SYSTEM_TEXT_REPLACE)),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(tr(keys::Q_PREFS_USE_THE_SHORTCUTS_FROM_KEYBOARD)),
+                    ),
+            )
+            .child(
+                Switch::new("appearance-system-text-replace")
+                    .checked(self.chat_prefs.system_text_replace)
+                    .accessibility_label(tr(keys::SETTINGS_SYSTEM_TEXT_REPLACE))
+                    .on_click(cx.listener(|this, &on, _, cx| {
+                        this.set_chat_prefs(cx, |c| c.system_text_replace = on);
+                    })),
+            )
+            .into_any_element()
     }
 
     /// tdesktop "Suggest emoji replacements" (`suggestEmoji`, default on):
