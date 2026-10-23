@@ -46,6 +46,7 @@ mod grams_withdraw;
 mod group_admin;
 mod group_bot_commands;
 mod group_calls;
+mod group_type;
 mod groups;
 mod history_liveness;
 mod history_window;

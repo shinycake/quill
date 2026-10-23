@@ -34,6 +34,7 @@ impl Session {
         self.apply_gift_market_ok(pending);
         self.apply_stories_ok(pending);
         self.apply_share_theme_ok(pending);
+        self.apply_group_type_ok(pending);
         match pending.map(|p| p.purpose) {
             Some(
                 RequestPurpose::SetChatTheme

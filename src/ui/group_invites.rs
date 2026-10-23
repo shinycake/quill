@@ -29,32 +29,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Slice G1: `toggleSupergroupJoinByRequest` (schema 1.8.67, line
-    /// 15188).
-    pub(super) fn toggle_join_by_request(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        let current = self.chat_join_by_request(chat_id);
-        let note = match self.live.as_mut() {
-            Some(live) => {
-                match live
-                    .driver
-                    .toggle_supergroup_join_by_request(chat_id, !current)
-                {
-                    Ok(_) => {
-                        if current {
-                            StatusNote::silent(tr(keys::Q_PEOPLE_JOIN_REQUESTS_DISABLED))
-                        } else {
-                            StatusNote::silent(tr(keys::Q_PEOPLE_JOIN_REQUESTS_ENABLED))
-                        }
-                    }
-                    Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_TOGGLE_JOIN_REQUESTS)),
-                }
-            }
-            None => StatusNote::info(tr(keys::Q_PEOPLE_JOIN_REQUESTS_NEED_A_LIVE)),
-        };
-        self.connection.set_note(note);
-        cx.notify();
-    }
-
     /// Phase D3a: open the invite-link create dialog for a chat.
     pub(super) fn open_invite_link_dialog(
         &mut self,

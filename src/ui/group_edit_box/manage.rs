@@ -11,6 +11,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use quill::group_type::type_row_value;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::RequestPurpose;
@@ -217,6 +218,9 @@ impl QuillApp {
                 ));
             };
         }
+        if is_owner {
+            section = section.child(self.group_type_row(chat_id, is_channel, cx));
+        }
         // B7: one entry for the settings the viewer's rights allow
         // (topics, history, reactions, discussion group, ...).
         if session.is_some_and(|s| !s.group_admin_controls(chat_id).is_empty()) {
@@ -274,56 +278,21 @@ impl QuillApp {
                 }
             );
         }
-        // Supergroup-only: join-request toggle, username, broadcast
-        // upgrade. `setSupergroupUsername` is owner-only (driver
-        // enforces); broadcast groups can't toggle join-by-request.
-        if !is_channel && !is_basic_group {
-            if can_restrict && !self.chat_is_broadcast(chat_id) {
-                let enabled = self.chat_join_by_request(chat_id);
-                toggle_row!(
-                    "g1-toggle-join-request",
-                    I::UserCheck,
-                    tr(keys::GROUP_INVITE_REQUEST_APPROVE),
-                    enabled,
-                    |this, _window, cx| {
-                        this.toggle_join_by_request(chat_id, cx);
-                    }
-                );
-            }
-            if is_owner {
-                let username = self.chat_username(chat_id);
-                let label = if username.is_empty() {
-                    tr(keys::Q_PEOPLE_SET_PUBLIC_USERNAME).to_string()
-                } else {
-                    tr_with(
-                        keys::Q_PEOPLE_PUBLIC_USERNAME,
-                        &[("username", &username.to_string())],
-                    )
-                };
-                row!("g1-open-username", I::AtSign, label, |this, window, cx| {
-                    this.open_username_dialog(chat_id, window, cx);
-                });
-                if !self.chat_is_broadcast(chat_id) {
-                    row!(
-                        "g1-broadcast-upgrade",
-                        I::Megaphone,
-                        tr(keys::RIGHTS_GIGAGROUP_CONVERT),
-                        |this, _window, cx| {
-                            this.open_group_confirm(
-                                chat_id,
-                                GroupConfirmAction::BroadcastIntro,
-                                cx,
-                            );
-                        }
-                    );
-                    section = section.child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(quill::admin_extras::BROADCAST_ABOUT),
-                    );
+        if !is_channel && !is_basic_group && is_owner && !self.chat_is_broadcast(chat_id) {
+            row!(
+                "g1-broadcast-upgrade",
+                I::Megaphone,
+                tr(keys::RIGHTS_GIGAGROUP_CONVERT),
+                |this, _window, cx| {
+                    this.open_group_confirm(chat_id, GroupConfirmAction::BroadcastIntro, cx);
                 }
-            }
+            );
+            section = section.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(quill::admin_extras::BROADCAST_ABOUT),
+            );
         }
         // Slice G2: channel signatures + show authors (Telegram X
         // ProfileController: two toggles, gated on `can_change_info`;
@@ -505,6 +474,61 @@ impl QuillApp {
             });
         }
         section.into_any_element()
+    }
+}
+
+impl QuillApp {
+    /// The type row with its value ("Public", "Private", "Private
+    /// restricted"), and the reason a saved link was refused.
+    fn group_type_row(
+        &self,
+        chat_id: ChatId,
+        is_channel: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let session = self.session();
+        let edit = self.group_edit_box();
+        let chosen = edit
+            .and_then(|edit| edit.type_choice.clone())
+            .or_else(|| session.map(|s| s.group_type_current(chat_id)))
+            .unwrap_or_default();
+        let value = tr(type_row_value(
+            chosen.public,
+            chosen.no_forwards,
+            !is_channel,
+        ));
+        let failure = edit.and_then(|edit| edit.username_failure(session));
+        let muted = cx.theme().muted_foreground;
+        let danger = cx.theme().danger;
+        let label = if is_channel {
+            tr(keys::MANAGE_PEER_CHANNEL_TYPE)
+        } else {
+            tr(keys::MANAGE_PEER_GROUP_TYPE)
+        };
+        div()
+            .flex()
+            .flex_col()
+            .child(
+                action_row(
+                    "group-edit-type",
+                    Some(gpui_kit::assets::IconName::Globe),
+                    label,
+                    false,
+                    cx,
+                )
+                .child(div().flex_1())
+                .child(div().text_sm().text_color(muted).child(value))
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.open_group_type_box(window, cx);
+                })),
+            )
+            .children(failure.map(|reason| {
+                div().px_2().text_xs().text_color(danger).child(tr_with(
+                    keys::Q_PEOPLE_COULDNT_SAVE_REASON,
+                    &[("reason", &reason)],
+                ))
+            }))
+            .into_any_element()
     }
 }
 

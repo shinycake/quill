@@ -104,6 +104,8 @@ pub enum GroupsPurpose {
     ToggleSupergroupUsername,
     /// `reorderSupergroupActiveUsernames`. Same follow-up.
     ReorderSupergroupUsernames,
+    /// The group and channel Type box's own requests.
+    GroupType(GroupTypePurpose),
     /// Phase D3b: `getChatAdministrators`. Response is
     /// `chatAdministrators`; correlated via `PendingRequest::chat_id`.
     GetChatAdministrators,

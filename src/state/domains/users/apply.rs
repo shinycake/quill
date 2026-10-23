@@ -211,6 +211,7 @@ impl Session {
             UsersPayload::CheckChatUsernameResult(result) => {
                 // `checkBotUsername` answers with the same type.
                 self.apply_bot_username_check(result, pending);
+                self.apply_group_username_check(result, pending);
             }
             // Slice A6: `importedContacts` (schema 1.8.67, line 14517) —
             // the `importContacts` answer. Same invalidate + notice as

@@ -66,6 +66,27 @@ pub fn reorder_supergroup_active_usernames(
     .to_string()
 }
 
+/// `checkCreatedPublicChatsLimit` (schema/td_api.tl:12598) for chats with
+/// a username: an error when the limit is reached.
+pub fn check_created_public_chats_limit(extra: RequestId) -> String {
+    json!({
+        "@type": "checkCreatedPublicChatsLimit",
+        "@extra": extra.as_extra(),
+        "type": {"@type": "publicChatTypeHasUsername"},
+    })
+    .to_string()
+}
+
+/// `disableAllSupergroupUsernames` (schema/td_api.tl:16240).
+pub fn disable_all_supergroup_usernames(extra: RequestId, supergroup_id: i64) -> String {
+    json!({
+        "@type": "disableAllSupergroupUsernames",
+        "@extra": extra.as_extra(),
+        "supergroup_id": supergroup_id,
+    })
+    .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,6 +111,16 @@ mod tests {
         let v = parse(&get_chat_boost_link(RequestId(2), -100));
         assert_eq!(v["@type"], "getChatBoostLink");
         assert_eq!(v["chat_id"], -100);
+    }
+
+    #[test]
+    fn type_box_request_shapes() {
+        let l = parse(&check_created_public_chats_limit(RequestId(5)));
+        assert_eq!(l["@type"], "checkCreatedPublicChatsLimit");
+        assert_eq!(l["type"]["@type"], "publicChatTypeHasUsername");
+        let d = parse(&disable_all_supergroup_usernames(RequestId(6), 55));
+        assert_eq!(d["@type"], "disableAllSupergroupUsernames");
+        assert_eq!(d["supergroup_id"], 55);
     }
 
     #[test]

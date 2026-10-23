@@ -524,17 +524,17 @@ pub fn replace_primary_chat_invite_link(extra: RequestId, chat_id: i64) -> Strin
     .to_string()
 }
 
-/// Slice G1: `toggleSupergroupJoinByRequest` (TDLib 1.8.67,
-/// `schema/td_api.tl:15188`):
+/// `toggleSupergroupJoinByRequest` (schema/td_api.tl:16284):
 /// `toggleSupergroupJoinByRequest supergroup_id:int53 join_by_request:Bool
 /// guard_bot_user_id:int53 apply_to_invite_links:Bool = Ok;`
 /// No guard bot in Quill (`guard_bot_user_id: 0`, ignored when
-/// `join_by_request == false` per the schema); the change is not applied
-/// to existing invite links (`apply_to_invite_links: false`).
+/// `join_by_request == false` per the schema); `apply_to_invite_links` is
+/// the Type box's "Apply to existing invite links" answer.
 pub fn toggle_supergroup_join_by_request(
     extra: RequestId,
     supergroup_id: i64,
     join_by_request: bool,
+    apply_to_invite_links: bool,
 ) -> String {
     json!({
         "@type": "toggleSupergroupJoinByRequest",
@@ -542,7 +542,7 @@ pub fn toggle_supergroup_join_by_request(
         "supergroup_id": supergroup_id,
         "join_by_request": join_by_request,
         "guard_bot_user_id": 0,
-        "apply_to_invite_links": false,
+        "apply_to_invite_links": apply_to_invite_links,
     })
     .to_string()
 }

@@ -199,6 +199,8 @@ pub struct GroupsState {
     /// `setChatPhoto` of the Edit box, keyed by chat id; cleared when the
     /// box saves again.
     pub info_edit_errors: HashMap<i64, GroupInfoEditError>,
+    /// The Type box: link checks, the public links limit and its list.
+    pub group_type: GroupTypeState,
     /// Slice G1: `supergroup.join_by_request` (schema 1.8.67, lines
     /// 2733/2746), keyed by supergroup id. Drives the "Approve new
     /// members" toggle.
@@ -327,6 +329,7 @@ impl GroupsState {
             basic_group_members: HashMap::new(),
             basic_group_descriptions: HashMap::new(),
             info_edit_errors: HashMap::new(),
+            group_type: GroupTypeState::default(),
             supergroup_join_by_request: HashMap::new(),
             supergroup_join_to_send: HashMap::new(),
             supergroup_restricted: HashSet::new(),
@@ -360,4 +363,6 @@ pub enum GroupInfoField {
     Title,
     Description,
     Photo,
+    /// The Type box's link (`setSupergroupUsername`).
+    Username,
 }

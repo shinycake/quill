@@ -878,5 +878,6 @@ mod grams_withdraw;
 mod limit_box;
 mod open_premium;
 mod promo;
+mod public_links;
 mod purchase;
 mod star_packs;

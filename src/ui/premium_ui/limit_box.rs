@@ -246,6 +246,9 @@ impl QuillApp {
                     .text_sm()
                     .child(view.message.clone()),
             );
+            if kind == PremiumLimitKind::PublicLinks {
+                body = body.child(this.public_links_list(cx));
+            }
             let mut footer = div().flex().justify_end().gap_2();
             if view.offer_upgrade {
                 footer = footer
