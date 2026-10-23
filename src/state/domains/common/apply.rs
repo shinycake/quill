@@ -98,6 +98,12 @@ impl Session {
                 {
                     self.stories.live_max_stars = Some(*limit);
                 }
+                if name == "poll_country_count_max"
+                    && let OptionValue::Integer(limit) = &value
+                    && *limit > 0
+                {
+                    self.payments.poll_countries_max = usize::try_from(*limit).ok();
+                }
                 if name == "gift_text_length_max"
                     && let OptionValue::Integer(limit) = &value
                 {

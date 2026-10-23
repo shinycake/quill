@@ -2,6 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::country_box::CountryHost;
 use super::scheduled::poll_deadline_picker;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
@@ -619,6 +620,17 @@ impl QuillApp {
             Some(dialog) => dialog.draft(cx),
             None => return,
         };
+        if self
+            .composer_ui
+            .poll_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.limit_by_country && dialog.country_codes.is_empty())
+        {
+            self.connection
+                .set_note(StatusNote::error(tr(keys::POLLS_CREATE_CHOOSE_COUNTRY)));
+            cx.notify();
+            return;
+        }
         if let Some(reason) = draft.validate() {
             self.connection
                 .set_note(StatusNote::error(reason.to_string()));
@@ -765,6 +777,9 @@ impl QuillApp {
     #[inline(never)]
     fn poll_dialog_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.composer_ui.poll_dialog.as_ref()?;
+        if dialog.country_box.is_some() {
+            return self.poll_country_panel(cx);
+        }
         let mut panel = div()
             .id("poll-dialog")
             .flex()
@@ -863,27 +878,17 @@ impl QuillApp {
         }
         panel = panel
             .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(match &dialog.deadline {
-                        // B15: an absolute deadline replaces the hours field.
-                        Some(picker) => div().flex_1().child(
-                            DatePicker::new(picker).placeholder(tr(keys::Q_MEDIA_PICK_A_DEADLINE)),
-                        ),
-                        None => div().flex_1().child(
-                            Textarea::new(&dialog.duration_input)
-                                .aria_label(tr(keys::Q_MEDIA_POLL_OPEN_DURATION_IN_HOURS))
-                                .h(px(40.)),
-                        ),
-                    })
-                    .child(
-                        div().flex_1().child(
-                            Textarea::new(&dialog.countries_input)
-                                .aria_label(tr(keys::Q_MEDIA_POLL_COUNTRY_CODES))
-                                .h(px(40.)),
-                        ),
+                div().flex().gap_2().child(match &dialog.deadline {
+                    // B15: an absolute deadline replaces the hours field.
+                    Some(picker) => div().flex_1().child(
+                        DatePicker::new(picker).placeholder(tr(keys::Q_MEDIA_PICK_A_DEADLINE)),
                     ),
+                    None => div().flex_1().child(
+                        Textarea::new(&dialog.duration_input)
+                            .aria_label(tr(keys::Q_MEDIA_POLL_OPEN_DURATION_IN_HOURS))
+                            .h(px(40.)),
+                    ),
+                }),
             )
             .child(self.poll_toggle_row(cx));
         if dialog.confirming_discard {

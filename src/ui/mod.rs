@@ -44,6 +44,7 @@ mod composer_state;
 mod composer_targets;
 mod composer_thumb;
 mod connection_state;
+mod country_box;
 pub(crate) mod crash_notice;
 mod demo_state;
 mod dialogs_state;

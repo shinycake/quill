@@ -317,7 +317,6 @@
 "qll_media_couldnt_send_the_apps_data" = "Couldn't send the app's data to the bot.";
 "qll_media_couldnt_send_the_game_here" = "Couldn't send the game here.";
 "qll_media_couldnt_update_stickers_try_again" = "Couldn't update stickers. Try again.";
-"qll_media_countries_e_g_us_gb" = "Countries, e.g. US, GB (optional)";
 "qll_media_cover" = "Cover";
 "qll_media_cover_frame_time_in_seconds" = "Cover frame time in seconds, e.g. 1.5";
 "qll_media_create" = "Create";
@@ -541,7 +540,6 @@
 "qll_media_play_video" = "Play video";
 "qll_media_please_note_that_inline_bots" = "Please note that inline bots are provided by third-party developers. For the bot to work, the symbols you type after the bot's username are sent to the respective developer.";
 "qll_media_poll_answer" = "Poll answer";
-"qll_media_poll_country_codes" = "Poll country codes";
 "qll_media_poll_description" = "Poll description";
 "qll_media_poll_open_duration_in_hours" = "Poll open duration in hours";
 "qll_media_poll_question" = "Poll question";
@@ -791,3 +789,11 @@
 "qll_media_you_cant_add_the_bot" = "You can't add the bot to this chat.";
 "qll_media_you_have_no_groups_or" = "You have no groups or channels where you can add this bot.";
 "qll_media_your_organization" = "your organization";
+"lng_polls_create_allowed_countries" = "Allowed Countries";
+"lng_polls_create_countries_count#one" = "{count} country";
+"lng_polls_create_countries_count#other" = "{count} countries";
+"lng_polls_create_countries_limit#one" = "You can choose up to {count} country.";
+"lng_polls_create_countries_limit#other" = "You can choose up to {count} countries.";
+"lng_polls_create_limit_by_country" = "Limit by Country";
+"lng_polls_create_limit_by_country_about" = "Only users from selected countries can vote.";
+"lng_polls_create_choose_country" = "Please choose at least one country.";

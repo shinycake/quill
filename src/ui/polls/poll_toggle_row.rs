@@ -1,6 +1,7 @@
 //! Methods moved out of `polls.rs` to keep files under 1000 lines.
 
 use super::*;
+use gpui_kit::component::switch::Switch;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
@@ -139,6 +140,7 @@ impl QuillApp {
                         ))
                     }),
             )
+            .when(in_channel, |this| this.child(self.poll_country_limit(cx)))
             .child(
                 Checkbox::new("poll-toggle-deadline")
                     .checked(has_deadline)
@@ -150,5 +152,62 @@ impl QuillApp {
                         cx.notify();
                     })),
             )
+    }
+
+    /// tdesktop's "Limit by Country" switch (broadcast channels) and, while
+    /// it is on, the "Allowed Countries" row under it. Turning it off
+    /// forgets the chosen countries.
+    fn poll_country_limit(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let dialog = self.composer_ui.poll_dialog.as_ref();
+        let on = dialog.is_some_and(|dialog| dialog.limit_by_country);
+        let codes = dialog.map(|dialog| dialog.country_codes.clone());
+        let muted = cx.theme().muted_foreground;
+        let mut block = div().flex().flex_col().gap_2().child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .child(
+                            div()
+                                .text_sm()
+                                .child(tr(keys::POLLS_CREATE_LIMIT_BY_COUNTRY)),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(muted)
+                                .child(tr(keys::POLLS_CREATE_LIMIT_BY_COUNTRY_ABOUT)),
+                        ),
+                )
+                .child(
+                    Switch::new("poll-toggle-country")
+                        .checked(on)
+                        .accessibility_label(tr(keys::POLLS_CREATE_LIMIT_BY_COUNTRY))
+                        .on_click(cx.listener(|this, &next: &bool, _, cx| {
+                            if let Some(dialog) = this.composer_ui.poll_dialog.as_mut() {
+                                dialog.limit_by_country = next;
+                                if !next {
+                                    dialog.country_codes.clear();
+                                    dialog.country_box = None;
+                                }
+                            }
+                            cx.notify();
+                        })),
+                ),
+        );
+        if on {
+            block = block.child(self.country_field_button(
+                CountryHost::Poll,
+                tr(keys::POLLS_CREATE_ALLOWED_COUNTRIES),
+                self.country_summary(&codes.unwrap_or_default()),
+                cx,
+            ));
+        }
+        block
     }
 }

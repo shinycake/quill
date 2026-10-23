@@ -483,8 +483,6 @@
 "qll_money_couldnt_send_the_request_try" = "Couldn't send the request. Try again.";
 "qll_money_couldnt_start_crafting" = "Couldn't start crafting.";
 "qll_money_couldnt_withdraw_right_now" = "Couldn't withdraw right now";
-"qll_money_country_code" = "Country code";
-"qll_money_country_code_e_g_us" = "Country code (e.g. US)";
 "qll_money_crafting" = "Crafting {name}";
 "qll_money_crypto_top_up" = "Crypto top-up";
 "qll_money_currency" = "Currency: {current}";
@@ -883,3 +881,4 @@
 "qll_money_your_first_grams" = "Your first Grams!";
 "qll_money_your_stars_balance_is_too" = "Your Stars balance is too low.";
 "qll_money_your_wallet_is_being_created" = "Your wallet is being created.";
+"lng_payments_address_country" = "Country";

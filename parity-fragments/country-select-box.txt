@@ -1,0 +1,2 @@
+parity:bots-poll-country-picker
+parity:bots-payment-country-picker
