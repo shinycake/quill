@@ -60,10 +60,9 @@ pub(crate) struct StoryUi {
     /// inputs.
     pub(super) composer_link: Entity<TextareaState>,
     pub(super) composer_reaction: Entity<TextareaState>,
-    /// Phase 9.5: cover-frame editor (viewer) — open on a video story
-    /// with `can_be_edited`; the input takes seconds.
-    pub(super) cover_target: Option<(i64, i32)>,
-    pub(super) cover_input: Entity<TextareaState>,
+    /// Phase 9.5: cover-frame picker (viewer) — open on a video story
+    /// with `can_be_edited`: a preview over a strip of frames.
+    pub(super) cover: Option<super::story_albums::CoverPicker>,
     pub(super) cover_sent: bool,
     /// Phase 9.5: privacy editor (viewer) — open on a story with
     /// `can_set_privacy_settings`; reuses the 4-way privacy selector
@@ -136,18 +135,11 @@ impl StoryUi {
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
-        // Phase 9.5: cover-frame seconds input (viewer cover editor) and
-        // the privacy editor's contact search.
+        // Phase 9.5: the privacy editor's contact search.
         let story_more_search = cx.new(|cx| {
             // No placeholder: the viewer draws its own on the dark chrome
             // (`chrome::search_field`).
             TextareaState::new(window, cx)
-                .auto_grow(1, 1)
-                .submit_on_enter(false)
-        });
-        let story_cover_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder(tr(keys::Q_MEDIA_COVER_FRAME_TIME_IN_SECONDS))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
@@ -171,8 +163,7 @@ impl StoryUi {
             composer_user_search: story_composer_user_search,
             composer_link: story_composer_link,
             composer_reaction: story_composer_reaction,
-            cover_target: None,
-            cover_input: story_cover_input,
+            cover: None,
             cover_sent: false,
             privacy_edit: None,
             privacy_user_search: story_privacy_user_search,

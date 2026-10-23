@@ -15,7 +15,8 @@ use quill::connect::LiveConnect;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with, trn_with};
 use quill::story_composer::StoryPrivacy;
-use quill::story_page::{StoryPageOpState, parse_story_id_list};
+use quill::story_album_picker::AlbumPickerTarget;
+use quill::story_page::StoryPageOpState;
 use quill::telegram::envelope::StoryAreaKind;
 /// Phase 9.5: the viewer privacy editor's state — the story plus the
 /// picked level/users. Prefilled from the story's `privacy_settings`.
@@ -160,20 +161,28 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Phase 9.7: create an album from the page's name + story-ids inputs
-    /// (`createStoryAlbum`). Ids the server marks as not addable to albums
-    /// (`story.can_be_added_to_album`, `schema/td_api.tl:6724`) are skipped
-    /// up front instead of being sent to fail.
+    /// Phase 9.7: create an album from the page's name input and the
+    /// stories ticked in the picker (`createStoryAlbum`). Ids the server
+    /// marks as not addable to albums (`story.can_be_added_to_album`,
+    /// `schema/td_api.tl:6724`) are skipped up front instead of being sent
+    /// to fail.
     pub(super) fn create_story_album(&mut self, cx: &mut Context<Self>) {
         let (chat_id, name, story_ids) = match self.stories.page.as_ref() {
             Some(page) => {
                 let name = page.new_album_name.read(cx).value().trim().to_string();
-                let story_ids =
-                    parse_story_id_list(page.new_album_story_ids.read(cx).value().as_ref());
+                let story_ids = match page.picker.as_ref() {
+                    Some(picker) if picker.target == AlbumPickerTarget::NewAlbum => {
+                        picker.selected_ids()
+                    }
+                    _ => Vec::new(),
+                };
                 (page.chat_id, name, story_ids)
             }
             None => return,
         };
+        if let Some(page) = self.stories.page.as_mut() {
+            page.picker = None;
+        }
         let (story_ids, skipped) = self.partition_addable_stories(chat_id, &story_ids);
         if !skipped.is_empty() {
             self.connection.set_note(StatusNote::info(trn_with(
@@ -305,35 +314,28 @@ impl QuillApp {
         })
     }
 
-    /// Phase 9.7: add the ids from the album's input to the opened album
-    /// (`addStoryAlbumStories`). Ids the server marks as not addable to
+    /// tdesktop `EditAlbumBox` save: send the picker's changes to the
+    /// opened album, adds then removes (`addStoryAlbumStories`,
+    /// `removeStoryAlbumStories`). Ids the server marks as not addable to
     /// albums are skipped up front (see `partition_addable_stories`).
-    pub(super) fn add_stories_to_album(&mut self, cx: &mut Context<Self>) {
-        let (chat_id, album_id, story_ids) = match self.stories.page.as_ref() {
-            Some(page) => match page.open_album {
-                Some(album_id) => (
-                    page.chat_id,
-                    album_id,
-                    parse_story_id_list(page.add_story_ids.read(cx).value().as_ref()),
-                ),
+    pub(super) fn save_album_picker(&mut self, cx: &mut Context<Self>) {
+        let (chat_id, album_id, added, removed) = match self.stories.page.as_ref() {
+            Some(page) => match page.picker.as_ref() {
+                Some(picker) => match picker.target {
+                    AlbumPickerTarget::Album(album_id) => {
+                        (page.chat_id, album_id, picker.added(), picker.removed())
+                    }
+                    AlbumPickerTarget::NewAlbum => return,
+                },
                 None => return,
             },
             None => return,
         };
-        if story_ids.is_empty() {
-            self.connection.set_note(StatusNote::silent(tr(
-                keys::Q_MEDIA_ENTER_AT_LEAST_ONE_STORY,
-            )));
-            cx.notify();
+        if added.is_empty() && removed.is_empty() {
+            self.close_album_picker(cx);
             return;
         }
-        let (story_ids, skipped) = self.partition_addable_stories(chat_id, &story_ids);
-        if story_ids.is_empty() {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_NOTES_NO_STORY_CAN_BE_ADDED)));
-            cx.notify();
-            return;
-        }
+        let (added, skipped) = self.partition_addable_stories(chat_id, &added);
         if !skipped.is_empty() {
             self.connection.set_note(StatusNote::info(trn_with(
                 keys::Q_NOTES_STORIES_SKIPPED,
@@ -341,12 +343,25 @@ impl QuillApp {
                 &[("count", &skipped.len().to_string())],
             )));
         }
+        if added.is_empty() && removed.is_empty() {
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_NOTES_NO_STORY_CAN_BE_ADDED)));
+            cx.notify();
+            return;
+        }
+        self.close_album_picker(cx);
         self.story_page_mutate(
             tr(keys::Q_MEDIA_ADD_STORIES_TO_ALBUM),
             |live| {
-                live.driver
-                    .add_story_album_stories(chat_id, album_id, &story_ids)
-                    .map(|_| ())
+                if !added.is_empty() {
+                    live.driver
+                        .add_story_album_stories(chat_id, album_id, &added)?;
+                }
+                if !removed.is_empty() {
+                    live.driver
+                        .remove_story_album_stories(chat_id, album_id, &removed)?;
+                }
+                Ok(())
             },
             cx,
         );
@@ -484,101 +499,6 @@ impl QuillApp {
         } else {
             manage.error
         }
-    }
-
-    /// Phase 9.5: toggle the cover-frame editor for a video story.
-    pub(super) fn toggle_story_cover_edit(
-        &mut self,
-        chat_id: i64,
-        story_id: i32,
-        cx: &mut Context<Self>,
-    ) {
-        if self.stories.cover_target == Some((chat_id, story_id)) {
-            self.stories.cover_target = None;
-        } else {
-            self.stories.cover_target = Some((chat_id, story_id));
-            self.stories.cover_sent = false;
-        }
-        cx.notify();
-    }
-
-    /// Phase 9.5: the cover-frame editor row — seconds input + Set.
-    pub(super) fn story_cover_editor(&self, cx: &mut Context<Self>) -> AnyElement {
-        // Review fix-up: shared `story_manage.pending` slot — no second
-        // op while one is in flight.
-        let manage_busy = self.session().is_some_and(|s| s.stories.manage.pending);
-        div()
-            .flex()
-            .gap_2()
-            .items_center()
-            .w(px(360.))
-            .child(
-                div().flex_1().child(
-                    Textarea::new(&self.stories.cover_input)
-                        .aria_label(tr(keys::Q_MEDIA_STORY_COVER_TIME))
-                        .h(px(32.)),
-                ),
-            )
-            .child(
-                Button::new("story-cover-set")
-                    .label(if self.stories.cover_sent {
-                        tr(keys::Q_MEDIA_SAVING)
-                    } else {
-                        tr(keys::Q_MEDIA_SET_2)
-                    })
-                    .disabled(manage_busy)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.story_cover_save(cx);
-                    })),
-            )
-            .into_any_element()
-    }
-
-    /// Phase 9.5: parse the seconds input and send `editStoryCover`
-    /// (`td_api.tl:13738`). The driver gates on `can_be_edited`; the
-    /// tick closes the editor on success.
-    pub(super) fn story_cover_save(&mut self, cx: &mut Context<Self>) {
-        if self.stories.cover_sent {
-            return;
-        }
-        let Some((chat_id, story_id)) = self.stories.cover_target else {
-            return;
-        };
-        // Demo mode: surface the same notice as `story_composer_save_edit`
-        // — management calls need live TDLib.
-        if self.live.is_none() {
-            if let Some(demo) = self.demo_session.as_mut() {
-                demo.stories.manage.error =
-                    Some(tr(keys::Q_MEDIA_DEMO_EDITING_RUNS_WITH_LIVE).into());
-            }
-            cx.notify();
-            return;
-        }
-        let raw = self.stories.cover_input.read(cx).value().trim().to_string();
-        let timestamp: f64 = match raw.parse() {
-            Ok(seconds) if seconds >= 0.0 => seconds,
-            _ => {
-                if let Some(live) = self.live.as_mut() {
-                    live.driver.session.stories.manage.error =
-                        Some(tr(keys::Q_MEDIA_ENTER_THE_COVER_TIME_IN).into());
-                }
-                cx.notify();
-                return;
-            }
-        };
-        if let Some(live) = self.live.as_mut() {
-            match live
-                .driver
-                .edit_story_cover(ChatId(chat_id), story_id, timestamp)
-            {
-                Ok(_) => self.stories.cover_sent = true,
-                Err(_) => {
-                    live.driver.session.stories.manage.error =
-                        Some(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_COVER).into());
-                }
-            }
-        }
-        cx.notify();
     }
 
     /// Phase 9.5: toggle the privacy editor, prefilled from the story's
@@ -837,4 +757,12 @@ impl QuillApp {
     }
 }
 
+#[cfg(feature = "demo-capture")]
+mod demo;
+mod cover_strip;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod picker_tests;
+pub(in crate::ui) use cover_strip::CoverPicker;
+mod picker;
 mod story_page_overlay;

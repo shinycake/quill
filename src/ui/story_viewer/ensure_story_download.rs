@@ -550,7 +550,7 @@ impl QuillApp {
         }
         // Phase 9.5: cover-frame editor row (video stories) + privacy
         // editor panel + the management status line (pending / error).
-        if self.stories.cover_target.is_some() {
+        if self.stories.cover.is_some() {
             column = column.child(self.story_cover_editor(cx));
         }
         if self.stories.privacy_edit.is_some() {

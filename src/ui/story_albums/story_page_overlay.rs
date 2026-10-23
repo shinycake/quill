@@ -16,9 +16,7 @@ impl QuillApp {
         let open_album = page.open_album;
         let delete_confirm = page.delete_confirm;
         let new_album_name = page.new_album_name.clone();
-        let new_album_story_ids = page.new_album_story_ids.clone();
         let rename_input = page.rename_input.clone();
-        let add_story_ids = page.add_story_ids.clone();
         let title = self
             .session()
             .and_then(|s| s.chats.get(&chat_id.0))
@@ -65,7 +63,9 @@ impl QuillApp {
         };
 
         let mut body = div().flex().flex_col().gap_3();
-        if let Some(album_id) = open_album {
+        if page.picker.is_some() {
+            body = body.child(self.album_picker_view(cx));
+        } else if let Some(album_id) = open_album {
             // ---- Opened album: rename, delete, stories, add. ----
             let name = self
                 .session()
@@ -184,16 +184,10 @@ impl QuillApp {
                     .items_center()
                     .gap_2()
                     .child(
-                        Textarea::new(&add_story_ids)
-                            .aria_label(tr(keys::Q_MEDIA_STORY_IDENTIFIERS_TO_ADD))
-                            .h(px(36.))
-                            .flex_1(),
-                    )
-                    .child(
                         Button::new("story-page-add-stories")
-                            .label(tr(keys::Q_MEDIA_ADD))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.add_stories_to_album(cx);
+                            .label(tr(keys::Q_MEDIA_ALBUM_ADD_STORIES))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.open_album_picker(AlbumPickerTarget::Album(album_id), cx);
                             })),
                     ),
             );
@@ -284,16 +278,23 @@ impl QuillApp {
                             .h(px(36.)),
                     )
                     .child(
-                        Textarea::new(&new_album_story_ids)
-                            .aria_label(tr(keys::Q_MEDIA_STORY_IDENTIFIERS_FOR_NEW_ALBUM))
-                            .h(px(36.)),
-                    )
-                    .child(
-                        Button::new("story-page-create")
-                            .label(tr(keys::Q_MEDIA_CREATE_ALBUM))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.create_story_album(cx);
-                            })),
+                        div()
+                            .flex()
+                            .gap_2()
+                            .child(
+                                Button::new("story-page-choose-stories")
+                                    .label(tr(keys::Q_MEDIA_ALBUM_CHOOSE_STORIES))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.open_album_picker(AlbumPickerTarget::NewAlbum, cx);
+                                    })),
+                            )
+                            .child(
+                                Button::new("story-page-create")
+                                    .label(tr(keys::Q_MEDIA_CREATE_ALBUM))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.create_story_album(cx);
+                                    })),
+                            ),
                     ),
             );
             // ---- Chat-page stories with pin/unpin. ----

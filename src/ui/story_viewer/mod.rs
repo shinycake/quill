@@ -716,7 +716,7 @@ impl QuillApp {
         self.stories.stats_open = false;
         self.clear_terminal_story_report();
         // Phase 9.5: drop the cover / privacy editors with the viewer.
-        self.stories.cover_target = None;
+        self.stories.cover = None;
         self.stories.cover_sent = false;
         self.stories.privacy_edit = None;
         self.stories.privacy_sent = false;

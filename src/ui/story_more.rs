@@ -44,14 +44,14 @@ impl QuillApp {
             || self.stories.share_open
             || self.stories.close_friends_edit.is_some()
             || self.stories.privacy_edit.is_some()
-            || self.stories.cover_target.is_some()
+            || self.stories.cover.is_some()
             // The live story's comment field, while it has the keyboard.
             || (self.live_story_shown().is_some()
                 && self.stories.live.input.focus_handle(cx).is_focused(window))
     }
 
     /// The current video story's clip, once it is a local sandboxed file.
-    fn story_video_path(&self) -> Option<PathBuf> {
+    pub(in crate::ui) fn story_video_path(&self) -> Option<PathBuf> {
         let item = self.stories.viewer.current()?;
         let file_id = item.video_file_id?;
         let roots = self.media_display_roots();

@@ -1,0 +1,2 @@
+parity:stories-albums-picker
+parity:stories-cover-frame-strip

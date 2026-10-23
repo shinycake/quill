@@ -184,7 +184,7 @@ impl QuillApp {
                 .session()
                 .is_some_and(|s| s.stories.manage.error.is_none())
             {
-                self.stories.cover_target = None;
+                self.stories.cover = None;
             }
         }
         if self.stories.privacy_sent && self.session().is_some_and(|s| !s.stories.manage.pending) {
