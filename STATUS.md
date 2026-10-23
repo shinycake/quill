@@ -303,7 +303,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Per-chat mute/unmute from the list via the row menu (src/ui/mod.rs:5611) <!-- parity:chatlist-list-mute -->
 - [x] Delete chat from the list via deleteChatHistory(remove_from_chat_list:true) — not the destructive deleteChat (src/connect.rs, src/ui/mod.rs) <!-- parity:chatlist-delete-chat -->
 - [x] Clear chat history via deleteChatHistory(remove_from_chat_list:false), gated on delete capabilities (src/connect.rs, src/ui/mod.rs) <!-- parity:chatlist-clear-history -->
-- [ ] Clear history is one confirmation with an "Also delete for {name}" checkbox, not two menu items <!-- parity:chatlist-clear-history-box -->
+- [x] Clear history is one confirmation with an "Also delete for {name}" checkbox, not two menu items <!-- parity:chatlist-clear-history-box -->
 - [x] Saved Messages entry row in the list: opens the existing self chat directly, otherwise createPrivateChat with getOption("my_id") and opens the returned chat (schema td_api.tl:9590; src/connect.rs: create_private_chat_with_self, src/ui/mod.rs: open_saved_messages) <!-- parity:chatlist-saved-messages -->
 - [x] Chat preview on long-press (press-and-hold; hover was deliberately rejected — see DECISIONS.md) <!-- parity:chatlist-chat-preview -->
 - [x] Clear recent searches: Clear button on the Recent heading, clearRecentlyFoundChats with optimistic local clear (TGX SearchManager parity), refusal surfaced as a status note (src/connect.rs: clear_recently_found_chats, src/ui/mod.rs: clear_search_recents) <!-- parity:chatlist-clear-recent-searches -->
@@ -1016,7 +1016,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Message font size (12–20 px), live across message text and captions (`BubbleLook`) <!-- parity:settings-font-size -->
 - [x] Bubble vs plain chat style, live (`BubbleLook.plain` drops bubble bg/rounding) <!-- parity:settings-bubble-style -->
 - [x] Per-chat mute presets (1h / 8h / 2d / forever), live via chat panel (src/ui/mod.rs:11564; connect.rs:5424 `set_chat_mute_for` → `setChatNotificationSettings`) <!-- parity:settings-chat-mute -->
-- [ ] Custom mute duration chosen with a slider and live label, not day/hour step buttons <!-- parity:settings-mute-custom-slider -->
+- [x] Custom mute duration chosen with a slider and live label, not day/hour step buttons <!-- parity:settings-mute-custom-slider -->
 - [x] Per-chat message preview toggle, live (src/ui/mod.rs:13028 `apply_chat_preview`) <!-- parity:settings-chat-preview -->
 - [x] Per-chat custom notification sound picker, live (src/ui/mod.rs:12844; `getSavedNotificationSounds`) <!-- parity:settings-chat-sound -->
 - [x] Default mute per scope (private / groups / channels), live "Notification defaults" dialog (src/ui/mod.rs:13274 `apply_scope_mute`, `setScopeNotificationSettings`) <!-- parity:settings-scope-mute -->
@@ -1075,7 +1075,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] New login alert ("Was this you?") with confirm or terminate <!-- parity:settings-new-login-alert -->
 - [x] Session details box and rename this device <!-- parity:settings-session-details -->
 - [x] Default auto-delete timer for new chats <!-- parity:settings-autodelete-default -->
-- [ ] Custom auto-delete timer chosen with a slider, not minus/plus step buttons <!-- parity:settings-autodelete-custom-slider -->
+- [x] Custom auto-delete timer chosen with a slider, not minus/plus step buttons <!-- parity:settings-autodelete-custom-slider -->
 - [x] Bots and websites: mini-app permissions (Telegram Desktop has no "delete cloud drafts") <!-- parity:settings-bots-websites -->
 - [x] Show 18+ content toggle <!-- parity:settings-sensitive-content -->
 - [x] File open confirmations: extension warning and IP-reveal warning <!-- parity:settings-file-open-confirm -->
@@ -1116,7 +1116,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 
 - [x] Clear cache removes TDLib cached files <!-- parity:data-clear-cache-real -->
 - [x] Storage limits: total size, media cache, clear older than <!-- parity:data-storage-limits -->
-- [ ] Auto-download size limits and the storage size limit use sliders with an "up to N MB" label, not click-to-cycle buttons or preset chips <!-- parity:data-size-sliders -->
+- [x] Auto-download size limits and the storage size limit use sliders with an "up to N MB" label, not click-to-cycle buttons or preset chips <!-- parity:data-size-sliders -->
 - [x] Clear storage per file type and per chat from the breakdown <!-- parity:data-clear-per-type -->
 - [x] Download folder and "ask where to save each file" <!-- parity:data-download-path -->
 - [x] Network usage statistics with reset <!-- parity:data-network-usage -->

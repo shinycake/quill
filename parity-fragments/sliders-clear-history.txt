@@ -1,4 +1,0 @@
-parity:settings-mute-custom-slider
-parity:settings-autodelete-custom-slider
-parity:data-size-sliders
-parity:chatlist-clear-history-box
