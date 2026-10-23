@@ -262,9 +262,6 @@ mod event_log;
 mod event_log_demo;
 mod event_log_filter_box;
 mod event_log_rows;
-#[cfg(test)]
-#[cfg(feature = "demo-capture")]
-mod event_log_tests;
 mod event_log_text;
 mod export_box;
 mod export_progress;

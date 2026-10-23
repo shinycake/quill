@@ -513,3 +513,8 @@ impl QuillApp {
 pub(super) fn new_event_log_list() -> ListState {
     ListState::new(0, ListAlignment::Bottom, px(LIST_OVERDRAW))
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "event_log_tests.rs"]
+mod tests;
