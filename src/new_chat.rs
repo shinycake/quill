@@ -13,6 +13,7 @@
 use crate::group_info_edit::{DESCRIPTION_MAX, TITLE_MAX};
 use crate::ids::{ChatId, RequestId};
 use crate::lang::{Key, keys};
+use crate::premium_hub::group_digits;
 
 /// What is being made (tdesktop `GroupInfoBox::Type`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -312,7 +313,11 @@ pub fn members_counter(
     }
     let picked = i32::try_from(selected).unwrap_or(i32::MAX);
     let full = already_in.max(1).saturating_add(picked);
-    Some(format!("{full} / {size_max}"))
+    Some(format!(
+        "{} / {}",
+        group_digits(i64::from(full)),
+        group_digits(i64::from(size_max))
+    ))
 }
 
 #[cfg(test)]
@@ -469,11 +474,11 @@ mod tests {
     fn the_counter_counts_the_viewer() {
         assert_eq!(
             members_counter(NewChatKind::Group, 0, 2, 200_000).as_deref(),
-            Some("3 / 200000")
+            Some("3 / 200,000")
         );
         assert_eq!(
             members_counter(NewChatKind::Megagroup, 4, 1, 200_000).as_deref(),
-            Some("5 / 200000")
+            Some("5 / 200,000")
         );
         assert_eq!(members_counter(NewChatKind::Channel, 1, 2, 200_000), None);
         assert_eq!(members_counter(NewChatKind::Group, 0, 2, 0), None);

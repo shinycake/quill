@@ -27,6 +27,9 @@ use std::rc::Rc;
 
 /// How close to the end of a member list the next page is asked for.
 const LOAD_MORE_DISTANCE: f32 = 120.;
+/// A picker row's userpic (tdesktop `peerListItem.photoSize` is 42; the
+/// rows here are compact).
+const PICKER_AVATAR: f32 = 28.;
 
 impl QuillApp {
     /// Slice G1: open the member-management dialog and kick off the
@@ -515,6 +518,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let name = row.name.clone();
+        let photo = self
+            .session()
+            .and_then(|s| s.user_photo_path(user_id))
+            .map(std::path::PathBuf::from);
         div()
             .id(format!("{id_prefix}-contact-{user_id}"))
             .flex()
@@ -526,7 +533,19 @@ impl QuillApp {
                 // value differs from the rendered one.
                 Checkbox::new(format!("{id_prefix}-toggle-{user_id}"))
                     .checked(selected)
-                    .label(name)
+                    .items_center()
+                    .accessibility_label(name.clone())
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(super::message_text::kit_avatar_element(
+                                &name,
+                                photo.as_deref(),
+                                px(PICKER_AVATAR),
+                            ))
+                            .child(name),
+                    )
                     .on_click(cx.listener(move |this, &on, _, cx| {
                         if on != selected {
                             this.toggle_g1_contact_pick(&id_prefix, user_id, cx);

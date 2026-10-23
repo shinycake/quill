@@ -49,7 +49,9 @@ The old single-form create dialog (`ui/dialogs/create_chat.rs`) is gone.
   then the link field or the invite link. Its Save sends the username at
   once; a refusal shows under the field and keeps the step open.
 - The member picker reuses the contacts picker from the group members
-  dialog.
+  dialog; its rows now show each contact's userpic, so the Add Members and
+  story audience pickers that share it gain them too. The counter writes
+  both numbers with thousands separators (`3 / 200,000`).
 - A failed create keeps everything typed and shows the reason on the step
   the user came from. `CHANNELS_TOO_MUCH` opens the existing premium limit
   box.
