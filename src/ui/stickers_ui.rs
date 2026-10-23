@@ -639,7 +639,7 @@ impl QuillApp {
                             .flex()
                             .items_center()
                             .gap_1()
-                            .children(on_recent.then(|| clear_recent))
+                            .children(on_recent.then_some(clear_recent))
                             .child(
                                 Button::new("close-sticker-picker")
                                     .icon(gpui_kit::assets::IconName::X)
