@@ -45,8 +45,9 @@ impl QuillApp {
             .all()
             .into_iter()
             .filter_map(|choice| match choice {
-                ReactionChoice::Emoji(emoji) => wanted(&emoji)
-                    .then(|| PanelCell::Emoji(crate::ui::reactions::emoji_presentation(&emoji).into())),
+                ReactionChoice::Emoji(emoji) => wanted(&emoji).then(|| {
+                    PanelCell::Emoji(crate::ui::reactions::emoji_presentation(&emoji).into())
+                }),
                 ReactionChoice::CustomEmoji(id) => {
                     let (ix, sticker) = session
                         .stickers

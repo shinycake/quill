@@ -71,11 +71,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if custom_emoji_id.is_none() {
             return Ok(0);
         }
-        crate::main_menu::emoji_status_expiration(
-            crate::state::unix_ms_now() / 1000,
-            duration_secs,
-        )
-        .ok_or(ConnectSendError::InvalidRequest)
+        crate::main_menu::emoji_status_expiration(crate::state::unix_ms_now() / 1000, duration_secs)
+            .ok_or(ConnectSendError::InvalidRequest)
     }
 
     fn status_change_busy(&self) -> bool {

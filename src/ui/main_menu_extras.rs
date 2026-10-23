@@ -73,7 +73,11 @@ impl QuillApp {
                     .emoji
                     .upgraded_gift_statuses
                     .iter()
-                    .any(|s| s.gift.as_ref().is_some_and(|g| g.model_custom_emoji_id == id))
+                    .any(|s| {
+                        s.gift
+                            .as_ref()
+                            .is_some_and(|g| g.model_custom_emoji_id == id)
+                    })
             });
             let sent = match id {
                 Some(id) if collectible => live.driver.change_collectible_emoji_status(id, secs),

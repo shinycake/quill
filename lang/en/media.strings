@@ -121,10 +121,6 @@
 "lng_todo_create_maximum" = "You have added the maximum number of tasks.";
 "lng_url_auth_allow_messages" = "Allow {bot} to send me messages";
 "lng_view_button_story" = "View story";
-"qll_media_1_hour" = "1 hour";
-"qll_media_2_days" = "2 days";
-"qll_media_2_hours" = "2 hours";
-"qll_media_8_hours" = "8 hours";
 "qll_media_about" = "About";
 "qll_media_about_fact_checks" = "About fact checks";
 "qll_media_add" = "Add";
@@ -160,7 +156,6 @@
 "qll_media_allow_to_send_you_messages" = "Allow {name} to send you messages?";
 "qll_media_already_loading" = "already loading";
 "qll_media_an_emoji_pack_is_already" = "an emoji pack is already updating";
-"qll_media_an_emoji_status_is_already" = "An emoji status is already updating.";
 "qll_media_apps_you_use" = "Apps you use";
 "qll_media_archive" = "Archive";
 "qll_media_archive_stickers" = "Archive Stickers";
@@ -202,7 +197,6 @@
 "qll_media_checklist_updated_demo" = "checklist updated (demo)";
 "qll_media_checklists_need_a_live_connection" = "checklists need a live connection (demo)";
 "qll_media_choose_a_chat_to_share" = "choose a chat to share to";
-"qll_media_choose_a_duration_then_a" = "Choose a duration, then a status. Refresh to retry missing choices.";
 "qll_media_choose_a_jpeg_png_or" = "Choose a JPEG, PNG or WebP image.";
 "qll_media_choose_a_photo_or_a" = "choose a photo or a video";
 "qll_media_choose_a_photo_or_video" = "Choose a photo or video for the story.";
@@ -213,9 +207,7 @@
 "qll_media_choose_image" = "Choose Image";
 "qll_media_choose_photo" = "Choose Photo";
 "qll_media_choose_where_to_send_the" = "Choose where to send the game.";
-"qll_media_clear_recent_statuses" = "Clear recent statuses";
 "qll_media_clear_recent_stickers" = "Clear recent stickers";
-"qll_media_clearing_recent_statuses" = "Clearing recent statuses…";
 "qll_media_clearing_recent_stickers" = "clearing recent stickers…";
 "qll_media_close_after_hours_optional" = "Close after, hours (optional)";
 "qll_media_close_anyway" = "Close anyway";
@@ -241,7 +233,6 @@
 "qll_media_could_not_change_the_sticker" = "could not change the sticker set";
 "qll_media_could_not_change_the_stories" = "Could not change the stories list";
 "qll_media_could_not_check_posting_eligibility" = "Could not check posting eligibility";
-"qll_media_could_not_clear_recent_statuses" = "Could not clear recent statuses. Retry the action.";
 "qll_media_could_not_clear_recent_stickers" = "could not clear recent stickers";
 "qll_media_could_not_delete_story" = "could not delete story";
 "qll_media_could_not_download_emoji_pack" = "Could not download emoji pack. Refresh the preview and retry.";
@@ -253,7 +244,6 @@
 "qll_media_could_not_load_archived_stickers" = "could not load archived stickers";
 "qll_media_could_not_load_emoji_pack" = "could not load emoji pack";
 "qll_media_could_not_load_emoji_packs" = "could not load emoji packs";
-"qll_media_could_not_load_emoji_statuses" = "Could not load emoji statuses. Retry the action.";
 "qll_media_could_not_load_members" = "could not load members";
 "qll_media_could_not_load_more_emoji" = "could not load more emoji packs";
 "qll_media_could_not_load_more_stickers" = "could not load more stickers";
@@ -306,7 +296,6 @@
 "qll_media_could_not_stop_the_bot" = "could not stop the bot reply";
 "qll_media_could_not_stop_the_reply" = "Could not stop the reply. Try again.";
 "qll_media_could_not_update_emoji_packs" = "Could not update emoji packs. Retry the action.";
-"qll_media_could_not_update_emoji_status" = "Could not update emoji status. Retry the action.";
 "qll_media_could_not_update_favorite_sticker" = "could not update favorite sticker";
 "qll_media_could_not_update_the_checklist" = "could not update the checklist";
 "qll_media_could_not_vote" = "could not vote";
@@ -339,7 +328,6 @@
 "qll_media_creating" = "Creating…";
 "qll_media_custom_emoji" = "Custom emoji {count}";
 "qll_media_custom_emoji_need_telegram_premium" = "Custom emoji need Telegram Premium";
-"qll_media_default" = "Default";
 "qll_media_delete_album" = "Delete album";
 "qll_media_delete_emoji" = "Delete emoji";
 "qll_media_delete_for_everyone" = "Delete for Everyone";
@@ -396,12 +384,10 @@
 "qll_media_emoji_pack_download_requested" = "Emoji pack download requested.";
 "qll_media_emoji_packs_and_status" = "Emoji Packs and Status";
 "qll_media_emoji_set" = "Emoji set";
-"qll_media_emoji_status_duration_in_hours" = "Emoji status duration in hours";
 "qll_media_emoji_stickers_and_gifs" = "Emoji, stickers and GIFs";
 "qll_media_enabling_stealth_mode" = "Enabling stealth mode…";
 "qll_media_enter_2_step_password" = "Enter 2-step password";
 "qll_media_enter_at_least_one_story" = "enter at least one story id";
-"qll_media_enter_positive_whole_hours_within" = "Enter positive whole hours within the supported date range.";
 "qll_media_enter_the_cover_time_in" = "Enter the cover time in seconds (0 or more)";
 "qll_media_enter_the_links_address" = "enter the link's address";
 "qll_media_expand_fact_check" = "Expand fact check";
@@ -411,7 +397,6 @@
 "qll_media_fast_buttons_mode" = "Fast buttons mode";
 "qll_media_favorites" = "Favorites";
 "qll_media_file_moved_choose_again" = "The file was moved or deleted. Choose it again.";
-"qll_media_forever" = "Forever";
 "qll_media_game_data_missing_cant_launch" = "Game data missing; can't launch.";
 "qll_media_game_sent" = "Game sent";
 "qll_media_games" = "Games";
@@ -449,12 +434,10 @@
 "qll_media_load_archived_stories" = "load archived stories";
 "qll_media_load_chat_page_stories" = "load chat page stories";
 "qll_media_load_more" = "Load more";
-"qll_media_load_or_refresh_statuses" = "Load or refresh statuses";
 "qll_media_loading" = "Loading…";
 "qll_media_loading_apps" = "Loading apps…";
 "qll_media_loading_archived_stickers" = "loading archived stickers…";
 "qll_media_loading_emoji_packs" = "Loading emoji packs…";
-"qll_media_loading_emoji_statuses" = "Loading emoji statuses…";
 "qll_media_loading_members" = "Loading members…";
 "qll_media_loading_more_stickers" = "loading more stickers…";
 "qll_media_loading_more_trending_stickers" = "loading more trending stickers…";
@@ -661,18 +644,14 @@
 "qll_media_searching_stories" = "Searching stories…";
 "qll_media_select_a_chat_to_send" = "select a chat to send";
 "qll_media_select_an_option_to_see" = "Select an option to see its voters.";
-"qll_media_selected_duration_forever" = "Selected duration: forever";
-"qll_media_selected_duration_hours" = "Selected duration: {status_duration_secs_3600} hours";
 "qll_media_send" = "Send";
 "qll_media_send_sticker" = "Send {emoji} sticker";
 "qll_media_sending" = "Sending…";
 "qll_media_sending_checklist" = "sending checklist…";
 "qll_media_sending_poll" = "sending poll…";
 "qll_media_sent_to_the_bot" = "Sent to the bot.";
-"qll_media_set" = "Set {emoji}";
 "qll_media_set_2" = "Set";
 "qll_media_set_name" = "Set name";
-"qll_media_setting_an_emoji_status_requires" = "Setting an emoji status requires Telegram Premium.";
 "qll_media_share" = "Share";
 "qll_media_share_game" = "Share game";
 "qll_media_share_story_to" = "Share story to…";
@@ -776,9 +755,7 @@
 "qll_media_updating" = "Updating…";
 "qll_media_updating_checklist" = "updating checklist…";
 "qll_media_updating_emoji_pack" = "Updating emoji pack…";
-"qll_media_updating_emoji_status" = "Updating emoji status…";
 "qll_media_updating_favorite_stickers" = "updating favorite stickers…";
-"qll_media_use_custom_duration" = "Use custom duration";
 "qll_media_user" = "User {user_id}";
 "qll_media_venue" = "Venue";
 "qll_media_verification_description" = "Verification description";

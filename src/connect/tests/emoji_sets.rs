@@ -374,7 +374,10 @@ fn emoji_status_choices_resolution_timing_and_confirmed_clear() {
     assert!(driver.change_emoji_status(Some(91), 0).is_err());
     assert!(driver.change_collectible_emoji_status(5555, 0).is_err());
     let removed = driver.change_emoji_status(None, 0).unwrap().unwrap();
-    ingest(&mut driver, json!({"@type":"ok","@extra":removed.as_extra()}));
+    ingest(
+        &mut driver,
+        json!({"@type":"ok","@extra":removed.as_extra()}),
+    );
     driver.session.auth = AuthorizationState::WaitPhoneNumber;
     assert!(driver.load_emoji_status_choices().is_err());
     assert!(driver.clear_recent_emoji_statuses().is_err());

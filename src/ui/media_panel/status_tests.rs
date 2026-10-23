@@ -66,6 +66,12 @@ fn labelled(vcx: &mut VisualTestContext, label: &str) -> bool {
     vcx.update(|window, _| window.try_find_by_label(label).is_some())
 }
 
+fn click_label(vcx: &mut VisualTestContext, label: &str) {
+    let bounds = vcx.update(|window, _| window.find_by_label(label).bounds());
+    vcx.simulate_click(bounds.center(), Modifiers::default());
+    frames(vcx);
+}
+
 fn first_cells(app: &QuillApp) -> Vec<PanelCell> {
     app.pickers
         .media_panel
@@ -148,7 +154,9 @@ fn a_click_sets_the_status_forever_and_closes_the_selector(cx: &mut TestAppConte
 fn the_star_removes_the_status(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, true);
     let vcx = &mut vcx;
-    app.update(vcx, |app, cx| app.change_emoji_status_for(Some(5003), 0, cx));
+    app.update(vcx, |app, cx| {
+        app.change_emoji_status_for(Some(5003), 0, cx)
+    });
     assert_eq!(my_status(&app, vcx), 5003);
     open_selector(&app, vcx);
     app.read_with(vcx, |app, _| {
@@ -166,7 +174,9 @@ fn without_premium_a_status_opens_premium_and_removing_still_works(cx: &mut Test
     let vcx = &mut vcx;
     // The menu entry itself shows the Premium preview.
     open_selector(&app, vcx);
-    app.read_with(vcx, |app, _| assert!(app.pickers.media_panel.status.is_none()));
+    app.read_with(vcx, |app, _| {
+        assert!(app.pickers.media_panel.status.is_none())
+    });
 
     // Past the menu, a chosen status is not set; the star still removes one.
     app.update_in(vcx, |app, window, cx| {
@@ -179,10 +189,7 @@ fn without_premium_a_status_opens_premium_and_removing_still_works(cx: &mut Test
 
     app.update(vcx, |app, cx| {
         let session = app.demo_session.as_mut().expect("demo session");
-        if let Some(user) = session
-            .my_user_id
-            .and_then(|me| session.users.get_mut(&me))
-        {
+        if let Some(user) = session.my_user_id.and_then(|me| session.users.get_mut(&me)) {
             user.emoji_status_id = 5003;
         }
         app.choose_panel_status(None, 0, cx)
@@ -249,7 +256,9 @@ fn the_menu_sets_a_status_for_a_while_and_custom_opens_the_box(cx: &mut TestAppC
 fn the_box_picks_a_duration_with_keys_and_sets_the_status(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, true);
     let vcx = &mut vcx;
-    app.update_in(vcx, |app, window, cx| app.open_status_time_box(5003, window, cx));
+    app.update_in(vcx, |app, window, cx| {
+        app.open_status_time_box(5003, window, cx)
+    });
     frames(vcx);
     let values = time_picker_values();
     assert!(values.len() > 3);
@@ -273,18 +282,24 @@ fn the_box_picks_a_duration_with_keys_and_sets_the_status(cx: &mut TestAppContex
     });
     app.update(vcx, |app, cx| app.confirm_status_time(cx));
     assert_eq!(my_status(&app, vcx), 5003);
-    app.read_with(vcx, |app, _| assert!(app.pickers.media_panel.until.is_none()));
+    app.read_with(vcx, |app, _| {
+        assert!(app.pickers.media_panel.until.is_none())
+    });
 }
 
 #[gpui_kit::test]
 fn cancel_closes_the_box_without_a_change(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, true);
     let vcx = &mut vcx;
-    app.update_in(vcx, |app, window, cx| app.open_status_time_box(5003, window, cx));
+    app.update_in(vcx, |app, window, cx| {
+        app.open_status_time_box(5003, window, cx)
+    });
     frames(vcx);
     assert!(labelled(vcx, "Cancel"));
     click_label(vcx, "Cancel");
-    app.read_with(vcx, |app, _| assert!(app.pickers.media_panel.until.is_none()));
+    app.read_with(vcx, |app, _| {
+        assert!(app.pickers.media_panel.until.is_none())
+    });
     assert_eq!(my_status(&app, vcx), 0);
 }
 

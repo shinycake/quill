@@ -55,7 +55,12 @@ pub enum StatusSlot {
 /// The leading section (`EmojiStatusPanel::show`): a remove cell, the
 /// first themed statuses, then the recent and default ones that are not
 /// listed yet, then `current` when it is still missing.
-pub fn status_slots(themed: &[i64], recent: &[i64], default: &[i64], current: i64) -> Vec<StatusSlot> {
+pub fn status_slots(
+    themed: &[i64],
+    recent: &[i64],
+    default: &[i64],
+    current: i64,
+) -> Vec<StatusSlot> {
     let mut ids: Vec<i64> = Vec::new();
     for &id in themed.iter().filter(|id| **id > 0).take(FIRST_ROW_LIMIT) {
         if !ids.contains(&id) {
@@ -79,7 +84,10 @@ pub fn status_slots(themed: &[i64], recent: &[i64], default: &[i64], current: i6
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StatusPick {
     /// Set the status; `0` seconds keeps it until it is removed.
-    Set { id: i64, secs: i32 },
+    Set {
+        id: i64,
+        secs: i32,
+    },
     Remove,
     /// The account has no Premium: show the Premium preview instead.
     PremiumPreview,
@@ -127,12 +135,19 @@ pub fn format_ttl(secs: i32) -> String {
         if secs % 7 == 0 {
             trn(keys::WEEKS, days / 7)
         } else {
-            format!("{} {}", trn(keys::WEEKS, days / 7), trn(keys::DAYS, days % 7))
+            format!(
+                "{} {}",
+                trn(keys::WEEKS, days / 7),
+                trn(keys::DAYS, days % 7)
+            )
         }
     } else if secs <= DAY * 31 * 11 {
         trn(keys::MONTHS, secs / (DAY * 31))
     } else {
-        trn(keys::YEARS, (f64::from(secs) / f64::from(DAY * 365)).round() as i64)
+        trn(
+            keys::YEARS,
+            (f64::from(secs) / f64::from(DAY * 365)).round() as i64,
+        )
     }
 }
 

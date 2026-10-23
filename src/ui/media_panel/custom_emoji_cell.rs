@@ -35,11 +35,7 @@ impl QuillApp {
         let still = self.panel_still(&item);
         let premium = self.session().is_some_and(|s| s.my_is_premium());
         let fallback: SharedString = item.emoji.clone().into();
-        let status_id = self
-            .pickers
-            .media_panel
-            .status
-            .and(item.custom_emoji_id);
+        let status_id = self.pickers.media_panel.status.and(item.custom_emoji_id);
         let cell = div()
             .id(("panel-custom-emoji", id))
             .size(px(EMOJI_CELL))

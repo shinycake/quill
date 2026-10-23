@@ -941,12 +941,12 @@ mod categories;
 mod custom_emoji_cell;
 mod reaction_rows;
 mod status;
-mod status_time_box;
 #[cfg(feature = "demo-capture")]
 mod status_demo;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod status_tests;
+mod status_time_box;
 pub(in crate::ui) use custom_emoji_cell::section_chip;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]

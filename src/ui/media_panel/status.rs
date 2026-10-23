@@ -180,7 +180,12 @@ impl QuillApp {
 
     /// A cell was chosen: set the status for `secs` (`0` until removed),
     /// remove it (`None`), or show Premium when the account has none.
-    pub(super) fn choose_panel_status(&mut self, id: Option<i64>, secs: i32, cx: &mut Context<Self>) {
+    pub(super) fn choose_panel_status(
+        &mut self,
+        id: Option<i64>,
+        secs: i32,
+        cx: &mut Context<Self>,
+    ) {
         let premium = self.session().is_some_and(|s| s.my_is_premium());
         self.close_media_panel(cx);
         match pick(id, secs, premium) {

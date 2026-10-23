@@ -776,31 +776,34 @@ impl Render for QuillApp {
             })
             // The expanded reaction selector, where the menu was, or the
             // emoji status selector under the main menu.
-            .when_some(self.pickers.media_panel.selector_anchor(), |this, position| {
-                let panel = self.media_panel(cx);
-                this.child(
-                    div()
-                        .id("reaction-selector-layer")
-                        .occlude()
-                        .absolute()
-                        .inset_0()
-                        .child(
-                            div()
-                                .id("reaction-selector-backdrop")
-                                .absolute()
-                                .inset_0()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.close_media_panel(cx);
-                                })),
-                        )
-                        .child(
-                            anchored()
-                                .position(position)
-                                .snap_to_window_with_margin(px(8.))
-                                .child(panel),
-                        ),
-                )
-            })
+            .when_some(
+                self.pickers.media_panel.selector_anchor(),
+                |this, position| {
+                    let panel = self.media_panel(cx);
+                    this.child(
+                        div()
+                            .id("reaction-selector-layer")
+                            .occlude()
+                            .absolute()
+                            .inset_0()
+                            .child(
+                                div()
+                                    .id("reaction-selector-backdrop")
+                                    .absolute()
+                                    .inset_0()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.close_media_panel(cx);
+                                    })),
+                            )
+                            .child(
+                                anchored()
+                                    .position(position)
+                                    .snap_to_window_with_margin(px(8.))
+                                    .child(panel),
+                            ),
+                    )
+                },
+            )
             // Slice CL1: right-click chat-row context menu.
             .when_some(self.chat_list.menu, |this, menu| {
                 this.child(self.chat_menu_overlay(menu, cx))
