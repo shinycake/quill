@@ -14,23 +14,6 @@ pub(super) const ENTRIES: &[Entry] = &[
     Entry::new("about.check_updates", P, keys::Q_OPS_CHECK_FOR_UPDATES)
         .section(keys::Q_OPS_QUILL_UPDATES)
         .keywords(&["upgrade", "new version"]),
-    Entry::new(
-        "about.check_on_launch",
-        P,
-        keys::Q_OPS_CHECK_FOR_UPDATES_ON_LAUNCH,
-    )
-    .section(keys::Q_OPS_QUILL_UPDATES)
-    .keywords(&["startup"]),
-    Entry::new(
-        "about.auto_install",
-        P,
-        keys::Q_OPS_INSTALL_UPDATES_AUTOMATICALLY,
-    )
-    .section(keys::Q_OPS_QUILL_UPDATES)
-    .keywords(&["background", "silent"]),
-    Entry::new("about.beta", P, keys::Q_SETTINGS_ABOUT_BETA)
-        .section(keys::Q_OPS_QUILL_UPDATES)
-        .keywords(&["prerelease", "channel", "preview"]),
     Entry::new("about.licenses", P, keys::Q_OPS_OPEN_SOURCE_LICENSES).keywords(&[
         "third party",
         "legal",
