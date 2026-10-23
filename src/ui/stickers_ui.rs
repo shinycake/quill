@@ -291,7 +291,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             self.connection
                 .set_note(match live.driver.select_sticker_tab(tab) {
-                    Ok(_) => StatusNote::silent("stickers"),
+                    Ok(_) => StatusNote::silent(tr(keys::Q_LEFTOVERS_STICKERS)),
                     Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_LOAD_STICKER_TAB)),
                 });
         } else if let Some(session) = self.demo_session.as_mut() {

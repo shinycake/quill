@@ -161,9 +161,8 @@ impl QuillApp {
                 self.privacy.device_login_qr = Some(link);
             }
             _ => {
-                self.privacy.device_link_notice = Some(
-                    "Copy the tg://login link from the other device's QR code first, then try again.",
-                );
+                self.privacy.device_link_notice =
+                    Some(tr(keys::Q_LEFTOVERS_DEVICE_LINK_COPY_FIRST));
             }
         }
         cx.notify();

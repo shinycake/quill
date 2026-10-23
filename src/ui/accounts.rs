@@ -416,15 +416,25 @@ impl QuillApp {
                         .text_color(cx.theme().muted_foreground)
                         .child(tr(keys::Q_OPS_ACCOUNTS_YOU_ARE_NOT_USING)),
                 )
-                .child(div().font_semibold().text_sm().child(tr(keys::Q_OPS_ADD_ANOTHER_ACCOUNT)))
+                .child(
+                    div()
+                        .font_semibold()
+                        .text_sm()
+                        .child(tr(keys::Q_OPS_ADD_ANOTHER_ACCOUNT)),
+                )
                 .child(
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(format!(
-                            "Up to {} accounts; Telegram Premium on an account adds one more (up to {}).",
-                            quill::signin::MAX_ACCOUNTS,
-                            quill::signin::MAX_ACCOUNTS_PREMIUM
+                        .child(tr_with(
+                            keys::Q_LEFTOVERS_ACCOUNT_LIMIT_ABOUT,
+                            &[
+                                ("limit", &(quill::signin::MAX_ACCOUNTS).to_string()),
+                                (
+                                    "premium_limit",
+                                    &(quill::signin::MAX_ACCOUNTS_PREMIUM).to_string(),
+                                ),
+                            ],
                         )),
                 )
                 .child(

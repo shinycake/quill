@@ -7,7 +7,7 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::lang::{keys, tr};
+use quill::lang::{keys, tr, tr_with};
 use quill::local_time::{civil_local, now_unix};
 use quill::stat_chart::{
     PostCounters, Sheet, StatChart, chat_statistics_sheets, export_file_name, parse_chart,
@@ -174,11 +174,15 @@ impl QuillApp {
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.connection.set_note(match written {
-                    Ok(dest) => StatusNote::info(format!(
-                        "Statistics saved to {}.",
-                        dest.file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or(tr(keys::Q_MONEY_THE_FILE))
+                    Ok(dest) => StatusNote::info(tr_with(
+                        keys::STATS_EXPORT_DONE,
+                        &[(
+                            "file",
+                            (dest
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or(tr(keys::Q_MONEY_THE_FILE))),
+                        )],
                     )),
                     Err(()) => StatusNote::error(tr(keys::STATS_EXPORT_ERROR)),
                 });

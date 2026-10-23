@@ -471,9 +471,9 @@ impl QuillApp {
                 )
                 .child(Input::new(&state.input).aria_label(tr(keys::Q_OPS_STARS_TO_UNLOCK_2)))
                 .when(state.too_high, |body| {
-                    body.child(div().text_sm().text_color(danger).child(format!(
-                        "The price can be up to {} Stars.",
-                        this.paid_media_star_max()
+                    body.child(div().text_sm().text_color(danger).child(tr_with(
+                        keys::Q_LEFTOVERS_PRICE_UP_TO_STARS,
+                        &[("count", &(this.paid_media_star_max()).to_string())],
                     )))
                 })
                 .child(

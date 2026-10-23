@@ -37,13 +37,21 @@ pub(crate) struct PlaylistMenu {
 }
 
 /// `lng_selected_remove_saved_music`.
-pub(crate) const REMOVE_TEXT: &str = "Do you want to remove this file from your profile?";
+pub(crate) fn remove_text() -> &'static str {
+    tr(keys::SELECTED_REMOVE_SAVED_MUSIC)
+}
 /// `lng_saved_music_removed`.
-pub(crate) const REMOVED_TOAST: &str = "Audio removed from your Profile.";
+pub(crate) fn removed_toast() -> &'static str {
+    tr(keys::SAVED_MUSIC_REMOVED)
+}
 /// `lng_saved_music_added`.
-pub(crate) const ADDED_TOAST: &str = "Audio added to your Profile.";
+pub(crate) fn added_toast() -> &'static str {
+    tr(keys::SAVED_MUSIC_ADDED)
+}
 /// `lng_context_save_music_about`.
-pub(crate) const SAVE_ABOUT: &str = "Choose where you want this audio to be saved.";
+pub(crate) fn save_about() -> &'static str {
+    tr(keys::CONTEXT_SAVE_MUSIC_ABOUT)
+}
 
 #[derive(Clone)]
 pub(crate) struct PlaylistDrag {
@@ -123,7 +131,8 @@ impl QuillApp {
         let Some(file_id) = self.playback.playlist_remove.take() else {
             return;
         };
-        self.connection.set_note(StatusNote::silent(REMOVED_TOAST));
+        self.connection
+            .set_note(StatusNote::silent(removed_toast()));
         match self.live.as_mut() {
             Some(live) => {
                 let _ = live.driver.remove_profile_audio_track(file_id);
@@ -210,7 +219,7 @@ impl QuillApp {
                         &track.performer,
                         &track.file_name,
                     ) {
-                        Ok(_) => StatusNote::info(ADDED_TOAST),
+                        Ok(_) => StatusNote::info(added_toast()),
                         Err(_) => StatusNote::error(tr(keys::Q_AV_COULD_NOT_SAVE_TO_YOUR)),
                     },
                 );
@@ -219,7 +228,7 @@ impl QuillApp {
                 if let Some(session) = self.demo_session.as_mut() {
                     session.local_save_profile_audio(track);
                 }
-                self.connection.set_note(StatusNote::silent(ADDED_TOAST));
+                self.connection.set_note(StatusNote::silent(added_toast()));
             }
         }
         cx.notify();
@@ -348,7 +357,7 @@ impl QuillApp {
                     .max_w(px(220.))
                     .text_xs()
                     .text_color(text_muted())
-                    .child(SAVE_ABOUT)
+                    .child(save_about())
                     .into_any_element(),
             );
         } else {
@@ -490,7 +499,7 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .gap_1()
-                .child(div().text_sm().child(REMOVE_TEXT))
+                .child(div().text_sm().child(remove_text()))
                 .child(
                     div()
                         .text_xs()

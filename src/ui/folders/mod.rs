@@ -134,9 +134,9 @@ impl QuillApp {
                 let all_ticked = leaving == suggested.len();
                 let select_ids = suggested.clone();
                 body = body
-                    .child(div().text_sm().child(format!(
-                        "Do you also want to quit the chats included in the folder {}?",
-                        confirm.name
+                    .child(div().text_sm().child(tr_with(
+                        keys::FILTERS_BY_LINK_REMOVE_SURE,
+                        &[("folder", &confirm.name.to_string())],
                     )))
                     .child(
                         div()

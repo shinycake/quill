@@ -599,28 +599,33 @@ impl QuillApp {
                     };
                     match c.warning {
                         OpenWarning::Executable => (
-                            format!(
-                                "This file has the extension {dotted}\nIt may harm your computer.\nAre you sure you want to run it?"
+                            tr_with(
+                                keys::LAUNCH_EXE_WARNING,
+                                &[("extension", &dotted.to_string())],
                             ),
                             tr(keys::Q_PREFS_RUN),
                             tr(keys::LAUNCH_DONT_ASK),
                         ),
                         OpenWarning::Unknown => (
-                            format!(
-                                "This file has {dotted} extension.\nAre you sure you want to open it?"
+                            tr_with(
+                                keys::LAUNCH_OTHER_WARNING,
+                                &[("extension", &dotted.to_string())],
                             ),
                             tr(keys::Q_PREFS_OPEN),
                             tr(keys::LAUNCH_DONT_ASK),
                         ),
                         OpenWarning::IpReveal => (
-                            tr(keys::LAUNCH_SVG_WARNING)
-                                .to_string(),
+                            tr(keys::LAUNCH_SVG_WARNING).to_string(),
                             tr(keys::Q_PREFS_OPEN),
                             tr(keys::LAUNCH_EXE_DONT_ASK),
                         ),
                     }
                 }
-                None => (String::new(), tr(keys::Q_PREFS_OPEN), tr(keys::LAUNCH_DONT_ASK)),
+                None => (
+                    String::new(),
+                    tr(keys::Q_PREFS_OPEN),
+                    tr(keys::LAUNCH_DONT_ASK),
+                ),
             };
             let name = confirm
                 .as_ref()
@@ -651,9 +656,12 @@ impl QuillApp {
                                 })),
                         )
                         .when(remember, |this_| {
-                            this_.child(div().text_xs().text_color(text_muted()).child(
-                                tr(keys::Q_PREFS_YOU_CAN_LATER_EDIT_TRUSTED),
-                            ))
+                            this_.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(text_muted())
+                                    .child(tr(keys::Q_PREFS_YOU_CAN_LATER_EDIT_TRUSTED)),
+                            )
                         })
                 })
                 .into_any_element();
@@ -682,7 +690,9 @@ impl QuillApp {
                 );
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title(tr(keys::Q_PREFS_OPEN_THIS_FILE)))
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::Q_PREFS_OPEN_THIS_FILE,
+                )))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body)));
                     move |content, _, _| {

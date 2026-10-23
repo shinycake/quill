@@ -190,11 +190,13 @@ impl QuillApp {
         };
         let question = match pending {
             StorageClear::All => tr(keys::Q_OPS_CLEAR_ALL_CACHED_FILES).to_string(),
-            StorageClear::Selected => format!(
-                "Clear {} selected {} ({})?",
-                selected.len(),
-                if selected.len() == 1 { "type" } else { "types" },
-                format_storage_bytes(selected_size)
+            StorageClear::Selected => tr_with(
+                keys::Q_LEFTOVERS_CLEAR_SELECTED_SURE,
+                &[
+                    ("count", &(selected.len()).to_string()),
+                    ("kind", (if selected.len() == 1 { "type" } else { "types" })),
+                    ("size", &(format_storage_bytes(selected_size)).to_string()),
+                ],
             ),
             StorageClear::Chat(chat_id) => tr_with(
                 keys::Q_OPS_CLEAR_THE_CACHED_FILES_OF,

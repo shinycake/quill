@@ -1,3 +1,4 @@
+use quill::lang::{Key, keys};
 /// Phase C2i: rating-detail draft for the call-end card. `problems` is
 /// indexed by `CALL_PROBLEMS` (schema 1.8.67, `:7253`-`:7277`).
 pub struct RatingDetail {
@@ -8,26 +9,32 @@ pub struct RatingDetail {
 /// Phase C2i: the nine `CallProblem` constructors (TDLib 1.8.67,
 /// `schema/td_api.tl:7253`-`:7277`) with their schema descriptions,
 /// in schema order. Index-aligned with `RatingDetail::problems`.
-pub const CALL_PROBLEMS: [(&str, &str); 9] = [
-    ("callProblemEcho", "Echo — I heard my own voice"),
-    ("callProblemNoise", "Noise — background noise"),
+pub const CALL_PROBLEMS: [(&str, Key); 9] = [
+    ("callProblemEcho", keys::Q_LEFTOVERS_CALL_PROBLEM_ECHO),
+    ("callProblemNoise", keys::Q_LEFTOVERS_CALL_PROBLEM_NOISE),
     (
         "callProblemInterruptions",
-        "Interruptions — the other side kept disappearing",
+        keys::Q_LEFTOVERS_CALL_PROBLEM_INTERRUPTIONS,
     ),
-    ("callProblemDistortedSpeech", "Distorted speech"),
+    (
+        "callProblemDistortedSpeech",
+        keys::Q_LEFTOVERS_CALL_PROBLEM_DISTORTED_SPEECH,
+    ),
     (
         "callProblemSilentLocal",
-        "Silent — I couldn't hear the other side",
+        keys::Q_LEFTOVERS_CALL_PROBLEM_SILENT_LOCAL,
     ),
     (
         "callProblemSilentRemote",
-        "Silent — the other side couldn't hear me",
+        keys::Q_LEFTOVERS_CALL_PROBLEM_SILENT_REMOTE,
+    ),
+    ("callProblemDropped", keys::Q_LEFTOVERS_CALL_PROBLEM_DROPPED),
+    (
+        "callProblemDistortedVideo",
+        keys::Q_LEFTOVERS_CALL_PROBLEM_DISTORTED_VIDEO,
     ),
     (
-        "callProblemDropped",
-        "Dropped — the call ended unexpectedly",
+        "callProblemPixelatedVideo",
+        keys::Q_LEFTOVERS_CALL_PROBLEM_PIXELATED_VIDEO,
     ),
-    ("callProblemDistortedVideo", "Distorted video"),
-    ("callProblemPixelatedVideo", "Pixelated video"),
 ];

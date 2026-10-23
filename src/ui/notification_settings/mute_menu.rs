@@ -70,9 +70,9 @@ impl QuillApp {
                 cx,
             );
             self.connection.set_note(if mute_for == 0 {
-                StatusNote::silent("unmuted")
+                StatusNote::silent(tr(keys::Q_LEFTOVERS_UNMUTED))
             } else {
-                StatusNote::silent("muted")
+                StatusNote::silent(tr(keys::Q_LEFTOVERS_MUTED))
             });
             cx.notify();
         }

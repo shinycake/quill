@@ -2,6 +2,7 @@
 mod apply;
 mod boost_level;
 mod error;
+mod event_log;
 mod group_type;
 mod new_chat;
 mod purpose;

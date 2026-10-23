@@ -2,6 +2,7 @@ use super::super::app::QuillApp;
 use gpui_kit::component::input::InputState;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr};
 /// B1: password prompt for an `inlineKeyboardButtonTypeCallbackWithPassword`
 /// button press (TDLib 1.8.67, `schema/td_api.tl:3789`). Submits the entered
 /// Slice A2: which form the two-step verification overlay shows.
@@ -41,7 +42,7 @@ impl CallbackPasswordDialog {
     ) -> Self {
         let password_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("2-step verification password")
+                .placeholder(tr(keys::Q_LEFTOVERS_2_STEP_VERIFICATION_PASSWORD))
                 .masked(true)
                 .submit_on_enter(false)
         });

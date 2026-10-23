@@ -14,6 +14,7 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::base::{GlobalState, TextSelection};
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::selection_drag::{
     AUTOSCROLL_TICK_MS, DragRange, LIMIT, RowBand, apply_drag, autoscroll_step, edge_delta,
     moved_enough, row_under,
@@ -272,8 +273,11 @@ impl QuillApp {
             }
             let count = self.forward_draft().map_or(0, |d| d.count());
             self.connection.set_note(match count {
-                1 => StatusNote::silent("1 message selected"),
-                n => StatusNote::silent(format!("{n} messages selected")),
+                1 => StatusNote::silent(tr(keys::Q_LEFTOVERS_1_MESSAGE_SELECTED)),
+                n => StatusNote::silent(tr_with(
+                    keys::Q_LEFTOVERS_MESSAGES_SELECTED,
+                    &[("n", &n.to_string())],
+                )),
             });
         }
         cx.notify();

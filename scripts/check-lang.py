@@ -40,6 +40,30 @@ def ui_files():
                 yield path
 
 
+# A literal handed straight to a text-taking call or a status note, even a
+# single lowercase word ("pinned"): it shows on screen, so it needs a key.
+DIRECT = re.compile(
+    r'(?:\.(?:child|label|tooltip|placeholder|aria_label|accessibility_label|title|description)'
+    r'|StatusNote::(?:info|error|silent))\(\s*"((?:[^"\\]|\\.)*)"\s*\)'
+)
+# Names and symbols that are the same in every language.
+DIRECT_OK = {'GIF', 'HDR', 'Quill', 't.me/'}
+DIRECT_WORD = re.compile(r'[A-Za-z]{2,}')
+
+
+def direct_count(line):
+    """Direct text literals the capitalised-phrase rule does not already count."""
+    return sum(
+        1
+        for lit in DIRECT.findall(line)
+        if lit not in DIRECT_OK
+        and DIRECT_WORD.search(re.sub(r'\\u\{[0-9A-Fa-f]+\}', '', lit))
+        and '::' not in lit
+        and not lit.isupper()
+        and not TEXT.match(lit)
+    )
+
+
 def english_count(path):
     count = 0
     in_tests = False
@@ -51,6 +75,7 @@ def english_count(path):
         for lit in LITERAL.findall(line):
             if TEXT.match(lit) and '::' not in lit:
                 count += 1
+        count += direct_count(line)
     return count
 
 

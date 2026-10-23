@@ -20,7 +20,11 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let dialog = dialog.overlay(true);
             let Some(dialog_state) = this.admin.group_confirm_dialog.as_ref() else {
-                return dialog.title(crate::ui::shell::dialog_title(tr(keys::SETTINGS_CLOUD_LOGIN_EMAIL_CONFIRM))).on_close(on_close);
+                return dialog
+                    .title(crate::ui::shell::dialog_title(tr(
+                        keys::SETTINGS_CLOUD_LOGIN_EMAIL_CONFIRM,
+                    )))
+                    .on_close(on_close);
             };
             let (title, message, confirm_label): (String, String, String) =
                 match dialog_state.action {
@@ -30,10 +34,18 @@ impl QuillApp {
                             .and_then(|session| session.chats.get(&dialog_state.chat_id.0))
                             .is_some_and(|chat| chat.is_channel());
                         (
-                            if is_channel { tr(keys::PROFILE_DELETE_CHANNEL) } else { tr(keys::PROFILE_DELETE_GROUP) }
-                                .to_string(),
-                            if is_channel { tr(keys::SURE_DELETE_CHANNEL) } else { tr(keys::SURE_DELETE_GROUP) }
-                                .to_string(),
+                            if is_channel {
+                                tr(keys::PROFILE_DELETE_CHANNEL)
+                            } else {
+                                tr(keys::PROFILE_DELETE_GROUP)
+                            }
+                            .to_string(),
+                            if is_channel {
+                                tr(keys::SURE_DELETE_CHANNEL)
+                            } else {
+                                tr(keys::SURE_DELETE_GROUP)
+                            }
+                            .to_string(),
                             tr(keys::BOX_DELETE).to_string(),
                         )
                     }
@@ -42,7 +54,10 @@ impl QuillApp {
                             .session()
                             .and_then(|session| session.chats.get(&dialog_state.chat_id.0))
                             .filter(|chat| {
-                                matches!(chat.kind, quill::telegram::envelope::ChatKind::BasicGroup { .. })
+                                matches!(
+                                    chat.kind,
+                                    quill::telegram::envelope::ChatKind::BasicGroup { .. }
+                                )
                             })
                             .map(|chat| chat.title.clone());
                         match group {
@@ -62,8 +77,7 @@ impl QuillApp {
                         if block {
                             (
                                 tr(keys::PROFILE_BLOCK_USER).to_string(),
-                                tr(keys::Q_PEOPLE_BLOCK_THIS_USER_THEY_WONT)
-                                    .to_string(),
+                                tr(keys::Q_PEOPLE_BLOCK_THIS_USER_THEY_WONT).to_string(),
                                 tr(keys::BLOCKED_LIST_CONFIRM_OK).to_string(),
                             )
                         } else {
@@ -76,8 +90,7 @@ impl QuillApp {
                     }
                     GroupConfirmAction::RemoveSelectedChats => (
                         tr(keys::Q_PEOPLE_DELETE_CHATS).to_string(),
-                        tr(keys::Q_PEOPLE_DELETE_THE_SELECTED_CHATS_AND)
-                            .to_string(),
+                        tr(keys::Q_PEOPLE_DELETE_THE_SELECTED_CHATS_AND).to_string(),
                         tr(keys::GROUP_INVITE_CONTEXT_DELETE).to_string(),
                     ),
                     GroupConfirmAction::LeaveChat => (
@@ -97,14 +110,12 @@ impl QuillApp {
                     ),
                     GroupConfirmAction::RestartBot => (
                         tr(keys::Q_PEOPLE_RESTART_BOT).to_string(),
-                        tr(keys::Q_PEOPLE_CLEAR_THIS_BOTS_CHAT_HISTORY)
-                            .to_string(),
+                        tr(keys::Q_PEOPLE_CLEAR_THIS_BOTS_CHAT_HISTORY).to_string(),
                         tr(keys::Q_PEOPLE_RESTART).to_string(),
                     ),
                     GroupConfirmAction::AbortRecoveryEmailSetup => (
                         tr(keys::Q_PEOPLE_ABORT_RECOVERY_EMAIL_SETUP).to_string(),
-                        tr(keys::Q_PEOPLE_ARE_YOU_SURE_YOU_WANT)
-                            .to_string(),
+                        tr(keys::Q_PEOPLE_ARE_YOU_SURE_YOU_WANT).to_string(),
                         tr(keys::Q_PEOPLE_ABORT).to_string(),
                     ),
                     GroupConfirmAction::BlockContact { user_id, block } => {
@@ -112,7 +123,10 @@ impl QuillApp {
                         if block {
                             (
                                 tr(keys::PROFILE_BLOCK_USER).to_string(),
-                                tr_with(keys::Q_PEOPLE_ARE_YOU_SURE_YOU_WANT_2, &[("name", &name.to_string())]),
+                                tr_with(
+                                    keys::Q_PEOPLE_ARE_YOU_SURE_YOU_WANT_2,
+                                    &[("name", &name.to_string())],
+                                ),
                                 tr(keys::BLOCKED_LIST_CONFIRM_OK).to_string(),
                             )
                         } else {
@@ -127,7 +141,10 @@ impl QuillApp {
                         let name = this.contact_display_name(user_id);
                         (
                             tr(keys::INFO_DELETE_CONTACT).to_string(),
-                            tr_with(keys::Q_PEOPLE_DELETE_FROM_CONTACTS, &[("name", &name.to_string())]),
+                            tr_with(
+                                keys::Q_PEOPLE_DELETE_FROM_CONTACTS,
+                                &[("name", &name.to_string())],
+                            ),
                             tr(keys::GROUP_INVITE_CONTEXT_DELETE).to_string(),
                         )
                     }
@@ -140,17 +157,23 @@ impl QuillApp {
                         let name = this
                             .session()
                             .and_then(|s| {
-                                s.threads.forum_topics.get(&dialog_state.chat_id.0).and_then(|topics| {
-                                    topics
-                                        .iter()
-                                        .find(|t| t.forum_topic_id == forum_topic_id)
-                                        .map(|t| t.name.clone())
-                                })
+                                s.threads
+                                    .forum_topics
+                                    .get(&dialog_state.chat_id.0)
+                                    .and_then(|topics| {
+                                        topics
+                                            .iter()
+                                            .find(|t| t.forum_topic_id == forum_topic_id)
+                                            .map(|t| t.name.clone())
+                                    })
                             })
                             .unwrap_or_else(|| tr(keys::Q_PEOPLE_THIS_TOPIC).to_string());
                         (
                             tr(keys::Q_PEOPLE_DELETE_TOPIC).to_string(),
-                            tr_with(keys::Q_PEOPLE_DELETE_AND_ALL_ITS_MESSAGES, &[("name", &name.to_string())]),
+                            tr_with(
+                                keys::Q_PEOPLE_DELETE_AND_ALL_ITS_MESSAGES,
+                                &[("name", &name.to_string())],
+                            ),
                             tr(keys::GROUP_INVITE_CONTEXT_DELETE).to_string(),
                         )
                     }
@@ -158,7 +181,8 @@ impl QuillApp {
                         let name = this
                             .session()
                             .and_then(|s| {
-                                s.threads.saved
+                                s.threads
+                                    .saved
                                     .topics
                                     .get(&topic_id)
                                     .map(|topic| s.saved_topic_title(topic))
@@ -166,8 +190,9 @@ impl QuillApp {
                             .unwrap_or_else(|| tr(keys::Q_PEOPLE_THIS_CHAT).to_string());
                         (
                             tr(keys::Q_PEOPLE_DELETE_CHAT).to_string(),
-                            format!(
-                                "Delete all messages saved from {name}? This cannot be undone."
+                            tr_with(
+                                keys::Q_LEFTOVERS_DELETE_SAVED_FROM_SURE,
+                                &[("name", &name.to_string())],
                             ),
                             tr(keys::GROUP_INVITE_CONTEXT_DELETE).to_string(),
                         )
@@ -177,17 +202,26 @@ impl QuillApp {
                         tr(keys::Q_PEOPLE_REMOVE_THIS_GIF_FROM_YOUR).to_string(),
                         tr(keys::BOX_REMOVE).to_string(),
                     ),
-                    GroupConfirmAction::RemoveEmojiSet { .. } => (tr(keys::Q_PEOPLE_REMOVE_EMOJI_PACK).to_string(),tr(keys::Q_PEOPLE_REMOVE_THIS_EMOJI_PACK_YOU).to_string(),tr(keys::BOX_REMOVE).to_string()),
+                    GroupConfirmAction::RemoveEmojiSet { .. } => (
+                        tr(keys::Q_PEOPLE_REMOVE_EMOJI_PACK).to_string(),
+                        tr(keys::Q_PEOPLE_REMOVE_THIS_EMOJI_PACK_YOU).to_string(),
+                        tr(keys::BOX_REMOVE).to_string(),
+                    ),
                     GroupConfirmAction::RemoveMember { user_id } => {
                         let name = this.contact_display_name(user_id);
-                        let place = if this.group_flavor(dialog_state.chat_id) == Some(quill::moderation::GroupFlavor::Channel) {
+                        let place = if this.group_flavor(dialog_state.chat_id)
+                            == Some(quill::moderation::GroupFlavor::Channel)
+                        {
                             "channel"
                         } else {
                             "group"
                         };
                         (
                             tr(keys::Q_PEOPLE_REMOVE_MEMBER).to_string(),
-                            tr_with(keys::Q_PEOPLE_REMOVE_FROM_THE, &[("name", &name.to_string()), ("place", place)]),
+                            tr_with(
+                                keys::Q_PEOPLE_REMOVE_FROM_THE,
+                                &[("name", &name.to_string()), ("place", place)],
+                            ),
                             tr(keys::BOX_REMOVE).to_string(),
                         )
                     }
@@ -204,8 +238,9 @@ impl QuillApp {
                             .unwrap_or_else(|| tr(keys::Q_PEOPLE_THIS_COMMUNITY).to_string());
                         (
                             tr(keys::Q_PEOPLE_DELETE_COMMUNITY).to_string(),
-                            format!(
-                                "Delete {name} for all members? Its chats stay, but they leave the community. This cannot be undone."
+                            tr_with(
+                                keys::Q_LEFTOVERS_DELETE_COMMUNITY_SURE,
+                                &[("name", &name.to_string())],
                             ),
                             tr(keys::GROUP_INVITE_CONTEXT_DELETE).to_string(),
                         )
@@ -231,23 +266,28 @@ impl QuillApp {
                 .gap_3()
                 .child(div().text_sm().child(message))
                 .into_any_element();
-            let footer = div().flex().justify_end().gap_2().child(
-                Button::new("g1-confirm-cancel")
-                    .label(tr(keys::CANCEL))
-                    .ghost()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.close_group_confirm(cx);
-                        this.close_kit_dialog_if_done(DialogKind::GroupConfirm, window, cx);
-                    })),
-            ).child(
-                Button::new("g1-confirm-submit")
-                    .label(confirm_label)
-                    .when(destructive, |button| button.danger())
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.submit_group_confirm(cx);
-                        this.close_kit_dialog_if_done(DialogKind::GroupConfirm, window, cx);
-                    })),
-            );
+            let footer = div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .child(
+                    Button::new("g1-confirm-cancel")
+                        .label(tr(keys::CANCEL))
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.close_group_confirm(cx);
+                            this.close_kit_dialog_if_done(DialogKind::GroupConfirm, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("g1-confirm-submit")
+                        .label(confirm_label)
+                        .when(destructive, |button| button.danger())
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.submit_group_confirm(cx);
+                            this.close_kit_dialog_if_done(DialogKind::GroupConfirm, window, cx);
+                        })),
+                );
             dialog
                 .title(crate::ui::shell::dialog_title(title))
                 .content(crate::ui::shell::scrollable_dialog_content({
@@ -255,7 +295,10 @@ impl QuillApp {
                     // per dialog render — hand it over through a one-shot cell.
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {
-                        let body = body.borrow_mut().take().unwrap_or_else(|| div().into_any_element());
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))

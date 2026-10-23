@@ -457,6 +457,69 @@ fn driver_fetch_chat_event_log_sends_dedupes_and_gates() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The live poll of an open recent-actions page sends the newest page
+/// (cursor 0) only once a page is loaded, and one at a time.
+#[test]
+fn driver_polls_event_log_after_load_one_at_a_time() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    for json in [
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":13,"title":"Demo channel","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":true},"unread_count":0}}"#,
+    ] {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    }
+    driver
+        .session
+        .chats
+        .get_mut(&13)
+        .unwrap()
+        .set_member_status(ChannelMemberStatus::Administrator, None);
+    let event_log_sends = || {
+        recorder
+            .snapshot()
+            .into_iter()
+            .filter(|sent| sent.contains("getChatEventLog"))
+            .count()
+    };
+    // Nothing loaded yet: no poll.
+    assert_eq!(driver.poll_chat_event_log(ChatId(13)), Ok(None));
+    let first = driver.fetch_chat_event_log(ChatId(13)).unwrap().unwrap();
+    assert_eq!(driver.poll_chat_event_log(ChatId(13)), Ok(None));
+    assert_eq!(event_log_sends(), 1);
+    driver
+        .ingest(
+            copy_and_parse(
+                &format!(
+                    r#"{{"@type":"chatEvents","@extra":"{}","events":[{{"@type":"chatEvent","id":9,"date":1700000000,"member_id":{{"@type":"messageSenderUser","user_id":777}},"action":{{"@type":"chatEventMemberJoined"}}}}]}}"#,
+                    first.0
+                ),
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let poll = driver.poll_chat_event_log(ChatId(13)).unwrap().unwrap();
+    let sent = recorder.snapshot();
+    let json: Value = serde_json::from_str(sent.last().unwrap()).unwrap();
+    assert_eq!(json["@type"], "getChatEventLog");
+    assert_eq!(json["@extra"], poll.0.to_string());
+    assert_eq!(json["from_event_id"], 0);
+    // One poll at a time.
+    assert_eq!(driver.poll_chat_event_log(ChatId(13)), Ok(None));
+    assert_eq!(event_log_sends(), 2);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Phase B1: the ordinary `sendMessage` path works for a Ready
 /// secret chat (secret chats are plain chat ids at the send layer);
 /// Pending chats are rejected by the same `can_post` gate as

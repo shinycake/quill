@@ -8,6 +8,7 @@
 use super::app::QuillApp;
 use gpui_kit::*;
 use quill::ids::MessageId;
+use quill::lang::{keys, tr};
 use quill::state::{HistoryMessage, unix_ms_now};
 use quill::telegram::envelope::{
     ChatKind, MessageContent, MessageSender, RichMessageContent, TextContent,
@@ -163,7 +164,7 @@ impl QuillApp {
             MessageContent::RichMessage(rich) => MessageContent::RichMessage(stream_rich(rich)),
             // No text yet: Telegram's "Thinking…" placeholder.
             _ => MessageContent::Text(TextContent {
-                text: "Thinking…".into(),
+                text: tr(keys::Q_LEFTOVERS_THINKING).into(),
                 entities: Vec::new(),
                 link_preview: None,
             }),

@@ -12,7 +12,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::calls::engine::EngineError;
 use quill::ids::ChatId;
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr, tr_with, trn_with};
 use quill::settings::CallPrefs;
 use quill::state::{ActiveCall, Session};
 use quill::telegram::envelope::{
@@ -824,10 +824,10 @@ impl QuillApp {
                 .border_b_1()
                 .border_color(cx.theme().border)
                 .bg(cx.theme().accent.opacity(0.12))
-                .child(div().text_sm().flex_1().child(format!(
-                    "Missed call{} from {} — declined because another call was active.",
-                    if declined.len() == 1 { "" } else { "s" },
-                    names.join(", ")
+                .child(div().text_sm().flex_1().child(trn_with(
+                    keys::Q_LEFTOVERS_MISSED_CALLS_BUSY,
+                    declined.len(),
+                    &[("names", &names.join(", "))],
                 )))
                 .child(
                     Button::new("call-busy-dismiss")

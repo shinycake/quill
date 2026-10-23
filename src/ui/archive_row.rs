@@ -20,7 +20,9 @@ use quill::chatlist_archive::{ArchiveRowSummary, COLLAPSED_BAR_HEIGHT};
 use quill::lang::{keys, tr, tr_with};
 
 /// `lng_archived_name`.
-const TITLE: &str = "Archived chats";
+fn title() -> &'static str {
+    tr(keys::ARCHIVED_NAME)
+}
 
 /// Avatar edge, same as a chat row's.
 const AVATAR: f32 = 46.;
@@ -155,7 +157,7 @@ impl QuillApp {
             .cursor_pointer()
             .pressable(cx.theme())
             .role(Role::Button)
-            .aria_label(format!("{TITLE} — {}", summary.text()))
+            .aria_label(format!("{} — {}", title(), summary.text()))
             .bg(cx.theme().sidebar)
             .on_click(cx.listener(|this, _, _, cx| this.open_archive_folder(cx)))
             .on_mouse_down(
@@ -178,7 +180,7 @@ impl QuillApp {
                             .gap_0p5()
                             .min_w_0()
                             .flex_1()
-                            .child(div().font_semibold().min_w_0().truncate().child(TITLE))
+                            .child(div().font_semibold().min_w_0().truncate().child(title()))
                             .child(
                                 div()
                                     .flex()
@@ -213,7 +215,7 @@ impl QuillApp {
             .cursor_pointer()
             .pressable(cx.theme())
             .role(Role::Button)
-            .aria_label(TITLE)
+            .aria_label(title())
             .bg(cx.theme().sidebar)
             .on_click(cx.listener(|this, _, _, cx| this.open_archive_folder(cx)))
             .on_mouse_down(
@@ -223,7 +225,7 @@ impl QuillApp {
                     cx.notify();
                 }),
             )
-            .child(div().text_sm().font_semibold().child(TITLE))
+            .child(div().text_sm().font_semibold().child(title()))
             .when_some(badge, |this, text| this.child(muted_badge(text, cx)))
             .map(|row| self.chat_list_nav_row(row, ListRow::Archive, false, cx))
             .into_any_element()
