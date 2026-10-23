@@ -137,6 +137,10 @@ pub struct MessagesState {
     /// (chat, topic) slot. Remote `updateChatDraftMessage` /
     /// `updateForumTopic` must not replace it (schema comment).
     pub(crate) draft_dirty: HashSet<DraftKey>,
+    /// Counts remote draft changes that replaced a stored draft. A
+    /// composer showing that slot compares against it to take the draft
+    /// another client typed (tdesktop `HistoryWidget::applyCloudDraft`).
+    pub(crate) remote_draft_revision: u64,
     /// Send succeeded in this (chat, topic); UI clears the server draft
     /// if the composer is still empty.
     pub draft_clears: Vec<(ChatId, DraftTopic)>,
@@ -205,6 +209,7 @@ impl MessagesState {
             poll_voters: HashMap::new(),
             poll_stats: HashMap::new(),
             draft_dirty: HashSet::new(),
+            remote_draft_revision: 0,
             draft_clears: Vec::new(),
             deferred_captions: Vec::new(),
             sponsored: HashMap::new(),

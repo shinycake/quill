@@ -578,3 +578,45 @@ fn chat_level_drafts_still_apply_and_respect_the_dirty_slot() {
     assert_eq!(session.draft_for(ChatId(8), DraftTopic::Forum(1)), None);
     assert!(!sink.rendered().contains("CANARY"));
 }
+
+#[test]
+fn a_remote_draft_change_moves_the_revision_and_an_echo_does_not() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    new_chat(
+        &mut session,
+        &seq,
+        &sink,
+        8,
+        r#"{"@type":"chatTypeBasicGroup","basic_group_id":8}"#,
+    );
+    let update = |text: &str| {
+        format!(
+            r#"{{"@type":"updateChatDraftMessage","chat_id":8,"draft_message":{},"positions":[]}}"#,
+            draft_json(text)
+        )
+    };
+    let start = session.remote_draft_revision();
+    // Typed on another client: the composer showing this chat re-reads it.
+    apply_json(&mut session, &seq, &sink, &update("from the phone"));
+    let after_remote = session.remote_draft_revision();
+    assert_ne!(after_remote, start);
+    // Quill's own save echoed back by TDLib: nothing new to show.
+    session.store_composer_draft(ChatId(8), DraftTopic::Chat, Some(text_draft("typed here")));
+    apply_json(&mut session, &seq, &sink, &update("typed here"));
+    assert_eq!(session.remote_draft_revision(), after_remote);
+    // Skipped while the composer has unsaved changes.
+    session.mark_draft_dirty(ChatId(8), DraftTopic::Chat);
+    apply_json(&mut session, &seq, &sink, &update("stale"));
+    assert_eq!(session.remote_draft_revision(), after_remote);
+    // Cleared elsewhere.
+    session.store_composer_draft(ChatId(8), DraftTopic::Chat, Some(text_draft("typed here")));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatDraftMessage","chat_id":8,"draft_message":null,"positions":[]}"#,
+    );
+    assert_ne!(session.remote_draft_revision(), after_remote);
+    assert_eq!(session.draft_for(ChatId(8), DraftTopic::Chat), None);
+}

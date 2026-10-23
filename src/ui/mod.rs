@@ -400,6 +400,9 @@ mod quick_replies;
 mod reactions;
 mod recording;
 pub(crate) mod reduce_motion_probe;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod remote_draft_tests;
 mod reply_guard_tests;
 mod reply_options_ui;
 mod reply_pattern;

@@ -106,7 +106,18 @@ impl Session {
             let terms = draft.as_ref().and_then(|draft| draft.suggested_post);
             self.payments.suggested_posts.sync_draft(chat_id, terms);
         }
+        if self.draft_for(chat_id, topic) != draft.as_ref() {
+            self.messages.remote_draft_revision =
+                self.messages.remote_draft_revision.wrapping_add(1);
+        }
         self.write_draft_slot(chat_id, topic, draft);
+    }
+
+    /// Bumped each time a remote draft replaced a stored one
+    /// ([`Self::set_remote_draft`]); composers showing a slot re-read its
+    /// draft when this moves.
+    pub fn remote_draft_revision(&self) -> u64 {
+        self.messages.remote_draft_revision
     }
 
     fn write_draft_slot(&mut self, chat_id: ChatId, topic: DraftTopic, draft: Option<ChatDraft>) {
