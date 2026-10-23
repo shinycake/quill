@@ -1,2 +1,0 @@
-# Video profile photos on the info cover and in the photo viewer
-parity:profile-video-avatar

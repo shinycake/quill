@@ -388,7 +388,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Set an earlier group or channel photo as the main photo from the viewer <!-- parity:viewer-set-main-chat -->
 - [x] Public (fallback) photo as the last entry in a user's photos <!-- parity:viewer-public-photo -->
 - [x] Photo viewer pages past 100 photos and the counter uses the total <!-- parity:viewer-photos-paging -->
-- [ ] Video avatars play on the profile cover and in the photo viewer <!-- parity:profile-video-avatar -->
+- [x] Video avatars play on the profile cover and in the photo viewer <!-- parity:profile-video-avatar -->
 - [x] Profile "More" menu in the info section (tdesktop FillDialogsEntryMenu, Section::Profile) <!-- parity:profile-more-menu -->
 - [x] Private chat "Restrict saving content" toggle (toggleChatHasProtectedContent) <!-- parity:profile-private-no-forwards -->
 - [x] Link and location rows on group and channel profiles <!-- parity:profile-link-row -->
