@@ -902,8 +902,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Owned bots management and create a bot <!-- parity:bots-owned-manage -->
 - [x] Bot earnings and affiliate programs <!-- parity:bots-earn-affiliate -->
 - [x] "Apps" tab in search with popular mini apps <!-- parity:bots-apps-tab -->
-- [ ] Mini apps can open invoices (openInvoice): run the checkout and report paid, failed, pending or cancelled back to the app <!-- parity:bots-webapp-invoice -->
-- [ ] Mini apps can ask to share your phone number, with a confirmation box <!-- parity:bots-webapp-share-phone -->
+- [x] Mini apps can open invoices (openInvoice): run the checkout and report paid, failed, pending or cancelled back to the app <!-- parity:bots-webapp-invoice -->
+- [x] Mini apps can ask to share your phone number, with a confirmation box <!-- parity:bots-webapp-share-phone -->
 - [x] Add an option to an open poll and "Allow adding options" when creating <!-- parity:polls-add-option -->
 - [x] Poll creation extras: hide results until close, restrict to subscribers, absolute deadline <!-- parity:polls-create-extras -->
 - [x] Links and media in poll options <!-- parity:polls-option-media -->
