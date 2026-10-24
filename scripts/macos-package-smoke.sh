@@ -122,10 +122,14 @@ vendor_deps
 
 # install_name_tool invalidates signatures. Re-sign inside-out: nested dylibs
 # and helpers first, then the app. Ad-hoc by default; set QUILL_CODESIGN_IDENTITY
-# (e.g. an "Apple Development: ..." identity) for a stable local signature.
+# (e.g. an "Apple Development: ..." identity) for a stable signature. A
+# certificate signature is timestamped so it stays valid after the
+# certificate expires.
 SIGN_ID="${QUILL_CODESIGN_IDENTITY:--}"
+SIGN_FLAGS=(--force --sign "$SIGN_ID")
+[[ "$SIGN_ID" == - ]] || SIGN_FLAGS+=(--timestamp)
 for item in "$DIST"/Contents/Frameworks/*.dylib "$DIST/Contents/MacOS/quill-qr-scanner" "$DIST/Contents/MacOS/quill-webview" "$DIST"; do
-  [[ -e "$item" ]] && codesign --force --sign "$SIGN_ID" "$item"
+  [[ -e "$item" ]] && codesign "${SIGN_FLAGS[@]}" "$item"
 done
 
 echo "Assembled $DIST"
