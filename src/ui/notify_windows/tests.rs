@@ -56,7 +56,7 @@ fn the_count_limits_the_stack_and_the_rest_wait(cx: &mut TestAppContext) {
     app.update(vcx, |app, cx| {
         app.notify.windows.platform = NotifyPlatform::Windows;
         for chat in 1..=4 {
-            app.show_custom_notification(None, message(chat), None, false, false, cx);
+            app.show_custom_notification(None, message(chat), None, None, false, false, cx);
         }
     });
     vcx.run_until_parked();
@@ -90,7 +90,7 @@ fn the_count_limits_the_stack_and_the_rest_wait(cx: &mut TestAppContext) {
 
     // A newer message of a shown chat replaces its window.
     app.update(vcx, |app, cx| {
-        app.show_custom_notification(None, message(2), None, false, false, cx)
+        app.show_custom_notification(None, message(2), None, None, false, false, cx)
     });
     app.read_with(vcx, |app, _| {
         let live: Vec<_> = app
@@ -110,8 +110,8 @@ fn a_click_opens_the_chat_and_hide_all_clears(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
         app.notify.windows.platform = NotifyPlatform::Windows;
-        app.show_custom_notification(None, message(7), None, false, true, cx);
-        app.show_custom_notification(None, message(8), None, false, true, cx);
+        app.show_custom_notification(None, message(7), None, None, false, true, cx);
+        app.show_custom_notification(None, message(8), None, None, false, true, cx);
     });
     app.update(vcx, |app, cx| {
         let id = app.notify.windows.shown.first().map(|s| s.id).unwrap_or(0);

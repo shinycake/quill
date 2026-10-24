@@ -160,12 +160,27 @@ impl Session {
         )
     }
 
+    /// The photo a message's notification shows ("Show photo previews").
+    pub(crate) fn notification_photo(&self, message: &ParsedMessage) -> Option<crate::ids::FileId> {
+        let secret_chat = self
+            .chats
+            .get(&message.chat_id.0)
+            .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
+        notify::preview_photo(
+            message,
+            self.settings.notify_view,
+            self.settings.notify_photo_previews,
+            secret_chat,
+        )
+    }
+
     /// Phase 8.1: append with same-chat burst coalescing; the first
     /// message's sound wins so a burst plays exactly once.
     pub(crate) fn queue_notification_with_sound(
         &mut self,
         notification: OsNotification,
         sound: Option<notify::NotificationSoundKind>,
+        photo: Option<crate::ids::FileId>,
     ) {
         self.settings
             .shown_notification_chats
@@ -174,6 +189,7 @@ impl Session {
             &mut self.settings.pending_notifications,
             notification,
             sound,
+            photo,
         );
     }
 
@@ -235,7 +251,7 @@ impl Session {
             let sound =
                 (self.settings.inapp_sounds_enabled && settings.sound_id != 0 && !self.app_active)
                     .then_some(notify::NotificationSoundKind::Default);
-            self.queue_notification_with_sound(notification, sound);
+            self.queue_notification_with_sound(notification, sound, None);
         }
     }
 }

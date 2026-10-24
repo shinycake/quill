@@ -686,6 +686,7 @@
 "qll_prefs_show_message_preview" = "Show message preview";
 "qll_prefs_show_message_preview_in_notifications" = "Show message preview in notifications";
 "qll_prefs_show_message_text" = "Show message text";
+"qll_prefs_show_photo_previews" = "Show photo previews";
 "qll_prefs_show_qr_code" = "Show QR code";
 "qll_prefs_show_sender_and_emoji_in" = "Show sender and emoji in notification";
 "qll_prefs_show_sender_and_emoji_in_2" = "Show sender and emoji in reaction notifications";

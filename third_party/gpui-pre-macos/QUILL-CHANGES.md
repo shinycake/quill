@@ -36,14 +36,14 @@ the sender's picture and an inline reply field, which GPUI's
 - `src/notification_extras.rs` (new, public, identical to
   `third_party/gpui-pre-windows/src/notification_extras.rs`; unit tests run
   with `scripts/test-notification-extras.sh`): `NotificationExtras { image,
-  text_input }` registered under the notification's tag with
+  photo, text_input }` registered under the notification's tag with
   `set_notification_extras` before `App::show_system_notification`, and
   `take_reply_text(tag)` for the text typed into the field, parked by the
   backend before the response is sent.
 - `src/system_notifications.rs`: `show` takes the extras for the tag; the
   action named in `text_input` becomes a `UNTextInputNotificationAction`
-  (categories are keyed by actions plus text input); the image is copied to
-  a temporary file and attached as a `UNNotificationAttachment` (the center
+  (categories are keyed by actions plus text input); the photo, or else the
+  image, is copied to a temporary file (keeping its extension) and attached as a `UNNotificationAttachment` (the center
   moves attached files into its own store). The delegate reads
   `UNTextInputNotificationResponse.userText` into the side channel.
 - `src/system_notifications.rs`: the notification center lives on one

@@ -146,6 +146,7 @@ struct Shown {
 struct Pending {
     notification: OsNotification,
     icon: Option<PathBuf>,
+    preview: Option<PathBuf>,
     locked: bool,
     reply: bool,
 }
@@ -273,6 +274,7 @@ impl QuillApp {
         account: Option<&AccountKey>,
         notification: OsNotification,
         icon: Option<PathBuf>,
+        preview: Option<PathBuf>,
         locked: bool,
         reply: bool,
         cx: &mut Context<Self>,
@@ -294,6 +296,7 @@ impl QuillApp {
             Pending {
                 notification,
                 icon,
+                preview,
                 locked,
                 reply,
             },
@@ -390,6 +393,7 @@ impl QuillApp {
             title: pending.notification.title.into(),
             body: pending.notification.body.into(),
             photo: pending.icon,
+            media: pending.preview,
             hide_sender: pending.locked,
             can_reply: pending.reply && pending.notification.message_id.is_some(),
             reply_inline: self.notify.windows.platform != NotifyPlatform::X11,

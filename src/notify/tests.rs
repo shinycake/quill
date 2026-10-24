@@ -618,3 +618,109 @@ fn inline_reply_sends_nothing_when_blank_or_locked() {
         None
     );
 }
+
+fn photo_message(sizes: &[(&str, i32, i32)], secret: bool, spoiler: bool) -> ParsedMessage {
+    use crate::telegram::envelope::{PhotoContent, PhotoSizeView};
+    let mut message = test_message(7, 42, false, "");
+    message.content = MessageContent::Photo(PhotoContent {
+        caption: String::new(),
+        caption_entities: Vec::new(),
+        show_caption_above_media: false,
+        sizes: sizes
+            .iter()
+            .zip(1..)
+            .map(|(&(type_name, width, height), id)| PhotoSizeView {
+                type_name: type_name.to_string(),
+                width,
+                height,
+                file_id: FileId(id),
+            })
+            .collect(),
+        is_secret: secret,
+        has_spoiler: spoiler,
+        has_stickers: false,
+        minithumbnail: None,
+    });
+    message
+}
+
+const SIZES: [(&str, i32, i32); 4] = [
+    ("m", 320, 240),
+    ("x", 800, 600),
+    ("y", 1280, 960),
+    ("w", 2560, 1920),
+];
+
+#[test]
+fn a_photo_notification_shows_the_800px_size() {
+    let message = photo_message(&SIZES, false, false);
+    assert_eq!(
+        preview_photo(&message, NotifyView::ShowPreview, true, false),
+        Some(FileId(2))
+    );
+    // Without an "x" size, the thumbnail; never the original.
+    let small = photo_message(&[("m", 320, 240), ("w", 2560, 1920)], false, false);
+    assert_eq!(
+        preview_photo(&small, NotifyView::ShowPreview, true, false),
+        Some(FileId(1))
+    );
+}
+
+#[test]
+fn photo_previews_follow_the_switch_and_the_text_view() {
+    let message = photo_message(&SIZES, false, false);
+    assert_eq!(
+        preview_photo(&message, NotifyView::ShowPreview, false, false),
+        None
+    );
+    assert_eq!(
+        preview_photo(&message, NotifyView::ShowName, true, false),
+        None
+    );
+    assert_eq!(
+        preview_photo(&message, NotifyView::ShowNothing, true, false),
+        None
+    );
+}
+
+#[test]
+fn private_photos_never_show_in_a_notification() {
+    let spoiler = photo_message(&SIZES, false, true);
+    let secret = photo_message(&SIZES, true, false);
+    let normal = photo_message(&SIZES, false, false);
+    assert_eq!(
+        preview_photo(&spoiler, NotifyView::ShowPreview, true, false),
+        None
+    );
+    assert_eq!(
+        preview_photo(&secret, NotifyView::ShowPreview, true, false),
+        None
+    );
+    // Nothing from a secret chat.
+    assert_eq!(
+        preview_photo(&normal, NotifyView::ShowPreview, true, true),
+        None
+    );
+    // Text messages have no photo.
+    let text = test_message(7, 43, false, "hi");
+    assert_eq!(
+        preview_photo(&text, NotifyView::ShowPreview, true, false),
+        None
+    );
+}
+
+#[test]
+fn a_burst_keeps_its_first_photo() {
+    let mut queue = Vec::new();
+    let notification = |body: &str| OsNotification {
+        chat_id: ChatId(7),
+        message_id: None,
+        title: "Ada".into(),
+        body: body.into(),
+    };
+    coalesce_notification_with_sound(&mut queue, notification("text"), None, None);
+    coalesce_notification_with_sound(&mut queue, notification("photo"), None, Some(FileId(5)));
+    coalesce_notification_with_sound(&mut queue, notification("photo"), None, Some(FileId(6)));
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue[0].photo, Some(FileId(5)));
+}

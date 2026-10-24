@@ -4,7 +4,10 @@
 //! the picture show up like a real one, and whatever is typed or pressed runs
 //! the real handlers, where the send is refused (unknown chat, status note)
 //! and the chat open finds nothing. Set it to an image path and that image
-//! is the sender picture. Never set in normal use.
+//! is the sender picture; `QUILL_DEBUG_NOTIFICATION_PHOTO` names an image
+//! shown as the message's photo, and `QUILL_DEBUG_NOTIFICATION_CUSTOM`
+//! shows it in Quill's own notification window instead. Never set in
+//! normal use.
 
 use super::*;
 use quill::lang::{keys, tr};
@@ -24,6 +27,9 @@ impl QuillApp {
             .is_file()
             .then(|| super::avatar_icon::circular_icon_for(&picture))
             .flatten();
+        let preview = std::env::var_os("QUILL_DEBUG_NOTIFICATION_PHOTO")
+            .map(PathBuf::from)
+            .filter(|path| path.is_file());
         let locked = self.account.passcode.locked;
         let notification = quill::notify::OsNotification {
             chat_id: ChatId(0),
@@ -32,9 +38,14 @@ impl QuillApp {
             body: tr(keys::Q_PREFS_TYPE_A_REPLY_OR_PRESS).to_string(),
         };
         eprintln!(
-            "posting the QUILL_DEBUG_NOTIFICATION check (picture: {})",
-            icon.is_some()
+            "posting the QUILL_DEBUG_NOTIFICATION check (picture: {}, photo: {})",
+            icon.is_some(),
+            preview.is_some()
         );
-        self.show_os_notification(notification, icon, locked, cx);
+        if std::env::var_os("QUILL_DEBUG_NOTIFICATION_CUSTOM").is_some() {
+            self.show_custom_notification(None, notification, icon, preview, locked, true, cx);
+            return;
+        }
+        self.show_os_notification(notification, icon, preview, locked, cx);
     }
 }

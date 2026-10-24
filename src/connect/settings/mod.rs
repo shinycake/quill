@@ -283,6 +283,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         save_preferences(&self.paths, &prefs)
     }
 
+    /// Persist "Show photo previews" to `prefs.json`, keeping the other
+    /// prefs.
+    pub fn save_notify_photo_previews(&mut self) -> std::io::Result<()> {
+        let mut prefs = load_preferences(&self.paths);
+        prefs.notify_photo_previews = self.session.settings.notify_photo_previews;
+        save_preferences(&self.paths, &prefs)
+    }
+
     pub fn save_desktop_notifications(&mut self) -> std::io::Result<()> {
         let mut prefs = load_preferences(&self.paths);
         prefs.desktop_notifications = self.session.settings.desktop_notifications;

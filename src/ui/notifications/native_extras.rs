@@ -16,20 +16,27 @@ use gpui_macos::notification_extras as backend;
 #[cfg(target_os = "windows")]
 use gpui_windows::notification_extras as backend;
 
-/// Hand the platform the picture and the reply field for the notification
-/// `tag` is about to show. `inline_reply` is the id of the action that
+/// Hand the platform the pictures and the reply field for the notification
+/// `tag` is about to show: `image` is the sender's picture, `photo` the
+/// message's photo ("Show photo previews"). `inline_reply` is the id of the action that
 /// becomes a text field (`NotificationAction::Reply.id()`); `None` leaves
 /// the buttons plain (locked app).
 #[cfg_attr(
     not(any(target_os = "macos", target_os = "windows")),
     allow(unused_variables)
 )]
-pub(in crate::ui) fn register(tag: &str, image: Option<&Path>, inline_reply: Option<&str>) {
+pub(in crate::ui) fn register(
+    tag: &str,
+    image: Option<&Path>,
+    photo: Option<&Path>,
+    inline_reply: Option<&str>,
+) {
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     backend::set_notification_extras(
         tag,
         backend::NotificationExtras {
             image: image.map(Path::to_path_buf),
+            photo: photo.map(Path::to_path_buf),
             text_input: inline_reply.map(|action_id| backend::TextInputAction {
                 action_id: action_id.to_string(),
                 placeholder: quill::notify::INLINE_REPLY_PLACEHOLDER.to_string(),

@@ -29,7 +29,7 @@ pub mod avatar;
 pub mod custom;
 pub mod dbus;
 
-use crate::ids::{ChatId, MessageId};
+use crate::ids::{ChatId, FileId, MessageId};
 use crate::telegram::envelope::{ParsedMessage, ReactionNotificationSource, effective_content};
 
 /// Generic body used when the message text is hidden (the "Show message
@@ -117,6 +117,9 @@ pub struct QueuedNotification {
     /// decision is made — so later mute/focus changes don't retroactively
     /// silence or unsilence it.
     pub sound: Option<NotificationSoundKind>,
+    /// The photo the notification shows beside its text ("Show photo
+    /// previews"), from [`preview_photo`]. A burst keeps the first one.
+    pub photo: Option<FileId>,
 }
 
 impl QueuedNotification {
@@ -157,7 +160,7 @@ impl QueuedNotification {
 /// chat bumps its burst count; otherwise a fresh entry is appended. The
 /// sound from the first message of a burst wins — a burst plays once.
 pub fn coalesce_notification(queue: &mut Vec<QueuedNotification>, notification: OsNotification) {
-    coalesce_notification_with_sound(queue, notification, None);
+    coalesce_notification_with_sound(queue, notification, None, None);
 }
 
 /// Like [`coalesce_notification`], carrying the sound decision for the new
@@ -166,9 +169,11 @@ pub fn coalesce_notification_with_sound(
     queue: &mut Vec<QueuedNotification>,
     notification: OsNotification,
     sound: Option<NotificationSoundKind>,
+    photo: Option<FileId>,
 ) {
     if let Some(existing) = queue.iter_mut().find(|q| q.chat_id == notification.chat_id) {
         existing.count += 1;
+        existing.photo = existing.photo.or(photo);
         // A reply from the notification answers the newest message.
         if notification.message_id.is_some() {
             existing.message_id = notification.message_id;
@@ -181,6 +186,7 @@ pub fn coalesce_notification_with_sound(
             body: notification.body,
             count: 1,
             sound,
+            photo,
         });
     }
 }
@@ -313,6 +319,29 @@ pub fn decide_notify(input: &NotifyInput) -> Option<OsNotification> {
         title,
         body,
     })
+}
+
+/// The photo file a message notification shows beside its text, when the
+/// "Show photo previews" switch is on and the view shows the text. Never a
+/// secret, spoiler or self-destructing photo, and nothing from a secret
+/// chat: the OS keeps notifications on screen and in its history.
+pub fn preview_photo(
+    message: &ParsedMessage,
+    view: NotifyView,
+    photo_previews: bool,
+    secret_chat: bool,
+) -> Option<FileId> {
+    if !photo_previews || !view.shows_text() || secret_chat || message.self_destruct.is_some() {
+        return None;
+    }
+    match effective_content(&message.content, message.ephemeral.as_ref()) {
+        crate::telegram::envelope::MessageContent::Photo(photo)
+            if !photo.is_secret && !photo.has_spoiler =>
+        {
+            photo.notification_size().map(|size| size.file_id)
+        }
+        _ => None,
+    }
 }
 
 /// A received TON transfer notifies as the official iOS app does, under

@@ -969,6 +969,7 @@ mod linux_dbus;
 #[cfg(target_os = "linux")]
 pub(in crate::ui) use linux_dbus::linux_service_capabilities;
 mod native_extras;
+mod photo_preview;
 mod spawn_call_notification;
 
 #[cfg(test)]

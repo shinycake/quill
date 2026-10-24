@@ -1,6 +1,6 @@
 // Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
 // an inline text field with its send button, the typed text on activation and
-// a circle-cropped `appLogoOverride`, through `notification_extras`. See
+// a circle-cropped `appLogoOverride` and an inline photo, through `notification_extras`. See
 // third_party/gpui-pre-windows/QUILL-CHANGES.md.
 //! System notifications as Windows toast notifications.
 
@@ -207,6 +207,12 @@ fn toast_document(
         let element = document.CreateElement(h!("text"))?;
         element.SetInnerText(&text.as_ref().into())?;
         binding.AppendChild(&element)?;
+    }
+    // Quill: the message's photo, inline under the text.
+    if let Some(photo) = extras.photo.as_deref() {
+        let image_element = document.CreateElement(h!("image"))?;
+        image_element.SetAttribute(h!("src"), &image_source(photo).as_str().into())?;
+        binding.AppendChild(&image_element)?;
     }
 
     if !notification.actions.is_empty() {

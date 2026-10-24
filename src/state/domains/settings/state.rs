@@ -7,6 +7,9 @@ pub struct SettingsState {
     /// Mirror of `settings::Preferences::notify_view` (tdesktop "Name" /
     /// "Text"), loaded from `prefs.json` at connect time.
     pub notify_view: crate::notify::NotifyView,
+    /// Mirror of `settings::Preferences::notify_photo_previews`: a photo
+    /// message's notification shows the photo.
+    pub notify_photo_previews: bool,
     /// Parity slice: mirror of
     /// `settings::Preferences::inapp_sounds_enabled` (default true) —
     /// tdesktop's "Play sounds" toggle. Loaded from `prefs.json` at
@@ -232,6 +235,7 @@ impl SettingsState {
             business: BusinessSettingsState::default(),
             business_extra: BusinessExtraState::default(),
             notify_view: crate::notify::NotifyView::ShowPreview,
+            notify_photo_previews: true,
             inapp_sounds_enabled: true,
             desktop_notifications: true,
             pending_notifications: Vec::new(),

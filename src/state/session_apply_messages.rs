@@ -459,6 +459,9 @@ impl Session {
                 .get(&message.chat_id.0)
                 .and_then(|chat| self.notification_sound_for(chat))
         });
+        let photo = notification
+            .as_ref()
+            .and_then(|_| self.notification_photo(&message));
         // B1: an incoming message demanding a reply (force-reply
         // markup) arms the composer's reply-to; the UI drains
         // `pending_force_reply` on the next render. Computed before
@@ -503,7 +506,7 @@ impl Session {
             self.bots.pending_force_reply = Some(target);
         }
         if let Some(notification) = notification {
-            self.queue_notification_with_sound(notification, sound);
+            self.queue_notification_with_sound(notification, sound, photo);
         }
     }
 }

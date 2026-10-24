@@ -168,7 +168,8 @@ impl Notifier {
     }
 
     /// Show (or, for a chat with a toast still up, replace) a notification.
-    /// `reply_field`: offer the daemon's inline reply where it has one.
+    /// `reply_field`: offer the daemon's inline reply where it has one;
+    /// `photo` is the message's photo, the notification's image.
     /// Blocks for the bus round trip: call from a worker thread.
     pub(super) fn show(
         &self,
@@ -176,6 +177,7 @@ impl Notifier {
         title: &str,
         body: &str,
         avatar: Option<&Path>,
+        photo: Option<&Path>,
         locked: bool,
         reply_field: bool,
     ) -> zbus::Result<()> {
@@ -185,7 +187,7 @@ impl Notifier {
             ..self.capabilities
         };
         let actions = notify_actions(capabilities, locked);
-        let hints: HashMap<&str, Value<'_>> = notify_hints()
+        let hints: HashMap<&str, Value<'_>> = notify_hints(photo)
             .into_iter()
             .map(|(key, value)| (key, Value::from(value)))
             .collect();
