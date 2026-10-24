@@ -82,12 +82,17 @@ pub fn notify_actions(capabilities: Capabilities, locked: bool) -> Vec<String> {
 /// in variants). `desktop-entry` names the app for the daemon's icon and
 /// grouping, `category` is the spec's incoming instant message. The sender
 /// picture is the `app_icon` argument (see [`app_icon`]), not a hint, so a
-/// daemon shows it where the app icon goes.
-pub fn notify_hints() -> Vec<(&'static str, &'static str)> {
-    vec![
-        ("desktop-entry", DESKTOP_ENTRY),
-        ("category", "im.received"),
-    ]
+/// daemon shows it where the app icon goes. The message's photo ("Show
+/// photo previews") is the spec's `image-path`, the notification's image.
+pub fn notify_hints(photo: Option<&std::path::Path>) -> Vec<(&'static str, String)> {
+    let mut hints = vec![
+        ("desktop-entry", DESKTOP_ENTRY.to_string()),
+        ("category", "im.received".to_string()),
+    ];
+    if let Some(photo) = photo {
+        hints.push(("image-path", photo.display().to_string()));
+    }
+    hints
 }
 
 /// The `app_icon` argument: the cached circular avatar's path, or empty so
@@ -178,9 +183,12 @@ mod tests {
 
     #[test]
     fn hints_name_the_desktop_entry_and_category() {
-        let hints = notify_hints();
-        assert!(hints.contains(&("desktop-entry", "org.shinycake.quill")));
-        assert!(hints.contains(&("category", "im.received")));
+        let hints = notify_hints(None);
+        assert!(hints.contains(&("desktop-entry", "org.shinycake.quill".to_string())));
+        assert!(hints.contains(&("category", "im.received".to_string())));
+        assert!(!hints.iter().any(|(key, _)| *key == "image-path"));
+        let hints = notify_hints(Some(std::path::Path::new("/td/photos/1.jpg")));
+        assert!(hints.contains(&("image-path", "/td/photos/1.jpg".to_string())));
         assert_eq!(app_icon(None), "");
         assert_eq!(
             app_icon(Some(std::path::Path::new("/cache/a.png"))),

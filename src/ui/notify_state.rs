@@ -20,6 +20,13 @@ pub(crate) struct NotifyUi {
     /// reply typed into it answers that message
     /// (`quill::notify::plan_inline_reply`).
     pub(super) reply_targets: std::collections::HashMap<ChatId, quill::ids::MessageId>,
+    /// Notifications waiting for their photo (`notifications::photo_preview`),
+    /// by account (`None` = on screen) and chat. A newer notification for
+    /// the chat, or its dismissal, removes the entry and the wait ends
+    /// without showing.
+    pub(super) preview_waits:
+        std::collections::HashMap<(Option<quill::ids::AccountKey>, ChatId), u64>,
+    pub(super) next_preview_wait: u64,
     pub(super) notification_sounds: super::audio::NotificationSounds,
     /// Redraws the TDLib poll asked for, batched by urgency
     /// (`notifications::PolledRedraw`).
@@ -81,6 +88,8 @@ impl NotifyUi {
             notify_clicks: Arc::new(Mutex::new(Vec::new())),
             notify_inflight: Arc::new(AtomicUsize::new(0)),
             reply_targets: std::collections::HashMap::new(),
+            preview_waits: std::collections::HashMap::new(),
+            next_preview_wait: 0,
             notification_sounds: super::audio::NotificationSounds::new(audio_output.clone()),
             polled_redraw: super::notifications::PolledRedraw::new(std::time::Instant::now()),
             mute_menu_open: false,

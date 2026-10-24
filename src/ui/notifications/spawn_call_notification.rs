@@ -120,6 +120,10 @@ impl QuillApp {
         if account.is_none() {
             self.notify.reply_targets.remove(&chat_id);
         }
+        // One still waiting for its photo never shows.
+        self.notify
+            .preview_waits
+            .remove(&(account.cloned(), chat_id));
         // Quill's own windows, whichever backend showed the rest.
         self.clear_custom_notifications(account, chat_id, cx);
         if quill::notify::current_backend() == quill::notify::NotifyBackend::Native {
@@ -196,7 +200,8 @@ impl QuillApp {
             queued.for_display()
         };
         let photo = self.notification_photo(notification.chat_id, locked);
-        self.show_notification_with_photo(None, notification, photo, locked, cx);
+        let preview = queued.photo.filter(|_| !locked);
+        self.show_notification_with_preview(None, notification, photo, preview, locked, cx);
     }
 
     /// The chat's already-downloaded small photo for its notification's
@@ -216,22 +221,25 @@ impl QuillApp {
         &mut self,
         notification: quill::notify::OsNotification,
         icon: Option<PathBuf>,
+        preview: Option<PathBuf>,
         locked: bool,
         cx: &mut Context<Self>,
     ) {
-        self.show_notification_as(None, notification, icon, locked, cx);
+        self.show_notification_as(None, notification, icon, preview, locked, cx);
     }
 
     /// [`Self::show_os_notification`] for the account on screen (`account`
     /// `None`) or a background account. A background account's
     /// notification has no reply field (a reply needs that account on
     /// screen: Reply switches to it and focuses the composer), and its
-    /// clicks go to `background.clicks`.
+    /// clicks go to `background.clicks`. `preview` is the message's photo
+    /// ("Show photo previews").
     pub(in crate::ui) fn show_notification_as(
         &mut self,
         account: Option<&AccountKey>,
         notification: quill::notify::OsNotification,
         icon: Option<PathBuf>,
+        preview: Option<PathBuf>,
         locked: bool,
         cx: &mut Context<Self>,
     ) {
@@ -251,7 +259,15 @@ impl QuillApp {
                 && quill::notify_prefs::current().skip_in_focus
                 && quill::notify_focus::dnd_active();
             if !skip {
-                self.show_custom_notification(account, notification, icon, locked, reply_field, cx);
+                self.show_custom_notification(
+                    account,
+                    notification,
+                    icon,
+                    preview,
+                    locked,
+                    reply_field,
+                    cx,
+                );
             }
             return;
         }
@@ -267,6 +283,7 @@ impl QuillApp {
             super::native_extras::register(
                 &tag,
                 icon.as_deref(),
+                preview.as_deref(),
                 reply_field.then_some(NotificationAction::Reply.id()),
             );
             cx.show_system_notification(SystemNotification {
@@ -284,9 +301,11 @@ impl QuillApp {
             });
             return;
         }
-        let Some(command) =
-            quill::notify::build_notification_command_with_icon(&notification, icon.as_deref())
-        else {
+        // `notify-send` has one picture: the photo, when there is one.
+        let Some(command) = quill::notify::build_notification_command_with_icon(
+            &notification,
+            preview.as_deref().or(icon.as_deref()),
+        ) else {
             return;
         };
         let Some(slot) = quill::thread_guard::InflightSlot::acquire(
@@ -309,6 +328,7 @@ impl QuillApp {
                     &notification.title,
                     &notification.body,
                     icon.as_deref(),
+                    preview.as_deref(),
                     locked,
                     reply_field,
                 ) {

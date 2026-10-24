@@ -25,6 +25,11 @@ pub struct NotificationExtras {
     /// `appLogoOverride` on Windows. The file is read when the notification
     /// is posted and may be deleted afterwards.
     pub image: Option<PathBuf>,
+    /// A picture shown large with the text: the message's photo. On macOS
+    /// it takes the attachment's place (the system shows one); on Windows
+    /// an inline image under the text. Read when the notification is
+    /// posted, in its own format (JPEG or PNG).
+    pub photo: Option<PathBuf>,
     /// The action in `SystemNotification::actions` whose button opens a text
     /// field instead of firing at once. Its response carries the same
     /// `action_id`; the typed text waits in [`take_reply_text`].
@@ -110,6 +115,7 @@ mod tests {
     fn extras_are_consumed_by_one_show() {
         let extras = NotificationExtras {
             image: Some(PathBuf::from("/tmp/a.png")),
+            photo: Some(PathBuf::from("/tmp/b.jpg")),
             text_input: Some(text_input("reply")),
         };
         set_notification_extras("extras-once", extras.clone());
@@ -126,6 +132,7 @@ mod tests {
             "extras-replace",
             NotificationExtras {
                 image: Some(PathBuf::from("/tmp/a.png")),
+                photo: None,
                 text_input: None,
             },
         );
@@ -133,6 +140,7 @@ mod tests {
             "extras-replace",
             NotificationExtras {
                 image: None,
+                photo: None,
                 text_input: Some(text_input("reply")),
             },
         );

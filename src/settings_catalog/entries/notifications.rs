@@ -141,6 +141,13 @@ pub(super) const ENTRIES: &[Entry] = &[
     )
     .section(keys::SETTINGS_DESKTOP_NOTIFY),
     Entry::new(
+        "notifications.photo_previews",
+        P,
+        keys::Q_PREFS_SHOW_PHOTO_PREVIEWS,
+    )
+    .section(keys::SETTINGS_DESKTOP_NOTIFY)
+    .keywords(&["images", "pictures", "thumbnail"]),
+    Entry::new(
         "notifications.native",
         P,
         keys::SETTINGS_USE_NATIVE_NOTIFICATIONS,

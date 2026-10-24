@@ -21,6 +21,14 @@ use std::sync::Arc;
 const TEXT_LEFT: f32 = PHOTO_POS + PHOTO_SIZE + 12.0;
 const TEXT_TOP: f32 = 7.0;
 
+/// The message's photo beside the text ("Show photo previews"): a square
+/// left of the close button, top-aligned with the chat name.
+const MEDIA_SIZE: f32 = 48.0;
+const MEDIA_RIGHT: f32 = 28.0;
+/// Where the text ends: before the close button, or before the photo.
+const TEXT_RIGHT: f32 = 28.0;
+const TEXT_RIGHT_WITH_MEDIA: f32 = MEDIA_RIGHT + MEDIA_SIZE + 8.0;
+
 /// The Quill logo for a notification that hides its sender (tdesktop
 /// `hiddenUserpicPlaceholder`, the app logo).
 static LOGO_PNG: &[u8] = include_bytes!("../../../assets/icons/hicolor/128x128/apps/quill.png");
@@ -33,6 +41,8 @@ pub(super) enum Content {
         /// The chat's picture; `None` draws initials, or the logo when
         /// the sender is hidden.
         photo: Option<PathBuf>,
+        /// The message's photo, drawn beside the text.
+        media: Option<PathBuf>,
         hide_sender: bool,
         can_reply: bool,
         /// The reply field opens in the window; otherwise Reply opens the
@@ -172,9 +182,16 @@ impl NotifyView {
         title: SharedString,
         body: SharedString,
         photo: Option<PathBuf>,
+        media: Option<PathBuf>,
         hide_sender: bool,
         cx: &mut Context<Self>,
     ) -> Div {
+        let media = media.filter(|_| !hide_sender);
+        let text_right = if media.is_some() {
+            TEXT_RIGHT_WITH_MEDIA
+        } else {
+            TEXT_RIGHT
+        };
         let theme = cx.theme();
         let picture = if hide_sender {
             logo().into_any_element()
@@ -203,7 +220,7 @@ impl NotifyView {
                 div()
                     .absolute()
                     .left(px(TEXT_LEFT))
-                    .right(px(28.0))
+                    .right(px(text_right))
                     .top(px(TEXT_TOP))
                     .flex()
                     .flex_col()
@@ -225,6 +242,17 @@ impl NotifyView {
                             .child(body),
                     ),
             )
+            .when_some(media, |this, media| {
+                this.child(
+                    img(media)
+                        .absolute()
+                        .top(px(TEXT_TOP + 2.0))
+                        .right(px(MEDIA_RIGHT))
+                        .size(px(MEDIA_SIZE))
+                        .rounded(px(4.0))
+                        .object_fit(ObjectFit::Cover),
+                )
+            })
             .child(
                 div().absolute().top(px(2.0)).right(px(1.0)).child(
                     Button::new("notify-close")
@@ -335,10 +363,11 @@ impl Render for NotifyView {
                 title,
                 body,
                 photo,
+                media,
                 hide_sender,
                 ..
             } => {
-                let message = self.render_message(title, body, photo, hide_sender, cx);
+                let message = self.render_message(title, body, photo, media, hide_sender, cx);
                 let reply = self
                     .reply
                     .clone()
@@ -379,6 +408,7 @@ impl Render for NotifyView {
                 .child(self.render_message(
                     tr(keys::Q_MISC_QUILL).into(),
                     tr(keys::NOTIFICATION_SAMPLE).into(),
+                    None,
                     None,
                     true,
                     cx,

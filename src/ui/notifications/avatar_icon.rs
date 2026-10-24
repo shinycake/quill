@@ -63,6 +63,7 @@ fn cached_icon_for(source: &Path) -> Option<PathBuf> {
 struct Waiting {
     account: Option<AccountKey>,
     notification: quill::notify::OsNotification,
+    preview: Option<PathBuf>,
     locked: bool,
 }
 
@@ -78,26 +79,35 @@ impl QuillApp {
     /// cached icon shows at once; otherwise the photo decodes, scales and
     /// encodes on a background thread and the notification follows with
     /// the result (without an icon when that fails). `account` `None` is
-    /// the account on screen.
+    /// the account on screen; `preview` is the message's photo, shown as is.
     pub(in crate::ui) fn show_notification_with_photo(
         &mut self,
         account: Option<AccountKey>,
         notification: quill::notify::OsNotification,
         photo: Option<PathBuf>,
+        preview: Option<PathBuf>,
         locked: bool,
         cx: &mut Context<Self>,
     ) {
         let Some(photo) = photo else {
-            self.show_notification_as(account.as_ref(), notification, None, locked, cx);
+            self.show_notification_as(account.as_ref(), notification, None, preview, locked, cx);
             return;
         };
         if let Some(icon) = cached_icon_for(&photo) {
-            self.show_notification_as(account.as_ref(), notification, Some(icon), locked, cx);
+            self.show_notification_as(
+                account.as_ref(),
+                notification,
+                Some(icon),
+                preview,
+                locked,
+                cx,
+            );
             return;
         }
         let waiting = Waiting {
             account,
             notification,
+            preview,
             locked,
         };
         // A decode for this avatar is already running: queue behind it.
@@ -134,6 +144,7 @@ impl QuillApp {
                         item.account.as_ref(),
                         item.notification,
                         icon.clone(),
+                        item.preview,
                         item.locked,
                         cx,
                     );

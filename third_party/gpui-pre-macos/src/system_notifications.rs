@@ -1,5 +1,5 @@
 // Modified by the Quill project (2026) from gpui-pre-macos 0.3.9 (Apache-2.0):
-// inline text-input actions, typed-text responses and an image attachment,
+// inline text-input actions, typed-text responses and a picture attachment,
 // through `notification_extras`, and every notification-center call on a
 // worker thread. See third_party/gpui-pre-macos/QUILL-CHANGES.md.
 //! System notifications through the `UNUserNotificationCenter` API.
@@ -233,7 +233,9 @@ impl NotificationCenter {
                 self.register_category(&notification.actions, extras.text_input);
             content.setCategoryIdentifier(&NSString::from_str(&category_identifier));
         }
-        if let Some(image) = extras.image
+        // The system shows one attachment: the message's photo when there
+        // is one, else the sender's picture.
+        if let Some(image) = extras.photo.or(extras.image)
             && let Some(attachment) = image_attachment(&image)
         {
             content.setAttachments(&NSArray::from_retained_slice(&[attachment]));
@@ -323,16 +325,21 @@ impl NotificationCenter {
     }
 }
 
-/// Quill: a notification attachment showing the PNG at `image`. The system
-/// moves an attached file into its own store, so the picture is copied to a
-/// temporary file first and the application's copy stays where it is. A copy
-/// the center refuses is removed again.
+/// Quill: a notification attachment showing the picture at `image`. The
+/// system moves an attached file into its own store, so the picture is copied
+/// to a temporary file first and the application's copy stays where it is.
+/// The copy keeps the extension, which the system reads the format from. A
+/// copy the center refuses is removed again.
 fn image_attachment(image: &Path) -> Option<Retained<UNNotificationAttachment>> {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_nanos());
+    let extension = image
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("png");
     let copy = std::env::temp_dir().join(format!(
-        "gpui-notification-{}-{nanos}.png",
+        "gpui-notification-{}-{nanos}.{extension}",
         std::process::id()
     ));
     if let Err(error) = std::fs::copy(image, &copy) {

@@ -1,6 +1,7 @@
 //! What a message notification reveals: tdesktop's "Name" and "Text"
 //! switches (`Core::Settings::NotifyView`), shown while desktop
-//! notifications are on.
+//! notifications are on, and Quill's "Show photo previews" (tdesktop shows
+//! the sender's picture only).
 
 use super::*;
 use crate::ui::status_note::StatusNote;
@@ -34,6 +35,30 @@ impl QuillApp {
         cx.notify();
     }
 
+    pub(in crate::ui) fn notify_photo_previews(&self) -> bool {
+        self.session()
+            .is_none_or(|s| s.settings.notify_photo_previews)
+    }
+
+    /// Save "Show photo previews" to `prefs.json` and the session mirror.
+    pub(in crate::ui) fn set_notify_photo_previews(&mut self, on: bool, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.settings.notify_photo_previews = on;
+            if let Err(err) = live.driver.save_notify_photo_previews() {
+                self.connection.set_note(StatusNote::silent(tr_with(
+                    keys::Q_PREFS_COULDN_T_SAVE_NOTIFICATION_PREVIEW,
+                    &[("err", &err.to_string())],
+                )));
+            }
+        } else if let Some(demo) = self.demo_session.as_mut() {
+            demo.settings.notify_photo_previews = on;
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_PREFS_DEMO_NOTIFICATION_PREVIEW_SETTINGS_ARE,
+            )));
+        }
+        cx.notify();
+    }
+
     /// "Show sender name" and "Show message text". As in tdesktop, the
     /// text needs the name: turning the name off turns the text off, and
     /// turning the text on turns the name on.
@@ -42,6 +67,7 @@ impl QuillApp {
             return None;
         }
         let view = self.notify_view();
+        let photos = self.notify_photo_previews();
         let row = |id: &'static str, label: &'static str, checked: bool, name: bool| {
             div()
                 .flex()
@@ -85,6 +111,24 @@ impl QuillApp {
                     view.shows_text(),
                     false,
                 ))
+                .child(
+                    // The photo is part of the message: hidden with the text.
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_2()
+                        .child(div().text_sm().child(tr(keys::Q_PREFS_SHOW_PHOTO_PREVIEWS)))
+                        .child(
+                            Switch::new("notify-view-photos")
+                                .checked(photos && view.shows_text())
+                                .disabled(!view.shows_text())
+                                .accessibility_label(tr(keys::Q_PREFS_SHOW_PHOTO_PREVIEWS))
+                                .on_click(cx.listener(|this, &on, _, cx| {
+                                    this.set_notify_photo_previews(on, cx);
+                                })),
+                        ),
+                )
                 .into_any_element(),
         )
     }

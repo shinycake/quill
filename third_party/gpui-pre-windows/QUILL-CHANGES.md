@@ -75,13 +75,14 @@ unvendored `gpui` crate) has no fields for:
 - `src/notification_extras.rs` (new, public, identical to
   `third_party/gpui-pre-macos/src/notification_extras.rs`; unit tests run
   with `scripts/test-notification-extras.sh`): `NotificationExtras { image,
-  text_input }` registered under the notification's tag with
+  photo, text_input }` registered under the notification's tag with
   `set_notification_extras` before `App::show_system_notification`, and
   `take_reply_text(tag)` for the text typed into the field, parked by the
   backend before the response is sent.
 - `src/system_notifications.rs`: `toast_document` takes the extras; the
   image becomes `<image placement="appLogoOverride" hint-crop="circle"
-  src="file:///...">`, the action named in `text_input` an `<input
+  src="file:///...">`, the photo an inline `<image src="file:///...">` under
+  the text, the action named in `text_input` an `<input
   type="text">` with a send button (`hint-inputId`,
   `activationType="background"`, as Telegram Desktop's `fastReply`). The
   `Activated` handler reads that input from `UserInput()` into the side

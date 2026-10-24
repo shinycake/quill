@@ -34,7 +34,15 @@ impl QuillApp {
                 .and_then(|live| live.driver.session.chat_photo_path(notification.chat_id))
                 .map(PathBuf::from)
         };
-        self.show_notification_with_photo(Some(account.clone()), notification, photo, locked, cx);
+        let preview = queued.photo.filter(|_| !locked);
+        self.show_notification_with_preview(
+            Some(account.clone()),
+            notification,
+            photo,
+            preview,
+            locked,
+            cx,
+        );
     }
 
     /// Play a background account's notification sound: a custom sound is

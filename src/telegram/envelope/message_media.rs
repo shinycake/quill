@@ -50,6 +50,16 @@ impl PhotoContent {
             .max_by_key(|size| i64::from(size.width) * i64::from(size.height))
     }
 
+    /// The size an OS notification shows: `"x"` (box 800), else the
+    /// thumbnail. Windows toasts take images up to 1024px a side, and a
+    /// small file posts quickly, so the original is never used.
+    pub fn notification_size(&self) -> Option<&PhotoSizeView> {
+        self.sizes
+            .iter()
+            .find(|size| size.type_name == "x")
+            .or_else(|| self.thumb_size())
+    }
+
     pub fn open_file_id(&self) -> Option<FileId> {
         self.largest_size()
             .or_else(|| self.thumb_size())

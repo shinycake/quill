@@ -45,6 +45,11 @@ pub struct Preferences {
     /// every account starts showing previews, as tdesktop does.
     #[serde(default)]
     pub notify_view: crate::notify::NotifyView,
+    /// "Show photo previews" in Settings > Notifications: a photo message's
+    /// notification shows the photo. Quill's own switch; tdesktop shows
+    /// only the sender's picture.
+    #[serde(default = "default_true")]
+    pub notify_photo_previews: bool,
     /// Parity slice: tdesktop "Play sounds" — in-app notification sounds.
     /// Client-side (no TDLib setting exists; `in-app-sounds` is only a
     /// `SettingsSection` deep-link name, schema line 9322).
@@ -74,6 +79,7 @@ impl Default for Preferences {
             version: PREFS_VERSION,
             account: AccountKey::primary(),
             notify_view: crate::notify::NotifyView::ShowPreview,
+            notify_photo_previews: true,
             inapp_sounds_enabled: true,
             desktop_notifications: true,
             custom_keybindings: Vec::new(),
