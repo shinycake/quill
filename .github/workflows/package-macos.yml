@@ -3,8 +3,10 @@ name: package-macos
 # arm64 runner (never the personal self-hosted Mac). TDLib and rlottie are built
 # from source (cached), ntgcalls is the pinned upstream library, OpenSSL is
 # bundled from the runner's Homebrew by scripts/macos-package-smoke.sh.
-# Ad-hoc signed only: there is no Developer ID and no notarization
-# (docs/decisions/codex-release-pipeline.md).
+# Not notarized: there is no Developer ID (docs/decisions/codex-release-pipeline.md).
+# Signed with the owner's Apple Development identity when the caller passes
+# MACOS_SIGNING_P12, ad-hoc otherwise. The certificate keeps the keychain
+# approval for the database key across updates (docs/decisions/macos-release-signing.md).
 on:
   workflow_call:
     inputs:
@@ -20,6 +22,11 @@ on:
       TELEGRAM_API_ID:
         required: false
       TELEGRAM_API_HASH:
+        required: false
+      MACOS_SIGNING_P12:
+        description: 'Base64 PKCS#12 holding the Apple Development identity'
+        required: false
+      MACOS_SIGNING_P12_PASSWORD:
         required: false
 
 permissions:
@@ -101,7 +108,39 @@ jobs:
         run: cargo build --release --features ui --locked
       - name: build mini-app helper
         run: cargo build --release --locked -p quill-webview
-      - name: package Quill.app (ad-hoc signed)
+      # A throwaway keychain holds the identity for codesign; the step only
+      # exports the certificate's SHA-1, never the key.
+      - name: import signing identity
+        env:
+          P12: ${{ secrets.MACOS_SIGNING_P12 }}
+          P12_PASSWORD: ${{ secrets.MACOS_SIGNING_P12_PASSWORD }}
+          RELEASE_BUILD: ${{ inputs.embed_credentials }}
+        run: |
+          if [ -z "$P12" ]; then
+            if [ "$RELEASE_BUILD" = true ]; then
+              echo "::warning::MACOS_SIGNING_P12 is not set: Quill.app is ad-hoc signed and every update asks for the keychain password"
+            fi
+            exit 0
+          fi
+          kc="$RUNNER_TEMP/signing.keychain-db"
+          kcpass="$(uuidgen)"
+          security create-keychain -p "$kcpass" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$kcpass" "$kc"
+          printf '%s' "$P12" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+          security import "$RUNNER_TEMP/signing.p12" -k "$kc" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/signing.p12"
+          # The intermediate that issues Apple Development certificates, so
+          # the identity validates and codesign embeds the whole chain.
+          curl -fsSL https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer -o "$RUNNER_TEMP/wwdr.cer"
+          security import "$RUNNER_TEMP/wwdr.cer" -k "$kc" || true
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kcpass" "$kc" >/dev/null
+          # shellcheck disable=SC2046 # keychain paths on the runner have no spaces
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          identity="$(security find-identity -v -p codesigning "$kc" | awk '$1 ~ /^[0-9]+\)$/ {print $2; exit}')"
+          [ -n "$identity" ] || { echo "::error::MACOS_SIGNING_P12 holds no valid code signing identity"; exit 1; }
+          echo "QUILL_CODESIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+      - name: package Quill.app
         env:
           # The hosted VM's Vision framework may not decode QR codes; the
           # self-test stays a hard failure on real Macs (quill-ui-build.yml).
@@ -113,6 +152,10 @@ jobs:
             test -f "dist/Quill.app/Contents/Frameworks/$lib" || { echo "missing Frameworks/$lib" >&2; exit 1; }
           done
           codesign --verify --deep --strict --verbose=2 dist/Quill.app
+          if [ -n "${QUILL_CODESIGN_IDENTITY:-}" ]; then
+            codesign -dv dist/Quill.app 2>&1 | grep -E '^TeamIdentifier=[A-Z0-9]{10}$' \
+              || { echo "::error::Quill.app is not signed by the identity's team" >&2; exit 1; }
+          fi
       - name: run from the bundle
         env:
           WANT_EMBED: ${{ inputs.embed_credentials && secrets.TELEGRAM_API_ID != '' && secrets.TELEGRAM_API_HASH != '' }}

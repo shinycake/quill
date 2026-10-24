@@ -164,6 +164,8 @@ jobs:
     secrets:
       TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
       TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+      MACOS_SIGNING_P12: ${{ secrets.MACOS_SIGNING_P12 }}
+      MACOS_SIGNING_P12_PASSWORD: ${{ secrets.MACOS_SIGNING_P12_PASSWORD }}
 
   # Corresponding source for the shipped LGPL libraries (FFmpeg, ntgcalls and
   # the FFmpeg/GLib inside ntgcalls).
