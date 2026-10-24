@@ -167,12 +167,12 @@ fn finish_previous_update() {
     });
 }
 
+/// What the last update left for this start, shown once: the receipt is
+/// removed as it is read, so a later start opens on `Idle` and the "Updated
+/// to Quill X" banner does not come back.
 pub fn startup_state() -> UpdateState {
     finish_previous_update();
-    let result = result_path()
-        .filter(|p| trusted_file(p))
-        .and_then(|p| fs::read(p).ok())
-        .and_then(|b| serde_json::from_slice::<InstallResult>(&b).ok());
+    let result = result_path().and_then(|p| take_receipt(&p));
     match result {
         Some(r) if r.failed => UpdateState::InstallFailed(
             r.release,
@@ -181,6 +181,15 @@ pub fn startup_state() -> UpdateState {
         Some(r) if r.release.version == crate::version::APP => UpdateState::Installed(r.release),
         _ => UpdateState::Idle,
     }
+}
+
+fn take_receipt(path: &Path) -> Option<InstallResult> {
+    if !trusted_file(path) {
+        return None;
+    }
+    let bytes = fs::read(path).ok();
+    let _ = fs::remove_file(path);
+    bytes.and_then(|b| serde_json::from_slice(&b).ok())
 }
 
 pub fn acknowledge_changelog() -> std::io::Result<()> {

@@ -541,3 +541,15 @@ fn a_release_refused_as_signed_differently_is_not_downloaded_again() {
     assert!(!refused_before(&layout, "999.0.0"));
     fs::remove_dir_all(fx.root).unwrap();
 }
+
+#[test]
+fn the_update_receipt_is_read_once() {
+    let path = std::env::temp_dir().join(format!("quill-receipt-{}.json", std::process::id()));
+    let _ = fs::remove_file(&path);
+    write_result(path.clone(), &release(), false).unwrap();
+    let first = take_receipt(&path).expect("the first start reads the receipt");
+    assert_eq!(first.release.version, release().version);
+    assert!(!first.failed);
+    assert!(!path.exists());
+    assert!(take_receipt(&path).is_none());
+}
