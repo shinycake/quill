@@ -100,7 +100,8 @@ mod tests {
     #[test]
     fn tool_names_read_as_words() {
         assert_eq!(tool_label("send_message"), "Send message");
-        assert_eq!(tool_label("pin_message"), "Pin or unpin");
+        assert_eq!(tool_label("pin_message"), "Pin");
+        assert_eq!(tool_label("unpin_message"), "Unpin");
         assert_eq!(tool_label("future_tool"), "Future tool");
         assert_eq!(tool_label(""), "");
     }
