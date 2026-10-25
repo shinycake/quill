@@ -1,6 +1,6 @@
 //! Driver tests: the "archive and mute new chats" suggestion and switch.
 use super::paid_messages::{Fixture, cleanup, extra_of, fixture, ingest, requests};
-use crate::archive_mute::{ACTION, suggestion_due};
+use crate::archive_mute::ACTION;
 
 fn suggest(f: &mut Fixture) {
     ingest(
@@ -24,7 +24,7 @@ fn answer_settings(f: &mut Fixture, on: bool) {
 
 fn due(f: &Fixture) -> bool {
     let chat_list = &f.1.session.chat_list;
-    suggestion_due(
+    chat_list.archive_mute.suggestion_due(
         &chat_list.suggestions.actions,
         chat_list.archive_chat_list_settings.as_ref(),
     )
@@ -51,10 +51,25 @@ fn the_suggestion_loads_the_setting_and_hiding_it_tells_the_server() {
     assert_eq!(hide["action"]["@type"], ACTION);
     assert!(!due(&f), "gone at once");
 
-    // A second suggestion uses the setting already loaded.
+    // A second suggestion reloads the setting and waits for the answer.
     suggest(&mut f);
-    assert_eq!(requests(&f, "getArchiveChatListSettings").len(), 1);
+    assert_eq!(requests(&f, "getArchiveChatListSettings").len(), 2);
+    assert!(!due(&f), "the cached copy is not enough");
+    answer_settings(&mut f, false);
     assert!(due(&f));
+    cleanup(f);
+}
+
+#[test]
+fn a_fresh_answer_that_the_setting_is_on_skips_the_box() {
+    let mut f = fixture();
+    suggest(&mut f);
+    answer_settings(&mut f, false);
+    f.1.hide_suggested_action(ACTION).unwrap();
+    // Turned on elsewhere since the first load: the reload sees it.
+    suggest(&mut f);
+    answer_settings(&mut f, true);
+    assert!(!due(&f));
     cleanup(f);
 }
 

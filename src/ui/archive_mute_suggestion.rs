@@ -13,13 +13,13 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::*;
-use quill::archive_mute::{ACTION, suggestion_due};
+use quill::archive_mute::ACTION;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
     pub(super) fn archive_mute_suggested(&self) -> bool {
         self.session().is_some_and(|s| {
-            suggestion_due(
+            s.chat_list.archive_mute.suggestion_due(
                 &s.chat_list.suggestions.actions,
                 s.chat_list.archive_chat_list_settings.as_ref(),
             )

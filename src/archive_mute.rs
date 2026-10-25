@@ -5,10 +5,10 @@
 //! archive settings box only while the server allows it, the setting is
 //! already on, or the account has Premium (`SetupArchiveAndMute`,
 //! `GlobalPrivacy::showArchiveAndMute`); once shown it stays. When the
-//! server suggests it (TDLib `suggestedActionEnableArchiveAndMuteNewChats`)
-//! and the setting is off, tdesktop asks "Hide new chats?" with a button to
-//! the settings (`SessionController::suggestArchiveAndMute`); closing the
-//! box dismisses the suggestion.
+//! server suggests it (TDLib `suggestedActionEnableArchiveAndMuteNewChats`),
+//! tdesktop reloads the setting and, if it is off, asks "Hide new chats?"
+//! with a button to the settings (`SessionController::suggestArchiveAndMute`);
+//! closing the box dismisses the suggestion.
 #![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::OptionValue;
@@ -27,6 +27,9 @@ pub struct ArchiveMute {
     /// The server reported the setting on this session, so the switch
     /// stays offered after it is turned off.
     pub seen_on: bool,
+    /// The suggestion arrived and the setting is being reloaded; the box
+    /// waits for the fresh answer.
+    pub reload_pending: bool,
 }
 
 impl ArchiveMute {
@@ -40,6 +43,15 @@ impl ArchiveMute {
     /// Notes the settings the server reported.
     pub fn note_settings(&mut self, settings: &ArchiveChatListSettings) {
         self.seen_on |= settings.archive_and_mute_new_chats_from_unknown_users;
+        self.reload_pending = false;
+    }
+
+    /// Folds the actions `updateSuggestedActions` added: a new
+    /// archive-and-mute suggestion waits for the setting to reload.
+    pub fn note_suggested(&mut self, added: &[String]) {
+        if added.iter().any(|action| action == ACTION) {
+            self.reload_pending = true;
+        }
     }
 
     /// Whether the switch is offered: the server allows it, it is or was
@@ -50,16 +62,19 @@ impl ArchiveMute {
             || settings.archive_and_mute_new_chats_from_unknown_users
             || premium
     }
-}
 
-/// Whether "Hide new chats?" is due: the server suggests it and the
-/// setting, once known, is off.
-pub fn suggestion_due(
-    actions: &BTreeSet<String>,
-    settings: Option<&ArchiveChatListSettings>,
-) -> bool {
-    actions.contains(ACTION)
-        && settings.is_some_and(|settings| !settings.archive_and_mute_new_chats_from_unknown_users)
+    /// Whether "Hide new chats?" is due: the server suggests it and the
+    /// setting, reloaded since the suggestion arrived, is off.
+    pub fn suggestion_due(
+        &self,
+        actions: &BTreeSet<String>,
+        settings: Option<&ArchiveChatListSettings>,
+    ) -> bool {
+        !self.reload_pending
+            && actions.contains(ACTION)
+            && settings
+                .is_some_and(|settings| !settings.archive_and_mute_new_chats_from_unknown_users)
+    }
 }
 
 #[cfg(test)]
@@ -103,12 +118,34 @@ mod tests {
     #[test]
     fn the_suggestion_waits_for_the_settings_and_skips_when_on() {
         let actions: BTreeSet<String> = [ACTION.to_string()].into();
-        assert!(!suggestion_due(&actions, None), "settings unknown");
-        assert!(suggestion_due(&actions, Some(&settings(false))));
+        let state = ArchiveMute::default();
+        assert!(!state.suggestion_due(&actions, None), "settings unknown");
+        assert!(state.suggestion_due(&actions, Some(&settings(false))));
         assert!(
-            !suggestion_due(&actions, Some(&settings(true))),
+            !state.suggestion_due(&actions, Some(&settings(true))),
             "already on"
         );
-        assert!(!suggestion_due(&BTreeSet::new(), Some(&settings(false))));
+        assert!(!state.suggestion_due(&BTreeSet::new(), Some(&settings(false))));
+    }
+
+    #[test]
+    fn a_new_suggestion_waits_for_a_fresh_copy() {
+        let actions: BTreeSet<String> = [ACTION.to_string()].into();
+        let mut state = ArchiveMute::default();
+        state.note_suggested(&["suggestedActionUpgradePremium".to_string()]);
+        assert!(!state.reload_pending, "other actions don't wait");
+        state.note_suggested(&[ACTION.to_string()]);
+        assert!(
+            !state.suggestion_due(&actions, Some(&settings(false))),
+            "the cached copy is not enough"
+        );
+        state.note_settings(&settings(true));
+        assert!(
+            !state.suggestion_due(&actions, Some(&settings(true))),
+            "turned on elsewhere"
+        );
+        state.note_suggested(&[ACTION.to_string()]);
+        state.note_settings(&settings(false));
+        assert!(state.suggestion_due(&actions, Some(&settings(false))));
     }
 }

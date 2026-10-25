@@ -22,9 +22,12 @@
   `can_archive_and_mute_new_chats_from_unknown_users` (TDLib's name for
   `autoarchive_setting_available`) and whether this session has seen the
   setting on. `switch_shown` and `suggestion_due` are pure functions.
-- When `updateSuggestedActions` adds `suggestedActionEnableArchiveAndMuteNewChats`,
-  the driver fetches `getArchiveChatListSettings`. The box shows once the
-  setting is known to be off.
+- Each time `updateSuggestedActions` adds
+  `suggestedActionEnableArchiveAndMuteNewChats`, the driver reloads
+  `getArchiveChatListSettings`, even when a copy is cached, as tdesktop
+  reloads the global privacy settings. `ArchiveMute::reload_pending` holds
+  the box until the fresh answer arrives, and the box shows only if that
+  answer says the setting is off.
 - `src/ui/archive_mute_suggestion.rs` adds the box as a registered dialog
   whose open state comes from session state. Cancel, Escape, the close button
   and "Go to Settings" all send `hideSuggestedAction`. "Go to Settings" then
@@ -35,8 +38,6 @@
 
 ## Deviations
 
-- tdesktop reloads the settings every time the suggestion arrives. Quill uses
-  the cached archive settings if this session already loaded them.
 - tdesktop keeps a shown switch for as long as that settings section is open.
   Quill keeps it for the whole session, because its section is rebuilt on
   every render.
@@ -46,8 +47,8 @@
 - Unit tests in `src/archive_mute.rs`.
 - Driver tests in `src/connect/tests/archive_mute.rs`. They cover the fetch
   when the suggestion arrives, `hideSuggestedAction` with the right action
-  type, the cached second arrival, no box while the setting is on, the server
-  option, and a refused hide.
+  type, the reload on a second arrival, a fresh "on" answer skipping the
+  box, no box while the setting is on, the server option, and a refused hide.
 - UI tests in `src/ui/archive_mute_suggestion_tests.rs`. They cover "Go to
   Settings", Cancel, Escape, no box while the setting is on, and the
   Privacy switch for non-Premium, Premium and server-allowed accounts.
