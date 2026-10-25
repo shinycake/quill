@@ -209,7 +209,10 @@ fn a_userpic_no_longer_drawn_sleeps_and_comes_back(cx: &mut TestAppContext) {
     };
     let before = opened(&scripts);
 
-    app.update_in(vcx, |app, window, cx| app.toggle_sidebar(window, cx));
+    // The Contacts tab takes the column, so the chat list stops drawing.
+    // (Not a hidden sidebar: that is saved to the process's shared
+    // window state and would start every later test's app without one.)
+    app.update_in(vcx, |app, _, cx| app.open_contacts_tab(cx));
     settle(vcx);
     for _ in 0..2 {
         vcx.executor().advance_clock(RELEASE_AFTER);
@@ -221,7 +224,7 @@ fn a_userpic_no_longer_drawn_sleeps_and_comes_back(cx: &mut TestAppContext) {
     assert_eq!(asleep(&app, vcx), Some(true), "asleep while not drawn");
     assert!(playing(&app, vcx, Surface::ChatList).is_empty());
 
-    app.update_in(vcx, |app, window, cx| app.toggle_sidebar(window, cx));
+    app.update_in(vcx, |app, _, cx| app.open_chats_tab(cx));
     settle(vcx);
     settle(vcx);
     assert_eq!(asleep(&app, vcx), Some(false));
