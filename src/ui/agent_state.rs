@@ -169,6 +169,9 @@ impl QuillApp {
 
     /// The request the dialog shows: the oldest one for the active account.
     pub(super) fn agent_request(&self) -> Option<Prompt> {
+        if !sees_prompts() {
+            return None;
+        }
         prompts::current().filter(|prompt| prompt.account == active_account())
     }
 
@@ -251,10 +254,28 @@ impl QuillApp {
 #[cfg(feature = "demo-capture")]
 pub(super) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+// The prompt queue is process-wide and UI tests run in parallel, one
+// thread each: only a test that set agent state up sees its prompts.
+#[cfg(test)]
+thread_local! {
+    static SEES_PROMPTS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+fn sees_prompts() -> bool {
+    SEES_PROMPTS.with(std::cell::Cell::get)
+}
+
+#[cfg(not(test))]
+fn sees_prompts() -> bool {
+    true
+}
+
 /// Back to a known state: access on, default grants, no waiting requests.
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 pub(super) fn reset_for_test(account: &AccountKey) {
+    SEES_PROMPTS.with(|sees| sees.set(true));
     quill::fast_buttons::set_persistence(false);
     prompts::deny_all();
     grants::update(account, |g| *g = AccountGrants::default());
