@@ -33,7 +33,6 @@ register_demos![
     .setup(QuillApp::demo_ai_compose),
 ];
 
-/// The demo user who created the "Pirate" style.
 pub(super) const CREATOR: i64 = 21;
 
 pub(super) const DRAFT: &str =
@@ -61,7 +60,6 @@ fn style(
     }
 }
 
-/// The styles, and the creator so "Style by" has a name.
 pub(super) fn seed_ai_compose(session: &mut Session, seq: &AtomicU64, sink: &Arc<MemorySink>) {
     let sink: Arc<dyn DiagnosticSink> = sink.clone();
     let user = format!(
@@ -97,7 +95,6 @@ fn text_result(text: &str, bold: Option<&str>) -> AiResult {
     }
 }
 
-/// A diff entity over `needle` in the ASCII `text`.
 fn edit(text: &str, needle: &str, kind: DiffKind) -> DiffEntity {
     let offset = text.find(needle).unwrap_or(0);
     DiffEntity {
@@ -134,8 +131,6 @@ pub(super) fn fix_result() -> AiResult {
 }
 
 impl QuillApp {
-    /// The answer for the box's pending request, through the session slot
-    /// the upkeep drains, as a live answer arrives.
     pub(super) fn demo_ai_answer(&mut self, outcome: Result<AiResult, AiBoxError>) {
         let token = match self.ai_compose.open.as_ref().map(|open| open.ai.card()) {
             Some(CardState::Loading { token }) => *token,

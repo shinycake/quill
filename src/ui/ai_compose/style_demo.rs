@@ -18,7 +18,6 @@ use quill::telegram::envelope::{StickerFormat, StickerItem, StickerSetInfo};
 use quill::text::{TextEntity, TextEntityKind};
 use std::sync::atomic::Ordering;
 
-/// The custom emoji the demo seed resolves (its still is file 61).
 const EMOJI: i64 = 4242;
 const EMOJI_FILE: FileId = FileId(61);
 const ICON_SET: i64 = 990;
@@ -41,7 +40,6 @@ fn emoji_item(id: i64, set_id: i64, emoji: &str, file: FileId) -> StickerItem {
     }
 }
 
-/// A shared style as the lookup returns it, with its English example.
 fn shared_style(installed: bool) -> TextCompositionStyle {
     let source = "The launch moves to Thursday afternoon.";
     let result = "Hey all! The launch is moving to Thursday afternoon \u{1F680}";
@@ -69,7 +67,6 @@ fn shared_style(installed: bool) -> TextCompositionStyle {
 }
 
 impl QuillApp {
-    /// The style variants; `false` for any other variant.
     pub(super) fn demo_ai_styles(
         &mut self,
         variant: &str,
@@ -130,7 +127,6 @@ impl QuillApp {
         true
     }
 
-    /// Pirate becomes the user's own style, with an emoji and instructions.
     fn demo_own_pirate(&mut self) {
         let Some(session) = session_mut(self) else {
             return;
@@ -151,8 +147,6 @@ impl QuillApp {
         styles.set_server(list);
     }
 
-    /// The default topic icons and one installed emoji set, for the icon
-    /// picker. Cells without a local file show their emoji.
     fn demo_seed_style_icons(&mut self) {
         let Some(session) = session_mut(self) else {
             return;
@@ -195,8 +189,6 @@ impl QuillApp {
         }];
     }
 
-    /// The preview over the chat, answered as a live lookup would be
-    /// (except `preview-loading`).
     pub(super) fn demo_ai_preview(
         &mut self,
         variant: &str,
@@ -228,7 +220,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// A message in the open chat with an `addstyle/` link card.
     fn demo_ai_style_link(&mut self) {
         let json = format!(
             r#"{{"@type":"updateNewMessage","message":{{"id":140,"chat_id":11,"is_outgoing":false,"date":1790632400,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Try my style: t.me/addstyle/cheerful","entities":[{{"@type":"textEntity","offset":14,"length":22,"type":{{"@type":"textEntityTypeUrl"}}}}]}},"link_preview":{{"@type":"linkPreview","url":"https://t.me/addstyle/cheerful","display_url":"t.me/addstyle/cheerful","site_name":"Telegram","title":"Cheerful","description":{{"@type":"formattedText","text":"AI style for rewriting messages.","entities":[]}},"author":"","type":{{"@type":"linkPreviewTypeTextCompositionStyle","custom_emoji_id":"{EMOJI}"}},"has_large_media":false,"show_large_media":false,"show_media_above_description":false,"skip_confirmation":true,"show_above_text":false,"instant_view_version":0}},"link_preview_options":null}}}}}}"#

@@ -39,8 +39,6 @@ pub(super) fn clamp_style_field(
 }
 
 impl QuillApp {
-    /// The "Create" pill (a new style) or the menu's Edit (the user's own
-    /// style), as a view of the box.
     pub(super) fn open_ai_style_editor(
         &mut self,
         editing: Option<TextCompositionStyle>,
@@ -74,8 +72,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// An edit that ran past the server's length, or put a line break in
-    /// the name, is cut back.
     pub(in crate::ui) fn clamp_ai_style_field(
         &mut self,
         field: &Entity<TextareaState>,
@@ -210,7 +206,6 @@ impl QuillApp {
             .into_any_element()
     }
 
-    /// Create or Save, disabled while the request runs.
     pub(super) fn ai_style_editor_footer(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(editor) = self.ai_style_editor() else {
             return div().into_any_element();

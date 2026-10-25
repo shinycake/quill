@@ -83,7 +83,6 @@ impl QuillApp {
             .into_any_element()
     }
 
-    /// The pinned style row ("Neutral" first) over Cancel.
     pub(super) fn ai_compose_languages_footer(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(open) = self.ai_compose.open.as_ref() else {
             return div().into_any_element();
@@ -153,7 +152,6 @@ impl QuillApp {
             .into_any_element()
     }
 
-    /// A translate style closes the picker, as in tdesktop.
     fn pick_ai_translate_style(
         &mut self,
         choice: StyleChoice,

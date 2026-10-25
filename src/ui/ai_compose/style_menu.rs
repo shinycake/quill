@@ -35,12 +35,10 @@ pub(super) fn ai_apply_shortcut_text(cx: &App) -> Option<String> {
     (!text.is_empty()).then(|| text.join(" "))
 }
 
-/// Whether the apply hotkey rewrites with the style `name`.
 pub(super) fn bound_to(name: &str) -> bool {
     prefs::current().bound_style_name.as_deref() == Some(name)
 }
 
-/// Bind the apply hotkey to `name`, or clear the binding.
 pub(super) fn set_bound_style(name: Option<&str>) {
     prefs::update(|prefs| prefs.bound_style_name = name.map(str::to_string));
 }
@@ -193,7 +191,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// "Share Style": the link goes to a chat through the share chooser.
     fn share_ai_style(&mut self, link: String, window: &mut Window, cx: &mut Context<Self>) {
         self.close_ai_compose(cx);
         self.close_kit_dialog_if_done(DialogKind::AiCompose, window, cx);
@@ -204,7 +201,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// "Set apply hotkey…": the Settings page where the action is bound.
     fn open_ai_apply_hotkey_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.close_ai_compose(cx);
         self.close_kit_dialog_if_done(DialogKind::AiCompose, window, cx);
@@ -213,8 +209,6 @@ impl QuillApp {
     }
 }
 
-/// A custom style's menu: the hotkey, Edit (the user's own), Share, and
-/// Delete or Remove.
 fn ai_style_menu(
     mut menu: PopupMenu,
     owner: &WeakEntity<QuillApp>,

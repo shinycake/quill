@@ -22,7 +22,6 @@ use std::rc::Rc;
 /// The Increase Limit badge (tdesktop `CustomEmojiTextBadge(u"x50"_q)`).
 const LIMIT_BADGE: &str = "x50";
 
-/// Room the kit's close button takes at the title's right end.
 const CLOSE_BUTTON_ROOM: f32 = 28.;
 
 impl QuillApp {
@@ -149,8 +148,6 @@ impl QuillApp {
             .into_any_element()
     }
 
-    /// The main button per `footer()`, and Send next to a ready result
-    /// when the chat can send it now.
     fn ai_compose_footer(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(open) = self.ai_compose.open.as_ref() else {
             return div().into_any_element();
@@ -240,7 +237,6 @@ impl QuillApp {
 }
 
 crate::ui::shell::register_dialogs! {
-    /// The AI compose box (Translate, Style and Fix over the draft).
     AiCompose => DialogSpec::new(
         7720,
         |app| app.ai_compose.open.is_some(),

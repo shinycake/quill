@@ -155,7 +155,6 @@ gpui_kit::assets::icon_assets!(
         TimerOff,
         // Send Location's Show my location (`ui::location_picker`).
         LocateFixed,
-        // The AI compose button and the box's tabs (`ui::ai_compose`).
         Sparkles,
         SpellCheck
     ]

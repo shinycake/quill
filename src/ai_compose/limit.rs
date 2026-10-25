@@ -15,14 +15,9 @@ pub const CUSTOM_STYLES_FALLBACK: LimitPair = LimitPair {
     premium_value: 20,
 };
 
-/// What the toast says when no more styles can be saved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StyleLimitNotice {
-    /// "You can save up to {count} styles. Delete one to add another."
     Final { count: i64 },
-    /// The Premium promo: "Subscribe to Premium to save up to
-    /// {premium_count} styles, or delete one of your {count} styles to add
-    /// another."
     Promo { count: i64, premium_count: i64 },
 }
 

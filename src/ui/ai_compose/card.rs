@@ -79,9 +79,12 @@ pub(super) fn diff_display(
     (text, runs)
 }
 
-/// "To {language}" or "To {language} ({style})" with the language part as
-/// the link; `None` for the plain titles.
-fn translate_title(title: &ResultTitle, styles: &StyleList) -> Option<(String, String)> {
+struct TranslateTitle {
+    template: String,
+    link: String,
+}
+
+fn translate_title(title: &ResultTitle, styles: &StyleList) -> Option<TranslateTitle> {
     let (code, style) = match title {
         ResultTitle::ToLanguage(code) => (code, None),
         ResultTitle::ToLanguageStyle(code, name) => (code, Some(name)),
@@ -100,7 +103,10 @@ fn translate_title(title: &ResultTitle, styles: &StyleList) -> Option<(String, S
         }
         None => language,
     };
-    Some((tr(keys::AI_COMPOSE_TO_LANGUAGE).to_string(), name))
+    Some(TranslateTitle {
+        template: tr(keys::AI_COMPOSE_TO_LANGUAGE).to_string(),
+        link: name,
+    })
 }
 
 impl QuillApp {
@@ -171,8 +177,6 @@ impl QuillApp {
             .into_any_element()
     }
 
-    /// A style's emoji still, or a sparkle until it is downloaded (or for a
-    /// style without one).
     pub(super) fn ai_style_glyph(&self, style: &TextCompositionStyle) -> AnyElement {
         let still = (style.custom_emoji_id > 0)
             .then(|| self.custom_emoji_still(style.custom_emoji_id))
@@ -312,8 +316,6 @@ impl QuillApp {
             .into_any_element()
     }
 
-    /// "Original" / "Result", or in Translate "To {language}" whose
-    /// language opens the language picker.
     fn ai_compose_result_title(
         &self,
         title: &ResultTitle,
@@ -321,7 +323,11 @@ impl QuillApp {
         muted: Hsla,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some((template, name)) = translate_title(title, styles) else {
+        let Some(TranslateTitle {
+            template,
+            link: name,
+        }) = translate_title(title, styles)
+        else {
             let text = match title {
                 ResultTitle::Original => tr(keys::AI_COMPOSE_ORIGINAL),
                 _ => tr(keys::AI_COMPOSE_RESULT),
@@ -392,7 +398,6 @@ impl QuillApp {
             .into_any_element()
     }
 
-    /// "Style by {user}" under a style result that names its creator.
     fn ai_compose_author(&self, ai: &AiComposeBox, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         let user_id = ai.author_user_id(&session.messages.ai_compose.styles)?;

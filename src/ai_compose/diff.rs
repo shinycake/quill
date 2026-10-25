@@ -229,8 +229,6 @@ mod tests {
 
     #[test]
     fn utf16_offsets_cover_emoji_and_hebrew() {
-        // "😀" is two UTF-16 units and four bytes; each Hebrew letter one
-        // unit and two bytes.
         let diff = DiffText {
             text: "😀 שלום עולם".into(),
             edits: vec![

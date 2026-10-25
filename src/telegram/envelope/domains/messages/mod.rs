@@ -236,6 +236,5 @@ pub enum MessagesPayload {
         chat_id: i64,
         is_translatable: bool,
     },
-    /// AI compose styles and answers (TDLib 1.8.69).
     AiCompose(AiComposePayload),
 }

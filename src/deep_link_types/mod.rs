@@ -703,7 +703,6 @@ pub fn route(link: &InternalLink, original: &str) -> LinkRoute {
                 LinkRoute::Ui(DeepLinkUi::Background { name: name.clone() })
             }
         }
-        // tdesktop's `lng_ai_compose_tone_invalid` for a link with no name.
         InternalLink::TextCompositionStyle { name } => {
             if name.is_empty() {
                 LinkRoute::Message("This style was deleted or the link is invalid.".into())

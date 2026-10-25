@@ -20,7 +20,6 @@ use quill::state::{StyleError, StyleNotice};
 /// tdesktop `aiComposeToneToastIconSize`.
 const TOAST_EMOJI: f32 = 32.;
 
-/// The limit toast's text with its `**` marks and `{link}` still in it.
 pub(super) fn style_limit_text(notice: StyleLimitNotice) -> String {
     match notice {
         StyleLimitNotice::Final { count } => trn_with(
@@ -42,7 +41,6 @@ pub(super) fn style_limit_text(notice: StyleLimitNotice) -> String {
     }
 }
 
-/// A plain toast; an empty error type reads as the generic error.
 pub(super) fn text_toast(text: &str) -> Notification {
     if text.is_empty() {
         Notification::new().message(tr(keys::AI_COMPOSE_ERROR))
@@ -63,8 +61,6 @@ impl QuillApp {
         });
     }
 
-    /// A style toast: the style's emoji (a sparkle until it is
-    /// downloaded), a title and the text.
     pub(super) fn ai_style_toast(
         &self,
         title: Option<String>,
@@ -128,9 +124,6 @@ impl QuillApp {
         }
     }
 
-    /// The create / edit answer for the open editor: back to the card with
-    /// the style selected and its toast, or the editor again with the
-    /// error.
     pub(super) fn ai_style_edit_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(answer) = session_mut(self).and_then(|s| s.messages.ai_compose.style_edit.take())
         else {
@@ -160,7 +153,6 @@ impl QuillApp {
             Err(error) => {
                 editor.pending = false;
                 match error {
-                    // The limit notice shows its own toast.
                     StyleError::SavedTooMany => None,
                     StyleError::Invalid => Some(text_toast(tr(keys::AI_COMPOSE_TONE_INVALID))),
                     StyleError::Other(kind) => Some(text_toast(&kind)),
@@ -173,7 +165,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// A style just created or edited is selected once the box lists it.
     pub(super) fn select_saved_ai_style(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(open) = self.ai_compose.open.as_mut() else {
             return;
@@ -188,9 +179,6 @@ impl QuillApp {
         self.ai_compose_update(window, cx, |ai| ai.select_style(&name));
     }
 
-    /// Added, removed, deleted, the limit and the errors of an add or
-    /// remove. Removed and deleted toast only when the preview asked; it
-    /// closes then, as after Add.
     pub(super) fn ai_style_notice_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(notice) =
             session_mut(self).and_then(|s| s.messages.ai_compose.style_notice.take())

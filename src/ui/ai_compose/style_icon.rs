@@ -13,8 +13,6 @@ use quill::lang::{keys, tr};
 use quill::telegram::envelope::StickerItem;
 use std::path::PathBuf;
 
-/// Cells whose files the picker downloads, in order: enough for the first
-/// screens of the grid without fetching every installed set at once.
 const DOWNLOAD_CELLS: usize = 240;
 
 const CELL: f32 = 40.;
@@ -29,8 +27,6 @@ impl QuillApp {
         self.set_ai_compose_view(AiComposeView::StyleIcon, cx);
     }
 
-    /// A custom emoji's still wherever the app knows the emoji from: the
-    /// resolved custom emoji, the default topic icons or a loaded set.
     pub(super) fn ai_emoji_still(&self, id: i64) -> Option<PathBuf> {
         if id <= 0 {
             return None;
@@ -48,7 +44,6 @@ impl QuillApp {
         self.panel_still(item)
     }
 
-    /// The picker's cells, in grid order, by section.
     fn ai_style_icon_sections(&self) -> Vec<(Option<String>, Vec<StickerItem>)> {
         let Some(session) = self.session() else {
             return Vec::new();
@@ -72,8 +67,6 @@ impl QuillApp {
         std::iter::once((None, icons)).chain(sets).collect()
     }
 
-    /// While the picker shows: the installed sets' contents and the first
-    /// cells' files.
     pub(super) fn fetch_ai_style_icons(&mut self) {
         let showing = self
             .ai_compose

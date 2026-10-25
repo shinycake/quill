@@ -129,8 +129,6 @@ actions!(
         ShowScheduledMessages,
         ToggleLinkPreview,
         RecordRoundMessage,
-        /// Rewrite the composer's selection (or all of it) with the style
-        /// bound to this shortcut.
         AiComposeApply,
         ArchiveOpenChat,
         ShowAdminLog,

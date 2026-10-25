@@ -21,7 +21,6 @@ pub(super) fn frames(vcx: &mut VisualTestContext) {
     }
 }
 
-/// The demo opens the box on Translate over a three-line draft.
 pub(super) fn open_main(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     prefs::set_persistence(false);
     cx.update(gpui_kit::init);

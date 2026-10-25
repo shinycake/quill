@@ -75,7 +75,6 @@ impl AiComposeLimits {
     }
 }
 
-/// The compose box's answer for `token`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AiBoxAnswer {
     pub token: u64,
@@ -90,7 +89,6 @@ pub struct ApplyInPlaceAnswer {
     pub outcome: Result<(String, Vec<TextEntity>), AiBoxError>,
 }
 
-/// Why a style request failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StyleError {
     /// `TONES_SAVED_TOO_MANY`.
@@ -118,13 +116,11 @@ pub struct ExampleAnswer {
     pub outcome: Option<Result<StyleExample, StyleError>>,
 }
 
-/// The create or edit box's answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StyleEditAnswer {
     pub outcome: Result<TextCompositionStyle, StyleError>,
 }
 
-/// A toast about the saved styles.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StyleNotice {
     /// The style of this name was added.

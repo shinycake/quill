@@ -82,14 +82,12 @@ pub(crate) struct ApplyInPlace {
     pub(super) cursor: usize,
 }
 
-/// The open box and the chat whose composer it rewrites.
 pub(crate) struct AiComposeOpen {
     pub(super) chat_id: ChatId,
     pub(super) ai: AiComposeBox,
     pub(super) view: AiComposeView,
     /// The style names the box last refreshed against.
     pub(super) style_names: Vec<String>,
-    /// The New / Edit Style view's state while it is open.
     pub(super) editor: Option<StyleEditor>,
     /// A style just created or edited, selected once the box's style list
     /// has it (tdesktop `selectToneById`).
@@ -98,9 +96,7 @@ pub(crate) struct AiComposeOpen {
 
 pub(crate) struct AiComposeUi {
     pub(super) open: Option<AiComposeOpen>,
-    /// The language picker's search field.
     pub(super) language_search: Entity<TextareaState>,
-    /// The style editor's name and prompt fields.
     pub(super) style_name: Entity<TextareaState>,
     pub(super) style_prompt: Entity<TextareaState>,
     pub(super) preview: Option<AiStylePreview>,

@@ -90,7 +90,6 @@ impl QuillApp {
             });
             self.connection.set_note(StatusNote::info(note));
         }
-        // The AI compose box: its answers, styles and the composer button.
         self.ai_compose_frame_upkeep(window, cx);
         // Phase A1: keep the slow-mode countdown ticking while the open
         // chat is gated (spawns at most one 1s task per open chat).

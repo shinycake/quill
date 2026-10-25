@@ -2,7 +2,6 @@
 //! and the list the Style tabs show.
 use crate::text::TextEntity;
 
-/// One style the AI can rewrite a text in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextCompositionStyle {
     /// The style's unique name: what `composeTextWithAi.style_name` and the
@@ -14,7 +13,6 @@ pub struct TextCompositionStyle {
     pub title: String,
     /// Created by a user (false for the built-in styles).
     pub is_custom: bool,
-    /// Created by the current user.
     pub is_creator: bool,
     /// Installs of a created custom style; 0 when unknown.
     pub install_count: i32,

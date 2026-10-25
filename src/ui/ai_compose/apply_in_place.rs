@@ -13,8 +13,6 @@ use quill::composer_doc::ComposerDoc;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
-    /// The shortcut. `false` (the key goes on) where the composer cannot
-    /// send text.
     pub(in crate::ui) fn ai_compose_apply_by_key(
         &mut self,
         window: &mut Window,
@@ -64,10 +62,6 @@ impl QuillApp {
         true
     }
 
-    /// The answer: it replaces the range it was asked for (clamped to the
-    /// field as it is now), the caret after it, or for the whole field at
-    /// its old offset. A style the server no longer has unbinds the
-    /// shortcut.
     pub(super) fn ai_apply_in_place_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(answer) =
             session_mut(self).and_then(|s| s.messages.ai_compose.apply_in_place.take())
@@ -118,7 +112,6 @@ impl QuillApp {
     }
 }
 
-/// `at` moved back to a char boundary of `text`, at most its length.
 fn floor_boundary(text: &str, at: usize) -> usize {
     (0..=at.min(text.len()))
         .rev()

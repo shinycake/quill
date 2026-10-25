@@ -75,7 +75,6 @@ pub(super) fn marked_link(template: &str, tag: &str, link: &str) -> MarkedLink {
     MarkedLink { text, bold, link }
 }
 
-/// The radius that rounds the box's pills and buttons fully.
 fn pill_radius() -> Pixels {
     px(999.)
 }
@@ -91,7 +90,6 @@ fn attention_button(cx: &App) -> ButtonCustomVariant {
         .active(danger.opacity(0.16))
 }
 
-/// The session the UI shows, writable: the live one, else the demo's.
 fn session_mut(app: &mut QuillApp) -> Option<&mut Session> {
     match app.live.as_mut() {
         Some(live) => Some(&mut live.driver.session),
@@ -143,7 +141,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Run one transition of the open box and send what it asks for.
     pub(super) fn ai_compose_update(
         &mut self,
         window: &mut Window,
@@ -164,9 +161,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Send `send` for the open box. A refused send fails the card with the
-    /// generic error. Without a live client (demos, tests) nothing is sent
-    /// and the card keeps loading.
     fn ai_compose_dispatch(
         &mut self,
         send: Option<AiSend>,

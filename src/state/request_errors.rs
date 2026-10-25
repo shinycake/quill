@@ -134,8 +134,6 @@ pub(crate) fn error_reason(err: &TdError) -> String {
         // the AI arm in `apply_error` phrases this for the user; this
         // is the fallback for any generic path.
         ErrorClass::AiComposeFloodPremium => tr(keys::Q_OPS_ERR_AI_LIMIT).to_string(),
-        // Group-call and AI style classes keep the text their plain code
-        // gave.
         ErrorClass::GroupCallRejoin
         | ErrorClass::GroupCallLeft
         | ErrorClass::StreamTimeTooBig

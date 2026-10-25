@@ -517,8 +517,6 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
             server_type,
         };
     }
-    // The AI compose errors are known constants, safe to match: they name
-    // a product state, not a secret.
     let ai_class = match value.and_then(|v| v.get("message")).and_then(Value::as_str) {
         Some("AICOMPOSE_FLOOD_PREMIUM") => Some(ErrorClass::AiComposeFloodPremium),
         Some("INPUT_TEXT_TOO_LONG") => Some(ErrorClass::InputTextTooLong),

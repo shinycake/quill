@@ -16,11 +16,8 @@ use std::rc::Rc;
 /// `CocoonDirect`).
 #[derive(Clone, Copy)]
 enum CocoonLink {
-    /// `@cocoon`: the account, in Quill.
     Mention,
-    /// `cocoon.org`, in the browser.
     Domain,
-    /// `t.me/cocoon?direct`: the account's direct messages, in Quill.
     Direct,
 }
 
@@ -43,7 +40,6 @@ impl QuillApp {
         }
     }
 
-    /// Marked text with its link opening `link`.
     fn cocoon_text(
         &self,
         id: &'static str,

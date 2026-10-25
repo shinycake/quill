@@ -26,8 +26,6 @@ fn view(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<AiCompose
     })
 }
 
-/// The box on the Style tab, the pills scrolled to their end, then New
-/// Style from the Create pill.
 fn open_editor(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     click(vcx, "ai-compose-tab-style");
     let row = vcx

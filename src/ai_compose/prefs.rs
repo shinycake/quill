@@ -15,7 +15,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AiComposePrefs {
-    /// The composer's AI button tooltip was dismissed.
     pub tooltip_hidden: bool,
     /// The Style tab's "pick a style" tooltip was dismissed (a style was
     /// chosen once).
@@ -64,7 +63,6 @@ pub fn store(prefs: AiComposePrefs) {
     *PREFS.write_or_recover() = Some(prefs);
 }
 
-/// Edit the preferences in place and persist.
 pub fn update(edit: impl FnOnce(&mut AiComposePrefs)) {
     let mut prefs = current();
     edit(&mut prefs);

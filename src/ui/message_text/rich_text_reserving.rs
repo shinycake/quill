@@ -397,7 +397,6 @@ pub(in crate::ui) fn link_preview_card(
         }),
         _ => thumb,
     };
-    // An `addstyle/` link: the style's emoji where a thumbnail goes.
     let thumb = thumb.or_else(|| {
         super::link_preview_tile::style_emoji(
             row_id,

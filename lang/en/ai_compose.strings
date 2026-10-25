@@ -1,5 +1,3 @@
-// ai_compose: the composer's AI button and the AI compose box (tdesktop
-// boxes/compose_ai_box.cpp, ui/boxes/about_cocoon_box.cpp).
 "lng_ai_compose_title" = "AI Editor";
 "lng_ai_compose_apply" = "Apply";
 "lng_ai_compose_tab_translate" = "Translate";
@@ -39,10 +37,7 @@
 "lng_translate_cocoon_text" = "Want to integrate Cocoon into your projects?\nReach out at {link}";
 "lng_translate_cocoon_text_link" = "t.me/cocoon?direct";
 "lng_translate_cocoon_done" = "Understood";
-// Quill: the composer button's letters (tdesktop draws "AI" without a key).
 "qll_ai_compose_button" = "AI";
-// Styles: the editor, the style menu, the preview and the apply hotkey
-// (tdesktop boxes/create_ai_tone_box.cpp, boxes/compose_ai_box.cpp).
 "lng_shortcuts_ai_compose_apply" = "Apply AI style to text";
 "lng_ai_compose_before" = "Before";
 "lng_ai_compose_after" = "After";

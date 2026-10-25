@@ -497,7 +497,6 @@ impl Session {
                     TextEntityKind::CustomEmoji { custom_emoji_id } => Some(custom_emoji_id),
                     _ => None,
                 }));
-                // An `addstyle/` link's emoji, drawn beside its card.
                 if let Some(LinkPreviewKind::TextCompositionStyle { custom_emoji_id }) =
                     text.link_preview.as_ref().map(|preview| &preview.kind)
                     && *custom_emoji_id != 0

@@ -38,20 +38,19 @@ const ICON_INNER: f32 = 54.;
 const SPIN: Duration = Duration::from_millis(600);
 const SPIN_PAUSE: Duration = Duration::from_millis(1000);
 
-/// The icon's angle `elapsed` after the request started.
 pub(super) fn spin_angle(elapsed: Duration) -> f32 {
     let cycle = (SPIN + SPIN_PAUSE).as_secs_f32();
     let at = elapsed.as_secs_f32() % cycle;
     let t = (at / SPIN.as_secs_f32()).min(1.);
-    // easeOutBack.
+    ease_out_back(t) * std::f32::consts::TAU
+}
+
+fn ease_out_back(t: f32) -> f32 {
     let (c1, c3) = (1.70158_f32, 2.70158_f32);
-    let eased = 1. + c3 * (t - 1.).powi(3) + c1 * (t - 1.).powi(2);
-    eased * std::f32::consts::TAU
+    1. + c3 * (t - 1.).powi(3) + c1 * (t - 1.).powi(2)
 }
 
 impl QuillApp {
-    /// An `addstyle/<name>` link: the preview opens loading and asks for
-    /// the style.
     pub(in crate::ui) fn open_ai_style_preview(
         &mut self,
         name: String,
@@ -81,7 +80,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// The preview's style once the lookup answers, and its examples.
     pub(super) fn ai_style_preview_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.ai_style_lookup_upkeep(window, cx);
         self.ai_style_example_upkeep(window, cx);
@@ -186,7 +184,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// "Another example" (and the first one when the style came without).
     fn load_ai_style_example(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(preview) = self.ai_compose.preview.as_mut() else {
             return;
@@ -333,8 +330,6 @@ impl QuillApp {
             .into_any_element()
     }
 
-    /// One example at a time, "Before" over "After"; skeletons while one
-    /// loads.
     fn ai_style_example_card(
         &self,
         preview: &AiStylePreview,
@@ -431,8 +426,6 @@ impl QuillApp {
             .into_any_element()
     }
 
-    /// "Used by {count} people. Created by {user}", the name opening the
-    /// creator's profile.
     fn ai_style_attribution(
         &self,
         style: &TextCompositionStyle,
@@ -499,7 +492,6 @@ impl QuillApp {
         )
     }
 
-    /// Add Style, or Remove / Delete Style for a saved custom style.
     fn ai_style_preview_footer(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(style) = self
             .ai_compose
@@ -548,7 +540,6 @@ impl QuillApp {
 }
 
 crate::ui::shell::register_dialogs! {
-    /// The preview of a shared AI compose style (`t.me/addstyle/<name>`).
     AiStylePreview => DialogSpec::new(
         7725,
         |app| app.ai_compose.preview.is_some(),

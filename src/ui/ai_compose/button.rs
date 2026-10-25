@@ -76,7 +76,6 @@ impl QuillApp {
         }
     }
 
-    /// The AI button, while the draft is long enough for it.
     pub(in crate::ui) fn ai_compose_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let shown_at = self.ai_compose.button_shown_at?;
         let reduce_motion = cx.reduce_motion();

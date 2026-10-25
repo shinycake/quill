@@ -8,7 +8,6 @@ use super::{DiffText, StyleList, fresh_token};
 use crate::text::TextEntity;
 use crate::text_split::utf16_len;
 
-/// The box's tabs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AiComposeMode {
     Translate,
@@ -43,7 +42,6 @@ pub struct AiResult {
     pub diff: Option<DiffText>,
 }
 
-/// The result card.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CardState {
     /// Nothing asked yet (Style tab with no style picked).
@@ -70,7 +68,6 @@ pub enum AiRequest {
     Fix { text: String },
 }
 
-/// A request and the token its answer must carry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AiSend {
     pub token: u64,
@@ -99,7 +96,6 @@ pub enum AiBoxError {
 pub enum ResultTitle {
     Original,
     Result,
-    /// "To {language}".
     ToLanguage(String),
     /// "To {language} ({style})": the language code and the style's name.
     ToLanguageStyle(String, String),
@@ -172,13 +168,11 @@ impl AiComposeBox {
         self.request_in(AiComposeMode::Style)
     }
 
-    /// The language picked in the Translate tab's language box.
     pub fn set_translate_to(&mut self, code: &str) -> Option<AiSend> {
         self.translate_to = code.to_string();
         self.request_in(AiComposeMode::Translate)
     }
 
-    /// The style picked under the Translate tab's language box.
     pub fn select_translate_style(&mut self, style: StyleChoice) -> Option<AiSend> {
         self.translate_style = style;
         self.request_in(AiComposeMode::Translate)
@@ -277,7 +271,6 @@ impl AiComposeBox {
         self.original_expanded
     }
 
-    /// The result to apply, once there is one.
     pub fn result(&self) -> Option<&AiResult> {
         match &self.card {
             CardState::Ready(result) => Some(result),

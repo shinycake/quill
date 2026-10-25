@@ -62,9 +62,6 @@ impl QuillApp {
         self.ai_compose_update(window, cx, |ai| ai.refresh_styles(&styles));
     }
 
-    /// The custom emoji the box and the preview show (the style pills,
-    /// the editor's icon, the previewed style): resolve each once, then
-    /// fetch its still.
     fn fetch_ai_compose_emoji(&mut self) {
         let Some(session) = self.session() else {
             return;
@@ -157,8 +154,6 @@ impl QuillApp {
         .icon(IconName::Star)
     }
 
-    /// A toast whose text has bold runs and one link; a click on the link
-    /// runs `on_link`.
     pub(super) fn marked_toast(
         id: &'static str,
         marked: MarkedLink,

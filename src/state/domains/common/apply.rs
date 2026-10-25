@@ -293,10 +293,6 @@ impl Session {
                     self.chats_state.background_url = Some(url);
                 }
             }
-            // `formattedText`: the composer's rich-text AI tools are
-            // captured by the driver before `apply` into
-            // `Session::ai_composer_text`; the compose box and the
-            // apply-in-place shortcut answers land in `ai_compose`.
             CommonPayload::FormattedText { text, entities }
                 if matches!(
                     pending.map(|p| p.purpose),

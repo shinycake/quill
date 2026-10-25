@@ -277,7 +277,6 @@ pub enum MessagesPurpose {
     /// 1.8.67, :12176). Response is `richMessage`; the parsed blocks
     /// replace the open chat's composer draft as editor markup.
     FixRichMessageWithAi,
-    /// AI compose box, apply-in-place and style requests (TDLib 1.8.69).
     AiCompose(AiComposePurpose),
 }
 
