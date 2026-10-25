@@ -523,8 +523,8 @@ mirrors it: a point inside a list needs a granted row or a control under
 it. Every chat-bearing row carries its chat: search results and media
 rows, the channels tab, the apps tab (a bot's chat id is its user id),
 the reply-elsewhere and share destinations, the player bar and the
-downloads rows (from the message the file came from, where one is
-loaded). `Everything` ignores `list` and `controls`: there every chat
+downloads rows (the chat is recorded on the download when it starts,
+`DownloadsState::note_chat`, so a row never scans messages to find it). `Everything` ignores `list` and `controls`: there every chat
 but a secret one is granted. The window test
 `list_parts_hide_rows_of_ungranted_chats_and_untagged_rows` renders the
 channels, photos, downloads and posts tabs and the reply chooser with
@@ -575,40 +575,79 @@ Stars; its confirmation (`PaidPostSearch`) refuses while injecting too.
 The screen covers reactions, poll votes, bot buttons, deletes, leaves,
 blocks, reports and payments from any surface the redaction missed. Each
 guard records a refusal (`guard::refuse_if_injecting`) that the tool
-reply lists under `refusals`.
+reply lists under `refusals`. A read refused only for its money (an
+`Everything`-scope profile asks for gifts, a channel page for revenue)
+is not an error to the caller: `AgentScreen` (`src/connect/sender.rs`)
+queues a TDLib-shaped error for the request's `@extra`
+(`guard::refused_read_answer`, code 403 `QUILL_AGENT_DRIVING`) and the
+next UI poll ingests it (`ConnectDriver::ingest_refused_answers`, at
+`LOCAL_ANSWER_SEQ` outside TDLib's receive order), so each caller's own
+error path clears what it set loading and no spinner sticks
+(`connect::tests::agent_screen`). Writes and the denied reads
+(`DENIED_READS`, now with `getLoginUrlInfo`) still return
+`AgentDriving`.
 
 Nothing leaves Quill (second review). `Everything` scope reaches
 surfaces with local effects, so those refuse while injecting whatever
 the scope: `ZoomPlatform` (`src/ui/interface_zoom.rs`), the one
 decorator every `open_url`, `reveal_path` and `open_with_system` passes
 through, refuses them with a message that tells the agent to give the
-user the link or the file name (`guard::refuse_outside_if_injecting`),
-and `platform::open_mailto`, `open_local_file`, `reveal_in_file_manager`
-refuse likewise; the file-open confirmation (`FileOpenConfirm`), the
+user the link or the file name (`guard::refuse_outside_if_injecting`).
+Quill's own launches meet one door, `platform::os_open` (third review):
+`open_external_url`, `open_mailto` and `open_local_file` all go through
+it and it refuses before anything is spawned, so a link clicked in a
+message, an Instant View fallback or a bot's login button cannot reach
+the browser; `reveal_in_file_manager` and the two System Settings
+openers (push-to-talk and screen-capture permissions) refuse likewise.
+Test builds count launches instead of spawning (`os_launch_attempts`),
+and `a_link_an_agent_clicks_in_a_granted_chat_launches_nothing` clicks
+a URL in a granted chat through the window: refused, nothing launched,
+while the user's click on the same spot launches; the file-open confirmation (`FileOpenConfirm`), the
 chat export and the account export dialogs are on `HARD_DIALOGS`, and
 their entry points (`open_file_guarded`, `open_file_now`,
 `confirm_file_open`, `start_chat_export`, `run_chat_export`,
 `open_account_export`, `run_account_export`) refuse as well; so does the
-device location lookup (`locate_for_request`). The clipboard is the
+device location lookup (`locate_for_request`, and the bot's location
+button refuses before its share sheet opens). The clipboard is the
 user's: Cmd/Ctrl+V, Cmd/Ctrl+Shift+V and Shift+Insert are forbidden
 chords (`keys::forbidden`), and a paste dispatched any other way (the
 Edit menu, an input's context menu, a mini app's "Paste from clipboard",
 the composer's image paste) reads an empty clipboard, because the
-`ZoomPlatform`'s clipboard reads refuse while injecting and the two
-composer paths that read the pasteboard directly refuse too.
+`ZoomPlatform`'s clipboard reads (the find pasteboard included) refuse
+while injecting and the two composer paths that read the pasteboard directly refuse too.
 
 Delayed opens run as part of the step. A clicked link runs at render
 (`run_pending_link`) and a username or t.me link resolves through TDLib
-after the step ended, outside the injecting flag. The pending link and
-the deep-link flow now remember an agent origin (`PendingLink.from_agent`,
-`LinkUi.deep_link_from_agent` set by `queue_deep_link` /
-`note_deep_link_origin` at every start of a flow), the render-time halves
-run under `guard::with_injecting`, and the resolved chat open
-(`open_deep_link_chat`) re-checks `agent_may_open` first: an ungranted
-chat stays closed with a refusal. Typed links from an agent's step
-(settings, proxies, folders, sticker sets, backgrounds) are refused
-outright. `a_link_resolved_after_the_step_opens_a_granted_chat_only`
-covers the three cases.
+after the step ended, outside the injecting flag. Each delayed path
+carries its origin with it and runs its half under
+`guard::with_injecting`:
+- the pending link (`PendingLink.from_agent`);
+- the deep-link flow: the origin lives with the flow
+  (`ChatsState.deep_link_from_agent`, set when a flow starts, kept while
+  it continues, taken at every terminal state), and a link queued while
+  another resolves is the agent's only if the agent queued that link
+  (`LinkUi.agent_pending_link`), so a user's link queued behind an
+  agent's flow neither clears nor inherits it
+  (`a_flow_keeps_its_origin_when_another_link_arrives`,
+  `a_queued_link_is_the_agents_only_if_the_agent_queued_that_link`);
+- the Instant View fallback (the request id is remembered as the
+  agent's, `instant_view_fallback_from_agent`, and the fallback URL opens
+  under that origin);
+- the bot login button (`LoginUrlRequest.from_agent`; the dialog refuses
+  for an agent's request).
+
+The resolved chat open (`open_deep_link_chat`) re-checks
+`agent_may_open` first: an ungranted chat stays closed with a refusal.
+Typed links from an agent's step (settings, proxies, folders, sticker
+sets, backgrounds) are refused outright.
+`a_link_resolved_after_the_step_opens_a_granted_chat_only` covers the
+three cases.
+
+The emoji, sticker and GIF panel occludes the composer, so it carries
+the chat's region tag (`REGION_CHAT`) itself; without it no point in it
+passed. `the_emoji_sticker_and_gif_panels_take_clicks_in_a_granted_chat`
+switches each panel's tab through the driver with no refusal; sending
+from them stays refused by the send guards.
 
 Sends are routed, not refused. Enter or the Send button in the message
 box of a granted chat while injecting goes through `submit_composer` to
