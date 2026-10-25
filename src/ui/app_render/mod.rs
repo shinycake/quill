@@ -235,10 +235,16 @@ impl Render for QuillApp {
             }))
             .on_action(cx.listener(|this, _: &ZoomWindow, window, _| {
                 let _ = this;
+                if guard::refuse_hard_if_injecting(HardSurface::Window) {
+                    return;
+                }
                 window.zoom_window();
             }))
             .on_action(cx.listener(|this, _: &ToggleFullscreen, window, _| {
                 let _ = this;
+                if guard::refuse_hard_if_injecting(HardSurface::Window) {
+                    return;
+                }
                 window.toggle_fullscreen();
             }))
             .on_action(cx.listener(|this, _: &ToggleSidebar, window, cx| {

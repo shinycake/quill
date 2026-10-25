@@ -469,7 +469,9 @@ fn perform_step_injecting(
         .update(|window, cx| input::point_at(target, pointer, tree, window, cx))
         .map_err(closed)??;
     let allowed = app
-        .update_in(cx, |app, window, _| app.agent_pointer_allowed(window))
+        .update_in(cx, |app, window, _| {
+            app.agent_pointer_allowed(window, pointer)
+        })
         .map_err(closed)?;
     if !allowed {
         return Err(policy::point_outside_region(

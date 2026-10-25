@@ -52,6 +52,15 @@ pub const PART_RESULTS: &str = "part=search-results";
 pub const LIST: &str = "list";
 /// Controls inside a list that name no chat (a filter strip, paging).
 pub const CONTROLS: &str = "controls";
+/// The drawn title bar: its minimise, maximise and close buttons, its
+/// drag area (a double click maximises or minimises) and its window menu.
+/// No point on it takes an agent's input, in any scope, unless a
+/// [`WINDOW_CHROME_CONTENT`] part above it says otherwise
+/// ([`on_window_chrome`]).
+pub const WINDOW_CHROME: &str = "window-chrome";
+/// What the title bar carries for the app (the menu bar, search): the
+/// ordinary rules decide those points.
+pub const WINDOW_CHROME_CONTENT: &str = "window-chrome-content";
 
 /// The tag of a row that stands for `chat_id` (a chat row, a search hit, a
 /// contact: a private chat's id is its user's id).
@@ -196,6 +205,15 @@ pub fn redact(tree: UiTree, scope: DriverScope, granted: &dyn Fn(i64) -> bool) -
         focus,
         ..tree
     }
+}
+
+/// Whether input at a point tagged `tags` (topmost first) would land on
+/// the drawn title bar itself, not on an app part of it: refused in every
+/// scope. Input only; a screenshot still shows the bar.
+pub fn on_window_chrome(tags: &[String]) -> bool {
+    let chrome = tags.iter().position(|tag| tag == WINDOW_CHROME);
+    let content = tags.iter().position(|tag| tag == WINDOW_CHROME_CONTENT);
+    chrome.is_some_and(|chrome| content.is_none_or(|content| content > chrome))
 }
 
 /// Whether a pointer over the elements tagged `tags` (topmost first, as
@@ -463,6 +481,21 @@ mod tests {
             DriverScope::Everything,
             &granted
         ));
+    }
+
+    #[test]
+    fn the_title_bar_takes_no_input_but_the_app_parts_on_it_do() {
+        let tags = |list: &[&str]| list.iter().map(|t| t.to_string()).collect::<Vec<_>>();
+        assert!(on_window_chrome(&tags(&[WINDOW_CHROME])));
+        assert!(!on_window_chrome(&tags(&[
+            WINDOW_CHROME_CONTENT,
+            WINDOW_CHROME
+        ])));
+        assert!(on_window_chrome(&tags(&[
+            WINDOW_CHROME,
+            WINDOW_CHROME_CONTENT
+        ])));
+        assert!(!on_window_chrome(&tags(&[REGION_CHAT])));
     }
 
     #[test]

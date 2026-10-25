@@ -381,19 +381,36 @@ impl QuillApp {
             .into_iter()
             .map(|tag| tag.to_string())
             .collect();
-        redact::point_allowed(&tags, self.driver_scope(), &|chat_id| {
-            self.driver_may_open_chat(chat_id)
-        })
+        !redact::on_window_chrome(&tags)
+            && redact::point_allowed(&tags, self.driver_scope(), &|chat_id| {
+                self.driver_may_open_chat(chat_id)
+            })
     }
 
     /// Whether the elements GPUI reports under the pointer now (clipped and
-    /// layered as drawn) are ones the driver may act on.
-    pub(super) fn agent_pointer_allowed(&self, window: &Window) -> bool {
+    /// layered as drawn) are ones the driver may act on. Over the drawn
+    /// title bar only a single left click, a hover or a scroll goes through,
+    /// even on the app's own buttons there: the bar takes a double click
+    /// (maximise) and a right click (the window menu) from anywhere on it.
+    pub(super) fn agent_pointer_allowed(&self, window: &Window, pointer: &Pointer) -> bool {
         let tags: Vec<String> = window
             .hovered_a11y_tags()
             .into_iter()
             .map(|tag| tag.to_string())
             .collect();
+        let plain = matches!(
+            pointer,
+            Pointer::Click {
+                button: Button::Left,
+                count: 1
+            } | Pointer::Hover
+                | Pointer::Scroll { .. }
+        );
+        if redact::on_window_chrome(&tags)
+            || (!plain && tags.iter().any(|tag| tag == redact::WINDOW_CHROME))
+        {
+            return false;
+        }
         redact::point_allowed(&tags, self.driver_scope(), &|chat_id| {
             self.driver_may_open_chat(chat_id)
         })

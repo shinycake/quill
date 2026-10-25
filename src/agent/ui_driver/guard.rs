@@ -180,7 +180,8 @@ pub enum HardSurface {
     Account,
     /// A checkout, Stars, Premium and gifts.
     Payments,
-    /// Quitting Quill, closing, hiding or minimising its window.
+    /// Quitting Quill, closing, hiding, minimising, maximising (zoom) or
+    /// full-screening its window.
     Window,
 }
 
@@ -193,7 +194,9 @@ impl HardSurface {
             HardSurface::Security => "open the security settings",
             HardSurface::Account => "log out or switch accounts",
             HardSurface::Payments => "open payments, Stars, Premium or gifts",
-            HardSurface::Window => "quit Quill, or close, hide or minimise its window",
+            HardSurface::Window => {
+                "quit Quill, or close, hide, minimise, maximise or full-screen its window"
+            }
         }
     }
 }

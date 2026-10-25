@@ -115,7 +115,9 @@ impl QuillApp {
     ) {
         if self.viewer.extra.video_fullscreen.is_on() {
             self.viewer_leave_video_fullscreen();
-        } else {
+        } else if !quill::agent::ui_driver::guard::refuse_hard_if_injecting(
+            quill::agent::ui_driver::guard::HardSurface::Window,
+        ) {
             let (mode, toggle) = self
                 .viewer
                 .extra

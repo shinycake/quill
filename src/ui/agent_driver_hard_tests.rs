@@ -300,3 +300,35 @@ fn an_agent_neither_switches_accounts_nor_answers_a_call(cx: &mut TestAppContext
     );
 }
 
+#[gpui_kit::test]
+fn full_screen_and_zoom_refuse_while_injecting(cx: &mut TestAppContext) {
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    turn_on();
+    grant(11, Scope::ReadWrite);
+    let _presence = activity::connect("Test agent");
+    settle(vcx);
+    focus_message_box(&app, vcx);
+
+    // F11 and Cmd+Ctrl+F: the window stays as it is.
+    for chord in ["f11", "cmd-ctrl-f"] {
+        let refusals = press(&app, vcx, chord);
+        assert!(
+            refusals.iter().any(|r| r.contains("full-screen")),
+            "{chord}: {refusals:?}"
+        );
+        assert!(!vcx.update(|window, _| window.is_fullscreen()), "{chord}");
+    }
+
+    // Window > Zoom, under the flag a step sets.
+    let _ = guard::take_refusals();
+    guard::set_injecting(true);
+    vcx.dispatch_action(crate::ui::actions::ZoomWindow);
+    guard::set_injecting(false);
+    let refusals = guard::take_refusals();
+    assert!(
+        refusals.iter().any(|r| r.contains("maximise")),
+        "{refusals:?}"
+    );
+}
