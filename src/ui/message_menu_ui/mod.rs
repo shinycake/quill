@@ -22,7 +22,7 @@ use quill::ids::{ChatId, FileId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::message_menu::{
     MediaAction, MediaFacts, MediaKind, MediaTarget, SeenKind, media_actions, media_target, order,
-    reacted_label, read_date_label, read_status_label, seen_kind, seen_label,
+    reacted_label, read_date_label, seen_kind, seen_label,
 };
 use quill::state::{Audience, MessageReportStage, Session};
 use quill::telegram::envelope::{
@@ -639,6 +639,7 @@ mod media_order_tests;
 mod menu_add_to_set_rows;
 mod menu_save_to_rows;
 pub(in crate::ui) mod origin_rows;
+mod read_date_row;
 
 #[cfg(test)]
 mod tests {

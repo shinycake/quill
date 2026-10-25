@@ -638,22 +638,21 @@ impl QuillApp {
                 // TGX `SettingsPrivacyKeyController.needExtraToggle`: the
                 // "Hide read time" toggle shows unless the mode is Everybody
                 // with no never-exceptions.
+                // The Subscribe row sits under it for a free account
+                // (tdesktop `LastSeenPrivacyController::setupBelowWidget`).
                 if key == PrivacySettingKey::ShowStatus
                     && (current != Some(PrivacyWho::Everybody) || !detail.never.is_empty())
                 {
                     body = body.child(self.read_date_toggle_row(cx));
+                    if !self.privacy_premium() {
+                        body = body.child(
+                            self.privacy_subscribe_row(premium_rows::LAST_SEEN_SUBSCRIBE, cx),
+                        );
+                    }
                 }
             }
-            if key.restriction_needs_premium()
-                && !session.is_some_and(|s| s.payments.premium_option == Some(true))
-            {
-                body = body.child(
-                    div()
-                        .text_xs()
-                        .px_2()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(tr(keys::Q_PREFS_RESTRICTING_WHO_CAN_SEND_YOU)),
-                );
+            if key.restriction_needs_premium() && !self.privacy_premium() {
+                body = body.child(self.privacy_subscribe_row(premium_rows::VOICE_SUBSCRIBE, cx));
             }
         }
         Some(self.privacy_shell(cx, "editor", target.label(), body.into_any_element()))
@@ -873,4 +872,6 @@ pub(crate) fn new_chat_privacy_value(session: &Session) -> String {
     }
 }
 
+mod premium_rows;
+mod premium_rows_demo;
 mod privacy_radio_row;

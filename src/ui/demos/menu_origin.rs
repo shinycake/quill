@@ -2,7 +2,9 @@
 //! the open chat: `forward` (a forwarded message), `gift` (a gift service
 //! message you sent), `replies` (the Replies chat) or `times` (messages from
 //! 2024, from earlier this year and from today, the last one edited: day
-//! separators, bubble times and the Edited row).
+//! separators, bubble times and the Edited row). `times-menu` opens the menu
+//! of the last message with its read time; `read-hidden` does the same with
+//! your read time hidden ("show when").
 
 use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
@@ -32,14 +34,21 @@ impl QuillApp {
             session.open_chat(match mode.as_str() {
                 "gift" => GIFT_CHAT,
                 "replies" => REPLIES_CHAT,
-                "times" | "times-menu" => TIMES_CHAT,
+                "times" | "times-menu" | "read-hidden" => TIMES_CHAT,
                 _ => FORWARD_CHAT,
             });
         }
-        if mode == "times-menu" {
+        let read = match mode.as_str() {
+            "times-menu" => Some(quill::telegram::envelope::MessageReadDate::Read(
+                1_773_504_420,
+            )),
+            "read-hidden" => Some(quill::telegram::envelope::MessageReadDate::MyPrivacyRestricted),
+            _ => None,
+        };
+        if let Some(read) = read {
             // The menu of a sent message in a private chat with a read time.
             // window-scope: demo setup in the one demo window.
-            cx.defer_in(window, |this, window, cx| {
+            cx.defer_in(window, move |this, window, cx| {
                 this.open_message_menu(
                     crate::ui::menu_states::MessageMenuState {
                         chat_id: TIMES_CHAT,
@@ -52,9 +61,7 @@ impl QuillApp {
                 if let Some(session) = this.demo_session.as_mut() {
                     let mut audience =
                         quill::state::MessageAudience::new(TIMES_CHAT, MessageId(71));
-                    audience.read_date = quill::state::Audience::Ready(
-                        quill::telegram::envelope::MessageReadDate::Read(1_773_504_420),
-                    );
+                    audience.read_date = quill::state::Audience::Ready(read);
                     session.messages.message_audience = Some(audience);
                 }
                 cx.notify();

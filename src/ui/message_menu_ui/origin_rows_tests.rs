@@ -5,12 +5,14 @@ use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::menu_states::MessageMenuState;
 use crate::ui::message_menu_ui::origin_rows::{FORWARD_CHAT, GIFT_CHAT, REPLIES_CHAT, TIMES_CHAT};
+use crate::ui::profile_cover::{ShowOrPremium, ShowOrPremiumBox};
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Focusable, TestAppContext, VisualTestContext, point, px, size};
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr};
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
@@ -219,4 +221,89 @@ fn a_private_chat_lists_the_date_above_the_read_time(cx: &mut TestAppContext) {
         )
     });
     assert!(date < read, "the sent line sits above the read time");
+    assert!(!has(vcx, "menu-read-show"));
+}
+
+fn hide_read_time(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
+    app.update(cx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            let mut audience = quill::state::MessageAudience::new(TIMES_CHAT, MessageId(71));
+            audience.read_date = quill::state::Audience::Ready(
+                quill::telegram::envelope::MessageReadDate::MyPrivacyRestricted,
+            );
+            session.messages.message_audience = Some(audience);
+            session.settings.read_date_show = Some(false);
+        }
+        cx.notify();
+    });
+    frames(cx);
+}
+
+fn read_time_box(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Option<ShowOrPremiumBox> {
+    app.read_with(cx, |app, _| app.profile_cover.show_or_premium)
+}
+
+#[gpui_kit::test]
+fn your_hidden_read_time_offers_to_show_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_menu_on(&app, vcx, TIMES_CHAT, MessageId(71));
+    hide_read_time(&app, vcx);
+    click(vcx, "menu-read-show");
+    assert!(app.read_with(vcx, |app, _| app.message_ui.menu.is_none()));
+    let shown = read_time_box(&app, vcx);
+    assert_eq!(shown.map(|open| open.kind), Some(ShowOrPremium::ReadTime));
+    click(vcx, "show-or-premium-show");
+    assert_eq!(read_time_box(&app, vcx), None);
+    let shown = app.read_with(vcx, |app, _| {
+        app.session()
+            .and_then(|session| session.settings.read_date_show)
+    });
+    assert_eq!(
+        shown,
+        Some(true),
+        "Show My Read Time shows read dates again"
+    );
+    let note = app.read_with(vcx, |app, _| app.connection.note().text().to_string());
+    assert_eq!(note, tr(keys::READTIME_SHOWN_TOAST));
+}
+
+#[gpui_kit::test]
+fn the_read_time_box_subscribes_with_its_ref(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_menu_on(&app, vcx, TIMES_CHAT, MessageId(71));
+    hide_read_time(&app, vcx);
+    click(vcx, "menu-read-show");
+    click(vcx, "show-or-premium-premium");
+    assert_eq!(read_time_box(&app, vcx), None);
+    let premium = app.read_with(vcx, |app, _| {
+        app.session().map(|session| {
+            (
+                session.payments.hub.premium_open,
+                session.payments.hub.premium_ref.clone(),
+            )
+        })
+    });
+    assert_eq!(premium, Some((true, "revtime_hidden".to_string())));
+}
+
+#[gpui_kit::test]
+fn their_hidden_read_time_has_nothing_to_show(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_menu_on(&app, vcx, TIMES_CHAT, MessageId(71));
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            let mut audience = quill::state::MessageAudience::new(TIMES_CHAT, MessageId(71));
+            audience.read_date = quill::state::Audience::Ready(
+                quill::telegram::envelope::MessageReadDate::UserPrivacyRestricted,
+            );
+            session.messages.message_audience = Some(audience);
+        }
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(has(vcx, "menu-read-date"));
+    assert!(!has(vcx, "menu-read-show"));
 }

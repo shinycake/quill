@@ -310,9 +310,14 @@ impl QuillApp {
                             Radio::new(format!("{id}-{who:?}")).label(tr(*label))
                         }),
                     )
-                    .on_click(cx.listener(move |this, &ix, _, cx| {
+                    .on_click(cx.listener(move |this, &ix, window, cx| {
                         if let Some(&who) = WHOS.get(ix) {
-                            this.set_privacy_target_who(PrivacyEditorTarget::Rule(key), who, cx);
+                            this.set_privacy_target_who(
+                                PrivacyEditorTarget::Rule(key),
+                                who,
+                                window,
+                                cx,
+                            );
                         }
                     }))
             };

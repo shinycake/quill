@@ -178,12 +178,14 @@ impl QuillApp {
         let message_id = message.id;
         // tdesktop's AddWhoReactedAction puts a private chat's date line
         // above the read time; a group's reactors row comes first.
-        let private = session.chats.get(&chat_id.0).is_some_and(|chat| {
-            matches!(
-                chat.kind,
-                quill::telegram::envelope::ChatKind::Private { .. }
-            )
-        });
+        let private_user = session
+            .chats
+            .get(&chat_id.0)
+            .and_then(|chat| match chat.kind {
+                quill::telegram::envelope::ChatKind::Private { user_id } => Some(user_id.0),
+                _ => None,
+            });
+        let private = private_user.is_some();
         let (date_order, audience_order) = if private {
             (order::AUDIENCE, order::PRIVATE_READ)
         } else {
@@ -202,13 +204,7 @@ impl QuillApp {
         if let Some(audience) = audience {
             // A private chat: the other side's read time.
             if let Audience::Ready(read) = &audience.read_date {
-                let label = read_status_label(*read, &now);
-                rows.push(info_row(
-                    audience_order,
-                    "menu-read-date",
-                    Some(IconName::Eye),
-                    label,
-                ));
+                rows.push(self.read_date_row(audience_order, private_user, *read, &now, cx));
             } else if audience.viewers.is_loading() || audience.reactions.is_loading() {
                 rows.push(info_row(
                     audience_order,

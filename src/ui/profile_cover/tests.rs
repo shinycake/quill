@@ -6,6 +6,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::demos::profile_cover::{COVER_HIDDEN, COVER_ME, COVER_STORIES};
 use crate::ui::keybindings::bind_keys;
 use crate::ui::navigation::NavigationAction;
+use crate::ui::profile_cover::{ShowOrPremium, ShowOrPremiumBox};
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::Root;
@@ -94,14 +95,34 @@ fn hidden_last_seen_offers_to_show_yours(cx: &mut TestAppContext) {
     assert!(!find(&mut vcx, "profile-rating"));
     click(&mut vcx, "profile-cover-when");
     assert_eq!(
-        app.read_with(&vcx, |app, _| app.profile_cover.last_seen_box),
-        Some(COVER_HIDDEN)
+        app.read_with(&vcx, |app, _| app.profile_cover.show_or_premium),
+        Some(ShowOrPremiumBox {
+            kind: ShowOrPremium::LastSeen,
+            user_id: COVER_HIDDEN,
+        })
     );
-    assert_eq!(dialog(&shell, &mut vcx), Some(DialogKind::ShowLastSeen));
-    click(&mut vcx, "last-seen-show");
+    assert_eq!(dialog(&shell, &mut vcx), Some(DialogKind::ShowOrPremium));
+    click(&mut vcx, "show-or-premium-show");
     let note = app.read_with(&vcx, |app, _| app.connection.note().text().to_string());
     assert_eq!(note, tr(keys::LASTSEEN_SHOWN_TOAST));
-    assert_ne!(dialog(&shell, &mut vcx), Some(DialogKind::ShowLastSeen));
+    assert_ne!(dialog(&shell, &mut vcx), Some(DialogKind::ShowOrPremium));
+}
+
+#[gpui_kit::test]
+fn hidden_last_seen_subscribes_with_the_lastseen_hidden_ref(cx: &mut TestAppContext) {
+    let (app, shell, mut vcx) = new_app(cx, "ready-info-cover-last-seen");
+    click(&mut vcx, "profile-cover-when");
+    click(&mut vcx, "show-or-premium-premium");
+    let premium = app.read_with(&vcx, |app, _| {
+        app.session().map(|session| {
+            (
+                session.payments.hub.premium_open,
+                session.payments.hub.premium_ref.clone(),
+            )
+        })
+    });
+    assert_eq!(premium, Some((true, "lastseen_hidden".to_string())));
+    assert_eq!(dialog(&shell, &mut vcx), Some(DialogKind::PremiumFeatures));
 }
 
 #[gpui_kit::test]
