@@ -12,6 +12,7 @@ const SAVED_NAMES: [&str; 5] = ["saved", "saved messages", "me", "self", "myself
 const TITLE_CANDIDATES: i64 = 20;
 
 /// A chat a call may use.
+#[derive(Clone)]
 pub(crate) struct Target {
     pub chat_id: i64,
     pub title: String,

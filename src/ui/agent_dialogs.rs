@@ -13,7 +13,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::agent::grants::Scope;
-use quill::agent::prompts::{Ask, Prompt};
+use quill::agent::prompts::{Ask, Prompt, Risk};
 use quill::lang::{keys, tr, tr_with};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -75,6 +75,10 @@ fn request_title(prompt: &Prompt) -> String {
                 ("action", &lower_first(&clip(action, 60))),
                 ("chat", &clip(title, 60)),
             ],
+        ),
+        Ask::Raw { method, .. } => tr_with(
+            keys::Q_AGENT_REQUEST_RAW,
+            &[("agent", &agent), ("method", &clip(method, 60))],
         ),
     }
 }
@@ -221,12 +225,43 @@ impl QuillApp {
                     );
                 }
             }
+            Ask::Raw { risk, preview, .. } => {
+                let (id, text) = match risk {
+                    Risk::Account => ("agent-request-raw-account", tr(keys::Q_AGENT_REQUEST_RAW_ACCOUNT)),
+                    Risk::Money => ("agent-request-raw-money", tr(keys::Q_AGENT_REQUEST_RAW_MONEY)),
+                };
+                body = body.child(warning(id, text, cx)).child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(muted)
+                                .child(tr(keys::Q_AGENT_REQUEST_RAW_PREVIEW)),
+                        )
+                        .child(
+                            div()
+                                .id("agent-request-raw")
+                                .debug_selector(|| "agent-request-raw".to_string())
+                                .px_3()
+                                .py_2()
+                                .rounded(radius)
+                                .bg(quote_bg)
+                                .text_xs()
+                                .font_family(super::message_text::MONO_FONT)
+                                .line_clamp(8)
+                                .child(clip(preview, 600)),
+                        ),
+                );
+            }
             Ask::Chat { .. } => {}
         }
-        let later = if matches!(prompt.ask, Ask::Write { .. }) {
-            keys::Q_AGENT_REQUEST_WRITE_LATER
-        } else {
-            keys::Q_AGENT_REQUEST_LATER
+        let later = match prompt.ask {
+            Ask::Write { .. } => keys::Q_AGENT_REQUEST_WRITE_LATER,
+            Ask::Raw { .. } => keys::Q_AGENT_REQUEST_RAW_LATER,
+            _ => keys::Q_AGENT_REQUEST_LATER,
         };
         body = body.child(div().text_xs().text_color(muted).child(tr(later)));
         let title = request_title(&prompt);

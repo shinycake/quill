@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use std::time::Duration;
 
 /// How long the user has to answer a confirmation.
-const ANSWER_WAIT: Duration = Duration::from_secs(120);
+pub const ANSWER_WAIT: Duration = Duration::from_secs(120);
 /// How long a send waits for Telegram to deliver it.
 const DELIVERY_WAIT: Duration = Duration::from_secs(30);
 /// Telegram's limits on one message's text and on a caption.
@@ -286,13 +286,18 @@ pub fn confirm(
 
 /// Add a line to the action log the user sees in Settings.
 pub fn log(ctx: &Ctx, target: &Target, tool: &str, summary: &str, ok: bool) {
+    log_in(ctx, target.chat_id, &target.title, tool, summary, ok);
+}
+
+/// [`log`] for an action that may name no chat (`chat_id` 0).
+pub fn log_in(ctx: &Ctx, chat_id: i64, chat_title: &str, tool: &str, summary: &str, ok: bool) {
     activity::record(Action {
         time: 0,
         account: ctx.account.clone(),
         agent: current_agent(),
         tool: tool.to_string(),
-        chat_id: target.chat_id,
-        chat_title: target.title.clone(),
+        chat_id,
+        chat_title: chat_title.to_string(),
         summary: summary.chars().take(200).collect(),
         ok,
     });
@@ -421,6 +426,25 @@ fn is_new_peer(ctx: &Ctx, target: &Target) -> bool {
     })
 }
 
+/// Let `count` messages to `target` go out: refuses paid chats, then waits
+/// for a turn in the paced queue every agent send shares.
+pub fn admit(ctx: &Ctx, target: &Target, count: u32) -> Result<(), ToolError> {
+    if stars_per_message(ctx, target.chat_id)? > 0 {
+        return Err(paid_refusal());
+    }
+    let new_peer = is_new_peer(ctx, target);
+    pacing::take_turn(ctx.client.id(), target.chat_id, count, new_peer).map_err(|refusal| match refusal {
+        Refusal::Flood(seconds) => ToolError::new(format!(
+            "Telegram asked Quill to slow down. Agent sends are paused for {seconds} more seconds; retry after that."
+        )),
+        Refusal::NewPeers => ToolError::new(
+            "Agents may start at most 5 new conversations a day (first messages to people who never wrote to the user). Ask the user to send this one from Quill.",
+        ),
+        Refusal::Busy => ToolError::new("Too many agent messages are waiting to go out. Retry in a minute."),
+    })?;
+    Ok(())
+}
+
 /// Send messages to `target` through the paced queue and wait until
 /// Telegram delivers them. Returns the messages with their final ids.
 pub fn send(
@@ -442,19 +466,7 @@ fn send_inner(
     request: Value,
     count: u32,
 ) -> Result<Vec<Value>, ToolError> {
-    if stars_per_message(ctx, target.chat_id)? > 0 {
-        return Err(paid_refusal());
-    }
-    let new_peer = is_new_peer(ctx, target);
-    pacing::take_turn(ctx.client.id(), target.chat_id, count, new_peer).map_err(|refusal| match refusal {
-        Refusal::Flood(seconds) => ToolError::new(format!(
-            "Telegram asked Quill to slow down. Agent sends are paused for {seconds} more seconds; retry after that."
-        )),
-        Refusal::NewPeers => ToolError::new(
-            "Agents may start at most 5 new conversations a day (first messages to people who never wrote to the user). Ask the user to send this one from Quill.",
-        ),
-        Refusal::Busy => ToolError::new("Too many agent messages are waiting to go out. Retry in a minute."),
-    })?;
+    admit(ctx, target, count)?;
     let answer = td::call(&ctx.client, request).map_err(write_error)?;
     let pending: Vec<Value> = match answer.get("messages").and_then(Value::as_array) {
         Some(list) => list.clone(),

@@ -5,7 +5,7 @@
 //! for the user's click in Quill.
 
 mod change;
-mod common;
+pub(super) mod common;
 mod manage;
 mod send;
 

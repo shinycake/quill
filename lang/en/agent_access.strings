@@ -51,6 +51,11 @@
 "qll_agent_request_write" = "{agent} wants to {action} in \"{chat}\"";
 "qll_agent_request_write_preview" = "It will send:";
 "qll_agent_request_write_later" = "Quill asks because Confirm each send is on. You can turn it off in Settings under Advanced and Agent access.";
+"qll_agent_request_raw" = "{agent} wants to run {method}";
+"qll_agent_request_raw_account" = "This changes your Telegram account, your profile or how you sign in. Allow it only if you asked for it.";
+"qll_agent_request_raw_money" = "This can spend Stars, TON or money from your account. Allow it only if you asked for it.";
+"qll_agent_request_raw_preview" = "The request:";
+"qll_agent_request_raw_later" = "Quill always asks before an agent changes your account or spends money. Allow covers this one request.";
 "qll_agent_confirm_sends" = "Confirm each send";
 "qll_agent_confirm_sends_hint" = "Ask here before an agent sends, edits or deletes anything.";
 "qll_agent_connected_one" = "{agent} connected";

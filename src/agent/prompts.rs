@@ -34,6 +34,23 @@ pub enum Ask {
         action: String,
         preview: String,
     },
+    /// One raw TDLib call on the deny list (`td_call`): it touches the
+    /// account or can spend money, so it runs only once the user allows it.
+    Raw {
+        method: String,
+        risk: Risk,
+        /// The request as the agent sent it, shortened.
+        preview: String,
+    },
+}
+
+/// Why a raw call needs the user.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Risk {
+    /// The account itself: sign-out, sessions, password, phone, profile.
+    Account,
+    /// It can spend Stars, TON or money.
+    Money,
 }
 
 #[derive(Debug, Clone)]
