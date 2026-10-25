@@ -53,11 +53,6 @@ pub(crate) fn parse_common_payload(
         "seconds" => Ok(EnvelopePayload::Common(CommonPayload::Seconds {
             seconds: value.get("seconds").and_then(Value::as_f64).unwrap_or(0.0),
         })),
-        // Slice msg-richtext-ai-tools: `fixedText` (schema:157) — the
-        // `fixTextWithAi` answer.
-        "fixedText" => Ok(EnvelopePayload::Common(CommonPayload::FixedText {
-            text: parse_formatted_text(value.get("text")),
-        })),
         // Slice msg-richtext-ai-tools: bare `formattedText` (schema:3046)
         // — the `composeTextWithAi` answer.
         "formattedText" => {

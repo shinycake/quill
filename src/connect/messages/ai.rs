@@ -33,7 +33,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// methods. The schema forbids `fixTextWithAi` in secret chats; the
     /// other four get the same refusal — sending draft text to a
     /// server-side AI model would break secret-chat privacy.
-    fn ai_compose_guard(&self, chat_id: ChatId) -> Result<(), ConnectSendError> {
+    pub(super) fn ai_compose_guard(&self, chat_id: ChatId) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }

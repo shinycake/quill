@@ -8,11 +8,11 @@ use crate::state::{ComposerLinkPreview, InstantViewPage, RequestPurpose, Session
 use crate::state::{GroupsPurpose, MessagesPurpose, StickersPurpose, ThreadsPurpose};
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
-    AuthorizationState, EnvelopePayload, MessageContent, RichMessageContent, UsernameCheckResult,
+    AiComposePayload, BotsPayload, CallsPayload, ChatsPayload, CommonPayload, GroupsPayload,
+    MediaPayload, MessagesPayload, SearchPayload, SettingsPayload, StickersPayload, UsersPayload,
 };
 use crate::telegram::envelope::{
-    BotsPayload, CallsPayload, ChatsPayload, CommonPayload, GroupsPayload, MediaPayload,
-    MessagesPayload, SearchPayload, SettingsPayload, StickersPayload, UsersPayload,
+    AuthorizationState, EnvelopePayload, MessageContent, RichMessageContent, UsernameCheckResult,
 };
 use crate::telegram::requests::{
     close_request, get_authorization_state, load_archive_chats, load_chats, log_out,
@@ -217,7 +217,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         // variants); the UI drains `Session::ai_composer_text` into the
         // composer draft.
         let ai_text_answer: Option<(ChatId, String)> = match &owned.envelope.payload {
-            EnvelopePayload::Common(CommonPayload::FixedText { text, .. })
+            EnvelopePayload::Messages(MessagesPayload::AiCompose(
+                AiComposePayload::FixedText { text, .. },
+            ))
             | EnvelopePayload::Common(CommonPayload::FormattedText { text, .. }) => owned
                 .envelope
                 .extra

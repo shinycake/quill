@@ -961,11 +961,13 @@ pub fn reaction_type_custom_emoji(custom_emoji_id: i64) -> Value {
 }
 
 mod add_message_reaction;
+mod ai_compose;
 mod link_at;
 mod plain;
 mod quote;
 #[allow(unused_imports)]
 pub use add_message_reaction::*;
+pub use ai_compose::*;
 #[allow(unused_imports)]
 pub use link_at::*;
 pub use quote::input_text_quote_json;

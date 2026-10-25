@@ -23,6 +23,7 @@ use crate::telegram::requests::{
 use crate::voice::VoiceDraft;
 
 mod ai;
+mod ai_compose;
 mod deferred_caption;
 mod delete_forward;
 mod edit;

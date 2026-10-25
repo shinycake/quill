@@ -177,10 +177,15 @@ pub struct LimitLine {
 impl PremiumInfo {
     /// The free and Premium value TDLib reported for `kind`.
     pub fn limit_pair(&self, kind: PremiumLimitKind) -> Option<LimitPair> {
-        let name = kind.td_limit_type()?;
+        self.limit_pair_for_type(kind.td_limit_type()?)
+    }
+
+    /// The free and Premium value TDLib reported for the
+    /// `premiumLimitType*` constructor `type_name`.
+    pub fn limit_pair_for_type(&self, type_name: &str) -> Option<LimitPair> {
         self.limits
             .iter()
-            .find(|row| row.type_name == name)
+            .find(|row| row.type_name == type_name)
             .map(|row| LimitPair {
                 default_value: row.default_value,
                 premium_value: row.premium_value,
