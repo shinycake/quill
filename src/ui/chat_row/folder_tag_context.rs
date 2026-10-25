@@ -146,6 +146,14 @@ impl QuillApp {
                 .then(|| self.session().and_then(|s| s.chat_story_ring(chat.id.0)))
                 .flatten();
                 let muted_fg = cx.theme().muted_foreground;
+                let video = self.chat_row_userpic(
+                    chat.id,
+                    &chat.kind,
+                    selected,
+                    saved,
+                    CHAT_ROW_AVATAR,
+                    cx,
+                );
                 // Swipe action for this row (none while selecting).
                 let swipe_label = if selecting {
                     quill::chat_swipe::SwipeLabel::Disabled
@@ -204,6 +212,7 @@ impl QuillApp {
                     },
                     forum,
                     story_ring,
+                    video,
                     self.session().and_then(|s| {
                         let promotion = quill::promotion::top_promotion(s, chat)?;
                         Some(s.chat_list.psa_labels.row(promotion))

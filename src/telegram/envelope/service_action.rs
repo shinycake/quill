@@ -549,8 +549,8 @@ impl ServiceAction {
                 photo: chat_photo(value, files),
                 photo_id: value.get("photo").map_or(0, |photo| i(photo, "id")),
                 animation: value.get("photo").and_then(parse_chat_photo_animation).map(
-                    |(animation, file)| {
-                        files.push(file);
+                    |(animation, clips)| {
+                        files.extend(clips);
                         animation
                     },
                 ),

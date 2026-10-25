@@ -43,6 +43,9 @@ pub struct UsersState {
     /// Phase 6: cached `getUserFullInfo` bios, keyed by user id. Presence
     /// records "fetched" so the driver never refetches.
     pub user_full_infos: HashMap<i64, UserFullInfoData>,
+    /// `(user id, photo id)` whose full info was asked for to learn the
+    /// clips of a video userpic (`Session::take_userpic_full_info_ask`).
+    pub userpic_full_info_asked: std::collections::HashSet<(i64, i64)>,
     /// A5: latest `checkChatUsername` verdict for the edit-profile
     /// dialog: (checked username text, result). Written by the driver
     /// before `apply` takes the pending request; the dialog only shows it
@@ -151,6 +154,7 @@ impl UsersState {
             replies_block: None,
             replies_bot_chat_id: None,
             user_full_infos: HashMap::new(),
+            userpic_full_info_asked: Default::default(),
             username_check: None,
             username_check_pending: None,
             bio_length_max: 70,

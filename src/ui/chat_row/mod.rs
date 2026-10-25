@@ -5,6 +5,7 @@ use super::app::ChatListFilter;
 use super::app::{PaneMode, QuillApp};
 use super::message_text::kit_avatar_element;
 use super::pressable::PressableDiv;
+use super::userpic_videos::UserpicFrame;
 use super::*;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::badge::Badge;
@@ -369,6 +370,7 @@ pub(super) fn session_chat_row(
     // Active stories: the ring around the avatar (unread: accent gradient,
     // read: grey).
     story_ring: Option<StoryRing>,
+    video: Option<UserpicFrame>,
     // A promoted chat's badge ("Proxy sponsor", "PSA") in place of the date,
     // and the announcement text in place of the preview.
     promotion: Option<quill::promotion::RowBadge>,
@@ -607,7 +609,11 @@ pub(super) fn session_chat_row(
                                 if saved {
                                     saved_messages_avatar(size)
                                 } else {
-                                    chat_avatar(&title, photo_path, size).into_any_element()
+                                    UserpicFrame::over(
+                                        video.as_ref(),
+                                        chat_avatar(&title, photo_path, size).into_any_element(),
+                                        size,
+                                    )
                                 }
                             },
                             ring,
@@ -615,7 +621,11 @@ pub(super) fn session_chat_row(
                             muted_fg,
                         ),
                         None if saved => saved_messages_avatar(CHAT_ROW_AVATAR),
-                        None => chat_avatar(&title, photo_path, CHAT_ROW_AVATAR).into_any_element(),
+                        None => UserpicFrame::over(
+                            video.as_ref(),
+                            chat_avatar(&title, photo_path, CHAT_ROW_AVATAR).into_any_element(),
+                            CHAT_ROW_AVATAR,
+                        ),
                     },
                     quill::peer_badge::shows_call_badge(chat.video_chat.as_ref()),
                     cx,
@@ -958,7 +968,7 @@ pub(super) fn with_presence_dot_scaled(
 
 /// Chat-row avatar edge (px). Row heights in `chatlist_style` leave room
 /// for it plus vertical padding.
-const CHAT_ROW_AVATAR: f32 = 46.;
+pub(super) const CHAT_ROW_AVATAR: f32 = 46.;
 
 mod folder_tag_context;
 pub(in crate::ui) use folder_tag_context::FolderTagContext;
