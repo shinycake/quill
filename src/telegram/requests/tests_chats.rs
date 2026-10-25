@@ -323,10 +323,10 @@ fn folder_request_shapes_match_1_8_67() {
     // `reorderChatFolders chat_folder_ids:vector<int32>
     // main_chat_list_position:int32 = Ok` (line 13373).
     let v: serde_json::Value =
-        serde_json::from_str(&reorder_chat_folders(RequestId(33), &[2, 1])).unwrap();
+        serde_json::from_str(&reorder_chat_folders(RequestId(33), &[2, 1], 2)).unwrap();
     assert_eq!(v["@type"], "reorderChatFolders");
     assert_eq!(v["chat_folder_ids"], json!([2, 1]));
-    assert_eq!(v["main_chat_list_position"], 0);
+    assert_eq!(v["main_chat_list_position"], 2);
     // `toggleChatFolderTags are_tags_enabled:Bool = Ok` (line 13376).
     let v: serde_json::Value =
         serde_json::from_str(&toggle_chat_folder_tags(RequestId(34), true)).unwrap();

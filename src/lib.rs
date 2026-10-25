@@ -80,6 +80,7 @@ pub mod file_prefs;
 pub mod folder_archive;
 pub mod folder_icons;
 pub mod folder_limits;
+pub mod folder_order;
 pub mod folder_picker;
 pub mod folders;
 pub mod font_choice;

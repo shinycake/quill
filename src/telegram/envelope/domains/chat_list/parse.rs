@@ -49,9 +49,15 @@ pub(crate) fn parse_chat_list_payload(
                 .get("are_tags_enabled")
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
+            let main_chat_list_position = value
+                .get("main_chat_list_position")
+                .and_then(Value::as_u64)
+                .and_then(|position| usize::try_from(position).ok())
+                .unwrap_or(0);
             Ok(EnvelopePayload::ChatList(
                 ChatListPayload::UpdateChatFolders {
                     folders,
+                    main_chat_list_position,
                     are_tags_enabled,
                 },
             ))

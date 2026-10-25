@@ -7,6 +7,10 @@ pub struct ChatListState {
     /// Phase 7.1: folder list from `updateChatFolders` (schema 1.8.67 line
     /// 10606). Empty until TDLib pushes the update (after authorization).
     pub chat_folders: Vec<ChatFolderInfo>,
+    /// `main_chat_list_position` from `updateChatFolders`
+    /// (`schema/td_api.tl:11425`): where "All chats" sits among the folder
+    /// tabs. Non-zero only with Premium; moved by `reorderChatFolders`.
+    pub main_list_position: usize,
     /// Parity slice: `are_tags_enabled` from `updateChatFolders` (schema
     /// 1.8.67 line 10606). When true, chat rows render folder-name tag
     /// chips; toggled via `toggleChatFolderTags` (`:13376`).
@@ -113,9 +117,32 @@ pub struct ChatListState {
 }
 
 impl ChatListState {
+    /// The folder tab order: the folders with "All chats" at its position.
+    pub fn folder_order(&self) -> crate::folder_order::FolderOrder {
+        crate::folder_order::FolderOrder {
+            folder_ids: self.chat_folders.iter().map(|f| f.id).collect(),
+            main_position: self.main_list_position,
+        }
+    }
+
+    /// Puts the folders and "All chats" in `order` (an optimistic reorder;
+    /// folders it does not name keep their place after the named ones).
+    pub fn apply_folder_order(&mut self, order: &crate::folder_order::FolderOrder) {
+        let index: HashMap<i32, usize> = order
+            .folder_ids
+            .iter()
+            .enumerate()
+            .map(|(i, id)| (*id, i))
+            .collect();
+        self.chat_folders
+            .sort_by_key(|f| index.get(&f.id).copied().unwrap_or(usize::MAX));
+        self.main_list_position = order.main_position;
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             chat_folders: Vec::new(),
+            main_list_position: 0,
             are_folder_tags_enabled: false,
             folder_specs: HashMap::new(),
             chat_lists_for_add: HashMap::new(),

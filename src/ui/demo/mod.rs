@@ -18,7 +18,7 @@ use quill::telegram::envelope::{
     ParsedSession, ParsedWebsite, StickerFormat, StickerItem, StorageFileTypeStats, StorageStats,
     toggle_chosen_emoji_reaction,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
