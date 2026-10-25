@@ -227,7 +227,9 @@ grants, pacing and confirmations.
 
 The user turns it on separately: "Let agents drive Quill's window" in
 Settings > Advanced > Agent access (off by default). `quill_status` shows
-`ui_driver.available`.
+`ui_driver {available, active, paused, stopped}`: `active` while you are
+driving, `paused` while the user has taken control, `stopped` after the
+user pressed Stop.
 
 | Tool | Use it to |
 | --- | --- |
@@ -292,8 +294,20 @@ Rules, all enforced by Quill:
 - The window acts for real: opening or scrolling a chat marks it read,
   typing in the message box saves a draft and shows the other side that
   you are typing. Every command is in the user's activity log.
-- While the user is using the window the driver pauses and the tools say
-  so. Wait and retry, or use the chat tools.
+- While you drive, Quill shows it: a glow around the window, a ghost
+  cursor where you are about to click or type, and a pill at the top
+  saying you are driving, with Stop. Each click glides the ghost there
+  first, so a pointer step takes about a quarter of a second longer.
+- The user takes control by pressing Esc, clicking, scrolling, typing or
+  moving the mouse in the window. The driver is then paused: every UI
+  tool answers "The user took control of Quill..." until the user picks
+  "Let it continue". Wait, call `quill_status`, and drive again when
+  `ui_driver.paused` is false. Do not retry in a loop; the chat tools
+  still work meanwhile.
+- Stop in the pill refuses the command running and every one waiting,
+  and the UI tools stay refused for the rest of your session
+  (`ui_driver.stopped` is true). Tell the user; do not drive again. Agent
+  access itself stays on, so the chat tools still work.
 
 What it cannot reach: native menus (the macOS menu bar), file and folder
 pickers, the input method editor, and system dialogs. Quill's window must

@@ -653,7 +653,8 @@ dx?, dy?}`, `hover_element {target}`, `open_menu {target}`
 while the element stays on screen. Input tools answer with the focused
 node, the nodes that appeared, `refusals` and, for a routed send, `sent`.
 `press_keys` presses chords and never types characters.
-`quill_status` reports `ui_driver {available, active, paused}`.
+`quill_status` reports `ui_driver {available, active, paused, stopped}`
+(`stopped` came with step 2's Stop).
 
 ### Cross-platform
 
@@ -687,9 +688,8 @@ notes, the chord policy and the step split.
 
 ### Gaps left for step 2 and later
 
-- Pause on real input and the connected strip saying "driving":
-  `bridge::note_real_input` and `set_paused` exist; nothing sets the pause
-  yet.
+- Pause on real input: done in step 2 (below). The connected strip still
+  says "connected", not "driving"; the takeover pill says it instead.
 - Message rows join the tree only when a screen reader focuses them, so
   history content is read through the chat tools, not the window.
 - `focus` is reported only when the focused element itself has a role; the
@@ -699,3 +699,194 @@ notes, the chord policy and the step split.
   menu that animates in over several frames may need a `read_ui_tree`.
 - A system screen reader and the driver do not share the window; a user
   who runs both gets the driver refused until the reader disconnects.
+
+## Phase 5 step 2: takeover state
+
+While an agent drives the window, Quill shows it: a glow along the window
+edge in the accent colour, a ghost cursor where the agent is about to
+click or type, and a pill at the top centre with Stop. Esc, or the user's
+own mouse or keyboard, pauses the agent and hands the window back.
+
+### One record
+
+`quill::agent::ui_driver::takeover` holds the facts (the session: agent,
+start, last command, end, last aimed action; the pause and its reason;
+Stop; when the user last let it continue; the last real pointer position)
+and derives the phase from them on every read, with the current clock and
+whether an agent is connected and allowed:
+
+- `Idle`: no session, or the last one has faded out.
+- `Driving`: from the first UI command, for as long as commands keep
+  coming (each one extends a 4 s hold) and the agent stays connected with
+  access and the driving switch on.
+- `Paused`: Esc or real input while driving. It lasts as long as the
+  agent stays connected; the hold does not run out while paused.
+- `FadingOut`: the hold ran out, the agent disconnected, the switch went
+  off, or the user pressed Stop. 600 ms, starting from however far the
+  240 ms fade-in had got.
+
+The window keeps no copy. The bridge's pause flag from step 1 became
+`takeover::pause`/`let_continue`, and `policy::switch_refusal` ends with
+`takeover::refusal()`, so the MCP tools, the per-step checks and the
+overlay read the same record. Nothing in it is persisted; a restart
+starts idle.
+
+### Pause and hand back
+
+The window's capture-phase input probe (`presence::input_probe`) passes
+every real event to `takeover::note_real_input`; injected input is marked
+by `guard::injecting` and never counts. While driving:
+
+- a press, a scroll or a key pauses at once;
+- Esc pauses through a keystroke interceptor registered before the app's
+  others and is consumed, so it does not also close the open chat or a
+  dialog (once paused or idle, Esc does its normal job again);
+- a pointer move pauses only when the window is active, the pointer moved
+  at least 4 px, and 1.5 s have passed since "Let it continue". Crossing
+  the window on the way to another app, trackpad jitter and the hand
+  leaving the button it just clicked do not pause;
+- pointer input on the pill answers the pill. The pill records its painted
+  bounds each frame, and presses, moves and scrolls inside them never
+  pause, so pressing Stop refuses queued commands with the Stop message
+  rather than the pause one.
+
+While paused every UI tool answers "The user took control of Quill, so the
+UI driver is paused. Wait, then call quill_status to see when you can
+drive again (ui_driver.paused turns false)." "Let it continue" unpauses.
+Both pill buttons refuse injected clicks (`guard::refuse_if_injecting`),
+so an agent cannot continue or stop itself through the window.
+
+### Stop
+
+Stop refuses the running command and every queued one
+(`bridge::refuse_all`), ends the session with the fade, and keeps the UI
+tools refused ("The user pressed Stop in Quill: don't drive its window
+again in this session...") until every agent has disconnected or the
+driving switch has gone off. Agent access stays on and the chat tools keep
+working. There is no "allow again" in the pill on purpose: after a Stop
+the user brings driving back by reconnecting the agent or with the switch,
+not with a button an agent could ask them to press.
+
+### The overlay
+
+`src/ui/agent_takeover.rs` draws one deferred layer at priority 300, above
+popups (100) and tooltips (200), built in `QuillApp`'s root render. It has
+no hitbox except the pill's (`occlude`), so a click anywhere else lands on
+what is underneath; a test clicks a chat row under the glow and the ghost,
+and the row opens.
+
+- Glow: an inset shadow along the window edge plus a 2 px border in
+  `theme.primary`, rounded like the window (16 px on macOS, 8 px
+  elsewhere). Theme tokens only, so it is the accent in light and dark.
+- Ghost cursor: a ring with Lucide's `mouse-pointer-2`, its tip on the
+  target. Before each pointer step the driver aims (`input::aim_step`) and
+  waits 220 ms while the ghost glides there from its last spot on an
+  ease-out curve; the click sends a ring outwards for 380 ms. For typing
+  it shows a keyboard badge at the focused input's caret, read through a
+  small GPUI patch (`Window::focused_text_caret`, in `QUILL-CHANGES.md`).
+  The glide adds about a quarter of a second to each pointer step; typing
+  and keys add nothing.
+- Pill: `popover` background, border and shadow. Driving: a live dot,
+  "{agent} is driving" and a ghost `Button` "Stop" whose tooltip says
+  access stays on. Paused: a hand icon, "Paused", "{agent} will wait until
+  you let it continue", a primary "Let it continue" and "Stop". Fading
+  out: the label only. Strings are in `lang/en/agent_access.strings`.
+
+### Glow looks and the default
+
+`QUILL_AGENT_GLOW=edge|breathe|sweep` picks one of three looks. Each was
+recorded for the owner as a clip of the same scripted session: fade in,
+click a row, glide to the message box, click, hold, Stop, fade out.
+
+- `edge`: still. A soft inset bloom and a thin accent border; only the
+  fades move.
+- `breathe`: a wider inset glow whose strength eases between 55% and 100%
+  every 2.8 s.
+- `sweep`: a dim border with a 260 px band of light that runs round the
+  edge every 3.2 s.
+
+The default is `edge`. The design guide's Motion section says motion
+explains change and is not ambient decoration, that reduced motion is
+honoured, and that state never depends on animation. With `edge` only
+changes move (the glow arriving and leaving, the ghost going where the
+agent acts, the click) and the steady state is still, so the eye goes to
+the ghost rather than the frame. It also draws no frames while steady
+(numbers below). `breathe` and `sweep` loop for as long as the agent
+drives. With reduced motion Quill shows `edge` whatever the variable says.
+
+### Frame cost
+
+Animation runs on the existing frame clock only. The layer asks for frames
+at 30 fps only while `takeover::moving` says something moves (a fade, a
+glide, a press pulse) or the look loops. It uses the clock's background
+variant so the takeover keeps animating while Quill sits behind the
+terminal the agent runs in. Otherwise it sets one timer for the next phase
+change (the hold running out, the fade ending) and draws nothing in
+between. With no agent driving the layer is not built; the cost is one
+mutex read per render.
+
+Measured 2026-10-25 on an M1 Pro (macOS), release build, 1100x720
+window, the `ready-agent-steady` demo (driving, faded in, nothing in
+motion) against `ready-chats` with no agent. Each run waited 8 s, then
+sampled `ps` once a second for 20 s; CPU is a share of one core.
+
+| Window | CPU | RSS |
+| --- | --- | --- |
+| No agent (`ready-chats`) | 0.0% | 119.8 MB |
+| Driving, `edge` | 0.1% | 120.0 MB |
+| Driving, `breathe` | 13.0% | 120.5 MB |
+| Driving, `sweep` | 9.3% | 120.9 MB |
+| Paused (any look) | 0.0% | 119.7 MB |
+
+A steady `edge` takeover costs nothing measurable; the looping looks
+redraw the whole window 30 times a second for as long as the agent drives
+(`breathe` costs more than `sweep` because its wide blurred shadow changes
+every frame). Fades, glides and pulses cost the same 30 fps for their
+240 to 600 ms, in every look. Memory is the same within noise.
+Script: `ready-agent-steady` per `QUILL_AGENT_GLOW`, sampled with
+`ps -o %cpu= -o rss=`.
+
+### Tests
+
+- Core (`takeover_tests.rs`): driving lasts while commands come and fades
+  after the hold; real input pauses and "Let it continue" hands back;
+  pointer moves pause only when deliberate; Stop ends the session at once
+  and holds until the agents leave; a disconnect or the switch fades out;
+  an interrupted fade-in carries on from the value reached; the glide's
+  ease and the pulse; what moves and when the next change is due; the
+  global record's refusal texts.
+- Window (`agent_takeover_tests.rs`, `demo-capture`): a real click pauses,
+  "Let it continue" hands back, the hold and a disconnect fade the layer
+  out; Esc pauses and the open chat stays open; Stop refuses a queued
+  command and a later one with the Stop text while access stays on; a
+  click under the glow and the ghost reaches the chat row; the frame clock
+  runs while fading in and stops once steady and when idle.
+- Glow (`agent_takeover_glow.rs`): look parsing, reduced motion, the
+  breath's range, the sweep wrapping round the corners.
+
+Screenshot demos: `ready-agent-driving` (each look via
+`QUILL_AGENT_GLOW`), `ready-agent-steady`, `ready-agent-glide`,
+`ready-agent-typing` and `ready-agent-paused`. With
+`QUILL_DEMO_TAKEOVER_FRAMES=<dir>`, `ready-agent-driving` records the
+scripted session as one PNG per 33 ms of takeover time.
+
+### Cross-platform
+
+None of this is platform code: the deferred layer, shadows and gradients
+(Metal and wgpu), the input probe, keystroke interceptors and the input
+handler's selected bounds work the same on macOS, Linux and Windows. Only
+the corner radius differs, as a constant per OS rather than a value read
+from the window.
+
+### Gaps
+
+- Checked in screenshot demos and window tests only. No real agent has
+  driven it with a real mouse and keyboard yet, so the pointer-move rule
+  (4 px, active window, 1.5 s grace) needs a check on real hardware.
+- The corner radius is a per-OS guess; a Linux window with square or
+  client-drawn corners shows the border slightly inset at the corners.
+- On a dark theme the ghost has less contrast than on light. It reads,
+  but a halo in `background` may help.
+- The typing badge needs the focused input to report selected bounds; an
+  input that does not shows no badge (typing still works).
+- The connected strip still says "connected", not "driving".
