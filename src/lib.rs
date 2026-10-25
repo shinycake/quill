@@ -6,6 +6,7 @@ pub mod add_special;
 pub mod admin_extras;
 pub mod advanced;
 pub mod agent;
+pub mod ai_compose;
 pub mod album;
 pub mod animation;
 pub mod app_theme;

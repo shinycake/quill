@@ -2,9 +2,10 @@
 //! open chat's composer, its scheduled messages and its recent actions, and
 //! the one that brings back a closed chat window: "Just send", "Silent
 //! send", "Schedule", "Scheduled messages", "Toggle link preview", "Record
-//! round message", "Archive chat", "Group/Channel recent actions" and
-//! "Reopen closed window". Like tdesktop's, none has a default chord except
-//! the last one (Ctrl/Cmd+Shift+T); the others are set in Settings >
+//! round message", "Archive chat", "Group/Channel recent actions",
+//! "Apply AI style to text" (`ai_compose::apply_in_place`) and "Reopen
+//! closed window". Like tdesktop's, none has a default chord except the
+//! last one (Ctrl/Cmd+Shift+T); the others are set in Settings >
 //! Appearance > Keyboard shortcuts.
 //!
 //! Each handler returns `false` when its command does not apply (tdesktop's
@@ -13,8 +14,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::actions::{
-    ArchiveOpenChat, JustSend, RecordRoundMessage, ReopenClosedWindow, ScheduleSend, SendSilently,
-    ShowAdminLog, ShowScheduledMessages, ToggleLinkPreview,
+    AiComposeApply, ArchiveOpenChat, JustSend, RecordRoundMessage, ReopenClosedWindow,
+    ScheduleSend, SendSilently, ShowAdminLog, ShowScheduledMessages, ToggleLinkPreview,
 };
 use super::app::QuillApp;
 use gpui_kit::*;
@@ -36,7 +37,7 @@ impl QuillApp {
     }
 
     /// The open chat when the viewer may write there (`canWriteMessage()`).
-    fn writable_open_chat(&self) -> Option<quill::ids::ChatId> {
+    pub(super) fn writable_open_chat(&self) -> Option<quill::ids::ChatId> {
         let session = self.session()?;
         let chat = session.chats.get(&session.open_chat?.0)?;
         (chat.can_post() && !session.is_frozen()).then_some(chat.id)
@@ -260,6 +261,7 @@ pub(super) trait CommandActions: InteractiveElement + Sized {
         let el = command!(el, cx, RecordRoundMessage, record_round_by_key);
         let el = command!(el, cx, ArchiveOpenChat, archive_chat_by_key);
         let el = command!(el, cx, ShowAdminLog, admin_log_by_key);
+        let el = command!(el, cx, AiComposeApply, ai_compose_apply_by_key);
         command!(el, cx, ReopenClosedWindow, reopen_closed_window_by_key)
     }
 

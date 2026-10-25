@@ -320,6 +320,7 @@ impl QuillApp {
             location_ui: Default::default(),
             share: super::share_state::ShareUi::new(window, cx, forward_search_input),
             start_files: super::start_files_state::StartFilesUi::new(window, cx),
+            ai_compose: super::ai_compose_state::AiComposeUi::new(window, cx),
             agent_ui: super::agent_state::AgentUi::new(window, cx),
             focus_sidebar: cx.focus_handle(),
             connection: super::connection_state::ConnectionUi::new(connect_status, status_note),

@@ -118,6 +118,12 @@ pub enum InternalLink {
     Background {
         name: String,
     },
+    /// `internalLinkTypeTextCompositionStyle` (TDLib 1.8.69,
+    /// `schema/td_api.tl:10335`): `t.me/addstyle/<name>`,
+    /// `tg://addstyle?slug=<name>`.
+    TextCompositionStyle {
+        name: String,
+    },
     Theme,
     UserPhoneNumber {
         phone: String,
@@ -188,6 +194,11 @@ pub enum DeepLinkUi {
     },
     /// `bg`: the wallpaper preview for a background name (`searchBackground`).
     Background {
+        name: String,
+    },
+    /// `addstyle`: the AI compose style preview (`searchTextCompositionStyle`
+    /// first, tdesktop `ShowAiStyle`).
+    TextCompositionStyle {
         name: String,
     },
     /// `giftcode`: the box with the code's details and an Apply button.
@@ -401,6 +412,9 @@ pub fn parse_internal_link(value: &Value) -> Option<InternalLink> {
         },
         "Background" => InternalLink::Background {
             name: text(value, "background_name"),
+        },
+        "TextCompositionStyle" => InternalLink::TextCompositionStyle {
+            name: text(value, "style_name"),
         },
         "Theme" => InternalLink::Theme,
         "UserPhoneNumber" => InternalLink::UserPhoneNumber {
@@ -687,6 +701,13 @@ pub fn route(link: &InternalLink, original: &str) -> LinkRoute {
                 LinkRoute::Message("This wallpaper link is broken.".into())
             } else {
                 LinkRoute::Ui(DeepLinkUi::Background { name: name.clone() })
+            }
+        }
+        InternalLink::TextCompositionStyle { name } => {
+            if name.is_empty() {
+                LinkRoute::Message("This style was deleted or the link is invalid.".into())
+            } else {
+                LinkRoute::Ui(DeepLinkUi::TextCompositionStyle { name: name.clone() })
             }
         }
         // `addtheme` links install a desktop theme file (`.tdesktop-theme`),

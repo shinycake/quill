@@ -164,6 +164,7 @@ pub struct MessagesState {
     pub translate: TranslateState,
     /// Notification-tone limits (`notification_sound_*_max` options).
     pub tone_limits: crate::message_menu::ToneLimits,
+    pub ai_compose: AiComposeState,
 }
 
 impl MessagesState {
@@ -219,6 +220,7 @@ impl MessagesState {
             last_sponsored_report: None,
             translate: TranslateState::default(),
             tone_limits: crate::message_menu::ToneLimits::default(),
+            ai_compose: AiComposeState::default(),
         }
     }
 }

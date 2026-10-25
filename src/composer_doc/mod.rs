@@ -253,6 +253,42 @@ impl ComposerDoc {
         self.emoji = kept;
     }
 
+    /// The part of the document over the byte range `range` (tdesktop
+    /// `getTextWithTagsPart`): spans clipped to it, emoji inside it, all
+    /// moved to start at 0. An empty document when `range` is not on char
+    /// boundaries of the text.
+    pub fn slice(&self, range: Range<usize>) -> Self {
+        let Some(text) = self.text.get(range.clone()) else {
+            return Self::default();
+        };
+        let shift = |at: usize| at.clamp(range.start, range.end) - range.start;
+        let spans = self
+            .spans
+            .iter()
+            .map(|span| {
+                DocSpan::new(
+                    shift(span.range.start)..shift(span.range.end),
+                    span.tag.clone(),
+                )
+            })
+            .filter(|span| span.range.start < span.range.end)
+            .collect();
+        let emoji = self
+            .emoji
+            .iter()
+            .filter(|emoji| emoji.range.start >= range.start && emoji.range.end <= range.end)
+            .map(|emoji| DocEmoji {
+                range: shift(emoji.range.start)..shift(emoji.range.end),
+                custom_emoji_id: emoji.custom_emoji_id,
+            })
+            .collect();
+        Self {
+            text: text.to_string(),
+            spans,
+            emoji,
+        }
+    }
+
     /// The composer markup for this document; [`Self::from_markup`] of it
     /// gives the document back (spans the markup cannot express are
     /// reshaped: a quote that starts mid-line is dropped, formatting inside

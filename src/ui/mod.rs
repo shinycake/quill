@@ -20,6 +20,7 @@ mod agent_labels;
 mod agent_presence;
 mod agent_presence_demo;
 mod agent_state;
+mod ai_compose_state;
 mod anim_layer;
 mod app_slice;
 mod app_theme;
@@ -167,6 +168,7 @@ pub(crate) use story_page::StoryPage;
 
 mod actions;
 mod activity_indicator;
+mod ai_compose;
 mod app;
 mod app_demo;
 mod app_render;

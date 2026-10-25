@@ -390,6 +390,18 @@ fn typed_links_route_through_get_internal_link_type() {
             &mut driver,
             &seq,
             &sink,
+            "https://t.me/addstyle/pirate",
+            json!({"@type":"internalLinkTypeTextCompositionStyle","style_name":"pirate"}),
+        ),
+        Some(DeepLinkState::Ui(DeepLinkUi::TextCompositionStyle {
+            name: "pirate".into()
+        }))
+    );
+    assert_eq!(
+        open_with(
+            &mut driver,
+            &seq,
+            &sink,
             "tg://addlist?slug=x",
             json!({"@type":"internalLinkTypeChatFolderInvite","invite_link":"https://t.me/addlist/x"}),
         ),
