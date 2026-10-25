@@ -106,9 +106,9 @@ impl StyleList {
 
     fn reapply_recent(&mut self) {
         let styles = std::mem::take(&mut self.styles);
-        let (mut front, rest): (Vec<_>, Vec<_>) = styles.into_iter().partition(|style| {
-            style.is_custom && self.recent.iter().any(|name| *name == style.name)
-        });
+        let (mut front, rest): (Vec<_>, Vec<_>) = styles
+            .into_iter()
+            .partition(|style| style.is_custom && self.recent.contains(&style.name));
         front.sort_by_key(|style| self.recent.iter().position(|name| *name == style.name));
         self.recent = front.iter().map(|style| style.name.clone()).collect();
         front.extend(rest);
