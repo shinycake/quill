@@ -7,7 +7,7 @@ use crate::ui::status_note::StatusNote;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::premium_hub::promo::PromoPage;
-use quill::premium_hub::purchase::{PremiumPurchaseRoute, feature_ref, purchase_route};
+use quill::premium_hub::purchase::{PremiumPurchaseRoute, purchase_route};
 use quill::state::DeepLinkAction;
 use quill::telegram::envelope::ChatKind;
 
@@ -16,18 +16,13 @@ impl QuillApp {
     /// feature being previewed, the limits page, or the ref the dialog was
     /// opened with.
     pub(super) fn premium_start_ref(&self) -> String {
-        let opened_with = self
-            .session()
-            .map(|s| s.payments.hub.premium_ref.clone())
-            .unwrap_or_default();
         match self.promo_page() {
-            PromoPage::Overview => opened_with,
+            PromoPage::Overview => self
+                .session()
+                .map(|s| s.payments.hub.premium_ref.clone())
+                .unwrap_or_default(),
             PromoPage::Limits => "double_limits".into(),
-            PromoPage::Preview(index) => self
-                .preview_feature_title(index)
-                .and_then(feature_ref)
-                .map(str::to_string)
-                .unwrap_or(opened_with),
+            PromoPage::Preview { feature, .. } => feature.start_ref().unwrap_or_default().into(),
         }
     }
 

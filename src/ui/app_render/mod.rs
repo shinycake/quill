@@ -59,7 +59,7 @@ impl Render for QuillApp {
         self.sync_capture_block(window);
         self.sync_poll_dialog_height(window);
         self.sync_viewer_hdr(window);
-        self.sync_speech_trial_hint(cx);
+        self.sync_speech_trial_hint(window, cx);
         self.sync_window_title(window);
         super::window_frame::sync(window, self.appearance.native_window_frame);
         // Rows the history list painted last frame are what the user saw.
@@ -294,6 +294,8 @@ impl Render for QuillApp {
             .capture_action(cx.listener(|this, _: &PasteAction, window, cx| {
                 if this.paste_image_from_clipboard(window, cx) {
                     cx.stop_propagation();
+                } else {
+                    this.offer_rich_paste(window, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &FocusSidebar, window, cx| {

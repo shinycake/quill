@@ -282,14 +282,24 @@ impl QuillApp {
         chat_id: ChatId,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        self.profile_chat_list_section(
+        let list = self.profile_chat_list_section(
             ProfileChatsKind::SimilarChats,
             chat_id.0,
             tr(keys::Q_PEOPLE_SIMILAR_CHANNELS).into(),
             "info-similar-channel",
             "info-similar-channels-retry",
             cx,
-        )
+        )?;
+        Some(match self.similar_unlock(chat_id, cx) {
+            Some(unlock) => div()
+                .flex()
+                .flex_col()
+                .w_full()
+                .child(list)
+                .child(unlock)
+                .into_any_element(),
+            None => list,
+        })
     }
 
     /// Forget a failed list and ask again.

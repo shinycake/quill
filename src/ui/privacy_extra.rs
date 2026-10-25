@@ -1058,21 +1058,21 @@ mod dispatch_tests {
         let vcx = &mut vcx;
         let key = PrivacySettingKey::AllowVoiceMessages;
         let target = PrivacyEditorTarget::Rule(key);
-        app.update_in(vcx, |app, _, cx| {
+        app.update_in(vcx, |app, window, cx| {
             if let Some(session) = app.demo_session.as_mut() {
                 session.payments.premium_option = Some(false);
             }
-            app.set_privacy_target_who(target, PrivacyWho::Nobody, cx);
+            app.set_privacy_target_who(target, PrivacyWho::Nobody, window, cx);
         });
         assert_eq!(
             app.read_with(vcx, |app, _| rule_who(app, key)),
             Some(PrivacyWho::Everybody)
         );
-        app.update_in(vcx, |app, _, cx| {
+        app.update_in(vcx, |app, window, cx| {
             if let Some(session) = app.demo_session.as_mut() {
                 session.payments.premium_option = Some(true);
             }
-            app.set_privacy_target_who(target, PrivacyWho::Nobody, cx);
+            app.set_privacy_target_who(target, PrivacyWho::Nobody, window, cx);
         });
         assert_eq!(
             app.read_with(vcx, |app, _| rule_who(app, key)),

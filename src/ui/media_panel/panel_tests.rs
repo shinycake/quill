@@ -13,7 +13,8 @@ use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, ImageSource, TestAppContext, VisualTestContext, px, size};
 use quill::ids::{ChatId, FileId};
-use quill::premium_hub::promo::PromoPage;
+use quill::premium_hub::PremiumFeature;
+use quill::premium_hub::promo::{PreviewOpen, PromoPage};
 use quill::telegram::envelope::{MessageContent, StickerContent, StickerFormat, StickerItem};
 use quill::telegram::{EmojiCategory, EmojiCategorySource};
 use std::sync::Arc;
@@ -223,7 +224,13 @@ fn a_locked_sticker_opens_the_premium_preview_instead_of_sending(cx: &mut TestAp
     app.read_with(vcx, |app, _| {
         let hub = &app.session().unwrap().payments.hub;
         // The locked sticker leads the stickers feature's preview.
-        assert_eq!(hub.promo_page, PromoPage::Preview(1));
+        assert_eq!(
+            hub.promo_page,
+            PromoPage::Preview {
+                feature: PremiumFeature::UniqueStickers.into(),
+                opened: PreviewOpen::Box,
+            }
+        );
         assert_eq!(
             hub.premium_requested.as_ref().map(|s| s.file_id),
             Some(FileId(1))

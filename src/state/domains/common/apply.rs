@@ -42,6 +42,7 @@ impl Session {
             CommonPayload::UpdateOption { name, value } => {
                 self.settings.storage_limits.apply_option(&name, &value);
                 self.chat_list.folder_limits.apply_option(&name, &value);
+                self.chat_list.archive_mute.apply_option(&name, &value);
                 self.apply_privacy_option(&name, &value);
                 self.users_state.apply_option(&name, &value);
                 self.apply_quick_replies_option(&name, &value);
@@ -49,6 +50,9 @@ impl Session {
                 self.apply_earn_option(&name, &value);
                 self.apply_ai_compose_option(&name, &value);
                 self.stories.stealth_periods.apply_option(&name, &value);
+                if let OptionValue::Integer(number) = &value {
+                    self.payments.hub.limits.apply_option(&name, *number);
+                }
                 if name == "disable_contact_registered_notifications"
                     && let OptionValue::Boolean(off) = &value
                 {

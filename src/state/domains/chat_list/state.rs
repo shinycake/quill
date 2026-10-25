@@ -100,6 +100,8 @@ pub struct ChatListState {
     pub archive_settings_loading: bool,
     /// Slice CL2: the archive-settings panel is open.
     pub archive_settings_open: bool,
+    /// Whether "Archive and mute" is offered (server option, seen on).
+    pub archive_mute: crate::archive_mute::ArchiveMute,
     /// Slice CL: chat-list peek preview — the latest `getChatHistory`
     /// result for one unopened chat (`parity:chatlist-chat-preview`).
     pub chat_preview_fetch: Option<PreviewHistoryFetch>,
@@ -175,6 +177,7 @@ impl ChatListState {
             archive_chat_list_settings: None,
             archive_settings_loading: false,
             archive_settings_open: false,
+            archive_mute: Default::default(),
             chat_preview_fetch: None,
             promoted_chats: HashMap::new(),
             psa_labels: crate::promotion::PsaLabels::default(),

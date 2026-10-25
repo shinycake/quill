@@ -294,6 +294,60 @@ fn nothing_to_send_means_no_effects(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn a_chat_in_its_own_window_plays_its_effects_there(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.open_chat_in_new_window(quill::ids::ChatId(CHAT), window, cx)
+    });
+    vcx.run_until_parked();
+    let main = vcx.update(|window, _| window.window_handle().window_id());
+    let chat_window = vcx
+        .windows()
+        .into_iter()
+        .find(|handle| handle.window_id() != main)
+        .expect("the chat window opened");
+    let draw = |vcx: &mut VisualTestContext| {
+        vcx.run_until_parked();
+        for _ in 0..3 {
+            vcx.update_window(chat_window, |_, window, cx| {
+                window.activate_window();
+                window.render_frame(cx);
+            })
+            .unwrap();
+        }
+        vcx.run_until_parked();
+    };
+    draw(vcx);
+    let key = (CHAT, ARRIVING);
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_deref_mut() {
+            crate::ui::send_effects::demo::arrive(session);
+        }
+        cx.notify();
+    });
+    draw(vcx);
+    let badge = ("message-effect", ARRIVING as u64);
+    let in_window = |vcx: &mut VisualTestContext| {
+        vcx.update_window(chat_window, |_, window, _| window.try_find(badge).is_some())
+            .unwrap()
+    };
+    assert!(in_window(vcx), "the badge shows in the chat window");
+    assert!(crate::ui::emoji_effect::message_effect_playing(key));
+    assert!(!unwatched(&app, vcx, key));
+    frames(vcx);
+    assert!(crate::ui::emoji_effect::message_effect_playing(key));
+
+    vcx.executor().advance_clock(Duration::from_secs(61));
+    draw(vcx);
+    assert!(!crate::ui::emoji_effect::message_effect_playing(key));
+    vcx.update_window(chat_window, |_, window, cx| window.click(badge, cx))
+        .unwrap();
+    draw(vcx);
+    assert!(crate::ui::emoji_effect::message_effect_playing(key));
+}
+
+#[gpui_kit::test]
 fn the_cards_schedule_sends_with_the_effect_after_the_time_is_picked(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_demo(cx);
     let vcx = &mut vcx;

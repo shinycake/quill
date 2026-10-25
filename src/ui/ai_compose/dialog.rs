@@ -176,7 +176,10 @@ impl QuillApp {
                     )
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.close_ai_compose(cx);
-                        this.show_premium_ai_compose_preview(cx);
+                        this.open_premium_at(
+                            quill::premium_hub::PremiumFeature::TextComposition,
+                            cx,
+                        );
                         this.close_kit_dialog_if_done(DialogKind::AiCompose, window, cx);
                     }))
             }

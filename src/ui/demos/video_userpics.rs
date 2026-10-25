@@ -3,7 +3,8 @@
 //! their messages plays its clip, and so does the chat-list row of a
 //! private chat with one of them. `QUILL_DEMO_USERPICS=still` gives the
 //! same chat with still photos only (the baseline for measuring the
-//! clips' cost).
+//! clips' cost); `window` opens the group in a window of its own (capture
+//! it with `QUILL_DEMO_CAPTURE_WINDOWS=1`).
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
@@ -139,11 +140,14 @@ fn apply_group(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
 }
 
 impl QuillApp {
-    fn demo_group_video_userpics(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn demo_group_video_userpics(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_group(session, &self.demo_ui.sink, &self.demo_ui.seq);
             session.open_chat(ChatId(USERPIC_GROUP));
+        }
+        if std::env::var("QUILL_DEMO_USERPICS").is_ok_and(|mode| mode == "window") {
+            self.open_chat_in_new_window(ChatId(USERPIC_GROUP), window, cx);
         }
         self.connection.set_note(StatusNote::silent(
             "screenshot demo — group of Premium members with video userpics",

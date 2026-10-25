@@ -33,6 +33,22 @@ impl CanPostStoryResult {
         matches!(self, CanPostStoryResult::Ok { .. })
     }
 
+    /// The Premium limit this answer ran into, if any.
+    pub fn premium_limit(&self) -> Option<crate::premium_limits::PremiumLimitKind> {
+        use crate::premium_limits::PremiumLimitKind;
+        match self {
+            CanPostStoryResult::ActiveStoryLimitExceeded => Some(PremiumLimitKind::ActiveStories),
+            CanPostStoryResult::WeeklyLimitExceeded { .. } => Some(PremiumLimitKind::WeeklyStories),
+            CanPostStoryResult::MonthlyLimitExceeded { .. } => {
+                Some(PremiumLimitKind::MonthlyStories)
+            }
+            CanPostStoryResult::Ok { .. }
+            | CanPostStoryResult::PremiumNeeded
+            | CanPostStoryResult::BoostNeeded
+            | CanPostStoryResult::LiveStoryIsActive { .. } => None,
+        }
+    }
+
     /// Honest one-line reason shown in the composer.
     pub fn user_message(&self) -> String {
         match self {

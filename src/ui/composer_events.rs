@@ -88,6 +88,7 @@ impl QuillApp {
                 self.queue_system_text_replace(&prev, &text, window, cx);
             }
             self.sync_composer_typing(&text);
+            self.close_stale_rich_paste_notice(&text, window, cx);
             self.note_open_draft(true, cx);
         }
         // Phase 3.3: the `/` menu tracks the composer text (Blur

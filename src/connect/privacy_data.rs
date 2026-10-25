@@ -241,21 +241,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         match crate::chatlist_suggestions::dismiss_action(suggestion) {
-            Some(action) => {
-                let extra = self.session.request(
-                    RequestPurpose::Settings(SettingsPurpose::HideSuggestedAction { action }),
-                    None,
-                );
-                if let Err(err) = self.sender.send_json(&hide_suggested_action(extra, action)) {
-                    self.session.requests.take(extra);
-                    return Err(err);
-                }
-                self.session.chat_list.suggestions.actions.remove(action);
-                if action == crate::chatlist_suggestions::ACTION_PASSWORD {
-                    self.session.settings.privacy_data.check_password_suggested = false;
-                }
-                Ok(extra)
-            }
+            Some(action) => self.hide_suggested_action(action),
             None => {
                 let extra = self
                     .session
@@ -268,6 +254,30 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Ok(extra)
             }
         }
+    }
+
+    /// `hideSuggestedAction(action)`. The action goes at once; a refusal
+    /// brings it back.
+    pub fn hide_suggested_action(
+        &mut self,
+        action: &'static str,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(
+            RequestPurpose::Settings(SettingsPurpose::HideSuggestedAction { action }),
+            None,
+        );
+        if let Err(err) = self.sender.send_json(&hide_suggested_action(extra, action)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        self.session.chat_list.suggestions.actions.remove(action);
+        if action == crate::chatlist_suggestions::ACTION_PASSWORD {
+            self.session.settings.privacy_data.check_password_suggested = false;
+        }
+        Ok(extra)
     }
 
     /// Dismiss the password check (`hideSuggestedAction`).

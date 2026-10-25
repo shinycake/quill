@@ -91,6 +91,7 @@ impl QuillApp {
             self.connection.set_note(StatusNote::info(note));
         }
         self.ai_compose_frame_upkeep(window, cx);
+        self.premium_limit_toast_upkeep(window, cx);
         // Phase A1: keep the slow-mode countdown ticking while the open
         // chat is gated (spawns at most one 1s task per open chat).
         self.ensure_slow_mode_tick(cx);
@@ -127,6 +128,7 @@ impl QuillApp {
         // A clicked mention, hashtag, command or link (`entity_links`).
         self.run_pending_link(window, cx);
         self.pump_collectible_info(cx);
+        self.pump_promo_request(cx);
         self.run_pending_mini_app_action(window, cx);
         // Phase 9.2: the `updateStoryPostSucceeded` reducer queued poster
         // chats whose active stories should be refreshed (an own story

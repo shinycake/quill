@@ -183,12 +183,16 @@ pub(super) fn push_message(
     });
 }
 
-/// Follow each message effect to its badge. A message gets its final id
-/// while its effect plays (`updateMessageSendSucceeded`): the badge is then
-/// found again by where it was. An effect whose badge is gone for good ends.
-fn follow_badges(now: Instant) {
+/// Follow each message effect of `chat` to its badge. A message gets its
+/// final id while its effect plays (`updateMessageSendSucceeded`): the
+/// badge is then found again by where it was. An effect whose badge is
+/// gone for good ends.
+fn follow_badges(chat: ChatId, now: Instant) {
     ACTIVE.with(|active| {
         for a in active.borrow_mut().iter_mut() {
+            if a.effect.chat_id != chat {
+                continue;
+            }
             let Some(play) = a.message.as_mut() else {
                 continue;
             };
@@ -234,10 +238,12 @@ fn message_effect_origin(badge: (f32, f32, f32, f32), side: f32, outgoing: bool)
     )
 }
 
-/// The history list is being rebuilt: forget where the emoji were.
-pub(super) fn begin_pass() {
-    ANCHORS.with(|anchors| anchors.borrow_mut().clear());
-    super::message_effect_badge::begin_pass();
+/// A history list is being rebuilt: forget where the emoji and effect
+/// badges were, except those of the chats `keep` names (shown by another
+/// window).
+fn begin_pass(keep: &dyn Fn(i64) -> bool) {
+    ANCHORS.with(|anchors| anchors.borrow_mut().retain(|key, _| keep(key.0)));
+    super::message_effect_badge::begin_pass(keep);
 }
 
 fn anchor(key: Key) -> Option<Bounds<Pixels>> {
@@ -430,6 +436,19 @@ fn message_emoji(session: &Session, effect: &EmojiEffect) -> String {
 }
 
 impl QuillApp {
+    /// The history of the window being built is rebuilt: its lone emoji and
+    /// effect badges are noted again as its rows paint. The notes of the
+    /// chats other windows show stay.
+    pub(super) fn begin_effect_notes_pass(&self) {
+        let own = self.viewed_chat().map(|chat| chat.0);
+        let others: Vec<i64> = self
+            .chats_on_screen()
+            .into_iter()
+            .filter(|chat| Some(*chat) != own)
+            .collect();
+        begin_pass(&|chat| others.contains(&chat));
+    }
+
     /// A lone emoji was clicked: ask TDLib for its effect. The answer is
     /// queued in the session and starts in [`Self::emoji_effect_overlay`].
     pub(super) fn tap_animated_emoji(&mut self, chat_id: ChatId, message_id: MessageId) {
@@ -441,18 +460,26 @@ impl QuillApp {
     }
 
     /// Start the effects the session queued and draw the ones playing, over
-    /// the conversation. `None` when nothing plays.
-    pub(super) fn emoji_effect_overlay(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let open = self.viewed_chat();
+    /// the conversation of the window being built (its `viewed_chat`; each
+    /// window draws its own chat's). `window_active`: that window is the
+    /// active one. `None` when nothing plays there.
+    pub(super) fn emoji_effect_overlay(
+        &mut self,
+        window_active: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let open = self.viewed_chat()?;
         let now = cx.background_executor().now();
         self.premium_autoplay(cx);
-        self.message_effects_pass(cx);
+        self.message_effects_pass(window_active, cx);
         let queued = self
             .live
             .as_mut()
             .map(|live| live.driver.session.stickers.interactions.take_pending())
             .unwrap_or_default();
-        if queued.is_empty() && ACTIVE.with(|active| active.borrow().is_empty()) {
+        let none_here =
+            || ACTIVE.with(|active| active.borrow().iter().all(|a| a.effect.chat_id != open));
+        if queued.is_empty() && none_here() {
             return None;
         }
         if !queued.is_empty() {
@@ -488,12 +515,14 @@ impl QuillApp {
                 }
             });
         }
-        follow_badges(now);
-        self.advance_effects(open, now, cx);
+        follow_badges(open, now);
+        let shown = self.chats_on_screen();
+        self.advance_effects(open, &shown, now, cx);
         let drawn: Vec<(Key, bool, u64, bool, bool, LayeredClip)> = ACTIVE.with(|active| {
             active
                 .borrow()
                 .iter()
+                .filter(|a| a.effect.chat_id == open)
                 .filter_map(|a| {
                     Some((
                         (a.effect.chat_id.0, a.effect.message_id.0),
@@ -506,7 +535,7 @@ impl QuillApp {
                 })
                 .collect()
         });
-        if ACTIVE.with(|active| active.borrow().is_empty()) {
+        if none_here() {
             return None;
         }
         self.request_animation_tick_for(None, TICK_FPS, cx);
@@ -582,17 +611,25 @@ impl QuillApp {
         )
     }
 
-    /// Give each waiting effect its decoded sticker, tell the partner an
-    /// incoming one is being watched, and drop what ended, timed out or
-    /// belongs to another chat.
-    fn advance_effects(&mut self, open: Option<ChatId>, now: Instant, cx: &mut Context<Self>) {
+    /// Give each waiting effect of `open` (the chat of the window being
+    /// built) its decoded sticker, tell the partner an incoming one is being
+    /// watched, and drop what ended or timed out there. The effects of a
+    /// chat no window shows (`shown`) go; other windows' wait for their own
+    /// pass.
+    fn advance_effects(
+        &mut self,
+        open: ChatId,
+        shown: &[i64],
+        now: Instant,
+        cx: &mut Context<Self>,
+    ) {
         let mut watched: Vec<(ChatId, String)> = Vec::new();
         let waiting: Vec<(usize, i32)> = ACTIVE.with(|active| {
             active
                 .borrow()
                 .iter()
                 .enumerate()
-                .filter(|(_, a)| a.clip.is_none())
+                .filter(|(_, a)| a.clip.is_none() && a.effect.chat_id == open)
                 .map(|(i, a)| (i, a.effect.sticker.file_id.0))
                 .collect()
         });
@@ -612,8 +649,10 @@ impl QuillApp {
         ACTIVE.with(|active| {
             let mut active = active.borrow_mut();
             for (index, clip) in clips {
+                // tdesktop `checkDelayed` counts one history's effects.
                 let playing: Vec<(Duration, Duration)> = active
                     .iter()
+                    .filter(|a| a.effect.chat_id == open)
                     .filter_map(|a| a.clip.as_ref())
                     .map(|c| (c.started.elapsed(), c.duration))
                     .collect();
@@ -639,10 +678,11 @@ impl QuillApp {
                 }
             }
             active.retain(|a| {
-                a.effect.chat_id == open.unwrap_or(ChatId(0))
-                    && a.message.is_none_or(|play| {
-                        play.missing.is_none_or(|at| badge_within_grace(now, at))
-                    })
+                if a.effect.chat_id != open {
+                    return shown.contains(&a.effect.chat_id.0);
+                }
+                a.message
+                    .is_none_or(|play| play.missing.is_none_or(|at| badge_within_grace(now, at)))
                     && match &a.clip {
                         Some(clip) => clip.started.elapsed() < clip.duration,
                         None => !sticker_wait_over(now, a.queued, a.wait),

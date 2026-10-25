@@ -26,7 +26,6 @@ use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::composer::draft_text_to_store;
 use quill::connect::{ChatSearchQueryOutcome, SEARCH_DEBOUNCE, SearchQueryOutcome};
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
@@ -39,7 +38,6 @@ use quill::state::{
     ChatSearchJump, FromPicker, RequestPurpose, SearchConfirm, SearchStatus, Session,
 };
 use quill::telegram::client::copy_and_parse;
-use quill::telegram::envelope::ChatDraft;
 use quill::telegram::envelope::MessageSender;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;

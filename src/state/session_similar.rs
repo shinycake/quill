@@ -11,13 +11,6 @@ pub const JOINED_NOTICE_ROW_ID: i64 = -9_000_000_001;
 /// Row id of the divider between a thread's root post and its replies.
 pub const THREAD_DIVIDER_ROW_ID: i64 = -9_000_000_002;
 
-/// tdesktop `PremiumLimits::similarChannelsDefault` /
-/// `similarChannelsPremium`: the app-config fallbacks
-/// (`recommended_channels_limit_default` = 10, `_premium` = 100) for how
-/// many similar channels the strip lists.
-pub const SIMILAR_CHANNELS_DEFAULT_LIMIT: usize = 10;
-pub const SIMILAR_CHANNELS_PREMIUM_LIMIT: i32 = 100;
-
 /// A channel joined in this session: the joined notice sits at the end of
 /// its history with the strip under it (tdesktop `GenerateJoinedMessage`
 /// plus the channel's `SimilarExpanded` flag, which `joinChannel` sets).
@@ -181,11 +174,16 @@ impl Session {
             .get(&chat_id.0)
             .copied()
             .unwrap_or(0);
+        // tdesktop `PremiumLimits::similarChannelsDefault`: the free value
+        // of `premiumLimitTypeSimilarChatCount`.
+        let limit = self
+            .premium_limit_pair(crate::premium_limits::PremiumLimitKind::SimilarChats)
+            .default_value;
         Some(similar_tiles(
             list,
             total,
             self.is_premium(),
-            SIMILAR_CHANNELS_DEFAULT_LIMIT,
+            usize::try_from(limit).unwrap_or(0),
         ))
     }
 

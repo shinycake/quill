@@ -178,6 +178,15 @@ impl Session {
                 let create = &mut self.bots.owned.create;
                 if create.creating == Some(generation) {
                     create.creating = None;
+                    if err.premium_limit == Some(crate::premium_limits::PremiumLimitKind::OwnedBots)
+                    {
+                        create.error = None;
+                        self.open_premium_limit(
+                            crate::premium_limits::PremiumLimitKind::OwnedBots,
+                            0,
+                        );
+                        return true;
+                    }
                     create.error = Some(err.flood_notice().unwrap_or_else(|| {
                         format!(
                             "Could not create the bot (error {}). {}",

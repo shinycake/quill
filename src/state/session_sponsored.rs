@@ -1,5 +1,6 @@
 //! Sponsored messages.
 use super::*;
+use crate::premium_hub::PremiumFeature;
 
 impl Session {
     /// Record a `joinChat` outcome. `Success` flips status optimistically;
@@ -146,21 +147,23 @@ impl Session {
     /// `toggleHasSponsoredMessagesEnabled(false)` setting (tdesktop's
     /// `HideSponsoredClickHandler`). `None`: the ad is gone. `Some(true)`:
     /// Premium, the caller sends the request. `Some(false)`: not Premium,
-    /// the "needs Telegram Premium" notice is recorded and nothing is sent.
+    /// the "No ads" preview is asked for and nothing is sent.
     pub fn begin_sponsored_hide(&mut self, chat_id: ChatId, message_id: i64) -> Option<bool> {
         self.sponsored_message(chat_id, message_id)?;
         self.messages.sponsored_report = None;
         self.messages.sponsored_report_target = None;
+        self.messages.last_sponsored_report = None;
         if self.my_is_premium() {
-            self.messages.last_sponsored_report = None;
             return Some(true);
         }
-        self.messages.last_sponsored_report = Some(SponsoredReportOutcome {
-            chat_id,
-            message_id,
-            result: ReportSponsoredResult::PremiumRequired,
-        });
+        self.request_no_ads_preview();
         Some(false)
+    }
+
+    /// tdesktop `ShowPremiumPreviewBox(PremiumFeature::NoAds)`, opened by
+    /// the UI on its next frame.
+    fn request_no_ads_preview(&mut self) {
+        self.payments.hub.promo_request = Some(PremiumFeature::DisabledAds.into());
     }
 
     /// `toggleHasSponsoredMessagesEnabled(false)` answered `ok`: no ads are
@@ -257,6 +260,11 @@ impl Session {
                         }
                     }
                     ReportSponsoredResult::AdsHidden => self.messages.sponsored_hidden = true,
+                    ReportSponsoredResult::PremiumRequired => {
+                        self.messages.last_sponsored_report = None;
+                        self.request_no_ads_preview();
+                        return;
+                    }
                     _ => {}
                 }
                 self.messages.last_sponsored_report = Some(SponsoredReportOutcome {

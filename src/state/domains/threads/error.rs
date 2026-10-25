@@ -1,4 +1,5 @@
 //! Failed requests for forum topics, comment threads and Saved Messages.
+use crate::premium_limits::PremiumLimitKind;
 use crate::state::*;
 
 impl Session {
@@ -12,6 +13,13 @@ impl Session {
         _seq: u64,
     ) {
         match pending.map(|p| p.purpose) {
+            // tdesktop `SublistsPinsLimitBox`: Saved Messages has its own
+            // pin limit.
+            Some(RequestPurpose::Threads(ThreadsPurpose::ToggleSavedMessagesTopicPinned {
+                ..
+            })) if err.premium_limit == Some(PremiumLimitKind::Pins) => {
+                self.open_premium_limit(PremiumLimitKind::SavedPins, 0);
+            }
             Some(RequestPurpose::GetTopicHistory) => {
                 if let Some(pending) = pending {
                     self.mark_topic_load_failed(pending);

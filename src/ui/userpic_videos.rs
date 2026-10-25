@@ -5,7 +5,8 @@
 //! picture is decoded.
 //!
 //! One player per surface and user ([`Key`]); tdesktop also keeps one
-//! map per widget (`HistoryInner`, `ListWidget`, `Dialogs::InnerWidget`).
+//! map per widget (`HistoryInner`, `ListWidget`, `Dialogs::InnerWidget`),
+//! so a chat in a window of its own has its own history surface.
 //! The players reuse the inline clip path (`Purpose::Inline` decoding at
 //! the userpic's size in device pixels on a decoder thread) and are drawn
 //! by their slice's animation layer (`anim_layer::tile`), whose
@@ -22,9 +23,10 @@
 //!   screen longest sleeps first, and with none off screen a further
 //!   userpic keeps its still.
 //! - A slot whose row did not render in its surface's previous pass goes.
-//! - Everything holds still while the window is in the background or a
-//!   layer, a menu panel or a round video with sound is over the chat
-//!   (tdesktop passes `isGifPausedAtLeastFor(GifPauseReason::Any)` as
+//! - Everything holds still while no Quill window is in front; a window's
+//!   surfaces hold still while a layer, a menu panel or a round video with
+//!   sound is over its chat (tdesktop passes
+//!   `isGifPausedAtLeastFor(GifPauseReason::Any)`, per window, as
 //!   `paused`).
 //!
 //! The state sits in one `RefCell`; every borrow is one short scope, and
@@ -34,7 +36,7 @@
 use super::inline_players::{OffScreenStep, RELEASE_AFTER, off_screen_step};
 use super::video_player::{PlayState, Purpose, VideoPlayer, video_frame};
 use gpui_kit::*;
-use quill::ids::FileId;
+use quill::ids::{ChatId, FileId};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -44,17 +46,19 @@ use std::time::Instant;
 /// Where a userpic plays.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Surface {
-    /// Beside messages in the history.
-    History,
+    /// Beside messages in a window's history: `None` the main window's,
+    /// else that of the window showing this chat.
+    History(Option<ChatId>),
     /// Chat list rows.
     ChatList,
 }
 
 impl Surface {
-    fn index(self) -> usize {
+    /// The window the surface is in (`None`: the main window).
+    fn window(self) -> Option<ChatId> {
         match self {
-            Surface::History => 0,
-            Surface::ChatList => 1,
+            Surface::History(window) => window,
+            Surface::ChatList => None,
         }
     }
 }
@@ -155,13 +159,18 @@ impl Slot {
 #[derive(Default)]
 struct State {
     slots: HashMap<Key, Slot>,
-    /// Each surface's pass count ([`Surface::index`]).
-    passes: [u64; 2],
+    /// Each surface's pass count.
+    passes: HashMap<Surface, u64>,
     /// The view each surface renders in, redrawn when a sleeping slot
     /// gets a new player.
-    views: [Option<EntityId>; 2],
-    /// The window is in the background or something covers the chat.
-    held: bool,
+    views: HashMap<Surface, EntityId>,
+    /// The surfaces that rendered since the last sweep: a sweep after a
+    /// pass judges only their slots on screen or off.
+    passed: HashSet<Surface>,
+    /// No Quill window is in front.
+    inactive: bool,
+    /// The windows (`None`: the main window) whose chat something covers.
+    covered: HashSet<Option<ChatId>>,
     /// The window's display scale; 0 until the first frame.
     scale: f32,
     /// Clips that failed to open or decode: their still stays.
@@ -176,6 +185,38 @@ struct State {
 }
 
 impl State {
+    /// Whether the players of `surface` hold still.
+    fn held(&self, surface: Surface) -> bool {
+        self.inactive || self.covered.contains(&surface.window())
+    }
+
+    fn pass(&self, surface: Surface) -> u64 {
+        self.passes.get(&surface).copied().unwrap_or(0)
+    }
+
+    /// Change what holds the players still (`change`), and return the play
+    /// or pause each awake player whose hold changed needs.
+    fn rehold(&mut self, change: impl FnOnce(&mut Self)) -> Vec<(VideoPlayer, bool)> {
+        let before: HashMap<Key, bool> = self
+            .slots
+            .keys()
+            .map(|key| (*key, self.held(key.0)))
+            .collect();
+        change(self);
+        self.slots
+            .iter()
+            .filter(|(key, slot)| {
+                !slot.asleep && before.get(*key).copied() != Some(self.held(key.0))
+            })
+            .map(|(key, slot)| {
+                (
+                    slot.player.clone(),
+                    !self.held(key.0) && slot.hidden_since.is_none(),
+                )
+            })
+            .collect()
+    }
+
     fn awake(&self) -> Vec<(Key, Option<Instant>)> {
         self.slots
             .iter()
@@ -190,6 +231,15 @@ impl State {
 #[derive(Default)]
 pub(super) struct UserpicVideos {
     state: RefCell<State>,
+}
+
+/// Mark `window` covered or not.
+fn cover(covered: &mut HashSet<Option<ChatId>>, window: Option<ChatId>, on: bool) {
+    if on {
+        covered.insert(window);
+    } else {
+        covered.remove(&window);
+    }
 }
 
 /// A play or pause to make once the state's borrow is released.
@@ -224,15 +274,14 @@ impl UserpicVideos {
         cx: &mut App,
     ) {
         let dropped = self.with(|state| {
-            let ix = surface.index();
-            let pass = state.passes.get(ix).copied().unwrap_or(0).saturating_add(1);
-            if let Some(slot) = state.passes.get_mut(ix) {
-                *slot = pass;
-            }
-            if let Some(slot) = state.views.get_mut(ix) {
-                *slot = view;
-            }
-            state.history_listed |= surface == Surface::History;
+            let pass = state.pass(surface).saturating_add(1);
+            state.passes.insert(surface, pass);
+            match view {
+                Some(view) => state.views.insert(surface, view),
+                None => state.views.remove(&surface),
+            };
+            state.passed.insert(surface);
+            state.history_listed |= surface == Surface::History(None);
             let (keep, drop): (HashMap<Key, Slot>, HashMap<Key, Slot>) =
                 std::mem::take(&mut state.slots)
                     .into_iter()
@@ -253,19 +302,26 @@ impl UserpicVideos {
         }
     }
 
-    /// At the start of every app frame: `held` (background window, or
-    /// something over the chat) pauses every player and lifts on return;
+    /// At the start of every main-window frame: `inactive` (no Quill
+    /// window in front) pauses every player, `covered` (something over the
+    /// main window's chat) the main window's, and either lifts on return;
     /// a new display scale restarts them at the new size. When the last
     /// frame rendered a conversation (`history_drawn`) without its message
-    /// list (an empty chat), the history's players go.
-    pub(super) fn frame_start(&self, held: bool, scale: f32, history_drawn: bool) {
+    /// list (an empty chat), the main history's players go.
+    pub(super) fn frame_start(
+        &self,
+        inactive: bool,
+        covered: bool,
+        scale: f32,
+        history_drawn: bool,
+    ) {
         let Some((commands, dropped)) = self.with(|state| {
             let mut dropped = HashMap::new();
             if history_drawn && !state.history_listed {
                 let (history, rest): (HashMap<Key, Slot>, HashMap<Key, Slot>) =
                     std::mem::take(&mut state.slots)
                         .into_iter()
-                        .partition(|((on, _), _)| *on == Surface::History);
+                        .partition(|((on, _), _)| *on == Surface::History(None));
                 state.slots = rest;
                 dropped = history;
             }
@@ -274,22 +330,45 @@ impl UserpicVideos {
                 dropped.extend(std::mem::take(&mut state.slots));
             }
             state.scale = scale;
-            if state.held == held {
-                return (Vec::new(), dropped);
-            }
-            state.held = held;
-            let commands = state
-                .slots
-                .values()
-                .filter(|slot| !slot.asleep)
-                .map(|slot| (slot.player.clone(), !held && slot.hidden_since.is_none()))
-                .collect();
+            let commands = state.rehold(|state| {
+                state.inactive = inactive;
+                cover(&mut state.covered, None, covered);
+            });
             (commands, dropped)
         }) else {
             return;
         };
         drop(dropped);
         settle(commands);
+    }
+
+    /// At each render of the chat window showing `window`: whether
+    /// something covers its chat, like `frame_start`'s `covered`.
+    pub(super) fn cover_window(&self, window: ChatId, covered: bool) {
+        let Some(commands) = self
+            .with(|state| state.rehold(|state| cover(&mut state.covered, Some(window), covered)))
+        else {
+            return;
+        };
+        settle(commands);
+    }
+
+    /// The chat window showing `window` closed: its history's players go.
+    pub(super) fn forget_window(&self, window: ChatId) {
+        let surface = Surface::History(Some(window));
+        let dropped = self.with(|state| {
+            state.passes.remove(&surface);
+            state.views.remove(&surface);
+            state.passed.remove(&surface);
+            state.covered.remove(&Some(window));
+            let (gone, keep): (HashMap<Key, Slot>, HashMap<Key, Slot>) =
+                std::mem::take(&mut state.slots)
+                    .into_iter()
+                    .partition(|((on, _), _)| *on == surface);
+            state.slots = keep;
+            gone
+        });
+        drop(dropped);
     }
 
     /// `key`'s player for its userpic, opened on first use (`path` is only
@@ -314,7 +393,7 @@ impl UserpicVideos {
                 current,
                 state.failed.contains(&clip),
                 state.scale,
-                state.passes.get(key.0.index()).copied().unwrap_or(0),
+                state.pass(key.0),
             )
         })?;
         if failed {
@@ -389,7 +468,7 @@ impl UserpicVideos {
             cx.background_executor().now(),
         );
         let replaced = self.with(|state| {
-            let seen = state.passes.get(key.0.index()).copied().unwrap_or(0);
+            let seen = state.pass(key.0);
             state.slots.insert(key, Slot { seen, ..slot })
         });
         drop(replaced);
@@ -399,23 +478,27 @@ impl UserpicVideos {
     /// The off-screen policy: play what was painted in view since the last
     /// sweep, pause what was not, put to sleep what has been off screen
     /// for [`RELEASE_AFTER`], and give a sleeping slot painted in view a
-    /// new player. While held nothing plays, and only a sweep after a
-    /// surface pass (`painted`) runs: a held player is not redrawn, so the
-    /// timer could not tell it from one off screen.
+    /// new player. A sweep after surface passes (`painted`) judges the
+    /// slots of the surfaces that rendered: another window may not have
+    /// painted since. The timer's judges every slot not held: a held
+    /// player is not redrawn, so it could not be told from one off screen.
     pub(super) fn sweep(self: &Rc<Self>, painted: bool, cx: &mut App) {
         let now = cx.background_executor().now();
         let Some(players) = self.with(|state| {
-            (painted || !state.held).then(|| {
-                state
-                    .slots
-                    .iter()
-                    .map(|(key, slot)| (*key, slot.player.clone(), slot.shown_mark))
-                    .collect::<Vec<_>>()
-            })
+            let passed = std::mem::take(&mut state.passed);
+            state
+                .slots
+                .iter()
+                .filter(|(key, _)| {
+                    if painted {
+                        passed.contains(&key.0)
+                    } else {
+                        !state.held(key.0)
+                    }
+                })
+                .map(|(key, slot)| (*key, slot.player.clone(), slot.shown_mark))
+                .collect::<Vec<_>>()
         }) else {
-            return;
-        };
-        let Some(players) = players else {
             return;
         };
         let counts: Vec<(Key, u64, u64)> = players
@@ -426,8 +509,8 @@ impl UserpicVideos {
             let mut commands = Vec::new();
             let mut sleepers = Vec::new();
             let mut revive = Vec::new();
-            let held = state.held;
             for (key, count, mark) in counts {
+                let held = state.held(key.0);
                 let Some(slot) = state.slots.get_mut(&key) else {
                     continue;
                 };
@@ -472,7 +555,7 @@ impl UserpicVideos {
     fn revive(&self, key: Key, cx: &mut App) {
         let Some((clip, path, max_edge, view)) = self
             .with(|state| {
-                let view = state.views.get(key.0.index()).copied().flatten();
+                let view = state.views.get(&key.0).copied();
                 let slot = state.slots.get(&key)?;
                 Some((slot.clip, slot.path.clone(), slot.max_edge, view))
             })
@@ -493,8 +576,10 @@ impl UserpicVideos {
         let wanted = self
             .with(|state| {
                 state.timer.is_none()
-                    && !state.held
-                    && state.slots.values().any(|slot| !slot.asleep)
+                    && state
+                        .slots
+                        .iter()
+                        .any(|(key, slot)| !slot.asleep && !state.held(key.0))
             })
             .unwrap_or(false);
         if !wanted {
@@ -520,7 +605,7 @@ impl UserpicVideos {
             state
                 .slots
                 .get(&key)
-                .is_some_and(|slot| !state.held && !slot.asleep && slot.player.wants_play())
+                .is_some_and(|slot| !state.held(key.0) && !slot.asleep && slot.player.wants_play())
         })
         .unwrap_or(false)
     }

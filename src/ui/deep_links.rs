@@ -236,7 +236,7 @@ impl QuillApp {
             self.connection.set_note(
                 match live
                     .driver
-                    .select_search_chat_open(chat_id, open, &text, reply, now_ms)
+                    .select_search_chat_open(chat_id, open, text, reply, now_ms)
                 {
                     Ok(_) => StatusNote::info(tr(keys::Q_MISC_OPENED_LINK)),
                     Err(_) => StatusNote::error(tr(keys::Q_MISC_COULDNT_OPEN_THE_CHAT)),

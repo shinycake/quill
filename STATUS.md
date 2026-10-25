@@ -937,21 +937,21 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Delete a channel's received gifts, for the channel's creator (tdesktop `canTransferGifts`) <!-- parity:gifts-delete-channel -->
 - [x] AI compose in every message field: the AI button opens tdesktop's compose box with Translate, Style and Fix tabs, result diff, emoji toggle and the Premium flood notice <!-- parity:premium-ai-compose-box -->
 - [x] AI writing styles: list, create, edit, share, remove and delete custom styles, the custom-style limit box, style links and style link previews <!-- parity:premium-ai-compose-styles -->
-- [ ] Rich message drafts sync across devices, with the rich-paste notice and the discard button <!-- parity:premium-rich-drafts -->
+- [x] Rich message drafts sync across devices, with the rich-paste notice and the discard button <!-- parity:premium-rich-drafts -->
 - [x] Private-chat sharing protection: Accept or Reject a request to turn sharing back on, ask the other person before re-enabling, and tell apart who turned it off <!-- parity:premium-noforwards-requests -->
 - [x] Move the "All chats" tab among folders (Premium) and keep its position from other devices <!-- parity:premium-main-list-position -->
 - [x] Story stealth mode box: past and next periods, cooldown, Premium lock for free accounts <!-- parity:premium-story-stealth-box -->
 - [x] Animated profile photos play beside messages in groups, as in tdesktop <!-- parity:premium-animated-userpics-history -->
 - [x] Reaction limits: up to 3 reactions per message with Premium (1 without), and locked Premium reactions open the Premium preview <!-- parity:premium-reaction-limits -->
-- [ ] Limit boxes read from TDLib and cover favorite stickers, pinned saved chats, story posting, similar channels and owned bots <!-- parity:premium-limit-boxes-more -->
-- [ ] Every Premium upsell opens the preview of its own feature <!-- parity:premium-preview-targets -->
-- [ ] Business features preview with per-feature animations for free accounts <!-- parity:premium-business-preview -->
-- [ ] Hidden read time and last seen: "Show my read time or get Premium" box, the subscribe row and the first-restrict warning in privacy settings <!-- parity:premium-readtime-box -->
-- [ ] Premium locks for wallpapers for both sides and the voice-message privacy subscribe button <!-- parity:premium-privacy-upsells -->
-- [ ] Recording voice and video notes is blocked for people who restricted them, with tdesktop's notice <!-- parity:premium-voice-restricted-send -->
-- [ ] "Gift Premium" from birthday suggestions <!-- parity:premium-birthday-gift -->
-- [ ] Suggestion box to archive and mute new chats from non-contacts <!-- parity:premium-archive-mute-suggestion -->
-- [ ] Message effects play when a message with an effect arrives or is tapped <!-- parity:premium-message-effects-play -->
+- [x] Limit boxes read from TDLib and cover favorite stickers, pinned saved chats, story posting, similar channels and owned bots <!-- parity:premium-limit-boxes-more -->
+- [x] Every Premium upsell opens the preview of its own feature <!-- parity:premium-preview-targets -->
+- [x] Business features preview with per-feature animations for free accounts <!-- parity:premium-business-preview -->
+- [x] Hidden read time and last seen: "Show my read time or get Premium" box, the subscribe row and the first-restrict warning in privacy settings <!-- parity:premium-readtime-box -->
+- [x] Premium locks for wallpapers for both sides and the voice-message privacy subscribe button <!-- parity:premium-privacy-upsells -->
+- [x] Recording voice and video notes is blocked for people who restricted them, with tdesktop's notice <!-- parity:premium-voice-restricted-send -->
+- [x] "Gift Premium" from birthday suggestions <!-- parity:premium-birthday-gift -->
+- [x] Suggestion box to archive and mute new chats from non-contacts <!-- parity:premium-archive-mute-suggestion -->
+- [x] Message effects play when a message with an effect arrives or is tapped <!-- parity:premium-message-effects-play -->
 
 ### TON wallet (low priority)
 

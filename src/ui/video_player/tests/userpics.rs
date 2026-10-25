@@ -15,6 +15,7 @@ use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use crate::ui::userpic_videos::Surface;
 use gpui_kit::component::Root;
+use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::ids::ChatId;
 use std::cell::RefCell;
@@ -102,9 +103,9 @@ fn userpics_play_muted_beside_messages_and_in_the_chat_list(cx: &mut TestAppCont
     vcx.update(|window, _| window.activate_window());
     settle(vcx);
 
-    let senders = keys(&app, vcx, Surface::History);
+    let senders = keys(&app, vcx, Surface::History(None));
     assert_eq!(senders.len(), 10, "one player per sender: {senders:?}");
-    assert_eq!(playing(&app, vcx, Surface::History), senders);
+    assert_eq!(playing(&app, vcx, Surface::History(None)), senders);
     assert_eq!(keys(&app, vcx, Surface::ChatList), [FIRST_MEMBER]);
     assert_eq!(playing(&app, vcx, Surface::ChatList), [FIRST_MEMBER]);
     let opened: Vec<Vec<String>> = scripts
@@ -132,22 +133,22 @@ fn userpics_play_muted_beside_messages_and_in_the_chat_list(cx: &mut TestAppCont
 
     vcx.deactivate_window();
     settle(vcx);
-    assert!(playing(&app, vcx, Surface::History).is_empty());
+    assert!(playing(&app, vcx, Surface::History(None)).is_empty());
     assert!(playing(&app, vcx, Surface::ChatList).is_empty());
     vcx.update(|window, _| window.activate_window());
     settle(vcx);
-    assert_eq!(playing(&app, vcx, Surface::History), senders);
+    assert_eq!(playing(&app, vcx, Surface::History(None)), senders);
 
     app.update_in(vcx, |app, _, cx| app.open_media_panel(PanelTab::Emoji, cx));
     settle(vcx);
     assert!(app.read_with(vcx, |app, _| app.media_panel_open()));
-    assert!(playing(&app, vcx, Surface::History).is_empty());
+    assert!(playing(&app, vcx, Surface::History(None)).is_empty());
     assert!(playing(&app, vcx, Surface::ChatList).is_empty());
     app.update_in(vcx, |app, _, cx| {
         app.close_media_panel(cx);
     });
     settle(vcx);
-    assert_eq!(playing(&app, vcx, Surface::History), senders);
+    assert_eq!(playing(&app, vcx, Surface::History(None)), senders);
 
     let before: usize = scripts.iter().filter(|s| s.borrow().dropped).count();
     app.update_in(vcx, |app, window, cx| {
@@ -158,7 +159,7 @@ fn userpics_play_muted_beside_messages_and_in_the_chat_list(cx: &mut TestAppCont
         app.update_in(vcx, |app, _, cx| app.notify_conversation(cx));
         vcx.run_until_parked();
     }
-    assert!(keys(&app, vcx, Surface::History).is_empty());
+    assert!(keys(&app, vcx, Surface::History(None)).is_empty());
     let after: usize = scripts.iter().filter(|s| s.borrow().dropped).count();
     assert!(
         after >= before + 10,
@@ -174,7 +175,7 @@ fn with_autoplay_off_userpics_stay_still(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     vcx.update(|window, _| window.activate_window());
     settle(vcx);
-    assert_eq!(keys(&app, vcx, Surface::History).len(), 10);
+    assert_eq!(keys(&app, vcx, Surface::History(None)).len(), 10);
     app.update_in(vcx, |app, _, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             session.settings.media_prefs.autoplay_gifs = false;
@@ -182,7 +183,7 @@ fn with_autoplay_off_userpics_stay_still(cx: &mut TestAppContext) {
         cx.notify();
     });
     settle(vcx);
-    assert!(keys(&app, vcx, Surface::History).is_empty());
+    assert!(keys(&app, vcx, Surface::History(None)).is_empty());
     assert!(keys(&app, vcx, Surface::ChatList).is_empty());
     assert!(
         scripts
@@ -230,4 +231,57 @@ fn a_userpic_no_longer_drawn_sleeps_and_comes_back(cx: &mut TestAppContext) {
     assert_eq!(asleep(&app, vcx), Some(false));
     assert_eq!(playing(&app, vcx, Surface::ChatList), [FIRST_MEMBER]);
     assert!(opened(&scripts) > before, "a new decoder for the row");
+}
+
+/// The group (`demos/video_userpics.rs`), open in the main window.
+const USERPIC_GROUP: ChatId = ChatId(960);
+
+#[gpui_kit::test]
+fn a_chat_in_its_own_window_plays_its_senders_userpics(cx: &mut TestAppContext) {
+    let _scripts = scripts();
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.update(|window, _| window.activate_window());
+    settle(vcx);
+    assert_eq!(keys(&app, vcx, Surface::History(None)).len(), 10);
+
+    app.update_in(vcx, |app, window, cx| {
+        app.open_chat_in_new_window(USERPIC_GROUP, window, cx)
+    });
+    vcx.run_until_parked();
+    let main = vcx.update(|window, _| window.window_handle().window_id());
+    let chat_window = vcx
+        .windows()
+        .into_iter()
+        .find(|handle| handle.window_id() != main)
+        .expect("the chat window opened");
+    let draw = |vcx: &mut VisualTestContext| {
+        for _ in 0..4 {
+            vcx.update_window(chat_window, |_, window, cx| {
+                window.activate_window();
+                window.render_frame(cx);
+            })
+            .unwrap();
+            vcx.run_until_parked();
+        }
+    };
+    draw(vcx);
+    let surface = Surface::History(Some(USERPIC_GROUP));
+    let senders = keys(&app, vcx, surface);
+    assert!(
+        senders.len() >= 5,
+        "one player per sender shown: {senders:?}"
+    );
+    assert_eq!(playing(&app, vcx, surface), senders);
+    settle(vcx);
+    assert!(keys(&app, vcx, Surface::History(None)).is_empty());
+    draw(vcx);
+    assert_eq!(playing(&app, vcx, surface), senders);
+
+    vcx.update_window(chat_window, |_, window, cx| {
+        window.dispatch_action(Box::new(crate::ui::actions::CloseWindow), cx);
+    })
+    .unwrap();
+    vcx.run_until_parked();
+    assert!(keys(&app, vcx, surface).is_empty());
 }

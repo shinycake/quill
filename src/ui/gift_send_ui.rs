@@ -64,20 +64,52 @@ impl QuillApp {
                 .as_mut()
                 .map(|live| live.driver.open_send_gift(chat))
         });
-        match opened {
-            Some(Ok(())) => {
-                self.payments
-                    .gift_message_input
-                    .update(cx, |input, cx| input.set_value("", window, cx));
-                self.payments.gift_hide_name = false;
-                self.payments.gift_pay_upgrade = false;
-            }
-            _ => {
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_MONEY_OPEN_A_CHAT_WITH_A)));
-            }
+        if matches!(opened, Some(Ok(()))) {
+            self.reset_send_gift_inputs(window, cx);
+        } else {
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_MONEY_OPEN_A_CHAT_WITH_A)));
         }
         cx.notify();
+    }
+
+    /// Open the dialog for a user picked by id: the birthday suggestion and
+    /// the gift recipient list (tdesktop `ShowStarGiftBox`).
+    pub(super) fn open_send_gift_to_user(
+        &mut self,
+        user_id: i64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let opened = match self.live.as_mut() {
+            Some(live) => live.driver.open_send_gift_to_user(user_id).is_ok(),
+            None => self.demo_session.as_mut().is_some_and(|session| {
+                let Some(recipient) = session.gift_recipient_user(user_id) else {
+                    return false;
+                };
+                session.payments.gifts_manage.send = quill::gift_manage::SendGiftState {
+                    open: true,
+                    recipient: Some(recipient),
+                    ..Default::default()
+                };
+                true
+            }),
+        };
+        if opened {
+            self.reset_send_gift_inputs(window, cx);
+        } else {
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_OPEN_THE_GIFTS)));
+        }
+        cx.notify();
+    }
+
+    fn reset_send_gift_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.payments
+            .gift_message_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.payments.gift_hide_name = false;
+        self.payments.gift_pay_upgrade = false;
     }
 
     fn close_send_gift_dialog(&mut self, cx: &mut Context<Self>) {

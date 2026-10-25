@@ -1,4 +1,5 @@
-//! Connect driver: the Gift Stars dialog (`crate::stars_gift`).
+//! Connect driver: the Gift Stars dialog (`crate::stars_gift`) and the
+//! gift recipient list.
 use super::*;
 use crate::ids::RequestId;
 use crate::stars_gift::{StarsGiftTarget, can_gift_stars};
@@ -17,6 +18,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.fetch_contacts()?;
         // The people you write to most are listed first, unless the
         // frequent contacts are switched off.
+        let _ = self.fetch_top_chats();
+        Ok(())
+    }
+
+    /// "Gift Premium or Stars": load the contacts and the frequent
+    /// contacts the gift recipient list shows (tdesktop
+    /// `ChooseStarGiftRecipient`).
+    pub fn load_gift_recipients(&mut self) -> Result<(), ConnectSendError> {
+        self.fetch_contacts()?;
         let _ = self.fetch_top_chats();
         Ok(())
     }

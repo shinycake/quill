@@ -60,14 +60,15 @@ render in a chat window cleared the main window's badge positions.
   `premium_animation`), not only the icon.
 - Effects play over the main window only. Badges in a separate chat window
   are not noted, and its history no longer clears the main window's notes.
+  (Superseded: chat windows play them too, see
+  `premium-effects-chat-windows.md`.)
 - Demo stage `QUILL_DEMO_EFFECTS=arrive` on `ready-message-effects`: an
   unread message with an effect arrives in the open chat.
 
 ## Not done, or different from tdesktop
 
-- Separate chat windows do not play message effects, emoji interactions or
-  Premium sticker effects. tdesktop plays them in every window. The overlay
-  is drawn by the main window's conversation slot only.
+- ~~Separate chat windows do not play message effects, emoji interactions
+  or Premium sticker effects.~~ Fixed in `premium-effects-chat-windows.md`.
 - tdesktop holds an incoming message's flag until the chat's read marker is
   known (`applyEffectWatchedOnUnreadKnown`). Quill counts a chat whose read
   marker is unknown as read. TDLib sends the chat before its messages, so

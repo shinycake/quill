@@ -116,21 +116,18 @@ thread_local! {
     static BADGES: RefCell<HashMap<Key, Seen>> = RefCell::new(HashMap::new());
     static REPLAYS: RefCell<Vec<Key>> = const { RefCell::new(Vec::new()) };
     static APP: RefCell<Option<WeakEntity<QuillApp>>> = const { RefCell::new(None) };
-    /// The chat open in the main window, the only one effects play over.
-    static MAIN_CHAT: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
 }
 
-/// Remember the app, so a click on a badge can wake it, and the chat open
-/// in its main window: badges painted for other chats (a separate chat
-/// window) are not noted.
-pub(super) fn set_app(app: WeakEntity<QuillApp>, main_chat: Option<i64>) {
+/// Remember the app, so a click on a badge can wake it.
+pub(super) fn set_app(app: WeakEntity<QuillApp>) {
     APP.with(|slot| *slot.borrow_mut() = Some(app));
-    MAIN_CHAT.with(|slot| slot.set(main_chat));
 }
 
-/// The history list is being rebuilt: forget where the badges were.
-pub(super) fn begin_pass() {
-    BADGES.with(|badges| badges.borrow_mut().clear());
+/// A history list is being rebuilt: forget where the badges were, except
+/// those of the chats `keep` names (shown by another window). Each chat
+/// shows in one window at most, so the notes are told apart by chat.
+pub(super) fn begin_pass(keep: &dyn Fn(i64) -> bool) {
+    BADGES.with(|badges| badges.borrow_mut().retain(|key, _| keep(key.0)));
 }
 
 pub(super) fn seen(key: Key) -> Option<Seen> {
@@ -165,16 +162,26 @@ pub(super) fn nearest(
     })
 }
 
-/// Badges clicked since the last call.
-pub(super) fn take_replays() -> Vec<Key> {
-    REPLAYS.with(|replays| std::mem::take(&mut *replays.borrow_mut()))
+/// Badges of `chat` clicked since the last call. Clicks in a chat no
+/// window shows any more (`shown`) are dropped; other windows' stay for
+/// their own pass.
+pub(super) fn take_replays(chat: i64, shown: &dyn Fn(i64) -> bool) -> Vec<Key> {
+    REPLAYS.with(|replays| {
+        let mut replays = replays.borrow_mut();
+        let (mine, rest): (Vec<Key>, Vec<Key>) = std::mem::take(&mut *replays)
+            .into_iter()
+            .partition(|key| key.0 == chat);
+        *replays = rest.into_iter().filter(|key| shown(key.0)).collect();
+        mine
+    })
 }
 
-/// Badges on screen whose message had not played its effect when they were
-/// painted (tdesktop `startEffectOnRead`). Nothing counts as shown while
-/// the window is not active (tdesktop `markingContentsRead`). The caller
-/// marks each watched in the session, which decides whether it plays.
-pub(super) fn shown_unwatched(window_active: bool) -> Vec<(Key, Seen)> {
+/// Badges of `chat` on screen whose message had not played its effect when
+/// they were painted (tdesktop `startEffectOnRead`). Nothing counts as
+/// shown while the chat's window is not active (tdesktop
+/// `markingContentsRead`). The caller marks each watched in the session,
+/// which decides whether it plays.
+pub(super) fn shown_unwatched(chat: i64, window_active: bool) -> Vec<(Key, Seen)> {
     if !window_active {
         return Vec::new();
     }
@@ -182,7 +189,7 @@ pub(super) fn shown_unwatched(window_active: bool) -> Vec<(Key, Seen)> {
         badges
             .borrow()
             .iter()
-            .filter(|(_, badge)| badge.unwatched)
+            .filter(|(key, badge)| key.0 == chat && badge.unwatched)
             .map(|(key, badge)| (*key, *badge))
             .collect()
     })
@@ -229,9 +236,7 @@ pub(super) fn badge(effect: &FooterEffect) -> AnyElement {
                 size(px(IMAGE), px(IMAGE)),
             );
             // Only a badge that shows whole counts as shown.
-            if MAIN_CHAT.with(std::cell::Cell::get) != Some(key.0)
-                || image.intersect(&window.content_mask().bounds) != image
-            {
+            if image.intersect(&window.content_mask().bounds) != image {
                 return;
             }
             BADGES.with(|badges| {
@@ -282,7 +287,7 @@ pub(super) fn badge(effect: &FooterEffect) -> AnyElement {
 
 #[cfg(test)]
 mod tests {
-    use super::{BADGES, Seen, begin_pass, nearest, seen, shown_unwatched};
+    use super::{BADGES, REPLAYS, Seen, begin_pass, nearest, seen, shown_unwatched, take_replays};
     use gpui_kit::{Bounds, point, px, size};
 
     #[test]
@@ -299,11 +304,12 @@ mod tests {
             badges.insert((5, 6), badge(true));
             badges.insert((5, 7), badge(false));
         });
-        assert!(shown_unwatched(false).is_empty());
-        let shown = shown_unwatched(true);
+        assert!(shown_unwatched(5, false).is_empty());
+        assert!(shown_unwatched(4, true).is_empty());
+        let shown = shown_unwatched(5, true);
         assert_eq!(shown.len(), 1);
         assert_eq!(shown[0].0, (5, 6));
-        begin_pass();
+        begin_pass(&|_| false);
         assert!(seen((5, 6)).is_none());
     }
 
@@ -328,6 +334,35 @@ mod tests {
         let found = nearest(7, 55, true, point(px(300.), px(398.)), px(80.));
         assert_eq!(found.map(|(key, _)| key), Some((7, 100)));
         assert!(nearest(7, 55, true, point(px(10.), px(10.)), px(80.)).is_none());
-        begin_pass();
+        begin_pass(&|_| false);
+    }
+
+    #[test]
+    fn a_pass_forgets_only_its_own_window_badges() {
+        let badge = Seen {
+            bounds: Bounds::default(),
+            effect_id: 1,
+            outgoing: false,
+            unwatched: true,
+        };
+        BADGES.with(|badges| {
+            let mut badges = badges.borrow_mut();
+            badges.clear();
+            badges.insert((5, 6), badge);
+            badges.insert((9, 1), badge);
+        });
+        begin_pass(&|chat| chat != 9);
+        assert!(seen((5, 6)).is_some());
+        assert!(seen((9, 1)).is_none());
+        begin_pass(&|_| false);
+    }
+
+    #[test]
+    fn each_window_takes_only_its_own_clicks() {
+        REPLAYS.with(|replays| *replays.borrow_mut() = vec![(5, 6), (9, 1), (3, 2)]);
+        let shown = |chat| chat != 3;
+        assert_eq!(take_replays(5, &shown), vec![(5, 6)]);
+        assert_eq!(take_replays(9, &shown), vec![(9, 1)]);
+        assert!(take_replays(3, &shown).is_empty());
     }
 }

@@ -159,14 +159,21 @@ fn premium_features_keep_known_rows_and_limits() {
         ],
         "limits": [
             {"type": {"@type": "premiumLimitTypeChatFolderCount"}, "default_value": 10, "premium_value": 20},
+            {"type": {"@type": "premiumLimitTypeOwnedBotCount"}, "default_value": 20, "premium_value": 40},
             {"type": {"@type": "premiumLimitTypeUnknown"}, "default_value": 1, "premium_value": 2}
         ]
     }));
     assert_eq!(info.features.len(), 2);
-    assert_eq!(info.features[0].title, "Doubled limits");
-    assert_eq!(info.limits.len(), 1);
-    assert_eq!(info.limits[0].title, "Folders");
+    assert_eq!(info.features[0].title(), "Doubled limits");
+    assert_eq!(info.limits.len(), 3);
+    assert_eq!(info.limits[0].title, Some("Folders"));
     assert_eq!(info.limits[0].premium_value, 20);
+    assert_eq!(info.limits[1].title, None);
+    assert_eq!(
+        info.limit_pair(crate::premium_limits::PremiumLimitKind::OwnedBots)
+            .map(|pair| pair.premium_value),
+        Some(40)
+    );
 }
 
 #[test]

@@ -12,6 +12,8 @@ use gpui_kit::{AppContext, Entity, Focusable, TestAppContext, VisualTestContext,
 use quill::business_bots::BotRight;
 use quill::business_chat_links::ChatLink;
 use quill::business_hours_edit::extract_day;
+use quill::premium_hub::BusinessFeature;
+use quill::premium_hub::promo::{PreviewOpen, PromoPage};
 use quill::quick_replies::{QuickRepliesUpdate, QuickReplyShortcut};
 use quill::telegram::envelope::ChatKind;
 
@@ -137,6 +139,15 @@ fn every_screen_renders(cx: &mut TestAppContext) {
     assert_eq!(view(&app, vcx), View::LinkEdit);
 }
 
+fn premium_page(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<PromoPage> {
+    app.read_with(vcx, |app, _| {
+        app.session()
+            .map(|s| &s.payments.hub)
+            .filter(|hub| hub.premium_open)
+            .map(|hub| hub.promo_page)
+    })
+}
+
 #[gpui_kit::test]
 fn without_premium_only_chatbots_open(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
@@ -144,12 +155,19 @@ fn without_premium_only_chatbots_open(cx: &mut TestAppContext) {
     seed(&app, vcx, false);
     open(&app, vcx);
     act(&app, vcx, |app, window, cx| {
-        app.business_open_feature(Some(View::Greeting), window, cx)
+        app.business_open_feature(BusinessFeature::GreetingMessage, window, cx)
     });
-    // The Premium screen opens instead (a live session loads it).
+    // The feature's preview to buy opens above the hub instead.
     assert_eq!(view(&app, vcx), View::Hub);
+    assert_eq!(
+        premium_page(&app, vcx),
+        Some(PromoPage::Preview {
+            feature: BusinessFeature::GreetingMessage.into(),
+            opened: PreviewOpen::ToBuy,
+        })
+    );
     act(&app, vcx, |app, window, cx| {
-        app.business_open_feature(Some(View::Chatbots), window, cx)
+        app.business_open_feature(BusinessFeature::Bots, window, cx)
     });
     assert_eq!(view(&app, vcx), View::Chatbots);
 }
@@ -488,7 +506,7 @@ fn an_empty_chat_shows_the_start_page(cx: &mut TestAppContext) {
                 photo_id: None,
                 blocked: false,
                 extras,
-                ratings: Default::default(),
+                ..Default::default()
             },
         );
     });

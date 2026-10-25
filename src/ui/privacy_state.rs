@@ -35,6 +35,9 @@ pub(crate) struct PrivacyState {
     pub(super) websites_confirm: Option<WebsitesConfirm>,
     /// Passkeys: the list, its delete confirmation and the about box.
     pub(super) passkeys: super::security::passkeys::PasskeysUi,
+    /// The last seen rule waiting on the one-time warning (tdesktop
+    /// `LastSeenPrivacyController::confirmSave`).
+    pub(super) last_seen_warning: Option<quill::privacy::PrivacyRuleDetail>,
 }
 
 impl PrivacyState {
@@ -55,6 +58,7 @@ impl PrivacyState {
             websites_open: false,
             websites_confirm: None,
             passkeys: Default::default(),
+            last_seen_warning: None,
         }
     }
 }

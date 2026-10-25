@@ -61,31 +61,34 @@ thread_local! {
     static PLAYED: RefCell<Played> = RefCell::new(Played::default());
 }
 
-/// Which messages already played their effect in the chat being viewed. A
-/// new chat starts over, as a rebuilt list does in tdesktop.
+/// Which messages already played their effect, for each chat a window
+/// shows. A chat no window shows any more starts over when it shows again,
+/// as a rebuilt list does in tdesktop (each window's history keeps its
+/// own `_animatedStickersPlayed`).
 #[derive(Default)]
 struct Played {
-    chat: Option<i64>,
-    keys: HashSet<Key>,
+    chats: HashMap<i64, HashSet<i64>>,
 }
 
 impl Played {
-    fn enter(&mut self, chat: i64) {
-        if self.chat != Some(chat) || self.keys.len() >= MAX_PLAYED {
-            self.chat = Some(chat);
-            self.keys.clear();
-        }
-    }
-
     /// Whether `key` still has its automatic first play.
-    fn pending(&mut self, key: Key) -> bool {
-        self.enter(key.0);
-        !self.keys.contains(&key)
+    fn pending(&self, key: Key) -> bool {
+        self.chats
+            .get(&key.0)
+            .is_none_or(|played| !played.contains(&key.1))
     }
 
     fn mark(&mut self, key: Key) {
-        self.enter(key.0);
-        self.keys.insert(key);
+        let played = self.chats.entry(key.0).or_default();
+        if played.len() >= MAX_PLAYED {
+            played.clear();
+        }
+        played.insert(key.1);
+    }
+
+    /// Forget the chats no window shows.
+    fn keep_shown(&mut self, shown: &[i64]) {
+        self.chats.retain(|chat, _| shown.contains(chat));
     }
 }
 
@@ -147,7 +150,7 @@ pub(super) fn tracker(
                 let mut seen = seen.borrow_mut();
                 seen.retain(|_, s| s.at.elapsed() < Duration::from_secs(5));
                 let stale = seen.get(&key).is_none_or(|s| s.at.elapsed() >= SEEN_FRESH);
-                let pending = PLAYED.with(|played| played.borrow_mut().pending(key));
+                let pending = PLAYED.with(|played| played.borrow().pending(key));
                 seen.insert(
                     key,
                     Seen {
@@ -299,18 +302,21 @@ impl QuillApp {
     /// `loadVideoThumbnail`).
     pub(super) fn premium_autoplay(&mut self, cx: &mut Context<Self>) {
         let paused = power_saving::on(power_saving::Flag::StickersChat);
-        if let Some(chat) = self.viewed_chat() {
-            SEEN.with(|seen| seen.borrow_mut().retain(|key, _| key.0 == chat.0));
-        }
+        let Some(chat) = self.viewed_chat() else {
+            return;
+        };
+        let shown = self.chats_on_screen();
+        SEEN.with(|seen| seen.borrow_mut().retain(|key, _| shown.contains(&key.0)));
+        PLAYED.with(|played| played.borrow_mut().keep_shown(&shown));
         let due: Vec<(Key, Seen)> = SEEN.with(|seen| {
             seen.borrow()
                 .iter()
-                .filter(|(_, s)| s.at.elapsed() < SEEN_FRESH)
+                .filter(|(key, s)| key.0 == chat.0 && s.at.elapsed() < SEEN_FRESH)
                 .map(|(key, s)| (*key, *s))
                 .collect()
         });
         for (key, seen) in due {
-            if !PLAYED.with(|played| played.borrow_mut().pending(key)) {
+            if !PLAYED.with(|played| played.borrow().pending(key)) {
                 continue;
             }
             if self
@@ -346,10 +352,12 @@ mod tests {
         played.mark((1, 10));
         assert!(!played.pending((1, 10)));
         assert!(played.pending((1, 11)));
-        // Another chat starts over, and so does coming back.
         assert!(played.pending((2, 10)));
         played.mark((2, 10));
+        assert!(!played.pending((1, 10)));
+        played.keep_shown(&[2]);
         assert!(played.pending((1, 10)));
+        assert!(!played.pending((2, 10)));
     }
 
     #[test]

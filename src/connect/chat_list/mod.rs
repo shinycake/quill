@@ -97,6 +97,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<(), ConnectSendError> {
         self.maybe_probe_channel_membership()?;
         self.maybe_fetch_bot_info()?;
+        self.maybe_fetch_open_user_full_info()?;
         self.maybe_fetch_paid_messages_info()?;
         self.maybe_fetch_bot_commands()?;
         // A failed send here must not cancel the other extras.
@@ -455,10 +456,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        if self.session.chat_list.archive_chat_list_settings.is_some() {
+            return Ok(None);
+        }
+        self.reload_archive_chat_list_settings()
+    }
+
+    /// `getArchiveChatListSettings` even when a copy is cached, as
+    /// tdesktop reloads its global privacy settings for the "Hide new
+    /// chats?" suggestion. `Ok(None)` = a fetch in flight.
+    pub fn reload_archive_chat_list_settings(
+        &mut self,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let purpose = RequestPurpose::GetArchiveChatListSettings;
-        if self.session.chat_list.archive_chat_list_settings.is_some()
-            || self.session.requests.has_purpose(purpose)
-        {
+        if self.session.requests.has_purpose(purpose) {
             return Ok(None);
         }
         let extra = self.session.request(purpose, None);
@@ -469,7 +483,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.chat_list.archive_settings_loading = true;
+        // A cached copy stays on screen while it reloads.
+        let chat_list = &mut self.session.chat_list;
+        chat_list.archive_settings_loading = chat_list.archive_chat_list_settings.is_none();
         Ok(Some(extra))
     }
 

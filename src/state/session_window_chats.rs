@@ -19,9 +19,30 @@ use std::collections::BTreeMap;
 
 impl Session {
     /// Whether `chat_id` is on screen: the main window's chat or one shown
-    /// in its own window.
+    /// in its own window, whichever view is in place.
     pub fn chat_is_shown(&self, chat_id: ChatId) -> bool {
-        self.open_chat == Some(chat_id) || self.window_chats.contains(&chat_id)
+        self.open_chat == Some(chat_id)
+            || self.window_chats.contains(&chat_id)
+            || self.window_chats.shows_chat(chat_id)
+    }
+
+    /// Every chat on screen: the main window's and each chat window's,
+    /// whichever view is in place.
+    pub fn chats_shown(&self) -> Vec<ChatId> {
+        let mut chats: Vec<ChatId> = self
+            .open_chat
+            .into_iter()
+            .chain(self.window_chats.iter().copied())
+            .chain(
+                self.window_chats
+                    .views
+                    .values()
+                    .filter_map(|view| view.open_chat),
+            )
+            .collect();
+        chats.sort_unstable_by_key(|chat| chat.0);
+        chats.dedup();
+        chats
     }
 
     /// Record that `chat_id` is shown in its own window and start a fresh

@@ -10,6 +10,8 @@
 "lng_away_recipients" = "Recipients";
 "lng_away_schedule_outside" = "Outside of Business Hours";
 "lng_away_select" = "Select chats or entire chat categories for sending an away message.";
+"lng_background_apply_me" = "Apply for me";
+"lng_background_apply_both" = "Apply for me and {user}";
 "lng_background_share" = "Share";
 "lng_bad_phone" = "Invalid phone number. Please try again.";
 "lng_bot_share_phone" = "Do you want to share your phone number with this bot?";
@@ -807,7 +809,6 @@
 "qll_ops_purchase_refused_review_the_quote" = "Purchase refused. Review the quote and comment length, then retry.";
 "qll_ops_quick_replies_are_a_telegram" = "Quick replies are a Telegram Premium feature.";
 "qll_ops_quick_replies_need_a_live" = "Quick replies need a live session.";
-"qll_ops_quick_replies_need_telegram_premium" = "Quick replies need Telegram Premium.";
 "qll_ops_quick_reply_message" = "Quick reply message";
 "qll_ops_quill" = "Quill {quill_version_app}";
 "qll_ops_quill_updates" = "Quill updates";

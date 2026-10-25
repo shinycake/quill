@@ -102,7 +102,6 @@
 "qll_misc_all" = "All";
 "qll_misc_also_pin_for" = "Also pin for {first_name}";
 "qll_misc_also_pin_for_the_other" = "Also pin for the other side";
-"qll_misc_also_set_for" = "Also set for {name}";
 "qll_misc_an_emoji_status_is_already" = "An emoji status is already updating.";
 "qll_misc_ann" = "Ann";
 "qll_misc_appearance" = "Appearance";
@@ -575,7 +574,6 @@
 "qll_misc_strikethrough" = "Strikethrough";
 "qll_misc_style_update_requested" = "Style update requested.";
 "qll_misc_style_updated" = "Style updated.";
-"qll_misc_subscribe_to_telegram_premium_to" = "Subscribe to Telegram Premium to unlock up to {similar_channels_premium_limit} similar channels.";
 "qll_misc_subscribe_to_telegram_premium_to_2" = "Subscribe to Telegram Premium to schedule repeating messages.";
 "qll_misc_supergroup" = "Supergroup";
 "qll_misc_telegram_link" = "Telegram link";

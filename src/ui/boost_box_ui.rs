@@ -124,10 +124,23 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// The Premium needed box's "Yes": open the Premium page.
-    fn boost_box_open_premium(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// The Premium needed box's "Yes": the Premium page, telling the bot
+    /// which channel it is for (tdesktop `"channel_boost__" + id`).
+    fn boost_box_open_premium(&mut self, cx: &mut Context<Self>) {
+        let start_ref = self
+            .session()
+            .and_then(|s| {
+                let chat_id = s.groups.boost_box.as_ref()?.chat_id;
+                match s.chats.get(&chat_id)?.kind {
+                    quill::telegram::envelope::ChatKind::Supergroup { supergroup_id, .. } => {
+                        Some(format!("channel_boost__{supergroup_id}"))
+                    }
+                    _ => None,
+                }
+            })
+            .unwrap_or_default();
         self.close_boost_box_state(cx);
-        self.navigate(super::navigation::NavigationAction::Premium, window, cx);
+        self.open_premium_from(&start_ref, cx);
     }
 
     pub(super) fn boost_progress(counters: &BoostCounters, cx: &App) -> AnyElement {
@@ -479,7 +492,7 @@ impl QuillApp {
                                 .label(tr(keys::BOX_YES))
                                 .primary()
                                 .on_click(cx.listener(|this, _, window, cx| {
-                                    this.boost_box_open_premium(window, cx);
+                                    this.boost_box_open_premium(cx);
                                     this.close_kit_dialog_if_done(DialogKind::BoostBox, window, cx);
                                 })),
                         );

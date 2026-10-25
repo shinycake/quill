@@ -36,12 +36,7 @@ impl QuillApp {
         media_roots: std::rc::Rc<[PathBuf]>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        // Where the lone emoji and effect badges are painted is noted again
-        // by the rows. Effects play over the main window only, so a chat
-        // window's history leaves its notes alone.
-        if self.windows.scope.is_none() {
-            super::super::emoji_effect::begin_pass();
-        }
+        self.begin_effect_notes_pass();
         let session = self.session();
         let jump_serial = session.map_or(0, |s| s.search.chat_search.jump_serial);
         // Phase B4: secret chats word the timer-change service row as
@@ -341,11 +336,11 @@ impl QuillApp {
         self.playback
             .inline_videos
             .begin_render(self.slices.current(), cx);
-        self.playback.userpic_videos.begin_render(
-            super::userpic_videos::Surface::History,
-            self.slices.current(),
-            cx,
-        );
+        let surface = self.history_userpic_surface();
+        let target = self.history_redraw_target();
+        self.playback
+            .userpic_videos
+            .begin_render(surface, target, cx);
         let weak = cx.weak_entity();
         let look = self.chat_look(self.viewed_chat().map(|c| c.0), cx);
         let palette = self.history_palette(&look, cx);

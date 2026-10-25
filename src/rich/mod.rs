@@ -12,10 +12,12 @@ use crate::text::{TextEntity, TextEntityKind, utf16_to_utf8_offset};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
+mod draft;
 mod input;
 mod markup;
 mod parse;
 mod quote;
+pub use draft::{RichDraft, text_has_markdown_structure};
 pub use input::*;
 pub use markup::*;
 pub use parse::*;

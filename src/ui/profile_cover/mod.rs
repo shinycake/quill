@@ -4,8 +4,8 @@
 //! cover of the Saved Messages chat. What shows is `quill::profile_cover`.
 #![deny(clippy::indexing_slicing)]
 
-mod last_seen_box;
 mod rating_box;
+mod show_or_premium_box;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod tests;
@@ -27,14 +27,15 @@ use quill::state::PhotoOwner;
 use quill::story_ring::UNREAD_WIDTH;
 use quill::story_viewer::StoryOpenScope;
 use quill::telegram::envelope::ParsedUser;
+pub(in crate::ui) use show_or_premium_box::{ShowOrPremium, ShowOrPremiumBox};
 
 /// The open cover boxes (a `QuillApp` field).
 #[derive(Debug, Default)]
 pub(super) struct ProfileCoverUi {
     /// The person whose Stars rating box is open.
     pub(super) rating_box: Option<i64>,
-    /// The person whose "Show Your Last Seen" box is open.
-    pub(super) last_seen_box: Option<i64>,
+    /// The open "Show Your Last Seen" / "Show Your Read Date" box.
+    pub(super) show_or_premium: Option<ShowOrPremiumBox>,
     /// The rating box shows your pending rating ("Future Rating").
     pub(super) rating_preview: bool,
 }
@@ -140,8 +141,7 @@ impl QuillApp {
                                 .xsmall()
                                 .rounded(px(9.))
                                 .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.profile_cover.last_seen_box = Some(user_id);
-                                    cx.notify();
+                                    this.open_show_or_premium(ShowOrPremium::LastSeen, user_id, cx);
                                 })),
                         ),
                 )
@@ -236,9 +236,9 @@ crate::ui::shell::register_dialogs! {
         QuillApp::build_rating_box,
     )
     .closes(|app, _, cx| app.close_rating_box(cx)),
-    ShowLastSeen => DialogSpec::new(
+    ShowOrPremium => DialogSpec::new(
         3792,
-        |app| app.profile_cover.last_seen_box.is_some(),
-        QuillApp::build_last_seen_box,
+        |app| app.profile_cover.show_or_premium.is_some(),
+        QuillApp::build_show_or_premium_box,
     ),
 }

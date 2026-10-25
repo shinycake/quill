@@ -146,8 +146,11 @@ impl QuillApp {
                     matches!(mode, PaneMode::Ready) && self.composer_ui.pending_edit.is_none();
                 // Something to send (text, an attachment, an edit): the
                 // composer shows Send instead of the mic.
+                // A rich draft shown in place of the field sends too.
+                let rich_preview = self.rich_draft_preview(cx);
                 let sendable = !show_attach
                     || self.forward_bar_here()
+                    || rich_preview.is_some()
                     || !self.pending_attachments().is_empty()
                     || !self.composer.read(cx).value().trim().is_empty();
                 this.child(
@@ -376,14 +379,22 @@ impl QuillApp {
                                                 );
                                             })),
                                     )
-                                    .child(self.format_menu_button(cx))
+                                    .when(rich_preview.is_none(), |row| {
+                                        row.child(self.format_menu_button(cx))
+                                    })
                                 })
                                 .when(!show_attach, |row| row.children(self.ai_compose_button(cx)))
+                                .when_some(rich_preview, |row, preview| row.child(preview))
                                 .child(
                                     div()
                                         .relative()
                                         .flex_1()
                                         .min_w_0()
+                                        // tdesktop hides the field behind a
+                                        // rich draft's preview.
+                                        .when(self.shown_rich_draft().is_some(), |field| {
+                                            field.hidden()
+                                        })
                                         // Scopes Cmd/Ctrl+K to "edit link" here
                                         // (see `composer_bindings`).
                                         .key_context(super::keybindings::COMPOSER_CONTEXT)

@@ -240,7 +240,9 @@ impl QuillApp {
                 .label(tr(keys::Q_MONEY_LEARN_MORE_ABOUT_TELEGRAM_GIFTS))
                 .ghost()
                 .small()
-                .on_click(cx.listener(|this, _, _, cx| this.open_premium(cx))),
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.open_premium_at(quill::premium_hub::promo::PromoFeature::Gifts, cx);
+                })),
         );
         let rows = info_rows(state, now, |date| format_unix_date_time(i64::from(date)));
         body = body.child(super::ton_wallet_details::facts(rows).bordered(true));

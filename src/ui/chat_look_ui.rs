@@ -19,7 +19,6 @@ use super::wallpaper_cache::Slot;
 use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error;
 use gpui_kit::component::button::*;
-use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::theme::ActiveTheme;
@@ -30,6 +29,12 @@ use quill::lang::{keys, tr, tr_with};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+
+mod apply;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod apply_tests;
+mod demo;
 
 /// What the dialog is for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -633,16 +638,10 @@ impl QuillApp {
                     .on_close(on_close);
             };
             let dark = cx.theme().is_dark();
-            let muted = cx.theme().muted_foreground;
             let (title, body, footer) = match &state.target {
                 LookTarget::Chat(chat_id) => {
                     let chat_id = *chat_id;
                     let session = this.session();
-                    let name = session
-                        .and_then(|s| s.chats.get(&chat_id))
-                        .map(|c| c.title.clone())
-                        .unwrap_or_default();
-                    let premium = session.is_some_and(|s| s.my_is_premium());
                     let own = session.and_then(|s| own_wallpaper(s, chat_id));
                     let has_own = own.is_some();
                     // The preview: pending wallpaper, else the chat's own,
@@ -779,34 +778,6 @@ impl QuillApp {
                             })),
                         );
                     }
-                    if (state.background.is_some() || state.file.is_some())
-                        && !this.is_boosted_look(chat_id)
-                    {
-                        wall = wall.child(if premium {
-                            Checkbox::new("chat-look-both")
-                                .checked(state.both)
-                                .label(tr_with(
-                                    keys::Q_MISC_ALSO_SET_FOR,
-                                    &[("name", &name.to_string())],
-                                ))
-                                .on_click(cx.listener(|this, &on, _, cx| {
-                                    if let Some(d) = this.dialogs.chat_look_dialog.as_mut() {
-                                        d.both = on;
-                                    }
-                                    cx.notify();
-                                }))
-                                .into_any_element()
-                        } else {
-                            div()
-                                .text_xs()
-                                .text_color(muted)
-                                .child(tr_with(
-                                    keys::Q_LEFTOVERS_WALLPAPER_FOR_YOU_ONLY,
-                                    &[("name", &name.to_string())],
-                                ))
-                                .into_any_element()
-                        });
-                    }
                     if let Some(error) =
                         session.and_then(|s| s.chats_state.background_error.clone())
                     {
@@ -828,34 +799,15 @@ impl QuillApp {
                             .and_then(|s| s.chats_state.chat_theme_names.get(&chat_id).cloned());
                         !plan_changes(current_theme.as_deref(), own, &state).is_empty()
                     };
-                    let footer = div()
-                        .flex()
-                        .justify_end()
-                        .gap_2()
-                        .child(
-                            Button::new("chat-look-cancel")
-                                .label(tr(keys::CANCEL))
-                                .ghost()
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.close_chat_look_dialog(cx);
-                                    this.close_kit_dialog_if_done(DialogKind::ChatLook, window, cx);
-                                })),
-                        )
-                        .child(
-                            Button::new("chat-look-apply")
-                                .label(if applying {
-                                    tr(keys::Q_MISC_APPLYING)
-                                } else {
-                                    tr(keys::Q_MISC_APPLY)
-                                })
-                                .primary()
-                                .disabled(!changed || applying)
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.apply_chat_look(cx);
-                                    this.close_kit_dialog_if_done(DialogKind::ChatLook, window, cx);
-                                })),
-                        )
-                        .into_any_element();
+                    let footer = this.chat_look_footer(
+                        apply::FooterState {
+                            chat_id,
+                            changed,
+                            applying,
+                        },
+                        &state,
+                        cx,
+                    );
                     (
                         tr(keys::Q_MISC_CHAT_COLORS_AND_WALLPAPER),
                         body.child(wall).into_any_element(),

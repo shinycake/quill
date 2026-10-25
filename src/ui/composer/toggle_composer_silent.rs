@@ -613,11 +613,7 @@ impl QuillApp {
                 .label("\u{2715}")
                 .ghost()
                 .on_click(cx.listener(|this, _, window, cx| {
-                    // Back to the formatted field.
-                    let markup = this.composer_markup(cx);
-                    this.composer_ui.rich_editor_open = false;
-                    this.set_composer_markup(&markup, window, cx);
-                    cx.notify();
+                    this.close_rich_editor(window, cx);
                 })),
         );
         let mut bar = div()

@@ -56,6 +56,8 @@ pub enum PaymentsPurpose {
     GetPremiumFeatures,
     /// `getPremiumState`.
     GetPremiumState,
+    /// `getBusinessFeatures`: the Business screen's rows and preview order.
+    GetBusinessFeatures,
     /// `getPremiumStickerExamples`. Response is `stickers`, kept in the
     /// Premium hub for the stickers feature preview.
     GetPremiumStickerExamples,
@@ -212,6 +214,7 @@ flat_purposes!(Payments(PaymentsPurpose) {
     SellGift,
     GetPremiumFeatures,
     GetPremiumState,
+    GetBusinessFeatures,
     GetPremiumStickerExamples,
     DeleteSavedOrderInfo,
     DeleteSavedCredentials,

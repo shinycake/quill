@@ -189,7 +189,9 @@ impl QuillApp {
         let premium = self.session().is_some_and(|s| s.my_is_premium());
         self.close_media_panel(cx);
         match pick(id, secs, premium) {
-            StatusPick::PremiumPreview => self.open_premium(cx),
+            StatusPick::PremiumPreview => {
+                self.open_premium_at(quill::premium_hub::PremiumFeature::EmojiStatus, cx)
+            }
             StatusPick::Remove => self.change_emoji_status_for(None, 0, cx),
             StatusPick::Set { id, secs } => self.change_emoji_status_for(Some(id), secs, cx),
         }

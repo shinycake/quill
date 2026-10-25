@@ -13,6 +13,7 @@ mod attachments;
 mod bar_click;
 mod commands;
 mod deferred_caption;
+mod draft_content;
 mod draft_topic;
 mod edit;
 mod edit_media_tools;
@@ -42,6 +43,7 @@ pub use commands::{
     merge_command_menu_items,
 };
 pub use deferred_caption::{DeferredCaption, has_editable_caption, set_caption};
+pub use draft_content::DraftContent;
 pub use draft_topic::{DraftKey, DraftTopic};
 pub use edit::{
     ComposerEdit, ComposerEditKind, EDIT_MEDIA_ALBUM_ERROR, EDIT_MEDIA_INVALID_FILE, EditMediaKind,

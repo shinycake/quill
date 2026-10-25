@@ -90,6 +90,7 @@ pub(crate) fn parse_users_payload(
             blocked: is_block_list_main(value.get("block_list")),
             share_theme: crate::peer_qr::theme::parse_share_theme(value.get("share_theme")),
             ratings: crate::stars_rating::parse_user_ratings(Some(value)),
+            voice_notes_restricted: voice_notes_restricted(Some(value)),
         })),
         "updateUserFullInfo" => Ok(EnvelopePayload::Users(UsersPayload::UpdateUserFullInfo {
             user_id: UserId(int53(value.get("user_id"))?),
@@ -123,6 +124,7 @@ pub(crate) fn parse_users_payload(
                     .and_then(|info| info.get("share_theme")),
             ),
             ratings: crate::stars_rating::parse_user_ratings(value.get("user_full_info")),
+            voice_notes_restricted: voice_notes_restricted(value.get("user_full_info")),
         })),
         "profileShareThemeBackdrops" => Ok(EnvelopePayload::Users(
             UsersPayload::ProfileShareThemeBackdrops(parse_share_theme_backdrops(value)),
@@ -144,6 +146,13 @@ pub(crate) fn parse_users_payload(
         _ => return Ok(None),
     };
     payload.map(Some)
+}
+
+/// `userFullInfo.has_restricted_voice_and_video_note_messages`.
+fn voice_notes_restricted(info: Option<&Value>) -> bool {
+    info.and_then(|info| info.get("has_restricted_voice_and_video_note_messages"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 /// `profileShareThemeBackdrops.backdrops`; colors are `0xRRGGBB`.

@@ -184,9 +184,13 @@ fn bot_info_fetched_once_on_chat_open() {
     driver.select_chat(ChatId(21)).unwrap();
     assert_eq!(info_fetches().len(), 1);
 
-    // A regular private chat never triggers the fetch.
+    // A regular private chat fetches its user's full info (whether they
+    // accept voice messages), keyed by user rather than by chat.
     driver.select_chat(ChatId(22)).unwrap();
-    assert_eq!(info_fetches().len(), 1);
+    let fetches = info_fetches();
+    assert_eq!(fetches.len(), 2);
+    assert!(fetches[1].contains("\"user_id\":22"));
+    assert!(driver.session.bot_info_for_chat(ChatId(22)).is_none());
 
     let _ = std::fs::remove_dir_all(&dir);
 }

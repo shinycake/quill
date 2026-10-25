@@ -4,6 +4,7 @@
 //! Pure state and copy; the UI reads it and the reducer feeds it.
 use super::*;
 use crate::ids::{ChatId, MessageId};
+use crate::lang::{keys, tr, tr_with};
 use crate::local_time::{civil_at, day_label};
 use crate::telegram::envelope::{
     ActiveLiveShare, AgeVerificationParams, FreezeStateUpdate, ParsedFileDownload,
@@ -209,10 +210,7 @@ pub fn speech_trial_toast(
 /// tdesktop `lng_audio_transcribe_trials_left` / `_trials_over` text for
 /// the free voice-to-text quota.
 pub fn speech_trial_hint(trial: &SpeechTrialUpdate, now: i64) -> String {
-    let date = day_label(
-        &civil_at(i64::from(trial.next_reset_date), 0),
-        &civil_at(now, 0),
-    );
+    let date = speech_trial_reset_label(trial, now);
     if trial.left_count > 0 {
         let noun = if trial.left_count == 1 {
             "transcription"
@@ -224,10 +222,31 @@ pub fn speech_trial_hint(trial: &SpeechTrialUpdate, now: i64) -> String {
             trial.left_count
         )
     } else {
-        format!(
-            "You have used all your free transcriptions this week. Wait until {date} to use it again or subscribe to Premium now."
+        tr_with(
+            keys::AUDIO_TRANSCRIBE_TRIALS_OVER,
+            &[
+                ("date", &date),
+                ("link", tr(keys::SETTINGS_PRIVACY_PREMIUM_LINK)),
+            ],
         )
     }
+}
+
+/// The transcribe button is locked: a free account that used its weekly
+/// transcriptions before the quota resets (tdesktop
+/// `TranscribeButton::hasLock`).
+pub fn speech_trial_locked(trial: Option<SpeechTrialUpdate>, premium: bool, now: i64) -> bool {
+    !premium
+        && trial
+            .is_some_and(|trial| trial.left_count == 0 && i64::from(trial.next_reset_date) > now)
+}
+
+/// The day the free transcription quota resets.
+pub fn speech_trial_reset_label(trial: &SpeechTrialUpdate, now: i64) -> String {
+    day_label(
+        &civil_at(i64::from(trial.next_reset_date), 0),
+        &civil_at(now, 0),
+    )
 }
 
 /// The frozen-account appeal deadline as a date.

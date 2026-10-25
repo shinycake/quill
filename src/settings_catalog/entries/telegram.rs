@@ -20,6 +20,12 @@ pub(super) const ENTRIES: &[Entry] = &[
         "greeting",
         "chatbots",
     ]),
+    Entry::new("telegram.send_gift", P, keys::SETTINGS_GIFT_PREMIUM).keywords(&[
+        "present",
+        "send",
+        "gift premium",
+        "birthday",
+    ]),
     Entry::new(
         "telegram.star_subscriptions",
         P,

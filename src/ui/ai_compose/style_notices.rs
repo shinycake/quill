@@ -117,7 +117,7 @@ impl QuillApp {
                     this.close_ai_compose(cx);
                     this.ai_compose.preview = None;
                     this.close_kit_dialog_if_done(DialogKind::AiCompose, window, cx);
-                    this.show_premium_ai_compose_preview(cx);
+                    this.open_premium_at(quill::premium_hub::PremiumFeature::TextComposition, cx);
                 })
                 .icon(IconName::Star)
             }

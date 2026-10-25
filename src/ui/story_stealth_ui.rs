@@ -13,6 +13,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
+use quill::premium_hub::PremiumFeature;
 use quill::state::{RequestPurpose, StoryStealthMode};
 use quill::story_stealth::{
     StealthButton, StealthPeriods, StealthPress, StealthToast, about_text, active_left, press,
@@ -119,7 +120,9 @@ impl QuillApp {
                 self.close_stealth_box();
                 self.show_stealth_toast(StealthToast::activated(facts.periods), cx);
             }
-            StealthPress::PremiumPreview => self.show_premium_stories_preview(cx),
+            StealthPress::PremiumPreview => {
+                self.open_premium_at(PremiumFeature::UpgradedStories, cx)
+            }
             StealthPress::CooldownToast => {
                 self.close_stealth_box();
                 self.show_stealth_toast(StealthToast::cooldown(), cx);

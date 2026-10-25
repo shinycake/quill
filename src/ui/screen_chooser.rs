@@ -654,7 +654,7 @@ impl QuillApp {
 }
 
 /// `text` with its `**bold**` runs in semibold (tdesktop marked text).
-fn bold_marked(text: &str) -> Div {
+pub(super) fn bold_marked(text: &str) -> Div {
     let (plain, bold) = split_bold(text);
     let style = HighlightStyle {
         font_weight: Some(FontWeight::SEMIBOLD),

@@ -373,6 +373,18 @@ impl QuillApp {
         message_id: MessageId,
         cx: &mut Context<Self>,
     ) {
+        let locked = self.session().is_some_and(|s| {
+            quill::state::speech_trial_locked(
+                s.sync.speech_trial,
+                s.my_is_premium(),
+                quill::local_time::now_unix(),
+            )
+        });
+        if locked {
+            // tdesktop `ShowPremiumPreviewBox(PremiumFeature::VoiceToText)`.
+            self.open_premium_at(quill::premium_hub::PremiumFeature::VoiceRecognition, cx);
+            return;
+        }
         if let Some(live) = self.live.as_mut() {
             match live.driver.recognize_speech(chat_id, message_id) {
                 Ok(_) => self

@@ -332,7 +332,7 @@ pub(crate) struct PendingDraft {
     /// The slot the edit belongs to, fixed when the timer was armed: a
     /// topic or thread switch before it fires still saves to the right one.
     pub(crate) topic: crate::composer::DraftTopic,
-    pub(crate) text: String,
+    pub(crate) content: crate::composer::DraftContent,
     pub(crate) reply_to: Option<SendReply>,
 }
 

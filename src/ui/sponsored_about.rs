@@ -18,7 +18,6 @@ use std::rc::Rc;
 
 /// The ad platform page the footer's "Learn more" opens.
 pub(super) const ADS_PLATFORM_URL: &str = "https://ads.telegram.org";
-const PREMIUM_URL: &str = "https://t.me/PremiumBot";
 
 /// What the open box shows about the ad it was opened from.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -115,7 +114,13 @@ impl QuillApp {
                             Button::new("sponsored-about-premium")
                                 .label(tr(keys::Q_OPS_TELEGRAM_PREMIUM))
                                 .link()
-                                .on_click(|_, _, cx| cx.open_url(PREMIUM_URL)),
+                                // tdesktop `ShowPremiumPreviewBox(NoAds)`.
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.open_premium_at(
+                                        quill::premium_hub::PremiumFeature::DisabledAds,
+                                        cx,
+                                    );
+                                })),
                         ),
                     ),
                 )

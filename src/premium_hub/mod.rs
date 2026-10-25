@@ -10,20 +10,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::{MessageSender, StickerContent, parse_sticker_value};
+pub use feature::{BusinessFeature, PremiumFeature};
 use serde_json::Value;
-
-/// `premiumFeatureProtectPrivateChatContent`'s title, which the Disable
-/// Sharing upsell opens.
-pub const NO_FORWARDS_TITLE: &str = "Protect private chat content";
-/// `premiumFeatureUniqueReactions`' title, which a locked reaction opens.
-pub const UNIQUE_REACTIONS_TITLE: &str = "Unique reactions";
-/// `premiumFeatureSavedMessagesTags`' title, which a tag opens.
-pub const SAVED_TAGS_TITLE: &str = "Tags for Saved Messages";
-pub const UPGRADED_STORIES_TITLE: &str = "Upgraded stories";
-
-/// `premiumFeatureTextComposition`'s title, which the AI compose box's
-/// Increase Limit opens.
-pub const AI_COMPOSE_TITLE: &str = "AI text tools";
 
 fn int(value: Option<&Value>) -> i64 {
     value
@@ -646,135 +634,12 @@ pub fn parse_received_gifts(value: &Value) -> GiftsPage {
     }
 }
 
-/// One Premium feature row (tdesktop `settings_premium.cpp`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PremiumFeatureRow {
-    pub title: &'static str,
-    pub about: &'static str,
-}
-
-/// Map a `premiumFeature*` constructor to its explainer row, in the order
-/// tdesktop lists them. Unknown (newer) features are skipped.
-pub fn feature_row(constructor: &str) -> Option<PremiumFeatureRow> {
-    let (title, about) = match constructor {
-        "premiumFeatureIncreasedLimits" => (
-            "Doubled limits",
-            "Up to 1000 channels, 20 folders, 10 pins, 20 public links and more.",
-        ),
-        "premiumFeatureIncreasedUploadFileSize" => (
-            "Files up to 4 GB",
-            "Upload documents and media of up to 4 GB each.",
-        ),
-        "premiumFeatureImprovedDownloadSpeed" => (
-            "Faster download speed",
-            "No speed limits when downloading media and documents.",
-        ),
-        "premiumFeatureVoiceRecognition" => (
-            "Voice-to-text conversion",
-            "Read the transcript of any incoming voice message.",
-        ),
-        "premiumFeatureDisabledAds" => (
-            "No ads",
-            "Sponsored messages in public channels are no longer shown.",
-        ),
-        "premiumFeatureUniqueReactions" => (
-            UNIQUE_REACTIONS_TITLE,
-            "Add more reactions to messages, including exclusive ones.",
-        ),
-        "premiumFeatureUniqueStickers" => (
-            "Premium stickers",
-            "Exclusive stickers with fullscreen effects.",
-        ),
-        "premiumFeatureCustomEmoji" => (
-            "Animated emoji",
-            "Use custom emoji from any pack in your messages.",
-        ),
-        "premiumFeatureAdvancedChatManagement" => (
-            "Advanced chat management",
-            "Tools to organize your chats: auto-archive and more.",
-        ),
-        "premiumFeatureProfileBadge" => (
-            "Profile badge",
-            "A badge next to your name shows you are subscribed.",
-        ),
-        "premiumFeatureEmojiStatus" => (
-            "Emoji status",
-            "Choose an emoji status to show next to your name.",
-        ),
-        "premiumFeatureAnimatedProfilePhoto" => (
-            "Animated profile pictures",
-            "Video avatars that play in chat lists and profiles.",
-        ),
-        "premiumFeatureForumTopicIcon" => (
-            "Topic icons",
-            "Create topics with any custom emoji as the icon.",
-        ),
-        "premiumFeatureAppIcons" => (
-            "Special app icons",
-            "Choose from a selection of Premium app icons.",
-        ),
-        "premiumFeatureRealTimeChatTranslation" => (
-            "Real-time translation",
-            "Translate entire chats in real time.",
-        ),
-        "premiumFeatureUpgradedStories" => (
-            UPGRADED_STORIES_TITLE,
-            "Longer stories, more captions, link and permanent options.",
-        ),
-        "premiumFeatureChatBoost" => (
-            "Boosts for channels",
-            "Boost channels to unlock perks for everyone.",
-        ),
-        "premiumFeatureAccentColor" => (
-            "Name and profile colors",
-            "Pick a color and logo for your name, replies and profile.",
-        ),
-        "premiumFeatureBackgroundForBoth" => (
-            "Wallpapers for both sides",
-            "Set a wallpaper for both you and your chat partner.",
-        ),
-        "premiumFeatureSavedMessagesTags" => {
-            (SAVED_TAGS_TITLE, "Organize saved messages with tags.")
-        }
-        "premiumFeatureMessagePrivacy" => ("Message privacy", "Choose who can send you messages."),
-        "premiumFeatureLastSeenTimes" => (
-            "Last seen times",
-            "See the last seen time of people who hid it.",
-        ),
-        "premiumFeatureBusiness" => (
-            "Telegram Business",
-            "Business hours, quick replies, chatbots and more.",
-        ),
-        "premiumFeatureMessageEffects" => (
-            "Message effects",
-            "Add animated effects to private messages.",
-        ),
-        "premiumFeatureChecklists" => ("Checklists", "Create checklists in chats."),
-        "premiumFeaturePaidMessages" => (
-            "Paid messages",
-            "Charge Stars for messages from people outside your contacts.",
-        ),
-        "premiumFeatureProtectPrivateChatContent" => (
-            NO_FORWARDS_TITLE,
-            "Restrict forwarding and saving of your private chats.",
-        ),
-        "premiumFeatureTextComposition" => (
-            AI_COMPOSE_TITLE,
-            "Rewrite, translate and fix your messages while typing.",
-        ),
-        "premiumFeatureRichMessages" => {
-            ("Rich messages", "Send messages with extended formatting.")
-        }
-        _ => return None,
-    };
-    Some(PremiumFeatureRow { title, about })
-}
-
-/// One `premiumLimit`, shown as "default → Premium".
+/// One `premiumLimit`, shown as "default → Premium" when it has a title;
+/// the untitled ones only feed the limit boxes and toasts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PremiumLimitRow {
     pub type_name: String,
-    pub title: &'static str,
+    pub title: Option<&'static str>,
     pub default_value: i64,
     pub premium_value: i64,
 }
@@ -795,10 +660,12 @@ fn limit_title(constructor: &str) -> Option<&'static str> {
         "premiumLimitTypeChatFolderInviteLinkCount" => "Folder invite links",
         "premiumLimitTypeShareableChatFolderCount" => "Shareable folders",
         "premiumLimitTypeActiveStoryCount" => "Active stories",
+        "premiumLimitTypeSimilarChatCount" => "Similar channels",
         _ => return None,
     })
 }
 
+pub mod feature;
 pub mod fragment;
 pub mod gift_value;
 pub mod promo;
@@ -810,7 +677,7 @@ pub mod upgraded;
 /// Premium Bot link the "Get Premium" button opens.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PremiumInfo {
-    pub features: Vec<PremiumFeatureRow>,
+    pub features: Vec<PremiumFeature>,
     pub limits: Vec<PremiumLimitRow>,
 }
 
@@ -820,7 +687,7 @@ pub fn parse_premium_features(value: &Value) -> PremiumInfo {
         .and_then(Value::as_array)
         .map(|rows| {
             rows.iter()
-                .filter_map(|f| feature_row(f.get("@type")?.as_str()?))
+                .filter_map(|f| PremiumFeature::from_td(f.get("@type")?.as_str()?))
                 .collect()
         })
         .unwrap_or_default();
@@ -832,7 +699,7 @@ pub fn parse_premium_features(value: &Value) -> PremiumInfo {
                 .filter_map(|l| {
                     Some(PremiumLimitRow {
                         type_name: l.get("type")?.get("@type")?.as_str()?.to_string(),
-                        title: limit_title(l.get("type")?.get("@type")?.as_str()?)?,
+                        title: limit_title(l.get("type")?.get("@type")?.as_str()?),
                         default_value: int(l.get("default_value")),
                         premium_value: int(l.get("premium_value")),
                     })
@@ -926,11 +793,23 @@ pub struct PremiumHub {
     /// The locked sticker whose click opened the stickers preview; it leads
     /// the preview (tdesktop `Descriptor::requestedSticker`).
     pub premium_requested: Option<crate::telegram::envelope::StickerItem>,
-    /// The page of the Premium dialog: the overview or "Doubled limits".
+    /// The page of the Premium dialog: the overview, "Doubled limits" or a
+    /// feature preview.
     pub promo_page: promo::PromoPage,
+    /// A preview a reducer asked the UI to open (tdesktop opens the No Ads
+    /// preview when a sponsored report needs Premium).
+    pub promo_request: Option<promo::PromoFeature>,
+    /// `getBusinessFeatures`: the Business screen's rows in the server's
+    /// order; `None` until it answers.
+    pub business_features: Option<Vec<BusinessFeature>>,
+    pub business_features_loading: bool,
     /// The limit box that is open (pins, caption, GIFs, ...), with how far
     /// over the limit the action went when that is known (caption).
     pub limit_box: Option<(crate::premium_limits::PremiumLimitKind, i64)>,
+    /// The limit toast waiting for the next frame (saved GIFs, favorite
+    /// stickers, similar channels, owned bots).
+    pub limit_toast: Option<crate::premium_limits::PremiumLimitKind>,
+    pub limits: crate::premium_limits::LimitStore,
     /// Settings → My Grams (`ton`).
     pub grams: ton::GramsHub,
     /// The upgraded gift whose value is asked for or shown (`gift_value`).

@@ -7,16 +7,16 @@
 use super::app::QuillApp;
 use super::chat_row::{chat_avatar, compact_count};
 use super::chat_theme::{accent, text_muted};
-use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
-use quill::state::{InfoPanelTarget, SIMILAR_CHANNELS_PREMIUM_LIMIT, Session, SimilarTile};
+use quill::premium_limits::PremiumLimitKind;
+use quill::state::{InfoPanelTarget, Session, SimilarTile};
 use quill::telegram::envelope::ChatKind;
 use std::path::PathBuf;
 
@@ -207,7 +207,7 @@ impl QuillApp {
 
     /// "More Channels" / "View all": the channel's info panel lists every
     /// similar channel; without Premium the locked tile explains the cap
-    /// (tdesktop `lng_similar_channels_premium_all`).
+    /// with tdesktop's Premium toast (`lng_similar_channels_premium_all`).
     fn open_more_similar_channels(
         &mut self,
         chat_id: ChatId,
@@ -216,14 +216,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if locked {
-            self.connection.set_note(StatusNote::info(tr_with(
-                keys::Q_MISC_SUBSCRIBE_TO_TELEGRAM_PREMIUM_TO,
-                &[(
-                    "similar_channels_premium_limit",
-                    &SIMILAR_CHANNELS_PREMIUM_LIMIT.to_string(),
-                )],
-            )));
-            cx.notify();
+            self.show_premium_limit(PremiumLimitKind::SimilarChats, 0, cx);
             return;
         }
         let supergroup_id = self

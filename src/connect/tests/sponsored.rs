@@ -91,5 +91,25 @@ fn sponsored_fetch_view_once_and_click() {
             .requests
             .has_purpose_for_chat(RequestPurpose::ClickChatSponsoredMessage, chat)
     );
+
+    // "Hide ads" without Premium sends nothing and asks for the No ads
+    // preview (tdesktop `ShowPremiumPreviewBox(NoAds)`).
+    assert!(
+        driver
+            .hide_sponsored_messages(chat, 9001)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        !recorder
+            .snapshot()
+            .iter()
+            .any(|json| json.contains("toggleHasSponsoredMessagesEnabled"))
+    );
+    assert_eq!(
+        driver.session.payments.hub.promo_request,
+        Some(crate::premium_hub::PremiumFeature::DisabledAds.into())
+    );
+    assert!(driver.session.messages.last_sponsored_report.is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }

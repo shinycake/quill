@@ -172,6 +172,11 @@ impl Session {
                     default_value,
                     premium_value,
                 );
+                self.payments.hub.limits.apply_premium_limit(
+                    &type_name,
+                    i64::from(default_value),
+                    i64::from(premium_value),
+                );
             }
             ChatListPayload::RecommendedChatFolders(folders) => {
                 self.chat_list.recommended_folders = Some(folders);
@@ -202,6 +207,7 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetArchiveChatListSettings) {
                     self.chat_list.archive_chat_list_settings = Some(settings);
                     self.chat_list.archive_settings_loading = false;
+                    self.chat_list.archive_mute.note_settings(&settings);
                 }
             }
         }

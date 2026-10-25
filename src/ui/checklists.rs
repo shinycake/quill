@@ -4,6 +4,7 @@
 //! (`lng_polls_add_option*`).
 #![deny(clippy::indexing_slicing)]
 
+use super::ai_compose::marked_link;
 use super::app::QuillApp;
 use super::dialogs::OptionMediaSlot;
 use super::polls::AttachTarget;
@@ -23,11 +24,25 @@ use quill::lang::{keys, tr, tr_with};
 use quill::poll::validate_new_option;
 use quill::telegram::envelope::{MessageContent, MessageSender};
 
-fn premium_only(key: quill::lang::Key) -> String {
-    tr_with(key, &[("link", tr(keys::TODO_PREMIUM_LINK))])
-}
-
 impl QuillApp {
+    /// tdesktop `PeerMenuTodoWantsPremium`: the toast whose "Telegram
+    /// Premium" opens the checklists preview.
+    fn checklist_premium_toast(
+        &mut self,
+        key: quill::lang::Key,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let link = format!("**{}**", tr(keys::TODO_PREMIUM_LINK));
+        let marked = marked_link(tr(key), "link", &link);
+        let toast = Self::marked_toast("checklist-premium-toast", marked, cx, |this, _, cx| {
+            this.open_premium_at(quill::premium_hub::PremiumFeature::Checklists, cx);
+        });
+        cx.defer_in(window, move |_, window, cx| {
+            window.push_notification(toast, cx);
+        });
+    }
+
     /// Whether the attach menu offers "Checklist" in the open chat
     /// (`PeerData::canCreateTodoLists`).
     pub(super) fn checklist_creation_allowed(&self) -> bool {
@@ -44,9 +59,7 @@ impl QuillApp {
 
     pub(super) fn open_checklist_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.checklist_creation_allowed() {
-            self.connection
-                .set_note(StatusNote::info(premium_only(keys::TODO_CREATE_PREMIUM)));
-            cx.notify();
+            self.checklist_premium_toast(keys::TODO_CREATE_PREMIUM, window, cx);
             return;
         }
         self.composer_ui.checklist_dialog = Some(ChecklistDialog::new(None, window, cx));
@@ -67,9 +80,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if !self.session().is_some_and(|s| s.my_is_premium()) {
-            self.connection
-                .set_note(StatusNote::info(premium_only(keys::TODO_ADD_PREMIUM)));
-            cx.notify();
+            self.checklist_premium_toast(keys::TODO_ADD_PREMIUM, window, cx);
             return;
         }
         self.composer_ui.checklist_dialog = Some(ChecklistDialog::new(
@@ -186,13 +197,12 @@ impl QuillApp {
         chat_id: ChatId,
         message_id: MessageId,
         task_id: i32,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
             if !live.driver.session.my_is_premium() {
-                self.connection
-                    .set_note(StatusNote::info(premium_only(keys::TODO_MARK_PREMIUM)));
-                cx.notify();
+                self.checklist_premium_toast(keys::TODO_MARK_PREMIUM, window, cx);
                 return;
             }
             self.connection.set_note(

@@ -112,6 +112,7 @@ impl Session {
                 for name in removed {
                     self.chat_list.suggestions.actions.remove(name);
                 }
+                self.chat_list.archive_mute.note_suggested(added);
                 const CHECK: &str = "suggestedActionCheckPassword";
                 if added.iter().any(|name| name == CHECK) {
                     self.settings.privacy_data.check_password_suggested = true;

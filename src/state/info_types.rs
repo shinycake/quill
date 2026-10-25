@@ -20,6 +20,9 @@ pub struct UserFullInfoData {
     pub extras: crate::telegram::envelope::UserProfileExtras,
     /// The Stars rating (`rating`, `pending_rating`).
     pub ratings: crate::stars_rating::UserRatings,
+    /// `has_restricted_voice_and_video_note_messages`: the user accepts no
+    /// voice or video messages (tdesktop `VoiceMessagesForbidden`).
+    pub voice_notes_restricted: bool,
 }
 
 /// B10: which chat-id list a profile panel fetched. The key of

@@ -276,49 +276,55 @@ fn markup_preview_text(text: &str) -> (String, Vec<TextEntity>) {
 pub fn preview_blocks(text: &str) -> Vec<RichBlock> {
     markup_to_blocks(text)
         .into_iter()
-        .map(|block| match block {
+        .map(preview_block)
+        .collect()
+}
+
+/// One editor block (markup text) in the form the block renderer paints:
+/// clean text with its entities, see [`preview_blocks`].
+pub fn preview_block(block: RichBlock) -> RichBlock {
+    match block {
+        RichBlock::Paragraph {
+            text,
+            entities: _,
+            buttons,
+        } => {
+            let (clean, styled) = markup_preview_text(&text);
             RichBlock::Paragraph {
-                text,
-                entities: _,
+                text: clean,
+                entities: styled,
                 buttons,
-            } => {
-                let (clean, styled) = markup_preview_text(&text);
-                RichBlock::Paragraph {
-                    text: clean,
-                    entities: styled,
-                    buttons,
-                }
             }
+        }
+        RichBlock::Heading {
+            level,
+            text,
+            entities: _,
+        } => {
+            let (clean, styled) = markup_preview_text(&text);
             RichBlock::Heading {
                 level,
-                text,
-                entities: _,
-            } => {
-                let (clean, styled) = markup_preview_text(&text);
-                RichBlock::Heading {
-                    level,
-                    text: clean,
-                    entities: styled,
-                }
+                text: clean,
+                entities: styled,
             }
-            RichBlock::List { ordered, items } => RichBlock::List {
-                ordered,
-                items: items
-                    .into_iter()
-                    .map(|item| RichListItem {
-                        text: markup_preview_text(&item.text).0,
-                        ..item
-                    })
-                    .collect(),
-            },
-            RichBlock::Collapsible { header, body, open } => RichBlock::Collapsible {
-                header: markup_preview_text(&header).0,
-                body: markup_preview_text(&body).0,
-                open,
-            },
-            other => other,
-        })
-        .collect()
+        }
+        RichBlock::List { ordered, items } => RichBlock::List {
+            ordered,
+            items: items
+                .into_iter()
+                .map(|item| RichListItem {
+                    text: markup_preview_text(&item.text).0,
+                    ..item
+                })
+                .collect(),
+        },
+        RichBlock::Collapsible { header, body, open } => RichBlock::Collapsible {
+            header: markup_preview_text(&header).0,
+            body: markup_preview_text(&body).0,
+            open,
+        },
+        other => other,
+    }
 }
 
 fn parse_heading_marker(trimmed: &str) -> Option<RichBlock> {
