@@ -50,28 +50,26 @@ pub fn render_action(action: &ServiceAction, ctx: &ServiceCtx<'_>) -> ServiceTex
             .extend(ctx.user(*new_owner))
             .t(" the new main admin of the group.")
             .done(),
-        A::ProtectedToggled { enabled } => match (ctx.actor_is_me(), enabled) {
-            (true, true) => text("You disabled sharing in this chat"),
-            (true, false) => text("You enabled sharing in this chat"),
-            (false, true) => from().t(" disabled sharing in this chat").done(),
-            (false, false) => from().t(" enabled sharing in this chat").done(),
+        A::ProtectedToggled {
+            enabled,
+            was_enabled,
+            ..
+        } => match (enabled == was_enabled, ctx.actor_is_me(), enabled) {
+            (true, ..) => text("Sharing in this chat is still disabled"),
+            (false, true, true) => text("You disabled sharing in this chat"),
+            (false, true, false) => text("You enabled sharing in this chat"),
+            (false, false, true) => from().t(" disabled sharing in this chat").done(),
+            (false, false, false) => from().t(" enabled sharing in this chat").done(),
         },
         A::ProtectedDisableRequested { expired } => {
             if *expired {
                 text("Sharing enable request has expired")
+            } else if ctx.actor_is_me() {
+                text("You requested to enable sharing in this chat, which includes:")
             } else {
-                let features = "\nForwarding messages\nSaving photos and videos\nCopying messages";
-                if ctx.actor_is_me() {
-                    text(&format!(
-                        "You requested to enable sharing in this chat, which includes:{features}"
-                    ))
-                } else {
-                    from()
-                        .t(format!(
-                            " would like to enable sharing in this chat, which includes:{features}"
-                        ))
-                        .done()
-                }
+                from()
+                    .t(" would like to enable sharing in this chat, which includes:")
+                    .done()
             }
         }
         A::AddMembers { users } => match users.as_slice() {

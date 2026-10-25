@@ -834,18 +834,21 @@ impl QuillApp {
                 .and_then(|(_, user)| user)
                 .map(|user| user.first_name.trim().to_string())
                 .filter(|name| !name.is_empty());
-            rows.push(info_row(
-                order::SELECT,
-                "menu-noforwards",
-                None,
-                quill::message_menu::noforwards_text(
-                    is_channel_post,
-                    is_group && !is_channel_post,
-                    is_bot,
-                    message.is_outgoing,
-                    peer_name.as_deref(),
-                ),
-            ));
+            let protected_by_me = actions.map(|a| a.has_protected_content_by_current_user);
+            if peer.is_none() || is_bot || protected_by_me.is_some() {
+                rows.push(info_row(
+                    order::SELECT,
+                    "menu-noforwards",
+                    None,
+                    quill::message_menu::noforwards_text(
+                        is_channel_post,
+                        is_group && !is_channel_post,
+                        is_bot,
+                        protected_by_me.unwrap_or(false),
+                        peer_name.as_deref(),
+                    ),
+                ));
+            }
         }
         let page_rows: Vec<MenuRow> = match page {
             MessageMenuPage::Main => rows,

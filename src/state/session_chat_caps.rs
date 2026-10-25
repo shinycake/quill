@@ -634,6 +634,7 @@ impl Session {
             self.chats_state.protected_chats.insert(chat_id);
         } else {
             self.chats_state.protected_chats.remove(&chat_id);
+            self.groups.private_sharing.forget_disabled(ChatId(chat_id));
         }
     }
 

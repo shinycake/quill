@@ -218,6 +218,9 @@ pub(super) fn service_message_row(
     media_roots: &[PathBuf],
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
+    if let Some(row) = super::history::sharing_request::sharing_request_row(message, session, cx) {
+        return row;
+    }
     let row_id = message.id.0 as u64;
     let text = session
         .and_then(|session| session.service_text(message))

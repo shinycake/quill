@@ -1,0 +1,11 @@
+"lng_enable_sharing_request_title" = "Enable Sharing";
+"lng_enable_sharing_request_text" = "You need **{name}'s** approval to enable sharing. Send a request?";
+"lng_enable_sharing_request_button" = "Send Request";
+"lng_action_no_forwards_request" = "{from} would like to enable sharing in this chat, which includes:";
+"lng_action_no_forwards_request_you" = "You requested to enable sharing in this chat, which includes:";
+"lng_action_no_forwards_feature_forwarding" = "Forwarding messages";
+"lng_action_no_forwards_feature_saving" = "Saving photos and videos";
+"lng_action_no_forwards_feature_copying" = "Copying messages";
+"lng_action_no_forwards_accept" = "Accept";
+"lng_action_no_forwards_reject" = "Reject";
+"qll_sharing_answer_failed" = "Could not answer the request";

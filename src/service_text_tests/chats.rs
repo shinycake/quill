@@ -83,7 +83,19 @@ wording!(
     protected_content_request,
     BY_DANA,
     r#"{"@type":"messageChatHasProtectedContentDisableRequested","is_expired":false}"#,
-    "Dana Cole would like to enable sharing in this chat, which includes:\nForwarding messages\nSaving photos and videos\nCopying messages"
+    "Dana Cole would like to enable sharing in this chat, which includes:"
+);
+wording!(
+    protected_content_request_mine,
+    BY_ME,
+    r#"{"@type":"messageChatHasProtectedContentDisableRequested","is_expired":false}"#,
+    "You requested to enable sharing in this chat, which includes:"
+);
+wording!(
+    protected_content_request_rejected,
+    BY_DANA,
+    r#"{"@type":"messageChatHasProtectedContentToggled","request_message_id":7340032,"old_has_protected_content":true,"new_has_protected_content":true}"#,
+    "Sharing in this chat is still disabled"
 );
 wording!(
     protected_content_request_expired,

@@ -271,6 +271,12 @@ pub(crate) fn parse_messages_payload(
                     can_add_offer: flag("can_add_offer"),
                     can_edit_suggested_post_info: flag("can_edit_suggested_post_info"),
                     can_get_author: flag("can_get_author"),
+                    has_protected_content_by_current_user: flag(
+                        "has_protected_content_by_current_user",
+                    ),
+                    has_protected_content_by_other_user: flag(
+                        "has_protected_content_by_other_user",
+                    ),
                 }),
             ))
         }

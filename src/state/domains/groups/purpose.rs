@@ -323,6 +323,13 @@ pub enum GroupsPurpose {
     /// `deleteCommunity` (TDLib 1.8.68). Response is `ok`; the state
     /// drops the community and its full-info pack.
     DeleteCommunity,
+    /// `processChatHasProtectedContentDisableRequest`: Accept or Reject a
+    /// request to enable sharing. Response is `ok`; the toggle arrives as a
+    /// new service message.
+    AnswerSharingRequest {
+        chat_id: ChatId,
+        message_id: MessageId,
+    },
 }
 
 flat_purposes!(Groups(GroupsPurpose) {

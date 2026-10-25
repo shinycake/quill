@@ -789,6 +789,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.refresh_emoji_pack_catalog()?;
         }
         self.refresh_open_mask_lists()?;
+        self.apply_resolved_enable_sharing()?;
         self.maybe_resolve_emoji_status_choices()?;
         self.sync_open_chat_custom_emoji()?;
         if gif_bot_changed {

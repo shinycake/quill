@@ -1,11 +1,11 @@
 use crate::ids::RequestId;
 use crate::telegram::envelope::{ChatAvailableReactions, ReactionType};
 use crate::telegram::requests::{
-    get_suitable_discussion_chats, set_chat_available_reactions, set_chat_discussion_group,
-    toggle_chat_has_protected_content, toggle_supergroup_can_have_sponsored_messages,
-    toggle_supergroup_has_hidden_members, toggle_supergroup_is_all_history_available,
-    toggle_supergroup_is_forum, toggle_supergroup_join_to_send_messages,
-    upgrade_basic_group_chat_to_supergroup_chat,
+    get_suitable_discussion_chats, process_chat_has_protected_content_disable_request,
+    set_chat_available_reactions, set_chat_discussion_group, toggle_chat_has_protected_content,
+    toggle_supergroup_can_have_sponsored_messages, toggle_supergroup_has_hidden_members,
+    toggle_supergroup_is_all_history_available, toggle_supergroup_is_forum,
+    toggle_supergroup_join_to_send_messages, upgrade_basic_group_chat_to_supergroup_chat,
 };
 use serde_json::Value;
 
@@ -75,6 +75,24 @@ fn protected_content_and_upgrade_target_the_chat() {
     ));
     assert_eq!(upgrade["@type"], "upgradeBasicGroupChatToSupergroupChat");
     assert_eq!(upgrade["chat_id"], -555);
+}
+
+#[test]
+fn answering_a_sharing_request_names_the_request_message() {
+    let accept = parse(&process_chat_has_protected_content_disable_request(
+        RequestId(8),
+        31,
+        7_340_032,
+        true,
+    ));
+    assert_eq!(
+        accept["@type"],
+        "processChatHasProtectedContentDisableRequest"
+    );
+    assert_eq!(accept["@extra"], "8");
+    assert_eq!(accept["chat_id"], 31);
+    assert_eq!(accept["request_message_id"], 7_340_032);
+    assert_eq!(accept["approve"], true);
 }
 
 #[test]

@@ -557,15 +557,25 @@ impl Session {
                     menu.properties = Some(properties);
                 }
             }
-            MessagesPayload::MessageProperties(actions) => {
-                if let Some(RequestPurpose::Messages(MessagesPurpose::GetMessageMenuActions {
+            MessagesPayload::MessageProperties(actions) => match pending.map(|p| p.purpose) {
+                Some(RequestPurpose::Messages(MessagesPurpose::GetMessageMenuActions {
                     chat_id,
                     message_id,
-                })) = pending.map(|p| p.purpose)
-                {
+                })) => {
                     self.messages.message_menu_actions = Some((chat_id, message_id, actions));
                 }
-            }
+                Some(RequestPurpose::Messages(MessagesPurpose::GetSharingProtection {
+                    chat_id,
+                })) => {
+                    self.groups.private_sharing.enable =
+                        Some(if actions.has_protected_content_by_other_user {
+                            EnableSharing::AskToRequest(chat_id)
+                        } else {
+                            EnableSharing::TurnOff(chat_id)
+                        });
+                }
+                _ => {}
+            },
         }
     }
 }

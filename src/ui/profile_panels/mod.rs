@@ -415,6 +415,7 @@ mod main_profile_tab_dialog;
 mod more_menu;
 mod photo_delete;
 mod photo_viewer;
+mod sharing_request_box;
 mod submit_personal_photo;
 
 #[cfg(test)]

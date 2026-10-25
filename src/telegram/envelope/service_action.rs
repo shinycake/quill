@@ -81,8 +81,14 @@ pub enum ServiceAction {
     OwnerChanged {
         new_owner: i64,
     },
+    /// `messageChatHasProtectedContentToggled`: `enabled` is the new
+    /// `has_protected_content`. The same old and new value means a request
+    /// to enable sharing was rejected; `request_message_id` names it (0 for
+    /// a plain toggle).
     ProtectedToggled {
         enabled: bool,
+        was_enabled: bool,
+        request_message_id: i64,
     },
     ProtectedDisableRequested {
         expired: bool,
@@ -558,6 +564,8 @@ impl ServiceAction {
             },
             "messageChatHasProtectedContentToggled" => A::ProtectedToggled {
                 enabled: flag(value, "new_has_protected_content"),
+                was_enabled: flag(value, "old_has_protected_content"),
+                request_message_id: i(value, "request_message_id"),
             },
             "messageChatHasProtectedContentDisableRequested" => A::ProtectedDisableRequested {
                 expired: flag(value, "is_expired"),
