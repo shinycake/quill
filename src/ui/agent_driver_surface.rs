@@ -44,6 +44,7 @@ pub(super) const HARD_DIALOGS: &[&str] = &[
     "StarsGift",
     "StarsRating",
     "SendGift",
+    "GiftRecipients",
     "GiftTransfer",
     "GiftMarket",
     "GiftValue",

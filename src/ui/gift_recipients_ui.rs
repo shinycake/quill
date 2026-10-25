@@ -28,6 +28,11 @@ const ROWS_MAX: usize = 200;
 
 impl QuillApp {
     pub(super) fn open_gift_recipients(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if quill::agent::ui_driver::guard::refuse_hard_if_injecting(
+            quill::agent::ui_driver::guard::HardSurface::Payments,
+        ) {
+            return;
+        }
         self.payments
             .gift_recipient_search
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -232,7 +237,8 @@ crate::ui::shell::register_dialogs! {
         3760,
         |app| app.payments.gift_recipients_open,
         QuillApp::build_gift_recipients_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_gift_recipients(cx)),
 }
 
 #[cfg(test)]
