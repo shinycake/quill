@@ -40,7 +40,8 @@ pub fn run(_args: &Value) -> Result<ToolOutput, ToolError> {
     } else if paused {
         "UI driver: paused. The user took control of Quill's window; wait, then check quill_status again.\n"
     } else {
-        "UI driver: on (read_ui_tree, click_element, type_text, press_keys, scroll_view, hover_element, open_menu).\n"
+        "UI driver: on (read_ui_tree, take_screenshot, click_element, type_text, press_keys, scroll_view, hover_element, open_menu). \
+Screenshots: one a second and 20 a minute, cut to your grants like the tree.\n"
     });
     text.push_str("Next: list_unread to catch up, or list_chats to find a chat.");
     Ok(ToolOutput {
@@ -60,6 +61,12 @@ pub fn run(_args: &Value) -> Result<ToolOutput, ToolError> {
                 "active": driving,
                 "paused": paused,
                 "stopped": stopped,
+                "screenshots": {
+                    "available": ui_driver && !stopped && crate::agent::ui_driver::shot::CAPTURE_BUILT,
+                    "per_minute": crate::agent::ui_driver::shot::PER_MINUTE,
+                    "min_interval_ms": crate::agent::ui_driver::shot::MIN_INTERVAL.as_millis() as u64,
+                    "max_long_side": crate::agent::ui_driver::shot::MAX_LONG_SIDE,
+                },
             },
         }),
     })

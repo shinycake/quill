@@ -240,6 +240,13 @@ user pressed Stop.
 | `scroll_view` | Scroll what is under a node or point; `dy` > 0 scrolls down. |
 | `hover_element` | Move the pointer over a node, for a tooltip or hover controls. |
 | `open_menu` | Right-click a node and get the menu's items. |
+| `take_screenshot` | See the window as a PNG, with the tree of the same frame. `full_resolution` keeps every device pixel; otherwise the long side is at most 1280. |
+
+Every input tool also takes `"screenshot": true` (and `full_resolution`)
+to get a PNG of the window after the input, next to the usual answer. Use
+the tree to find and target things; use a screenshot to check layout,
+colours, images or anything the tree does not describe. Divide a point
+in the image by its `scale` to get window pixels for `click_element`.
 
 Open settings and read them:
 
@@ -294,6 +301,16 @@ Rules, all enforced by Quill:
 - The window acts for real: opening or scrolling a chat marks it read,
   typing in the message box saves a draft and shows the other side that
   you are typing. Every command is in the user's activity log.
+- A screenshot shows what the tree shows and nothing more. Rows and parts
+  of the window you may not see are a flat grey block; with "All other
+  chats" on, only secret chats without their own grant are grey. A screen
+  that is never yours gets no screenshot, just the same note as
+  `read_ui_tree`. Quill's own takeover glow and pill are not in it.
+- Screenshots are for operating Quill, not for archiving chats: at most
+  one a second and 20 a minute, each one is in the user's activity log,
+  and over the limit the tool answers with how long to wait (an input
+  tool still runs, without the image). Read messages with the chat
+  tools.
 - While you drive, Quill shows it: a glow around the window, a ghost
   cursor where you are about to click or type, and a pill at the top
   saying you are driving, with Stop. Each click glides the ghost there
@@ -314,3 +331,8 @@ pickers, the input method editor, and system dialogs. Quill's window must
 be open and visible so it draws frames; a hidden or minimised window
 answers "did not redraw". Bounds are in window pixels, not screen pixels.
 `focus` is reported only when the focused element itself carries a role.
+A screenshot is Quill's own rendering of its window, so it never shows
+other apps; text and images are drawn as on screen, but a renderer that
+cannot read its frame back (a Windows HDR display, for one) answers with
+an error instead of an image. `quill_status` says whether screenshots are
+available (`ui_driver.screenshots.available`).

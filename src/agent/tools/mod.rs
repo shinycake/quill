@@ -18,6 +18,7 @@ mod td_redact;
 pub(crate) mod td_request;
 mod td_schema;
 mod ui;
+mod ui_shot;
 mod write;
 
 use crate::agent::td::{self, Client, TdError};
@@ -94,6 +95,7 @@ fn all_tools() -> impl Iterator<Item = &'static Tool> {
         .chain(write::TOOLS)
         .chain(td_call::TOOLS)
         .chain(ui::TOOLS)
+        .chain(ui_shot::TOOLS)
 }
 
 struct Tool {
@@ -344,18 +346,25 @@ pub(crate) fn names() -> Vec<&'static str> {
 pub fn call(name: &str, arguments: &Value, agent: &str) -> Value {
     let _ = AGENT.try_with(|current| current.replace(agent.to_string()));
     let _ = GENERATION.try_with(|current| current.set(crate::agent::access::generation()));
+    let _ = ui_shot::take_attached();
     let result = match all_tools().find(|tool| tool.name == name) {
         Some(tool) => (tool.run)(arguments),
         None => Err(ToolError::new(format!(
             "There is no tool named {name}. Call tools/list, or quill_status, to see the tools."
         ))),
     };
+    // Screenshots ride along as image blocks after the text.
+    let images = ui_shot::take_attached();
     match result {
-        Ok(output) => json!({
-            "content": [{"type": "text", "text": output.text}],
-            "structuredContent": output.data,
-            "isError": false,
-        }),
+        Ok(output) => {
+            let mut content = vec![json!({"type": "text", "text": output.text})];
+            content.extend(images);
+            json!({
+                "content": content,
+                "structuredContent": output.data,
+                "isError": false,
+            })
+        }
         Err(ToolError(message)) => json!({
             "content": [{"type": "text", "text": message}],
             "isError": true,

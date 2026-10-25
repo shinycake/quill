@@ -8,6 +8,7 @@
 //! ([`note_real_input`]); the pause itself is in `super::takeover`.
 
 use super::keys::KeyChord;
+use super::shot::{Shot, ShotOptions};
 use super::tree::{UiNode, UiTree};
 use serde_json::Value;
 use std::collections::VecDeque;
@@ -104,6 +105,9 @@ pub struct UiRequest {
     /// The MCP client's name, for the log.
     pub agent: String,
     pub command: UiCommand,
+    /// A screenshot after the command (`super::shot`): of the window for
+    /// `ReadTree`, of the window the input left for an input command.
+    pub shot: Option<ShotOptions>,
 }
 
 /// What `UiCommand::State` answers.
@@ -133,6 +137,12 @@ pub struct UiSend {
 pub enum UiReply {
     State(UiState),
     Tree(UiTree),
+    /// `ReadTree` with a screenshot: the tree of the frame the screenshot
+    /// shows.
+    Shot {
+        tree: UiTree,
+        shot: Shot,
+    },
     /// Input ran; `added` lists the nodes that appeared since, `refusals`
     /// what a handler refused to do for the agent, `ui_send` a composer
     /// send handed to the agent path.
@@ -141,6 +151,9 @@ pub enum UiReply {
         added: Vec<UiNode>,
         refusals: Vec<String>,
         ui_send: Option<UiSend>,
+        /// The screenshot asked for, or why there is none; `tree` is then
+        /// the tree of the frame it shows.
+        shot: Option<Result<Shot, String>>,
     },
     /// A command without a tree ran (`ComposerSent`).
     Ok,
@@ -188,6 +201,16 @@ pub fn send(agent: &str, command: UiCommand, timeout: Duration) -> Result<UiRepl
     post(agent, command)?.wait(timeout)
 }
 
+/// [`send`] with a screenshot after the command.
+pub fn send_with_shot(
+    agent: &str,
+    command: UiCommand,
+    shot: Option<ShotOptions>,
+    timeout: Duration,
+) -> Result<UiReply, BridgeError> {
+    post_with_shot(agent, command, shot)?.wait(timeout)
+}
+
 /// A filed command, waiting for the UI's answer.
 pub struct Ticket {
     id: u64,
@@ -215,6 +238,15 @@ impl Ticket {
 
 /// File `command` without waiting (the UI thread is woken).
 pub fn post(agent: &str, command: UiCommand) -> Result<Ticket, BridgeError> {
+    post_with_shot(agent, command, None)
+}
+
+/// [`post`] with a screenshot after the command.
+pub fn post_with_shot(
+    agent: &str,
+    command: UiCommand,
+    shot: Option<ShotOptions>,
+) -> Result<Ticket, BridgeError> {
     let mut queue = crate::locks::lock_or_recover(&QUEUE);
     if queue.len() >= MAX_WAITING {
         return Err(BridgeError::Busy);
@@ -227,6 +259,7 @@ pub fn post(agent: &str, command: UiCommand) -> Result<Ticket, BridgeError> {
             id,
             agent: agent.to_string(),
             command,
+            shot,
         },
         reply,
         cancelled: cancelled.clone(),

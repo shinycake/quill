@@ -1,5 +1,6 @@
 //! The UI driver tools: read Quill's window as an element tree, click,
-//! hover, scroll, type and press keys in it. Each call hands a command to
+//! hover, scroll, type and press keys in it, each with an optional
+//! screenshot after (`ui_shot`). Each call hands a command to
 //! the UI thread (`crate::agent::ui_driver::bridge`) and waits for its
 //! answer; this thread never touches GPUI.
 //!
@@ -11,6 +12,7 @@
 //! through the same write path as `send_message`.
 
 use super::target::{granted, my_user_id, stranger_bot};
+use super::ui_shot::{self, Asked};
 use super::write::common;
 use super::{Ctx, Tool, ToolError, ToolOutput, current_agent};
 use crate::agent::grants::Scope;
@@ -19,6 +21,7 @@ use crate::agent::ui_driver::bridge::{
 };
 use crate::agent::ui_driver::keys;
 use crate::agent::ui_driver::policy;
+use crate::agent::ui_driver::shot::ShotOptions;
 use crate::agent::ui_driver::tree::{UiNode, UiTree, parse_id};
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -53,8 +56,10 @@ Output: window {width, height, scale}, focus (node id), nodes [{id, role, name, 
 agents may use (the point must be over them). Pressing Send in the message box sends through the agent path (grants, pacing, \
 \"Confirm each send\", the activity log) and the reply says so; other sends, deletions, payments and settings changes are refused and listed under refusals. \
 Opening or scrolling a chat marks it read. \
-Example input: {\"target\": {\"node\": \"3f2a\"}}, or {\"target\": {\"x\": 120, \"y\": 40}, \"button\": \"right\", \"count\": 2}. \
-Output: {clicked {id, role, name}, focus {id, role, name}, added [nodes that appeared], refusals, sent}.",
+Add \"screenshot\": true for a picture of the window after the click (as take_screenshot). \
+Example input: {\"target\": {\"node\": \"3f2a\"}}, or {\"target\": {\"x\": 120, \"y\": 40}, \"button\": \"right\", \"count\": 2}, \
+or {\"target\": {\"node\": \"3f2a\"}, \"screenshot\": true}. \
+Output: {clicked {id, role, name}, focus {id, role, name}, added [nodes that appeared], refusals, sent, screenshot}, plus a PNG image when asked.",
         schema: click_schema,
         run: click_element,
         read_only: false,
@@ -65,7 +70,8 @@ Output: {clicked {id, role, name}, focus {id, role, name}, added [nodes that app
         description: "Use to type text into the focused text box (click it first; nothing is typed while a button or a list has the focus). \
 A line break is typed as the chord that inserts one in Quill's message box, never as a send; a tab character is refused. \
 Typing in the message box saves a draft and shows the other side that you are typing. \
-Example input: {\"text\": \"hello\"}. Output: {typed (characters), focus {id, role, name, value}, refusals}.",
+Add \"screenshot\": true for a picture of the window after typing. \
+Example input: {\"text\": \"hello\"}. Output: {typed (characters), focus {id, role, name, value}, refusals, screenshot}, plus a PNG image when asked.",
         schema: type_schema,
         run: type_text,
         read_only: false,
@@ -77,8 +83,9 @@ Example input: {\"text\": \"hello\"}. Output: {typed (characters), focus {id, ro
 joined with - or +, chords separated by spaces. Each chord is checked on its own: keys that quit or close Quill are refused, \
 Enter and Space only go to a focused text box (Enter in the message box sends through the agent path), and a chord that \
 moves to an ungranted chat stops the sequence. Chords never type characters; use type_text for text. \
+Add \"screenshot\": true for a picture of the window after the keys. \
 Example input: {\"keys\": \"cmd-k\"}, or {\"keys\": \"escape escape\"}, or {\"keys\": \"ctrl-shift-a\"}. \
-Output: {pressed [chords], focus {id, role, name}, added [nodes that appeared], refusals}.",
+Output: {pressed [chords], focus {id, role, name}, added [nodes that appeared], refusals, screenshot}, plus a PNG image when asked.",
         schema: keys_schema,
         run: press_keys,
         read_only: false,
@@ -88,8 +95,9 @@ Output: {pressed [chords], focus {id, role, name}, added [nodes that appeared], 
         title: "Scroll in Quill's window",
         description: "Use to scroll the element under a node or point by dx, dy pixels: dy > 0 scrolls down (shows what is below), \
 dy < 0 scrolls up. Scrolling a chat's history marks what comes into view as read. \
+Add \"screenshot\": true for a picture of the window after scrolling. \
 Example input: {\"target\": {\"node\": \"3f2a\"}, \"dy\": 400}, or {\"target\": {\"x\": 600, \"y\": 300}, \"dy\": -200}. \
-Output: {scrolled {dx, dy}, focus, added, refusals}.",
+Output: {scrolled {dx, dy}, focus, added, refusals, screenshot}, plus a PNG image when asked.",
         schema: scroll_schema,
         run: scroll_view,
         read_only: false,
@@ -98,7 +106,8 @@ Output: {scrolled {dx, dy}, focus, added, refusals}.",
         name: "hover_element",
         title: "Hover in Quill's window",
         description: "Use to move the pointer over an element, for a tooltip or hover controls, then read_ui_tree to see them. \
-Example input: {\"target\": {\"node\": \"3f2a\"}}. Output: {hovered {id, role, name}, added [nodes that appeared]}.",
+Add \"screenshot\": true to see the tooltip or hover state as a picture. \
+Example input: {\"target\": {\"node\": \"3f2a\"}}. Output: {hovered {id, role, name}, added [nodes that appeared], screenshot}, plus a PNG image when asked.",
         schema: target_only_schema,
         run: hover_element,
         read_only: false,
@@ -108,7 +117,8 @@ Example input: {\"target\": {\"node\": \"3f2a\"}}. Output: {hovered {id, role, n
         title: "Open a context menu in Quill's window",
         description: "Use to right-click an element and get the menu that opens. Then click_element one of the menu nodes, or press_keys \
 {\"keys\": \"escape\"} to close it. Menu items that delete, report, block or leave are refused when clicked. \
-Example input: {\"target\": {\"node\": \"3f2a\"}}. Output: {menu [{id, role, name}], added [nodes that appeared]}.",
+Add \"screenshot\": true for a picture of the open menu. \
+Example input: {\"target\": {\"node\": \"3f2a\"}}. Output: {menu [{id, role, name}], added [nodes that appeared], screenshot}, plus a PNG image when asked.",
         schema: target_only_schema,
         run: open_menu,
         read_only: false,
@@ -141,7 +151,7 @@ fn read_schema() -> Value {
 }
 
 fn click_schema() -> Value {
-    json!({
+    ui_shot::with_options(json!({
         "type": "object",
         "properties": {
             "target": target_schema(),
@@ -150,33 +160,33 @@ fn click_schema() -> Value {
         },
         "required": ["target"],
         "additionalProperties": false,
-    })
+    }))
 }
 
 fn type_schema() -> Value {
-    json!({
+    ui_shot::with_options(json!({
         "type": "object",
         "properties": {
             "text": {"type": "string", "maxLength": 4000},
         },
         "required": ["text"],
         "additionalProperties": false,
-    })
+    }))
 }
 
 fn keys_schema() -> Value {
-    json!({
+    ui_shot::with_options(json!({
         "type": "object",
         "properties": {
             "keys": {"type": "string", "description": "Chords separated by spaces, e.g. \"cmd-k\", \"escape\", \"ctrl-shift-a tab\"."},
         },
         "required": ["keys"],
         "additionalProperties": false,
-    })
+    }))
 }
 
 fn scroll_schema() -> Value {
-    json!({
+    ui_shot::with_options(json!({
         "type": "object",
         "properties": {
             "target": target_schema(),
@@ -185,19 +195,19 @@ fn scroll_schema() -> Value {
         },
         "required": ["target"],
         "additionalProperties": false,
-    })
+    }))
 }
 
 fn target_only_schema() -> Value {
-    json!({
+    ui_shot::with_options(json!({
         "type": "object",
         "properties": {"target": target_schema()},
         "required": ["target"],
         "additionalProperties": false,
-    })
+    }))
 }
 
-fn bridge_error(error: BridgeError) -> ToolError {
+pub(super) fn bridge_error(error: BridgeError) -> ToolError {
     match error {
         BridgeError::Busy => ToolError::new(
             "Quill's window is busy with other agent commands. Wait a moment, then retry.",
@@ -211,10 +221,17 @@ fn bridge_error(error: BridgeError) -> ToolError {
 /// The switches, then `command` on the UI thread, which decides the rest
 /// from its own state.
 fn run(command: UiCommand) -> Result<UiReply, ToolError> {
+    run_shot(command, None)
+}
+
+/// [`run`] with a screenshot after the command.
+fn run_shot(command: UiCommand, shot: Option<ShotOptions>) -> Result<UiReply, ToolError> {
     if let Some(refusal) = policy::switch_refusal() {
         return Err(ToolError::new(refusal));
     }
-    match bridge::send(&current_agent(), command, COMMAND_WAIT).map_err(bridge_error)? {
+    match bridge::send_with_shot(&current_agent(), command, shot, COMMAND_WAIT)
+        .map_err(bridge_error)?
+    {
         UiReply::Refused(reason) => Err(ToolError::new(reason)),
         reply => Ok(reply),
     }
@@ -361,13 +378,20 @@ fn keep_draft(error: ToolError) -> ToolError {
     ))
 }
 
-/// The answer of an input command as text and JSON, with `lead` first.
-fn done_output(reply: UiReply, lead: String, extra: Value) -> Result<ToolOutput, ToolError> {
+/// The answer of an input command as text and JSON, with `lead` first;
+/// the screenshot asked for rides along as an image (`ui_shot`).
+fn done_output(
+    reply: UiReply,
+    lead: String,
+    extra: Value,
+    asked: Asked,
+) -> Result<ToolOutput, ToolError> {
     let UiReply::Done {
         tree,
         added,
         refusals,
         ui_send,
+        shot,
     } = reply
     else {
         return Err(ToolError::new(
@@ -406,6 +430,7 @@ fn done_output(reply: UiReply, lead: String, extra: Value) -> Result<ToolOutput,
             map.insert(key.clone(), value.clone());
         }
     }
+    ui_shot::add_to_answer(shot, asked.skipped, tree.frame, &mut text, &mut data);
     Ok(ToolOutput { text, data })
 }
 
@@ -459,11 +484,15 @@ pub fn click_element(args: &Value) -> Result<ToolOutput, ToolError> {
         }
     };
     let count = super::int_arg(args, "count", 1, 1, 3)? as u32;
-    let reply = run(UiCommand::Click {
-        target: target.clone(),
-        button,
-        count,
-    })?;
+    let asked = ui_shot::asked(args);
+    let reply = run_shot(
+        UiCommand::Click {
+            target: target.clone(),
+            button,
+            count,
+        },
+        asked.options,
+    )?;
     let clicked = match &reply {
         UiReply::Done { tree, .. } => target_json(&target, tree),
         _ => Value::Null,
@@ -480,7 +509,7 @@ pub fn click_element(args: &Value) -> Result<ToolOutput, ToolError> {
             .unwrap_or_else(|| "the point".to_string()),
         button
     );
-    done_output(reply, lead, json!({"clicked": clicked}))
+    done_output(reply, lead, json!({"clicked": clicked}), asked)
 }
 
 pub fn type_text(args: &Value) -> Result<ToolOutput, ToolError> {
@@ -497,14 +526,19 @@ pub fn type_text(args: &Value) -> Result<ToolOutput, ToolError> {
     if text.contains('\t') {
         return Err(ToolError::new(policy::tab_in_text()));
     }
-    let reply = run(UiCommand::TypeText {
-        text: text.to_string(),
-    })?;
+    let asked = ui_shot::asked(args);
+    let reply = run_shot(
+        UiCommand::TypeText {
+            text: text.to_string(),
+        },
+        asked.options,
+    )?;
     let typed = text.chars().count();
     done_output(
         reply,
         format!("Typed {typed} characters."),
         json!({"typed": typed}),
+        asked,
     )
 }
 
@@ -523,11 +557,13 @@ pub fn press_keys(args: &Value) -> Result<ToolOutput, ToolError> {
         }
     }
     let pressed: Vec<String> = chords.iter().map(|chord| chord.describe()).collect();
-    let reply = run(UiCommand::PressKeys { chords })?;
+    let asked = ui_shot::asked(args);
+    let reply = run_shot(UiCommand::PressKeys { chords }, asked.options)?;
     done_output(
         reply,
         format!("Pressed {}.", pressed.join(", ")),
         json!({"pressed": pressed}),
+        asked,
     )
 }
 
@@ -549,29 +585,41 @@ pub fn scroll_view(args: &Value) -> Result<ToolOutput, ToolError> {
             "Pass dx or dy: pixels to scroll, dy > 0 scrolls down.",
         ));
     }
-    let reply = run(UiCommand::Scroll { target, dx, dy })?;
+    let asked = ui_shot::asked(args);
+    let reply = run_shot(UiCommand::Scroll { target, dx, dy }, asked.options)?;
     done_output(
         reply,
         format!("Scrolled by ({dx}, {dy})."),
         json!({"scrolled": {"dx": dx, "dy": dy}}),
+        asked,
     )
 }
 
 pub fn hover_element(args: &Value) -> Result<ToolOutput, ToolError> {
     let target = target_arg(args)?;
-    let reply = run(UiCommand::Hover {
-        target: target.clone(),
-    })?;
+    let asked = ui_shot::asked(args);
+    let reply = run_shot(
+        UiCommand::Hover {
+            target: target.clone(),
+        },
+        asked.options,
+    )?;
     let hovered = match &reply {
         UiReply::Done { tree, .. } => target_json(&target, tree),
         _ => Value::Null,
     };
-    done_output(reply, "Hovering.".to_string(), json!({"hovered": hovered}))
+    done_output(
+        reply,
+        "Hovering.".to_string(),
+        json!({"hovered": hovered}),
+        asked,
+    )
 }
 
 pub fn open_menu(args: &Value) -> Result<ToolOutput, ToolError> {
     let target = target_arg(args)?;
-    let reply = run(UiCommand::OpenMenu { target })?;
+    let asked = ui_shot::asked(args);
+    let reply = run_shot(UiCommand::OpenMenu { target }, asked.options)?;
     let menu: Vec<Value> = match &reply {
         UiReply::Done { added, .. } => added
             .iter()
@@ -586,7 +634,7 @@ pub fn open_menu(args: &Value) -> Result<ToolOutput, ToolError> {
     } else {
         format!("A menu with {} items opened.", menu.len())
     };
-    done_output(reply, lead, json!({"menu": menu}))
+    done_output(reply, lead, json!({"menu": menu}), asked)
 }
 
 #[cfg(test)]
