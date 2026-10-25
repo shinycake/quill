@@ -130,11 +130,12 @@ pub struct AiComposeBox {
 }
 
 impl AiComposeBox {
-    /// A box on the Translate tab for `source_text`. Call [`Self::start`]
-    /// for the first request.
+    /// A box on the Style tab for `source_text` (tdesktop
+    /// `ComposeAiContent::_mode`). Call [`Self::start`] for the first
+    /// request.
     pub fn new(source_text: String, detected_language: Option<&str>, app_language: &str) -> Self {
         Self {
-            mode: AiComposeMode::Translate,
+            mode: AiComposeMode::Style,
             translate_to: default_translate_to(detected_language, app_language),
             source_text,
             translate_style: StyleChoice::None,
@@ -146,7 +147,8 @@ impl AiComposeBox {
         }
     }
 
-    /// The first request: tdesktop translates as soon as the box opens.
+    /// The first request (tdesktop `ComposeAiContent::start`): none until
+    /// a style or emojify is picked, since the box opens on the Style tab.
     pub fn start(&mut self) -> Option<AiSend> {
         self.request()
     }

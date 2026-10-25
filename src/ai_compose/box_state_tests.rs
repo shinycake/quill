@@ -31,7 +31,10 @@ fn styles(names: &[(&str, i64)]) -> StyleList {
 
 fn opened() -> (AiComposeBox, AiSend) {
     let mut ai = AiComposeBox::new("Hello there".into(), Some("en"), "de");
-    let send = ai.start().expect("the box translates at once");
+    assert_eq!(ai.start(), None);
+    let send = ai
+        .set_mode(AiComposeMode::Translate)
+        .expect("the Translate tab asks at once");
     (ai, send)
 }
 
@@ -40,7 +43,17 @@ fn token(send: &Option<AiSend>) -> u64 {
 }
 
 #[test]
-fn opening_translates_to_the_app_language() {
+fn opening_waits_on_the_style_tab() {
+    let mut ai = AiComposeBox::new("Hello there".into(), Some("en"), "de");
+    assert_eq!(ai.start(), None);
+    assert_eq!(ai.mode(), AiComposeMode::Style);
+    assert_eq!(ai.card(), &CardState::Waiting);
+    assert_eq!(ai.footer(), FooterAction::SelectStyle);
+    assert!(!ai.original_visible());
+}
+
+#[test]
+fn translate_tab_targets_the_app_language() {
     let (ai, send) = opened();
     assert_eq!(ai.mode(), AiComposeMode::Translate);
     assert_eq!(ai.card(), &CardState::Loading { token: send.token });
