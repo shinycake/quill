@@ -128,7 +128,9 @@ fn the_forced_tree_lists_the_window_and_a_click_by_id_lands(cx: &mut TestAppCont
         .collect();
     assert!(tree.nodes.len() > 10, "{summary:?}");
     assert!(
-        tree.nodes.iter().any(|n| n.role == "Button" && n.bounds.is_some()),
+        tree.nodes
+            .iter()
+            .any(|n| n.role == "Button" && n.bounds.is_some()),
         "{summary:?}"
     );
     assert!(tree.node(&tree.root).is_some_and(|n| n.role == "Window"));
@@ -167,9 +169,7 @@ fn the_forced_tree_lists_the_window_and_a_click_by_id_lands(cx: &mut TestAppCont
     let reply = drive(
         &app,
         vcx,
-        UiCommand::TypeText {
-            text: "ann".into(),
-        },
+        UiCommand::TypeText { text: "ann".into() },
         Some(open),
     );
     let Ok(UiReply::Done { tree: typed, .. }) = reply else {

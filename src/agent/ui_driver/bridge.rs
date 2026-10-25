@@ -96,7 +96,10 @@ pub enum UiReply {
     State(UiState),
     Tree(UiTree),
     /// Input ran; `added` lists the nodes that appeared since.
-    Done { tree: UiTree, added: Vec<UiNode> },
+    Done {
+        tree: UiTree,
+        added: Vec<UiNode>,
+    },
     /// The UI did not run the command; the text says why and what to do.
     Refused(String),
 }
@@ -282,9 +285,8 @@ mod tests {
     #[test]
     fn a_command_goes_in_and_its_reply_comes_out() {
         let _guard = lock();
-        let agent = std::thread::spawn(|| {
-            send("Test", UiCommand::State, None, Duration::from_secs(5))
-        });
+        let agent =
+            std::thread::spawn(|| send("Test", UiCommand::State, None, Duration::from_secs(5)));
         let pending = loop {
             let mut taken = take();
             if let Some(pending) = taken.pop() {
@@ -321,7 +323,10 @@ mod tests {
 
     #[test]
     fn the_drive_clock_and_pause_flag() {
-        assert!(!super::drove_recently() || super::LAST_DRIVE_MS.load(std::sync::atomic::Ordering::Relaxed) != 0);
+        assert!(
+            !super::drove_recently()
+                || super::LAST_DRIVE_MS.load(std::sync::atomic::Ordering::Relaxed) != 0
+        );
         super::note_drive();
         assert!(super::drove_recently());
         assert!(super::real_input_age_ms().is_none_or(|age| age < u64::MAX));

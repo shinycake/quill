@@ -313,3 +313,148 @@ the contacts grant. Every call that isn't a read is logged under
 Why the deny list asks instead of refusing: the plan lets a user tell an
 agent "log out my old laptop session" or "send Ann a gift" and approve it,
 while no agent can do either on its own.
+
+## Phase 5: UI driver
+
+Step 1 (this record): the element tree, input injection and the tools, with
+no visuals. Step 2 adds the setting's row in Settings, the pause on real
+input and the on-screen sign that an agent is driving.
+
+### Why an element tree, not pixels
+
+Agents see the window as GPUI's own accessibility tree: every element with
+a role and an id (Quill has about 375 roles and 850 labels today), with its
+AccessKit id, role, name, value, states, supported actions, children and
+bounds in window logical pixels. It is the tree a screen reader gets, so
+work that helps one helps the other, and no screenshot goes to a model.
+
+GPUI builds that tree only while assistive technology is connected
+(`window.a11y.is_active()`). The vendored `gpui-pre` gains
+`Window::set_a11y_forced(bool)`, ORed into the per-frame check, and
+`Window::a11y_tree_snapshot()`, the last built tree as plain data
+(`third_party/gpui-pre/QUILL-CHANGES.md`). A forced tree is never sent to
+the platform adapter, and `Window::is_a11y_system_active()` keeps Quill's
+screen-reader behaviour (focus announcements in the history, Up/Down
+moving the read message) off: an agent driving must not change what the
+user's keys do. Only the tree gating (`slices.a11y_active`, which renders
+every slice uncached so the tree is whole) follows the forced flag.
+
+The tree is forced only while it is used: the switches are on, an agent is
+connected and one drove within the last 30 seconds
+(`ui_driver::bridge::wants_forced`). The agent wake task checks every five
+seconds while forced and releases it.
+
+### Cost of forcing the tree
+
+Measured with `forced_tree_frame_cost` (`src/ui/agent_driver_tests.rs`,
+ignored; `cargo test --release --features demo-capture --bin quill --
+--ignored --nocapture forced_tree_frame_cost`), the `ready-chats` demo at
+1100x900 under the test platform (CPU layout and paint, no GPU), 60 full
+redraws each way, on the M-series Mac this was built on, 2026-10-25:
+
+| Build | Full redraw, tree off | Tree forced | Off again | Nodes | Snapshot read |
+| --- | --- | --- | --- | --- | --- |
+| release | 2.0 ms | 3.3 ms | 4.2 ms | 47 | 78 µs |
+| debug | 82 ms | 111 ms | 88 ms | 47 | 134 µs |
+
+So forcing the tree costs on the order of a millisecond per drawn frame in
+release, within the run-to-run noise of this harness (the second "off"
+run came out slower than "on"); the debug build shows the same shape at
+about 30 ms. Nearly all of it is the slices rendering uncached (the price
+a screen reader pays too), not the tree itself, which the 78 µs snapshot
+read bounds. It is paid only while an agent drives and only on frames that
+are drawn; idle Quill, and Quill with agents merely connected, build no
+tree. A chat with a long history has more nodes than this demo's 47;
+message rows join the tree only when a screen reader focuses them, so the
+count stays in the low hundreds.
+
+### How a command runs
+
+Tool threads never touch GPUI. `ui_driver::bridge` is a queue of
+`UiCommand`s with a reply channel each (`post`, `Ticket::wait`; `send`
+does both), woken with `wake::AGENT.poke()`. The UI thread drains it where
+it already reads agent state, in the agent wake task
+(`agent_state.rs`, `QuillApp::agent_driver_tick` in
+`src/ui/agent_driver.rs`). `State` (open chat, window active) is answered
+at once. Every other command becomes a task: force the tree, wait for a
+frame newer than the one before (polling `Window::a11y_tree_frame` every
+16 ms, up to 90 times), inject the input through the window context (the
+handlers update `QuillApp` themselves, so this cannot run inside the
+entity's own update), then wait for the frame after the input's and answer
+with that tree and the nodes that appeared. Input goes through
+`Window::dispatch_event` and `dispatch_keystroke`, the platform's own
+path: a MouseMove, then MouseDown and MouseUp per click (`click_count`
+counts up for double clicks), a ScrollWheel with the delta negated so
+"dy > 0 scrolls down", keystrokes with `key_char` for typed characters. A
+thread-local `INJECTING` flag marks the dispatch; `presence::input_probe`
+skips injected input, so an agent's clicks keep nobody online and (step 2)
+real input can pause the driver.
+
+### Gating, and why it does not weaken phase 3
+
+- A separate setting, "Let agents drive Quill's window"
+  (`access::ui_driver`, off by default, serde default so old files load),
+  on top of Agent access. The tools refuse with the setting's name while
+  it is off.
+- The chat open in the window gates everything: reading the tree needs
+  `read` on it, any input needs `read_write`. The tool asks the UI for the
+  open chat, checks the grant on its own thread (TDLib), then files the
+  command with that chat as `expect_open_chat`; the UI refuses if another
+  chat is open by the time it runs, and checks again right before
+  injecting. With no chat open, the chat list and settings may be driven;
+  opening an ungranted chat makes the next read refuse. The history puts
+  message text in the tree only for the message a screen reader focused,
+  so a tree read exposes little content, but chat rows and previews are
+  the window's and the setting is the user's consent to that; step 2's
+  settings row says so.
+- Sends, deletes and payments through the window would skip the paced
+  queue, the activity log, "Confirm each send" and the Stars checks. So
+  `click_element` refuses nodes (or their nearest ancestors) whose name is
+  a guarded control: the translated "Send message", "Schedule message",
+  "Schedule" and "Delete" from the language packs, plus the English words
+  send, schedule, resend, delete, unsend, clear history, pay, buy,
+  purchase, subscribe, stars, gift, premium, top up, donate, transfer and
+  checkout as whole words in names of up to six words (longer names are
+  content). `press_keys` refuses Enter while it would send in the focused
+  text box under the user's send-key setting (and when focus is unknown),
+  and `type_text` types a line break as the non-sending chord. Keys that
+  quit, close or hide the window (Cmd/Ctrl+Q, +W, Cmd+H, Cmd+M, Alt+F4)
+  are never pressed. This is a second layer: the guarantee is that the
+  write tools are the documented way to send, and the guide says so.
+- Agent access going off refuses every waiting command, as it denies
+  prompts.
+
+### Tools
+
+`read_ui_tree {filter?, role?, limit?}`, `click_element {target, button?,
+count?}`, `type_text {text}`, `press_keys {keys}`, `scroll_view {target,
+dx?, dy?}`, `hover_element {target}`, `open_menu {target}`
+(`src/agent/tools/ui.rs`). A target is `{"node": id}` from the tree or
+`{"x", "y"}` in window pixels; node ids are AccessKit's ids in hex, stable
+while the element stays on screen. Input tools answer with the focused
+node and the nodes that appeared, so one call shows its effect.
+`quill_status` reports `ui_driver {available, active, paused}`.
+
+### Cross-platform
+
+`dispatch_event` and the accessibility tree work the same on macOS, Linux
+and Windows; nothing here is platform code. Out of reach everywhere:
+native menus and the macOS menu bar (those need `cx.dispatch_action`, a
+later tool), file and folder pickers, the IME, and system dialogs. A
+window that draws no frames (hidden, minimised, on some platforms
+occluded) answers "did not redraw" after 1.5 seconds.
+
+### Gaps left for step 2 and later
+
+- Settings row, consent text and the connected strip saying "driving".
+- Pause on real input: `bridge::note_real_input` and `set_paused` exist;
+  nothing sets the pause yet.
+- Chat rows in the chat list and most message rows carry no role, so they
+  can be clicked by point but not by id; giving them roles helps screen
+  readers too.
+- `focus` is reported only when the focused element itself has a role; the
+  kit `Input` registers its focus handle on a wrapper, so a focused text
+  box shows no `focused` state (the typed value shows it worked).
+- `open_menu` reports the nodes that appeared one frame after the click; a
+  menu that animates in over several frames may need a `read_ui_tree`.
+- No activity-log entries for UI commands yet; the log stays about writes.

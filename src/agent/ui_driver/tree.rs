@@ -90,8 +90,18 @@ impl Guarded {
 const SEND_WORDS: &[&str] = &["send", "schedule", "resend"];
 const DELETE_WORDS: &[&str] = &["delete", "unsend", "clear history"];
 const PAY_WORDS: &[&str] = &[
-    "pay", "buy", "purchase", "subscribe", "stars", "star", "gift", "premium", "top up", "donate",
-    "transfer", "checkout",
+    "pay",
+    "buy",
+    "purchase",
+    "subscribe",
+    "stars",
+    "star",
+    "gift",
+    "premium",
+    "top up",
+    "donate",
+    "transfer",
+    "checkout",
 ];
 /// Names longer than this are content (a message), not a control.
 const CONTROL_NAME_WORDS: usize = 6;
@@ -102,7 +112,10 @@ fn guarded_phrases() -> Vec<(String, Guarded)> {
     use crate::lang::{keys, tr};
     vec![
         (tr(keys::CONTEXT_SEND_MESSAGE).to_string(), Guarded::Send),
-        (tr(keys::Q_MONEY_SCHEDULE_MESSAGE).to_string(), Guarded::Send),
+        (
+            tr(keys::Q_MONEY_SCHEDULE_MESSAGE).to_string(),
+            Guarded::Send,
+        ),
         (tr(keys::SCHEDULE_BUTTON).to_string(), Guarded::Send),
         (tr(keys::BOX_DELETE).to_string(), Guarded::Delete),
     ]
@@ -212,12 +225,19 @@ impl UiTree {
     /// Nodes whose name, value or role contains `text` (case-insensitive)
     /// and whose role is `role` (case-insensitive), when given.
     pub fn filter(&self, text: Option<&str>, role: Option<&str>) -> Vec<&UiNode> {
-        let text = text.map(|t| t.trim().to_lowercase()).filter(|t| !t.is_empty());
-        let role = role.map(|r| r.trim().to_lowercase()).filter(|r| !r.is_empty());
+        let text = text
+            .map(|t| t.trim().to_lowercase())
+            .filter(|t| !t.is_empty());
+        let role = role
+            .map(|r| r.trim().to_lowercase())
+            .filter(|r| !r.is_empty());
         self.nodes
             .iter()
             .filter(|node| text.as_deref().is_none_or(|t| node.matches_text(t)))
-            .filter(|node| role.as_deref().is_none_or(|r| node.role.to_lowercase() == r))
+            .filter(|node| {
+                role.as_deref()
+                    .is_none_or(|r| node.role.to_lowercase() == r)
+            })
             .collect()
     }
 
@@ -356,11 +376,35 @@ mod tests {
             focus: Some("3".into()),
             frame: 7,
             nodes: vec![
-                node("0", "Window", "Quill", [0.0, 0.0, 800.0, 600.0], &["1", "2", "4"]),
+                node(
+                    "0",
+                    "Window",
+                    "Quill",
+                    [0.0, 0.0, 800.0, 600.0],
+                    &["1", "2", "4"],
+                ),
                 node("1", "Button", "Search", [10.0, 10.0, 100.0, 30.0], &[]),
-                node("2", "Button", "Send message", [700.0, 560.0, 40.0, 30.0], &["3"]),
-                node("3", "Label", "Send message", [705.0, 565.0, 30.0, 20.0], &[]),
-                node("4", "TextInput", "Message", [100.0, 560.0, 500.0, 30.0], &[]),
+                node(
+                    "2",
+                    "Button",
+                    "Send message",
+                    [700.0, 560.0, 40.0, 30.0],
+                    &["3"],
+                ),
+                node(
+                    "3",
+                    "Label",
+                    "Send message",
+                    [705.0, 565.0, 30.0, 20.0],
+                    &[],
+                ),
+                node(
+                    "4",
+                    "TextInput",
+                    "Message",
+                    [100.0, 560.0, 500.0, 30.0],
+                    &[],
+                ),
             ],
         }
     }
@@ -388,9 +432,15 @@ mod tests {
     #[test]
     fn hit_test_picks_the_smallest_node_under_the_point() {
         let tree = tree();
-        assert_eq!(tree.hit_test(710.0, 570.0).map(|n| n.id.as_str()), Some("3"));
+        assert_eq!(
+            tree.hit_test(710.0, 570.0).map(|n| n.id.as_str()),
+            Some("3")
+        );
         assert_eq!(tree.hit_test(50.0, 20.0).map(|n| n.id.as_str()), Some("1"));
-        assert_eq!(tree.hit_test(400.0, 300.0).map(|n| n.id.as_str()), Some("0"));
+        assert_eq!(
+            tree.hit_test(400.0, 300.0).map(|n| n.id.as_str()),
+            Some("0")
+        );
         assert_eq!(tree.hit_test(900.0, 300.0), None);
     }
 
@@ -398,12 +448,19 @@ mod tests {
     fn guarded_controls_are_recognised_by_name() {
         assert_eq!(guarded_by_name("Send message"), Some(Guarded::Send));
         assert_eq!(guarded_by_name("Schedule"), Some(Guarded::Send));
-        assert_eq!(guarded_by_name("Delete for everyone"), Some(Guarded::Delete));
+        assert_eq!(
+            guarded_by_name("Delete for everyone"),
+            Some(Guarded::Delete)
+        );
         assert_eq!(guarded_by_name("Clear history"), Some(Guarded::Delete));
         assert_eq!(guarded_by_name("Buy Stars"), Some(Guarded::Pay));
         assert_eq!(guarded_by_name("Top up"), Some(Guarded::Pay));
         assert_eq!(guarded_by_name("Search"), None);
-        assert_eq!(guarded_by_name("Sender settings"), None, "no substring match");
+        assert_eq!(
+            guarded_by_name("Sender settings"),
+            None,
+            "no substring match"
+        );
         assert_eq!(
             guarded_by_name("Ann, 14:02: please send me the file when you can, thanks"),
             None,
@@ -415,22 +472,34 @@ mod tests {
     #[test]
     fn click_refusal_looks_at_the_node_and_its_parents() {
         let mut tree = tree();
-        assert!(tree.click_refusal("3").is_some_and(|r| r.contains("send_message")));
+        assert!(
+            tree.click_refusal("3")
+                .is_some_and(|r| r.contains("send_message"))
+        );
         assert!(tree.click_refusal("2").is_some());
         assert_eq!(tree.click_refusal("1"), None);
         assert_eq!(tree.click_refusal("missing"), None);
         if let Some(search) = tree.nodes.get_mut(1) {
             search.states.push("disabled".into());
         }
-        assert!(tree.click_refusal("1").is_some_and(|r| r.contains("disabled")));
+        assert!(
+            tree.click_refusal("1")
+                .is_some_and(|r| r.contains("disabled"))
+        );
     }
 
     #[test]
     fn new_since_lists_added_nodes() {
         let before = tree();
         let mut after = tree();
-        after.nodes.push(node("9", "MenuItem", "Copy", [0.0, 0.0, 10.0, 10.0], &[]));
-        let added: Vec<&str> = after.new_since(&before).iter().map(|n| n.id.as_str()).collect();
+        after
+            .nodes
+            .push(node("9", "MenuItem", "Copy", [0.0, 0.0, 10.0, 10.0], &[]));
+        let added: Vec<&str> = after
+            .new_since(&before)
+            .iter()
+            .map(|n| n.id.as_str())
+            .collect();
         assert_eq!(added, ["9"]);
     }
 

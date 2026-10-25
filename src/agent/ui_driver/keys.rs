@@ -98,7 +98,9 @@ fn canonical_key(name: &str) -> Option<String> {
 pub fn parse_chord(text: &str) -> Result<KeyChord, String> {
     let text = text.trim();
     if text.is_empty() {
-        return Err("Empty key. Pass something like \"cmd-k\", \"escape\" or \"ctrl-shift-a\".".into());
+        return Err(
+            "Empty key. Pass something like \"cmd-k\", \"escape\" or \"ctrl-shift-a\".".into(),
+        );
     }
     // A trailing separator is the key itself ("-", "cmd--", "shift-+").
     let (body, trailing) = match text.chars().last() {
@@ -160,8 +162,7 @@ pub fn parse_chord(text: &str) -> Result<KeyChord, String> {
 
 /// Parse a space-separated sequence of chords.
 pub fn parse_sequence(text: &str) -> Result<Vec<KeyChord>, String> {
-    let chords: Result<Vec<KeyChord>, String> =
-        text.split_whitespace().map(parse_chord).collect();
+    let chords: Result<Vec<KeyChord>, String> = text.split_whitespace().map(parse_chord).collect();
     let chords = chords?;
     if chords.is_empty() {
         return Err(
@@ -242,7 +243,11 @@ mod tests {
     fn bad_chords_say_what_to_fix() {
         assert!(parse_chord("").unwrap_err().contains("cmd-k"));
         assert!(parse_chord("cmd").unwrap_err().contains("no key"));
-        assert!(parse_chord("cmd-blorp").unwrap_err().contains("Unknown key"));
+        assert!(
+            parse_chord("cmd-blorp")
+                .unwrap_err()
+                .contains("Unknown key")
+        );
         assert!(parse_chord("a-b").unwrap_err().contains("two keys"));
         assert!(parse_chord("f99").unwrap_err().contains("Unknown key"));
     }
@@ -259,8 +264,14 @@ mod tests {
 
     #[test]
     fn quit_close_and_hide_are_forbidden() {
-        assert_eq!(forbidden(&parse_chord("cmd-q").unwrap()), Some("quit Quill"));
-        assert_eq!(forbidden(&parse_chord("ctrl-q").unwrap()), Some("quit Quill"));
+        assert_eq!(
+            forbidden(&parse_chord("cmd-q").unwrap()),
+            Some("quit Quill")
+        );
+        assert_eq!(
+            forbidden(&parse_chord("ctrl-q").unwrap()),
+            Some("quit Quill")
+        );
         assert!(forbidden(&parse_chord("cmd-w").unwrap()).is_some());
         assert!(forbidden(&parse_chord("alt-f4").unwrap()).is_some());
         assert!(forbidden(&parse_chord("cmd-h").unwrap()).is_some());
@@ -278,8 +289,14 @@ mod tests {
         assert!(sends_message(&cmd_enter, SendKeyMode::Enter));
         assert!(!sends_message(&enter, SendKeyMode::CtrlEnter));
         assert!(sends_message(&cmd_enter, SendKeyMode::CtrlEnter));
-        assert!(!sends_message(&parse_chord("a").unwrap(), SendKeyMode::Enter));
+        assert!(!sends_message(
+            &parse_chord("a").unwrap(),
+            SendKeyMode::Enter
+        ));
         assert_eq!(newline_chord(SendKeyMode::Enter), shift_enter);
-        assert_eq!(newline_chord(SendKeyMode::CtrlEnter), KeyChord::plain("enter"));
+        assert_eq!(
+            newline_chord(SendKeyMode::CtrlEnter),
+            KeyChord::plain("enter")
+        );
     }
 }

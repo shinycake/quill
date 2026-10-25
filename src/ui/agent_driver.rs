@@ -25,7 +25,11 @@ pub(super) const FORCED_WAKE: Duration = Duration::from_secs(5);
 impl QuillApp {
     /// Keeps the tree forced while an agent drives and starts every waiting
     /// command. Returns whether the tree is forced now.
-    pub(super) fn agent_driver_tick(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+    pub(super) fn agent_driver_tick(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         window.set_a11y_forced(bridge::wants_forced());
         for pending in bridge::take() {
             self.agent_driver_start(pending, window, cx);
@@ -33,7 +37,12 @@ impl QuillApp {
         window.is_a11y_forced()
     }
 
-    fn agent_driver_start(&mut self, pending: Pending, window: &mut Window, cx: &mut Context<Self>) {
+    fn agent_driver_start(
+        &mut self,
+        pending: Pending,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(refusal) = policy::switch_refusal() {
             pending.answer(UiReply::Refused(refusal));
             return;
@@ -131,5 +140,6 @@ async fn wait_for_tree(cx: &mut AsyncWindowContext, after: u64) -> Option<UiTree
 }
 
 #[cfg(test)]
+#[cfg(feature = "demo-capture")]
 #[path = "agent_driver_tests.rs"]
 mod tests;

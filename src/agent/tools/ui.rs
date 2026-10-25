@@ -9,7 +9,9 @@
 
 use super::target::{granted, my_user_id};
 use super::{Ctx, Tool, ToolError, ToolOutput, current_agent};
-use crate::agent::ui_driver::bridge::{self, BridgeError, Button, Target, UiCommand, UiReply, UiState};
+use crate::agent::ui_driver::bridge::{
+    self, BridgeError, Button, Target, UiCommand, UiReply, UiState,
+};
 use crate::agent::ui_driver::keys;
 use crate::agent::ui_driver::policy;
 use crate::agent::ui_driver::tree::{UiNode, UiTree, parse_id};
@@ -219,16 +221,22 @@ fn bridge_error(error: BridgeError) -> ToolError {
 }
 
 fn ui_state() -> Result<UiState, ToolError> {
-    match bridge::send(&current_agent(), UiCommand::State, None, STATE_WAIT).map_err(bridge_error)? {
+    match bridge::send(&current_agent(), UiCommand::State, None, STATE_WAIT)
+        .map_err(bridge_error)?
+    {
         UiReply::State(state) => Ok(state),
         UiReply::Refused(reason) => Err(ToolError::new(reason)),
-        _ => Err(ToolError::new("Quill's window gave an unexpected answer. Retry.")),
+        _ => Err(ToolError::new(
+            "Quill's window gave an unexpected answer. Retry.",
+        )),
     }
 }
 
 /// Run `command` on the UI thread, holding it to `expect` as the open chat.
 fn run(command: UiCommand, expect: Option<i64>) -> Result<UiReply, ToolError> {
-    match bridge::send(&current_agent(), command, Some(expect), COMMAND_WAIT).map_err(bridge_error)? {
+    match bridge::send(&current_agent(), command, Some(expect), COMMAND_WAIT)
+        .map_err(bridge_error)?
+    {
         UiReply::Refused(reason) => Err(ToolError::new(reason)),
         reply => Ok(reply),
     }
@@ -263,7 +271,9 @@ fn target_arg(args: &Value) -> Result<Target, ToolError> {
 
 fn node_json(node: Option<&UiNode>) -> Value {
     match node {
-        Some(node) => json!({"id": node.id, "role": node.role, "name": node.name, "value": node.value}),
+        Some(node) => {
+            json!({"id": node.id, "role": node.role, "name": node.name, "value": node.value})
+        }
         None => Value::Null,
     }
 }
@@ -283,7 +293,9 @@ fn describe(node: Option<&UiNode>) -> String {
 /// The answer of an input command as text and JSON, with `lead` first.
 fn done_output(reply: UiReply, lead: String, extra: Value) -> Result<ToolOutput, ToolError> {
     let UiReply::Done { tree, added } = reply else {
-        return Err(ToolError::new("Quill's window gave an unexpected answer. Retry."));
+        return Err(ToolError::new(
+            "Quill's window gave an unexpected answer. Retry.",
+        ));
     };
     let focus = tree.focus.as_deref().and_then(|id| tree.node(id));
     let mut text = lead;
@@ -322,7 +334,9 @@ pub fn read_ui_tree(args: &Value) -> Result<ToolOutput, ToolError> {
     let role = args.get("role").and_then(Value::as_str);
     let limit = super::int_arg(args, "limit", DEFAULT_LIMIT, 1, MAX_LIMIT)? as usize;
     let UiReply::Tree(tree) = run(UiCommand::ReadTree, expect)? else {
-        return Err(ToolError::new("Quill's window gave an unexpected answer. Retry."));
+        return Err(ToolError::new(
+            "Quill's window gave an unexpected answer. Retry.",
+        ));
     };
     let nodes = tree.filter(filter, role);
     let mut text = format!(
@@ -527,7 +541,10 @@ mod tests {
         crate::fast_buttons::set_persistence(false);
         crate::agent::access::set_enabled(true);
         crate::agent::access::set_ui_driver(false);
-        let error = read_ui_tree(&json!({})).err().map(|e| e.0).unwrap_or_default();
+        let error = read_ui_tree(&json!({}))
+            .err()
+            .map(|e| e.0)
+            .unwrap_or_default();
         assert!(error.contains("Let agents drive Quill's window"), "{error}");
         let error = click_element(&json!({"target": {"x": 1, "y": 1}}))
             .err()
@@ -535,7 +552,10 @@ mod tests {
             .unwrap_or_default();
         assert!(error.contains("Let agents drive Quill's window"), "{error}");
         crate::agent::access::set_enabled(false);
-        let error = read_ui_tree(&json!({})).err().map(|e| e.0).unwrap_or_default();
+        let error = read_ui_tree(&json!({}))
+            .err()
+            .map(|e| e.0)
+            .unwrap_or_default();
         assert!(error.contains("Agent access is off"), "{error}");
     }
 }

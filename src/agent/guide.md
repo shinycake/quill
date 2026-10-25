@@ -205,3 +205,60 @@ Agents act as the user, under Telegram's Terms of Service. Do not use what
 you read to train or improve AI models, and do not export or index whole
 chats. Quill never marks messages read, hides online status or suppresses
 typing for an agent.
+
+## UI driver
+
+For what no chat tool does: Quill's settings, a dialog, a picker, checking
+what the user sees. Reading and sending messages stay with the chat tools,
+which are faster, work with the window hidden and go through Quill's
+grants, pacing and confirmations.
+
+The user turns it on separately: "Let agents drive Quill's window" in
+Settings > Advanced > Agent access (off by default). `quill_status` shows
+`ui_driver.available`.
+
+| Tool | Use it to |
+| --- | --- |
+| `read_ui_tree` | See the window: nodes with `id`, `role`, `name`, `value`, `bounds` `[x, y, w, h]` in window pixels, `states`, `actions`, `children`. `filter` and `role` narrow it. |
+| `click_element` | Click a node by id, or a point; `button` right or middle, `count` 2 for a double click. |
+| `type_text` | Type into the focused box (click it first). |
+| `press_keys` | Press chords like `cmd-k`, `escape`, `ctrl-shift-a`, several separated by spaces. |
+| `scroll_view` | Scroll what is under a node or point; `dy` > 0 scrolls down. |
+| `hover_element` | Move the pointer over a node, for a tooltip or hover controls. |
+| `open_menu` | Right-click a node and get the menu's items. |
+
+Open settings and read them:
+
+    press_keys {"keys": "cmd-,"}
+    read_ui_tree {"role": "Button"}
+
+Find the search box and look for a chat:
+
+    read_ui_tree {"filter": "search"}
+    click_element {"target": {"node": "<id of the search box>"}}
+    type_text {"text": "design"}
+    read_ui_tree {"role": "ListItem"}
+
+Every input tool answers with the focused node and the nodes that appeared
+after it (a dialog, a menu), so you usually do not need another
+`read_ui_tree` to see what happened. Ids stay the same while an element
+stays on screen; after the window changes a lot, read it again.
+
+Rules, all enforced by Quill:
+
+- The chat open in the window must be granted: `read` to read the window,
+  `read_write` for any click, key or scroll. Otherwise the tool says so and
+  names the chat for `request_access`.
+- Controls that send, schedule, delete or pay (Stars, Premium, gifts) are
+  never clicked, and Enter is not pressed while it would send the message
+  in the focused box. Use `send_message`, `set_draft`, `delete_messages`.
+  `type_text` types a line break as the chord that inserts one.
+- Keys that quit, close or hide Quill are never pressed.
+- While the user is using the window the driver pauses and the tools say
+  so. Wait and retry, or use the chat tools.
+
+What it cannot reach: native menus (the macOS menu bar), file and folder
+pickers, the input method editor, and system dialogs. Quill's window must
+be open and visible so it draws frames; a hidden or minimised window
+answers "did not redraw". Bounds are in window pixels, not screen pixels.
+`focus` is reported only when the focused element itself carries a role.

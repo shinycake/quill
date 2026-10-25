@@ -59,7 +59,11 @@ pub fn input_refusal(open_chat: Option<i64>, scope: Option<Scope>) -> Option<Str
 
 /// Why `chord` is not pressed: it leaves Quill, or it would send the
 /// message in the focused text box under `mode`.
-pub fn chord_refusal(chord: &KeyChord, focus_in_text: Option<bool>, mode: SendKeyMode) -> Option<String> {
+pub fn chord_refusal(
+    chord: &KeyChord,
+    focus_in_text: Option<bool>,
+    mode: SendKeyMode,
+) -> Option<String> {
     if let Some(effect) = keys::forbidden(chord) {
         return Some(format!(
             "{} would {effect}; agents never press it.",
@@ -139,22 +143,39 @@ mod tests {
     fn input_needs_read_write_on_the_open_chat() {
         assert_eq!(input_refusal(None, None), None);
         assert_eq!(input_refusal(Some(7), Some(Scope::ReadWrite)), None);
-        assert!(input_refusal(Some(7), Some(Scope::Read)).is_some_and(|r| r.contains("reading only")));
+        assert!(
+            input_refusal(Some(7), Some(Scope::Read)).is_some_and(|r| r.contains("reading only"))
+        );
         assert!(input_refusal(Some(7), None).is_some_and(|r| r.contains("not granted")));
     }
 
     #[test]
     fn chords_that_quit_or_send_are_refused() {
         let quit = parse_chord("cmd-q").unwrap();
-        assert!(chord_refusal(&quit, Some(false), SendKeyMode::Enter).is_some_and(|r| r.contains("quit")));
+        assert!(
+            chord_refusal(&quit, Some(false), SendKeyMode::Enter)
+                .is_some_and(|r| r.contains("quit"))
+        );
         let enter = parse_chord("enter").unwrap();
-        assert!(chord_refusal(&enter, Some(true), SendKeyMode::Enter).is_some_and(|r| r.contains("shift-enter")));
-        assert!(chord_refusal(&enter, None, SendKeyMode::Enter).is_some(), "unknown focus is refused");
+        assert!(
+            chord_refusal(&enter, Some(true), SendKeyMode::Enter)
+                .is_some_and(|r| r.contains("shift-enter"))
+        );
+        assert!(
+            chord_refusal(&enter, None, SendKeyMode::Enter).is_some(),
+            "unknown focus is refused"
+        );
         assert_eq!(chord_refusal(&enter, Some(false), SendKeyMode::Enter), None);
-        assert_eq!(chord_refusal(&enter, Some(true), SendKeyMode::CtrlEnter), None);
+        assert_eq!(
+            chord_refusal(&enter, Some(true), SendKeyMode::CtrlEnter),
+            None
+        );
         let cmd_enter = parse_chord("cmd-enter").unwrap();
         assert!(chord_refusal(&cmd_enter, Some(true), SendKeyMode::CtrlEnter).is_some());
-        assert_eq!(chord_refusal(&parse_chord("cmd-k").unwrap(), None, SendKeyMode::Enter), None);
+        assert_eq!(
+            chord_refusal(&parse_chord("cmd-k").unwrap(), None, SendKeyMode::Enter),
+            None
+        );
     }
 
     #[test]
