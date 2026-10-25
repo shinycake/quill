@@ -18,6 +18,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::agent_labels::agent_label;
+use super::shell::QuillShell;
 use super::agent_takeover_glow::{GLOW_FPS, SWEEP_FPS, glow_element, glow_frame, sweep_allowed};
 use super::app::QuillApp;
 use gpui_kit::assets::IconName;
@@ -89,13 +90,16 @@ impl QuillApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        // The pill paints again below (and records itself) if still shown.
+        PILL.with(|pill| pill.set(None));
+        // Only a prompt the user can see answers input: a pending request
+        // hidden behind a higher dialog must not swallow a pause.
+        let prompt = QuillShell::open_dialog_name(self) == Some("AgentRequest")
+            || self.agent_consent_open();
+        PROMPT.with(|open| open.set(prompt));
         if super::agent_driver_shot::capturing() {
             return None;
         }
-        // The pill paints again below (and records itself) if still shown.
-        PILL.with(|pill| pill.set(None));
-        let prompt = self.agent_request_open() || self.agent_consent_open();
-        PROMPT.with(|open| open.set(prompt));
         if !super::agent_state::sees_agents() {
             return None;
         }

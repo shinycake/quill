@@ -227,7 +227,8 @@ pub fn phase(facts: &Facts, live: Live, now: u64) -> Phase {
 /// forget the pause and Stop: an agent that disconnects and reconnects
 /// (it may kill its `quill mcp` and start another) finds both where the
 /// user left them. A pause seen again with an agent connected brings its
-/// pill back, fading in, so the user can let it continue.
+/// pill back, fading in, so the user can let it continue. The pill names
+/// no agent then: the one connected may not be the one the user paused.
 pub fn observe(facts: &mut Facts, live: Live, now: u64) {
     if !live.allowed {
         facts.paused = None;
@@ -242,6 +243,7 @@ pub fn observe(facts: &mut Facts, live: Live, now: u64) {
             session.last_ms = now;
             session.ended_ms = None;
             session.action = None;
+            session.agent.clear();
         }
         return;
     }

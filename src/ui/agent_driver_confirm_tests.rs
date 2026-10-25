@@ -197,3 +197,36 @@ fn a_read_answered_after_a_pause_is_refused(cx: &mut TestAppContext) {
     }
     takeover::reset_for_test();
 }
+
+#[gpui_kit::test]
+fn a_prompt_hidden_behind_another_dialog_neither_lets_it_drive_nor_eats_a_pause(
+    cx: &mut TestAppContext,
+) {
+    use crate::ui::shell::QuillShell;
+    use quill::agent::grants;
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx, _presence) = setup(cx);
+    let vcx = &mut vcx;
+    grants::update(&AccountKey::primary(), |g| g.all_chats = Some(Scope::ReadWrite));
+    settle(vcx);
+    let tree = read_tree(&app, vcx);
+    let reply = drive(&app, vcx, click(Target::Node(message_box(&tree))));
+    assert!(matches!(reply, Ok(UiReply::Done { .. })), "{reply:?}");
+    vcx.update(|_, cx| app.update(cx, |app, cx| app.open_archive_settings(cx)));
+    settle(vcx);
+    let (_id, _rx) = ask_confirm(vcx);
+    let shown = vcx.update(|_, cx| QuillShell::open_dialog_name(app.read(cx)));
+    assert_eq!(shown, Some("ArchiveSettings"), "the prompt is hidden");
+
+    let reply = drive(&app, vcx, UiCommand::ReadTree);
+    assert!(
+        super::tests::refused(&reply, "a request to the user"),
+        "{reply:?}"
+    );
+    vcx.simulate_mouse_move(point(px(20.), px(20.)), None, Modifiers::none());
+    vcx.simulate_click(point(px(600.), px(400.)), Modifiers::none());
+    settle(vcx);
+    assert!(takeover::paused(), "a real press still pauses");
+    grants::update(&AccountKey::primary(), |g| g.all_chats = None);
+    takeover::reset_for_test();
+}

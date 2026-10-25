@@ -195,7 +195,7 @@ impl QuillApp {
         if self.settings.open {
             return blocked("Settings");
         }
-        if self.agent_ui.consent.is_some() {
+        if self.agent_ui.consent.is_some() || self.agent_request_open() {
             return blocked("a request to the user");
         }
         let scope = self.driver_scope();

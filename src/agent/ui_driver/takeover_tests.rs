@@ -191,6 +191,10 @@ fn a_pause_outlives_a_reconnect_and_shows_again() {
         "{back:?}"
     );
     assert!(back.presence(5000) < 0.1, "fades in");
+    assert!(
+        back.agent().unwrap_or_default().is_empty(),
+        "names no agent: whoever connected may not be the one paused"
+    );
     resume(&mut facts, 6000);
     assert!(matches!(phase(&facts, ON, 6000), Phase::Driving { .. }));
     // The switch going off forgets it.

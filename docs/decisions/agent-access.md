@@ -804,6 +804,11 @@ by `guard::injecting` and never counts. While driving:
   and Esc on one denies it instead of pausing. (Recording the dialog's
   bounds like the pill's was the other choice; a modal dialog makes the
   whole window its surface, so the open flag is simpler and exact.)
+  The flag counts only a prompt the user can see: a request waiting
+  behind a higher dialog (Scheduled, Archive settings) answers no input,
+  so a press there still pauses. While any request waits, shown or not,
+  the driver's surface is blocked, so an agent cannot hide its own
+  prompt behind a dialog it opened and keep driving that dialog.
 
 Without the last rule, confirming a send the agent typed paused it: the
 user's move to Confirm or the press on it counted as taking the window
@@ -1282,3 +1287,7 @@ executor. The default 1280-px image is smaller and encodes faster.
   names the folder, not a chat.
 - The limit is per process, not per agent; one busy agent can use the
   minute's budget for all.
+- A deferred refusal (IV fallback, login answer, deep-link open) goes to
+  whichever input command is open when it fires. The bridge runs one
+  command at a time, so this is the command that caused it; two at once
+  would credit the newer one.
