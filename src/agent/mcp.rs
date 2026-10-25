@@ -91,7 +91,7 @@ fn initialize(id: &Value, params: &Value) -> Value {
         id,
         json!({
             "protocolVersion": version,
-            "capabilities": {"tools": {"listChanged": false}, "resources": {}},
+            "capabilities": {"tools": {"listChanged": false}, "resources": {"subscribe": true}},
             "serverInfo": {"name": "quill", "title": "Quill", "version": crate::version::APP},
             "instructions": super::guide::INSTRUCTIONS,
         }),
@@ -158,9 +158,12 @@ pub fn run() -> i32 {
                     emit(&out, &result(&id, read));
                 }
             }
-            Some(method @ ("tools/call" | "resources/read")) => {
-                forward(&out, &mut link, &id, method == "tools/call", line)
-            }
+            Some(
+                method @ ("tools/call"
+                | "resources/read"
+                | "resources/subscribe"
+                | "resources/unsubscribe"),
+            ) => forward(&out, &mut link, &id, method == "tools/call", line),
             Some(other) => emit(
                 &out,
                 &error(&id, code::NO_METHOD, &format!("Unknown method {other}.")),
@@ -342,7 +345,7 @@ fn handshake(root: &std::path::Path, stream: Stream) -> Result<Stream, Refused> 
         .and_then(|()| writer.flush())
         .map_err(|_| Refused::Other("Quill closed the connection. Retry.".into()))?;
     let _ = stream.set_recv_timeout(Some(Duration::from_secs(10)));
-    let answer = server::read_line_raw(&stream)
+    let answer = server::read_line_raw(&stream, 64 * 1024)
         .and_then(|line| serde_json::from_str::<Value>(&line).ok())
         .ok_or_else(|| Refused::Other("Quill did not answer. Retry.".into()))?;
     if let Some(error) = answer.get("error") {

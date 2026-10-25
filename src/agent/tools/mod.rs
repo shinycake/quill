@@ -269,6 +269,43 @@ pub fn catalog() -> Vec<Value> {
         .collect()
 }
 
+/// The `quill://unread` resource: what `list_unread` returns, as JSON.
+pub fn unread_resource() -> Result<Value, ToolError> {
+    let output = chats::list_unread(&json!({}))?;
+    Ok(json!({"contents": [{
+        "uri": crate::agent::guide::UNREAD_URI,
+        "mimeType": "application/json",
+        "text": output.data.to_string(),
+    }]}))
+}
+
+/// Wait up to `wait` for a message from someone else in a granted chat of
+/// the active account after `since`; moves `since` past what it saw.
+pub fn granted_message_arrived(
+    since: &mut u64,
+    wait: std::time::Duration,
+) -> Result<bool, ToolError> {
+    let ctx = Ctx::active()?;
+    let me = target::my_user_id(&ctx)?;
+    let mut known = std::collections::HashMap::new();
+    let arrived = crate::agent::events::wait_for(ctx.client.id(), *since, wait, |new| {
+        !new.outgoing
+            && *known.entry(new.chat_id).or_insert_with(|| {
+                target::granted(&ctx, new.chat_id, me)
+                    .ok()
+                    .flatten()
+                    .is_some()
+            })
+    });
+    *since = arrived
+        .iter()
+        .map(|new| new.seq)
+        .max()
+        .unwrap_or_else(crate::agent::events::latest_seq)
+        .max(*since);
+    Ok(!arrived.is_empty())
+}
+
 /// The names of every tool, for `quill_status`.
 pub(crate) fn names() -> Vec<&'static str> {
     TOOLS.iter().map(|tool| tool.name).collect()

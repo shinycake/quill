@@ -13,6 +13,8 @@ Chats can be named by id, title, @username or \"saved\". Errors say what to do n
 
 pub const GUIDE_URI: &str = "quill://guide";
 pub const GRANTS_URI: &str = "quill://grants";
+/// Unread messages in granted chats; subscribable.
+pub const UNREAD_URI: &str = "quill://unread";
 const GUIDE: &str = include_str!("guide.md");
 
 /// The `resources` array of a `resources/list` answer.
@@ -30,6 +32,13 @@ pub fn resources() -> Vec<Value> {
             "name": "grants",
             "title": "Granted chats",
             "description": "The chats agents may use and with what scope (read or read+write).",
+            "mimeType": "application/json",
+        }),
+        json!({
+            "uri": UNREAD_URI,
+            "name": "unread",
+            "title": "Unread in granted chats",
+            "description": "Granted chats with unread messages and the newest of them. Subscribe to hear when a new message arrives.",
             "mimeType": "application/json",
         }),
     ]
