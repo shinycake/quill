@@ -21,7 +21,7 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
-    let handle = cx.open_window(size(px(1100.), px(800.)), move |window, cx| {
+    let handle = cx.open_window(size(px(1100.), px(1500.)), move |window, cx| {
         let view = cx.new(|cx| {
             QuillApp::new_with_demo(
                 window,
@@ -52,7 +52,10 @@ fn settle(vcx: &mut VisualTestContext) {
 
 #[gpui_kit::test]
 fn the_agent_access_page_turns_access_on_and_offers_the_setup_command(cx: &mut TestAppContext) {
+    let _guard = quill::locks::lock_or_recover(&crate::ui::agent_state::TEST_LOCK);
     let (app, mut vcx) = new_app(cx);
+    crate::ui::agent_state::reset_for_test(&quill::ids::AccountKey::primary());
+    access::set_enabled(false);
     let vcx = &mut vcx;
     app.update(vcx, |_, cx| cx.notify());
     settle(vcx);

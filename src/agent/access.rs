@@ -24,6 +24,10 @@ struct Stored {
 }
 
 static ENABLED: RwLock<Option<bool>> = RwLock::new(None);
+/// Lib tests that turn the switch (which denies every waiting prompt) or
+/// wait on prompts hold this, so they don't run into each other.
+#[cfg(test)]
+pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// Bumped whenever the switch goes off, so open connections notice.
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 
@@ -67,7 +71,9 @@ pub fn set_enabled(on: bool) {
     }
     if !on {
         GENERATION.fetch_add(1, Ordering::SeqCst);
+        super::prompts::deny_all();
     }
+    crate::wake::AGENT.poke();
     publish_token();
 }
 
@@ -113,7 +119,7 @@ pub fn publish_token() {
     };
     let path = token_path(&root);
     let result = if enabled() {
-        write_owner_only(&path, token().as_bytes())
+        std::fs::create_dir_all(&root).and_then(|()| write_owner_only(&path, token().as_bytes()))
     } else {
         match std::fs::remove_file(&path) {
             Err(err) if err.kind() != std::io::ErrorKind::NotFound => Err(err),

@@ -392,6 +392,7 @@ fn receive_one(
     if crate::agent::td::intercept(&json) {
         return;
     }
+    crate::agent::events::observe(&json);
     let Some(owned) = copy_and_parse(&json, seq, sink) else {
         return;
     };

@@ -66,7 +66,18 @@ struct Link {
     pending: Pending,
 }
 
+/// The MCP client's name from `initialize`, which Quill shows in prompts.
+static CLIENT_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
 fn initialize(id: &Value, params: &Value) -> Value {
+    let info = params.get("clientInfo");
+    if let Some(name) = info
+        .and_then(|i| i.get("title"))
+        .or_else(|| info.and_then(|i| i.get("name")))
+        .and_then(Value::as_str)
+    {
+        let _ = CLIENT_NAME.set(friendly_client_name(name));
+    }
     let asked = params
         .get("protocolVersion")
         .and_then(Value::as_str)
@@ -80,11 +91,29 @@ fn initialize(id: &Value, params: &Value) -> Value {
         id,
         json!({
             "protocolVersion": version,
-            "capabilities": {"tools": {"listChanged": false}, "resources": {}},
+            "capabilities": {"tools": {"listChanged": false}, "resources": {"subscribe": true}},
             "serverInfo": {"name": "quill", "title": "Quill", "version": crate::version::APP},
             "instructions": super::guide::INSTRUCTIONS,
         }),
     )
+}
+
+/// "claude-code" → "Claude Code"; names that already look written stay.
+fn friendly_client_name(name: &str) -> String {
+    if name.contains(' ') || name.chars().any(|c| c.is_ascii_uppercase()) {
+        return name.to_string();
+    }
+    name.split(['-', '_'])
+        .filter(|w| !w.is_empty())
+        .map(|word| {
+            let mut chars = word.chars();
+            chars
+                .next()
+                .map(|first| first.to_uppercase().chain(chars).collect::<String>())
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Run the bridge until stdin closes. Returns the process exit code.
@@ -129,9 +158,12 @@ pub fn run() -> i32 {
                     emit(&out, &result(&id, read));
                 }
             }
-            Some(method @ ("tools/call" | "resources/read")) => {
-                forward(&out, &mut link, &id, method == "tools/call", line)
-            }
+            Some(
+                method @ ("tools/call"
+                | "resources/read"
+                | "resources/subscribe"
+                | "resources/unsubscribe"),
+            ) => forward(&out, &mut link, &id, method == "tools/call", line),
             Some(other) => emit(
                 &out,
                 &error(&id, code::NO_METHOD, &format!("Unknown method {other}.")),
@@ -306,14 +338,14 @@ fn handshake(root: &std::path::Path, stream: Stream) -> Result<Stream, Refused> 
     let mut writer = &stream;
     let hello = format!(
         "{HEADER}\n{}\n",
-        json!({"jsonrpc": "2.0", "id": 0, "method": "auth", "params": {"token": token}})
+        json!({"jsonrpc": "2.0", "id": 0, "method": "auth", "params": {"token": token, "client": CLIENT_NAME.get()}})
     );
     writer
         .write_all(hello.as_bytes())
         .and_then(|()| writer.flush())
         .map_err(|_| Refused::Other("Quill closed the connection. Retry.".into()))?;
     let _ = stream.set_recv_timeout(Some(Duration::from_secs(10)));
-    let answer = server::read_line_raw(&stream)
+    let answer = server::read_line_raw(&stream, 64 * 1024)
         .and_then(|line| serde_json::from_str::<Value>(&line).ok())
         .ok_or_else(|| Refused::Other("Quill did not answer. Retry.".into()))?;
     if let Some(error) = answer.get("error") {
@@ -379,6 +411,12 @@ mod tests {
         );
         let answer = initialize(&json!(1), &json!({"protocolVersion": "1999-01-01"}));
         assert_eq!(answer["result"]["protocolVersion"], "2025-06-18");
+    }
+
+    #[test]
+    fn client_names_read_naturally() {
+        assert_eq!(super::friendly_client_name("claude-code"), "Claude Code");
+        assert_eq!(super::friendly_client_name("Cursor"), "Cursor");
     }
 
     #[test]
