@@ -2,6 +2,7 @@
 //! the takeover clock pinned so the glow and the ghost cursor hold still:
 //!
 //! - `ready-agent-driving`: driving, the ghost just clicked a chat row.
+//! - `ready-agent-steady`: driving with nothing in motion (for measuring).
 //! - `ready-agent-glide`: the ghost halfway from that row to the message box.
 //! - `ready-agent-typing`: the keyboard badge at the message box's caret.
 //! - `ready-agent-paused`: the user took control.
@@ -51,6 +52,17 @@ fn demo_driving(_: &mut QuillApp, window: &mut Window, cx: &mut Context<QuillApp
     at(760);
     takeover::note_press();
     at(890);
+}
+
+/// Driving with nothing in motion (faded in, the click's pulse over): what
+/// a steady takeover costs per glow look.
+fn demo_steady(_: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) {
+    start_session();
+    at(500);
+    takeover::note_aim(Aim::Click, ROW);
+    at(760);
+    takeover::note_press();
+    at(2000);
 }
 
 fn demo_glide(_: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) {
@@ -172,6 +184,7 @@ fn record(_: std::path::PathBuf, _: &mut Window, _: &mut Context<QuillApp>) {}
 
 crate::ui::screenshot_demo::register_demos![
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-agent-driving").setup(demo_driving),
+    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-agent-steady").setup(demo_steady),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-agent-glide").setup(demo_glide),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-agent-paused").setup(demo_paused),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-agent-typing")

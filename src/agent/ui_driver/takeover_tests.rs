@@ -153,6 +153,27 @@ fn stop_ends_the_session_now_and_holds_until_the_agents_leave() {
 }
 
 #[test]
+fn an_interrupted_fade_in_carries_on_from_where_it_got_to() {
+    let mut facts = Facts::default();
+    command(&mut facts, "Claude Code", 0);
+    let half = ms(FADE_IN) / 2;
+    let reached = phase(&facts, ON, half).presence(half);
+    // Paused halfway: the fade-in keeps going, it does not jump to full.
+    facts.paused = Some(PauseReason::Escape);
+    let paused = phase(&facts, ON, half);
+    assert_eq!(paused.presence(half), reached);
+    assert!(moving(&paused, half), "still fading in");
+    assert!(!moving(&paused, ms(FADE_IN)));
+    // Stopped halfway: the fade-out starts at the value reached.
+    facts.paused = None;
+    stop(&mut facts, half);
+    let fading = phase(&facts, ON, half);
+    assert_eq!(fading.presence(half), reached);
+    let later = half + ms(FADE_OUT) / 2;
+    assert!(fading.presence(later) < reached);
+}
+
+#[test]
 fn a_disconnect_fades_out_from_the_moment_it_is_seen() {
     let mut facts = Facts::default();
     command(&mut facts, "Claude Code", 100);

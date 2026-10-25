@@ -122,10 +122,14 @@ pub enum Phase {
     },
     Paused {
         agent: String,
+        since_ms: u64,
         reason: PauseReason,
     },
+    /// `since_ms` is when the session started, so a session that ends
+    /// while still fading in fades out from where it got to.
     FadingOut {
         agent: String,
+        since_ms: u64,
         ended_ms: u64,
         action: Option<Action>,
     },
@@ -137,13 +141,20 @@ fn ms(duration: Duration) -> u64 {
 
 impl Phase {
     /// How much of the takeover is on screen, 0 to 1: fading in, full,
-    /// fading out.
+    /// fading out. A pause or an end during the fade-in carries on from
+    /// the value reached, never jumping to full first.
     pub fn presence(&self, now: u64) -> f32 {
         match self {
             Phase::Idle => 0.0,
-            Phase::Driving { since_ms, .. } => progress(*since_ms, now, FADE_IN),
-            Phase::Paused { .. } => 1.0,
-            Phase::FadingOut { ended_ms, .. } => 1.0 - progress(*ended_ms, now, FADE_OUT),
+            Phase::Driving { since_ms, .. } | Phase::Paused { since_ms, .. } => {
+                progress(*since_ms, now, FADE_IN)
+            }
+            Phase::FadingOut {
+                since_ms, ended_ms, ..
+            } => {
+                let reached = progress(*since_ms, *ended_ms, FADE_IN);
+                reached * (1.0 - progress(*ended_ms, now, FADE_OUT))
+            }
         }
     }
 
@@ -180,6 +191,7 @@ pub fn phase(facts: &Facts, live: Live, now: u64) -> Phase {
     if on && let Some(reason) = facts.paused {
         return Phase::Paused {
             agent: session.agent.clone(),
+            since_ms: session.started_ms,
             reason,
         };
     }
@@ -196,6 +208,7 @@ pub fn phase(facts: &Facts, live: Live, now: u64) -> Phase {
     if now < end.saturating_add(ms(FADE_OUT)) {
         return Phase::FadingOut {
             agent: session.agent.clone(),
+            since_ms: session.started_ms,
             ended_ms: end.min(now),
             action: session.action,
         };
@@ -362,9 +375,11 @@ pub fn next_change_ms(phase: &Phase, facts: &Facts) -> Option<u64> {
 /// or a press pulse (the glow's own motion is the UI's choice).
 pub fn moving(phase: &Phase, now: u64) -> bool {
     let fading = match phase {
-        Phase::Driving { since_ms, .. } => progress(*since_ms, now, FADE_IN) < 1.0,
+        Phase::Driving { since_ms, .. } | Phase::Paused { since_ms, .. } => {
+            progress(*since_ms, now, FADE_IN) < 1.0
+        }
         Phase::FadingOut { .. } => true,
-        Phase::Idle | Phase::Paused { .. } => false,
+        Phase::Idle => false,
     };
     fading
         || phase.action().is_some_and(|action| {
