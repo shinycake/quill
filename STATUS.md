@@ -943,7 +943,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Story stealth mode box: past and next periods, cooldown, Premium lock for free accounts <!-- parity:premium-story-stealth-box -->
 - [x] Animated profile photos play beside messages in groups, as in tdesktop <!-- parity:premium-animated-userpics-history -->
 - [x] Reaction limits: up to 3 reactions per message with Premium (1 without), and locked Premium reactions open the Premium preview <!-- parity:premium-reaction-limits -->
-- [ ] Limit boxes read from TDLib and cover favorite stickers, pinned saved chats, story posting, similar channels and owned bots <!-- parity:premium-limit-boxes-more -->
+- [x] Limit boxes read from TDLib and cover favorite stickers, pinned saved chats, story posting, similar channels and owned bots <!-- parity:premium-limit-boxes-more -->
 - [x] Every Premium upsell opens the preview of its own feature <!-- parity:premium-preview-targets -->
 - [x] Business features preview with per-feature animations for free accounts <!-- parity:premium-business-preview -->
 - [x] Hidden read time and last seen: "Show my read time or get Premium" box, the subscribe row and the first-restrict warning in privacy settings <!-- parity:premium-readtime-box -->
