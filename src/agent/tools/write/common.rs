@@ -267,7 +267,15 @@ pub fn confirm(ctx: &Ctx, target: &Target, kind: &str, preview: &str) -> Result<
     match prompts::wait(id, &rx, ANSWER_WAIT) {
         Some(Decision::Allowed) => Ok(()),
         Some(Decision::Denied) => {
-            record(ctx, target.chat_id, &target.title, kind, preview, false, true);
+            record(
+                ctx,
+                target.chat_id,
+                &target.title,
+                kind,
+                preview,
+                false,
+                true,
+            );
             Err(ToolError::new(
                 "The user declined this in Quill. Do not retry it; ask the user what they want instead.",
             ))

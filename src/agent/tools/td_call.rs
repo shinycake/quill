@@ -9,7 +9,7 @@
 
 use super::target::{self, Target};
 use super::td_policy::{self, Class};
-use super::write::common::{ANSWER_WAIT, admit, log_in, record, take_write_turn, write_error};
+use super::write::common::{self, ANSWER_WAIT, log_in, record, take_write_turn, write_error};
 use super::{Ctx, Tool, ToolError, ToolOutput, current_agent, still_allowed};
 use crate::agent::grants::{self, Scope};
 use crate::agent::prompts::{self, Ask, Decision, Risk};
@@ -60,7 +60,12 @@ fn chats_named(request: &Value, write: bool) -> Vec<(i64, bool)> {
     let Some(fields) = request.as_object() else {
         return named;
     };
-    let int = |key: &str| fields.get(key).and_then(Value::as_i64).filter(|id| *id != 0);
+    let int = |key: &str| {
+        fields
+            .get(key)
+            .and_then(Value::as_i64)
+            .filter(|id| *id != 0)
+    };
     if let Some(id) = int("chat_id") {
         named.push((id, true));
     }
@@ -209,6 +214,11 @@ fn redact(value: &mut Value, grants: &mut Grants) {
             }
             if let Some(Value::Array(ids)) = fields.get_mut("chat_ids") {
                 ids.retain(|id| id.as_i64().is_some_and(|id| grants.allows(id, Scope::Read)));
+                let kept = ids.len();
+                // A count of the whole list would tell how many chats are hidden.
+                if fields.contains_key("total_count") {
+                    fields.insert("total_count".into(), json!(kept));
+                }
             }
             for inner in fields.values_mut() {
                 redact(inner, grants);
@@ -233,7 +243,13 @@ fn method_of(request: &Value) -> Result<String, ToolError> {
 }
 
 /// Wait for the user to allow a deny-listed call.
-fn ask_user(ctx: &Ctx, method: &str, risk: Risk, request: &Value, reason: &str) -> Result<(), ToolError> {
+fn ask_user(
+    ctx: &Ctx,
+    method: &str,
+    risk: Risk,
+    request: &Value,
+    reason: &str,
+) -> Result<(), ToolError> {
     if reason.trim().is_empty() {
         return Err(ToolError::new(format!(
             "{method} needs the user's click in Quill. Call td_call again with \"reason\": one sentence on why, which the user reads."
@@ -273,7 +289,9 @@ fn send_count(request: &Value) -> u32 {
     ["input_message_contents", "message_ids"]
         .iter()
         .find_map(|key| request.get(*key).and_then(Value::as_array))
-        .map_or(1, |list| u32::try_from(list.len().max(1)).unwrap_or(u32::MAX))
+        .map_or(1, |list| {
+            u32::try_from(list.len().max(1)).unwrap_or(u32::MAX)
+        })
 }
 
 fn run(args: &Value) -> Result<ToolOutput, ToolError> {
@@ -283,7 +301,10 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
         .cloned()
         .ok_or_else(|| ToolError::new("Pass request: a TDLib request object with \"@type\"."))?;
     let method = method_of(&request)?;
-    let reason = args.get("reason").and_then(Value::as_str).unwrap_or_default();
+    let reason = args
+        .get("reason")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     if let Some(fields) = request.as_object_mut() {
         // Quill routes answers by @extra; an agent's own would be dropped.
         fields.remove("@extra");
@@ -291,7 +312,10 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
     }
     let ctx = Ctx::active()?;
     let mut grants = Grants::new(&ctx)?;
-    let write_named = !matches!(td_policy::classify(&method, true), Class::Granted(Scope::Read));
+    let write_named = !matches!(
+        td_policy::classify(&method, true),
+        Class::Granted(Scope::Read)
+    );
     let named = chats_named(&request, write_named);
     let mut class = td_policy::classify(&method, !named.is_empty());
     if !matches!(class, Class::Blocked(_) | Class::Ask(_)) && spends(&request) {
@@ -300,7 +324,9 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
     let first_chat = named.first().map(|(id, _)| *id).unwrap_or(0);
     let answer = match class {
         Class::Blocked(why) => {
-            return Err(ToolError::new(format!("td_call does not run {method}: {why}")));
+            return Err(ToolError::new(format!(
+                "td_call does not run {method}: {why}"
+            )));
         }
         Class::Ask(risk) => {
             ask_user(&ctx, &method, risk, &request, reason)?;
@@ -330,11 +356,18 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
                 .target(first_chat)
                 .cloned()
                 .ok_or_else(|| ToolError::new("A send needs chat_id, the chat to send in."))?;
-            admit(&ctx, &target, send_count(&request))?;
-            td::call(&ctx.client, request).map_err(write_error)
+            // Paced, then waited on until Telegram delivers, so the answer
+            // carries final message ids; `send` logs it.
+            let count = send_count(&request);
+            let mut sent = common::send(&ctx, &target, "td_call", &method, request, count)?;
+            if sent.len() == 1 && method != "sendMessageAlbum" && method != "forwardMessages" {
+                Ok(sent.remove(0))
+            } else {
+                Ok(json!({"@type": "messages", "total_count": sent.len(), "messages": sent}))
+            }
         }
     };
-    if !matches!(class, Class::Granted(Scope::Read)) {
+    if !matches!(class, Class::Granted(Scope::Read) | Class::Send) {
         let title = grants
             .target(first_chat)
             .map(|t| t.title.clone())
@@ -345,7 +378,10 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
     redact(&mut result, &mut grants);
     let mut text = serde_json::to_string(&result).unwrap_or_default();
     if text.len() > TEXT_CAP {
-        let cut = (0..=TEXT_CAP).rev().find(|at| text.is_char_boundary(*at)).unwrap_or(0);
+        let cut = (0..=TEXT_CAP)
+            .rev()
+            .find(|at| text.is_char_boundary(*at))
+            .unwrap_or(0);
         text.truncate(cut);
         text.push_str("… (cut; the whole answer is in structuredContent.result)");
     }
@@ -373,7 +409,10 @@ mod tests {
         let forward = json!({"@type": "forwardMessages", "chat_id": 5, "from_chat_id": 6, "message_ids": [1, 2]});
         assert_eq!(chats_named(&forward, true), vec![(5, true), (6, false)]);
         let members = json!({"@type": "getSupergroupMembers", "supergroup_id": 77});
-        assert_eq!(chats_named(&members, false), vec![(-1_000_000_000_077, true)]);
+        assert_eq!(
+            chats_named(&members, false),
+            vec![(-1_000_000_000_077, true)]
+        );
         let nested = json!({"@type": "sendMessage", "chat_id": 5, "input_message_content":
             {"@type": "inputMessageForwarded", "from_chat_id": 9, "message_id": 1}});
         assert_eq!(chats_named(&nested, true), vec![(5, true), (9, false)]);
@@ -385,14 +424,23 @@ mod tests {
 
     #[test]
     fn paid_content_needs_the_user() {
-        assert!(spends(&json!({"@type": "addMessageReaction", "reaction_type": {"@type": "reactionTypePaid"}})));
-        assert!(spends(&json!({"@type": "sendMessage", "options": {"paid_message_star_count": 10}})));
-        assert!(!spends(&json!({"@type": "sendMessage", "input_message_content": {"@type": "inputMessageText"}})));
+        assert!(spends(
+            &json!({"@type": "addMessageReaction", "reaction_type": {"@type": "reactionTypePaid"}})
+        ));
+        assert!(spends(
+            &json!({"@type": "sendMessage", "options": {"paid_message_star_count": 10}})
+        ));
+        assert!(!spends(
+            &json!({"@type": "sendMessage", "input_message_content": {"@type": "inputMessageText"}})
+        ));
     }
 
     #[test]
     fn albums_and_forwards_pace_per_message() {
-        assert_eq!(send_count(&json!({"input_message_contents": [{}, {}, {}]})), 3);
+        assert_eq!(
+            send_count(&json!({"input_message_contents": [{}, {}, {}]})),
+            3
+        );
         assert_eq!(send_count(&json!({"message_ids": [1, 2]})), 2);
         assert_eq!(send_count(&json!({})), 1);
     }

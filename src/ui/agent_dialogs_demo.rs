@@ -80,7 +80,9 @@ fn demo_raw_request(_: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>)
         Ask::Raw {
             method: "terminateSession".into(),
             risk: quill::agent::prompts::Risk::Account,
-            preview: "{\n  \"@type\": \"terminateSession\",\n  \"session_id\": \"5281930266421836\"\n}".into(),
+            preview:
+                "{\n  \"@type\": \"terminateSession\",\n  \"session_id\": \"5281930266421836\"\n}"
+                    .into(),
         },
         "You asked me to sign out the old work laptop.".into(),
     );

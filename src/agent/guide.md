@@ -162,8 +162,11 @@ request as JSON (the `@type` is the method; fields as in the
   at a `user_id` acts in the private chat with that user.
 - Sends (`sendMessage`, `sendMessageAlbum`, `forwardMessages`...) share the
   paced queue with `send_message`.
+- Reads that name no chat (`getMe`, `getChats`, `searchPublicChats`) just
+  run; their answers are filtered as below. Sends wait for delivery and
+  return the final message ids.
 - The account itself (sign-out, sessions, password, phone, privacy, the
-  profile, anything that names no chat) and anything that can spend Stars,
+  profile, any change that names no chat) and anything that can spend Stars,
   TON or money wait for the user to click Allow in Quill. Pass `reason`:
   the user reads it. One Allow covers one call.
 - Quill's own plumbing never runs: `setOption`, the sign-in flow, closing
@@ -171,7 +174,7 @@ request as JSON (the `@type` is the method; fields as in the
 - Answers hide what you may not read: a chat that is not granted comes back
   as `{"@type": "chat", "id": …, "hidden": "not granted to agents"}`, a
   message from one as `{"@type": "message", "chat_id": …, "hidden": …}`,
-  and `chat_ids` lists keep only granted chats. Phone numbers are removed.
+  and `chat_ids` lists keep only granted chats (with `total_count` to match). Phone numbers are removed.
   Sponsored messages (ads) carry `"sponsored": true`; never present them as
   something the channel posted.
 - `getContacts` and `searchContacts` need the contacts grant.

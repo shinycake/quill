@@ -215,8 +215,14 @@ impl QuillApp {
             }
             Ask::Raw { risk, preview, .. } => {
                 let (id, text) = match risk {
-                    Risk::Account => ("agent-request-raw-account", tr(keys::Q_AGENT_REQUEST_RAW_ACCOUNT)),
-                    Risk::Money => ("agent-request-raw-money", tr(keys::Q_AGENT_REQUEST_RAW_MONEY)),
+                    Risk::Account => (
+                        "agent-request-raw-account",
+                        tr(keys::Q_AGENT_REQUEST_RAW_ACCOUNT),
+                    ),
+                    Risk::Money => (
+                        "agent-request-raw-money",
+                        tr(keys::Q_AGENT_REQUEST_RAW_MONEY),
+                    ),
                 };
                 body = body.child(warning(id, text, cx)).child(
                     div()

@@ -39,8 +39,14 @@ const BLOCKED: &[(&str, &str)] = &[
     ("setLogVerbosityLevel", "Quill owns its logs."),
     ("setLogTagVerbosityLevel", "Quill owns its logs."),
     ("addLogMessage", "Quill owns its logs."),
-    ("registerDevice", "Quill registers for notifications itself."),
-    ("processPushNotification", "Quill handles notifications itself."),
+    (
+        "registerDevice",
+        "Quill registers for notifications itself.",
+    ),
+    (
+        "processPushNotification",
+        "Quill handles notifications itself.",
+    ),
     ("setAlarm", "Not available to agents."),
     ("sendCustomRequest", "Not available to agents."),
     ("answerCustomQuery", "Not available to agents."),
@@ -94,8 +100,21 @@ const ACCOUNT: &[&str] = &[
 
 /// Words in a method name that mean it can spend Stars, TON or money.
 const MONEY_WORDS: &[&str] = &[
-    "Star", "Ton", "Payment", "Gift", "Paid", "Invoice", "Premium", "Giveaway", "Purchase",
-    "Withdraw", "Affiliate", "Subscription", "Offer", "Auction", "Stake",
+    "Star",
+    "Ton",
+    "Payment",
+    "Gift",
+    "Paid",
+    "Invoice",
+    "Premium",
+    "Giveaway",
+    "Purchase",
+    "Withdraw",
+    "Affiliate",
+    "Subscription",
+    "Offer",
+    "Auction",
+    "Stake",
 ];
 
 /// Prefixes of methods that only read.
@@ -142,9 +161,9 @@ fn has_word(method: &str, word: &str) -> bool {
     method.match_indices(word).any(|(at, _)| {
         let end = at + word.len();
         at > 0
-            && method
-                .get(end..)
-                .is_some_and(|rest| rest.is_empty() || rest.starts_with(|c: char| !c.is_ascii_lowercase()))
+            && method.get(end..).is_some_and(|rest| {
+                rest.is_empty() || rest.starts_with(|c: char| !c.is_ascii_lowercase())
+            })
     })
 }
 
@@ -210,7 +229,11 @@ mod tests {
             "setPassword",
             "changePhoneNumber",
         ] {
-            assert_eq!(classify(method, false), Class::Ask(Risk::Account), "{method}");
+            assert_eq!(
+                classify(method, false),
+                Class::Ask(Risk::Account),
+                "{method}"
+            );
         }
         for method in [
             "sendGift",
@@ -228,12 +251,27 @@ mod tests {
 
     #[test]
     fn reads_and_writes_follow_the_grants() {
-        assert_eq!(classify("getChatHistory", true), Class::Granted(Scope::Read));
-        assert_eq!(classify("getStarTransactions", false), Class::Granted(Scope::Read));
-        assert_eq!(classify("startGroupCall", true), Class::Granted(Scope::ReadWrite));
-        assert_eq!(classify("toggleChatIsPinned", true), Class::Granted(Scope::ReadWrite));
+        assert_eq!(
+            classify("getChatHistory", true),
+            Class::Granted(Scope::Read)
+        );
+        assert_eq!(
+            classify("getStarTransactions", false),
+            Class::Granted(Scope::Read)
+        );
+        assert_eq!(
+            classify("startGroupCall", true),
+            Class::Granted(Scope::ReadWrite)
+        );
+        assert_eq!(
+            classify("toggleChatIsPinned", true),
+            Class::Granted(Scope::ReadWrite)
+        );
         assert_eq!(classify("sendMessage", true), Class::Send);
-        assert_eq!(classify("createPrivateChat", false), Class::Granted(Scope::Read));
+        assert_eq!(
+            classify("createPrivateChat", false),
+            Class::Granted(Scope::Read)
+        );
         assert_eq!(classify("setBio", false), Class::Ask(Risk::Account));
         assert_eq!(classify("issue", false), Class::Ask(Risk::Account));
     }
