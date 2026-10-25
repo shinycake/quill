@@ -68,6 +68,7 @@ mod topic_load;
 mod unread_totals;
 mod update_batches;
 mod updates_sync;
+mod userpic_video;
 mod users;
 mod video_avatar;
 mod window_chats;

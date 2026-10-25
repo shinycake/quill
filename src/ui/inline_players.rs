@@ -943,6 +943,17 @@ impl InlineVideos {
         .unwrap_or(false)
     }
 
+    /// Whether any clip plays with sound now.
+    pub(super) fn any_sounding(&self) -> bool {
+        self.with(|state| {
+            state
+                .players
+                .values()
+                .any(|slot| slot.sound && !slot.paused)
+        })
+        .unwrap_or(false)
+    }
+
     /// The slot's player, for tests.
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]

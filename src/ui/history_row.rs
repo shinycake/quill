@@ -54,6 +54,15 @@ pub(crate) struct RowChrome {
     pub(crate) via_bot: Option<String>,
 }
 
+/// A row's userpic as it renders: the chrome's `sender_avatar` (an empty
+/// name is a spacer) and the sender's playing clip, if any.
+#[derive(Clone)]
+pub(crate) struct SenderAvatar {
+    pub(crate) name: String,
+    pub(crate) photo: Option<PathBuf>,
+    pub(crate) video: Option<super::userpic_videos::UserpicFrame>,
+}
+
 /// Where a row sits among its neighbours, decided by the messages alone:
 /// it is kept with the row so its chrome can be derived again without
 /// walking the list.

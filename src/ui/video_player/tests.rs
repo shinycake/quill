@@ -424,6 +424,10 @@ mod live_pip_follow;
 #[cfg(feature = "demo-capture")]
 mod video_avatar;
 
+/// Video userpics beside messages and in the chat list.
+#[cfg(feature = "demo-capture")]
+mod userpics;
+
 /// The viewer on a clip that is still opening: the transport shows it,
 /// and closing then drops the player without a crash.
 #[cfg(feature = "demo-capture")]

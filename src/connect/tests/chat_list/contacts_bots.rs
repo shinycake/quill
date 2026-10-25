@@ -715,3 +715,55 @@ fn callback_query_sent_for_button_press() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_video_userpic_asks_for_the_full_info_once_per_photo() {
+    // tdesktop `VideoUserpic::paintLeft` → `updateFullForced`: a Premium
+    // user's video photo needs the full `chatPhoto`, even when an older
+    // full info is cached.
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: String| {
+        driver
+            .ingest(copy_and_parse(&json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    };
+    let user = |photo_id: i64| {
+        format!(
+            r#"{{"@type":"updateUser","user":{{"@type":"user","id":41,"first_name":"Noa","last_name":"","is_premium":true,"profile_photo":{{"@type":"profilePhoto","id":"{photo_id}","small":null,"big":null,"has_animation":true,"is_personal":false}},"type":{{"@type":"userTypeRegular"}}}}}}"#
+        )
+    };
+    let answer = |extra: crate::ids::RequestId| {
+        format!(
+            r#"{{"@type":"userFullInfo","@extra":"{}","bio":{{"@type":"formattedText","text":"","entities":[]}}}}"#,
+            extra.0
+        )
+    };
+    let asked = |recorder: &RecordingSender| {
+        recorder
+            .snapshot()
+            .iter()
+            .filter(|j| j.contains(r#""@type":"getUserFullInfo""#) && j.contains(r#""user_id":41"#))
+            .count()
+    };
+    ingest(&mut driver, user(700));
+    let extra = driver.fetch_user_full_info(41).unwrap().expect("sent");
+    ingest(&mut driver, answer(extra));
+    assert_eq!(asked(&recorder), 1);
+    let extra = driver.fetch_userpic_full_info(41).unwrap().expect("asked");
+    assert_eq!(asked(&recorder), 2);
+    assert_eq!(driver.fetch_userpic_full_info(41).unwrap(), None);
+    ingest(&mut driver, answer(extra));
+    assert_eq!(driver.fetch_userpic_full_info(41).unwrap(), None);
+    assert_eq!(asked(&recorder), 2);
+    ingest(&mut driver, user(701));
+    assert!(driver.fetch_userpic_full_info(41).unwrap().is_some());
+    assert_eq!(asked(&recorder), 3);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

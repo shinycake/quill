@@ -34,6 +34,7 @@ pub(super) fn tool_label(tool: &str) -> String {
         "unmute_chat" => tr(keys::Q_AGENT_TOOL_UNMUTE_CHAT).to_string(),
         "unarchive_chat" => tr(keys::Q_AGENT_TOOL_UNARCHIVE_CHAT).to_string(),
         "remove_from_folder" => tr(keys::Q_AGENT_TOOL_REMOVE_FROM_FOLDER).to_string(),
+        "td_call" => tr(keys::Q_AGENT_TOOL_TD_CALL).to_string(),
         other => {
             let spaced = other.replace('_', " ");
             let mut chars = spaced.chars();
@@ -58,6 +59,7 @@ pub(super) fn confirm_title_key(kind: &str) -> Key {
         "remove_reaction" => keys::Q_AGENT_CONFIRM_REMOVE_REACTION,
         "pin_message" => keys::Q_AGENT_CONFIRM_PIN,
         "unpin_message" => keys::Q_AGENT_CONFIRM_UNPIN,
+        "td_call" => keys::Q_AGENT_CONFIRM_TD_CALL,
         _ => keys::Q_AGENT_CONFIRM_SEND_MESSAGE,
     }
 }
@@ -70,6 +72,7 @@ pub(super) fn confirm_preview_key(kind: &str) -> Key {
         "delete_messages" => keys::Q_AGENT_CONFIRM_PREVIEW_DELETE,
         "react" | "remove_reaction" => keys::Q_AGENT_CONFIRM_PREVIEW_REACTION,
         "pin_message" | "unpin_message" => keys::Q_AGENT_CONFIRM_PREVIEW_MESSAGE,
+        "td_call" => keys::Q_AGENT_REQUEST_RAW_PREVIEW,
         _ => keys::Q_AGENT_REQUEST_WRITE_PREVIEW,
     }
 }

@@ -341,6 +341,11 @@ impl QuillApp {
         self.playback
             .inline_videos
             .begin_render(self.slices.current(), cx);
+        self.playback.userpic_videos.begin_render(
+            super::userpic_videos::Surface::History,
+            self.slices.current(),
+            cx,
+        );
         let weak = cx.weak_entity();
         let look = self.chat_look(self.viewed_chat().map(|c| c.0), cx);
         let palette = self.history_palette(&look, cx);

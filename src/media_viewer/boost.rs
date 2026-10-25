@@ -30,12 +30,11 @@ pub enum BoostPress {
 /// What a Space release asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BoostRelease {
-    /// A tap (released before the hold delay): toggle pause.
+    /// A tap (released before the hold timer fired): toggle pause.
     TogglePause,
     /// The boost was on: go back to the chosen speed.
     EndBoost,
-    /// Held long enough but the boost never started (the check came late),
-    /// or no press was seen: change nothing.
+    /// No press was seen: change nothing.
     Nothing,
 }
 
@@ -91,15 +90,16 @@ impl BoostState {
     }
 
     /// Space went up at `now`.
-    pub fn release(&mut self, now: Instant) -> BoostRelease {
+    /// tdesktop `handleKeyRelease`: a hold timer that has not fired yet
+    /// makes the release a tap, however late the release is handled.
+    pub fn release(&mut self) -> BoostRelease {
         let was_active = self.active;
-        let held = self.held_long_enough(now);
         let pressed = self.pressed_at.is_some();
         *self = Self::default();
-        match (was_active, pressed, held) {
-            (true, _, _) => BoostRelease::EndBoost,
-            (false, true, false) => BoostRelease::TogglePause,
-            _ => BoostRelease::Nothing,
+        match (was_active, pressed) {
+            (true, _) => BoostRelease::EndBoost,
+            (false, true) => BoostRelease::TogglePause,
+            (false, false) => BoostRelease::Nothing,
         }
     }
 
@@ -151,7 +151,7 @@ mod tests {
         let mut boost = BoostState::default();
         assert_eq!(boost.press(t0), BoostPress::Armed);
         assert!(!boost.tick(ms(t0, 120)));
-        assert_eq!(boost.release(ms(t0, 150)), BoostRelease::TogglePause);
+        assert_eq!(boost.release(), BoostRelease::TogglePause);
         assert!(!boost.is_active());
         assert_eq!(boost.wait(ms(t0, 160)), None);
     }
@@ -171,19 +171,20 @@ mod tests {
         assert!(!boost.tick(ms(t0, 400)));
         assert_eq!(boost.press(ms(t0, 450)), BoostPress::Repeat);
         assert_eq!(boost.wait(ms(t0, 450)), None);
-        assert_eq!(boost.release(ms(t0, 900)), BoostRelease::EndBoost);
+        assert_eq!(boost.release(), BoostRelease::EndBoost);
         assert!(!boost.is_active());
     }
 
     #[test]
-    fn a_late_check_still_never_toggles_a_long_hold() {
+    fn a_release_before_the_timer_fires_is_a_tap_however_late() {
         let t0 = Instant::now();
         let mut boost = BoostState::default();
         boost.press(t0);
-        // Released at 250 ms before the timer ran: a hold, not a tap.
-        assert_eq!(boost.release(ms(t0, 250)), BoostRelease::Nothing);
+        // The timer has not fired (a busy frame): still a tap, as in
+        // tdesktop, where only the hold timer starts the boost.
+        assert_eq!(boost.release(), BoostRelease::TogglePause);
         // A release with no press (the press went to another window).
-        assert_eq!(boost.release(ms(t0, 300)), BoostRelease::Nothing);
+        assert_eq!(boost.release(), BoostRelease::Nothing);
     }
 
     #[test]
@@ -196,7 +197,7 @@ mod tests {
         assert!(boost.tick(ms(t0, 300)));
         assert!(boost.cancel());
         assert!(!boost.is_active());
-        assert_eq!(boost.release(ms(t0, 400)), BoostRelease::Nothing);
+        assert_eq!(boost.release(), BoostRelease::Nothing);
     }
 
     #[test]
@@ -212,7 +213,7 @@ mod tests {
         // The release went elsewhere; the next press, seconds later, is new.
         assert_eq!(boost.press(ms(t0, 6_000)), BoostPress::Armed);
         assert!(!boost.is_active(), "the stale boost ended");
-        assert_eq!(boost.release(ms(t0, 6_050)), BoostRelease::TogglePause);
+        assert_eq!(boost.release(), BoostRelease::TogglePause);
     }
 
     #[test]

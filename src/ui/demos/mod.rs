@@ -36,6 +36,7 @@ mod stories;
 mod topic_states;
 pub(in crate::ui) mod video_avatar;
 pub(in crate::ui) mod video_fixtures;
+mod video_userpics;
 
 use quill::composer::{AttachmentKind, ComposerAttachment};
 

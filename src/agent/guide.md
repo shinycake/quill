@@ -13,7 +13,7 @@ with what scope, and the tools that work right now.
 
 ## What you can do
 
-Quill exposes four layers. This version ships two of them:
+Quill exposes four layers. This version ships three of them:
 
 1. Curated tools. Reading: chats, folders, unread, history, search, chat
    details, members, contacts, files. Writing: send text, files, albums,
@@ -21,7 +21,7 @@ Quill exposes four layers. This version ships two of them:
    messages; react; pin; drafts; mark read; mute; archive; folders.
 2. Events: `wait_for_message`, and the `quill://unread` resource, which you
    can subscribe to.
-3. Raw TDLib calls (`td_call`): coming later.
+3. Raw TDLib calls (`td_call`): any TDLib request, under the same grants.
 4. UI driver (click, type and look at Quill's window): coming later.
 
 ## Grants
@@ -146,6 +146,49 @@ The bots default covers bots the user already talks to. A bot you just found
 by @username needs `request_access` with `read_write` before you write to it.
 `send_file` never sends files from Quill's own data folder. If the user turns
 Agent access off while a write waits its turn, nothing goes out.
+
+## Raw TDLib calls
+
+Use `td_call` only when no curated tool does the job. It takes a TDLib
+request as JSON (the `@type` is the method; fields as in the
+[TDLib API](https://core.telegram.org/tdlib/docs/td__api_8h.html)):
+
+    td_call {"request": {"@type": "getChatPinnedMessage", "chat_id": -1001234567890}}
+
+- Quill checks the request against TDLib 1.8.69: an unknown method is
+  refused and fields the method doesn't have are dropped. Chat ids may be
+  numbers or numeric strings.
+- Grants apply to every chat id in the request (`chat_id`, `from_chat_id`,
+  `chat_ids`, any `…_chat_id`, and the chat behind a `supergroup_id`,
+  `basic_group_id` or `secret_chat_id`). Reads (`get…`, `search…`,
+  `check…`) need `read`. A change needs `read_write` on every chat it acts
+  in; a forward's source needs only `read`.
+- Only changes that act on one chat (the method has a `chat_id`) run under
+  the grants, paced like other writes and covered by "Confirm each send".
+  Sends (`sendMessage`, `sendMessageAlbum`, `forwardMessages`...) also wait
+  for delivery and return final message ids.
+- Everything else asks the user to click Allow in Quill, once per call:
+  changes that name no chat (the profile, folders, joining by link),
+  stories and live streams (they post as the user), group calls by
+  `group_call_id`, the account (sessions, password, phone, privacy, proxies,
+  web logins, bot buttons, passport data, stream keys) and anything that can
+  spend Stars, TON or money, a price in any field included. Pass `reason`;
+  the user reads it next to the whole request. A request too long to show
+  in full (over 6000 characters) is refused.
+- Never available: Quill's own plumbing (`setOption`, the sign-in flow,
+  closing the client, logs, `openChat`), raw file access, `inputFileId` and `inputFileGenerated`
+  (use `download_file`; upload with `inputFileLocal` or forward), the TON
+  wallet, `getCurrentState`, and uploads from Quill's data folder.
+- Answers leave out what you may not read: items from chats that aren't
+  granted are dropped from lists, `…chat_ids` lists keep only granted
+  chats, other chats' ids read 0, and a single object from such a chat
+  becomes `{"hidden": "not granted to agents"}`. A list's `total_count`
+  counts only the items returned. Paging offsets come back as
+  `quill-offset:` tokens; pass them back as `offset`. Phone numbers and
+  vCards are removed. Sponsored messages (ads) carry `"sponsored": true`; never
+  present them as something the channel posted.
+- `getContacts`, `searchContacts`, `searchUserByPhoneNumber` and
+  `getImportedContactCount` need the contacts grant.
 
 ## Events
 

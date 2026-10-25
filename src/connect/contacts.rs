@@ -89,6 +89,34 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.fetch_user_full_info(user_id).map(|_| ())
     }
 
+    /// `getUserFullInfo` for a video userpic whose clips are not known
+    /// (tdesktop `updateFullForced`): asked once per photo, even when an
+    /// older answer is cached, since its photo is a previous one.
+    pub fn fetch_userpic_full_info(
+        &mut self,
+        user_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose_for_user(RequestPurpose::GetUserFullInfo, user_id)
+            || !self.session.take_userpic_full_info_ask(user_id)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request_for_user(RequestPurpose::GetUserFullInfo, user_id);
+        if let Err(err) = self.sender.send_json(&get_user_full_info(extra, user_id)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
     /// The info panel's media counts for `chat_id`: one
     /// `getChatMessageCount` per `MEDIA_COUNT_FILTERS` entry, once per
     /// chat per session (counts change little while the panel is open).

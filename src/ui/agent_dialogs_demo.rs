@@ -70,9 +70,29 @@ fn demo_consent(app: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) {
     });
 }
 
+/// `ready-agent-raw-request`: an agent asks to run a deny-listed TDLib call.
+fn demo_raw_request(_: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) {
+    quill::fast_buttons::set_persistence(false);
+    quill::agent::access::set_enabled(true);
+    let _ = quill::agent::prompts::file(
+        super::agent_state::active_account(),
+        "Claude Code".into(),
+        Ask::Raw {
+            method: "terminateSession".into(),
+            risk: quill::agent::prompts::Risk::Account,
+            preview:
+                "{\n  \"@type\": \"terminateSession\",\n  \"session_id\": \"5281930266421836\"\n}"
+                    .into(),
+        },
+        "You asked me to sign out the old work laptop.".into(),
+    );
+}
+
 crate::ui::screenshot_demo::register_demos![
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-agent-request").setup(demo_request),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-agent-write-request")
         .setup(demo_write_request),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-agent-consent").setup(demo_consent),
+    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-agent-raw-request")
+        .setup(demo_raw_request),
 ];
