@@ -120,3 +120,8 @@ that baseline; they are not a comparison with other apps.
 - Held (window in the background, a layer or the emoji panel open) the
   players pause and nothing redraws for them.
 
+## Chat windows
+
+A chat in a window of its own plays its senders' clips too, with its own
+players (`Surface::History(Some(chat))`), as each tdesktop history widget
+keeps its own map. See `premium-effects-chat-windows.md`.

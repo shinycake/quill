@@ -172,6 +172,53 @@ fn message_json(id: i64, outgoing: bool, sending_state: &str) -> String {
     )
 }
 
+/// `updateNewMessage` for an incoming message sent with `effect`.
+fn live_message(chat: i64, id: i64, effect: i64) -> String {
+    format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{chat},"is_outgoing":false,"date":1,"effect_id":"{effect}","content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"hi","entities":[]}}}}}}}}"#
+    )
+}
+
+/// The effect asked for with `getMessageEffect`, if it was.
+fn asked_for(f: &Fixture, effect: i64) -> Option<Value> {
+    f.sent("getMessageEffect").into_iter().find(|request| {
+        request["effect_id"].as_str().and_then(|id| id.parse().ok()) == Some(effect)
+    })
+}
+
+#[test]
+fn a_live_message_gets_its_effect_ready_in_the_main_window_and_a_chat_window() {
+    let mut f = Fixture::new();
+    f.ingest(
+        r#"{"@type":"updateNewChat","chat":{"id":8,"title":"Bob","type":{"@type":"chatTypePrivate","user_id":8},"unread_count":0,"permissions":{"@type":"chatPermissions","can_send_basic_messages":true}}}"#,
+    );
+    f.driver.open_chat_window(ChatId(8)).unwrap();
+    let in_window: i64 = 5_107_584_321_108_051_014;
+    for (chat, id, effect, icon) in [(7, 90, EFFECT, 800), (8, 91, in_window, 810)] {
+        f.ingest(&live_message(chat, id, effect));
+        assert!(
+            f.driver
+                .session
+                .stickers
+                .effects
+                .watch
+                .is_unwatched((chat, id))
+        );
+        let request = asked_for(&f, effect).expect("the effect is described");
+        f.answer_effect(&request, icon);
+        f.ingest(&format!(
+            r#"{{"@type":"updateFile","file":{{"@type":"file","id":{icon},"size":9,"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"is_downloading_completed":false}},"remote":{{"@type":"remoteFile","id":"r{icon}","unique_id":"u{icon}"}}}}}}"#
+        ));
+        let downloads = f.sent("downloadFile");
+        for file in [icon, icon + 2] {
+            assert!(
+                downloads.iter().any(|request| request["file_id"] == file),
+                "chat {chat}: file {file} downloads"
+            );
+        }
+    }
+}
+
 #[test]
 fn an_effect_that_is_gone_is_not_asked_for_again() {
     let mut f = Fixture::new();

@@ -388,7 +388,7 @@ impl QuillApp {
         self.slices.conversation_shown.set(true);
         let drop_state = self.visible_drop_state(cx);
         let drop_overlay = drop_state.map(|state| self.drop_zone_overlay(state, cx));
-        let emoji_effects = self.emoji_effect_overlay(cx);
+        let emoji_effects = self.emoji_effect_overlay(self.effects_window_active(), cx);
         let send_fly = self.send_fly_overlay(cx);
         let slot = div()
             .id("conversation-slot")

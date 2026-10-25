@@ -44,6 +44,8 @@ impl QuillApp {
         // Rows this window painted last frame are what the user saw.
         self.report_visible_history(window.is_window_active(), cx);
         self.report_visible_sponsored(window.is_window_active());
+        self.sync_window_userpic_videos(chat_id);
+        let effects = self.emoji_effect_overlay(self.effects_window_active(), cx);
         let forum_column = self.forum_column_layout(window);
         let topic_open = self.session().is_some_and(|s| s.open_topic.is_some());
         // A narrow forum window shows the topics until one is picked.
@@ -98,7 +100,8 @@ impl QuillApp {
                     .child(bottom)
                     .children(self.pull_hint_overlay(cx)),
             )
-            .children(drop_overlay);
+            .children(drop_overlay)
+            .children(effects);
         let viewer_open = self.viewer.state.is_open();
         div()
             .id("chat-window-body")

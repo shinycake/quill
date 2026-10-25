@@ -4,6 +4,8 @@
 //!
 //! `QUILL_DEMO_EFFECTS` picks what is open over it: `badge` (nothing, the default),
 //! `arrive` (an unread message sent with an effect arrives and plays it),
+//! `window` (the same, with the chat open in a window of its own; capture
+//! it with `QUILL_DEMO_CAPTURE_WINDOWS=1`),
 //! `strip` (the send menu), `expanded` (the full list),
 //! `card` (the "Send with Effect" card) or `premium` (the card of a Premium
 //! effect, offering Premium).
@@ -165,6 +167,22 @@ impl QuillApp {
             input.set_value("See you tonight", window, cx);
         });
         let stage = std::env::var("QUILL_DEMO_EFFECTS").unwrap_or_default();
+        if stage == "window" {
+            self.open_chat_in_new_window(ChatId(CHAT), window, cx);
+            QuillApp::spawn_main(cx, async move |app, cx| {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(1800))
+                    .await;
+                let _ = app.update(cx, |app, cx| {
+                    if let Some(session) = app.demo_session.as_deref_mut() {
+                        arrive(session);
+                    }
+                    cx.notify();
+                });
+            })
+            .detach();
+            return;
+        }
         if stage == "arrive" {
             if let Some(session) = self.demo_session.as_deref_mut() {
                 arrive(session);

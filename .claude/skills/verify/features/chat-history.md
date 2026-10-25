@@ -37,6 +37,14 @@ are drawn (not empty), the time footer sits inside the bubble.
   and playing its effect once. Set `QUILL_RLOTTIE_PATH` to the vendored
   `librlottie.dylib` in a dev build, or the effect shows a renderer notice.
   The demo's effect animation is a placeholder circle.
+- A chat in its own window: `QUILL_DEMO_EFFECTS=window` (on
+  `ready-message-effects`) and `QUILL_DEMO_USERPICS=window` (on
+  `ready-group-video-userpics`) open the chat in a new window; capture it
+  with `QUILL_DEMO_CAPTURE_WINDOWS=1` (`<png>.window1.png`). Add
+  `QUILL_DEMO_BACKGROUND=1 QUILL_ASSUME_ACTIVE=1`: otherwise the main window
+  comes to the front over the chat window, which then gets no frames. The
+  effect arrives 1.8 s after launch; `QUILL_DEMO_CLICK=p:350` puts the
+  window capture mid-effect.
 - Messages arriving, reacted to and deleted in the open chat:
   `QUILL_DEMO_UPDATE_STREAM=4 QUILL_DEMO_STREAM_OPEN=1` with a pause step
   (`QUILL_DEMO_CLICK=p:7000`); `QUILL_TRACE_TICKS=1` prints row builds,

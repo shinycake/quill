@@ -88,7 +88,8 @@ impl QuillApp {
         let video = match sender {
             Some(MessageSender::User { user_id }) if !name.is_empty() => {
                 let behind = self.wallpaper_backdrop(cx);
-                self.userpic_frame(Surface::History, user_id, HISTORY_USERPIC, behind, cx)
+                let surface = self.history_userpic_surface();
+                self.userpic_frame(surface, user_id, HISTORY_USERPIC, behind, cx)
             }
             _ => None,
         };
@@ -125,22 +126,53 @@ impl QuillApp {
         self.userpic_frame(Surface::ChatList, user_id.0, size, behind, cx)
     }
 
-    /// At the start of every main-window frame: the clips hold still while
-    /// no Quill window is in front or something covers the chat, as
-    /// tdesktop pauses them for any `GifPauseReason` (a layer, the
+    /// The history surface of the window being built: the main window's,
+    /// or that of the chat window in scope (each history keeps its own
+    /// players, as each tdesktop history widget does).
+    pub(super) fn history_userpic_surface(&self) -> Surface {
+        Surface::History(self.windows.scope)
+    }
+
+    /// The view to redraw for the history being built: the main window's
+    /// conversation slice, or the chat window in scope.
+    pub(super) fn history_redraw_target(&self) -> Option<EntityId> {
+        match self.windows.scope {
+            Some(chat) => self.windows.view_id_for(chat),
+            None => self.slices.current(),
+        }
+    }
+
+    /// Whether something covers the chat of the window being built, as
+    /// tdesktop pauses the clips for any `GifPauseReason` (a layer, the
     /// emoji panel, inline results, a round video with sound).
-    pub(super) fn sync_userpic_videos(&self, active: bool, scale: f32, history_drawn: bool) {
-        let held = !active
-            || self.viewer.state.is_open()
+    fn userpics_covered(&self) -> bool {
+        self.viewer.state.is_open()
             || self.stories.viewer.is_open()
             || self.kit_dialog_open()
             || self.profile_modal_active()
             || self.media_panel_open()
             || self.composer_ui.inline_results_open
-            || self.playback.inline_videos.any_sounding();
+            || self.playback.inline_videos.any_sounding()
+    }
+
+    /// At the start of every main-window frame: the clips hold still while
+    /// no Quill window is in front, and the main window's while something
+    /// covers its chat.
+    pub(super) fn sync_userpic_videos(&self, active: bool, scale: f32, history_drawn: bool) {
+        self.playback.userpic_videos.frame_start(
+            !active,
+            self.userpics_covered(),
+            scale,
+            history_drawn,
+        );
+    }
+
+    /// At each render of `chat`'s window, its state in place: its clips
+    /// hold still while something covers its chat.
+    pub(super) fn sync_window_userpic_videos(&self, chat: ChatId) {
         self.playback
             .userpic_videos
-            .frame_start(held, scale, history_drawn);
+            .cover_window(chat, self.userpics_covered());
     }
 }
 
