@@ -47,10 +47,10 @@ Write tools need `read_write` on the chat.
 `@username` or t.me link, or the chat's title (`"Ann Lee"`). When a title
 matches several granted chats the error lists them with their ids. Leave
 `chat` out of `search_messages` to search every granted chat. Names only
-ever match granted chats: "No granted chat is called…" means there may be
-such a chat, but you can't see it until the user grants it (ask with
-`request_access`, which takes the same name); "No chat is called…" means
-there is none at all. `list_chats` shows only granted chats.
+ever match granted chats, so "No granted chat is called…" does not say
+whether such a chat exists; if the user wants you to use it, ask with
+`request_access`, which takes the same name and shows the user the match.
+`list_chats` shows only granted chats.
 
 ## Tools
 

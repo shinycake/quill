@@ -1,19 +1,25 @@
 //! Tools that put new messages in a chat: text, files, polls, stickers and
 //! forwards.
 
+use super::super::messages::{self, Detail, Names};
+use super::super::target::{Target, chat_schema, require};
+use super::super::{Ctx, ToolError, ToolOutput};
 use super::common::{
     self, CAPTION_LIMIT, TEXT_LIMIT, confirm, formatted, message_ids, reply_to, required_text,
     send_options,
 };
-use super::super::messages::{self, Detail, Names};
-use super::super::target::{Target, chat_schema, require};
-use super::super::{Ctx, ToolError, ToolOutput};
 use crate::agent::grants::Scope;
 use serde_json::{Value, json};
 use std::path::Path;
 
 /// The sent messages as the agent sees them.
-fn sent_output(ctx: &Ctx, target: &Target, verb: &str, sent: &[Value], scheduled: bool) -> ToolOutput {
+fn sent_output(
+    ctx: &Ctx,
+    target: &Target,
+    verb: &str,
+    sent: &[Value],
+    scheduled: bool,
+) -> ToolOutput {
     let mut names = Names::new(ctx);
     let shaped: Vec<Value> = sent
         .iter()
@@ -66,7 +72,10 @@ pub fn send_message(args: &Value) -> Result<ToolOutput, ToolError> {
     let ctx = Ctx::active()?;
     let target = require(&ctx, args, Scope::ReadWrite)?;
     let body = formatted(&ctx, &text, args, TEXT_LIMIT)?;
-    let link_preview = args.get("link_preview").and_then(Value::as_bool).unwrap_or(true);
+    let link_preview = args
+        .get("link_preview")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
     let request = json!({
         "@type": "sendMessage",
         "chat_id": target.chat_id,
@@ -86,7 +95,13 @@ pub fn send_message(args: &Value) -> Result<ToolOutput, ToolError> {
     confirm(&ctx, &target, "send_message", "Send a message", &text)?;
     let summary = format!("Sent \"{}\"", clip(&text));
     let sent = common::send(&ctx, &target, "send_message", &summary, request, 1)?;
-    Ok(sent_output(&ctx, &target, "Sent", &sent, is_scheduled(args)))
+    Ok(sent_output(
+        &ctx,
+        &target,
+        "Sent",
+        &sent,
+        is_scheduled(args),
+    ))
 }
 
 /// How to send one file.
@@ -188,12 +203,18 @@ pub fn send_file_schema() -> Value {
 
 pub fn send_file(args: &Value) -> Result<ToolOutput, ToolError> {
     let paths: Vec<String> = match args.get("paths") {
-        Some(Value::Array(list)) => list.iter().filter_map(Value::as_str).map(str::to_string).collect(),
+        Some(Value::Array(list)) => list
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect(),
         Some(Value::String(one)) => vec![one.clone()],
         _ => Vec::new(),
     };
     if paths.is_empty() || paths.len() > 10 {
-        return Err(ToolError::new("paths must list 1 to 10 absolute file paths."));
+        return Err(ToolError::new(
+            "paths must list 1 to 10 absolute file paths.",
+        ));
     }
     for path in &paths {
         let file = Path::new(path);
@@ -207,7 +228,9 @@ pub fn send_file(args: &Value) -> Result<ToolOutput, ToolError> {
     let forced = match args.get("as").and_then(Value::as_str) {
         None => None,
         Some(word) => FileKind::parse(word).ok_or_else(|| {
-            ToolError::new("as is \"auto\", \"photo\", \"video\", \"audio\", \"voice\" or \"document\".")
+            ToolError::new(
+                "as is \"auto\", \"photo\", \"video\", \"audio\", \"voice\" or \"document\".",
+            )
         })?,
     };
     let kinds: Vec<FileKind> = paths
@@ -215,7 +238,9 @@ pub fn send_file(args: &Value) -> Result<ToolOutput, ToolError> {
         .map(|p| forced.unwrap_or_else(|| FileKind::guess(Path::new(p))))
         .collect();
     if paths.len() > 1 {
-        let visual = kinds.iter().all(|k| matches!(k, FileKind::Photo | FileKind::Video));
+        let visual = kinds
+            .iter()
+            .all(|k| matches!(k, FileKind::Photo | FileKind::Video));
         let same = kinds.windows(2).all(|w| w.first() == w.get(1));
         if !(visual || same) || kinds.contains(&FileKind::Voice) {
             return Err(ToolError::new(
@@ -225,7 +250,10 @@ pub fn send_file(args: &Value) -> Result<ToolOutput, ToolError> {
     }
     let ctx = Ctx::active()?;
     let target = require(&ctx, args, Scope::ReadWrite)?;
-    let caption_text = args.get("caption").and_then(Value::as_str).unwrap_or_default();
+    let caption_text = args
+        .get("caption")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let caption = if caption_text.trim().is_empty() {
         Value::Null
     } else {
@@ -235,11 +263,18 @@ pub fn send_file(args: &Value) -> Result<ToolOutput, ToolError> {
         .iter()
         .zip(&kinds)
         .enumerate()
-        .map(|(i, (path, kind))| file_content(path, *kind, if i == 0 { &caption } else { &Value::Null }))
+        .map(|(i, (path, kind))| {
+            file_content(path, *kind, if i == 0 { &caption } else { &Value::Null })
+        })
         .collect();
     let names: Vec<String> = paths
         .iter()
-        .map(|p| Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
+        .map(|p| {
+            Path::new(p)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        })
         .collect();
     let request = if contents.len() == 1 {
         json!({
@@ -261,12 +296,26 @@ pub fn send_file(args: &Value) -> Result<ToolOutput, ToolError> {
             "input_message_contents": contents,
         })
     };
-    let preview = format!("{}{}", names.join(", "), if caption_text.is_empty() { String::new() } else { format!("\n{caption_text}") });
+    let preview = format!(
+        "{}{}",
+        names.join(", "),
+        if caption_text.is_empty() {
+            String::new()
+        } else {
+            format!("\n{caption_text}")
+        }
+    );
     confirm(&ctx, &target, "send_file", "Send files", &preview)?;
     let summary = format!("Sent {}", clip(&names.join(", ")));
     let count = u32::try_from(paths.len()).unwrap_or(10);
     let sent = common::send(&ctx, &target, "send_file", &summary, request, count)?;
-    Ok(sent_output(&ctx, &target, "Sent", &sent, is_scheduled(args)))
+    Ok(sent_output(
+        &ctx,
+        &target,
+        "Sent",
+        &sent,
+        is_scheduled(args),
+    ))
 }
 
 pub fn send_poll_schema() -> Value {
@@ -291,7 +340,12 @@ pub fn send_poll(args: &Value) -> Result<ToolOutput, ToolError> {
     let options: Vec<String> = args
         .get("options")
         .and_then(Value::as_array)
-        .map(|list| list.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        .map(|list| {
+            list.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
         .unwrap_or_default();
     if !(2..=12).contains(&options.len()) {
         return Err(ToolError::new("options must list 2 to 12 answers."));
@@ -299,9 +353,14 @@ pub fn send_poll(args: &Value) -> Result<ToolOutput, ToolError> {
     let last = i64::try_from(options.len()).unwrap_or(12) - 1;
     let correct = match args.get("correct_option") {
         None | Some(Value::Null) => None,
-        Some(value) => Some(value.as_i64().filter(|c| (0..=last).contains(c)).ok_or_else(|| {
-            ToolError::new("correct_option is the 0-based index of one of the options.")
-        })?),
+        Some(value) => Some(
+            value
+                .as_i64()
+                .filter(|c| (0..=last).contains(c))
+                .ok_or_else(|| {
+                    ToolError::new("correct_option is the 0-based index of one of the options.")
+                })?,
+        ),
     };
     let ctx = Ctx::active()?;
     let target = require(&ctx, args, Scope::ReadWrite)?;
@@ -377,12 +436,18 @@ pub fn send_sticker(args: &Value) -> Result<ToolOutput, ToolError> {
         .and_then(Value::as_array)
         .and_then(|list| list.first())
         .cloned()
-        .ok_or_else(|| ToolError::new(format!("The user has no sticker for {emoji}. Try another emoji.")))?;
+        .ok_or_else(|| {
+            ToolError::new(format!(
+                "The user has no sticker for {emoji}. Try another emoji."
+            ))
+        })?;
     let file_id = sticker
         .get("sticker")
         .and_then(|f| f.get("id"))
         .and_then(Value::as_i64)
-        .ok_or_else(|| ToolError::new("Telegram returned a sticker without a file. Try another emoji."))?;
+        .ok_or_else(|| {
+            ToolError::new("Telegram returned a sticker without a file. Try another emoji.")
+        })?;
     let request = json!({
         "@type": "sendMessage",
         "chat_id": target.chat_id,
@@ -427,8 +492,15 @@ pub fn forward_messages(args: &Value) -> Result<ToolOutput, ToolError> {
     let ids = message_ids(args, "message_ids")?;
     let ctx = Ctx::active()?;
     let from = require(&ctx, &json!({"chat": args.get("from_chat")}), Scope::Read)?;
-    let to = require(&ctx, &json!({"chat": args.get("to_chat")}), Scope::ReadWrite)?;
-    let hide_sender = args.get("hide_sender").and_then(Value::as_bool).unwrap_or(false);
+    let to = require(
+        &ctx,
+        &json!({"chat": args.get("to_chat")}),
+        Scope::ReadWrite,
+    )?;
+    let hide_sender = args
+        .get("hide_sender")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let request = json!({
         "@type": "forwardMessages",
         "chat_id": to.chat_id,

@@ -26,6 +26,10 @@ struct Stored {
 }
 
 static STORED: RwLock<Option<Stored>> = RwLock::new(None);
+/// Lib tests that turn the switch (which denies every waiting prompt) or
+/// wait on prompts hold this, so they don't run into each other.
+#[cfg(test)]
+pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// Bumped whenever the switch goes off, so open connections notice.
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 

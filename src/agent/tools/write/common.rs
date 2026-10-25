@@ -87,7 +87,10 @@ pub fn message_ids(args: &Value, key: &str) -> Result<Vec<i64>, ToolError> {
 
 /// `text` as a TDLib `formattedText`, read in the `format` argument's way.
 pub fn formatted(ctx: &Ctx, text: &str, args: &Value, limit: usize) -> Result<Value, ToolError> {
-    let format = args.get("format").and_then(Value::as_str).unwrap_or("plain");
+    let format = args
+        .get("format")
+        .and_then(Value::as_str)
+        .unwrap_or("plain");
     let parsed = match format {
         "plain" => json!({"@type": "formattedText", "text": text, "entities": []}),
         "markdown" | "html" => {
@@ -161,7 +164,8 @@ pub fn send_options(args: &Value) -> Result<Value, ToolError> {
                     "schedule_at is in the past. Leave it out to send now, or pass a later time.",
                 ));
             }
-            let at = i32::try_from(at).map_err(|_| ToolError::new("schedule_at is too far ahead."))?;
+            let at =
+                i32::try_from(at).map_err(|_| ToolError::new("schedule_at is too far ahead."))?;
             json!({"@type": "messageSchedulingStateSendAtDate", "send_date": at, "repeat_period": 0})
         }
     };
@@ -192,7 +196,9 @@ pub fn parse_time(text: &str) -> Option<i64> {
     let text = text.trim();
     let num = |range: std::ops::Range<usize>| -> Option<i64> {
         let part = text.get(range)?;
-        part.bytes().all(|b| b.is_ascii_digit()).then(|| part.parse().ok())?
+        part.bytes()
+            .all(|b| b.is_ascii_digit())
+            .then(|| part.parse().ok())?
     };
     let (year, month, day) = (num(0..4)?, num(5..7)?, num(8..10)?);
     let (hour, minute) = (num(11..13)?, num(14..16)?);
@@ -223,7 +229,12 @@ pub fn parse_time(text: &str) -> Option<i64> {
             sign * (hours * 3600 + minutes * 60)
         }
     };
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 || second > 60 {
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 60
+    {
         return None;
     }
     // Days from the civil date (Howard Hinnant's algorithm).
@@ -238,7 +249,13 @@ pub fn parse_time(text: &str) -> Option<i64> {
 }
 
 /// While "Confirm each send" is on, wait for the user to allow this write.
-pub fn confirm(ctx: &Ctx, target: &Target, tool: &str, action: &str, preview: &str) -> Result<(), ToolError> {
+pub fn confirm(
+    ctx: &Ctx,
+    target: &Target,
+    tool: &str,
+    action: &str,
+    preview: &str,
+) -> Result<(), ToolError> {
     if !access::confirm_sends() {
         return Ok(());
     }
@@ -282,7 +299,13 @@ pub fn log(ctx: &Ctx, target: &Target, tool: &str, summary: &str, ok: bool) {
 }
 
 /// Run a write that is not a send, logging how it went.
-pub fn change(ctx: &Ctx, target: &Target, tool: &str, summary: &str, request: Value) -> Result<Value, ToolError> {
+pub fn change(
+    ctx: &Ctx,
+    target: &Target,
+    tool: &str,
+    summary: &str,
+    request: Value,
+) -> Result<Value, ToolError> {
     let result = td::call(&ctx.client, request).map_err(write_error);
     log(ctx, target, tool, summary, result.is_ok());
     result
@@ -292,7 +315,14 @@ pub fn change(ctx: &Ctx, target: &Target, tool: &str, summary: &str, request: Va
 /// pause every agent send.
 pub fn write_error(error: TdError) -> ToolError {
     match error {
-        TdError::Td { code: 429, ref message } | TdError::Td { code: 420, ref message } => {
+        TdError::Td {
+            code: 429,
+            ref message,
+        }
+        | TdError::Td {
+            code: 420,
+            ref message,
+        } => {
             let seconds = pacing::flood_seconds(message).unwrap_or(60);
             pacing::flood(seconds);
             ToolError::new(format!(
@@ -300,7 +330,12 @@ pub fn write_error(error: TdError) -> ToolError {
             ))
         }
         TdError::Td { ref message, .. } if is_paid_error(message) => paid_refusal(),
-        TdError::Td { code: 400, ref message } if message.contains("CHAT_WRITE_FORBIDDEN") || message.contains("Have no write access") => {
+        TdError::Td {
+            code: 400,
+            ref message,
+        } if message.contains("CHAT_WRITE_FORBIDDEN")
+            || message.contains("Have no write access") =>
+        {
             ToolError::new("The user cannot write in this chat (no permission). Tell the user.")
         }
         other => ToolError::from(other),
@@ -324,7 +359,10 @@ fn stars_per_message(ctx: &Ctx, chat_id: i64) -> Result<i64, ToolError> {
     let kind = chat.get("type").cloned().unwrap_or(Value::Null);
     let count = |value: Option<&Value>| -> i64 {
         value
-            .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+            .and_then(|v| {
+                v.as_i64()
+                    .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+            })
             .unwrap_or(0)
     };
     Ok(match kind.get("@type").and_then(Value::as_str) {
@@ -335,7 +373,10 @@ fn stars_per_message(ctx: &Ctx, chat_id: i64) -> Result<i64, ToolError> {
                 .unwrap_or(0)
         }
         Some("chatTypeSupergroup") => {
-            let id = kind.get("supergroup_id").and_then(Value::as_i64).unwrap_or(0);
+            let id = kind
+                .get("supergroup_id")
+                .and_then(Value::as_i64)
+                .unwrap_or(0);
             ctx.call(json!({"@type": "getSupergroup", "supergroup_id": id}))
                 .map(|group| count(group.get("paid_message_star_count")))
                 .unwrap_or(0)
@@ -357,7 +398,10 @@ fn is_new_peer(ctx: &Ctx, target: &Target) -> bool {
     if kind.and_then(|k| k.get("@type")).and_then(Value::as_str) != Some("chatTypePrivate") {
         return false;
     }
-    let user_id = kind.and_then(|k| k.get("user_id")).and_then(Value::as_i64).unwrap_or(0);
+    let user_id = kind
+        .and_then(|k| k.get("user_id"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
     let is_contact = ctx
         .call(json!({"@type": "getUser", "user_id": user_id}))
         .ok()
@@ -379,13 +423,25 @@ fn is_new_peer(ctx: &Ctx, target: &Target) -> bool {
 
 /// Send messages to `target` through the paced queue and wait until
 /// Telegram delivers them. Returns the messages with their final ids.
-pub fn send(ctx: &Ctx, target: &Target, tool: &str, summary: &str, request: Value, count: u32) -> Result<Vec<Value>, ToolError> {
+pub fn send(
+    ctx: &Ctx,
+    target: &Target,
+    tool: &str,
+    summary: &str,
+    request: Value,
+    count: u32,
+) -> Result<Vec<Value>, ToolError> {
     let result = send_inner(ctx, target, request, count);
     log(ctx, target, tool, summary, result.is_ok());
     result
 }
 
-fn send_inner(ctx: &Ctx, target: &Target, request: Value, count: u32) -> Result<Vec<Value>, ToolError> {
+fn send_inner(
+    ctx: &Ctx,
+    target: &Target,
+    request: Value,
+    count: u32,
+) -> Result<Vec<Value>, ToolError> {
     if stars_per_message(ctx, target.chat_id)? > 0 {
         return Err(paid_refusal());
     }

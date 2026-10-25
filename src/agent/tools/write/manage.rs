@@ -1,9 +1,9 @@
 //! Tools that change how a chat sits in the user's Quill: draft, read
 //! state, notifications, archive and folders.
 
-use super::common::{self, TEXT_LIMIT, change, formatted};
 use super::super::target::{chat_schema, require};
 use super::super::{Ctx, ToolError, ToolOutput};
+use super::common::{self, TEXT_LIMIT, change, formatted};
 use crate::agent::grants::Scope;
 use serde_json::{Value, json};
 
@@ -26,7 +26,11 @@ pub fn draft_schema() -> Value {
 }
 
 pub fn set_draft(args: &Value) -> Result<ToolOutput, ToolError> {
-    let text = args.get("text").and_then(Value::as_str).unwrap_or_default().to_string();
+    let text = args
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
     let ctx = Ctx::active()?;
     let target = require(&ctx, args, Scope::ReadWrite)?;
     let draft = if text.trim().is_empty() {
@@ -46,7 +50,11 @@ pub fn set_draft(args: &Value) -> Result<ToolOutput, ToolError> {
         })
     };
     let cleared = draft.is_null();
-    let summary = if cleared { "Cleared the draft".to_string() } else { "Set the draft".to_string() };
+    let summary = if cleared {
+        "Cleared the draft".to_string()
+    } else {
+        "Set the draft".to_string()
+    };
     change(
         &ctx,
         &target,
@@ -55,7 +63,10 @@ pub fn set_draft(args: &Value) -> Result<ToolOutput, ToolError> {
         json!({"@type": "setChatDraftMessage", "chat_id": target.chat_id, "topic_id": Value::Null, "draft_message": draft}),
     )?;
     Ok(done(
-        format!("{summary} in \"{}\". The user sends it from Quill.", target.title),
+        format!(
+            "{summary} in \"{}\". The user sends it from Quill.",
+            target.title
+        ),
         json!({"chat": target.summary(), "cleared": cleared}),
     ))
 }
@@ -73,7 +84,11 @@ pub fn mark_read(args: &Value) -> Result<ToolOutput, ToolError> {
     let ctx = Ctx::active()?;
     let target = require(&ctx, args, Scope::ReadWrite)?;
     let chat = ctx.call(json!({"@type": "getChat", "chat_id": target.chat_id}))?;
-    if let Some(last) = chat.get("last_message").and_then(|m| m.get("id")).and_then(Value::as_i64) {
+    if let Some(last) = chat
+        .get("last_message")
+        .and_then(|m| m.get("id"))
+        .and_then(Value::as_i64)
+    {
         change(
             &ctx,
             &target,
@@ -91,7 +106,10 @@ pub fn mark_read(args: &Value) -> Result<ToolOutput, ToolError> {
     if chat.get("is_marked_as_unread").and_then(Value::as_bool) == Some(true) {
         ctx.call(json!({"@type": "toggleChatIsMarkedAsUnread", "chat_id": target.chat_id, "is_marked_as_unread": false}))?;
     }
-    Ok(done(format!("Marked \"{}\" as read.", target.title), json!({"chat": target.summary(), "read": true})))
+    Ok(done(
+        format!("Marked \"{}\" as read.", target.title),
+        json!({"chat": target.summary(), "read": true}),
+    ))
 }
 
 pub fn mute_schema() -> Value {
@@ -109,9 +127,12 @@ pub fn mute_schema() -> Value {
 pub fn mute_chat(args: &Value) -> Result<ToolOutput, ToolError> {
     let minutes = match args.get("minutes") {
         None | Some(Value::Null) => None,
-        Some(value) => Some(value.as_i64().filter(|m| *m >= 0).ok_or_else(|| {
-            ToolError::new("minutes must be a whole number, 0 or more.")
-        })?),
+        Some(value) => Some(
+            value
+                .as_i64()
+                .filter(|m| *m >= 0)
+                .ok_or_else(|| ToolError::new("minutes must be a whole number, 0 or more."))?,
+        ),
     };
     let mute_for: i64 = match minutes {
         None => i64::from(i32::MAX),
@@ -124,7 +145,9 @@ pub fn mute_chat(args: &Value) -> Result<ToolOutput, ToolError> {
         .get("notification_settings")
         .cloned()
         .filter(Value::is_object)
-        .ok_or_else(|| ToolError::new("Quill could not read this chat's notification settings. Retry."))?;
+        .ok_or_else(|| {
+            ToolError::new("Quill could not read this chat's notification settings. Retry.")
+        })?;
     if let Some(fields) = settings.as_object_mut() {
         fields.insert("use_default_mute_for".into(), json!(false));
         fields.insert("mute_for".into(), json!(mute_for));
@@ -141,7 +164,10 @@ pub fn mute_chat(args: &Value) -> Result<ToolOutput, ToolError> {
         &summary,
         json!({"@type": "setChatNotificationSettings", "chat_id": target.chat_id, "notification_settings": settings}),
     )?;
-    Ok(done(format!("{summary} \"{}\".", target.title), json!({"chat": target.summary(), "mute_for_seconds": mute_for})))
+    Ok(done(
+        format!("{summary} \"{}\".", target.title),
+        json!({"chat": target.summary(), "mute_for_seconds": mute_for}),
+    ))
 }
 
 pub fn archive_schema() -> Value {
@@ -160,7 +186,11 @@ pub fn archive_chat(args: &Value) -> Result<ToolOutput, ToolError> {
     let archive = args.get("archive").and_then(Value::as_bool).unwrap_or(true);
     let ctx = Ctx::active()?;
     let target = require(&ctx, args, Scope::ReadWrite)?;
-    let list = if archive { "chatListArchive" } else { "chatListMain" };
+    let list = if archive {
+        "chatListArchive"
+    } else {
+        "chatListMain"
+    };
     let summary = if archive { "Archived" } else { "Unarchived" };
     change(
         &ctx,
@@ -169,7 +199,10 @@ pub fn archive_chat(args: &Value) -> Result<ToolOutput, ToolError> {
         summary,
         json!({"@type": "addChatToList", "chat_id": target.chat_id, "chat_list": {"@type": list}}),
     )?;
-    Ok(done(format!("{summary} \"{}\".", target.title), json!({"chat": target.summary(), "archived": archive})))
+    Ok(done(
+        format!("{summary} \"{}\".", target.title),
+        json!({"chat": target.summary(), "archived": archive}),
+    ))
 }
 
 pub fn folder_schema() -> Value {
@@ -198,9 +231,9 @@ fn folder_id(ctx: &Ctx, wanted: Option<&Value>) -> Result<(i64, String), ToolErr
         }
         _ => None,
     };
-    found.cloned().ok_or_else(|| {
-        ToolError::new("No such folder. Call list_folders for the names and ids.")
-    })
+    found
+        .cloned()
+        .ok_or_else(|| ToolError::new("No such folder. Call list_folders for the names and ids."))
 }
 
 pub fn set_chat_folder(args: &Value) -> Result<ToolOutput, ToolError> {
@@ -226,7 +259,11 @@ pub fn set_chat_folder(args: &Value) -> Result<ToolOutput, ToolError> {
         edit(&mut folder, "excluded_chat_ids", false);
         edit(&mut folder, "included_chat_ids", true);
     }
-    let summary = if remove { format!("Removed from folder \"{name}\"") } else { format!("Added to folder \"{name}\"") };
+    let summary = if remove {
+        format!("Removed from folder \"{name}\"")
+    } else {
+        format!("Added to folder \"{name}\"")
+    };
     change(
         &ctx,
         &target,
@@ -235,11 +272,18 @@ pub fn set_chat_folder(args: &Value) -> Result<ToolOutput, ToolError> {
         json!({"@type": "editChatFolder", "chat_folder_id": id, "folder": folder}),
     )
     .map_err(|error| {
-        if error.0.contains("CHATLIST_INCLUDE_INVALID") || error.0.contains("FILTER_INCLUDE_TOO_MUCH") {
-            ToolError::new(format!("Folder \"{name}\" is full (Telegram's limit on chats per folder)."))
+        if error.0.contains("CHATLIST_INCLUDE_INVALID")
+            || error.0.contains("FILTER_INCLUDE_TOO_MUCH")
+        {
+            ToolError::new(format!(
+                "Folder \"{name}\" is full (Telegram's limit on chats per folder)."
+            ))
         } else {
             error
         }
     })?;
-    Ok(done(format!("{summary}: \"{}\".", target.title), json!({"chat": target.summary(), "folder": {"id": id, "name": name}, "in_folder": !remove})))
+    Ok(done(
+        format!("{summary}: \"{}\".", target.title),
+        json!({"chat": target.summary(), "folder": {"id": id, "name": name}, "in_folder": !remove}),
+    ))
 }

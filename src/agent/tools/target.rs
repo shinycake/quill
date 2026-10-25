@@ -204,12 +204,10 @@ fn by_title(ctx: &Ctx, title: &str, me: i64, reach: Reach) -> Result<i64, ToolEr
         .unwrap_or_default();
     let grants = grants::for_account(&ctx.account);
     let mut candidates = Vec::new();
-    let mut hidden = 0usize;
     for id in ids {
         let chat = ctx.call(json!({"@type": "getChat", "chat_id": id}))?;
         let class = classify(ctx, &chat, me)?;
         if reach == Reach::Granted && grants.scope_for(id, class).is_none() {
-            hidden += 1;
             continue;
         }
         candidates.push((id, chat_title(&chat, class)));
@@ -220,11 +218,10 @@ fn by_title(ctx: &Ctx, title: &str, me: i64, reach: Reach) -> Result<i64, ToolEr
         .collect();
     match (exact.as_slice(), candidates.as_slice()) {
         ([(id, _)], _) | ([], [(id, _)]) => Ok(*id),
-        ([], []) if hidden > 0 => Err(ToolError::new(format!(
-            "No granted chat is called \"{title}\". If you need a chat by that name, call request_access {{\"chat\": \"{title}\", \"scope\": \"read\", \"reason\": \"<why>\"}}; Quill shows the user the match and asks."
-        ))),
+        // One answer whether or not an ungranted chat matched, so trying
+        // names tells an agent nothing about chats it can't see.
         ([], []) => Err(ToolError::new(format!(
-            "No chat is called \"{title}\". Check the name, or call list_chats for the chats you can use."
+            "No granted chat is called \"{title}\". Call list_chats for the chats you can use. If the user wants you to use a chat by that name, call request_access {{\"chat\": \"{title}\", \"scope\": \"read\", \"reason\": \"<why>\"}}; Quill shows the user the match and asks."
         ))),
         _ if reach == Reach::Any => Err(ToolError::new(format!(
             "Several chats match \"{title}\". Ask with the chat's exact title or @username, or with its id if you have it."

@@ -1,9 +1,9 @@
 //! Tools that change messages already in a chat: edit, delete, react, pin.
 //! Edits and deletes touch only the user's own messages.
 
-use super::common::{self, TEXT_LIMIT, change, confirm, formatted, message_ids, required_text};
 use super::super::target::{Target, chat_schema, require};
 use super::super::{Ctx, ToolError, ToolOutput, int_arg};
+use super::common::{self, TEXT_LIMIT, change, confirm, formatted, message_ids, required_text};
 use crate::agent::grants::Scope;
 use serde_json::{Value, json};
 
@@ -64,7 +64,16 @@ pub fn edit_message(args: &Value) -> Result<ToolOutput, ToolError> {
         .and_then(|c| c.get("@type"))
         .and_then(Value::as_str)
         == Some("messageText");
-    let body = formatted(&ctx, &text, args, if is_text { TEXT_LIMIT } else { common::CAPTION_LIMIT })?;
+    let body = formatted(
+        &ctx,
+        &text,
+        args,
+        if is_text {
+            TEXT_LIMIT
+        } else {
+            common::CAPTION_LIMIT
+        },
+    )?;
     let request = if is_text {
         json!({
             "@type": "editMessageText",
@@ -84,7 +93,13 @@ pub fn edit_message(args: &Value) -> Result<ToolOutput, ToolError> {
         })
     };
     confirm(&ctx, &target, "edit_message", "Edit a message", &text)?;
-    change(&ctx, &target, "edit_message", &format!("Edited message {id}"), request)?;
+    change(
+        &ctx,
+        &target,
+        "edit_message",
+        &format!("Edited message {id}"),
+        request,
+    )?;
     Ok(done(
         format!("Edited message {id} in \"{}\".", target.title),
         json!({"chat": target.summary(), "message_id": id, "edited": true}),
@@ -106,7 +121,10 @@ pub fn delete_schema() -> Value {
 
 pub fn delete_messages(args: &Value) -> Result<ToolOutput, ToolError> {
     let ids = message_ids(args, "message_ids")?;
-    let for_everyone = args.get("for_everyone").and_then(Value::as_bool).unwrap_or(true);
+    let for_everyone = args
+        .get("for_everyone")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
     let ctx = Ctx::active()?;
     let target = require(&ctx, args, Scope::ReadWrite)?;
     let mut refused = Vec::new();
@@ -115,7 +133,8 @@ pub fn delete_messages(args: &Value) -> Result<ToolOutput, ToolError> {
         let message = get_message(&ctx, &target, *id)?;
         let props = properties(&ctx, &target, *id);
         if !flag(&message, "is_outgoing")
-            || !(flag(&props, "can_be_deleted_only_for_self") || flag(&props, "can_be_deleted_for_all_users"))
+            || !(flag(&props, "can_be_deleted_only_for_self")
+                || flag(&props, "can_be_deleted_for_all_users"))
         {
             refused.push(id.to_string());
         } else if !flag(&props, "can_be_deleted_for_all_users") {
@@ -128,7 +147,20 @@ pub fn delete_messages(args: &Value) -> Result<ToolOutput, ToolError> {
             refused.join(", ")
         )));
     }
-    confirm(&ctx, &target, "delete_messages", "Delete messages", &format!("{} message(s): {}", ids.len(), ids.iter().map(i64::to_string).collect::<Vec<_>>().join(", ")))?;
+    confirm(
+        &ctx,
+        &target,
+        "delete_messages",
+        "Delete messages",
+        &format!(
+            "{} message(s): {}",
+            ids.len(),
+            ids.iter()
+                .map(i64::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    )?;
     change(
         &ctx,
         &target,
@@ -136,9 +168,17 @@ pub fn delete_messages(args: &Value) -> Result<ToolOutput, ToolError> {
         &format!("Deleted {} message(s)", ids.len()),
         json!({"@type": "deleteMessages", "chat_id": target.chat_id, "message_ids": ids, "revoke": revoke}),
     )?;
-    let whom = if revoke { "for everyone" } else { "for the user only" };
+    let whom = if revoke {
+        "for everyone"
+    } else {
+        "for the user only"
+    };
     Ok(done(
-        format!("Deleted {} message(s) in \"{}\" {whom}.", ids.len(), target.title),
+        format!(
+            "Deleted {} message(s) in \"{}\" {whom}.",
+            ids.len(),
+            target.title
+        ),
         json!({"chat": target.summary(), "deleted": ids, "for_everyone": revoke}),
     ))
 }
@@ -171,9 +211,15 @@ pub fn react(args: &Value) -> Result<ToolOutput, ToolError> {
         json!({"@type": "addMessageReaction", "chat_id": target.chat_id, "message_id": id, "reaction_type": reaction, "is_big": false, "update_recent_reactions": true})
     };
     let (action, summary) = if remove {
-        ("Remove a reaction", format!("Removed {} from message {id}", emoji.trim()))
+        (
+            "Remove a reaction",
+            format!("Removed {} from message {id}", emoji.trim()),
+        )
     } else {
-        ("React to a message", format!("Reacted {} to message {id}", emoji.trim()))
+        (
+            "React to a message",
+            format!("Reacted {} to message {id}", emoji.trim()),
+        )
     };
     confirm(&ctx, &target, "react", action, emoji.trim())?;
     change(&ctx, &target, "react", &summary, request).map_err(|error| {
@@ -183,7 +229,10 @@ pub fn react(args: &Value) -> Result<ToolOutput, ToolError> {
             error
         }
     })?;
-    Ok(done(format!("{summary} in \"{}\".", target.title), json!({"chat": target.summary(), "message_id": id, "emoji": emoji.trim(), "removed": remove})))
+    Ok(done(
+        format!("{summary} in \"{}\".", target.title),
+        json!({"chat": target.summary(), "message_id": id, "emoji": emoji.trim(), "removed": remove}),
+    ))
 }
 
 pub fn pin_schema() -> Value {
@@ -213,7 +262,26 @@ pub fn pin_message(args: &Value) -> Result<ToolOutput, ToolError> {
         json!({"@type": "pinChatMessage", "chat_id": target.chat_id, "message_id": id, "disable_notification": silent, "only_for_self": false})
     };
     let verb = if unpin { "Unpinned" } else { "Pinned" };
-    confirm(&ctx, &target, "pin_message", if unpin { "Unpin a message" } else { "Pin a message" }, &format!("Message {id}"))?;
-    change(&ctx, &target, "pin_message", &format!("{verb} message {id}"), request)?;
-    Ok(done(format!("{verb} message {id} in \"{}\".", target.title), json!({"chat": target.summary(), "message_id": id, "pinned": !unpin})))
+    confirm(
+        &ctx,
+        &target,
+        "pin_message",
+        if unpin {
+            "Unpin a message"
+        } else {
+            "Pin a message"
+        },
+        &format!("Message {id}"),
+    )?;
+    change(
+        &ctx,
+        &target,
+        "pin_message",
+        &format!("{verb} message {id}"),
+        request,
+    )?;
+    Ok(done(
+        format!("{verb} message {id} in \"{}\".", target.title),
+        json!({"chat": target.summary(), "message_id": id, "pinned": !unpin}),
+    ))
 }

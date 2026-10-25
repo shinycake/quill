@@ -88,19 +88,23 @@ fn record_send(json: &str) {
         return;
     };
     let message = update.get("message").cloned().unwrap_or(Value::Null);
-    let outcome = if update.get("@type").and_then(Value::as_str) == Some("updateMessageSendSucceeded") {
-        Sent::Delivered(message)
-    } else {
-        let error = update.get("error");
-        Sent::Failed(
-            error.and_then(|e| e.get("code")).and_then(Value::as_i64).unwrap_or(0),
-            error
-                .and_then(|e| e.get("message"))
-                .and_then(Value::as_str)
-                .unwrap_or("unknown error")
-                .to_string(),
-        )
-    };
+    let outcome =
+        if update.get("@type").and_then(Value::as_str) == Some("updateMessageSendSucceeded") {
+            Sent::Delivered(message)
+        } else {
+            let error = update.get("error");
+            Sent::Failed(
+                error
+                    .and_then(|e| e.get("code"))
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0),
+                error
+                    .and_then(|e| e.get("message"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown error")
+                    .to_string(),
+            )
+        };
     let mut guard = crate::locks::lock_or_recover(&OUTCOMES);
     let outcomes = guard.get_or_insert_with(VecDeque::new);
     outcomes.push_back((client_of(&update), old_id, outcome));
@@ -292,7 +296,10 @@ mod tests {
         assert!(matches!(got.first(), Some(Some(super::Sent::Delivered(m))) if m["id"] == 2048));
         assert_eq!(
             got.get(1),
-            Some(&Some(super::Sent::Failed(400, "CHAT_WRITE_FORBIDDEN".into())))
+            Some(&Some(super::Sent::Failed(
+                400,
+                "CHAT_WRITE_FORBIDDEN".into()
+            )))
         );
     }
 
