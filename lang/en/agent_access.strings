@@ -97,6 +97,7 @@
 "qll_agent_tool_ui_type" = "Typed in the window";
 "qll_agent_tool_ui_keys" = "Pressed keys in the window";
 "qll_agent_tool_ui_send" = "Sent from the message box";
+"qll_agent_tool_ui_screenshot" = "Took a screenshot of the window";
 "qll_agent_tool_td_call" = "Raw TDLib call";
 "qll_agent_activity_declined" = "declined in Quill";
 "qll_agent_confirm_send_message" = "{agent} wants to send a message in \"{chat}\"";

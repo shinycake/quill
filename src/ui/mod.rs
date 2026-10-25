@@ -19,6 +19,8 @@ mod agent_dialogs_demo;
 mod agent_driver;
 mod agent_driver_input;
 mod agent_driver_send;
+mod agent_driver_shot;
+mod agent_driver_shot_demo;
 mod agent_driver_surface;
 mod agent_driver_tree;
 mod agent_labels;

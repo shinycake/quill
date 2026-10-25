@@ -14,6 +14,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::agent_driver_input::{self as input, Step, steps};
+use super::agent_driver_shot as driver_shot;
 use super::agent_state::active_account;
 use super::app::QuillApp;
 use gpui_kit::*;
@@ -107,8 +108,18 @@ impl QuillApp {
                 }
             };
             let command = pending.request.command.clone();
+            let agent = pending.request.agent.clone();
             if !command.is_input() {
-                pending.answer(UiReply::Tree(tree));
+                // A screenshot draws a frame of its own and answers with
+                // that frame's tree (`agent_driver_shot`).
+                let reply = match pending.request.shot {
+                    None => UiReply::Tree(tree),
+                    Some(options) => match driver_shot::capture(&app, cx, &agent, options).await {
+                        Ok((tree, shot)) => UiReply::Shot { tree, shot },
+                        Err(note) => UiReply::Refused(note),
+                    },
+                };
+                pending.answer(reply);
                 return;
             }
             let steps = match steps(&command) {
@@ -202,7 +213,7 @@ impl QuillApp {
             // A click often takes a frame to show (a dialog, a menu, focus),
             // so the answer waits for the one after the input's own. A
             // surface the agent may not see answers with its note instead.
-            let (tree, added) = match wait_for_tree(&app, cx, tree.frame.saturating_add(1)).await {
+            let (after, added) = match wait_for_tree(&app, cx, tree.frame.saturating_add(1)).await {
                 Ok((_, after)) => {
                     let added = after.new_since(&tree).into_iter().cloned().collect();
                     (after, added)
@@ -221,11 +232,22 @@ impl QuillApp {
                     )
                 }
             };
+            let (tree, added, shot) = driver_shot::after_input(
+                &app,
+                cx,
+                &agent,
+                pending.request.shot,
+                &tree,
+                after,
+                added,
+            )
+            .await;
             pending.answer(UiReply::Done {
                 tree,
                 added,
                 refusals,
                 ui_send,
+                shot,
             });
         })
         .detach();
@@ -454,6 +476,11 @@ mod tests;
 #[cfg(feature = "demo-capture")]
 #[path = "agent_driver_redact_tests.rs"]
 mod redact_tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "agent_driver_shot_tests.rs"]
+mod shot_tests;
 
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]

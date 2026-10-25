@@ -42,6 +42,7 @@ pub(super) fn tool_label(tool: &str) -> String {
         "ui_type" => tr(keys::Q_AGENT_TOOL_UI_TYPE).to_string(),
         "ui_keys" => tr(keys::Q_AGENT_TOOL_UI_KEYS).to_string(),
         "ui_send" => tr(keys::Q_AGENT_TOOL_UI_SEND).to_string(),
+        "ui_screenshot" => tr(keys::Q_AGENT_TOOL_UI_SCREENSHOT).to_string(),
         other => {
             let spaced = other.replace('_', " ");
             let mut chars = spaced.chars();

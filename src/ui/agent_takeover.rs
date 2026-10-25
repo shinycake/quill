@@ -65,12 +65,16 @@ pub(super) fn note_real_input(input: RealInput, window: &Window) {
 }
 
 impl QuillApp {
-    /// The takeover layer, or nothing when no agent drives.
+    /// The takeover layer, or nothing when no agent drives. A screenshot's
+    /// frame leaves it out (`agent_driver_shot`): it is not Quill's UI.
     pub(super) fn takeover_layer(
         &self,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        if super::agent_driver_shot::capturing() {
+            return None;
+        }
         // The pill paints again below (and records itself) if still shown.
         PILL.with(|pill| pill.set(None));
         if !super::agent_state::sees_agents() {

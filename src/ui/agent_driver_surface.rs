@@ -137,8 +137,13 @@ impl QuillApp {
 
     /// The grant `chat_id` has, by the same rule the chat tools use.
     pub(super) fn driver_chat_scope(&self, chat_id: i64) -> Option<Scope> {
+        grants::for_account(&active_account()).scope_for(chat_id, self.driver_chat_class(chat_id))
+    }
+
+    /// The class of `chat_id` its grant defaults follow.
+    pub(super) fn driver_chat_class(&self, chat_id: i64) -> ChatClass {
         let session = self.session();
-        let class = match session.and_then(|s| s.chats.get(&chat_id)) {
+        match session.and_then(|s| s.chats.get(&chat_id)) {
             Some(chat) => match chat.kind {
                 ChatKind::Private { user_id } => {
                     if session.is_some_and(|s| s.is_saved_messages(ChatId(chat_id))) {
@@ -167,8 +172,7 @@ impl QuillApp {
             },
             None if is_secret_chat_id(chat_id) => ChatClass::Secret,
             None => ChatClass::Other,
-        };
-        grants::for_account(&active_account()).scope_for(chat_id, class)
+        }
     }
 
     /// Whether the driver may open `chat_id` through the window.
