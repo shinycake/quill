@@ -93,6 +93,11 @@ pub struct ChatsState {
     /// The link text being resolved by `getInternalLinkType` (the proxy
     /// hand-off needs it back).
     pub deep_link_original: String,
+    /// The flow in `deep_link` was started by a step the agent UI driver
+    /// injected. Set at every start of a flow, kept while it continues,
+    /// taken by the UI at every terminal state; the UI re-checks what an
+    /// agent's flow opens (`guard::with_injecting`).
+    pub deep_link_from_agent: bool,
 }
 
 impl ChatsState {
@@ -130,6 +135,7 @@ impl ChatsState {
             deep_link: None,
             deep_link_seq: 0,
             deep_link_original: String::new(),
+            deep_link_from_agent: false,
         }
     }
 }

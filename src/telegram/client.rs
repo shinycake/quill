@@ -8,6 +8,11 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+/// The sequence of an answer Quill makes itself instead of TDLib (a read
+/// the agent driver refused): applied where it lands, outside the receive
+/// order, so it never drops or is dropped by TDLib's envelopes.
+pub const LOCAL_ANSWER_SEQ: u64 = 0;
+
 /// Owned JSON copied off the TDLib receive pointer, with a monotonic sequence.
 #[derive(Debug, Clone)]
 pub struct OwnedEnvelope {

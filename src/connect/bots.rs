@@ -395,6 +395,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             message_id,
             button_id,
             raw_url: fallback_url.to_string(),
+            from_agent: crate::agent::ui_driver::guard::injecting(),
         });
         let json = get_login_url_info(extra, chat_id, message_id, button_id);
         self.send_json_request(extra, &json)
@@ -414,7 +415,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             request.message_id,
             RequestPurpose::GetLoginUrl,
         )?;
-        self.session.bots.login_url_request = Some(request.clone());
+        self.session.bots.login_url_request = Some(LoginUrlRequest {
+            from_agent: request.from_agent || crate::agent::ui_driver::guard::injecting(),
+            ..request.clone()
+        });
         let json = get_login_url(
             extra,
             request.chat_id,

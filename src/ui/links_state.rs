@@ -14,10 +14,9 @@ pub(crate) struct LinkUi {
     /// `parity:platform-deep-links`: resolved chat + action waiting for
     /// render (which owns the `Window`) to open it.
     pub(super) pending_deep_link_open: Option<(ChatId, quill::state::DeepLinkAction)>,
-    /// The deep-link flow in progress was started by a step the UI driver
-    /// injected (`QuillApp::note_deep_link_origin`); taken when the flow
-    /// ends or hands a chat to render.
-    pub(super) deep_link_from_agent: bool,
+    /// The link in `QuillApp::pending_deep_link` when a step the UI driver
+    /// injected queued it (`QuillApp::queue_deep_link`).
+    pub(super) agent_pending_link: Option<String>,
     /// `pending_deep_link_open` came from an agent's step: render re-checks
     /// the open as part of that step.
     pub(super) pending_deep_link_open_from_agent: bool,
@@ -34,7 +33,7 @@ impl LinkUi {
             deep_link_invite: None,
             pending_deep_link_ui: None,
             pending_deep_link_open: None,
-            deep_link_from_agent: false,
+            agent_pending_link: None,
             pending_deep_link_open_from_agent: false,
             callback_password_dialog: None,
             login_url_confirm: None,

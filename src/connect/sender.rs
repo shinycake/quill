@@ -27,6 +27,45 @@ pub trait JsonSender: Send {
     fn paid_guard(&self) -> Option<&crate::paid_messages_guard::PaidGuard> {
         None
     }
+
+    /// TDLib-shaped answers for requests the agent UI driver's screen
+    /// refused without sending ([`AgentScreen`]), oldest first. The driver
+    /// ingests them at the start of each batch.
+    fn take_refused_answers(&self) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+/// The agent UI driver's screen in front of a sender
+/// (`guard::screen_request`): while an agent's input is injected, only
+/// reads and the changes looking around makes go out. A read refused for
+/// money is answered here like TDLib refusing it (`guard::refused_read_answer`),
+/// so its caller's error path clears what it set loading; anything else
+/// is refused with [`ConnectSendError::AgentDriving`].
+#[derive(Default)]
+pub struct AgentScreen {
+    answers: Mutex<Vec<String>>,
+}
+
+impl AgentScreen {
+    /// `Ok(true)` when `request` may go out, `Ok(false)` when it was
+    /// answered here instead.
+    pub fn screen(&self, request: &str) -> Result<bool, ConnectSendError> {
+        use crate::agent::ui_driver::guard;
+        if guard::screen_request(request).is_ok() {
+            return Ok(true);
+        }
+        let Some(answer) = guard::refused_read_answer(request) else {
+            return Err(ConnectSendError::AgentDriving);
+        };
+        self.answers.lock_or_recover().push(answer);
+        crate::wake::UPDATES.poke();
+        Ok(false)
+    }
+
+    pub fn take_answers(&self) -> Vec<String> {
+        std::mem::take(&mut *self.answers.lock_or_recover())
+    }
 }
 
 /// Q1: TDLib `@type`s that are safe to re-send verbatim after a rate
@@ -113,6 +152,7 @@ pub struct RecordingSender {
     pub sent: Mutex<Vec<String>>,
     stash: RetryStash,
     guard: crate::paid_messages_guard::PaidGuard,
+    agent: AgentScreen,
 }
 
 impl RecordingSender {
@@ -127,6 +167,11 @@ impl RecordingSender {
 
 impl JsonSender for RecordingSender {
     fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
+        // The same agent screen as the live sender (a no-op unless a test
+        // injects).
+        if !self.agent.screen(request)? {
+            return Ok(());
+        }
         // A send into a paid chat waits for the user's confirmation.
         let Some(request) = self.guard.screen(request) else {
             return Ok(());
@@ -147,6 +192,10 @@ impl JsonSender for RecordingSender {
     fn forget_retained(&self, extra: RequestId) {
         self.stash.take(extra);
     }
+
+    fn take_refused_answers(&self) -> Vec<String> {
+        self.agent.take_answers()
+    }
 }
 
 impl JsonSender for Arc<RecordingSender> {
@@ -165,6 +214,10 @@ impl JsonSender for Arc<RecordingSender> {
     fn paid_guard(&self) -> Option<&crate::paid_messages_guard::PaidGuard> {
         (**self).paid_guard()
     }
+
+    fn take_refused_answers(&self) -> Vec<String> {
+        (**self).take_refused_answers()
+    }
 }
 
 /// Live `td_send` wrapper.
@@ -173,6 +226,7 @@ pub struct LiveSender {
     client_id: i32,
     stash: RetryStash,
     guard: crate::paid_messages_guard::PaidGuard,
+    agent: AgentScreen,
 }
 
 impl LiveSender {
@@ -182,6 +236,7 @@ impl LiveSender {
             client_id: live.client_id,
             stash: RetryStash::default(),
             guard: Default::default(),
+            agent: AgentScreen::default(),
         }
     }
 
@@ -199,9 +254,9 @@ impl LiveSender {
 impl JsonSender for LiveSender {
     fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
         // While the agent UI driver injects input, only reads and the
-        // changes that looking around makes go out (`guard::screen_request`).
-        if crate::agent::ui_driver::guard::screen_request(request).is_err() {
-            return Err(ConnectSendError::AgentDriving);
+        // changes that looking around makes go out (`AgentScreen`).
+        if !self.agent.screen(request)? {
+            return Ok(());
         }
         // A send into a paid chat waits for the user's confirmation.
         let Some(request) = self.guard.screen(request) else {
@@ -228,6 +283,10 @@ impl JsonSender for LiveSender {
 
     fn paid_guard(&self) -> Option<&crate::paid_messages_guard::PaidGuard> {
         Some(&self.guard)
+    }
+
+    fn take_refused_answers(&self) -> Vec<String> {
+        self.agent.take_answers()
     }
 }
 

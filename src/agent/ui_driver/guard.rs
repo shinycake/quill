@@ -116,6 +116,7 @@ pub fn refuse_outside_if_injecting(what: &str) -> bool {
 const DENIED_READS: &[&str] = &[
     "getCallbackQueryAnswer",
     "getLoginUrl",
+    "getLoginUrlInfo",
     "getInlineQueryResults",
     "getPaymentForm",
     "getWebAppUrl",
@@ -258,11 +259,34 @@ pub fn screen_request(request: &str) -> Result<(), String> {
     Err(reason)
 }
 
+/// The answer for a request [`screen_request`] refused that is a read (or
+/// a harmless change) refused only for money: TDLib's own error shape for
+/// its `@extra`, so the request's error path runs as for any failed read
+/// and clears what the caller set loading. `None` for a write, a read that
+/// acts ([`DENIED_READS`]) or a request without an `@extra`: the sender
+/// refuses those outright and the caller's send-failure path runs.
+pub fn refused_read_answer(request: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(request).ok()?;
+    let method = value.get("@type").and_then(Value::as_str)?;
+    let extra = value
+        .get("@extra")
+        .filter(|extra| extra.is_string() || extra.is_number())?;
+    request_allowed(method).then(|| {
+        serde_json::json!({
+            "@type": "error",
+            "code": 403,
+            "message": "QUILL_AGENT_DRIVING",
+            "@extra": extra,
+        })
+        .to_string()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        carries_money, injecting, refuse_if_injecting, request_allowed, screen_request,
-        set_injecting, take_refusals,
+        carries_money, injecting, refuse_if_injecting, refused_read_answer, request_allowed,
+        screen_request, set_injecting, take_refusals,
     };
     use crate::ids::RequestId;
     use crate::telegram::requests::search_public_posts_paid;
@@ -380,5 +404,27 @@ mod tests {
         set_injecting(false);
         assert_eq!(screen_request(&paid), Ok(()), "only while injecting");
         assert_eq!(take_refusals().len(), 1);
+    }
+
+    #[test]
+    fn a_read_refused_for_money_is_answered_like_a_tdlib_error() {
+        let answer = refused_read_answer(r#"{"@type":"getReceivedGifts","@extra":"42"}"#)
+            .map(|text| serde_json::from_str::<serde_json::Value>(&text).unwrap_or_default());
+        assert_eq!(
+            answer,
+            Some(json!({
+                "@type": "error", "code": 403, "message": "QUILL_AGENT_DRIVING", "@extra": "42"
+            }))
+        );
+        // Writes, reads that act and requests nobody waits for are refused
+        // outright instead.
+        for request in [
+            r#"{"@type":"sendMessage","@extra":"1"}"#,
+            r#"{"@type":"getLoginUrlInfo","@extra":"1"}"#,
+            r#"{"@type":"getReceivedGifts"}"#,
+            "not json",
+        ] {
+            assert_eq!(refused_read_answer(request), None, "{request}");
+        }
     }
 }

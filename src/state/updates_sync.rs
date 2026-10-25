@@ -265,6 +265,9 @@ impl Session {
         if let Some(name) = download.name {
             self.sync.download_names.insert(id, name);
         }
+        if let Some(chat_id) = download.chat_id {
+            self.media.downloads.note_chat(id, chat_id);
+        }
         if download.complete_date != 0 {
             self.media.downloads.record_finished(id);
             self.media.downloads.forget(id);

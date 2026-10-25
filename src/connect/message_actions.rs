@@ -553,6 +553,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .messages
                     .instant_view_urls
                     .insert(extra, url.to_string());
+                if crate::agent::ui_driver::guard::injecting() {
+                    self.session
+                        .messages
+                        .instant_view_agent_requests
+                        .insert(extra);
+                }
                 InstantViewOutcome::Requested
             }
             Err(_) => {

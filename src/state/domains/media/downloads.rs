@@ -6,6 +6,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use super::FileMap;
+use crate::ids::ChatId;
 
 const RECENT_CAP: usize = 50;
 
@@ -74,6 +75,10 @@ pub struct DownloadIntents {
     failed: HashSet<i32>,
     /// Requested preloads.
     preloads: HashSet<i32>,
+    /// The chat of the message a listed download came from, noted when it
+    /// starts (`note_chat`): the downloads panel tags its row with it.
+    /// Kept while the file has an intent or a place in `finished`.
+    chats: HashMap<i32, ChatId>,
 }
 
 impl DownloadIntents {
@@ -101,7 +106,12 @@ impl DownloadIntents {
     fn put(&mut self, file_id: i32, intent: Option<Intent>) {
         let old = match intent {
             Some(new) => self.entries.insert(file_id, new),
-            None => self.entries.remove(&file_id),
+            None => {
+                if !self.finished.contains(&file_id) {
+                    self.chats.remove(&file_id);
+                }
+                self.entries.remove(&file_id)
+            }
         };
         if let Some(old) = old {
             if old.phase == Phase::Requested {
@@ -227,12 +237,33 @@ impl DownloadIntents {
         self.finished.retain(|id| *id != file_id);
         self.finished.push_back(file_id);
         while self.finished.len() > RECENT_CAP {
-            self.finished.pop_front();
+            if let Some(old) = self.finished.pop_front() {
+                self.drop_chat_unless_tracked(old);
+            }
         }
     }
 
     pub fn drop_finished(&mut self, file_id: i32) {
         self.finished.retain(|id| *id != file_id);
+        self.drop_chat_unless_tracked(file_id);
+    }
+
+    fn drop_chat_unless_tracked(&mut self, file_id: i32) {
+        if !self.entries.contains_key(&file_id) && !self.finished.contains(&file_id) {
+            self.chats.remove(&file_id);
+        }
+    }
+
+    /// The download of `file_id` came from a message in `chat_id`.
+    pub fn note_chat(&mut self, file_id: i32, chat_id: ChatId) {
+        if file_id != 0 && chat_id.0 != 0 {
+            self.chats.insert(file_id, chat_id);
+        }
+    }
+
+    /// The chat a download came from, when it was noted at its start.
+    pub fn chat_of(&self, file_id: i32) -> Option<ChatId> {
+        self.chats.get(&file_id).copied()
     }
 
     /// Everything goes (the session closed).
@@ -243,6 +274,7 @@ impl DownloadIntents {
         self.preloads.clear();
         self.requested = 0;
         self.finished.clear();
+        self.chats.clear();
     }
 
     fn get(&self, file_id: i32) -> Option<&Intent> {

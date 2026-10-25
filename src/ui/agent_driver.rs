@@ -454,3 +454,8 @@ mod tests;
 #[cfg(feature = "demo-capture")]
 #[path = "agent_driver_redact_tests.rs"]
 mod redact_tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "agent_driver_open_tests.rs"]
+mod open_tests;

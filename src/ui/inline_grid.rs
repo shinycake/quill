@@ -452,7 +452,6 @@ impl QuillApp {
                 // its chat is open and remembers where to come back to
                 // (`inline_return.rs`).
                 self.begin_inline_return(bot_id, &username, &parameter);
-                self.note_deep_link_origin();
                 if let Some(live) = self.live.as_mut() {
                     let sent = live.driver.resolve_deep_link(DeepLinkAction::OpenUsername {
                         domain: username,
