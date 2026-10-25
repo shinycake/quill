@@ -81,6 +81,11 @@ fn persist(log: &VecDeque<Action>) {
 /// Add `action` to the log, stamped now.
 pub fn record(mut action: Action) {
     action.time = now();
+    record_at(action);
+}
+
+/// Add `action` to the log with the time it already carries.
+pub fn record_at(action: Action) {
     with_log(|log| {
         log.push_back(action);
         while log.len() > KEEP {

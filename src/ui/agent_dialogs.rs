@@ -68,7 +68,23 @@ fn request_title(prompt: &Prompt) -> String {
             tr_with(key, &[("agent", &agent)])
         }
         Ask::Contacts => tr_with(keys::Q_AGENT_REQUEST_CONTACTS, &[("agent", &agent)]),
+        Ask::Write { title, action, .. } => tr_with(
+            keys::Q_AGENT_REQUEST_WRITE,
+            &[
+                ("agent", &agent),
+                ("action", &lower_first(&clip(action, 60))),
+                ("chat", &clip(title, 60)),
+            ],
+        ),
     }
+}
+
+/// `Send a message` read inside a sentence: `send a message`.
+fn lower_first(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_lowercase().chain(chars).collect()
+    })
 }
 
 /// Opens a dialog's body and footer closures from elements built once.
@@ -176,14 +192,43 @@ impl QuillApp {
                         .child(tr(keys::Q_AGENT_REQUEST_CONTACTS_HINT)),
                 );
             }
+            Ask::Write { preview, .. } => {
+                let preview = clip(preview, 600);
+                if !preview.is_empty() {
+                    body = body.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(muted)
+                                    .child(tr(keys::Q_AGENT_REQUEST_WRITE_PREVIEW)),
+                            )
+                            .child(
+                                div()
+                                    .id("agent-request-preview")
+                                    .debug_selector(|| "agent-request-preview".to_string())
+                                    .px_3()
+                                    .py_2()
+                                    .rounded(radius)
+                                    .bg(quote_bg)
+                                    .text_sm()
+                                    .line_clamp(4)
+                                    .child(format!("\"{preview}\"")),
+                            ),
+                    );
+                }
+            }
             Ask::Chat { .. } => {}
         }
-        body = body.child(
-            div()
-                .text_xs()
-                .text_color(muted)
-                .child(tr(keys::Q_AGENT_REQUEST_LATER)),
-        );
+        let later = if matches!(prompt.ask, Ask::Write { .. }) {
+            keys::Q_AGENT_REQUEST_WRITE_LATER
+        } else {
+            keys::Q_AGENT_REQUEST_LATER
+        };
+        body = body.child(div().text_xs().text_color(muted).child(tr(later)));
         let title = request_title(&prompt);
         let footer = app.update(cx, |_, cx| {
             let answer = |allow: bool, prompt: Prompt, shell: Entity<QuillShell>| {
