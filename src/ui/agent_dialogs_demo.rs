@@ -52,7 +52,8 @@ fn demo_write_request(_: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp
             action: "Send a message".into(),
             preview: "Hi Ann, the trip plan is ready. Flights are booked for the 14th, and I put the hotel and the train times in the shared doc. Tell me if the Friday dinner still works for you.".into(),
         },
-        "You asked me to tell Ann the plan once it was ready.".into(),
+        // Write confirmations carry no reason: the preview is the point.
+        String::new(),
     );
 }
 

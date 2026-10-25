@@ -15,8 +15,19 @@ pub(super) fn now_unix() -> i64 {
 pub(super) fn tool_label(tool: &str) -> String {
     match tool {
         "send_message" => tr(keys::Q_AGENT_TOOL_SEND_MESSAGE).to_string(),
+        "send_file" => tr(keys::Q_AGENT_TOOL_SEND_FILE).to_string(),
+        "send_poll" => tr(keys::Q_AGENT_TOOL_SEND_POLL).to_string(),
+        "send_sticker" => tr(keys::Q_AGENT_TOOL_SEND_STICKER).to_string(),
+        "forward_messages" => tr(keys::Q_AGENT_TOOL_FORWARD_MESSAGES).to_string(),
         "edit_message" => tr(keys::Q_AGENT_TOOL_EDIT_MESSAGE).to_string(),
-        "delete_message" => tr(keys::Q_AGENT_TOOL_DELETE_MESSAGE).to_string(),
+        "delete_messages" => tr(keys::Q_AGENT_TOOL_DELETE_MESSAGES).to_string(),
+        "react" => tr(keys::Q_AGENT_TOOL_REACT).to_string(),
+        "pin_message" => tr(keys::Q_AGENT_TOOL_PIN_MESSAGE).to_string(),
+        "set_draft" => tr(keys::Q_AGENT_TOOL_SET_DRAFT).to_string(),
+        "mark_read" => tr(keys::Q_AGENT_TOOL_MARK_READ).to_string(),
+        "mute_chat" => tr(keys::Q_AGENT_TOOL_MUTE_CHAT).to_string(),
+        "archive_chat" => tr(keys::Q_AGENT_TOOL_ARCHIVE_CHAT).to_string(),
+        "set_chat_folder" => tr(keys::Q_AGENT_TOOL_SET_CHAT_FOLDER).to_string(),
         other => {
             let spaced = other.replace('_', " ");
             let mut chars = spaced.chars();
@@ -52,7 +63,8 @@ mod tests {
     #[test]
     fn tool_names_read_as_words() {
         assert_eq!(tool_label("send_message"), "Send message");
-        assert_eq!(tool_label("pin_message"), "Pin message");
+        assert_eq!(tool_label("pin_message"), "Pin or unpin");
+        assert_eq!(tool_label("future_tool"), "Future tool");
         assert_eq!(tool_label(""), "");
     }
 }

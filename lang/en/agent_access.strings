@@ -21,7 +21,7 @@
 "qll_agent_scope_off" = "Off";
 "qll_agent_scope_read" = "Read";
 "qll_agent_scope_read_write" = "Read and write";
-"qll_agent_grants_caption" = "Read lets an agent see messages. Write lets it send, edit and delete its own messages as you, and arrives in the next update.";
+"qll_agent_grants_caption" = "Read lets an agent see messages. Read and write also lets it send messages as you, react, pin, and edit or delete your own messages. Everything it changes shows under Activity.";
 "qll_agent_contacts_title" = "Contacts";
 "qll_agent_contacts_hint" = "Agents can read names and usernames, never phone numbers.";
 "qll_agent_chats_title" = "Chats you added";
@@ -65,6 +65,17 @@
 "qll_agent_activity_more" = "Show more";
 "qll_agent_activity_failed" = "Failed";
 "qll_agent_tool_send_message" = "Send message";
+"qll_agent_tool_send_file" = "Send files";
+"qll_agent_tool_send_poll" = "Send poll";
+"qll_agent_tool_send_sticker" = "Send sticker";
+"qll_agent_tool_forward_messages" = "Forward";
 "qll_agent_tool_edit_message" = "Edit message";
-"qll_agent_tool_delete_message" = "Delete message";
+"qll_agent_tool_delete_messages" = "Delete messages";
+"qll_agent_tool_react" = "React";
+"qll_agent_tool_pin_message" = "Pin or unpin";
+"qll_agent_tool_set_draft" = "Set draft";
+"qll_agent_tool_mark_read" = "Mark as read";
+"qll_agent_tool_mute_chat" = "Mute";
+"qll_agent_tool_archive_chat" = "Archive";
+"qll_agent_tool_set_chat_folder" = "Folders";
 "qll_agent_activity_clear_hint" = "Clears the log for every account";

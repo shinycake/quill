@@ -49,7 +49,7 @@ fn demo_activity(app: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) 
             (
                 30_000,
                 "Claude Code",
-                "delete_message",
+                "delete_messages",
                 "Saved Messages",
                 "Deleted its message",
                 true,
