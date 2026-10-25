@@ -24,6 +24,11 @@ mod upkeep;
 #[path = "dialog_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "style_tests.rs"]
+mod style_tests;
+
 use super::ai_compose_state::{AiComposeOpen, AiComposeView};
 use super::app::QuillApp;
 use super::status_note::StatusNote;

@@ -13,7 +13,7 @@ use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, px, size};
 use quill::ai_compose::{AiBoxError, AiComposeMode, CardState, FooterAction, prefs};
 
-fn frames(vcx: &mut VisualTestContext) {
+pub(super) fn frames(vcx: &mut VisualTestContext) {
     vcx.update(|_, cx| cx.set_reduce_motion(true));
     vcx.run_until_parked();
     for _ in 0..3 {
@@ -22,7 +22,7 @@ fn frames(vcx: &mut VisualTestContext) {
 }
 
 /// The demo opens the box on Translate over a three-line draft.
-fn open_main(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+pub(super) fn open_main(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     prefs::set_persistence(false);
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
@@ -47,7 +47,7 @@ fn open_main(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     (app, main)
 }
 
-fn click(vcx: &mut VisualTestContext, selector: &'static str) {
+pub(super) fn click(vcx: &mut VisualTestContext, selector: &'static str) {
     let bounds = vcx
         .debug_bounds(selector)
         .unwrap_or_else(|| panic!("{selector} is on screen"));
@@ -55,7 +55,7 @@ fn click(vcx: &mut VisualTestContext, selector: &'static str) {
     frames(vcx);
 }
 
-fn close_box(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+pub(super) fn close_box(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     app.update(vcx, |app, cx| app.close_ai_compose(cx));
     frames(vcx);
 }
