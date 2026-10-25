@@ -16,6 +16,7 @@ pub mod events;
 pub mod grants;
 pub mod guide;
 pub mod mcp;
+pub mod pacing;
 pub mod prompts;
 pub mod server;
 pub mod td;

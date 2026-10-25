@@ -11,6 +11,7 @@ mod messages;
 mod people;
 mod status;
 mod target;
+mod write;
 
 use crate::agent::td::{self, Client, TdError};
 use crate::ids::AccountKey;
@@ -79,6 +80,11 @@ impl Ctx {
     }
 }
 
+/// Every tool: the read tools, then the write tools.
+fn all_tools() -> impl Iterator<Item = &'static Tool> {
+    READ_TOOLS.iter().chain(write::TOOLS)
+}
+
 struct Tool {
     name: &'static str,
     title: &'static str,
@@ -88,7 +94,7 @@ struct Tool {
     read_only: bool,
 }
 
-const TOOLS: &[Tool] = &[
+const READ_TOOLS: &[Tool] = &[
     Tool {
         name: "quill_status",
         title: "Quill status",
@@ -253,8 +259,7 @@ fn no_arguments() -> Value {
 
 /// The `tools` array of a `tools/list` answer.
 pub fn catalog() -> Vec<Value> {
-    TOOLS
-        .iter()
+    all_tools()
         .map(|tool| {
             json!({
                 "name": tool.name,
@@ -309,13 +314,13 @@ pub fn granted_message_arrived(
 
 /// The names of every tool, for `quill_status`.
 pub(crate) fn names() -> Vec<&'static str> {
-    TOOLS.iter().map(|tool| tool.name).collect()
+    all_tools().map(|tool| tool.name).collect()
 }
 
 /// Run tool `name` for `agent` and shape the MCP `tools/call` result.
 pub fn call(name: &str, arguments: &Value, agent: &str) -> Value {
     let _ = AGENT.try_with(|current| current.replace(agent.to_string()));
-    let result = match TOOLS.iter().find(|tool| tool.name == name) {
+    let result = match all_tools().find(|tool| tool.name == name) {
         Some(tool) => (tool.run)(arguments),
         None => Err(ToolError::new(format!(
             "There is no tool named {name}. Call tools/list, or quill_status, to see the tools."
@@ -358,11 +363,11 @@ pub(crate) fn int_arg(
 
 #[cfg(test)]
 mod tests {
-    use super::{TOOLS, call, catalog};
+    use super::{all_tools, call, catalog};
 
     #[test]
     fn every_tool_is_described_with_an_example_and_output() {
-        for tool in TOOLS {
+        for tool in all_tools() {
             assert!(tool.description.contains("Example input"), "{}", tool.name);
             assert!(tool.description.contains("Output"), "{}", tool.name);
             assert!(
@@ -371,7 +376,7 @@ mod tests {
                     .all(|c| c.is_ascii_lowercase() || c == '_')
             );
         }
-        assert_eq!(catalog().len(), TOOLS.len());
+        assert_eq!(catalog().len(), all_tools().count());
     }
 
     #[test]
