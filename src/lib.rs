@@ -10,6 +10,7 @@ pub mod ai_compose;
 pub mod album;
 pub mod animation;
 pub mod app_theme;
+pub mod archive_mute;
 pub mod auth;
 pub mod auto_delete;
 pub mod autoscroll;

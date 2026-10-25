@@ -74,6 +74,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             _ => None,
         };
+        let archive_mute_suggested = matches!(
+            &owned.envelope.payload,
+            EnvelopePayload::Settings(SettingsPayload::UpdateSuggestedActions { added, .. })
+                if added.iter().any(|action| action == crate::archive_mute::ACTION)
+        );
         let view_purpose = owned
             .envelope
             .extra
@@ -689,6 +694,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         let _ = self.refresh_connected_websites_if_stale();
         // Passkeys: refetch after a removal, resolve the software icons.
         self.after_passkeys_ingest();
+        // "Hide new chats?" waits for a fresh copy of the setting, as
+        // tdesktop reloads the global privacy settings on the suggestion.
+        if archive_mute_suggested {
+            let _ = self.reload_archive_chat_list_settings();
+        }
         // `parity:proxy-settings`: a proxy mutation marks the list stale.
         let _ = self.refresh_proxies_if_stale();
         // Slice `parity:bots-payment-recurring`: an

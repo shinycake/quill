@@ -180,7 +180,11 @@ impl QuillApp {
                             })),
                     );
             } else if let Some(settings) = settings {
+                let mute_offered = this.archive_mute_offered(&settings);
                 for (index, (title, label, desc)) in ARCHIVE_SETTING_ROWS.iter().enumerate() {
+                    if index == 0 && !mute_offered {
+                        continue;
+                    }
                     let enabled = archive_setting_get(&settings, index);
                     body = body.child(
                         div()
@@ -824,6 +828,16 @@ impl QuillApp {
 }
 
 impl QuillApp {
+    /// Whether the archive-and-mute switch is offered (tdesktop
+    /// `SetupArchiveAndMute`): the server allows it, it is on, or Premium.
+    fn archive_mute_offered(&self, settings: &ArchiveChatListSettings) -> bool {
+        self.session().is_some_and(|s| {
+            s.chat_list
+                .archive_mute
+                .switch_shown(settings, s.is_premium())
+        })
+    }
+
     /// Privacy and security > Archive and Mute (tdesktop
     /// `settings_privacy_security.cpp`): the three archive switches,
     /// including the one for chats from folders, inline.
@@ -855,7 +869,11 @@ impl QuillApp {
                 )
                 .into_any_element();
         };
+        let mute_offered = self.archive_mute_offered(&settings);
         for (index, (title, label, desc)) in ARCHIVE_SETTING_ROWS.iter().enumerate() {
+            if index == 0 && !mute_offered {
+                continue;
+            }
             section = section.child(
                 div()
                     .flex()
