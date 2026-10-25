@@ -94,6 +94,9 @@ pub struct Session {
 pub struct Facts {
     pub session: Option<Session>,
     pub paused: Option<PauseReason>,
+    /// When the pause began, so what moves on screen can hold still at
+    /// that moment.
+    pub paused_ms: u64,
     /// The user pressed Stop: UI commands are refused until the driving
     /// switch (or Agent access) goes off, or Quill restarts. A reconnect
     /// does not clear it.
@@ -350,6 +353,14 @@ pub fn pauses_on(facts: &Facts, phase: &Phase, input: RealInput, active: bool, n
     }
 }
 
+/// Pause for `reason` at `now`; an earlier pause and its reason are kept.
+pub fn pause_at(facts: &mut Facts, reason: PauseReason, now: u64) {
+    if facts.paused.is_none() {
+        facts.paused = Some(reason);
+        facts.paused_ms = now;
+    }
+}
+
 /// The user answered one of the agent's prompts: the hand leaving the
 /// button is not the user taking the window back.
 pub fn answered(facts: &mut Facts, now: u64) {
@@ -415,6 +426,7 @@ pub fn moving(phase: &Phase, now: u64) -> bool {
 static FACTS: Mutex<Facts> = Mutex::new(Facts {
     session: None,
     paused: None,
+    paused_ms: 0,
     stopped: false,
     resumed_ms: 0,
     last_pointer: None,
@@ -472,7 +484,16 @@ pub fn current() -> Phase {
 
 /// A command from `agent` reached the window.
 pub fn note_command(agent: &str) {
-    with_facts(|facts, _, now| command(facts, agent, now));
+    let starts = with_facts(|facts, live, now| {
+        let idle = phase(facts, live, now) == Phase::Idle;
+        command(facts, agent, now);
+        idle
+    });
+    if starts {
+        // The glow's sweep follows the system's low-power mode: ask now,
+        // not at the battery watcher's next turn.
+        crate::wake::BATTERY.poke();
+    }
 }
 
 /// The driver is about to act at `to` (window pixels).
@@ -508,7 +529,7 @@ pub fn note_real_input(input: RealInput, window_active: bool, on_controls: bool)
             facts.last_pointer = Some((x, y));
         }
         if pause {
-            facts.paused = Some(PauseReason::Input);
+            pause_at(facts, PauseReason::Input, now);
         }
         pause
     });
@@ -524,7 +545,7 @@ pub fn note_escape() -> bool {
     let paused = with_facts(|facts, live, now| {
         let driving = matches!(phase(facts, live, now), Phase::Driving { .. });
         if driving {
-            facts.paused = Some(PauseReason::Escape);
+            pause_at(facts, PauseReason::Escape, now);
         }
         driving
     });
@@ -536,9 +557,7 @@ pub fn note_escape() -> bool {
 
 /// Pause for `reason` (kept when already paused).
 pub fn pause(reason: PauseReason) {
-    with_facts(|facts, _, _| {
-        facts.paused.get_or_insert(reason);
-    });
+    with_facts(|facts, _, now| pause_at(facts, reason, now));
     crate::wake::AGENT.poke();
 }
 
