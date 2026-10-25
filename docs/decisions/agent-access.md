@@ -504,12 +504,32 @@ sent to the platform adapter): `region=chat-list|chat|forum|menu|panels`,
 `part=search|folders|rows|search-results`, `chat=<id>` on every chat row,
 search result, contact and top-people tile, and `archive` on the archive
 row. `ui_driver::redact::redact` walks the snapshot from the root, zones
-each node (allowed, chat list, pruned) from its ancestors' tags and the
-scope, drops pruned subtrees and ungranted `chat=` nodes with their
+each node (allowed, chat list, list, pruned) from its ancestors' tags and
+the scope, drops pruned subtrees and ungranted `chat=` nodes with their
 children, and keeps the ancestors of allowed nodes with their names,
 values and actions removed so the shape survives without the content.
 The tree an agent gets is computed in the same `cx.update` that checks
 the surface, so no answer describes a window other than the one checked.
+
+Lists are default-deny (second review). The first cut let an untagged
+row through: search media rows, downloads, joined channels and the reply
+chooser named ungranted chats in the granted scope. Now `part=rows`,
+`part=search-results` and any container tagged `list` are a zone where
+only two things survive: a `chat=<id>` subtree of a granted chat, and a
+`controls` subtree (a filter strip, a "Show more" row, a header with no
+chat in it). A row that names no chat is cut, whatever it shows, so a
+new list leaks nothing until someone tags its rows. `point_allowed`
+mirrors it: a point inside a list needs a granted row or a control under
+it. Every chat-bearing row carries its chat: search results and media
+rows, the channels tab, the apps tab (a bot's chat id is its user id),
+the reply-elsewhere and share destinations, the player bar and the
+downloads rows (from the message the file came from, where one is
+loaded). `Everything` ignores `list` and `controls`: there every chat
+but a secret one is granted. The window test
+`list_parts_hide_rows_of_ungranted_chats_and_untagged_rows` renders the
+channels, photos, downloads and posts tabs and the reply chooser with
+ungranted chats and asserts nothing from them reaches the tree, then
+turns All chats on to prove the rows render.
 
 Checks per step (`agent_driver::check_step`). Before each step: the
 ticket is still waited for (a tool that timed out cancels it, so a late
@@ -521,39 +541,92 @@ open an ungranted chat is refused by `QuillApp::agent_may_open` in
 `select_chat_with`, `select_search_chat` and `select_search_message`, and
 the sequence stops with no tree). Characters, line breaks, Enter and
 Space go only while GPUI reports a focused text input handler
-(`Window::focused_text_input`), a tab character is refused outright, and
-a line break is typed as the chord that inserts one under the user's
-send-key setting. A pointer step first injects a MouseMove, then asks
-GPUI which tagged hitboxes are under the pointer as it hit-tests them
-(`Window::hovered_a11y_tags`, topmost first, stopping at an occluding
-hitbox) and `redact::point_allowed` decides from those tags and the scope;
-only then does it press. A node target must have bounds inside the
-viewport. The `press_keys` chord list is checked chord by chord, so a
-sequence stops at the first refusal.
+(`Window::focused_text_input`) and the tags above the focused element
+pass `redact::point_allowed` (`Window::focused_a11y_tags`, recorded at
+paint from a tag stack, so a key is checked against the regions the way
+a click is), a tab character is refused outright, and a line break is
+typed as the chord that inserts one under the user's send-key setting. A
+pointer step first injects a MouseMove, then asks GPUI which tagged
+hitboxes are under the pointer as it hit-tests them
+(`Window::hovered_a11y_tags`: the hitboxes `Hitbox::is_hovered` would
+report, within `hover_hitbox_count`, no further than an occluding
+hitbox, tagged or not) and `redact::point_allowed` decides from those
+tags and the scope; only then does it press. A node target must have
+bounds inside the viewport. The `press_keys` chord list is checked chord
+by chord, so a sequence stops at the first refusal. Between steps the
+task waits for the a11y frame index to move past the frame the previous
+step was injected into (not a timer), so the focus and the surface a
+step meets are the ones its predecessor left.
 
 Action guards. While `guard::injecting()` the handlers themselves refuse
 what the driver must not do, whatever element was clicked:
 `grants::update` and every `access` setter, `prompts::answer` (no
 self-approval), `confirm_all_chats`, voice and video recording, the paid
 and formatted send paths, and `LiveSender::send_json` screens every TDLib
-request against `td_policy` (`ConnectSendError::AgentDriving`), which
-covers reactions, poll votes, bot buttons, deletes, leaves, blocks,
-reports and payments from any surface the redaction missed. Each guard
-records a refusal (`guard::refuse_if_injecting`) that the tool reply
-lists under `refusals`.
+request (`guard::screen_request`, `ConnectSendError::AgentDriving`):
+first the `td_policy` read allowlist, then money by parameters, not by
+prefix: a request whose own type or any nested type `names_money`, or
+that carries a positive `star_count`, `paid_message_star_count`,
+`price`, `amount`, `star_amount` or `total_amount` at any depth
+(`guard::carries_money`, with `td_request::spends`), is refused whatever
+it is called. That is what stops the paid public-post search
+(`searchPublicPosts` with `star_count`), which reads by name and spends
+Stars; its confirmation (`PaidPostSearch`) refuses while injecting too.
+The screen covers reactions, poll votes, bot buttons, deletes, leaves,
+blocks, reports and payments from any surface the redaction missed. Each
+guard records a refusal (`guard::refuse_if_injecting`) that the tool
+reply lists under `refusals`.
+
+Nothing leaves Quill (second review). `Everything` scope reaches
+surfaces with local effects, so those refuse while injecting whatever
+the scope: `ZoomPlatform` (`src/ui/interface_zoom.rs`), the one
+decorator every `open_url`, `reveal_path` and `open_with_system` passes
+through, refuses them with a message that tells the agent to give the
+user the link or the file name (`guard::refuse_outside_if_injecting`),
+and `platform::open_mailto`, `open_local_file`, `reveal_in_file_manager`
+refuse likewise; the file-open confirmation (`FileOpenConfirm`), the
+chat export and the account export dialogs are on `HARD_DIALOGS`, and
+their entry points (`open_file_guarded`, `open_file_now`,
+`confirm_file_open`, `start_chat_export`, `run_chat_export`,
+`open_account_export`, `run_account_export`) refuse as well; so does the
+device location lookup (`locate_for_request`). The clipboard is the
+user's: Cmd/Ctrl+V, Cmd/Ctrl+Shift+V and Shift+Insert are forbidden
+chords (`keys::forbidden`), and a paste dispatched any other way (the
+Edit menu, an input's context menu, a mini app's "Paste from clipboard",
+the composer's image paste) reads an empty clipboard, because the
+`ZoomPlatform`'s clipboard reads refuse while injecting and the two
+composer paths that read the pasteboard directly refuse too.
+
+Delayed opens run as part of the step. A clicked link runs at render
+(`run_pending_link`) and a username or t.me link resolves through TDLib
+after the step ended, outside the injecting flag. The pending link and
+the deep-link flow now remember an agent origin (`PendingLink.from_agent`,
+`LinkUi.deep_link_from_agent` set by `queue_deep_link` /
+`note_deep_link_origin` at every start of a flow), the render-time halves
+run under `guard::with_injecting`, and the resolved chat open
+(`open_deep_link_chat`) re-checks `agent_may_open` first: an ungranted
+chat stays closed with a refusal. Typed links from an agent's step
+(settings, proxies, folders, sticker sets, backgrounds) are refused
+outright. `a_link_resolved_after_the_step_opens_a_granted_chat_only`
+covers the three cases.
 
 Sends are routed, not refused. Enter or the Send button in the message
 box of a granted chat while injecting goes through `submit_composer` to
 `QuillApp::agent_route_send` (`src/ui/agent_driver_send.rs`): it builds
-the same `sendMessage` request the window would (reply, topic, post
-options) and hands it over as `UiSend` instead of sending. The tool thread
-(`tools/ui.rs::finish_ui_send`) runs it through the agent write path:
-`target::granted` (read_write, no stranger bots), `common::confirm`
-("Confirm each send" waits for the user's dialog, which the driver cannot
-click) and `common::send` (the paced queue, the activity log as
-`ui_send`). On success the UI gets `ComposerSent` and clears the box; on
-a refusal the draft stays and the reply says why. Edits, forwards, files
-and formatted blocks through the driver are refused.
+a `sendMessage` for the reply and topic with clean `SendOptions` (the
+composer's link preview choices and nothing else: no schedule, silent
+flag, effect, paid Stars or suggested-post terms) and hands it over as
+`UiSend` instead of sending. The tool thread
+(`tools/ui.rs::finish_ui_send`) trusts the window no further than
+`not_plain`: anything but a `sendMessage` of `inputMessageText` with no
+`scheduling_state`, `suggested_post_info`, effect or Stars is refused
+with the draft kept. Then the agent write path: `target::granted`
+(read_write, no stranger bots), `common::confirm` ("Confirm each send"
+waits for the user's dialog, which the driver cannot click) and
+`common::send` (the paced queue, the activity log as `ui_send`). On
+success the UI gets `ComposerSent` and clears the box; on a refusal the
+draft stays and the reply says why. Edits, forwards, files and formatted
+blocks through the driver are refused.
 
 Side effects and the activity log. The driver acts for real: opening or
 scrolling a chat marks it read, typing in the message box saves a draft
@@ -601,10 +674,16 @@ answers with the note and a click on Allow by point is refused with the
 prompt still waiting; a ctrl-tab that would open an ungranted chat stops
 the sequence with no tree; the composer's Enter hands the send to the
 agent path with the draft kept, a read-only chat is refused, and
-`ComposerSent` clears the box; a tool that gave up gets nothing injected.
-Unit tests cover the redaction zones and point rules
-(`ui_driver::redact`), the surface notes, the chord policy and the step
-split.
+`ComposerSent` clears the box; a tool that gave up gets nothing injected;
+the search tabs and the reply chooser leak no ungranted chat
+(`agent_driver_redact_tests.rs`); a link resolved after the step opens a
+granted chat only; the focused message box carries `region=chat` and a
+blurred window carries nothing. Unit tests cover the redaction zones,
+the list rule and point rules (`ui_driver::redact`), money by parameters
+(`guard::money_is_read_from_the_parameters_not_the_prefix`), the paste
+chords (`keys::paste_chords_are_forbidden`), the plain-send check
+(`tools::ui::only_a_plain_text_send_passes_the_agent_path`), the surface
+notes, the chord policy and the step split.
 
 ### Gaps left for step 2 and later
 

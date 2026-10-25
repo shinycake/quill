@@ -275,10 +275,20 @@ Rules, all enforced by Quill:
   activity log; the reply has `sent` or says why not, and the draft stays
   in the box. Other sends, deletes, reactions, votes, bot buttons,
   payments and settings changes are refused and listed under `refusals`.
-- `type_text` goes only into a focused text box, types a line break as the
-  chord that inserts one, and refuses a tab character; Enter and Space go
-  only to a text box. `press_keys` never types characters.
-- Keys that quit, close or hide Quill are never pressed.
+- `type_text` goes only into a focused text box inside a part of the
+  window you may use, types a line break as the chord that inserts one,
+  and refuses a tab character; Enter and Space go only to such a text
+  box. `press_keys` never types characters.
+- Keys that quit, close or hide Quill are never pressed, and neither are
+  paste chords: the clipboard is the user's, and a paste reached any other
+  way (a menu) reads it as empty. Type your own text with `type_text`.
+- Nothing leaves Quill: a link is not opened in the browser, a file is
+  not opened or revealed, mail is not composed, chats and accounts are
+  not exported, and nothing that spends Stars or money runs (a paid
+  search included). Give the user the link or the file name instead.
+- A link you click that resolves later (a username, a t.me link) opens
+  only a chat you are granted; links to settings, proxies, folders or
+  sticker sets are refused.
 - The window acts for real: opening or scrolling a chat marks it read,
   typing in the message box saves a draft and shows the other side that
   you are typing. Every command is in the user's activity log.
