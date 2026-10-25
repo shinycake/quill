@@ -247,11 +247,13 @@ impl QuillApp {
 
 /// The grants, prompts and switch are process-wide: UI tests that touch
 /// them take this lock and reset them.
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 pub(super) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Back to a known state: access on, default grants, no waiting requests.
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 pub(super) fn reset_for_test(account: &AccountKey) {
     quill::fast_buttons::set_persistence(false);
     prompts::deny_all();
