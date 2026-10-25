@@ -694,13 +694,19 @@ fn a_link_resolved_after_the_step_opens_a_granted_chat_only(cx: &mut TestAppCont
     };
 
     // The agent's link led to chat 12, which is not granted: nothing opens,
-    // the start parameter is not put in the box, the refusal is recorded.
+    // the start parameter is not put in the box. The step answered long
+    // ago, so the refusal goes to the activity log, not to the next reply.
     assert_eq!(resolved(&app, vcx, 12, "secret", true), "");
-    let refusals = guard::take_refusals();
     assert!(
-        refusals.iter().any(|r| r.contains("not granted")),
-        "{refusals:?}"
+        guard::take_refusals().is_empty(),
+        "nothing for the next reply"
     );
+    let logged = activity::recent(&AccountKey::primary())
+        .into_iter()
+        .find(|action| action.summary.contains("not granted"))
+        .unwrap_or_else(|| panic!("the refusal is in the activity log"));
+    assert!(logged.declined && !logged.ok);
+    assert!(logged.tool.starts_with("ui_"), "{}", logged.tool);
     // Chat 11 is granted: the open runs (here, the `/start` prefill).
     assert_eq!(resolved(&app, vcx, 11, "hello", true), "/start hello");
     assert!(guard::take_refusals().is_empty());

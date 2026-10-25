@@ -56,25 +56,26 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Cleanup of a send the user confirmed: it clears the box even when
+        // the user paused or stopped the agent meanwhile (pressing Confirm
+        // may itself have been the input), so the next Enter does not send
+        // the text twice. The open chat and the text must still match.
+        if let UiCommand::ComposerSent { chat_id, text } = &pending.request.command {
+            self.agent_composer_sent(*chat_id, text, window, cx);
+            pending.answer(UiReply::Ok);
+            return;
+        }
         if let Some(refusal) = policy::switch_refusal() {
             pending.answer(UiReply::Refused(refusal));
             return;
         }
-        match &pending.request.command {
-            UiCommand::State => {
-                pending.answer(UiReply::State(UiState {
-                    open_chat: self.open_chat_id().map(|chat| chat.0),
-                    window_active: window.is_window_active(),
-                    forced: window.is_a11y_forced(),
-                }));
-                return;
-            }
-            UiCommand::ComposerSent { chat_id, text } => {
-                self.agent_composer_sent(*chat_id, text, window, cx);
-                pending.answer(UiReply::Ok);
-                return;
-            }
-            _ => {}
+        if let UiCommand::State = &pending.request.command {
+            pending.answer(UiReply::State(UiState {
+                open_chat: self.open_chat_id().map(|chat| chat.0),
+                window_active: window.is_window_active(),
+                forced: window.is_a11y_forced(),
+            }));
+            return;
         }
         // Decided before any frame is waited for, so a blocked surface
         // answers at once.
@@ -93,12 +94,20 @@ impl QuillApp {
             return;
         }
         bridge::note_drive();
-        takeover::note_command(&pending.request.agent);
+        // Only input (the logged commands) drives: a read starts no
+        // takeover and holds none.
+        let open = pending.request.command.log_name().map(|tool| {
+            takeover::note_command(&pending.request.agent);
+            guard::OpenCommand::begin(&pending.request.agent, tool)
+        });
         window.set_a11y_forced(true);
         let send_key_mode = self.chat_prefs.send_key_mode;
         let generation = grants::generation();
         let before = window.a11y_tree_frame();
         QuillApp::spawn_main_in(window, cx, async move |app, cx| {
+            // Held until the task ends: deferred refusals until then are
+            // this command's (`guard::with_injecting`).
+            let _open = open;
             let (mut surface, tree) = match wait_for_tree(&app, cx, before).await {
                 Ok(found) => found,
                 Err(refusal) => {
@@ -106,6 +115,11 @@ impl QuillApp {
                     return;
                 }
             };
+            // The user may have paused or stopped while the frame came.
+            if let Some(refusal) = takeover::refusal() {
+                pending.answer(UiReply::Refused(refusal));
+                return;
+            }
             let command = pending.request.command.clone();
             if !command.is_input() {
                 pending.answer(UiReply::Tree(tree));
@@ -202,7 +216,12 @@ impl QuillApp {
             // A click often takes a frame to show (a dialog, a menu, focus),
             // so the answer waits for the one after the input's own. A
             // surface the agent may not see answers with its note instead.
-            let (tree, added) = match wait_for_tree(&app, cx, tree.frame.saturating_add(1)).await {
+            // Paused or stopped while it came, the frame after is the
+            // user's: the agent gets the note, not the tree.
+            let after = wait_for_tree(&app, cx, tree.frame.saturating_add(1))
+                .await
+                .and_then(|found| takeover::refusal().map_or(Ok(found), Err));
+            let (tree, added) = match after {
                 Ok((_, after)) => {
                     let added = after.new_since(&tree).into_iter().cloned().collect();
                     (after, added)
@@ -221,6 +240,12 @@ impl QuillApp {
                     )
                 }
             };
+            // What the frames after the input refused (a link run at render).
+            for refusal in guard::take_refusals() {
+                if !refusals.contains(&refusal) {
+                    refusals.push(refusal);
+                }
+            }
             pending.answer(UiReply::Done {
                 tree,
                 added,
@@ -459,3 +484,8 @@ mod redact_tests;
 #[cfg(feature = "demo-capture")]
 #[path = "agent_driver_open_tests.rs"]
 mod open_tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "agent_driver_confirm_tests.rs"]
+mod confirm_tests;
