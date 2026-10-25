@@ -15,6 +15,10 @@ use serde_json::Value;
 /// `premiumFeatureProtectPrivateChatContent`'s title, which the Disable
 /// Sharing upsell opens.
 pub const NO_FORWARDS_TITLE: &str = "Protect private chat content";
+/// `premiumFeatureUniqueReactions`' title, which a locked reaction opens.
+pub const UNIQUE_REACTIONS_TITLE: &str = "Unique reactions";
+/// `premiumFeatureSavedMessagesTags`' title, which a tag opens.
+pub const SAVED_TAGS_TITLE: &str = "Tags for Saved Messages";
 
 fn int(value: Option<&Value>) -> i64 {
     value
@@ -669,7 +673,7 @@ pub fn feature_row(constructor: &str) -> Option<PremiumFeatureRow> {
             "Sponsored messages in public channels are no longer shown.",
         ),
         "premiumFeatureUniqueReactions" => (
-            "Unique reactions",
+            UNIQUE_REACTIONS_TITLE,
             "Add more reactions to messages, including exclusive ones.",
         ),
         "premiumFeatureUniqueStickers" => (
@@ -724,10 +728,9 @@ pub fn feature_row(constructor: &str) -> Option<PremiumFeatureRow> {
             "Wallpapers for both sides",
             "Set a wallpaper for both you and your chat partner.",
         ),
-        "premiumFeatureSavedMessagesTags" => (
-            "Tags for Saved Messages",
-            "Organize saved messages with tags.",
-        ),
+        "premiumFeatureSavedMessagesTags" => {
+            (SAVED_TAGS_TITLE, "Organize saved messages with tags.")
+        }
         "premiumFeatureMessagePrivacy" => ("Message privacy", "Choose who can send you messages."),
         "premiumFeatureLastSeenTimes" => (
             "Last seen times",

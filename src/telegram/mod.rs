@@ -35,7 +35,7 @@ pub use envelope::{
     PollOption, PollType, PollVoteRestrictionReason, ReactionType, RichMessageContent,
     StickerContent, StickerFormat, StickerItem, StickerSetInfo, TdError, UnknownKind,
     VoiceNoteContent, effective_content, parse_chat_admin_rights, parse_chat_permissions,
-    parse_envelope, toggle_chosen_emoji_reaction,
+    parse_envelope,
 };
 pub use envelope_emoji::{
     EmojiCategory, EmojiCategorySource, EmojiKeyword, EmojiStatusItem, UpgradedGiftEmojiStatus,

@@ -204,6 +204,7 @@ impl Session {
                 passkeys,
                 premium_purchase,
                 fragment,
+                reaction_limits,
             } => {
                 self.settings.passkeys.display_allowed = passkeys.display;
                 if passkeys.max.is_some() {
@@ -229,6 +230,7 @@ impl Session {
                 limits.app_config_loaded = true;
                 self.payments.hub.purchase = premium_purchase;
                 self.payments.hub.fragment = fragment;
+                self.stickers.reaction_limits = reaction_limits;
             }
             // `getChatBoostFeatures` answer, kept for the chat it was
             // asked for.

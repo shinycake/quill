@@ -100,6 +100,7 @@ fn visible_custom_emoji_survives_overflow() {
             recent: Vec::new(),
             popular: Vec::new(),
             allow_custom_emoji: true,
+            premium_locked: Vec::new(),
         });
     let total = CUSTOM_EMOJI_CACHE_CAP as i64 + 5;
     session.accept_custom_emoji_stickers(

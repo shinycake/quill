@@ -160,6 +160,7 @@ fn picker_options_are_refetched_when_reactions_change() {
             recent: Vec::new(),
             popular: Vec::new(),
             allow_custom_emoji: false,
+            premium_locked: Vec::new(),
         });
     // Another chat's change leaves the options alone.
     feed(

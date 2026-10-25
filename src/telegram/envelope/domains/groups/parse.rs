@@ -498,6 +498,7 @@ pub(crate) fn parse_groups_payload(
                 passkeys: crate::passkeys::config_from_app_config(value),
                 premium_purchase: crate::premium_hub::purchase::purchase_from_config(value),
                 fragment: crate::premium_hub::fragment::fragment_from_config(value),
+                reaction_limits: crate::reaction_limit::ReactionLimits::from_app_config(value),
             }))
         }
         "chatBoostSlots" => Ok(EnvelopePayload::Groups(GroupsPayload::ChatBoostSlots {

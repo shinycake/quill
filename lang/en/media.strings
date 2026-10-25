@@ -50,6 +50,7 @@
 "lng_emoji_add_existing" = "Add an Existing Emoji";
 "lng_emoji_already_in_set" = "This Emoji is already in the Set.";
 "lng_emoji_manage_sets" = "Choose emoji set";
+"lng_emoji_premium_restore" = "Restore";
 "lng_emoji_remove_recent" = "Remove from Recent";
 "lng_emoji_set_is_full" = "This Emoji Set is full.";
 "lng_emoji_status_for_submit" = "Set Status";

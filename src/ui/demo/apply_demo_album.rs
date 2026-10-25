@@ -451,17 +451,17 @@ impl QuillApp {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
-        let current = session
+        let chosen = session
             .histories
             .get(&chat_id.0)
             .and_then(|history| history.messages.get(&message_id.0))
-            .and_then(|message| message.interaction_info.clone());
-        let next = toggle_chosen_emoji_reaction(current.as_ref(), emoji);
-        let json = interaction_info_update_json(chat_id, message_id, &next);
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
-        if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
-            session.apply(owned);
-        }
+            .is_some_and(|message| message.chosen_emoji(emoji));
+        session.set_own_reaction(
+            chat_id,
+            message_id,
+            &quill::telegram::envelope::ReactionType::emoji(emoji),
+            !chosen,
+        );
     }
 
     /// Demo-only vote: resolve the tap with the same `poll_answer_for_tap`

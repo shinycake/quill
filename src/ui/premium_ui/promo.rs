@@ -150,6 +150,27 @@ impl QuillApp {
         self.go_to_feature_preview(EFFECTS_FEATURE, cx);
     }
 
+    /// A reaction that needs Premium: the Premium dialog on its feature
+    /// (tdesktop `ShowReactPremiumError` → `ShowPremiumPreviewBox`).
+    pub(in crate::ui) fn show_premium_reaction_preview(
+        &mut self,
+        feature: quill::state::ReactPremiumFeature,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_premium(cx);
+        self.go_to_feature_preview(
+            match feature {
+                quill::state::ReactPremiumFeature::UniqueReactions => {
+                    quill::premium_hub::UNIQUE_REACTIONS_TITLE
+                }
+                quill::state::ReactPremiumFeature::SavedMessagesTags => {
+                    quill::premium_hub::SAVED_TAGS_TITLE
+                }
+            },
+            cx,
+        );
+    }
+
     /// Disable Sharing without Premium: the Premium dialog on that feature
     /// (tdesktop `ShowPremiumPreviewBox(PremiumFeature::NoForwards)`).
     pub(in crate::ui) fn show_premium_no_forwards_preview(&mut self, cx: &mut Context<Self>) {

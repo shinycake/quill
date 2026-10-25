@@ -76,4 +76,43 @@ impl QuillApp {
         }
         (rows, sections)
     }
+
+    /// A custom emoji pack in the reaction selector of an account that can
+    /// buy Premium: its header carries a lock and "Restore" (tdesktop
+    /// `EmojiListWidget`, `premiumRequired`).
+    pub(super) fn reaction_pack_locked(&self, set_id: Option<i64>) -> bool {
+        set_id.is_some()
+            && self.pickers.media_panel.reaction.is_some()
+            && self
+                .session()
+                .is_some_and(|s| !s.my_is_premium() && s.premium_possible())
+    }
+
+    /// The header's "Restore": the Premium dialog on reactions, the
+    /// selector closed (tdesktop `_jumpedToPremium`, `infinite_reactions`).
+    pub(super) fn reaction_pack_restore(&self, set_id: i64, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .ml_auto()
+            .child(
+                Button::new(SharedString::from(format!(
+                    "reaction-pack-restore-{set_id}"
+                )))
+                .primary()
+                .xsmall()
+                .label(tr(keys::EMOJI_PREMIUM_RESTORE))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.close_media_panel(cx);
+                    this.show_premium_reaction_preview(
+                        quill::state::ReactPremiumFeature::UniqueReactions,
+                        cx,
+                    );
+                })),
+            )
+            .into_any_element()
+    }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "reaction_rows_tests.rs"]
+mod tests;

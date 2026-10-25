@@ -454,7 +454,7 @@ fn message_interaction_info_and_update_are_typed() {
         }) => assert_eq!(interaction_info, None),
         other => panic!("{other:?}"),
     }
-    let after_unreact = toggle_chosen_emoji_reaction(
+    let after_unreact = crate::reaction_limit::with_own_reaction(
         Some(&MessageInteractionInfo {
             reactions: Some(MessageReactions {
                 reactions: vec![MessageReaction {
@@ -469,7 +469,9 @@ fn message_interaction_info_and_update_are_typed() {
             }),
             ..MessageInteractionInfo::default()
         }),
-        "❤",
+        &ReactionType::emoji("❤"),
+        false,
+        None,
     );
     assert!(!after_unreact.chosen_emoji("❤"));
     assert_eq!(

@@ -39,6 +39,15 @@ impl ReactionChoice {
         }
     }
 
+    pub fn reaction_type(&self) -> ReactionType {
+        match self {
+            Self::Emoji(emoji) => ReactionType::emoji(emoji.clone()),
+            Self::CustomEmoji(id) => ReactionType::CustomEmoji {
+                custom_emoji_id: *id,
+            },
+        }
+    }
+
     fn from_view(view: StoryAvailableReactionView) -> Option<Self> {
         match view.kind {
             StoryAvailableReactionKind::Emoji(emoji) => Some(Self::Emoji(emoji)),
@@ -60,6 +69,17 @@ pub struct MessageReactionOptions {
     pub popular: Vec<ReactionChoice>,
     /// Custom emoji from the user's packs may be used too.
     pub allow_custom_emoji: bool,
+    /// Offered reactions TDLib marks `needs_premium` for this account.
+    pub premium_locked: Vec<ReactionChoice>,
+}
+
+/// The Premium feature a reaction tap shows instead of reacting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReactPremiumFeature {
+    /// tdesktop `PremiumFeature::InfiniteReactions`.
+    UniqueReactions,
+    /// tdesktop `PremiumFeature::TagsForMessages`.
+    SavedMessagesTags,
 }
 
 /// Where the open message menu's reaction options stand. tdesktop reads
@@ -212,6 +232,13 @@ impl Session {
             .chain(&popular)
             .any(|view| matches!(view.kind, StoryAvailableReactionKind::Paid));
         self.payments.paid.offered = paid_offered.then_some((chat_id.0, message_id.0));
+        let premium_locked: Vec<ReactionChoice> = top
+            .iter()
+            .chain(&recent)
+            .chain(&popular)
+            .filter(|view| view.needs_premium)
+            .filter_map(|view| ReactionChoice::from_view(view.clone()))
+            .collect();
         let convert = |views: Vec<StoryAvailableReactionView>| -> Vec<ReactionChoice> {
             views
                 .into_iter()
@@ -225,6 +252,7 @@ impl Session {
             recent: convert(recent),
             popular: convert(popular),
             allow_custom_emoji,
+            premium_locked,
         };
         // tdesktop adds the paid reaction to `recent` when paid is enabled
         // (data_message_reactions.cpp), so an offer of Stars alone still
@@ -259,5 +287,78 @@ impl Session {
                 message_id,
             };
         }
+    }
+
+    /// How many reactions this account may leave on one message, once the
+    /// app config is in.
+    pub fn reaction_limit(&self) -> Option<usize> {
+        self.stickers
+            .reaction_limits
+            .for_account(self.my_is_premium())
+    }
+
+    /// The user's own `reaction` added (`add`) or taken back, shown before
+    /// TDLib answers (tdesktop `MessageReactions::add` / `remove`); TDLib's
+    /// next `updateMessageInteractionInfo` replaces it.
+    pub fn set_own_reaction(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        reaction: &ReactionType,
+        add: bool,
+    ) {
+        let limit = self.reaction_limit();
+        self.edit_loaded_message(chat_id, message_id, |message| {
+            message.interaction_info = Some(crate::reaction_limit::with_own_reaction(
+                message.interaction_info.as_ref(),
+                reaction,
+                add,
+                limit,
+            ));
+        });
+    }
+
+    /// The Premium feature to show instead of reacting with `choice`, or
+    /// `None` when the reaction may be sent (tdesktop
+    /// `Window::ShowReactPremiumError`). A reaction already on the message
+    /// is free, so is any reaction in a channel; otherwise TDLib's
+    /// `needs_premium` and custom emoji need Premium.
+    pub fn react_premium_feature(
+        &self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        choice: &ReactionChoice,
+    ) -> Option<ReactPremiumFeature> {
+        if self.my_is_premium() {
+            return None;
+        }
+        let reactions = self
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
+            .and_then(|message| message.interaction_info.as_ref())
+            .and_then(|info| info.reactions.as_ref());
+        if reactions.is_some_and(|r| r.are_tags) {
+            return Some(ReactPremiumFeature::SavedMessagesTags);
+        }
+        let on_message = reactions.is_some_and(|r| {
+            r.reactions
+                .iter()
+                .any(|one| ReactionChoice::from_type(&one.reaction_type).as_ref() == Some(choice))
+        });
+        if on_message {
+            return None;
+        }
+        let locked = self
+            .stickers
+            .message_reaction_options
+            .ready_for(chat_id, message_id)
+            .is_some_and(|options| options.premium_locked.contains(choice));
+        let broadcast = self
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.is_channel());
+        let custom = matches!(choice, ReactionChoice::CustomEmoji(_));
+        (locked || (custom && !broadcast)).then_some(ReactPremiumFeature::UniqueReactions)
     }
 }
