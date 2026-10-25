@@ -282,33 +282,44 @@ pub(super) fn press_at(
 }
 
 /// A typed character, a line break or a chord: only into a focused text
-/// box, or a chord that activates nothing.
+/// box that is inside a part agents may use (`focus_allowed`, from the
+/// tags above the focused element), or a chord that activates nothing.
 pub(super) fn perform_key_step(
     step: &Step,
     send_key_mode: SendKeyMode,
+    focus_allowed: bool,
     window: &mut Window,
     cx: &mut App,
 ) -> Result<(), String> {
     let in_text = window.focused_text_input();
+    let text_focus = || {
+        if !in_text {
+            Err(policy::no_text_focus())
+        } else if !focus_allowed {
+            Err(policy::focus_outside_region())
+        } else {
+            Ok(())
+        }
+    };
     match step {
         Step::Pointer { .. } => Ok(()),
         Step::Char(ch) => {
-            if !in_text {
-                return Err(policy::no_text_focus());
-            }
+            text_focus()?;
             inject_keystroke(window, cx, typed(*ch));
             Ok(())
         }
         Step::Newline => {
-            if !in_text {
-                return Err(policy::no_text_focus());
-            }
+            text_focus()?;
             inject_chord(window, cx, keystroke(&keys::newline_chord(send_key_mode)));
             Ok(())
         }
         Step::Chord(chord) => {
             if let Some(refusal) = policy::chord_refusal(chord, in_text) {
                 return Err(refusal);
+            }
+            // Enter and Space act on the focused element (send, activate).
+            if matches!(chord.key.as_str(), "enter" | "space") {
+                text_focus()?;
             }
             inject_chord(window, cx, keystroke(chord));
             Ok(())
@@ -317,6 +328,20 @@ pub(super) fn perform_key_step(
 }
 
 impl QuillApp {
+    /// Whether the focused element, with the elements it was drawn inside,
+    /// is one the driver may send keys to: the same rule as a pointer,
+    /// from the tags GPUI recorded above the focus in the last frame.
+    pub(super) fn agent_focus_allowed(&self, window: &Window) -> bool {
+        let tags: Vec<String> = window
+            .focused_a11y_tags()
+            .into_iter()
+            .map(|tag| tag.to_string())
+            .collect();
+        redact::point_allowed(&tags, self.driver_scope(), &|chat_id| {
+            self.driver_may_open_chat(chat_id)
+        })
+    }
+
     /// Whether the elements GPUI reports under the pointer now (clipped and
     /// layered as drawn) are ones the driver may act on.
     pub(super) fn agent_pointer_allowed(&self, window: &Window) -> bool {

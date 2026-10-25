@@ -135,3 +135,22 @@ an occluding hitbox, so a reader can tell what GPUI itself would deliver a
 click to after an overlay or a clip. `Window::focused_text_input` says
 whether the last frame registered a text input handler, so a reader knows
 typed characters would go into a text field.
+
+## Hover tags follow the hit test; the focused element records its tags
+
+Added in 2026 for the UI driver's second security review (phase 5).
+`Window::hovered_a11y_tags` (`src/window.rs`) now walks the hit test the
+way `Hitbox::is_hovered` does: only the first `hover_hitbox_count` ids
+(the rest are reachable by scroll alone, under a
+`BlockMouseExceptScroll` hitbox) and no further than an occluding
+`BlockMouse` hitbox, tagged or not. `Window.a11y_tag_stack` holds the
+tags of the elements being painted; `Interactivity::paint`
+(`src/elements/div.rs`) pushes an element's tag around its children's
+paint. When a focused element is painted (a `track_focus` div in
+`Div::paint`, or any element calling `Window::handle_input`), the stack
+is copied into `Frame.focus_tags`; `Window::focused_a11y_tags` returns
+it from the last frame, innermost first, so a reader can tell where a
+key event would land the way it tells where a click would. A tag
+reaches the accessibility node (`A11y::node_tags`, `src/element.rs`)
+only when the element has a role; it always tags the hitbox and the
+stack.

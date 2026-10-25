@@ -120,21 +120,34 @@ impl QuillApp {
             let mut ui_send: Option<UiSend> = None;
             let mut stopped: Option<String> = None;
             let mut done = 0usize;
-            for (index, step) in steps.iter().enumerate() {
-                if index > 0 && step.waits_frame() {
-                    cx.background_executor().timer(FRAME_WAIT).await;
+            // The frame the last step was injected into: a step that could
+            // activate something waits for the frame after it, so the
+            // focus and the surface it meets are the ones its predecessor
+            // left (a timer would race the redraw).
+            let mut injected_frame: Option<u64> = None;
+            for step in &steps {
+                if let Some(frame) = injected_frame
+                    && step.waits_frame()
+                    && let Err(note) = wait_for_frame(&app, cx, frame).await
+                {
+                    stopped = Some(note);
+                    break;
                 }
                 // Three synchronous parts on the UI thread, nothing runs in
                 // between: the checks hold the app, the injection holds only
                 // the window (its handlers update the app themselves).
                 let outcome = app
                     .update_in(cx, |app, window, _| {
-                        check_step(&pending, generation, &surface, app, window)
+                        (
+                            check_step(&pending, generation, &surface, app, window),
+                            window.a11y_tree_frame(),
+                        )
                     })
                     .map_err(|_| ())
-                    .map(|checked| match checked {
+                    .map(|(checked, frame)| match checked {
                         Ok(now) => {
                             surface = now;
+                            injected_frame = Some(frame);
                             perform_step(&app, cx, step, &tree, send_key_mode)
                         }
                         Err(refusal) => Err(refusal),
@@ -338,8 +351,13 @@ fn perform_step_injecting(
         policy::window_closed()
     }
     let Step::Pointer { target, pointer } = step else {
+        let focus_allowed = app
+            .update_in(cx, |app, window, _| app.agent_focus_allowed(window))
+            .map_err(closed)?;
         return cx
-            .update(|window, cx| input::perform_key_step(step, send_key_mode, window, cx))
+            .update(|window, cx| {
+                input::perform_key_step(step, send_key_mode, focus_allowed, window, cx)
+            })
             .map_err(closed)?;
     };
     let position = cx
@@ -356,6 +374,33 @@ fn perform_step_injecting(
     }
     cx.update(|window, cx| input::press_at(position, pointer, window, cx))
         .map_err(closed)
+}
+
+/// A frame later than `after` drawn, asking for a redraw until one comes.
+/// `Err` when the window closed or no frame came.
+async fn wait_for_frame(
+    app: &super::chat_window::ScopedApp,
+    cx: &mut AsyncWindowContext,
+    after: u64,
+) -> Result<(), String> {
+    for _ in 0..FRAME_TRIES {
+        let drawn = app.update_in(cx, |_, window, _| {
+            window.set_a11y_forced(true);
+            if window.a11y_tree_frame() > after {
+                true
+            } else {
+                window.refresh();
+                false
+            }
+        });
+        match drawn {
+            Err(_) => return Err(policy::window_closed()),
+            Ok(true) => return Ok(()),
+            Ok(false) => {}
+        }
+        cx.background_executor().timer(FRAME_WAIT).await;
+    }
+    Err(policy::no_frame())
 }
 
 /// The surface and the first tree from a frame later than `after`, asking

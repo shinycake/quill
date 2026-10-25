@@ -445,6 +445,12 @@ impl<E: Element> Drawable<E> {
                             });
                             self.element.write_a11y_info(&mut node);
                             window.a11y.node_bounds.insert(node_id, bounds);
+                            // Only here, under `a11y_role`: a tag on an
+                            // element without a role has no node to ride
+                            // and never reaches the tree. It still tags
+                            // the element's hitbox and the tag stack, so
+                            // readers of pointer and focus tags see it; a
+                            // tag meant for the tree needs a role.
                             if let Some(tag) = self.element.a11y_tag() {
                                 window.a11y.node_tags.insert(node_id, tag);
                             }

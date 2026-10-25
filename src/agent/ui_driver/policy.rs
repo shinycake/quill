@@ -102,6 +102,11 @@ pub fn point_outside_region(x: f32, y: f32) -> String {
     )
 }
 
+/// A key for a focused element that is not inside a part agents may use.
+pub fn focus_outside_region() -> String {
+    "The focused text box is not inside a part of Quill's window agents may use (the open granted chat and the chat list's granted rows), so the key was not pressed. Click a text box there first (click_element).".into()
+}
+
 /// A node whose rectangle is not inside the window.
 pub fn node_off_screen(id: &str) -> String {
     format!("Node {id} is outside the visible window. Scroll it into view first (scroll_view).")

@@ -1048,6 +1048,9 @@ pub(crate) struct Frame {
     /// [`InteractiveElement::a11y_tag`] per tagged hitbox
     /// ([`Window::hovered_a11y_tags`]).
     pub(crate) hitbox_tags: FxHashMap<HitboxId, SharedString>,
+    /// The tags of the focused element and its tagged ancestors, outermost
+    /// first, as painted this frame ([`Window::focused_a11y_tags`]).
+    pub(crate) focus_tags: Vec<SharedString>,
     pub(crate) window_control_hitboxes: Vec<(WindowControlArea, Hitbox)>,
     pub(crate) deferred_draws: Vec<DeferredDraw>,
     pub(crate) input_handlers: Vec<Option<PlatformInputHandler>>,
@@ -1105,6 +1108,7 @@ impl Frame {
             scene: Scene::default(),
             hitboxes: Vec::new(),
             hitbox_tags: FxHashMap::default(),
+            focus_tags: Vec::new(),
             window_control_hitboxes: Vec::new(),
             deferred_draws: Vec::new(),
             input_handlers: Vec::new(),
@@ -1136,6 +1140,7 @@ impl Frame {
         self.cursor_styles.clear();
         self.hitboxes.clear();
         self.hitbox_tags.clear();
+        self.focus_tags.clear();
         self.window_control_hitboxes.clear();
         self.deferred_draws.clear();
         self.tab_stops.clear();
@@ -1267,6 +1272,10 @@ pub struct Window {
     default_prevented: bool,
     mouse_position: Point<Pixels>,
     mouse_hit_test: HitTest,
+    /// The [`InteractiveElement::a11y_tag`]s of the elements being painted,
+    /// outermost first (pushed and popped around each tagged element's
+    /// paint), so the focused element can record the tags above it.
+    pub(crate) a11y_tag_stack: Vec<SharedString>,
     modifiers: Modifiers,
     capslock: Capslock,
     scale_factor: f32,
@@ -2167,6 +2176,7 @@ impl Window {
             default_prevented: true,
             mouse_position,
             mouse_hit_test: HitTest::default(),
+            a11y_tag_stack: Vec::new(),
             modifiers,
             capslock,
             scale_factor,
@@ -5345,15 +5355,29 @@ impl Window {
     }
 
     /// The tags ([`InteractiveElement::a11y_tag`]) of the hitboxes under the
-    /// mouse as of the last mouse event, topmost first: the window's own
-    /// z-ordered hit test, stopping at an occluding hitbox, so an overlay
-    /// over a tagged region hides the region's tag.
+    /// mouse as of the last mouse event, topmost first: the hitboxes a
+    /// mouse event would reach, as [`Hitbox::is_hovered`] sees them. The
+    /// walk ends with the hitboxes that only scroll would reach
+    /// ([`HitboxBehavior::BlockMouseExceptScroll`]) and at an occluding
+    /// hitbox ([`HitboxBehavior::BlockMouse`]), tagged or not, so an
+    /// overlay over a tagged region hides the region's tag.
     pub fn hovered_a11y_tags(&self) -> Vec<SharedString> {
-        self.mouse_hit_test
-            .ids
-            .iter()
-            .filter_map(|id| self.rendered_frame.hitbox_tags.get(id).cloned())
-            .collect()
+        let hit_test = &self.mouse_hit_test;
+        let frame = &self.rendered_frame;
+        let mut tags = Vec::new();
+        for id in hit_test.ids.iter().take(hit_test.hover_hitbox_count) {
+            if let Some(tag) = frame.hitbox_tags.get(id) {
+                tags.push(tag.clone());
+            }
+            let occludes = frame
+                .hitboxes
+                .iter()
+                .any(|hitbox| hitbox.id == *id && hitbox.behavior == HitboxBehavior::BlockMouse);
+            if occludes {
+                break;
+            }
+        }
+        tags
     }
 
     /// Whether the focused element registered a text input handler in the
@@ -5361,6 +5385,28 @@ impl Window {
     /// field, not to key bindings alone.
     pub fn focused_text_input(&self) -> bool {
         !self.rendered_frame.input_handlers.is_empty()
+    }
+
+    /// The tags ([`InteractiveElement::a11y_tag`]) of the focused element
+    /// and the elements it was painted inside, innermost first, from the
+    /// last frame: what a key event would reach, read the way
+    /// [`Self::hovered_a11y_tags`] reads a click. Recorded when a focused
+    /// element registers a text input handler or tracks its focus handle;
+    /// empty when nothing focused was painted (focus in a deferred draw
+    /// records the tags of that draw's own ancestors only).
+    pub fn focused_a11y_tags(&self) -> Vec<SharedString> {
+        self.rendered_frame
+            .focus_tags
+            .iter()
+            .rev()
+            .cloned()
+            .collect()
+    }
+
+    /// Paint-time: the focused element is being painted; keep the tag
+    /// stack above it for [`Self::focused_a11y_tags`].
+    pub(crate) fn record_focus_tags(&mut self) {
+        self.next_frame.focus_tags = self.a11y_tag_stack.clone();
     }
 
     /// Set a hitbox which will act as a control area of the platform window.
@@ -5452,6 +5498,7 @@ impl Window {
         self.invalidator.debug_assert_paint();
 
         if focus_handle.is_focused(self) {
+            self.record_focus_tags();
             let cx = self.to_async(cx);
             self.next_frame
                 .input_handlers
