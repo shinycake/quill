@@ -313,13 +313,14 @@ impl QuillApp {
 
     fn favorite_sticker(&mut self, id: FileId, favorite: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
-                .set_note(match live.driver.set_favorite_sticker(id, favorite) {
-                    Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_UPDATING_FAVORITE_STICKERS)),
-                    Err(_) => {
-                        StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_UPDATE_FAVORITE_STICKER))
-                    }
-                });
+            let sent = live.driver.set_favorite_sticker(id, favorite);
+            self.connection.set_note(match sent {
+                Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_UPDATING_FAVORITE_STICKERS)),
+                Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_UPDATE_FAVORITE_STICKER)),
+            });
+            if favorite && sent.is_ok() {
+                self.note_faved_replaced(id, cx);
+            }
         }
         cx.notify();
     }

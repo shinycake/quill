@@ -634,11 +634,12 @@ pub fn parse_received_gifts(value: &Value) -> GiftsPage {
     }
 }
 
-/// One `premiumLimit`, shown as "default → Premium".
+/// One `premiumLimit`, shown as "default → Premium" when it has a title;
+/// the untitled ones only feed the limit boxes and toasts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PremiumLimitRow {
     pub type_name: String,
-    pub title: &'static str,
+    pub title: Option<&'static str>,
     pub default_value: i64,
     pub premium_value: i64,
 }
@@ -659,6 +660,7 @@ fn limit_title(constructor: &str) -> Option<&'static str> {
         "premiumLimitTypeChatFolderInviteLinkCount" => "Folder invite links",
         "premiumLimitTypeShareableChatFolderCount" => "Shareable folders",
         "premiumLimitTypeActiveStoryCount" => "Active stories",
+        "premiumLimitTypeSimilarChatCount" => "Similar channels",
         _ => return None,
     })
 }
@@ -697,7 +699,7 @@ pub fn parse_premium_features(value: &Value) -> PremiumInfo {
                 .filter_map(|l| {
                     Some(PremiumLimitRow {
                         type_name: l.get("type")?.get("@type")?.as_str()?.to_string(),
-                        title: limit_title(l.get("type")?.get("@type")?.as_str()?)?,
+                        title: limit_title(l.get("type")?.get("@type")?.as_str()?),
                         default_value: int(l.get("default_value")),
                         premium_value: int(l.get("premium_value")),
                     })
@@ -804,6 +806,10 @@ pub struct PremiumHub {
     /// The limit box that is open (pins, caption, GIFs, ...), with how far
     /// over the limit the action went when that is known (caption).
     pub limit_box: Option<(crate::premium_limits::PremiumLimitKind, i64)>,
+    /// The limit toast waiting for the next frame (saved GIFs, favorite
+    /// stickers, similar channels, owned bots).
+    pub limit_toast: Option<crate::premium_limits::PremiumLimitKind>,
+    pub limits: crate::premium_limits::LimitStore,
     /// Settings → My Grams (`ton`).
     pub grams: ton::GramsHub,
     /// The upgraded gift whose value is asked for or shown (`gift_value`).

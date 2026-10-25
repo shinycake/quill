@@ -85,6 +85,7 @@ mod peer_qr;
 mod permissions_box;
 mod poll_option_menu;
 mod polls_checklists;
+mod premium_limits;
 mod premium_purchase;
 mod privacy_data;
 mod private_sharing;

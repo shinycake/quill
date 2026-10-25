@@ -511,7 +511,6 @@ impl QuillApp {
                 Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SAVE_GIF)),
             });
             if sent.is_ok() {
-                // A full list drops its oldest GIF; the limit box says so.
                 self.note_gif_replaced(cx);
             }
         } else {
@@ -545,12 +544,15 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
-                .set_note(match live.driver.set_favorite_sticker(file_id, favorite) {
-                    Ok(_) if favorite => StatusNote::silent(tr(keys::Q_CHAT_ADDED_TO_FAVORITES)),
-                    Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_REMOVED_FROM_FAVORITES)),
-                    Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_CHANGE_FAVORITES)),
-                });
+            let sent = live.driver.set_favorite_sticker(file_id, favorite);
+            self.connection.set_note(match sent {
+                Ok(_) if favorite => StatusNote::silent(tr(keys::Q_CHAT_ADDED_TO_FAVORITES)),
+                Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_REMOVED_FROM_FAVORITES)),
+                Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_CHANGE_FAVORITES)),
+            });
+            if favorite && sent.is_ok() {
+                self.note_faved_replaced(file_id, cx);
+            }
         } else {
             self.connection.set_note(StatusNote::silent(tr(
                 keys::Q_CHAT_DEMO_FAVORITES_CHANGE_WITH_LIVE,

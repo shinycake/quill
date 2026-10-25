@@ -214,13 +214,39 @@ fn a_failed_create_keeps_the_dialog_open_with_a_reason() {
         &sink,
         &answer(
             &extra_of(&request),
-            r#"{"@type":"error","code":400,"message":"BOT_CREATE_LIMIT_EXCEEDED"}"#,
+            r#"{"@type":"error","code":400,"message":"BOT_INVALID"}"#,
         ),
     );
     let create = &driver.session.bots.owned.create;
     assert!(create.created.is_none());
     assert!(create.creating.is_none());
     assert!(create.error.as_deref().unwrap().contains("BotFather"));
+    assert_eq!(driver.session.payments.hub.limit_toast, None);
+}
+
+#[test]
+fn the_bot_limit_shows_the_premium_toast_over_the_open_dialog() {
+    let (mut driver, recorder, sink, seq) = driver_parts();
+    driver
+        .create_managed_bot(5, "Cool", "coolbot", true)
+        .unwrap();
+    let request = sent_request(&recorder, "createBot");
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &answer(
+            &extra_of(&request),
+            r#"{"@type":"error","code":400,"message":"BOT_CREATE_LIMIT_EXCEEDED"}"#,
+        ),
+    );
+    let create = &driver.session.bots.owned.create;
+    assert!(create.creating.is_none());
+    assert_eq!(create.error, None);
+    assert_eq!(
+        driver.session.payments.hub.limit_toast,
+        Some(crate::premium_limits::PremiumLimitKind::OwnedBots)
+    );
 }
 
 #[test]

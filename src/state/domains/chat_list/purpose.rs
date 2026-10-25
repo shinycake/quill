@@ -133,8 +133,8 @@ pub enum ChatListPurpose {
     GetChatFolderNewChats,
     /// `processChatFolderNewChats`. Response is `ok`; fire-and-forget.
     ProcessChatFolderNewChats,
-    /// `getPremiumLimit` for a folder limit box. Response is
-    /// `premiumLimit`, which names its own type.
+    /// `getPremiumLimit` for a folder or Premium limit box or toast.
+    /// Response is `premiumLimit`, which names its own type.
     GetPremiumLimit,
 }
 

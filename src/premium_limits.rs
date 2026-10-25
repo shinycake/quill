@@ -1,12 +1,19 @@
-//! Premium limit boxes outside folders: pinned chats, captions, saved GIFs,
-//! joined communities, public links and file size. Pure logic, no GPUI and
-//! no TDLib I/O.
+//! Premium limits outside folders: the boxes for pinned chats, pinned
+//! Saved Messages chats, captions, joined communities, public links, file
+//! size and story posting, the toasts for saved GIFs, favorite stickers, similar channels
+//! and owned bots, and the values TDLib reports for them. Pure logic, no
+//! GPUI and no TDLib I/O.
 //!
 //! tdesktop reference: `boxes/premium_limits_box.cpp` (`SimpleLimitBox`,
-//! `SimplePinsLimitBox`, `ChannelsLimitBox`, `PublicLinksLimitBox`,
-//! `CaptionLimitBox`, `CaptionLimitReachedBox`, `FileSizeLimitBox`),
+//! `SimplePinsLimitBox`, `SublistsPinsLimitBox`, `ChannelsLimitBox`,
+//! `PublicLinksLimitBox`, `CaptionLimitBox`, `CaptionLimitReachedBox`,
+//! `FileSizeLimitBox`), `data/stickers/data_stickers.cpp` (`SavedGifsToast`,
+//! `FaveStickersToast`), `history_view_similar_channels.cpp`,
+//! `create_managed_bot_box.cpp` (`BOT_CREATE_LIMIT_EXCEEDED`),
 //! `data/data_premium_limits.cpp` (the fallbacks used before the server
-//! answers) and `Resources/langs/lang.strings` (`lng_*_limit*`). Folder
+//! answers) and `Resources/langs/lang.strings` (`lng_*_limit*`). tdesktop
+//! cannot post stories, so the story boxes follow the pins box and take
+//! their limits from `canPostStoryResult*` and `getPremiumLimit`. Folder
 //! limits live in [`crate::folder_limits`]; they keep their own box.
 #![deny(clippy::indexing_slicing)]
 
@@ -27,6 +34,14 @@ pub enum PremiumLimitKind {
     PublicLinks,
     /// Size of one uploaded document, in gigabytes.
     FileSize,
+    FavoriteStickers,
+    /// Pinned chats of Saved Messages (tdesktop's sublists).
+    SavedPins,
+    SimilarChats,
+    OwnedBots,
+    ActiveStories,
+    WeeklyStories,
+    MonthlyStories,
 }
 
 /// The free and the Premium value of one limit.
@@ -38,7 +53,8 @@ pub struct LimitPair {
 
 impl PremiumLimitKind {
     /// The `/start` ref of the box's Increase Limit (tdesktop
-    /// `LimitsPremiumRef`).
+    /// `LimitsPremiumRef`, or the plain ref the similar channels and bot
+    /// toasts pass to `Settings::ShowPremium`).
     pub fn premium_ref(self) -> String {
         let addition = match self {
             Self::Pins => "dialog_pinned",
@@ -48,20 +64,69 @@ impl PremiumLimitKind {
             Self::Channels => "channels",
             Self::PublicLinks => "channels_public",
             Self::FileSize => "upload_max_fileparts",
+            Self::FavoriteStickers => "stickers_faved",
+            Self::SavedPins => "saved_dialog_pinned",
+            Self::SimilarChats => return "similar_channels".to_string(),
+            Self::OwnedBots => return "managed_bots".to_string(),
+            Self::ActiveStories | Self::WeeklyStories | Self::MonthlyStories => {
+                return "stories".to_string();
+            }
         };
         format!("double_limits__{addition}")
     }
 
     /// Every kind, in the order of the "Doubled limits" page.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 14] = [
         Self::Channels,
         Self::Pins,
         Self::PinsArchive,
         Self::PublicLinks,
         Self::SavedGifs,
+        Self::FavoriteStickers,
         Self::Caption,
+        Self::SimilarChats,
         Self::FileSize,
+        Self::SavedPins,
+        Self::OwnedBots,
+        Self::ActiveStories,
+        Self::WeeklyStories,
+        Self::MonthlyStories,
     ];
+
+    /// Whether the "Doubled limits" page lists it (tdesktop
+    /// `DoubledLimitsPreviewBox` leaves out the Saved Messages pins, the
+    /// bot count and the story limits).
+    pub fn on_doubled_page(self) -> bool {
+        !matches!(
+            self,
+            Self::SavedPins
+                | Self::OwnedBots
+                | Self::ActiveStories
+                | Self::WeeklyStories
+                | Self::MonthlyStories
+        )
+    }
+
+    /// tdesktop tells about these with a toast, not a box: the saved GIF
+    /// and favorite sticker lists drop their oldest entry, the similar
+    /// channels strip and the bot creation box stay where they are.
+    pub fn shows_toast(self) -> bool {
+        matches!(
+            self,
+            Self::SavedGifs | Self::FavoriteStickers | Self::SimilarChats | Self::OwnedBots
+        )
+    }
+
+    /// The TDLib option that holds the limit in force for this account,
+    /// for the kinds whose option is read here.
+    pub fn option_name(self) -> Option<&'static str> {
+        match self {
+            Self::FavoriteStickers => Some("favorite_stickers_limit"),
+            Self::SavedPins => Some("pinned_saved_messages_topic_count_max"),
+            Self::OwnedBots => Some("owned_bot_count_max"),
+            _ => None,
+        }
+    }
 
     /// The `premiumLimitType*` constructor behind the limit. File size is
     /// a Premium feature in TDLib (`premiumFeatureIncreasedUploadFileSize`),
@@ -74,6 +139,13 @@ impl PremiumLimitKind {
             Self::SavedGifs => Some("premiumLimitTypeSavedAnimationCount"),
             Self::Channels => Some("premiumLimitTypeSupergroupCount"),
             Self::PublicLinks => Some("premiumLimitTypeCreatedPublicChatCount"),
+            Self::FavoriteStickers => Some("premiumLimitTypeFavoriteStickerCount"),
+            Self::SavedPins => Some("premiumLimitTypePinnedSavedMessagesTopicCount"),
+            Self::SimilarChats => Some("premiumLimitTypeSimilarChatCount"),
+            Self::OwnedBots => Some("premiumLimitTypeOwnedBotCount"),
+            Self::ActiveStories => Some("premiumLimitTypeActiveStoryCount"),
+            Self::WeeklyStories => Some("premiumLimitTypeWeeklyPostedStoryCount"),
+            Self::MonthlyStories => Some("premiumLimitTypeMonthlyPostedStoryCount"),
             Self::FileSize => None,
         }
     }
@@ -85,8 +157,9 @@ impl PremiumLimitKind {
             .find(|kind| kind.td_limit_type() == Some(name))
     }
 
-    /// Telegram's published free and Premium values, used until
-    /// `getPremiumFeatures` answers (tdesktop `data_premium_limits.cpp`).
+    /// tdesktop's values before the server answers
+    /// (`data_premium_limits.cpp`), used until `getPremiumFeatures` or
+    /// `getPremiumLimit` reports the real pair.
     pub fn fallback(self) -> LimitPair {
         let (default_value, premium_value) = match self {
             Self::Pins => (5, 10),
@@ -96,6 +169,13 @@ impl PremiumLimitKind {
             Self::Channels => (500, 1000),
             Self::PublicLinks => (10, 20),
             Self::FileSize => (2, 4),
+            Self::FavoriteStickers => (5, 10),
+            Self::SavedPins => (5, 100),
+            Self::SimilarChats => (10, 100),
+            Self::OwnedBots => (20, 40),
+            Self::ActiveStories => (3, 100),
+            Self::WeeklyStories => (7, 700),
+            Self::MonthlyStories => (30, 3000),
         };
         LimitPair {
             default_value,
@@ -113,6 +193,13 @@ impl PremiumLimitKind {
             Self::Channels => "Groups and channels",
             Self::PublicLinks => "Public links",
             Self::FileSize => "File size",
+            Self::FavoriteStickers => "Favorite stickers",
+            Self::SavedPins => "Pinned saved chats",
+            Self::SimilarChats => "Similar channels",
+            Self::OwnedBots => "Bots",
+            Self::ActiveStories => "Active stories",
+            Self::WeeklyStories => "Stories per week",
+            Self::MonthlyStories => "Stories per month",
         }
     }
 
@@ -125,6 +212,11 @@ impl PremiumLimitKind {
             Self::Channels => "communities",
             Self::PublicLinks => "links",
             Self::FileSize => "GB",
+            Self::FavoriteStickers => "stickers",
+            Self::SavedPins => "chats",
+            Self::SimilarChats => "channels",
+            Self::OwnedBots => "bots",
+            Self::ActiveStories | Self::WeeklyStories | Self::MonthlyStories => "stories",
         }
     }
 
@@ -141,6 +233,9 @@ impl PremiumLimitKind {
 /// `MEDIA_CAPTION_TOO_LONG`, ...) and TDLib's own wording.
 pub fn kind_for_message(message: &str) -> Option<PremiumLimitKind> {
     let m = message.to_ascii_uppercase();
+    if m.contains("BOT_CREATE_LIMIT_EXCEEDED") || m.contains("BOTS_TOO_MUCH") {
+        return Some(PremiumLimitKind::OwnedBots);
+    }
     let too_many = m.contains("TOO_MUCH") || m.contains("TOO MANY");
     // `CHANNELS_ADMIN_PUBLIC_TOO_MUCH`, `USERNAMES_ACTIVE_TOO_MUCH`
     if (m.contains("PUBLIC") && too_many) || m.contains("USERNAMES_ACTIVE_TOO_MUCH") {
@@ -175,14 +270,15 @@ pub struct LimitBoxText {
 ///
 /// `shown` is the limit that applies to the account now. `premium` is the
 /// Premium value. A Premium account, or one whose server offers no Premium,
-/// gets the first sentence only and an OK button.
+/// gets the first sentence only and an OK button. `None` for the kinds
+/// tdesktop tells about with a toast ([`PremiumLimitKind::shows_toast`]).
 pub fn limit_box_text(
     kind: PremiumLimitKind,
     shown: i64,
     premium: i64,
     is_premium: bool,
     premium_possible: bool,
-) -> LimitBoxText {
+) -> Option<LimitBoxText> {
     let upsell = !is_premium && premium_possible;
     let join = |first: String, second: String| {
         if upsell {
@@ -192,7 +288,7 @@ pub fn limit_box_text(
         }
     };
     let (title, message) = match kind {
-        PremiumLimitKind::Pins | PremiumLimitKind::PinsArchive => (
+        PremiumLimitKind::Pins | PremiumLimitKind::PinsArchive | PremiumLimitKind::SavedPins => (
             "Limit Reached".to_string(),
             join(
                 format!(
@@ -256,16 +352,6 @@ pub fn limit_box_text(
                 ),
             ),
         ),
-        PremiumLimitKind::SavedGifs => (
-            format!("Limit of {} Reached", plural(shown, "GIF", "GIFs")),
-            join(
-                "An older GIF was replaced with this one.".to_string(),
-                format!(
-                    "You can increase the limit to {}.",
-                    plural(premium, "GIF", "GIFs")
-                ),
-            ),
-        ),
         PremiumLimitKind::FileSize => (
             "File Too Large".to_string(),
             join(
@@ -276,12 +362,54 @@ pub fn limit_box_text(
                 ),
             ),
         ),
+        PremiumLimitKind::ActiveStories => (
+            "Limit Reached".to_string(),
+            join(
+                format!(
+                    "Sorry, you can't have more than {} at once.",
+                    plural(shown, "active story", "active stories")
+                ),
+                format!(
+                    "Delete one or wait for the oldest to expire, or subscribe to Telegram \
+                     Premium to raise the limit to {}.",
+                    plural(premium, "story", "stories")
+                ),
+            ) + if upsell {
+                ""
+            } else {
+                " Delete one or wait for the oldest to expire."
+            },
+        ),
+        PremiumLimitKind::WeeklyStories | PremiumLimitKind::MonthlyStories => {
+            let period = if kind == PremiumLimitKind::WeeklyStories {
+                "week"
+            } else {
+                "month"
+            };
+            (
+                "Limit Reached".to_string(),
+                join(
+                    format!(
+                        "Sorry, you can't post more than {} a {period}.",
+                        plural(shown, "story", "stories")
+                    ),
+                    format!(
+                        "Subscribe to Telegram Premium to raise the limit to {} a {period}.",
+                        plural(premium, "story", "stories")
+                    ),
+                ),
+            )
+        }
+        PremiumLimitKind::SavedGifs
+        | PremiumLimitKind::FavoriteStickers
+        | PremiumLimitKind::SimilarChats
+        | PremiumLimitKind::OwnedBots => return None,
     };
-    LimitBoxText {
+    Some(LimitBoxText {
         title,
         message,
         offer_upgrade: upsell,
-    }
+    })
 }
 
 /// The limit now in force, given the Premium state and the pair.
@@ -341,17 +469,123 @@ pub fn check_file_size(bytes: u64, is_premium: bool) -> FileSizeCheck {
     }
 }
 
-/// The saved GIF list was already at its limit when a GIF was added (TDLib
-/// replaces the oldest one silently, so the box is the only notice).
-pub fn gif_limit_reached(saved_count: usize, limit: i64) -> bool {
-    limit > 0 && saved_count as i64 >= limit
+/// A saved GIF or favorite sticker list was already at its limit when one
+/// more was added: TDLib drops the oldest entry silently, so the toast is
+/// the only notice (tdesktop `Stickers::addSavedGif`, `checkFavedLimit`).
+pub fn saved_list_full(saved_count: usize, limit: i64) -> bool {
+    limit > 0 && i64::try_from(saved_count).unwrap_or(i64::MAX) >= limit
+}
+
+/// What TDLib said about the limits beyond `getPremiumFeatures`: the
+/// `getPremiumLimit` answers, which ones were asked for, and the options
+/// that hold the limit in force for this account.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LimitStore {
+    answered: Vec<(PremiumLimitKind, LimitPair)>,
+    asked: Vec<PremiumLimitKind>,
+    options: Vec<(PremiumLimitKind, i64)>,
+}
+
+impl LimitStore {
+    /// Fold one `premiumLimit` answer; other limit types are ignored.
+    pub fn apply_premium_limit(&mut self, type_name: &str, default_value: i64, premium_value: i64) {
+        let Some(kind) = PremiumLimitKind::from_td_limit_type(type_name) else {
+            return;
+        };
+        self.answered.retain(|(k, _)| *k != kind);
+        self.answered.push((
+            kind,
+            LimitPair {
+                default_value,
+                premium_value,
+            },
+        ));
+    }
+
+    pub fn answered(&self, kind: PremiumLimitKind) -> Option<LimitPair> {
+        self.answered
+            .iter()
+            .find(|(k, _)| *k == kind)
+            .map(|(_, pair)| *pair)
+    }
+
+    /// Whether `getPremiumLimit` should be sent for `kind`: it has a limit
+    /// type and was neither answered nor asked for (an account that cannot
+    /// buy Premium gets an error, so a refused one is not asked again).
+    pub fn should_ask(&self, kind: PremiumLimitKind) -> bool {
+        kind.td_limit_type().is_some()
+            && self.answered(kind).is_none()
+            && !self.asked.contains(&kind)
+    }
+
+    pub fn note_asked(&mut self, kind: PremiumLimitKind) {
+        if !self.asked.contains(&kind) {
+            self.asked.push(kind);
+        }
+    }
+
+    /// A send failed: `kind` may be asked again.
+    pub fn forget_asked(&mut self, kind: PremiumLimitKind) {
+        self.asked.retain(|k| *k != kind);
+    }
+
+    /// An integer `updateOption`; only the options of
+    /// [`PremiumLimitKind::option_name`] are kept.
+    pub fn apply_option(&mut self, name: &str, value: i64) {
+        let Some(kind) = PremiumLimitKind::ALL
+            .into_iter()
+            .find(|kind| kind.option_name() == Some(name))
+        else {
+            return;
+        };
+        self.options.retain(|(k, _)| *k != kind);
+        if value > 0 {
+            self.options.push((kind, value));
+        }
+    }
+
+    pub fn option(&self, kind: PremiumLimitKind) -> Option<i64> {
+        self.options
+            .iter()
+            .find(|(k, _)| *k == kind)
+            .map(|(_, value)| *value)
+    }
+}
+
+/// The toast after `createBot` hit the bot limit (tdesktop
+/// `create_managed_bot_box.cpp`): the Premium offer for a free account
+/// that can buy Premium, else the final notice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BotsLimitNotice {
+    /// `lng_bots_create_limit_final`: `count` is the limit in force.
+    Final { count: i64 },
+    /// `lng_bots_create_limit`.
+    Promo { count: i64, premium_count: i64 },
+}
+
+/// `count` is the limit in force (`owned_bot_count_max`), `premium_count`
+/// the Premium value.
+pub fn bots_limit_notice(
+    count: i64,
+    premium_count: i64,
+    is_premium: bool,
+    premium_possible: bool,
+) -> BotsLimitNotice {
+    if is_premium || !premium_possible {
+        BotsLimitNotice::Final { count }
+    } else {
+        BotsLimitNotice::Promo {
+            count,
+            premium_count,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        LimitPair, PremiumLimitKind as Kind, gif_limit_reached, kind_for_message, limit_box_text,
-        line_ratio, pair_text, shown_limit,
+        BotsLimitNotice, LimitPair, LimitStore, PremiumLimitKind as Kind, bots_limit_notice,
+        kind_for_message, limit_box_text, line_ratio, pair_text, saved_list_full, shown_limit,
     };
 
     #[test]
@@ -396,11 +630,15 @@ mod tests {
         assert_eq!(kind_for_message("FILTER_INCLUDE_TOO_MUCH"), None);
         assert_eq!(kind_for_message("CHAT_WRITE_FORBIDDEN"), None);
         assert_eq!(kind_for_message("MESSAGE_TOO_LONG"), None);
+        assert_eq!(
+            kind_for_message("BOT_CREATE_LIMIT_EXCEEDED"),
+            Some(Kind::OwnedBots)
+        );
     }
 
     #[test]
     fn free_accounts_get_the_upsell_sentence() {
-        let free = limit_box_text(Kind::Pins, 5, 10, false, true);
+        let free = limit_box_text(Kind::Pins, 5, 10, false, true).expect("a box");
         assert_eq!(free.title, "Limit Reached");
         assert!(
             free.message
@@ -412,27 +650,25 @@ mod tests {
 
     #[test]
     fn premium_accounts_and_missing_premium_get_the_plain_sentence() {
-        let premium = limit_box_text(Kind::Caption, 4096, 4096, true, true);
+        let premium = limit_box_text(Kind::Caption, 4096, 4096, true, true).expect("a box");
         assert!(!premium.offer_upgrade);
         assert!(!premium.message.contains("Premium"));
-        let none = limit_box_text(Kind::Channels, 500, 1000, false, false);
+        let none = limit_box_text(Kind::Channels, 500, 1000, false, false).expect("a box");
         assert!(!none.offer_upgrade);
         assert!(none.message.ends_with("before joining a new one."));
         assert!(!none.message.contains("Premium"));
-        let links = limit_box_text(Kind::PublicLinks, 10, 20, true, true);
+        let links = limit_box_text(Kind::PublicLinks, 10, 20, true, true).expect("a box");
         assert!(links.message.ends_with("an older group or channel."));
     }
 
     #[test]
     fn counts_use_the_singular() {
-        let text = limit_box_text(Kind::Pins, 1, 2, false, true);
+        let text = limit_box_text(Kind::Pins, 1, 2, false, true).expect("a box");
         assert!(text.message.contains("1 chat to the top"));
         assert_eq!(
-            limit_box_text(Kind::SavedGifs, 200, 400, false, true).title,
-            "Limit of 200 GIFs Reached"
-        );
-        assert_eq!(
-            limit_box_text(Kind::FileSize, 2, 4, false, true).message,
+            limit_box_text(Kind::FileSize, 2, 4, false, true)
+                .expect("a box")
+                .message,
             "The document can't be sent, because it is larger than 2 GB. You can double this \
              limit to 4 GB per document by subscribing to Telegram Premium."
         );
@@ -470,9 +706,118 @@ mod tests {
     }
 
     #[test]
-    fn full_gif_list_is_detected() {
-        assert!(gif_limit_reached(200, 200));
-        assert!(!gif_limit_reached(199, 200));
-        assert!(!gif_limit_reached(5, 0));
+    fn full_saved_lists_are_detected() {
+        assert!(saved_list_full(200, 200));
+        assert!(!saved_list_full(199, 200));
+        assert!(!saved_list_full(5, 0));
+    }
+
+    #[test]
+    fn saved_pins_use_the_pins_sentence_and_toast_kinds_have_no_box() {
+        let free = limit_box_text(Kind::SavedPins, 5, 100, false, true).expect("a box");
+        assert_eq!(free.title, "Limit Reached");
+        assert!(free.message.contains("more than 5 chats"));
+        assert!(free.message.contains("double the limit to 100 chats"));
+        let premium = limit_box_text(Kind::SavedPins, 100, 100, true, true).expect("a box");
+        assert_eq!(
+            premium.message,
+            "Sorry, you can't pin more than 100 chats to the top."
+        );
+        assert!(!premium.offer_upgrade);
+        for kind in Kind::ALL {
+            assert_eq!(
+                limit_box_text(kind, 1, 2, false, true).is_none(),
+                kind.shows_toast(),
+                "{kind:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn new_kinds_send_tdesktops_premium_refs() {
+        assert_eq!(
+            Kind::SavedPins.premium_ref(),
+            "double_limits__saved_dialog_pinned"
+        );
+        assert_eq!(
+            Kind::FavoriteStickers.premium_ref(),
+            "double_limits__stickers_faved"
+        );
+        assert_eq!(Kind::SimilarChats.premium_ref(), "similar_channels");
+        assert_eq!(Kind::OwnedBots.premium_ref(), "managed_bots");
+    }
+
+    #[test]
+    fn story_boxes_name_the_period_and_the_premium_value() {
+        let weekly = limit_box_text(Kind::WeeklyStories, 7, 700, false, true).expect("a box");
+        assert_eq!(
+            weekly.message,
+            "Sorry, you can't post more than 7 stories a week. Subscribe to Telegram Premium \
+             to raise the limit to 700 stories a week."
+        );
+        assert!(weekly.offer_upgrade);
+        let monthly = limit_box_text(Kind::MonthlyStories, 3000, 3000, true, true).expect("a box");
+        assert_eq!(
+            monthly.message,
+            "Sorry, you can't post more than 3000 stories a month."
+        );
+        let active = limit_box_text(Kind::ActiveStories, 1, 100, false, false).expect("a box");
+        assert_eq!(
+            active.message,
+            "Sorry, you can't have more than 1 active story at once. Delete one or wait for \
+             the oldest to expire."
+        );
+        assert!(!active.offer_upgrade);
+        assert!(!Kind::WeeklyStories.on_doubled_page());
+        assert_eq!(
+            Kind::from_td_limit_type("premiumLimitTypeMonthlyPostedStoryCount"),
+            Some(Kind::MonthlyStories)
+        );
+    }
+
+    #[test]
+    fn the_store_folds_answers_options_and_asks_once() {
+        let mut store = LimitStore::default();
+        assert!(store.should_ask(Kind::SavedPins));
+        assert!(!store.should_ask(Kind::FileSize));
+        store.note_asked(Kind::SavedPins);
+        assert!(!store.should_ask(Kind::SavedPins));
+        store.forget_asked(Kind::SavedPins);
+        assert!(store.should_ask(Kind::SavedPins));
+        store.apply_premium_limit("premiumLimitTypePinnedSavedMessagesTopicCount", 6, 120);
+        store.apply_premium_limit("premiumLimitTypeBioLength", 70, 140);
+        assert_eq!(
+            store.answered(Kind::SavedPins),
+            Some(LimitPair {
+                default_value: 6,
+                premium_value: 120
+            })
+        );
+        assert!(!store.should_ask(Kind::SavedPins));
+        store.apply_option("favorite_stickers_limit", 7);
+        store.apply_option("pinned_chat_count_max", 9);
+        assert_eq!(store.option(Kind::FavoriteStickers), Some(7));
+        assert_eq!(store.option(Kind::Pins), None);
+        store.apply_option("favorite_stickers_limit", 0);
+        assert_eq!(store.option(Kind::FavoriteStickers), None);
+    }
+
+    #[test]
+    fn the_bots_toast_offers_premium_only_where_it_helps() {
+        assert_eq!(
+            bots_limit_notice(20, 40, false, true),
+            BotsLimitNotice::Promo {
+                count: 20,
+                premium_count: 40
+            }
+        );
+        assert_eq!(
+            bots_limit_notice(40, 40, true, true),
+            BotsLimitNotice::Final { count: 40 }
+        );
+        assert_eq!(
+            bots_limit_notice(20, 40, false, false),
+            BotsLimitNotice::Final { count: 20 }
+        );
     }
 }

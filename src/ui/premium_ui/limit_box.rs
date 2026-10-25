@@ -1,5 +1,5 @@
-//! Premium limit boxes for pinned chats, captions, saved GIFs, joined
-//! communities, public links and file size.
+//! Premium limit boxes for pinned chats (main list, archive and Saved
+//! Messages), captions, joined communities, public links and file size.
 //!
 //! tdesktop `boxes/premium_limits_box.cpp` (`SimpleLimitBox`): a line from
 //! the free to the Premium value, the sentence, and "Increase Limit" next to
@@ -11,10 +11,9 @@ use super::*;
 use crate::ui::folder_share::finish_dialog;
 use quill::composer::ComposerAttachment;
 use quill::lang::{keys, tr, tr_with};
-use quill::premium_hub::promo::limit_pair;
 use quill::premium_limits::{
-    FileSizeCheck, LimitPair, PremiumLimitKind, check_file_size, gif_limit_reached, limit_box_text,
-    line_ratio, shown_limit,
+    FileSizeCheck, LimitPair, PremiumLimitKind, check_file_size, limit_box_text, line_ratio,
+    shown_limit,
 };
 
 /// The blue-to-pink of the Premium line (tdesktop `premiumButtonBg`).
@@ -30,24 +29,6 @@ fn value_text(kind: PremiumLimitKind, value: i64) -> String {
     }
 }
 
-/// The limit now in force for this account: TDLib's option where it keeps
-/// one, else the free or Premium value.
-fn limit_in_force(session: &Session, kind: PremiumLimitKind, pair: LimitPair) -> i64 {
-    let option = match kind {
-        PremiumLimitKind::Pins => i64::from(session.chat_list.pinned_chat_count_max),
-        PremiumLimitKind::PinsArchive => {
-            i64::from(session.chat_list.pinned_archived_chat_count_max)
-        }
-        PremiumLimitKind::Caption => i64::from(session.messages.message_caption_length_max),
-        _ => 0,
-    };
-    if option > 0 {
-        option
-    } else {
-        shown_limit(pair, session.my_is_premium())
-    }
-}
-
 /// What a box shows, resolved from the session.
 struct LimitView {
     title: String,
@@ -58,10 +39,10 @@ struct LimitView {
     ratio: f32,
 }
 
-fn view_of(session: &Session, kind: PremiumLimitKind, extra: i64) -> LimitView {
+fn view_of(session: &Session, kind: PremiumLimitKind, extra: i64) -> Option<LimitView> {
     let premium = session.my_is_premium();
     let possible = session.premium_possible();
-    let pair = limit_pair(session.payments.hub.premium.as_ref(), kind);
+    let pair = session.premium_limit_pair(kind);
     // A file over even the Premium limit: no upsell, the Premium size shown.
     let too_large = kind == PremiumLimitKind::FileSize && extra == 1;
     let (shown, is_premium, possible) = if too_large {
@@ -69,9 +50,9 @@ fn view_of(session: &Session, kind: PremiumLimitKind, extra: i64) -> LimitView {
     } else if kind == PremiumLimitKind::FileSize {
         (shown_limit(pair, premium), premium, possible)
     } else {
-        (limit_in_force(session, kind, pair), premium, possible)
+        (session.premium_limit_in_force(kind), premium, possible)
     };
-    let text = limit_box_text(kind, shown, pair.premium_value, is_premium, possible);
+    let text = limit_box_text(kind, shown, pair.premium_value, is_premium, possible)?;
     let mut message = text.message;
     if kind == PremiumLimitKind::Caption && extra > 0 {
         message.push_str(&format!(
@@ -89,14 +70,14 @@ fn view_of(session: &Session, kind: PremiumLimitKind, extra: i64) -> LimitView {
         pair.default_value,
         pair.premium_value.max(pair.default_value),
     );
-    LimitView {
+    Some(LimitView {
         title: text.title,
         message,
         offer_upgrade: text.offer_upgrade,
         show_line: possible,
         pair,
         ratio: line_ratio(kind, pair, current),
-    }
+    })
 }
 
 /// The line from the free value to the Premium one.
@@ -104,6 +85,7 @@ fn limit_line(kind: PremiumLimitKind, view: &LimitView, cx: &App) -> impl IntoEl
     let cell = || div().flex().items_center().justify_between().gap_2().px_3();
     div()
         .id("premium-limit-line")
+        .debug_selector(|| "premium-limit-line".into())
         .flex()
         .w_full()
         .h(px(32.))
@@ -133,21 +115,17 @@ fn limit_line(kind: PremiumLimitKind, view: &LimitView, cx: &App) -> impl IntoEl
 }
 
 impl QuillApp {
-    /// Open the limit box for `kind` and ask for the Premium values if they
-    /// are not loaded yet. `extra` is how far over the limit the action
-    /// went (caption characters) or, for file size, 1 when even Premium
-    /// would not take the file.
     pub(in crate::ui) fn show_premium_limit(
         &mut self,
         kind: PremiumLimitKind,
         extra: i64,
         cx: &mut Context<Self>,
     ) {
-        if let Some(hub) = self.hub_mut() {
-            hub.limit_box = Some((kind, extra));
-        }
         if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.maybe_fetch_premium();
+            live.driver.session.open_premium_limit(kind, extra);
+            let _ = live.driver.ensure_premium_limit(kind);
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.open_premium_limit(kind, extra);
         }
         cx.notify();
     }
@@ -192,22 +170,6 @@ impl QuillApp {
         }
     }
 
-    /// After "Add to GIFs" on a full list: TDLib replaced the oldest GIF,
-    /// and tdesktop says so with the limit box.
-    pub(in crate::ui) fn note_gif_replaced(&mut self, cx: &mut Context<Self>) {
-        let full = self.session().is_some_and(|s| {
-            let pair = limit_pair(s.payments.hub.premium.as_ref(), PremiumLimitKind::SavedGifs);
-            s.stickers.gifs.loaded
-                && gif_limit_reached(
-                    s.stickers.gifs.animations.len(),
-                    shown_limit(pair, s.my_is_premium()),
-                )
-        });
-        if full {
-            self.show_premium_limit(PremiumLimitKind::SavedGifs, 0, cx);
-        }
-    }
-
     pub(in crate::ui) fn build_premium_limit_dialog(
         app: &Entity<QuillApp>,
         shell: &Entity<QuillShell>,
@@ -228,7 +190,7 @@ impl QuillApp {
                     )))
                     .on_close(on_close);
             };
-            let Some(view) = this.session().map(|s| view_of(s, kind, extra)) else {
+            let Some(view) = this.session().and_then(|s| view_of(s, kind, extra)) else {
                 return dialog
                     .overlay(true)
                     .title(crate::ui::shell::dialog_title(tr(
@@ -264,6 +226,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("premium-limit-increase")
+                            .debug_selector(|| "premium-limit-increase".into())
                             .label(tr(keys::AI_COMPOSE_INCREASE_LIMIT))
                             .primary()
                             .on_click(cx.listener(move |this, _, window, cx| {
@@ -275,6 +238,7 @@ impl QuillApp {
             } else {
                 footer = footer.child(
                     Button::new("premium-limit-ok")
+                        .debug_selector(|| "premium-limit-ok".into())
                         .label(tr(keys::BOX_OK))
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
@@ -296,7 +260,6 @@ impl QuillApp {
 }
 
 crate::ui::shell::register_dialogs! {
-    /// A Premium limit box (pins, caption, GIFs, communities, links, file size).
     PremiumLimit => DialogSpec::new(
         1310,
         |app| app.session().is_some_and(|s| s.payments.hub.limit_box.is_some()),

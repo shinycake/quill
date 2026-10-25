@@ -268,6 +268,12 @@ impl QuillApp {
     }
 
     fn pin_saved_sublist_ui(&mut self, topic_id: i64, pinned: bool, cx: &mut Context<Self>) {
+        // tdesktop `PinnedLimitReached` for a sublist: the limit box, not
+        // the request.
+        if pinned && self.session().is_some_and(|s| s.saved_pin_limit_reached()) {
+            self.show_premium_limit(quill::premium_limits::PremiumLimitKind::SavedPins, 0, cx);
+            return;
+        }
         if let Some(live) = self.live.as_mut() {
             if live
                 .driver

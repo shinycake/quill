@@ -319,20 +319,22 @@ pub fn limit_pair(info: Option<&PremiumInfo>, kind: PremiumLimitKind) -> LimitPa
 /// `getPremiumFeatures` yet it falls back to the known set.
 pub fn limit_lines(info: Option<&PremiumInfo>) -> Vec<LimitLine> {
     let mut lines: Vec<LimitLine> = match info {
-        Some(info) if !info.limits.is_empty() => info
+        Some(info) if info.limits.iter().any(|row| row.title.is_some()) => info
             .limits
             .iter()
-            .map(|row| LimitLine {
-                label: row.title.to_string(),
-                default_value: row.default_value,
-                premium_value: row.premium_value,
-                unit: PremiumLimitKind::from_td_limit_type(&row.type_name)
-                    .map_or("", PremiumLimitKind::unit),
+            .filter_map(|row| {
+                Some(LimitLine {
+                    label: row.title?.to_string(),
+                    default_value: row.default_value,
+                    premium_value: row.premium_value,
+                    unit: PremiumLimitKind::from_td_limit_type(&row.type_name)
+                        .map_or("", PremiumLimitKind::unit),
+                })
             })
             .collect(),
         _ => PremiumLimitKind::ALL
             .into_iter()
-            .filter(|kind| *kind != PremiumLimitKind::FileSize)
+            .filter(|kind| *kind != PremiumLimitKind::FileSize && kind.on_doubled_page())
             .map(|kind| line_of(kind, kind.fallback()))
             .collect(),
     };
@@ -508,7 +510,14 @@ mod tests {
         assert_eq!(lines[1].unit, "");
         assert_eq!(lines[3].premium_value, 4);
         let known = limit_lines(None);
-        assert_eq!(known.len(), PremiumLimitKind::ALL.len());
+        assert_eq!(
+            known.len(),
+            PremiumLimitKind::ALL
+                .iter()
+                .filter(|kind| kind.on_doubled_page())
+                .count()
+        );
+        assert!(!known.iter().any(|l| l.label == "Bots"));
         assert_eq!(known.last().map(|l| l.label.as_str()), Some("File size"));
     }
 }

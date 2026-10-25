@@ -857,6 +857,8 @@ mod grams;
 mod grams_demo;
 mod grams_withdraw;
 mod limit_box;
+mod limit_demo;
+mod limit_notices;
 mod open_premium;
 mod paging;
 mod preview;

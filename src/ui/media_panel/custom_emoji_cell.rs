@@ -170,8 +170,11 @@ impl QuillApp {
                     })
                     .on_click(move |_, _, cx| {
                         let _ = favorite_owner.update(cx, |this, cx| {
-                            if let Some(live) = this.live.as_mut() {
-                                let _ = live.driver.set_favorite_sticker(file_id, !favorite);
+                            let sent = this.live.as_mut().is_some_and(|live| {
+                                live.driver.set_favorite_sticker(file_id, !favorite).is_ok()
+                            });
+                            if sent && !favorite {
+                                this.note_faved_replaced(file_id, cx);
                             }
                             cx.notify();
                         });
