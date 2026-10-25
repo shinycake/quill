@@ -6,6 +6,7 @@
 use super::app::{ChatListFilter, QuillApp};
 use super::chat_theme::{accent, accent_strong, text_on_fill};
 use super::folder_glyphs::folder_glyph;
+use super::folder_tabs_drag::folder_tab_drag;
 use super::folder_tabs_fit::{FADE_WIDTH, RevealKey, fade_edges, needs_reveal};
 use super::pressable::PressableDiv;
 use gpui_kit::assets::IconName;
@@ -27,7 +28,8 @@ pub(super) const RAIL_WIDTH_ICONS: f32 = 52.;
 const RAIL_NAME_WIDTH: f32 = 54.;
 
 /// What a slot selects. The order of the slots is the order of the tabs:
-/// All, the folders, then the Unread and Archived category filters.
+/// the folders with All at its position among them (Premium can move it),
+/// then the Unread and Archived category filters.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum FolderSlotKind {
     All,
@@ -44,22 +46,30 @@ pub(super) struct FolderSlot {
     pub badge: Option<FolderBadge>,
 }
 
-/// The slots for a folder list `(id, name, icon name)`.
-pub(super) fn build_slots(folders: &[(i32, String, String)]) -> Vec<FolderSlot> {
-    let mut slots = vec![FolderSlot {
-        kind: FolderSlotKind::All,
-        name: tr(keys::FILTERS_ALL_SHORT).into(),
-        glyph: folder_glyph(tr(keys::FILTERS_ALL_SHORT)),
-        badge: None,
-    }];
-    for (id, name, icon) in folders {
-        slots.push(FolderSlot {
+/// The slots for a folder list `(id, name, icon name)` with All at
+/// `main_position` among the folders (clamped to the end).
+pub(super) fn build_slots(
+    folders: &[(i32, String, String)],
+    main_position: usize,
+) -> Vec<FolderSlot> {
+    let mut slots: Vec<FolderSlot> = folders
+        .iter()
+        .map(|(id, name, icon)| FolderSlot {
             kind: FolderSlotKind::Folder(*id),
             name: name.clone(),
             glyph: folder_glyph(icon),
             badge: None,
-        });
-    }
+        })
+        .collect();
+    slots.insert(
+        main_position.min(slots.len()),
+        FolderSlot {
+            kind: FolderSlotKind::All,
+            name: tr(keys::FILTERS_ALL_SHORT).into(),
+            glyph: folder_glyph(tr(keys::FILTERS_ALL_SHORT)),
+            badge: None,
+        },
+    );
     slots.push(FolderSlot {
         kind: FolderSlotKind::Unread,
         name: tr(keys::FILTERS_NAME_UNREAD).into(),
@@ -133,6 +143,7 @@ fn folder_tab(
     slot: &FolderSlot,
     show_icon: bool,
     show_text: bool,
+    premium: bool,
     weak: &WeakEntity<QuillApp>,
     cx: &App,
 ) -> Tab {
@@ -165,7 +176,7 @@ fn folder_tab(
             });
         });
     }
-    tab
+    folder_tab_drag(tab, slot.kind, slot.name.clone().into(), premium, weak)
 }
 
 /// The fade over an edge of the strip that hides tabs.
@@ -253,7 +264,8 @@ impl QuillApp {
                     .collect()
             })
             .unwrap_or_default();
-        let mut slots = build_slots(&folders);
+        let main_position = self.session().map_or(0, |s| s.chat_list.main_list_position);
+        let mut slots = build_slots(&folders, main_position);
         if let Some(session) = self.session() {
             let include_muted = session.settings.badge_prefs.include_muted_folders;
             for slot in &mut slots {
@@ -392,9 +404,10 @@ impl QuillApp {
             .folder_tabs_mode
             .resolved(self.appearance.folder_tabs_view);
         let weak = cx.weak_entity();
+        let premium = self.session().is_some_and(|s| s.my_is_premium());
         let tabs: Vec<Tab> = slots
             .iter()
-            .map(|slot| folder_tab(slot, show_icon, show_text, &weak, cx))
+            .map(|slot| folder_tab(slot, show_icon, show_text, premium, &weak, cx))
             .collect();
         let kinds: Vec<FolderSlotKind> = slots.iter().map(|s| s.kind).collect();
         TabBar::new("folder-tabs")
@@ -423,6 +436,8 @@ impl QuillApp {
             .resolved(self.appearance.folder_tabs_view);
         let selected = selected_slot(&slots, self.chat_list.filter, self.folders.tab);
         let width = self.folder_rail_width();
+        let premium = self.session().is_some_and(|s| s.my_is_premium());
+        let weak = cx.weak_entity();
         let mut list = div()
             .id("folder-rail-scroll")
             .flex()
@@ -445,70 +460,72 @@ impl QuillApp {
                 FolderSlotKind::Folder(id) => Some(Some(id)),
                 FolderSlotKind::Unread | FolderSlotKind::Archived => None,
             };
+            let item = div()
+                .id(("folder-rail-item", ix))
+                .relative()
+                .flex()
+                .flex_col()
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .w_full()
+                .py(px(8.))
+                .gap(px(4.))
+                .cursor_pointer()
+                .pressable(cx.theme())
+                .role(Role::Tab)
+                .aria_selected(active)
+                .aria_label(name.clone())
+                .tab_index(0)
+                .on_click(cx.listener(move |this, _, _, cx| this.select_folder_slot(kind, cx)))
+                .when_some(menu_folder, |this, folder| {
+                    this.on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            this.open_folder_tab_menu(folder, event.position, cx);
+                        }),
+                    )
+                })
+                .when(show_icon, |this| {
+                    this.child(Icon::new(slot.glyph).size(px(22.)).text_color(color))
+                })
+                .when(show_text, |this| {
+                    this.child(
+                        div()
+                            .w(px(RAIL_NAME_WIDTH.min(width - 6.)))
+                            .text_size(px(10.))
+                            .line_height(px(12.))
+                            .text_center()
+                            .line_clamp(2)
+                            .text_ellipsis()
+                            .text_color(color)
+                            .child(name),
+                    )
+                })
+                .when_some(slot.badge, |this, badge| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .top(px(2.))
+                            .right(px(6.))
+                            .child(folder_badge_pill(badge, cx)),
+                    )
+                })
+                .when(active, |this| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .top(px(8.))
+                            .bottom(px(8.))
+                            .w(px(4.))
+                            .rounded_r(px(2.))
+                            .bg(accent()),
+                    )
+                });
             list = list.child(
-                div()
-                    .id(("folder-rail-item", ix))
-                    .relative()
-                    .flex()
-                    .flex_col()
-                    .flex_none()
-                    .items_center()
-                    .justify_center()
-                    .w_full()
-                    .py(px(8.))
-                    .gap(px(4.))
-                    .cursor_pointer()
-                    .pressable(cx.theme())
-                    .role(Role::Tab)
-                    .aria_selected(active)
-                    .aria_label(name.clone())
-                    .tab_index(0)
-                    .on_click(cx.listener(move |this, _, _, cx| this.select_folder_slot(kind, cx)))
-                    .when_some(menu_folder, |this, folder| {
-                        this.on_mouse_down(
-                            MouseButton::Right,
-                            cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                                this.open_folder_tab_menu(folder, event.position, cx);
-                            }),
-                        )
-                    })
-                    .when(show_icon, |this| {
-                        this.child(Icon::new(slot.glyph).size(px(22.)).text_color(color))
-                    })
-                    .when(show_text, |this| {
-                        this.child(
-                            div()
-                                .w(px(RAIL_NAME_WIDTH.min(width - 6.)))
-                                .text_size(px(10.))
-                                .line_height(px(12.))
-                                .text_center()
-                                .line_clamp(2)
-                                .text_ellipsis()
-                                .text_color(color)
-                                .child(name),
-                        )
-                    })
-                    .when_some(slot.badge, |this, badge| {
-                        this.child(
-                            div()
-                                .absolute()
-                                .top(px(2.))
-                                .right(px(6.))
-                                .child(folder_badge_pill(badge, cx)),
-                        )
-                    })
-                    .when(active, |this| {
-                        this.child(
-                            div()
-                                .absolute()
-                                .left_0()
-                                .top(px(8.))
-                                .bottom(px(8.))
-                                .w(px(4.))
-                                .rounded_r(px(2.))
-                                .bg(accent()),
-                        )
-                    }),
+                folder_tab_drag(item, kind, slot.name.clone().into(), premium, &weak)
+                    .test_support(),
             );
         }
         div()
@@ -607,7 +624,7 @@ mod tests {
 
     #[test]
     fn slots_are_all_folders_unread_archived() {
-        let slots = build_slots(&folders());
+        let slots = build_slots(&folders(), 0);
         let kinds: Vec<_> = slots.iter().map(|s| s.kind).collect();
         assert_eq!(
             kinds,
@@ -624,13 +641,36 @@ mod tests {
 
     #[test]
     fn selection_follows_filter_then_folder() {
-        let slots = build_slots(&folders());
+        let slots = build_slots(&folders(), 0);
         assert_eq!(selected_slot(&slots, ChatListFilter::All, None), 0);
         assert_eq!(selected_slot(&slots, ChatListFilter::All, Some(9)), 2);
         assert_eq!(selected_slot(&slots, ChatListFilter::Unread, Some(9)), 3);
         assert_eq!(selected_slot(&slots, ChatListFilter::Archived, None), 4);
         // A folder that vanished falls back to All.
         assert_eq!(selected_slot(&slots, ChatListFilter::All, Some(77)), 0);
+    }
+
+    #[test]
+    fn all_sits_at_the_main_list_position() {
+        let kinds = |position| -> Vec<_> {
+            build_slots(&folders(), position)
+                .iter()
+                .map(|s| s.kind)
+                .collect()
+        };
+        assert_eq!(
+            kinds(1),
+            vec![
+                FolderSlotKind::Folder(4),
+                FolderSlotKind::All,
+                FolderSlotKind::Folder(9),
+                FolderSlotKind::Unread,
+                FolderSlotKind::Archived,
+            ]
+        );
+        assert_eq!(kinds(9).get(2), Some(&FolderSlotKind::All));
+        let slots = build_slots(&folders(), 2);
+        assert_eq!(selected_slot(&slots, ChatListFilter::All, None), 2);
     }
 }
 

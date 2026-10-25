@@ -605,8 +605,12 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return false;
         };
-        let tabs: Vec<Option<i32>> = std::iter::once(None)
-            .chain(session.chat_list.chat_folders.iter().map(|f| Some(f.id)))
+        let tabs: Vec<Option<i32>> = session
+            .chat_list
+            .folder_order()
+            .tabs()
+            .into_iter()
+            .map(quill::folder_order::FolderTab::folder_id)
             .collect();
         let Some(target) = near_folder(&tabs, self.folders.tab, forward) else {
             return false;

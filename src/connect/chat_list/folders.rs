@@ -117,13 +117,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
-    /// Parity slice: `reorderChatFolders` with the full new folder-id order
-    /// (`main_chat_list_position` is always 0 — non-zero is Premium-only).
-    /// The tab order is applied optimistically; `updateChatFolders`
-    /// confirms (or corrects, on error).
+    /// `reorderChatFolders` with the full new folder order and the index of
+    /// "All chats" among the folders. Applied optimistically;
+    /// `updateChatFolders` confirms (or corrects, on error).
     pub fn reorder_chat_folders(
         &mut self,
-        folder_ids: &[i32],
+        order: &crate::folder_order::FolderOrder,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -131,22 +130,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::ReorderChatFolders, None);
-        if let Err(err) = self
-            .sender
-            .send_json(&reorder_chat_folders(extra, folder_ids))
-        {
+        if let Err(err) = self.sender.send_json(&reorder_chat_folders(
+            extra,
+            &order.folder_ids,
+            order.main_position,
+        )) {
             self.session.requests.take(extra);
             return Err(err);
         }
-        let order: std::collections::HashMap<i32, usize> = folder_ids
-            .iter()
-            .enumerate()
-            .map(|(i, id)| (*id, i))
-            .collect();
-        self.session
-            .chat_list
-            .chat_folders
-            .sort_by_key(|f| order.get(&f.id).copied().unwrap_or(usize::MAX));
+        self.session.chat_list.apply_folder_order(order);
         Ok(extra)
     }
 

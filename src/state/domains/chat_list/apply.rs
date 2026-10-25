@@ -99,10 +99,11 @@ impl Session {
             }
             ChatListPayload::UpdateChatFolders {
                 folders,
+                main_chat_list_position,
                 are_tags_enabled,
             } => {
-                // The update carries the full ordered list — replace.
                 self.chat_list.chat_folders = folders;
+                self.chat_list.main_list_position = main_chat_list_position;
                 self.chat_list.are_folder_tags_enabled = are_tags_enabled;
             }
             ChatListPayload::ChatFolderInfo(info) => {

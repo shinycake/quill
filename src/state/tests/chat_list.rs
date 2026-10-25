@@ -390,6 +390,24 @@ fn chat_folders_update_replaces_list() {
 }
 
 #[test]
+fn chat_folders_update_places_all_chats() {
+    use crate::folder_order::FolderTab;
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatFolders","chat_folders":[{"@type":"chatFolderInfo","id":3,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"Work","entities":[]}},"icon":null,"color_id":-1,"is_shareable":false,"has_my_invite_links":false}],"main_chat_list_position":1,"are_tags_enabled":false}"#,
+    );
+    assert_eq!(session.chat_list.main_list_position, 1);
+    assert_eq!(
+        session.chat_list.folder_order().tabs(),
+        vec![FolderTab::Folder(3), FolderTab::Main]
+    );
+}
+
+#[test]
 fn folder_position_membership_and_order() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);

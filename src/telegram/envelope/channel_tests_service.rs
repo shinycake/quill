@@ -329,15 +329,17 @@ fn update_chat_folders_parsed() {
     // `vector<chatFolderInfo>` (line 3485); there is no `getChatFolders`
     // function in 1.8.67, so this update is the folder list.
     let env = parse_envelope(
-            r#"{"@type":"updateChatFolders","chat_folders":[{"@type":"chatFolderInfo","id":3,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"Work","entities":[]},"animate_custom_emoji":false},"icon":{"@type":"chatFolderIcon","name":"Work"},"color_id":2,"is_shareable":false,"has_my_invite_links":false},{"@type":"chatFolderInfo","id":7,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"News","entities":[]},"animate_custom_emoji":false},"icon":null,"color_id":-1,"is_shareable":false,"has_my_invite_links":false}],"main_chat_list_position":0,"are_tags_enabled":false}"#,
+            r#"{"@type":"updateChatFolders","chat_folders":[{"@type":"chatFolderInfo","id":3,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"Work","entities":[]},"animate_custom_emoji":false},"icon":{"@type":"chatFolderIcon","name":"Work"},"color_id":2,"is_shareable":false,"has_my_invite_links":false},{"@type":"chatFolderInfo","id":7,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"News","entities":[]},"animate_custom_emoji":false},"icon":null,"color_id":-1,"is_shareable":false,"has_my_invite_links":false}],"main_chat_list_position":1,"are_tags_enabled":false}"#,
         )
         .unwrap();
     match env.payload {
         EnvelopePayload::ChatList(ChatListPayload::UpdateChatFolders {
             folders,
+            main_chat_list_position,
             are_tags_enabled,
         }) => {
             assert_eq!(folders.len(), 2);
+            assert_eq!(main_chat_list_position, 1, "All chats after Work");
             assert!(!are_tags_enabled);
             assert_eq!(
                 folders[0],

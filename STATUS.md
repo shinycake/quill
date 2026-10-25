@@ -939,7 +939,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] AI writing styles: list, create, edit, share, remove and delete custom styles, the custom-style limit box, style links and style link previews <!-- parity:premium-ai-compose-styles -->
 - [ ] Rich message drafts sync across devices, with the rich-paste notice and the discard button <!-- parity:premium-rich-drafts -->
 - [x] Private-chat sharing protection: Accept or Reject a request to turn sharing back on, ask the other person before re-enabling, and tell apart who turned it off <!-- parity:premium-noforwards-requests -->
-- [ ] Move the "All chats" tab among folders (Premium) and keep its position from other devices <!-- parity:premium-main-list-position -->
+- [x] Move the "All chats" tab among folders (Premium) and keep its position from other devices <!-- parity:premium-main-list-position -->
 - [ ] Story stealth mode box: past and next periods, cooldown, Premium lock for free accounts <!-- parity:premium-story-stealth-box -->
 - [ ] Story Premium limits: lock 6, 12 and 48 hour expiry, story caption length limit, Premium note for older viewers <!-- parity:premium-story-limits -->
 - [ ] Animated profile photos play beside messages in groups, as in tdesktop <!-- parity:premium-animated-userpics-history -->

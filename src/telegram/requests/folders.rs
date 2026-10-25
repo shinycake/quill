@@ -78,15 +78,19 @@ pub fn delete_chat_folder(extra: RequestId, folder_id: i32, leave_chat_ids: &[i6
     .to_string()
 }
 
-/// `reorderChatFolders` (TDLib 1.8.67, `schema/td_api.tl:13373`). Response
-/// is `ok`. `main_chat_list_position` is always 0 — a non-zero position is
-/// Premium-only per the schema doc, and Quill keeps Main first.
-pub fn reorder_chat_folders(extra: RequestId, folder_ids: &[i32]) -> String {
+/// `reorderChatFolders` (`schema/td_api.tl:14362`). Response is `ok`.
+/// `main_chat_list_position` is the index of "All chats" among the folders;
+/// the schema allows a non-zero one only for Premium users.
+pub fn reorder_chat_folders(
+    extra: RequestId,
+    folder_ids: &[i32],
+    main_chat_list_position: usize,
+) -> String {
     json!({
         "@type": "reorderChatFolders",
         "@extra": extra.as_extra(),
         "chat_folder_ids": folder_ids,
-        "main_chat_list_position": 0,
+        "main_chat_list_position": main_chat_list_position,
     })
     .to_string()
 }

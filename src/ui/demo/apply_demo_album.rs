@@ -604,15 +604,13 @@ impl QuillApp {
     }
 
     /// Parity slice: screenshot-demo folder reorder.
-    pub(in crate::ui) fn apply_demo_folder_reorder(&mut self, ids: &[i32]) {
-        let Some(session) = self.demo_session.as_mut() else {
-            return;
-        };
-        let order: HashMap<i32, usize> = ids.iter().enumerate().map(|(i, id)| (*id, i)).collect();
-        session
-            .chat_list
-            .chat_folders
-            .sort_by_key(|f| order.get(&f.id).copied().unwrap_or(usize::MAX));
+    pub(in crate::ui) fn apply_demo_folder_reorder(
+        &mut self,
+        order: &quill::folder_order::FolderOrder,
+    ) {
+        if let Some(session) = self.demo_session.as_mut() {
+            session.chat_list.apply_folder_order(order);
+        }
     }
 
     pub(in crate::ui) fn apply_demo_archive(&mut self, chat_id: ChatId, archive: bool) {

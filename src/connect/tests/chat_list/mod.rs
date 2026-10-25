@@ -3,6 +3,7 @@ use super::super::*;
 use super::*;
 use crate::diagnostics::DiagnosticSink;
 use crate::diagnostics::MemorySink;
+use crate::folder_order::{FolderOrder, FolderTab};
 use crate::ids::{AccountKey, ChatId, MessageId};
 use crate::platform::MemorySecretStore;
 use crate::state::{RequestPurpose, Session};
@@ -267,7 +268,12 @@ fn driver_reorder_chat_folders_optimistic() {
             )
             .unwrap();
 
-    driver.reorder_chat_folders(&[2, 1]).expect("reorder");
+    driver
+        .reorder_chat_folders(&FolderOrder {
+            folder_ids: vec![2, 1],
+            main_position: 0,
+        })
+        .expect("reorder");
     let json = recorder.snapshot().last().cloned().expect("sent");
     let v: Value = serde_json::from_str(&json).unwrap();
     assert_eq!(v["@type"], "reorderChatFolders");
@@ -281,6 +287,51 @@ fn driver_reorder_chat_folders_optimistic() {
         .map(|f| f.id)
         .collect();
     assert_eq!(ids, vec![2, 1], "optimistic reorder");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn driver_moves_all_chats_among_folders() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+    let folders = r#"[{"@type":"chatFolderInfo","id":1,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"A","entities":[]}},"icon":null,"color_id":-1,"is_shareable":false},{"@type":"chatFolderInfo","id":2,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"B","entities":[]}},"icon":null,"color_id":-1,"is_shareable":false}]"#;
+    let update = |position: usize| {
+        format!(
+            r#"{{"@type":"updateChatFolders","chat_folders":{folders},"main_chat_list_position":{position},"are_tags_enabled":false}}"#
+        )
+    };
+    driver
+        .ingest(copy_and_parse(&update(0), &seq, &dyn_sink).unwrap())
+        .unwrap();
+
+    let order = driver
+        .session
+        .chat_list
+        .folder_order()
+        .moved(FolderTab::Main, FolderTab::Folder(2), true)
+        .expect("a move");
+    driver.reorder_chat_folders(&order).expect("reorder");
+    let json = recorder.snapshot().last().cloned().expect("sent");
+    let v: Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["@type"], "reorderChatFolders");
+    assert_eq!(v["chat_folder_ids"], serde_json::json!([1, 2]));
+    assert_eq!(v["main_chat_list_position"], 2);
+    assert_eq!(driver.session.chat_list.main_list_position, 2, "optimistic");
+
+    driver
+        .ingest(copy_and_parse(&update(1), &seq, &dyn_sink).unwrap())
+        .unwrap();
+    assert_eq!(
+        driver.session.chat_list.folder_order().tabs(),
+        vec![FolderTab::Folder(1), FolderTab::Main, FolderTab::Folder(2)]
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
