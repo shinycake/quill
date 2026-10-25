@@ -1,3 +1,0 @@
-# parity:premium-message-effects-play is left open until effects are seen
-# playing on a live Premium account (offline demo and tests pass; separate
-# chat windows do not play effects yet).
