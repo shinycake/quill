@@ -164,7 +164,15 @@ impl QuillApp {
     }
 
     /// Answer: switch to the account, then answer there.
-    pub(super) fn answer_background_call(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn answer_background_call(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Agents never answer a call for the user; the ring stays as it was.
+        if quill::agent::ui_driver::guard::refuse_if_injecting("answer calls for the user") {
+            return;
+        }
         let Some(account) = self.background_ring_account().cloned() else {
             return;
         };
@@ -311,5 +319,6 @@ crate::ui::shell::register_dialogs! {
         150,
         |app| app.background_ring_audible() && !app.account.passcode.locked,
         QuillApp::build_background_call_dialog,
-    ),
+    )
+    .closes(|app, _, cx| { if let Some(ring) = app.background.ringing.as_mut() { ring.dismissed = true; } cx.notify(); }),
 }

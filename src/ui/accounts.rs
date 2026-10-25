@@ -108,6 +108,12 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Every route (the switcher, the main menu, the tray, a ringing
+        // call's Answer, a notification) ends here.
+        use quill::agent::ui_driver::guard::{self, HardSurface};
+        if guard::refuse_hard_if_injecting(HardSurface::Account) {
+            return;
+        }
         // The lock-screen log out is deleting every account's data; the
         // connection starts once it is gone.
         if self.background.wiping {

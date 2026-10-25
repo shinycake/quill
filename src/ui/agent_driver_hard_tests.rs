@@ -274,3 +274,29 @@ fn an_opener_without_a_guard_leaves_no_hard_dialog_for_an_agent(cx: &mut TestApp
     assert_eq!(dialog_shown(&app, vcx), Some("PaidReaction"));
 }
 
+#[gpui_kit::test]
+fn an_agent_neither_switches_accounts_nor_answers_a_call(cx: &mut TestAppContext) {
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    settle(vcx);
+    let _ = guard::take_refusals();
+    guard::set_injecting(true);
+    app.update_in(vcx, |app, window, cx| {
+        app.answer_background_call(window, cx);
+        app.switch_account(&quill::ids::AccountKey("other".into()), "", window, cx);
+    });
+    guard::set_injecting(false);
+    let refusals = guard::take_refusals();
+    for part in ["answer calls", "log out or switch accounts"] {
+        assert!(
+            refusals.iter().any(|r| r.contains(part)),
+            "{part}: {refusals:?}"
+        );
+    }
+    assert_eq!(
+        crate::ui::agent_state::active_account(),
+        quill::ids::AccountKey::primary()
+    );
+}
+

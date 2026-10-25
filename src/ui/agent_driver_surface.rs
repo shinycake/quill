@@ -29,6 +29,8 @@ use quill::telegram::envelope::{ChannelMemberStatus, ChatKind};
 pub(super) const HARD_DIALOGS: &[&str] = &[
     "AgentRequest",
     "AgentConsent",
+    // Answering switches to the ringing account and takes the call.
+    "BackgroundCall",
     "LogOut",
     "AccountLifecycle",
     "Passcode",
