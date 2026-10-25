@@ -415,7 +415,7 @@ impl QuillApp {
     /// A URL the page tried to leave the frame for.
     pub(super) fn open_from_mini_app(&mut self, url: &str, cx: &mut Context<Self>) {
         if is_telegram_link(url) {
-            self.pending_deep_link = Some(url.to_string());
+            self.queue_deep_link(url.to_string());
             cx.notify();
             return;
         }
@@ -528,7 +528,7 @@ impl QuillApp {
             }),
             WebAppEvent::OpenLink { url, .. } => self.open_from_mini_app(&url, cx),
             WebAppEvent::OpenTgLink { url } => {
-                self.pending_deep_link = Some(url);
+                self.queue_deep_link(url);
                 cx.activate(true);
                 cx.notify();
             }

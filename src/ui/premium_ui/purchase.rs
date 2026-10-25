@@ -48,6 +48,7 @@ impl QuillApp {
                     hub.auto_start = Some((username.to_lowercase(), start_ref.clone()));
                 }
                 self.close_premium(cx);
+                self.note_deep_link_origin();
                 if let Some(live) = self.live.as_mut() {
                     let sent = live.driver.resolve_deep_link(DeepLinkAction::OpenUsername {
                         domain: username,

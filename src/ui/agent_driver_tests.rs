@@ -338,6 +338,16 @@ fn a_key_that_opens_an_ungranted_chat_stops_the_sequence(cx: &mut TestAppContext
     // Keys reach the app's handlers through the focused element.
     let reply = drive(&app, vcx, click(Target::Node(message_box(&tree))));
     assert!(matches!(reply, Ok(UiReply::Done { .. })), "{reply:?}");
+    // GPUI recorded the tags above the focused message box: keys are
+    // checked against them the way a click is checked against the hover.
+    let focus_tags = vcx.update(|window, _| window.focused_a11y_tags());
+    assert!(
+        focus_tags
+            .iter()
+            .any(|tag| tag.as_ref() == quill::agent::ui_driver::redact::REGION_CHAT),
+        "{focus_tags:?}"
+    );
+    assert!(vcx.update(|window, cx| app.read(cx).agent_focus_allowed(window)));
 
     // "Next chat" from chat 11 lands on chat 12, which is not granted: the
     // handler refuses to open it, the second chord is not pressed, and the
@@ -363,6 +373,11 @@ fn a_key_that_opens_an_ungranted_chat_stops_the_sequence(cx: &mut TestAppContext
     // Space and Enter go nowhere while no text box has the focus.
     vcx.update(|window, cx| window.blur(cx));
     settle(vcx);
+    assert!(
+        vcx.update(|window, _| window.focused_a11y_tags())
+            .is_empty()
+    );
+    assert!(!vcx.update(|window, cx| app.read(cx).agent_focus_allowed(window)));
     let chords = parse_sequence("space").unwrap_or_default();
     let reply = drive(&app, vcx, UiCommand::PressKeys { chords });
     assert!(refused(&reply, "click_element"), "{reply:?}");
@@ -638,4 +653,62 @@ fn forced_tree_frame_cost(cx: &mut TestAppContext) {
     println!(
         "forced tree: frame {off:?} -> {on:?} (off again {off2:?}); {nodes} nodes; snapshot read {read:?}"
     );
+}
+
+/// A link an agent clicked resolves after its step ended (TDLib answers
+/// later): the open runs as part of that step, so an ungranted chat stays
+/// closed with a refusal, a granted one opens, and the user's own links
+/// are not gated.
+#[gpui_kit::test]
+fn a_link_resolved_after_the_step_opens_a_granted_chat_only(cx: &mut TestAppContext) {
+    use quill::agent::ui_driver::guard;
+    use quill::ids::ChatId;
+    use quill::state::DeepLinkAction;
+
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    turn_on();
+    grant(11, Scope::ReadWrite);
+    let _presence = activity::connect("Test agent");
+    settle(vcx);
+    let _ = guard::take_refusals();
+    let start = |param: &str| DeepLinkAction::OpenUsername {
+        domain: "demo".into(),
+        start_param: Some(param.into()),
+        post: None,
+        story_id: None,
+    };
+    let resolved = |app: &Entity<QuillApp>,
+                    vcx: &mut VisualTestContext,
+                    chat: i64,
+                    param: &str,
+                    from_agent: bool| {
+        app.update_in(vcx, |app, _, cx| {
+            app.links.pending_deep_link_open_from_agent = from_agent;
+            app.links.pending_deep_link_open = Some((ChatId(chat), start(param)));
+            cx.notify();
+        });
+        settle(vcx);
+        vcx.update(|_, cx| app.read(cx).composer.read(cx).value().to_string())
+    };
+
+    // The agent's link led to chat 12, which is not granted: nothing opens,
+    // the start parameter is not put in the box, the refusal is recorded.
+    assert_eq!(resolved(&app, vcx, 12, "secret", true), "");
+    let refusals = guard::take_refusals();
+    assert!(
+        refusals.iter().any(|r| r.contains("not granted")),
+        "{refusals:?}"
+    );
+    // Chat 11 is granted: the open runs (here, the `/start` prefill).
+    assert_eq!(resolved(&app, vcx, 11, "hello", true), "/start hello");
+    assert!(guard::take_refusals().is_empty());
+    // The user's own link to chat 12 is not an agent's.
+    assert_eq!(resolved(&app, vcx, 12, "theirs", false), "/start theirs");
+    assert!(guard::take_refusals().is_empty());
+    app.update_in(vcx, |app, window, cx| {
+        app.composer
+            .update(cx, |input, cx| input.set_value("", window, cx));
+    });
 }

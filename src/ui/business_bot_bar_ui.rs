@@ -135,7 +135,7 @@ impl QuillApp {
     /// routes itself; anything else goes to the browser.
     fn open_business_bot_manage(&mut self, url: &str, cx: &mut Context<Self>) {
         if self.live.is_some() && url.starts_with("https://t.me/") {
-            self.pending_deep_link = Some(url.to_string());
+            self.queue_deep_link(url.to_string());
             cx.notify();
         } else {
             self.open_message_url(url, cx);

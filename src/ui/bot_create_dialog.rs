@@ -327,6 +327,7 @@ impl QuillApp {
                 );
             }
             // tdesktop opens the new bot's chat and toasts.
+            self.note_deep_link_origin();
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.resolve_deep_link(DeepLinkAction::OpenUsername {
                     domain: full.to_string(),

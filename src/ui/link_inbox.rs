@@ -32,12 +32,12 @@ pub fn install_link_inbox(
                 .await;
                 let alive = view
                     .update(cx, |this, _| {
-                        if this.pending_deep_link.is_none() {
-                            this.pending_deep_link = quill::deep_link_inbox::pop_link();
-                            if this.pending_deep_link.is_some() {
-                                // The poll loop starts the flow.
-                                quill::wake::UPDATES.poke();
-                            }
+                        if this.pending_deep_link.is_none()
+                            && let Some(link) = quill::deep_link_inbox::pop_link()
+                        {
+                            this.queue_deep_link(link);
+                            // The poll loop starts the flow.
+                            quill::wake::UPDATES.poke();
                         }
                     })
                     .is_ok();

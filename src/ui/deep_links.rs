@@ -14,6 +14,7 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::*;
+use quill::agent::ui_driver::guard;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr};
 use quill::state::{DeepLinkAction, DeepLinkState, HistoryOpen};
@@ -92,6 +93,7 @@ impl QuillApp {
                     // The real in-app updater is a queued future slice; the
                     // honest UI is TDLib's own text saying so.
                     (true, _) => {
+                        self.links.deep_link_from_agent = false;
                         self.links.deep_link_dialog = Some(text);
                     }
                     (false, Some(action)) => {
@@ -100,23 +102,37 @@ impl QuillApp {
                     // Unknown link: TDLib's info text is the confirmation
                     // copy written for exactly this case.
                     (false, None) => {
+                        self.links.deep_link_from_agent = false;
                         self.links.deep_link_dialog = Some(text);
                     }
                 }
             }
             Some(preview @ DeepLinkState::InvitePreview { .. }) => {
+                self.links.deep_link_from_agent = false;
                 self.links.deep_link_invite = Some(preview.clone());
                 live.driver.session.chats_state.deep_link = Some(preview);
             }
             Some(DeepLinkState::ChatReady { chat_id, action }) => {
+                self.links.pending_deep_link_open_from_agent =
+                    std::mem::take(&mut self.links.deep_link_from_agent);
                 self.links.pending_deep_link_open = Some((chat_id, action));
             }
             Some(DeepLinkState::ShowText(text)) => {
+                self.links.deep_link_from_agent = false;
                 self.links.deep_link_dialog = Some(text);
             }
             // Typed links (`deep_link_types`): the UI half runs in render.
+            // An agent's step gets none of them (settings, proxies, folders,
+            // sticker sets, backgrounds): nothing an agent needs, all of it
+            // the user's.
             Some(DeepLinkState::Ui(ui)) => {
-                self.links.pending_deep_link_ui = Some(ui);
+                if std::mem::take(&mut self.links.deep_link_from_agent) {
+                    guard::refuse(
+                        "Quill does not let agents open that kind of link through the window (settings, proxies, folders, sticker sets, backgrounds). Ask the user.",
+                    );
+                } else {
+                    self.links.pending_deep_link_ui = Some(ui);
+                }
             }
             // TDLib has no type for it: `getDeepLinkInfo` explains it.
             Some(DeepLinkState::Unknown { link }) => {
@@ -126,10 +142,41 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Starts the deep-link flow for `link` at the next poll, remembering
+    /// whether the handler asking is a step the UI driver injected.
+    pub(super) fn queue_deep_link(&mut self, link: String) {
+        self.pending_deep_link = Some(link);
+        self.note_deep_link_origin();
+    }
+
+    /// The flow starting now belongs to the running handler: an agent's
+    /// injected step, or the user. Called where a flow starts without
+    /// [`Self::queue_deep_link`] (a direct `resolve_deep_link`).
+    pub(super) fn note_deep_link_origin(&mut self) {
+        self.links.deep_link_from_agent = guard::injecting();
+    }
+
     /// Render-time half: open the resolved chat (has the `Window` for
     /// draft restore and composer prefill). Consumed once via
-    /// `pending_deep_link_open`.
+    /// `pending_deep_link_open`. A chat an agent's step asked for opens as
+    /// part of that step: the step ended when the agent clicked, TDLib
+    /// resolved the link later, and the open is checked again now.
     pub(super) fn open_deep_link_chat(
+        &mut self,
+        chat_id: ChatId,
+        action: &DeepLinkAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let from_agent = std::mem::take(&mut self.links.pending_deep_link_open_from_agent);
+        guard::with_injecting(from_agent, || {
+            if !from_agent || self.agent_may_open(chat_id) {
+                self.open_deep_link_chat_now(chat_id, action, window, cx);
+            }
+        });
+    }
+
+    fn open_deep_link_chat_now(
         &mut self,
         chat_id: ChatId,
         action: &DeepLinkAction,

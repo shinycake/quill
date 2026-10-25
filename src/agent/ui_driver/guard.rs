@@ -40,6 +40,21 @@ pub fn set_injecting(on: bool) {
     INJECTING.with(|flag| flag.set(on));
 }
 
+/// Runs `f` under the injecting flag when `on`: the deferred half of an
+/// agent's step (a clicked link run at render, a deep link's chat open
+/// once TDLib resolved it) meets the same refusals as the step itself.
+/// The flag goes back to what it was after.
+pub fn with_injecting<R>(on: bool, f: impl FnOnce() -> R) -> R {
+    if !on {
+        return f();
+    }
+    let was = injecting();
+    set_injecting(true);
+    let out = f();
+    set_injecting(was);
+    out
+}
+
 /// Record why something was refused during the current injection.
 pub fn refuse(reason: impl Into<String>) {
     let reason = reason.into();
