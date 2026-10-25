@@ -601,7 +601,8 @@ crate::ui::shell::register_dialogs! {
         3810,
         |app| app.session().is_some_and(|s| s.ton_wallet.can_use && s.ton_wallet.money.open),
         QuillApp::build_money_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_money(cx)),
 }
 
 #[cfg(test)]

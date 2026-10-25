@@ -90,7 +90,7 @@ impl QuillApp {
         })
     }
 
-    fn close_rating_box(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn close_rating_box(&mut self, cx: &mut Context<Self>) {
         self.profile_cover.rating_box = None;
         self.profile_cover.rating_preview = false;
         cx.notify();

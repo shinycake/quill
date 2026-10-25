@@ -2,7 +2,9 @@
 //! a chord bound to Settings or the lock, a menu item or a main-menu entry
 //! reaches a handler that refuses while the driver injects, so nothing is
 //! left open for the user to close, and the step's reply says why.
-use super::tests::{click, drive, grant, message_box, new_app, read_tree, settle, turn_on};
+use super::tests::{
+    click, drive, grant, message_box, new_app, node_named, read_tree, settle, turn_on,
+};
 use crate::ui::agent_state::TEST_LOCK;
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::apply_custom_bindings;
@@ -153,3 +155,122 @@ fn menu_routes_to_hard_surfaces_refuse_while_injecting(cx: &mut TestAppContext) 
     assert!(vcx.update(|_, cx| app.read(cx).settings.open));
     assert!(guard::take_refusals().is_empty());
 }
+
+/// "All other chats" on: the driver reaches most of the window.
+fn grant_everything() {
+    quill::agent::grants::update(&quill::ids::AccountKey::primary(), |g| {
+        g.all_chats = Some(Scope::Read);
+    });
+}
+
+/// A Star reaction on the open chat's last message; returns its id.
+fn add_star_reaction(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> i64 {
+    use quill::telegram::envelope::{
+        MessageInteractionInfo, MessageReaction, MessageReactions, ReactionType,
+    };
+    let id = app.update(vcx, |app, cx| {
+        let history = app
+            .demo_session
+            .as_mut()
+            .and_then(|session| session.histories.get_mut(&11));
+        let Some(history) = history else {
+            panic!("chat 11's history");
+        };
+        let Some(id) = history.messages.keys().next_back().copied() else {
+            panic!("a message in chat 11");
+        };
+        if let Some(message) = history.messages.get_mut(&id) {
+            message.interaction_info = Some(MessageInteractionInfo {
+                reactions: Some(MessageReactions {
+                    reactions: vec![MessageReaction {
+                        reaction_type: ReactionType::Paid,
+                        total_count: 5,
+                        is_chosen: false,
+                        recent_senders: Vec::new(),
+                    }],
+                    ..MessageReactions::default()
+                }),
+                ..MessageInteractionInfo::default()
+            });
+        }
+        cx.notify();
+        id
+    });
+    settle(vcx);
+    id
+}
+
+fn paid_box_open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
+    vcx.update(|_, cx| app.read(cx).paid_reaction.boxed.is_some())
+}
+
+fn dialog_shown(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<&'static str> {
+    vcx.update(|_, cx| crate::ui::shell::QuillShell::open_dialog_name(app.read(cx)))
+}
+
+#[gpui_kit::test]
+fn an_opener_without_a_guard_leaves_no_hard_dialog_for_an_agent(cx: &mut TestAppContext) {
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    turn_on();
+    grant(11, Scope::ReadWrite);
+    grant_everything();
+    let _presence = activity::connect("Test agent");
+    settle(vcx);
+    let message_id = add_star_reaction(&app, vcx);
+
+    // The Star chip's right-click opens the amount box (`open_paid_box`,
+    // no guard of its own). For an agent, the box never shows and the
+    // reply says why.
+    let tree = read_tree(&app, vcx);
+    let Some(chip) = node_named(&tree, "Star reaction") else {
+        panic!("the Star chip is in the tree");
+    };
+    let reply = drive(
+        &app,
+        vcx,
+        UiCommand::OpenMenu {
+            target: Target::Node(chip.id.clone()),
+        },
+    );
+    let Ok(UiReply::Done { refusals, .. }) = reply else {
+        panic!("expected Done, got {reply:?}");
+    };
+    assert!(
+        refusals.iter().any(|r| r.contains("Quill closed a dialog")),
+        "{refusals:?}"
+    );
+    settle(vcx);
+    assert!(!paid_box_open(&app, vcx), "the amount box stayed open");
+    assert_eq!(dialog_shown(&app, vcx), None);
+
+    // A deferred half of a step (a link resolved later) gets the same.
+    app.update_in(vcx, |app, _, cx| {
+        app.agent_step(true, |app| {
+            app.open_paid_box(
+                quill::ids::ChatId(11),
+                quill::ids::MessageId(message_id),
+                cx,
+            );
+        });
+    });
+    settle(vcx);
+    assert!(
+        !paid_box_open(&app, vcx),
+        "a deferred half left the box open"
+    );
+
+    // The user's own right-click opens it.
+    app.update(vcx, |app, cx| {
+        app.open_paid_box(
+            quill::ids::ChatId(11),
+            quill::ids::MessageId(message_id),
+            cx,
+        );
+    });
+    settle(vcx);
+    assert!(paid_box_open(&app, vcx));
+    assert_eq!(dialog_shown(&app, vcx), Some("PaidReaction"));
+}
+

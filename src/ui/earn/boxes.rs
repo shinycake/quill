@@ -388,13 +388,15 @@ crate::ui::shell::register_dialogs! {
         7611,
         |app| app.earn.ton_tx.is_some(),
         QuillApp::build_earn_ton_tx_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_earn_tx(cx)),
     /// A Stars transaction's receipt from a revenue page.
     EarnStarTx => DialogSpec::new(
         7613,
         |app| app.earn.star_tx.is_some(),
         QuillApp::build_earn_star_tx_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_earn_tx(cx)),
     /// The boost box of a locked "Switch Off Ads".
     EarnAskBoost => DialogSpec::new(
         7614,

@@ -431,8 +431,16 @@ fn perform_step(
     tree: &UiTree,
     send_key_mode: SendKeyMode,
 ) -> Result<(), String> {
+    let before = app
+        .update(cx, |app, _| super::agent_driver_surface::hard_open(app))
+        .unwrap_or_default();
     guard::set_injecting(true);
     let result = perform_step_injecting(app, cx, step, tree, send_key_mode);
+    // A dialog or layer agents never use that the step opened through an
+    // opener with no guard of its own: refused, and closed before it shows.
+    let _ = app.update(cx, |app, _| {
+        super::agent_driver_surface::block_opened_by_agent(app, &before);
+    });
     guard::set_injecting(false);
     result
 }

@@ -234,7 +234,8 @@ crate::ui::shell::register_dialogs! {
         3791,
         |app| app.profile_cover.rating_box.is_some(),
         QuillApp::build_rating_box,
-    ),
+    )
+    .closes(|app, _, cx| app.close_rating_box(cx)),
     ShowLastSeen => DialogSpec::new(
         3792,
         |app| app.profile_cover.last_seen_box.is_some(),

@@ -385,5 +385,6 @@ crate::ui::shell::register_dialogs! {
             })
         },
         QuillApp::build_gift_transfer_dialog,
-    ),
+    )
+    .closes(|app, window, cx| app.close_gift_transfer(window, cx)),
 }

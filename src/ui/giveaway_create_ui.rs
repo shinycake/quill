@@ -648,5 +648,6 @@ crate::ui::shell::register_dialogs! {
         // back when it closes.
         |app| app.giveaway.form.is_some() && !app.payment_dialog_visible(),
         QuillApp::build_giveaway_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_giveaway_form(cx)),
 }

@@ -905,7 +905,8 @@ crate::ui::shell::register_dialogs! {
         3400,
         |app| app.privacy.extra.file_open.is_some(),
         QuillApp::build_file_open_dialog,
-    ),
+    )
+    .closes(|app, _, cx| { app.privacy.extra.file_open = None; cx.notify(); }),
 }
 
 #[cfg(test)]

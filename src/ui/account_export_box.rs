@@ -362,7 +362,8 @@ crate::ui::shell::register_dialogs! {
                     && app.session().is_some_and(|s| s.settings.account_export.is_some()))
         },
         QuillApp::build_account_export_dialog,
-    ),
+    )
+    .closes(|app, _, cx| { app.dialogs.account_export_dialog = None; app.dialogs.account_export_progress_hidden = true; cx.notify(); }),
 }
 
 #[cfg(test)]

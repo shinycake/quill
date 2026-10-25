@@ -493,5 +493,6 @@ crate::ui::shell::register_dialogs! {
         7000,
         |app| app.account.accounts.open,
         QuillApp::build_accounts_dialog,
-    ),
+    )
+    .closes(|app, window, cx| app.close_accounts(window, cx)),
 }

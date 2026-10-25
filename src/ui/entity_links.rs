@@ -96,9 +96,7 @@ impl QuillApp {
         else {
             return;
         };
-        quill::agent::ui_driver::guard::with_injecting(from_agent, || {
-            self.run_link(link, msg_key, window, cx)
-        });
+        self.agent_step(from_agent, |this| this.run_link(link, msg_key, window, cx));
     }
 
     fn run_link(

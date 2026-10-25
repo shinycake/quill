@@ -123,6 +123,10 @@ impl std::fmt::Debug for DialogKind {
 /// `app.update`/`app.read` are safe inside.
 pub type DialogBuilder = fn(&Entity<QuillApp>, &Entity<QuillShell>, Dialog, &mut App) -> Dialog;
 
+/// Clears one dialog's app-side open flag the way its own close does (the
+/// clear its builder hands `QuillShell::on_close_kind`).
+pub type DialogClose = fn(&mut QuillApp, &mut Window, &mut Context<QuillApp>);
+
 /// One dialog the shell can show, collected at link time.
 pub(crate) struct DialogSpec {
     kind: DialogKind,
@@ -134,6 +138,10 @@ pub(crate) struct DialogSpec {
     /// not here.
     is_open: fn(&QuillApp) -> bool,
     build: DialogBuilder,
+    /// How the shell closes the dialog without the kit: set for every
+    /// dialog agents never use (`agent_driver_surface::HARD_DIALOGS`), so
+    /// one an agent's step opened is closed before it shows.
+    close: Option<DialogClose>,
 }
 
 impl DialogSpec {
@@ -148,6 +156,16 @@ impl DialogSpec {
             priority,
             is_open,
             build,
+            close: None,
+        }
+    }
+
+    /// The dialog's own close, for the shell to run when the dialog may not
+    /// show ([`DialogClose`]).
+    pub(crate) const fn closes(self, close: DialogClose) -> Self {
+        Self {
+            close: Some(close),
+            ..self
         }
     }
 
@@ -254,6 +272,48 @@ impl QuillShell {
         registry().iter().map(|spec| spec.kind.0).collect()
     }
 
+    /// The registered dialogs with a close of their own ([`DialogSpec::closes`]).
+    #[cfg(test)]
+    pub(super) fn closable_dialog_names() -> Vec<&'static str> {
+        registry()
+            .iter()
+            .filter(|spec| spec.close.is_some())
+            .map(|spec| spec.kind.0)
+            .collect()
+    }
+
+    /// The names of every dialog whose open flag is set, shown or not.
+    pub(super) fn open_dialog_names(app: &QuillApp) -> Vec<&'static str> {
+        registry()
+            .iter()
+            .filter(|spec| (spec.is_open)(app))
+            .map(|spec| spec.kind.0)
+            .collect()
+    }
+
+    /// Close what an agent's step opened that agents never use
+    /// (`agent_driver_surface::block_opened_by_agent`), each dialog with its
+    /// own close, before the winner is picked: it never shows.
+    fn close_blocked_dialogs(app: &Entity<QuillApp>, window: &mut Window, cx: &mut App) {
+        let blocked = super::agent_driver_surface::take_blocked_closing_layers(app, window, cx);
+        for name in blocked {
+            let Some(spec) = registry().iter().find(|spec| spec.kind.0 == name) else {
+                continue;
+            };
+            let Some(close) = spec.close else {
+                continue;
+            };
+            // A close that steps back (a stacked market page) runs again
+            // until the flag is clear.
+            for _ in 0..8 {
+                if !(spec.is_open)(app.read(cx)) {
+                    break;
+                }
+                app.update(cx, |app, cx| close(app, window, cx));
+            }
+        }
+    }
+
     /// Keep the single kit dialog in sync with the app-side open flags.
     /// The kit dialog is modal, so at most one flag wins, by registry
     /// priority. A flag cleared without a kit close (e.g. an action
@@ -285,6 +345,7 @@ impl QuillShell {
     ) {
         let app = self.app.clone();
         let shell = cx.entity();
+        Self::close_blocked_dialogs(&app, window, cx);
         // Snapshot the flags once; the app is not leased here.
         let winner = Self::first_open(app.read(cx));
         let first_open = winner.map(|r| r.kind);

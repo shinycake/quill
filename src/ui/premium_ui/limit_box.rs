@@ -301,5 +301,6 @@ crate::ui::shell::register_dialogs! {
         1310,
         |app| app.session().is_some_and(|s| s.payments.hub.limit_box.is_some()),
         QuillApp::build_premium_limit_dialog,
-    ),
+    )
+    .closes(|app, _, cx| { app.dismiss_premium_limit(); cx.notify(); }),
 }

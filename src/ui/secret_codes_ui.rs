@@ -281,5 +281,6 @@ crate::ui::shell::register_dialogs! {
         1050,
         |app| app.settings.advanced.debug_confirm.is_some(),
         QuillApp::build_debug_mode_dialog,
-    ),
+    )
+    .closes(|app, _, cx| { app.settings.advanced.debug_confirm = None; cx.notify(); }),
 }

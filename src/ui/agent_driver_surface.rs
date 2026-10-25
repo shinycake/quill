@@ -17,7 +17,9 @@ use super::app::{PaneMode, QuillApp};
 use super::esc_stack::ESC_LAYERS;
 use super::first_run_state::FirstRun;
 use super::shell::QuillShell;
+use gpui_kit::{App, Entity, Window};
 use quill::agent::grants::{self, ChatClass, Scope};
+use quill::agent::ui_driver::guard;
 use quill::agent::ui_driver::surface::{DriverScope, Surface};
 use quill::ids::ChatId;
 use quill::telegram::envelope::{ChannelMemberStatus, ChatKind};
@@ -87,6 +89,104 @@ pub(super) const HARD_LAYERS: &[&str] = &[
     "pending-delete",
     "pending-stop-poll",
 ];
+
+/// A hard dialog or layer an agent's step opened, waiting for the shell to
+/// close it before the next frame shows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Opened {
+    Dialog(&'static str),
+    Layer(&'static str),
+}
+
+thread_local! {
+    /// What agents' steps opened since the shell last closed it (UI thread).
+    static BLOCKED: std::cell::RefCell<Vec<Opened>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The hard dialogs and layers whose open flag is set now.
+pub(super) fn hard_open(app: &QuillApp) -> Vec<Opened> {
+    QuillShell::open_dialog_names(app)
+        .into_iter()
+        .filter(|name| HARD_DIALOGS.contains(name))
+        .map(Opened::Dialog)
+        .chain(
+            ESC_LAYERS
+                .iter()
+                .filter(|layer| HARD_LAYERS.contains(&layer.name) && (layer.is_open)(app))
+                .map(|layer| Opened::Layer(layer.name)),
+        )
+        .collect()
+}
+
+/// After an injected step (or the deferred half of one): every hard dialog
+/// or layer open now that was not open `before` was opened by the agent's
+/// input. It is refused, so the step's reply and the activity log say so,
+/// and queued for the shell to close before it shows
+/// ([`take_blocked_closing_layers`]).
+pub(super) fn block_opened_by_agent(app: &QuillApp, before: &[Opened]) {
+    let opened: Vec<Opened> = hard_open(app)
+        .into_iter()
+        .filter(|open| !before.contains(open))
+        .collect();
+    if opened.is_empty() {
+        return;
+    }
+    guard::refuse_hard_dialog();
+    BLOCKED.with(|blocked| {
+        let mut blocked = blocked.borrow_mut();
+        for open in opened {
+            if !blocked.contains(&open) {
+                blocked.push(open);
+            }
+        }
+    });
+}
+
+/// The dialog names queued by [`block_opened_by_agent`], taken. The layers
+/// are closed here, with their Escape close.
+pub(super) fn take_blocked_closing_layers(
+    app: &Entity<QuillApp>,
+    window: &mut Window,
+    cx: &mut App,
+) -> Vec<&'static str> {
+    let blocked = BLOCKED.with(|blocked| std::mem::take(&mut *blocked.borrow_mut()));
+    let mut dialogs = Vec::new();
+    for open in blocked {
+        match open {
+            Opened::Dialog(name) => dialogs.push(name),
+            Opened::Layer(name) => {
+                let Some(layer) = ESC_LAYERS.iter().find(|layer| layer.name == name) else {
+                    continue;
+                };
+                // A layer that peels one level per Escape closes in steps.
+                for _ in 0..8 {
+                    if !(layer.is_open)(app.read(cx)) {
+                        break;
+                    }
+                    app.update(cx, |app, cx| (layer.close)(app, window, cx));
+                }
+            }
+        }
+    }
+    dialogs
+}
+
+impl QuillApp {
+    /// Runs the deferred half of an agent's step (`from_agent`): under the
+    /// injecting flag (`guard::with_injecting`), and a hard dialog or layer
+    /// it opens is closed and refused like one the step itself opened.
+    pub(super) fn agent_step<R>(&mut self, from_agent: bool, f: impl FnOnce(&mut Self) -> R) -> R {
+        if !from_agent {
+            return f(self);
+        }
+        let before = hard_open(self);
+        guard::with_injecting(true, || {
+            let out = f(self);
+            block_opened_by_agent(self, &before);
+            out
+        })
+    }
+}
 
 /// Layers the granted scope allows: what reading and writing in the chat
 /// list and the open chat takes. Everything else blocks it.
@@ -241,6 +341,20 @@ mod tests {
             .filter(|name| !names.contains(name))
             .collect();
         assert!(missing.is_empty(), "unknown dialogs: {missing:?}");
+    }
+
+    /// The shell closes a hard dialog an agent's step opened with the
+    /// dialog's own close. The agent prompts are opened by tool threads,
+    /// never by input, and need none.
+    #[test]
+    fn every_hard_dialog_input_can_open_has_a_close() {
+        let closable = QuillShell::closable_dialog_names();
+        let missing: Vec<_> = HARD_DIALOGS
+            .iter()
+            .filter(|name| !matches!(**name, "AgentRequest" | "AgentConsent"))
+            .filter(|name| !closable.contains(name))
+            .collect();
+        assert!(missing.is_empty(), "no close: {missing:?}");
     }
 
     #[test]

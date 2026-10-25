@@ -755,13 +755,16 @@ crate::ui::shell::register_dialogs! {
         3500,
         |app| app.payment_dialog_visible(),
         QuillApp::build_payment_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_payment_dialog(cx)),
 
     PaymentReceipt => DialogSpec::new(
         3600,
         |app| app.session().is_some_and(|s| s.payments.receipt_open),
         QuillApp::build_payment_receipt_dialog,
-    ),
+    )
+
+    .closes(|app, _, cx| app.close_payment_receipt(cx)),
 
     // Slice `parity:bots-payment-recurring`: the `starSubscriptions`
     // management dialog.
@@ -769,7 +772,8 @@ crate::ui::shell::register_dialogs! {
         3700,
         |app| app.session().is_some_and(|s| s.payments.subscriptions_open),
         QuillApp::build_subscriptions_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_subscriptions(cx)),
 }
 
 mod build_payment_dialog;

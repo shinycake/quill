@@ -539,5 +539,6 @@ crate::ui::shell::register_dialogs! {
         5441,
         |app| app.composer_ui.send_box.price.is_some(),
         QuillApp::build_price_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_price_dialog(cx)),
 }

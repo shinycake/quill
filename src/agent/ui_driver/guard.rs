@@ -204,6 +204,17 @@ pub fn refuse_hard_if_injecting(surface: HardSurface) -> bool {
     refuse_if_injecting(surface.what())
 }
 
+/// An agent's step opened a dialog or overlay agents never use (a payment,
+/// Stars, a gift, Premium, an account, security or export box, a delete
+/// confirmation): the window closes it before it shows, and this says so.
+/// The other half of [`refuse_hard_if_injecting`], for the openers that
+/// have no guard of their own.
+pub fn refuse_hard_dialog() {
+    refuse(
+        "Quill closed a dialog an agent's input opened: payments, Stars, gifts, Premium, accounts, security, exports and delete confirmations stay with the user. Use the agent tools, or ask the user.",
+    );
+}
+
 /// A clipboard read (a paste by chord, menu or mini app) while injecting:
 /// the clipboard is the user's, so it reads as empty.
 pub fn refuse_clipboard_if_injecting() -> bool {

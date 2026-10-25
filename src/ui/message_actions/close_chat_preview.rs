@@ -653,9 +653,7 @@ impl QuillApp {
         {
             let messages = &mut live.driver.session.messages;
             let from_agent = std::mem::take(&mut messages.instant_view_fallback_from_agent);
-            quill::agent::ui_driver::guard::with_injecting(from_agent, || {
-                self.open_message_url(&url, cx)
-            });
+            self.agent_step(from_agent, |this| this.open_message_url(&url, cx));
         }
         self.session()?.messages.instant_view.as_ref()?;
         self.instant_view_overlay_body(cx)

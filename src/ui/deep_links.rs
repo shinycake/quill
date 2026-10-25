@@ -176,9 +176,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let from_agent = std::mem::take(&mut self.links.pending_deep_link_open_from_agent);
-        guard::with_injecting(from_agent, || {
-            if !from_agent || self.agent_may_open(chat_id) {
-                self.open_deep_link_chat_now(chat_id, action, window, cx);
+        self.agent_step(from_agent, |this| {
+            if !from_agent || this.agent_may_open(chat_id) {
+                this.open_deep_link_chat_now(chat_id, action, window, cx);
             }
         });
     }

@@ -308,5 +308,6 @@ crate::ui::shell::register_dialogs! {
         3750,
         |app| app.session().is_some_and(|s| s.payments.stars_gift.open),
         QuillApp::build_stars_gift_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_stars_gift_dialog(cx)),
 }
