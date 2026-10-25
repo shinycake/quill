@@ -185,3 +185,10 @@ Added in 2026 for Agent access's UI driver, step 3 (screenshots,
   children only), so a filtered row loses its background too.
 - `src/platform.rs`: `PlatformWindow::capture_image(&Scene)`, by default an
   error. `src/platform/test/window.rs` answers with `render_to_image`.
+- `src/window.rs`, `src/elements/div.rs`, `src/elements/text.rs`: a
+  tooltip is drawn at the root after everything else, where the tag stack
+  is empty. Under a paint filter, the element that owns a tooltip records
+  the tag stack it is painted under (`Window::record_tooltip_tags`), and
+  the tooltip is painted under the same tags, so the filter cuts it with
+  its owner (a tooltip over a hidden chat row is hidden too). Nothing is
+  recorded while no filter is set.

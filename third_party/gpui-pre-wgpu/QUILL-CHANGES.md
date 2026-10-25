@@ -38,4 +38,6 @@ The Quill project also changed it in 2026 for Agent access's screenshots
 - `src/wgpu_renderer.rs`: `WgpuRenderer::capture_scene` renders a scene to
   an offscreen texture in the surface format (BGRA8 or RGBA8; other formats
   answer with an error), copies it to a mapped buffer with 5 s timeouts and
-  returns RGBA rows. Not built for wasm.
+  returns RGBA rows. Not built for wasm. It renders in the surface's alpha
+  mode (the pipelines blend for it), so the rows are premultiplied in both
+  the opaque and the premultiplied mode.

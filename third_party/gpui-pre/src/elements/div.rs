@@ -2598,6 +2598,8 @@ impl Interactivity {
                 if let Some(tag) = &self.aria.tag {
                     window.push_a11y_tag(tag.clone(), bounds);
                 }
+                // Quill: its tooltip is filtered under these tags.
+                window.record_tooltip_tags(self.tooltip_id);
                 window.with_element_opacity(style.opacity, |window| {
                     style.paint(bounds, window, cx, |window: &mut Window, cx: &mut App| {
                         window.with_text_style(style.text_style().cloned(), |window| {

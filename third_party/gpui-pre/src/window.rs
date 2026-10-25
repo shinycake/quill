@@ -1297,6 +1297,10 @@ pub struct Window {
     /// Quill: decides from [`Self::a11y_tag_stack`] whether what is painted
     /// now reaches the scene ([`Self::set_paint_filter`]).
     paint_filter: Option<PaintFilter>,
+    /// Quill: under a paint filter, the tag stack each tooltip's owner was
+    /// painted under; the tooltip is painted under the same tags, so it is
+    /// cut with its owner ([`Self::record_tooltip_tags`]).
+    tooltip_tags: Vec<(TooltipId, Vec<SharedString>)>,
     modifiers: Modifiers,
     capslock: Capslock,
     scale_factor: f32,
@@ -2198,6 +2202,7 @@ impl Window {
             mouse_position,
             mouse_hit_test: HitTest::default(),
             a11y_tag_stack: Vec::new(),
+            tooltip_tags: Vec::new(),
             paint_filter: None,
             modifiers,
             capslock,
@@ -3498,6 +3503,7 @@ impl Window {
             }
         }
         self.next_frame.scene.filtered = self.paint_filter.is_some();
+        self.tooltip_tags.clear();
         self.update_paint_suppression();
         self.cover_refused_window();
         if !cx.mode.skip_drawing() {
@@ -3797,7 +3803,29 @@ impl Window {
         } else if let Some(mut drag_element) = active_drag_element {
             drag_element.paint(self, cx);
         } else if let Some(mut tooltip_element) = tooltip_element {
+            // Quill: under a paint filter the tooltip is painted under its
+            // owner's tags, so the filter decides it as it decided the
+            // owner.
+            let tags = self
+                .tooltip_bounds
+                .as_ref()
+                .filter(|_| self.paint_filter.is_some())
+                .and_then(|tooltip| {
+                    self.tooltip_tags
+                        .iter()
+                        .find(|(id, _)| *id == tooltip.id)
+                        .map(|(_, tags)| (tags.clone(), tooltip.bounds))
+                });
+            let pushed = tags.as_ref().map_or(0, |(tags, _)| tags.len());
+            if let Some((tags, bounds)) = tags {
+                for tag in tags {
+                    self.push_a11y_tag(tag, bounds);
+                }
+            }
             tooltip_element.paint(self, cx);
+            for _ in 0..pushed {
+                self.pop_a11y_tag();
+            }
         }
 
         #[cfg(any(feature = "inspector", debug_assertions))]
@@ -5511,6 +5539,20 @@ impl Window {
     pub fn capture_frame(&self) -> anyhow::Result<image::RgbaImage> {
         self.platform_window
             .capture_image(&self.rendered_frame.scene)
+    }
+
+    /// Quill, paint-time: the element that owns tooltip `id` is being
+    /// painted. Under a paint filter, keep the tag stack above it, so the
+    /// tooltip is filtered as its owner is (it is drawn later, at the
+    /// root, where the stack is empty).
+    pub(crate) fn record_tooltip_tags(&mut self, id: Option<TooltipId>) {
+        let Some(id) = id else {
+            return;
+        };
+        if self.paint_filter.is_none() {
+            return;
+        }
+        self.tooltip_tags.push((id, self.a11y_tag_stack.clone()));
     }
 
     /// Paint-time: the focused element is being painted; keep the tag

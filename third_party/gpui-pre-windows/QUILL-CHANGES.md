@@ -263,7 +263,12 @@ The Quill project also changed it in 2026 for Agent access's screenshots
 (`docs/decisions/agent-access.md`, phase 5 step 3):
 
 - `src/directx_renderer.rs`: `render_to_image` is built in every
-  configuration (it was test-only).
+  configuration (it was test-only). It copies the render target into a
+  single-sample staging texture with `CopyResource`, which needs matching
+  sample counts: the render target is buffer 0 of the flip-model swap
+  chain, created with one sample (flip model allows no other; the 4x MSAA
+  texture is path rasterization's own). It checks the count and refuses
+  with an error rather than copy, so no `ResolveSubresource` is needed.
 - `src/window.rs`: `WindowsWindow::capture_image` renders the scene through
   it, and answers with an error while the renderer is borrowed. Not run on
   Windows by the author. An HDR swap chain format refuses readback with an

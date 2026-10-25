@@ -1221,6 +1221,12 @@ impl WgpuRenderer {
     pub fn capture_scene(&mut self, scene: &Scene) -> anyhow::Result<(u32, u32, Vec<u8>)> {
         let width = self.surface_config.width;
         let height = self.surface_config.height;
+        // The pipelines blend for the surface's alpha mode, so the capture
+        // renders in that same mode, as `draw` does. Either way the target
+        // ends premultiplied: straight-alpha blending onto the transparent
+        // clear premultiplies, and the premultiplied mode already is.
+        let premultiplied_alpha =
+            self.surface_config.alpha_mode == wgpu::CompositeAlphaMode::PreMultiplied;
         let core = self
             .core_mut()
             .ok_or_else(|| anyhow::anyhow!("the renderer was released"))?;
@@ -1251,7 +1257,13 @@ impl WgpuRenderer {
             width: DevicePixels(i32::try_from(width).unwrap_or(i32::MAX)),
             height: DevicePixels(i32::try_from(height).unwrap_or(i32::MAX)),
         };
-        core.render_frame(scene, &view, size, false, wgpu::Color::TRANSPARENT)?;
+        core.render_frame(
+            scene,
+            &view,
+            size,
+            premultiplied_alpha,
+            wgpu::Color::TRANSPARENT,
+        )?;
 
         let bytes_per_row = width
             .checked_mul(4)
