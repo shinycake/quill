@@ -50,7 +50,6 @@ fn the_menu_follows_whose_story_it_is(cx: &mut TestAppContext) {
     for act in [
         MenuAct::Stories,
         MenuAct::CopyLink,
-        MenuAct::Stealth,
         MenuAct::Hide,
         MenuAct::Report,
     ] {
@@ -59,6 +58,10 @@ fn the_menu_follows_whose_story_it_is(cx: &mut TestAppContext) {
     for act in [MenuAct::Delete, MenuAct::Edit, MenuAct::CloseFriends] {
         assert!(!theirs.contains(&act), "{act:?} is only for your own");
     }
+    assert!(
+        !theirs.contains(&MenuAct::Stealth),
+        "Hide My View is only for a user's stories, not a channel's"
+    );
     app.update(vcx, |app, _| {
         let key = app
             .stories

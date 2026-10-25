@@ -5,7 +5,7 @@ use crate::diagnostics::DiagnosticSink;
 use crate::diagnostics::MemorySink;
 use crate::ids::{AccountKey, ChatId, MessageId};
 use crate::platform::MemorySecretStore;
-use crate::state::Session;
+use crate::state::{RequestPurpose, Session};
 use crate::story_composer::StoryPrivacy;
 use crate::telegram::client::copy_and_parse;
 use serde_json::Value;
@@ -329,6 +329,30 @@ fn driver_activate_story_stealth_mode_sends_and_dedupes() {
     assert_eq!(v["@extra"], extra.0.to_string());
     // A second activation while the first is in flight is a no-op.
     assert_eq!(driver.activate_story_stealth_mode(), Ok(None));
+    driver
+        .ingest(
+            copy_and_parse(
+                &format!(
+                    r#"{{"@type":"error","@extra":"{}","code":400,"message":"PREMIUM_ACCOUNT_REQUIRED"}}"#,
+                    extra.0
+                ),
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(
+        !driver
+            .session
+            .requests
+            .has_purpose(RequestPurpose::ActivateStoryStealthMode)
+    );
+    let again = driver
+        .activate_story_stealth_mode()
+        .unwrap()
+        .expect("sends again after the error");
+    assert_ne!(again, extra);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

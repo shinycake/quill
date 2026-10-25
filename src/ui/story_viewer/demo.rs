@@ -5,7 +5,11 @@
 //! toast, and `QUILL_DEMO_STORY=card` opens Leo's story the way a story
 //! card in a message does: alone, with no neighbours. `composer` opens the
 //! story composer instead, and `composer-picked` opens it with a photo
-//! already picked.
+//! already picked. `stealth` opens the Stealth Mode box over the story for
+//! a Premium account, `stealth-free` for a free one, `stealth-cooldown`
+//! while it cools down, and `stealth-on` shows the toast that stealth
+//! mode is already on. `stealth-tile-menu` opens Leo's story tile menu
+//! with View Anonymously.
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
@@ -83,6 +87,28 @@ impl QuillApp {
                 }
             }
             "card" => self.open_story_viewer(ChatId(LEO), 3, StoryOpenScope::Single, cx),
+            "stealth-tile-menu" => {
+                session.payments.premium_option = Some(true);
+                self.open_story_menu(LEO, point(px(240.), px(140.)), cx);
+            }
+            "stealth" | "stealth-free" | "stealth-cooldown" | "stealth-on" => {
+                let now = i32::try_from(now).unwrap_or(0);
+                session.payments.premium_option = Some(variant != "stealth-free");
+                session.stories.stealth = quill::state::StoryStealthMode {
+                    active_until_date: if variant == "stealth-on" {
+                        now + 1499
+                    } else {
+                        0
+                    },
+                    cooldown_until_date: match variant.as_str() {
+                        "stealth-cooldown" => now + 3 * 3600 - 1,
+                        "stealth-on" => now + 3 * 3600,
+                        _ => 0,
+                    },
+                };
+                self.open_story_viewer(ChatId(LEO), 3, StoryOpenScope::Tray, cx);
+                self.setup_story_stealth(None, cx);
+            }
             "composer" | "composer-picked" => {
                 self.open_story_composer(window, cx);
                 if variant == "composer-picked" {
