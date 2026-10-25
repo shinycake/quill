@@ -74,6 +74,7 @@ impl QuillApp {
                 )],
             ));
         if on {
+            page = page.children(self.agent_grants_section(cx));
             let command = mcp_command();
             page = page.child(group(
                 Some(tr(keys::Q_AGENT_ACCESS_CONNECT)),
