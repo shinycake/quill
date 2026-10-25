@@ -70,7 +70,7 @@ use uuid::Uuid;
 pub(crate) mod a11y;
 mod prompts;
 
-pub use a11y::A11ySubtreeBuilder;
+pub use a11y::{A11yNodeSnapshot, A11ySubtreeBuilder, A11yTreeSnapshot};
 
 use self::a11y::A11y;
 #[cfg(not(target_family = "wasm"))]
@@ -3773,10 +3773,13 @@ impl Window {
 
         // a11y may have been activated/deactivated halfway through the frame
         let a11y_active_start_of_frame = self.a11y.is_active();
+        let a11y_system_active_start_of_frame = self.a11y.is_system_active();
         self.a11y.sync_active_flag();
-        let a11y_active_end_of_frame = self.a11y.is_active();
+        let a11y_system_active_end_of_frame = self.a11y.is_system_active();
 
-        let should_send_a11y_update = a11y_active_start_of_frame && a11y_active_end_of_frame;
+        // A tree built only because it was forced stays in-process.
+        let should_send_a11y_update =
+            a11y_system_active_start_of_frame && a11y_system_active_end_of_frame;
 
         if a11y_active_start_of_frame {
             // Harvest frame metadata for the debug dump while the live window
@@ -7032,6 +7035,28 @@ impl Window {
     /// Debug representation of the last frame's accessibility information.
     pub fn debug_a11y_tree_json(&self) -> Option<String> {
         self.a11y.debug_tree_json()
+    }
+
+    /// Build the accessibility tree every frame whether or not assistive
+    /// technology is connected, so an in-process reader can read it with
+    /// [`Self::a11y_tree_snapshot`]. The tree is not sent to the platform
+    /// while only this asks for it. Turning it on or off redraws the window.
+    pub fn set_a11y_forced(&mut self, on: bool) {
+        if self.a11y.set_forced(on) {
+            self.refresh();
+        }
+    }
+
+    /// Whether [`Self::set_a11y_forced`] is on.
+    pub fn is_a11y_forced(&self) -> bool {
+        self.a11y.is_forced()
+    }
+
+    /// The accessibility tree of the last frame that built one, with bounds
+    /// in window logical pixels. `None` until a frame built a tree (see
+    /// [`Self::is_a11y_active`] and [`Self::set_a11y_forced`]).
+    pub fn a11y_tree_snapshot(&self) -> Option<A11yTreeSnapshot> {
+        self.a11y.snapshot(self.scale_factor)
     }
 
     /// Register a listener for an accessibility action on a specific node.

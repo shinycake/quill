@@ -100,3 +100,19 @@ Desktop does (`docs/decisions/history-preload.md`). `src/elements/list.rs`:
 `ListState::estimated_distance_to_edges` returns the distance from the
 viewport to the list's start and end, counting each item not measured yet at
 the mean height of the measured ones, and the viewport's height.
+
+## The accessibility tree can be forced and read in-process
+
+Added in 2026 for Agent access's UI driver
+(`docs/decisions/agent-access.md`, phase 5). GPUI builds its AccessKit tree
+only while assistive technology is connected. `src/window/a11y.rs` and
+`src/window.rs`: `Window::set_a11y_forced(bool)` builds it every frame
+regardless (`A11y::forced` is ORed into the per-frame active check), while
+only a tree the system asked for (`A11y::is_system_active`) is sent to the
+platform adapter. `Window::a11y_tree_snapshot` returns the last built tree
+as plain data (`A11yTreeSnapshot`, `A11yNodeSnapshot`: id, role, label,
+value, states, supported actions, children, and bounds in window logical
+pixels, from the element bounds GPUI recorded or, for synthetic children,
+AccessKit's physical rectangle divided by the scale factor).
+`src/window/a11y/debug.rs` exposes the retained update, focus and frame
+number to the snapshot.

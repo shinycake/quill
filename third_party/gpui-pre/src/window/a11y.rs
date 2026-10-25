@@ -145,6 +145,15 @@ pub(crate) struct A11y {
     /// At the end of the frame, we re-call [`Self::sync_active_flag`] to
     /// determine whether we should actually send the finished [`TreeUpdate`].
     active_this_frame: bool,
+    /// Whether the system (assistive technology) asked for the tree this
+    /// frame, as opposed to a tree built only because it was [forced].
+    /// Only a tree the system asked for is sent to the platform adapter.
+    ///
+    /// [forced]: Self::set_forced
+    system_active_this_frame: bool,
+    /// Build the tree every frame even while no assistive technology is
+    /// connected, for an in-process reader ([`crate::Window::set_a11y_forced`]).
+    forced: bool,
     pub(crate) nodes: A11yNodeBuilder,
     pub(crate) focus_ids: FxHashMap<NodeId, FocusId>,
     pub(crate) node_bounds: FxHashMap<NodeId, Bounds<Pixels>>,
@@ -173,6 +182,8 @@ impl A11y {
             force_disabled,
             active_flag,
             active_this_frame: false,
+            system_active_this_frame: false,
+            forced: false,
             nodes: A11yNodeBuilder::new(),
             focus_ids: FxHashMap::default(),
             node_bounds: FxHashMap::default(),
@@ -210,7 +221,27 @@ impl A11y {
     /// See the docs for [`Self::active_flag`] and [`Self::active_this_frame`]
     /// for more commentary.
     pub(crate) fn sync_active_flag(&mut self) {
-        self.active_this_frame = self.is_enabled() && self.active_flag.load(Ordering::SeqCst);
+        self.system_active_this_frame =
+            self.is_enabled() && self.active_flag.load(Ordering::SeqCst);
+        self.active_this_frame = self.system_active_this_frame || (self.is_enabled() && self.forced);
+    }
+
+    /// Whether assistive technology asked for the tree this frame (so the
+    /// finished update goes to the platform adapter).
+    pub(crate) fn is_system_active(&self) -> bool {
+        self.system_active_this_frame
+    }
+
+    /// Build the tree every frame whether or not assistive technology is
+    /// connected. Returns whether the setting changed.
+    pub(crate) fn set_forced(&mut self, on: bool) -> bool {
+        let changed = self.forced != on;
+        self.forced = on;
+        changed
+    }
+
+    pub(crate) fn is_forced(&self) -> bool {
+        self.forced
     }
 
     pub(crate) fn is_enabled(&self) -> bool {
@@ -297,6 +328,121 @@ impl A11y {
     pub(crate) fn debug_tree_json(&self) -> Option<String> {
         self.debug.to_json()
     }
+
+    /// The last finished tree as plain data, with each node's bounds in
+    /// window logical pixels. `None` before the first frame built a tree.
+    pub(crate) fn snapshot(&self, scale_factor: f32) -> Option<A11yTreeSnapshot> {
+        let update = self.debug.last_update()?;
+        let scale = if scale_factor.is_finite() && scale_factor > 0.0 {
+            scale_factor
+        } else {
+            1.0
+        };
+        let nodes = update
+            .nodes
+            .iter()
+            .map(|(id, node)| {
+                // Elements record logical bounds; synthetic children carry
+                // only the physical rectangle AccessKit sees, if any.
+                let bounds = self.node_bounds.get(id).copied().or_else(|| {
+                    node.bounds().map(|rect| Bounds {
+                        origin: point(px(rect.x0 as f32 / scale), px(rect.y0 as f32 / scale)),
+                        size: size(
+                            px((rect.x1 - rect.x0) as f32 / scale),
+                            px((rect.y1 - rect.y0) as f32 / scale),
+                        ),
+                    })
+                });
+                let mut next_action = 0u8;
+                let actions = std::iter::from_fn(move || {
+                    let action = Action::n(next_action)?;
+                    next_action += 1;
+                    Some(action)
+                })
+                .filter(|action| node.supports_action(*action))
+                .collect();
+                A11yNodeSnapshot {
+                    id: *id,
+                    role: node.role(),
+                    label: node.label().map(str::to_string),
+                    description: node.description().map(str::to_string),
+                    value: node.value().map(str::to_string),
+                    placeholder: node.placeholder().map(str::to_string),
+                    tooltip: node.tooltip().map(str::to_string),
+                    bounds,
+                    actions,
+                    children: node.children().to_vec(),
+                    selected: node.is_selected(),
+                    expanded: node.is_expanded(),
+                    toggled: node.toggled(),
+                    disabled: node.is_disabled(),
+                    hidden: node.is_hidden(),
+                    read_only: node.is_read_only(),
+                    modal: node.is_modal(),
+                }
+            })
+            .collect();
+        Some(A11yTreeSnapshot {
+            root: update.tree.as_ref().map(|tree| tree.root).unwrap_or(ROOT_NODE_ID),
+            focus: self.debug.last_focus(),
+            frame_number: self.debug.frame_number(),
+            nodes,
+        })
+    }
+}
+
+/// One node of an [`A11yTreeSnapshot`].
+#[derive(Debug, Clone)]
+pub struct A11yNodeSnapshot {
+    /// AccessKit's id, stable across frames for the same element.
+    pub id: NodeId,
+    /// The node's role.
+    pub role: accesskit::Role,
+    /// The accessible name.
+    pub label: Option<String>,
+    /// The longer description, when the element set one.
+    pub description: Option<String>,
+    /// The value of an input, slider or status.
+    pub value: Option<String>,
+    /// The placeholder of an empty input.
+    pub placeholder: Option<String>,
+    /// The tooltip text.
+    pub tooltip: Option<String>,
+    /// In window logical pixels; `None` for a node without a rectangle.
+    pub bounds: Option<Bounds<Pixels>>,
+    /// The actions the node says it supports (Click, Focus, ...).
+    pub actions: Vec<Action>,
+    /// The child nodes, in order.
+    pub children: Vec<NodeId>,
+    /// Whether a selectable node is selected.
+    pub selected: Option<bool>,
+    /// Whether an expandable node is expanded.
+    pub expanded: Option<bool>,
+    /// A checkbox's or toggle's state.
+    pub toggled: Option<accesskit::Toggled>,
+    /// The node does not take input.
+    pub disabled: bool,
+    /// The node is excluded from assistive technology and hit testing.
+    pub hidden: bool,
+    /// A text node that allows focus and selection but not input.
+    pub read_only: bool,
+    /// An explicitly modal dialog.
+    pub modal: bool,
+}
+
+/// The accessibility tree of the last frame that built one, as plain data
+/// ([`crate::Window::a11y_tree_snapshot`]).
+#[derive(Debug, Clone)]
+pub struct A11yTreeSnapshot {
+    /// The window node.
+    pub root: NodeId,
+    /// The node GPUI reported as focused, if any.
+    pub focus: Option<NodeId>,
+    /// Counts the frames that built a tree; two reads with the same number
+    /// saw the same frame.
+    pub frame_number: u64,
+    /// Every node, parents before their children.
+    pub nodes: Vec<A11yNodeSnapshot>,
 }
 
 /// Builder API for synthetic children. See the docs for
