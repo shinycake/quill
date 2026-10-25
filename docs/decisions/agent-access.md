@@ -60,9 +60,16 @@ not hold up the rest.
   new one each launch, writes it once the socket listens, and deletes it when
   the switch goes off. A connection whose first request does not carry it is
   answered with an error and closed. The token is compared in constant time.
+- A connection takes one of the four agent slots only after it
+  authenticates, so a client that never sends `auth` cannot lock agents out.
+  Request lines are capped at 4 MiB on every read; a longer one closes the
+  connection.
+- `quill mcp` checks the socket's owner too (peer uid on Unix), and does not
+  start Quill while the switch is off.
 - Turning the switch off bumps a generation counter; open connections close
   within a second on Unix (they wake on a receive timeout to check), and at
-  their next request on Windows, where named pipes have no read timeout.
+  their next request on Windows, where named pipes have no read timeout. Answers
+  that finish after the switch went off are replaced by the off error.
 
 There is no network listener, now or later.
 

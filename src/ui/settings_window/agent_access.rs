@@ -14,15 +14,33 @@ use gpui_kit::*;
 use quill::agent::access;
 use quill::lang::{keys, tr};
 
-/// The command that starts Quill's MCP server: this executable with `mcp`.
+/// The command that starts Quill's MCP server: this executable with `mcp`,
+/// quoted for the shell it is pasted into. An AppImage runs from a temporary
+/// mount, so the command names the AppImage file itself.
 fn mcp_command() -> String {
-    let exe = std::env::current_exe()
+    let appimage = cfg!(target_os = "linux")
+        .then(|| std::env::var_os("APPIMAGE"))
+        .flatten()
+        .filter(|path| !path.is_empty())
+        .map(std::path::PathBuf::from);
+    let exe = appimage
+        .or_else(|| std::env::current_exe().ok())
         .map(|path| path.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| "quill".to_string());
-    if exe.contains(' ') {
-        format!("\"{exe}\" mcp")
+        .unwrap_or_else(|| "quill".to_string());
+    format!("{} mcp", shell_quote(&exe))
+}
+
+/// Quote `word` for a POSIX shell, or for PowerShell and cmd on Windows,
+/// where paths cannot contain `"`.
+fn shell_quote(word: &str) -> String {
+    let plain =
+        |c: char| c.is_ascii_alphanumeric() || "/._-+:".contains(c) || (cfg!(windows) && c == '\\');
+    if !word.is_empty() && word.chars().all(plain) {
+        word.to_string()
+    } else if cfg!(windows) {
+        format!("\"{word}\"")
     } else {
-        format!("{exe} mcp")
+        format!("'{}'", word.replace('\'', "'\\''"))
     }
 }
 

@@ -148,6 +148,12 @@ fn write_owner_only(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     std::fs::rename(&temp, path)
 }
 
+/// Whether the switch is on in the settings under `root`, read from disk
+/// (for `quill mcp`, which runs in its own process).
+pub fn enabled_on_disk(root: &Path) -> bool {
+    load(&root.join(SETTINGS_FILE))
+}
+
 /// Read the token a running Quill published under `root`.
 pub fn read_published_token(root: &Path) -> Option<String> {
     let text = std::fs::read_to_string(token_path(root)).ok()?;

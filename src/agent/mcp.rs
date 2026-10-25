@@ -200,15 +200,33 @@ fn launch_quill() -> Result<(), String> {
         const DETACHED_PROCESS: u32 = 0x0000_0008;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
         command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+        // Windows passes every inheritable handle to the child, and the MCP
+        // client's pipes on our stdio are usually inheritable: a Quill that
+        // kept them open would keep the client waiting for EOF.
+        use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation};
+        use windows_sys::Win32::System::Console::{
+            GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+        };
+        for which in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+            // SAFETY: GetStdHandle takes a constant and returns a handle or
+            // null/INVALID; SetHandleInformation fails harmlessly on either.
+            unsafe {
+                SetHandleInformation(GetStdHandle(which), HANDLE_FLAG_INHERIT, 0);
+            }
+        }
     }
     command.spawn().map(drop).map_err(|e| {
         format!("Could not start Quill ({e}). Ask the user to open Quill, then retry.")
     })
 }
 
-fn connect_or_launch(endpoint: &Endpoint) -> Result<Stream, String> {
+fn connect_or_launch(root: &std::path::Path, endpoint: &Endpoint) -> Result<Stream, String> {
     if let Some(stream) = connect(endpoint) {
         return Ok(stream);
+    }
+    // Starting Quill would only end in the same refusal.
+    if !super::access::enabled_on_disk(root) {
+        return Err(server::OFF_MESSAGE.into());
     }
     launch_quill()?;
     let deadline = Instant::now() + LAUNCH_WAIT;
@@ -221,33 +239,33 @@ fn connect_or_launch(endpoint: &Endpoint) -> Result<Stream, String> {
     Err("Started Quill, but it did not get ready within 45 seconds. Ask the user to check Quill, then retry.".into())
 }
 
+/// How a handshake with Quill failed.
+enum Refused {
+    /// The token on disk is not this launch's yet: a Quill that just started
+    /// writes its own once its socket listens.
+    StaleToken,
+    Other(String),
+}
+
 fn open_link(out: &Out) -> Result<Link, String> {
     let root = crate::settings::safe_app_root()
         .ok_or_else(|| "Quill's data folder is unavailable on this computer.".to_string())?;
-    let stream = connect_or_launch(&Endpoint::for_root(&root))?;
-    let token = super::access::read_published_token(&root)
-        .ok_or_else(|| server::OFF_MESSAGE.to_string())?;
-    let mut writer = &stream;
-    let hello = format!(
-        "{HEADER}\n{}\n",
-        json!({"jsonrpc": "2.0", "id": 0, "method": "auth", "params": {"token": token}})
-    );
-    writer
-        .write_all(hello.as_bytes())
-        .and_then(|()| writer.flush())
-        .map_err(|_| "Quill closed the connection. Retry.".to_string())?;
-    let _ = stream.set_recv_timeout(Some(Duration::from_secs(10)));
-    let answer = server::read_line_raw(&stream)
-        .and_then(|line| serde_json::from_str::<Value>(&line).ok())
-        .ok_or_else(|| "Quill did not answer. Retry.".to_string())?;
-    if let Some(message) = answer
-        .get("error")
-        .and_then(|e| e.get("message"))
-        .and_then(Value::as_str)
-    {
-        return Err(message.to_string());
-    }
-    let _ = stream.set_recv_timeout(None);
+    let endpoint = Endpoint::for_root(&root);
+    let mut retried = false;
+    let stream = loop {
+        let stream = connect_or_launch(&root, &endpoint)?;
+        match handshake(&root, stream) {
+            Ok(stream) => break stream,
+            Err(Refused::StaleToken) if !retried => {
+                retried = true;
+                std::thread::sleep(Duration::from_secs(1));
+            }
+            Err(Refused::StaleToken) => {
+                return Err("Quill refused this bridge's token. Retry; if it keeps failing, ask the user to restart Quill.".into());
+            }
+            Err(Refused::Other(message)) => return Err(message),
+        }
+    };
     let (recv, send) = stream.split();
     let alive = Arc::new(AtomicBool::new(true));
     let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
@@ -264,6 +282,43 @@ fn open_link(out: &Out) -> Result<Link, String> {
         alive,
         pending,
     })
+}
+
+/// Check who owns the socket, then send the header and this launch's token.
+fn handshake(root: &std::path::Path, stream: Stream) -> Result<Stream, Refused> {
+    // The socket may sit in a shared temp folder; only talk to our own user.
+    if !server::same_user(&stream) {
+        return Err(Refused::Other(
+            "The Quill socket on this computer belongs to another user. Ask the user to check Quill.".into(),
+        ));
+    }
+    let token = super::access::read_published_token(root)
+        .ok_or_else(|| Refused::Other(server::OFF_MESSAGE.to_string()))?;
+    let mut writer = &stream;
+    let hello = format!(
+        "{HEADER}\n{}\n",
+        json!({"jsonrpc": "2.0", "id": 0, "method": "auth", "params": {"token": token}})
+    );
+    writer
+        .write_all(hello.as_bytes())
+        .and_then(|()| writer.flush())
+        .map_err(|_| Refused::Other("Quill closed the connection. Retry.".into()))?;
+    let _ = stream.set_recv_timeout(Some(Duration::from_secs(10)));
+    let answer = server::read_line_raw(&stream)
+        .and_then(|line| serde_json::from_str::<Value>(&line).ok())
+        .ok_or_else(|| Refused::Other("Quill did not answer. Retry.".into()))?;
+    if let Some(error) = answer.get("error") {
+        if error.get("code").and_then(Value::as_i64) == Some(code::UNAUTHORIZED) {
+            return Err(Refused::StaleToken);
+        }
+        let message = error
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("Quill refused the connection. Retry.");
+        return Err(Refused::Other(message.to_string()));
+    }
+    let _ = stream.set_recv_timeout(None);
+    Ok(stream)
 }
 
 /// Copy Quill's answers to stdout; when Quill goes away, fail what is still

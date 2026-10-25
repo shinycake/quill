@@ -102,6 +102,26 @@ fn agents_need_the_switch_and_this_launchs_token() {
     );
     assert_eq!(by_id(4)["result"]["isError"], true);
 
+    // A request line past the limit ends the connection, whether or not it
+    // ever gets a newline.
+    let stream = connect(&endpoint).unwrap_or_else(|e| panic!("connect: {e}"));
+    let mut writer = &stream;
+    let hello = format!("{HEADER}\n{}\n", auth(&token));
+    writer
+        .write_all(hello.as_bytes())
+        .unwrap_or_else(|e| panic!("write: {e}"));
+    let mut reader = BufReader::new(&stream);
+    let mut line = String::new();
+    let _ = reader.read_line(&mut line);
+    assert!(line.contains("quill_version"), "{line}");
+    let _ = writer.write_all(&vec![b'x'; super::MAX_LINE_BYTES + 2]);
+    line.clear();
+    assert_eq!(
+        reader.read_line(&mut line).unwrap_or(0),
+        0,
+        "closed: {line}"
+    );
+
     // The launch protocol still works beside agents.
     assert_eq!(
         acquire(&endpoint, &[], |_| ()).ok(),

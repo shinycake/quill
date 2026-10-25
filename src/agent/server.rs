@@ -36,6 +36,7 @@ pub mod code {
     pub const ACCESS_OFF: i64 = -32001;
     pub const UNAUTHORIZED: i64 = -32002;
     pub const BUSY: i64 = -32003;
+    pub const INTERNAL: i64 = -32603;
     pub const PARSE: i64 = -32700;
     pub const INVALID: i64 = -32600;
     pub const NO_METHOD: i64 = -32601;
@@ -83,7 +84,7 @@ fn write_line(out: &mut impl Write, line: &str) -> io::Result<()> {
 /// The peer runs as this user (Unix). The socket file is 0600 already; this
 /// also covers a socket in a shared temp folder.
 #[cfg(unix)]
-fn same_user(stream: &Stream) -> bool {
+pub(super) fn same_user(stream: &Stream) -> bool {
     // SAFETY: geteuid has no preconditions and cannot fail.
     let me = unsafe { libc::geteuid() };
     stream
@@ -94,7 +95,7 @@ fn same_user(stream: &Stream) -> bool {
 }
 
 #[cfg(windows)]
-fn same_user(_stream: &Stream) -> bool {
+pub(super) fn same_user(_stream: &Stream) -> bool {
     // The pipe's DACL admits only this user (`pipe_security`).
     true
 }
@@ -154,17 +155,6 @@ pub fn serve(stream: Stream) {
     if !same_user(&stream) {
         return;
     }
-    let Some(_slot) = ConnectionSlot::take() else {
-        let _ = write_line(
-            &mut out,
-            &error_line(
-                &Value::Null,
-                code::BUSY,
-                "Too many agents are connected to Quill. Close one and retry.",
-            ),
-        );
-        return;
-    };
     let generation = access::generation();
     let _ = stream.set_recv_timeout(Some(AUTH_TIMEOUT));
     let auth_id = match authenticate(&stream) {
@@ -173,6 +163,19 @@ pub fn serve(stream: Stream) {
             let _ = write_line(&mut out, &error_line(&id, code, message));
             return;
         }
+    };
+    // Taken after auth, so a client that never authenticates (a Windows pipe
+    // has no read timeout) cannot hold a slot.
+    let Some(_slot) = ConnectionSlot::take() else {
+        let _ = write_line(
+            &mut out,
+            &error_line(
+                &auth_id,
+                code::BUSY,
+                "Too many agents are connected to Quill. Close one and retry.",
+            ),
+        );
+        return;
     };
     if write_line(
         &mut out,
@@ -189,8 +192,15 @@ pub fn serve(stream: Stream) {
     let mut reader = BufReader::new(recv);
     let mut line = Vec::new();
     loop {
-        let still_on = access::enabled() && access::generation() == generation;
-        match reader.read_until(b'\n', &mut line) {
+        let on = still_on(generation);
+        // Every read is bounded, so a line past the limit ends the
+        // connection however its bytes arrive.
+        let room = (MAX_LINE_BYTES + 1).saturating_sub(line.len()) as u64;
+        let read = (&mut reader).take(room).read_until(b'\n', &mut line);
+        if line.len() > MAX_LINE_BYTES {
+            return;
+        }
+        match read {
             Ok(0) => return,
             Ok(_) if line.ends_with(b"\n") => {}
             Ok(_) => return,
@@ -200,10 +210,7 @@ pub fn serve(stream: Stream) {
                     io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
                 ) =>
             {
-                if !still_on {
-                    return;
-                }
-                if line.len() > MAX_LINE_BYTES {
+                if !on {
                     return;
                 }
                 continue;
@@ -215,7 +222,7 @@ pub fn serve(stream: Stream) {
         if text.is_empty() {
             continue;
         }
-        if !(access::enabled() && access::generation() == generation) {
+        if !still_on(generation) {
             let mut out = crate::locks::lock_or_recover(&send);
             let _ = write_line(
                 &mut *out,
@@ -223,7 +230,42 @@ pub fn serve(stream: Stream) {
             );
             return;
         }
-        dispatch(text, &send, &in_flight);
+        dispatch(text, &send, &in_flight, generation);
+    }
+}
+
+/// Agent access is on and has not been turned off since `generation`.
+fn still_on(generation: u64) -> bool {
+    access::enabled() && access::generation() == generation
+}
+
+/// One request in flight: frees its slot and writes its answer when
+/// dropped, including when the tool panicked, so the agent always hears
+/// back. An answer finished after the switch went off is not sent.
+struct Reply<W: Write> {
+    send: Arc<Mutex<W>>,
+    in_flight: Arc<AtomicUsize>,
+    id: Value,
+    generation: u64,
+    line: Option<String>,
+}
+
+impl<W: Write> Drop for Reply<W> {
+    fn drop(&mut self) {
+        self.in_flight.fetch_sub(1, Ordering::SeqCst);
+        let line = if !still_on(self.generation) {
+            error_line(&self.id, code::ACCESS_OFF, OFF_MESSAGE)
+        } else {
+            self.line.take().unwrap_or_else(|| {
+                error_line(
+                    &self.id,
+                    code::INTERNAL,
+                    "Quill hit an internal error answering this request. Retry, or try another tool.",
+                )
+            })
+        };
+        let mut out = crate::locks::lock_or_recover(&self.send);
+        let _ = write_line(&mut *out, &line);
     }
 }
 
@@ -233,6 +275,7 @@ fn dispatch<W: Write + Send + 'static>(
     text: String,
     send: &Arc<Mutex<W>>,
     in_flight: &Arc<AtomicUsize>,
+    generation: u64,
 ) {
     let request: Value = match serde_json::from_str(&text) {
         Ok(request) => request,
@@ -263,17 +306,17 @@ fn dispatch<W: Write + Send + 'static>(
         );
         return;
     }
-    let send = send.clone();
-    let counter = in_flight.clone();
-    let spawned = crate::thread_guard::spawn_guarded("quill-agent-request", move || {
-        let line = answer(&request, &id);
-        counter.fetch_sub(1, Ordering::SeqCst);
-        let mut out = crate::locks::lock_or_recover(&send);
-        let _ = write_line(&mut *out, &line);
+    let mut reply = Reply {
+        send: send.clone(),
+        in_flight: in_flight.clone(),
+        id,
+        generation,
+        line: None,
+    };
+    // A failed spawn drops the closure, and with it `reply`, which answers.
+    let _ = crate::thread_guard::spawn_guarded("quill-agent-request", move || {
+        let _ = reply.line.insert(answer(&request, &reply.id));
     });
-    if spawned.is_err() {
-        in_flight.fetch_sub(1, Ordering::SeqCst);
-    }
 }
 
 fn answer(request: &Value, id: &Value) -> String {

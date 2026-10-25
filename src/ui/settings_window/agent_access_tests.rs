@@ -79,3 +79,24 @@ fn the_agent_access_page_turns_access_on_and_offers_the_setup_command(cx: &mut T
     settle(vcx);
     assert!(!access::enabled());
 }
+
+#[test]
+fn setup_commands_quote_paths_for_the_shell() {
+    use super::shell_quote;
+    assert_eq!(shell_quote("/usr/bin/quill"), "/usr/bin/quill");
+    if cfg!(windows) {
+        assert_eq!(
+            shell_quote(r"C:\Program Files\Quill\quill.exe"),
+            r#""C:\Program Files\Quill\quill.exe""#
+        );
+    } else {
+        assert_eq!(
+            shell_quote("/Applications/Quill.app/Contents/MacOS/quill"),
+            "/Applications/Quill.app/Contents/MacOS/quill"
+        );
+        assert_eq!(
+            shell_quote("/home/a b/it's $HOME"),
+            r"'/home/a b/it'\''s $HOME'"
+        );
+    }
+}
