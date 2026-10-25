@@ -1,0 +1,43 @@
+// ai_compose: the composer's AI button and the AI compose box (tdesktop
+// boxes/compose_ai_box.cpp, ui/boxes/about_cocoon_box.cpp).
+"lng_ai_compose_title" = "AI Editor";
+"lng_ai_compose_apply" = "Apply";
+"lng_ai_compose_tab_translate" = "Translate";
+"lng_ai_compose_tab_style" = "Style";
+"lng_ai_compose_tab_fix" = "Fix";
+"lng_ai_compose_original" = "Original";
+"lng_ai_compose_result" = "Result";
+"lng_ai_compose_to_language" = "To {language}";
+"lng_ai_compose_name_style" = "{name} ({style})";
+"lng_ai_compose_style_neutral" = "Neutral";
+"lng_ai_compose_emojify" = "emojify";
+"lng_ai_compose_error" = "AI request failed.";
+"lng_ai_compose_error_too_long" = "Sorry, this text is too long.";
+"lng_ai_compose_tooltip" = "Rewrite, translate, or correct your text using AI.";
+"lng_ai_compose_flood_text" = "Get {link} for **50x** more AI text transformations per day.";
+"lng_ai_compose_flood_link" = "Telegram Premium";
+"lng_ai_compose_select_style" = "Select Style";
+"lng_ai_compose_apply_style" = "Apply Style";
+"lng_ai_compose_style_tooltip" = "Choose Style";
+"lng_ai_compose_author" = "Style by {user}";
+"lng_sr_ai_compose_info" = "About AI Editor";
+"lng_sr_ai_compose_copy_result" = "Copy result";
+"lng_sr_ai_compose_expand_original" = "Expand original";
+"lng_sr_ai_compose_collapse_original" = "Collapse original";
+"lng_send_button" = "Send";
+"lng_translate_cocoon_title" = "Cocoon";
+"lng_translate_cocoon_subtitle" = "**Cocoon** ({text}) handles AI tasks **safely** and **efficiently**.";
+"lng_translate_cocoon_explain" = "**Co**nfidential **Co**mpute **O**pen **N**etwork";
+"lng_translate_cocoon_private_title" = "Private";
+"lng_translate_cocoon_private_text" = "No third party can access any data, such as translations, inside {mention}.";
+"lng_translate_cocoon_private_mention" = "@cocoon";
+"lng_translate_cocoon_efficient_title" = "Efficient";
+"lng_translate_cocoon_efficient_text" = "Cocoon has allowed Telegram to reduce translation costs by 6x.";
+"lng_translate_cocoon_everyone_title" = "For Everyone";
+"lng_translate_cocoon_everyone_text" = "Any developer can use Cocoon for AI features. Learn more at {domain}.";
+"lng_translate_cocoon_everyone_domain" = "cocoon.org";
+"lng_translate_cocoon_text" = "Want to integrate Cocoon into your projects?\nReach out at {link}";
+"lng_translate_cocoon_text_link" = "t.me/cocoon?direct";
+"lng_translate_cocoon_done" = "Understood";
+// Quill: the composer button's letters (tdesktop draws "AI" without a key).
+"qll_ai_compose_button" = "AI";
