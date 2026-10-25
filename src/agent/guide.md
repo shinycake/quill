@@ -231,11 +231,12 @@ Settings > Advanced > Agent access (off by default). `quill_status` shows
 `active` while you are driving, `paused` while the user has taken control,
 `stopped` after the user pressed Stop, and `resumes_when` says what lifts
 a pause or a Stop. `window` is `visible`, `hidden` (behind other windows,
-on another desktop, on a sleeping display), `minimised` or `not open`
-(null while the driver is off, paused or stopped). Quill's window draws
-nothing unless it is `visible`, so every UI tool then answers at once that
-it is hidden, minimised or not open: ask the user to bring it back, and use
-the chat tools meanwhile. Windows and some Linux desktops keep drawing a
+on another desktop, on a sleeping display), `minimised`, `not open`, or
+`not answering` (Quill did not answer in time, usually because it is busy;
+retry in a moment) and null while the driver is off, paused or stopped.
+Quill's window draws nothing unless it is `visible`, so every UI tool then
+answers at once that it is hidden, minimised or not open: ask the user to
+bring it back, and use the chat tools meanwhile. Windows and some Linux desktops keep drawing a
 covered window and report it `visible`.
 
 | Tool | Use it to |
@@ -282,8 +283,10 @@ Rules, all enforced by Quill:
   answers "Quill is showing <that>; agents can't see or use it. Ask the
   user." and every input is refused. You cannot open one either: a key
   (`cmd-,`, the lock chord), a menu item or a click that would open
-  Settings, lock Quill, log out, switch accounts or open a payment, Stars,
-  Premium or a gift opens nothing, and the reply lists the refusal.
+  Settings, lock Quill, log out, switch accounts, answer a call or open a
+  payment, Stars, Premium or a gift opens nothing, and the reply lists the
+  refusal. Any other dialog of that kind your input opens is closed before
+  it shows, and the reply says "Quill closed a dialog".
 - Enter or Send in the message box of a granted chat sends through the
   same path as `send_message`: grants, pacing, "Confirm each send" and the
   activity log; the reply has `sent` or says why not, and the draft stays
@@ -293,8 +296,10 @@ Rules, all enforced by Quill:
   window you may use, types a line break as the chord that inserts one,
   and refuses a tab character; Enter and Space go only to such a text
   box. `press_keys` never types characters.
-- Keys that quit, close, hide or minimise Quill are never pressed (a
-  shortcut the user rebound to one is refused by the action itself), and
+- Keys that quit, close, hide, minimise, maximise or full-screen Quill
+  are never pressed (a shortcut the user rebound to one is refused by the
+  action itself), the drawn title bar's buttons and drag area take no
+  click, and
   neither are paste chords: the clipboard is the user's, and a paste reached any other
   way (a menu) reads it as empty. Type your own text with `type_text`.
 - Nothing leaves Quill: a link is not opened in the browser, a file is

@@ -1332,13 +1332,11 @@ blocked by the surface check. Every other keybinding (chat and folder
 navigation, search, history scrolling, selection, formatting, viewer keys)
 opens nothing on the hard list; a chat it would open goes through
 `agent_may_open`, a write it would send through `screen_request`. The
-drawn title bar on Linux and Windows carries no region tag, so a point on
-it fails `point_allowed` in the granted scope; in the Everything scope its
-close button refuses too (`FrameTitleBar` in `src/ui/window_frame.rs`
-wraps the callback). Its minimise and maximise buttons call the window
-directly inside the kit's `TitleBar` and are not guarded there: a gap in
-the Everything scope (the window is left minimised, and the next command
-says so, below).
+drawn title bar carries no region tag, so a point on it fails
+`point_allowed` in the granted scope; in the Everything scope its close
+button refuses too (`FrameTitleBar` in `src/ui/window_frame.rs` wraps the
+callback), and its minimise and maximise buttons are kept off by a tag
+(below, "Review fixes").
 
 Tests: `agent_driver_hard_tests.rs`. An agent presses Cmd+, and Ctrl+,
 (Settings stays closed, the reply carries "open Settings"), Cmd+L and
@@ -1396,9 +1394,10 @@ as it can (GPUI's own notes: Windows and compositing X11 window managers
 keep a covered window visible, and draw it). It feeds three places:
 
 - `UiCommand::State` carries it as `UiState::window`, and `quill_status`
-  asks for it (1.5 s; no answer means no window: `not open`) and reports
-  `ui_driver.window` as `visible`, `hidden`, `minimised` or `not open`,
-  with a line in the text when it is not visible. It is null while the UI
+  asks for it (1.5 s; no answer in time is `not answering`: the window
+  may be there with its thread busy) and reports `ui_driver.window` as
+  `visible`, `hidden`, `minimised`, `not open` or `not answering`, with a
+  line in the text when it is not visible. It is null while the UI
   answers no driver command (the driver off, paused or stopped), so the
   status never reveals more than a command would.
 - Every other command answers at once when the window is not visible,
@@ -1419,3 +1418,102 @@ are refused with "is hidden" and nothing is logged, and shown again the
 state is `visible` and the tree reads. `policy` tests the wording for each
 state. The minimised readings are platform calls the test platform does
 not have; none of them ran, and only the macOS one was compiled here.
+
+### Review fixes
+
+A review of the three fixes above found openers the handler guards had
+missed, and gaps around the window itself.
+
+**Dialogs that open from state.** About twenty openers had no guard
+(`open_paid_box`, the gift transfer, resale, value, auction and code
+boxes, the giveaway form, the suggested-post price, the live story Stars
+box, Grams, mini app invoices, the remove-fee box, the paid price, Earn,
+Money, the Stars gift box, a payment receipt, the boost extras), so an
+agent's click left a hard dialog on screen. Guarding them one by one
+would miss the next one. Quill's kit dialogs do not open through one call:
+the shell derives the dialog from the app's open flags on every render
+(`QuillShell::sync_kit_dialogs_in`, the registry built by
+`register_dialogs!`), so there is no `open_dialog` call to refuse. The
+open state is derived instead, at the one place every injected input
+passes:
+
+- `perform_step` (`src/ui/agent_driver.rs`) reads which hard dialogs
+  (`HARD_DIALOGS`) and hard layers (`HARD_LAYERS`) are open before the
+  step, and again after it, still under the injecting flag
+  (`agent_driver_surface::block_opened_by_agent`). A dialog or layer that
+  became open is recorded as a refusal (`guard::refuse_hard_dialog`: the
+  step's reply carries "Quill closed a dialog an agent's input opened"),
+  and queued.
+- The deferred halves of a step (a clicked link run at render, a deep
+  link TDLib resolved later, the instant view fallback) run through
+  `QuillApp::agent_step`, which does the same around
+  `guard::with_injecting`; after the command answered, the refusal goes to
+  the activity log.
+- The shell, before it picks the dialog to show, closes every queued one
+  with the dialog's own close (`DialogSpec::closes`, the clear its builder
+  hands `on_close_kind`; a layer with its Escape close), repeating up to
+  eight times for one that steps back. No frame runs between the step and
+  that render, so the dialog never shows. A test requires a close for
+  every hard dialog except the agent prompts, which tool threads open and
+  input never does.
+
+Only a dialog that went from closed to open during the agent's own input
+counts: a call ringing or an agent prompt arriving in the same frame is
+not the step's, and the user's input never runs under the flag. The
+handler guards stay: their refusals say what was refused ("open
+Settings", "lock Quill"), and they cover what is not a dialog (Settings,
+the lock, quitting).
+
+**Calls and accounts.** Answering a call from the `BackgroundCall`
+dialog switched to the ringing account with no guard. `switch_account`
+(`src/ui/accounts.rs`) now refuses with `HardSurface::Account` on every
+route (the switcher, the main menu, the tray, a notification), and
+`answer_background_call` refuses before it touches the ring ("answer
+calls for the user"). `BackgroundCall` is a hard dialog: a ringing call
+blocks driving in any scope.
+
+**The window.** `ZoomWindow` and `ToggleFullscreen` (F11, Cmd+Ctrl+F, the
+Window menu) refuse with `HardSurface::Window`, and so do the viewer's
+video full screen and the group call stage when they would make the
+window full screen (leaving full screen stays allowed). The kit's
+`TitleBar` calls `minimize_window` and `zoom_window` itself, with no
+callback to wrap (only close has one), and its drag area takes a double
+click (maximise, or the macOS title-bar action) and, on Linux, a right
+click (the window manager's menu). `FrameTitleBar` wraps the bar in a
+`window-chrome` tag, and the app's own parts of it (the menu bar, the
+search button) in `window-chrome-content`. `redact::on_window_chrome`
+says a point's topmost chrome tag is `window-chrome`, and the pointer and
+focus checks refuse it in every scope (input only: `point_allowed` also
+decides the screenshot's paint filter, which keeps showing the bar), and `agent_pointer_allowed` lets only a single left click, a hover
+or a scroll through anywhere on the bar, since a double or right click on
+a button there still reaches the bar.
+
+**Linux minimised reading.** `window_control::is_minimised` and
+`set_visible` built their arguments as a tuple, so every call opened an X
+connection, on Wayland too. They now read the X window first and connect
+only for an X11 window, and the connection (with the `WM_STATE` atom) is
+kept for the UI thread, so a check is one `GetProperty` round trip. A
+Wayland window never connects.
+
+**Smaller fixes.** `QUILL_DEMO_SHOT_KEYS` is read only in a
+`demo-capture` build. The live story top-up returns before it marks the
+Stars packs open when the Stars box is refused. The main menu's Night
+mode and archive toggles are refused as "change a setting"
+(`HardSurface::Setting`). In `gpui-pre`, a node that owns the focused
+handle replaces the focus fallback instead of tripping the "set_focus
+called more than once" assertion (`QUILL-CHANGES.md`).
+
+Tests (`agent_driver_hard_tests.rs`): with "All other chats" on, an agent
+right-clicks the Star chip under a message: the reply carries "Quill
+closed a dialog", the amount box is not open and no dialog shows; the
+same opener run as a deferred half (`agent_step`) leaves nothing open; the
+user's own call opens the box. An agent's `switch_account` and Answer are
+refused and the account stays. F11 and Cmd+Ctrl+F are refused and the
+window is not full screen; Zoom is refused. `window_frame_tests.rs`
+hovers the drawn bar: the drag area reports only `window-chrome` and
+refuses, the menu and the action report the content tag first and pass.
+`redact` and `agent_driver_surface` unit tests cover the tag rule and the
+closes. The X11 code was type-checked against x11rb 0.13.2 in a scratch
+crate (the Linux target does not build here: no cross C toolchain); it did
+not run on a Linux desktop, nor did the Windows and macOS minimised
+readings change.
