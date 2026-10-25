@@ -408,6 +408,49 @@ fn a_key_that_opens_an_ungranted_chat_stops_the_sequence(cx: &mut TestAppContext
 }
 
 #[gpui_kit::test]
+fn the_clicked_message_box_is_the_focused_node(cx: &mut TestAppContext) {
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    turn_on();
+    grant(11, Scope::ReadWrite);
+    let _presence = activity::connect("Test agent");
+    settle(vcx);
+    let tree = read_tree(&app, vcx);
+    let target = message_box(&tree);
+
+    // The text input's role sits on its frame and the editor inside takes
+    // the focus; the frame is what an agent (and a screen reader) sees
+    // focused, in the click's own reply, after typing and in a fresh read.
+    let focused = |tree: &UiTree| {
+        assert_eq!(tree.focus.as_deref(), Some(target.as_str()), "focus");
+        assert!(
+            tree.node(&target)
+                .is_some_and(|node| node.states.iter().any(|s| s == "focused")),
+            "{:?}",
+            tree.node(&target)
+        );
+    };
+    let reply = drive(&app, vcx, click(Target::Node(target.clone())));
+    let Ok(UiReply::Done { tree: clicked, .. }) = reply else {
+        panic!("expected Done, got {reply:?}");
+    };
+    focused(&clicked);
+    let reply = drive(&app, vcx, UiCommand::TypeText { text: "hi".into() });
+    let Ok(UiReply::Done { tree: typed, .. }) = reply else {
+        panic!("expected Done, got {reply:?}");
+    };
+    focused(&typed);
+    focused(&read_tree(&app, vcx));
+
+    // Focus elsewhere: the message box is no longer reported.
+    vcx.update(|window, cx| window.blur(cx));
+    settle(vcx);
+    let blurred = read_tree(&app, vcx);
+    assert_ne!(blurred.focus.as_deref(), Some(target.as_str()));
+}
+
+#[gpui_kit::test]
 fn the_composer_send_goes_to_the_agent_path_and_read_only_refuses(cx: &mut TestAppContext) {
     let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
     let (app, mut vcx) = new_app(cx);

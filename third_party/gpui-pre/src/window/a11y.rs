@@ -281,12 +281,40 @@ impl A11y {
             // later focus on a node-less element logs again.
             self.last_focus_without_node = None;
             self.nodes.set_focus(node_id);
-        } else {
+        } else if !self.focus_nearest_focusable_ancestor() {
             // The element registered a focus handle and an id, but never got a
             // node because it has no role.
             if let Some(focus_id) = self.focus_ids.get(&node_id).copied() {
                 self.note_focus_without_node(focus_id, "it has an id but no role");
             }
+        }
+    }
+
+    /// The focused element has no node of its own (no role, or no id):
+    /// report the nearest enclosing node that is focusable this frame
+    /// instead. A composite control puts its role on a frame that tracks a
+    /// focus handle of its own around the element that takes the focus (a
+    /// text input's frame around its editor), and that frame is what has
+    /// the focus to assistive technology. Returns whether the focus is
+    /// reported now.
+    pub(crate) fn focus_nearest_focusable_ancestor(&mut self) -> bool {
+        if self.nodes.focus.is_some() {
+            return true;
+        }
+        let ancestor = self
+            .nodes
+            .ids_stack
+            .iter()
+            .rev()
+            .find(|id| **id != ROOT_NODE_ID && self.focus_ids.contains_key(*id))
+            .copied();
+        match ancestor {
+            Some(id) => {
+                self.last_focus_without_node = None;
+                self.nodes.set_focus(id);
+                true
+            }
+            None => false,
         }
     }
 

@@ -2377,10 +2377,12 @@ impl Interactivity {
                     if focus_handle.is_focused(window) {
                         window.a11y.set_focus(node_id);
                     }
-                } else if focus_handle.is_focused(window) {
+                } else if focus_handle.is_focused(window)
+                    && !window.a11y.focus_nearest_focusable_ancestor()
+                {
                     // Focusable, but with no element id it can't have an
-                    // accessibility node, so screen readers fall back to the
-                    // whole window.
+                    // accessibility node, and no focusable node encloses it,
+                    // so screen readers fall back to the whole window.
                     window
                         .a11y
                         .note_focus_without_node(focus_handle.id, "it has no element id");

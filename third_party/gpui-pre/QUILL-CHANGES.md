@@ -192,3 +192,21 @@ Added in 2026 for Agent access's UI driver, step 3 (screenshots,
   the tooltip is painted under the same tags, so the filter cuts it with
   its owner (a tooltip over a hidden chat row is hidden too). Nothing is
   recorded while no filter is set.
+
+## A focused element without a node reports its focusable frame
+
+Added in 2026 for Agent access's UI driver (`docs/decisions/agent-access.md`,
+"Phase 5: fixes from a live test"). A text input puts its role on a frame
+(gpui-component's `Input` renders `InputBase` with the role and a focus
+handle of its own) while the editor inside, which has an id and no role,
+takes the focus. `A11y::set_focus` only reported a node that had been
+pushed, so the focused composer left the tree with no focus at all, for
+the driver and for screen readers alike. `src/window/a11y.rs`:
+`A11y::focus_nearest_focusable_ancestor` reports the nearest enclosing
+node that registered a focus handle this frame (`set_focusable`) instead,
+unless a node already holds the focus; `set_focus` falls back to it for a
+focused element with no node. `src/elements/div.rs`: a focused element
+with no id falls back the same way before logging that it has no node.
+The crate's own tests do not build in Quill's tree (missing dev
+dependencies and example assets), so Quill's window test
+`the_clicked_message_box_is_the_focused_node` covers it.

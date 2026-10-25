@@ -734,9 +734,8 @@ notes, the chord policy and the step split.
   says "connected", not "driving"; the takeover pill says it instead.
 - Message rows join the tree only when a screen reader focuses them, so
   history content is read through the chat tools, not the window.
-- `focus` is reported only when the focused element itself has a role; the
-  kit `Input` registers its focus handle on a wrapper, so a focused text
-  box shows no `focused` state (the typed value shows it worked).
+- `focus` was reported only when the focused element itself had a role;
+  fixed after the live test (below).
 - `open_menu` reports the nodes that appeared one frame after the click; a
   menu that animates in over several frames may need a `read_ui_tree`.
 - A system screen reader and the driver do not share the window; a user
@@ -1346,3 +1345,29 @@ Ctrl+L with a passcode set (Quill stays unlocked) and Ctrl+M (refused);
 the user's own Cmd+, still opens Settings. A second test runs the main
 menu entries and the openers under the injecting flag: nothing opens, each
 refusal is recorded, and the same entry opens for the user.
+
+### The focused text box is reported
+
+`focus` was null in every tree, even right after clicking the message box
+and typing into it. The tree's focus comes from GPUI
+(`A11yTreeSnapshot::focus`, read in `src/ui/agent_driver_tree.rs`), and
+GPUI reported a node as focused only if the element that tracks the
+focused handle pushed a node itself. gpui-component's `Input` puts the
+`MultilineTextInput` role on its frame (`InputBase`, which tracks a frame
+focus handle of its own), while the editor inside (`input-state` in
+gpui-base, an id and no role) holds the focus, so `A11y::set_focus` found
+no node and logged "it has an id but no role". The same held for every
+kit text box, and for screen readers, which announced the whole window.
+
+The fix is in the vendored `gpui-pre` (`third_party/gpui-pre/QUILL-CHANGES.md`):
+a focused element with no node of its own reports the nearest enclosing
+node that registered a focus handle in the same frame, unless one already
+holds the focus. The text box's frame is that node. Nothing in Quill
+changed; the driver, the redaction (a focused node cut from the tree
+reports no focus) and the screenshot's tree read the same field.
+
+Test: `the_clicked_message_box_is_the_focused_node`
+(`agent_driver_tests.rs`) clicks the message box and checks that the
+click's reply, the reply after `type_text` and a fresh `read_ui_tree` all
+name it as `focus` with the `focused` state, and that blurring the window
+drops it. It fails without the `gpui-pre` change (`focus` is `None`).
