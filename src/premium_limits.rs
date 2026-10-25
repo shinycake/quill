@@ -37,6 +37,21 @@ pub struct LimitPair {
 }
 
 impl PremiumLimitKind {
+    /// The `/start` ref of the box's Increase Limit (tdesktop
+    /// `LimitsPremiumRef`).
+    pub fn premium_ref(self) -> String {
+        let addition = match self {
+            Self::Pins => "dialog_pinned",
+            Self::PinsArchive => "dialogs_folder_pinned",
+            Self::Caption => "caption_length",
+            Self::SavedGifs => "saved_gifs",
+            Self::Channels => "channels",
+            Self::PublicLinks => "channels_public",
+            Self::FileSize => "upload_max_fileparts",
+        };
+        format!("double_limits__{addition}")
+    }
+
     /// Every kind, in the order of the "Doubled limits" page.
     pub const ALL: [Self; 7] = [
         Self::Channels,

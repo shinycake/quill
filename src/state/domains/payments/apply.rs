@@ -232,6 +232,12 @@ impl Session {
                     self.payments.hub.premium_state = Some(info);
                 }
             }
+            PaymentsPayload::BusinessFeatures(features) => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBusinessFeatures) {
+                    self.payments.hub.business_features_loading = false;
+                    self.payments.hub.business_features = Some(features);
+                }
+            }
             PaymentsPayload::GiveawayInfo(info) => self.apply_giveaway_info(info, pending),
             PaymentsPayload::PremiumGiveawayOptions(options) => {
                 self.apply_premium_giveaway_options(options, pending)

@@ -131,3 +131,30 @@ fn premium_features_apply_to_their_request() {
     );
     assert!(!session.payments.hub.premium_loading);
 }
+
+#[test]
+fn business_features_keep_the_server_order() {
+    use crate::premium_hub::BusinessFeature;
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request(RequestPurpose::GetBusinessFeatures, None);
+    session.payments.hub.business_features_loading = true;
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"businessFeatures","@extra":"{}","features":[{{"@type":"businessFeatureQuickReplies"}},{{"@type":"businessFeatureEmojiStatus"}},{{"@type":"businessFeatureLocation"}}]}}"#,
+            extra.0
+        ),
+    );
+    assert!(!session.payments.hub.business_features_loading);
+    // The emoji status row is not one tdesktop lists.
+    assert_eq!(
+        session.payments.hub.business_features,
+        Some(vec![
+            BusinessFeature::QuickReplies,
+            BusinessFeature::Location
+        ])
+    );
+}

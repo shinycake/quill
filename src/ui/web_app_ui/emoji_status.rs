@@ -147,7 +147,7 @@ impl QuillApp {
         }
         if !self.premium_for_emoji_status() {
             // tdesktop shows the Premium preview and leaves the box open.
-            self.open_premium(cx);
+            self.open_premium_at(quill::premium_hub::PremiumFeature::EmojiStatus, cx);
             self.with_window(|window| {
                 window.show_popup(PopupPurpose::EmojiStatusAccess, access_popup(&bot_name));
             });
@@ -226,8 +226,8 @@ impl QuillApp {
             return;
         }
         if !self.premium_for_emoji_status() {
-            // The prompt stays, behind the Premium page.
-            self.open_premium(cx);
+            // The prompt stays, behind the Premium preview.
+            self.open_premium_at(quill::premium_hub::PremiumFeature::EmojiStatus, cx);
             let popup = confirm_popup(&bot_name, alt);
             self.with_window(|window| {
                 window.show_popup(PopupPurpose::EmojiStatus, popup);

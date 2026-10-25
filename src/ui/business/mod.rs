@@ -38,6 +38,7 @@ use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::*;
 use quill::business_info::BusinessInfo;
 use quill::lang::{keys, tr, tr_with};
+use quill::premium_hub::BusinessFeature;
 
 /// Whether a screen may be left after its save ran.
 pub(super) enum Leave {
@@ -118,6 +119,9 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.business.error = None;
             let _ = live.driver.ensure_quick_reply_shortcuts();
+            // The hub's row order, and the clips of the feature previews.
+            let _ = live.driver.maybe_fetch_business_features();
+            let _ = live.driver.maybe_fetch_premium();
             if let Some(me) = me {
                 let _ = live.driver.fetch_user_full_info(me);
             }
@@ -358,17 +362,33 @@ impl QuillApp {
     /// The line shown when a save cannot be sent in demo mode.
     pub(super) const DEMO_LINE: &'static str = "Business settings need a live session.";
 
-    /// A hub row was chosen. Without Premium tdesktop shows the Premium
-    /// screen instead (it opens above this dialog); the chatbots row works
-    /// without it.
+    /// A hub row was chosen. Without Premium tdesktop shows the feature's
+    /// preview to buy instead (it opens above this dialog); the chatbots
+    /// row works without it, and folder tags always show their preview.
     pub(super) fn business_open_feature(
         &mut self,
-        view: Option<View>,
+        feature: BusinessFeature,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if view != Some(View::Chatbots) && !self.business_premium() {
-            self.open_premium(cx);
+        let view = match feature {
+            BusinessFeature::GreetingMessage => Some(View::Greeting),
+            BusinessFeature::AwayMessage => Some(View::Away),
+            BusinessFeature::QuickReplies => None,
+            BusinessFeature::OpeningHours => Some(View::Hours),
+            BusinessFeature::Location => Some(View::Location),
+            BusinessFeature::AccountLinks => Some(View::ChatLinks),
+            BusinessFeature::StartPage => Some(View::StartPage),
+            BusinessFeature::Bots => Some(View::Chatbots),
+            BusinessFeature::ChatFolderTags
+            | BusinessFeature::EmojiStatus
+            | BusinessFeature::UpgradedStories => {
+                self.open_premium_to_buy(feature, cx);
+                return;
+            }
+        };
+        if feature != BusinessFeature::Bots && !self.business_premium() {
+            self.open_premium_to_buy(feature, cx);
             return;
         }
         match view {

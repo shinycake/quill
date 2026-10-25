@@ -56,7 +56,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if link.is_none() && !self.business_premium() {
-            self.open_premium(cx);
+            self.open_premium_to_buy(quill::premium_hub::BusinessFeature::AccountLinks, cx);
             return;
         }
         let text = cx.new(|cx| {

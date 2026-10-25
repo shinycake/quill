@@ -699,9 +699,15 @@ impl QuillApp {
                         } else {
                             tr(keys::Q_CHATLIST_INCREASE_LIMIT)
                         })
-                        .on_click(cx.listener(|this, _, window, cx| {
+                        .on_click(cx.listener(move |this, _, window, cx| {
                             this.folders.limit_box = None;
-                            this.open_premium(cx);
+                            match kind.premium_ref() {
+                                Some(start_ref) => this.open_premium_from(&start_ref, cx),
+                                None => this.open_premium_to_buy(
+                                    quill::premium_hub::BusinessFeature::ChatFolderTags,
+                                    cx,
+                                ),
+                            }
                             this.close_kit_dialog_if_done(DialogKind::FolderLimit, window, cx);
                         })),
                 );
@@ -721,13 +727,19 @@ impl QuillApp {
     // ------------------------------------------------------------------
 
     /// A click on a tag colour (`-1` = No tag). Colours need Premium with
-    /// folder tags on; anyone else gets the Premium notice.
+    /// folder tags on: a free account gets the tags preview (tdesktop
+    /// `ShowPremiumPreviewToBuy(FilterTags)`), a Premium one with tags
+    /// off the notice.
     fn choose_folder_tag_color(&mut self, color_id: i32, cx: &mut Context<Self>) {
         let (premium, tags_enabled) = (
             self.is_premium(),
             self.session()
                 .is_some_and(|s| s.chat_list.are_folder_tags_enabled),
         );
+        if !premium {
+            self.open_premium_to_buy(quill::premium_hub::BusinessFeature::ChatFolderTags, cx);
+            return;
+        }
         if !tag_choice_allowed(premium, tags_enabled) {
             self.show_folder_limit(FolderLimitKind::Tags, cx);
             return;

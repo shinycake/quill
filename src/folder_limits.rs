@@ -30,6 +30,19 @@ pub enum FolderLimitKind {
 }
 
 impl FolderLimitKind {
+    /// The `/start` ref the box's Premium button sends (tdesktop
+    /// `LimitsPremiumRef`); `None` for tags, which open their preview.
+    pub fn premium_ref(self) -> Option<String> {
+        let addition = match self {
+            Self::Folders => "dialog_filters",
+            Self::ChatsIncluded | Self::ChatsExcluded => "dialog_filters_chats",
+            Self::InviteLinks => "chatlist_invites",
+            Self::SharedFolders => "chatlists_joined",
+            Self::Tags => return None,
+        };
+        Some(format!("double_limits__{addition}"))
+    }
+
     /// The `premiumLimitType*` constructor behind the limit, if it has one.
     pub fn td_limit_type(self) -> Option<&'static str> {
         match self {

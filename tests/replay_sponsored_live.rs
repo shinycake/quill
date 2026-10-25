@@ -54,16 +54,12 @@ fn sponsored_tail_hides_after_report_and_hide() {
     );
     assert!(session.open_sponsored_tail().is_none());
 
-    // Hide ads without Premium: notice only, ads stay available.
+    // Hide ads without Premium: the No ads preview, ads stay available.
     assert_eq!(session.begin_sponsored_hide(chat_id, 9002), Some(false));
+    assert!(session.messages.last_sponsored_report.is_none());
     assert_eq!(
-        session
-            .messages
-            .last_sponsored_report
-            .clone()
-            .unwrap()
-            .user_message(),
-        "Hiding sponsored messages needs Telegram Premium"
+        session.payments.hub.promo_request.take(),
+        Some(quill::premium_hub::PremiumFeature::DisabledAds.into())
     );
     assert!(!session.messages.sponsored_hidden);
 

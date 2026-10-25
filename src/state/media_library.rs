@@ -3,6 +3,7 @@
 //! comes into view), plus the reaction options of the message whose
 //! reaction picker is open.
 use super::*;
+use crate::premium_hub::PremiumFeature;
 use crate::telegram::envelope::{
     ReactionType, StoryAvailableReactionKind, StoryAvailableReactionView,
 };
@@ -71,15 +72,6 @@ pub struct MessageReactionOptions {
     pub allow_custom_emoji: bool,
     /// Offered reactions TDLib marks `needs_premium` for this account.
     pub premium_locked: Vec<ReactionChoice>,
-}
-
-/// The Premium feature a reaction tap shows instead of reacting.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReactPremiumFeature {
-    /// tdesktop `PremiumFeature::InfiniteReactions`.
-    UniqueReactions,
-    /// tdesktop `PremiumFeature::TagsForMessages`.
-    SavedMessagesTags,
 }
 
 /// Where the open message menu's reaction options stand. tdesktop reads
@@ -328,7 +320,7 @@ impl Session {
         chat_id: ChatId,
         message_id: MessageId,
         choice: &ReactionChoice,
-    ) -> Option<ReactPremiumFeature> {
+    ) -> Option<PremiumFeature> {
         if self.my_is_premium() {
             return None;
         }
@@ -339,7 +331,7 @@ impl Session {
             .and_then(|message| message.interaction_info.as_ref())
             .and_then(|info| info.reactions.as_ref());
         if reactions.is_some_and(|r| r.are_tags) {
-            return Some(ReactPremiumFeature::SavedMessagesTags);
+            return Some(PremiumFeature::SavedMessagesTags);
         }
         let on_message = reactions.is_some_and(|r| {
             r.reactions
@@ -359,6 +351,6 @@ impl Session {
             .get(&chat_id.0)
             .is_some_and(|chat| chat.is_channel());
         let custom = matches!(choice, ReactionChoice::CustomEmoji(_));
-        (locked || (custom && !broadcast)).then_some(ReactPremiumFeature::UniqueReactions)
+        (locked || (custom && !broadcast)).then_some(PremiumFeature::UniqueReactions)
     }
 }

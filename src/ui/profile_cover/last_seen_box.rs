@@ -144,7 +144,7 @@ impl QuillApp {
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.close_last_seen_box(cx);
                                 this.close_kit_dialog_if_done(DialogKind::ShowLastSeen, window, cx);
-                                this.open_premium(cx);
+                                this.open_premium_from("lastseen_hidden", cx);
                             })),
                     ),
             );

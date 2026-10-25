@@ -141,8 +141,32 @@ fn speech_trial_hint_counts_and_runs_out() {
     };
     assert_eq!(
         speech_trial_hint(&out, 1_700_000_000),
-        "You have used all your free transcriptions this week. Wait until November 21 to use it again or subscribe to Premium now."
+        "You have used all your free transcriptions this week. Wait until November 21 to use it again or subscribe to Telegram Premium now."
     );
+}
+
+#[test]
+fn transcription_locks_once_the_free_quota_is_used() {
+    let used = SpeechTrialUpdate {
+        max_media_duration: 300,
+        weekly_count: 2,
+        left_count: 0,
+        next_reset_date: 1_700_600_000,
+    };
+    let now = 1_700_000_000;
+    assert!(speech_trial_locked(Some(used), false, now));
+    assert!(!speech_trial_locked(Some(used), true, now), "Premium");
+    assert!(!speech_trial_locked(
+        Some(SpeechTrialUpdate {
+            left_count: 1,
+            ..used
+        }),
+        false,
+        now
+    ));
+    // The reset date passed, or TDLib sent no quota at all.
+    assert!(!speech_trial_locked(Some(used), false, 1_700_600_000));
+    assert!(!speech_trial_locked(None, false, now));
 }
 
 #[test]

@@ -39,7 +39,7 @@ impl QuillApp {
     /// `MainMenu::chooseEmojiStatus`).
     pub(super) fn open_emoji_status_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.session().is_some_and(|s| s.my_is_premium()) {
-            self.open_premium(cx);
+            self.open_premium_at(quill::premium_hub::PremiumFeature::EmojiStatus, cx);
             return;
         }
         self.open_status_selector(point(px(8.), px(52.)), window, cx);

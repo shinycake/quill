@@ -417,7 +417,7 @@ impl QuillApp {
 
     /// "Hide ads" (tdesktop `HideSponsoredClickHandler`): Premium accounts
     /// turn sponsored messages off (`toggleHasSponsoredMessagesEnabled`);
-    /// others get the "needs Telegram Premium" banner without any request.
+    /// others get the "No ads" preview without any request.
     /// Demo: the same reducer calls, with `ok` injected for Premium.
     pub(super) fn hide_sponsored_messages_ui(
         &mut self,

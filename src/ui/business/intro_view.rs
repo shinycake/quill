@@ -89,7 +89,10 @@ impl QuillApp {
                                                 this.open_business(window, cx);
                                                 this.business_go(View::StartPage, window, cx);
                                             } else {
-                                                this.open_premium(cx);
+                                                this.open_premium_at(
+                                                    quill::premium_hub::BusinessFeature::StartPage,
+                                                    cx,
+                                                );
                                             }
                                         })),
                                 ),

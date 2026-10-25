@@ -163,7 +163,7 @@ fn premium_features_keep_known_rows_and_limits() {
         ]
     }));
     assert_eq!(info.features.len(), 2);
-    assert_eq!(info.features[0].title, "Doubled limits");
+    assert_eq!(info.features[0].title(), "Doubled limits");
     assert_eq!(info.limits.len(), 1);
     assert_eq!(info.limits[0].title, "Folders");
     assert_eq!(info.limits[0].premium_value, 20);

@@ -130,6 +130,16 @@ pub fn get_premium_sticker_examples(extra: RequestId) -> String {
     json!({"@type": "getPremiumStickerExamples", "@extra": extra.as_extra()}).to_string()
 }
 
+/// `getBusinessFeatures` from the Business screen (no source feature).
+pub fn get_business_features(extra: RequestId) -> String {
+    json!({
+        "@type": "getBusinessFeatures",
+        "@extra": extra.as_extra(),
+        "source": null,
+    })
+    .to_string()
+}
+
 /// `getPremiumState`.
 pub fn get_premium_state(extra: RequestId) -> String {
     json!({"@type": "getPremiumState", "@extra": extra.as_extra()}).to_string()

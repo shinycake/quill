@@ -130,6 +130,10 @@ impl Session {
                 self.payments.hub.gifts_error =
                     Some(format!("Couldn't update the gift: {}", error_reason(err)));
             }
+            // The Business screen keeps tdesktop's fallback order.
+            Some(RequestPurpose::GetBusinessFeatures) => {
+                self.payments.hub.business_features_loading = false;
+            }
             Some(RequestPurpose::GetPremiumFeatures) => {
                 self.payments.hub.premium_loading = false;
                 self.payments.hub.premium_error = Some(format!(

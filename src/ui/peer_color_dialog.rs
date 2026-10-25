@@ -117,7 +117,7 @@ impl QuillApp {
         let premium = self.session().is_some_and(|s| s.my_is_premium());
         match draft.apply_outcome(&current, premium) {
             ApplyOutcome::NeedsPremium => {
-                self.open_premium(cx);
+                self.open_premium_at(quill::premium_hub::PremiumFeature::AccentColor, cx);
             }
             ApplyOutcome::Unchanged => self.close_peer_color_dialog(cx),
             ApplyOutcome::Send { name, profile } => {

@@ -76,7 +76,7 @@ impl QuillApp {
             quill::emoji_status_selector::StatusPick::Set { id, secs } => {
                 self.change_emoji_status_for(Some(id), secs, cx)
             }
-            _ => self.open_premium(cx),
+            _ => self.open_premium_at(quill::premium_hub::PremiumFeature::EmojiStatus, cx),
         }
         cx.notify();
     }

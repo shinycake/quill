@@ -7,12 +7,18 @@ use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Focusable, TestAppContext, VisualTestContext, point, px, size};
 use quill::ids::{ChatId, MessageId};
-use quill::premium_hub::promo::PromoPage;
+use quill::premium_hub::PremiumFeature;
+use quill::premium_hub::promo::{PreviewOpen, PromoPage};
 use quill::reaction_limit::ReactionLimits;
 use quill::state::{MessageReactionsState, ReactionChoice};
 
 const CHAT: ChatId = ChatId(11);
 const MESSAGE: MessageId = MessageId(101);
+/// tdesktop `ShowPremiumPreviewBox(PremiumFeature::InfiniteReactions)`.
+const REACTIONS_PREVIEW: PromoPage = PromoPage::Preview {
+    feature: quill::premium_hub::promo::PromoFeature::Premium(PremiumFeature::UniqueReactions),
+    opened: PreviewOpen::Box,
+};
 
 fn new_app(cx: &mut TestAppContext, demo: &'static str) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
@@ -138,7 +144,7 @@ fn a_locked_reaction_in_the_strip_opens_the_premium_preview(cx: &mut TestAppCont
     let cell = strip_cell(&app, vcx, &ReactionChoice::CustomEmoji(77));
     vcx.update(|window, cx| window.click(gpui_kit::ElementId::Name(cell.clone()), cx));
     frames(vcx);
-    assert_eq!(premium_page(&app, vcx), Some(PromoPage::Preview(1)));
+    assert_eq!(premium_page(&app, vcx), Some(REACTIONS_PREVIEW));
     assert_eq!(reactions(&app, vcx), before, "nothing was sent");
 }
 
@@ -167,7 +173,7 @@ fn a_free_account_swaps_its_reaction_from_the_strip(cx: &mut TestAppContext) {
         reactions(&app, vcx),
         vec![("❤".into(), 2, false), ("👍".into(), 3, true)]
     );
-    assert_ne!(premium_page(&app, vcx), Some(PromoPage::Preview(1)));
+    assert_ne!(premium_page(&app, vcx), Some(REACTIONS_PREVIEW));
 }
 
 #[gpui_kit::test]
@@ -179,7 +185,7 @@ fn restore_on_a_locked_pack_opens_the_premium_preview(cx: &mut TestAppContext) {
     assert!(restore, "the first pack header offers Restore");
     vcx.update(|window, cx| window.click("reaction-pack-restore-1", cx));
     frames(vcx);
-    assert_eq!(premium_page(&app, vcx), Some(PromoPage::Preview(1)));
+    assert_eq!(premium_page(&app, vcx), Some(REACTIONS_PREVIEW));
     assert!(
         app.read_with(vcx, |app, _| !app.pickers.media_panel.open),
         "the selector closes"

@@ -6,10 +6,75 @@
 //! month) and `boxes/premium_limits_box.cpp` (`lng_premium_subscribe_*`).
 //! Nothing here buys anything: the subscribe button opens @PremiumBot.
 
-use super::{PremiumInfo, flag, int, text_of};
+use super::{BusinessFeature, PremiumFeature, PremiumInfo, flag, int, text_of};
+use crate::lang::{keys, tr};
 use crate::premium_limits::{LimitPair, PremiumLimitKind};
 use crate::telegram::envelope::format_payment_price;
 use serde_json::Value;
+
+/// What a preview page shows: one Premium feature, one Business feature,
+/// or tdesktop's Gifts explainer (`PremiumFeature::Gifts`, which TDLib has
+/// no constructor for).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PromoFeature {
+    Premium(PremiumFeature),
+    Business(BusinessFeature),
+    Gifts,
+}
+
+impl From<PremiumFeature> for PromoFeature {
+    fn from(feature: PremiumFeature) -> Self {
+        Self::Premium(feature)
+    }
+}
+
+impl From<BusinessFeature> for PromoFeature {
+    fn from(feature: BusinessFeature) -> Self {
+        Self::Business(feature)
+    }
+}
+
+impl PromoFeature {
+    /// Title of the preview.
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Premium(feature) => feature.title(),
+            Self::Business(feature) => tr(feature.text_keys().0),
+            Self::Gifts => tr(keys::PREMIUM_SUMMARY_SUBTITLE_GIFTS),
+        }
+    }
+
+    /// Text under the title.
+    pub fn about(self) -> &'static str {
+        match self {
+            Self::Premium(feature) => feature.about(),
+            Self::Business(feature) => tr(feature.text_keys().1),
+            Self::Gifts => tr(keys::PREMIUM_SUMMARY_ABOUT_GIFTS),
+        }
+    }
+
+    /// The `/start` ref of the subscribe button on this preview (tdesktop
+    /// `LookupPremiumRef`; Business rows have none).
+    pub fn start_ref(self) -> Option<&'static str> {
+        match self {
+            Self::Premium(feature) => feature.start_ref(),
+            Self::Business(_) | Self::Gifts => None,
+        }
+    }
+}
+
+/// How a preview was opened, which decides its buttons (tdesktop
+/// `ShowPremiumPreviewBox` versus `ShowPremiumPreviewToBuy`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewOpen {
+    /// A row of the overview: plans and Subscribe, and Back to the list.
+    Overview,
+    /// `ShowPremiumPreviewToBuy`: plans and Subscribe (Close with Premium).
+    ToBuy,
+    /// `ShowPremiumPreviewBox`: one button that leads to the overview
+    /// ("Unlock Animated Emoji", "About Telegram Premium").
+    Box,
+}
 
 /// Which page of the Premium dialog is showing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -19,9 +84,60 @@ pub enum PromoPage {
     Overview,
     /// "Doubled limits": every limit with its free and Premium value.
     Limits,
-    /// The preview of the feature at this index of the feature list, with
-    /// its promotion clip (tdesktop `premium_preview_box.cpp`).
-    Preview(usize),
+    /// The preview of one feature with its promotion clip (tdesktop
+    /// `premium_preview_box.cpp`).
+    Preview {
+        feature: PromoFeature,
+        opened: PreviewOpen,
+    },
+}
+
+impl PromoPage {
+    /// The page an upsell for `feature` opens: "Doubled limits" for the
+    /// limits feature (tdesktop `DoubledLimitsPreviewBox`), else its
+    /// preview.
+    pub fn for_feature(feature: PromoFeature, opened: PreviewOpen) -> Self {
+        match feature {
+            PromoFeature::Premium(PremiumFeature::IncreasedLimits) => Self::Limits,
+            feature => Self::Preview { feature, opened },
+        }
+    }
+}
+
+/// The features a preview pages through (tdesktop `PreviewBox`): the
+/// Business list when it holds `at`, else the Premium list when it does,
+/// else `at` alone.
+pub fn preview_order(
+    premium: &[PremiumFeature],
+    business: &[BusinessFeature],
+    at: PromoFeature,
+) -> Vec<PromoFeature> {
+    match at {
+        PromoFeature::Business(feature) if business.contains(&feature) => business
+            .iter()
+            .copied()
+            .map(PromoFeature::Business)
+            .collect(),
+        PromoFeature::Premium(feature) if premium.contains(&feature) => premium
+            .iter()
+            .copied()
+            // The limits row opens its own page, not a preview.
+            .filter(|feature| *feature != PremiumFeature::IncreasedLimits)
+            .map(PromoFeature::Premium)
+            .collect(),
+        at => vec![at],
+    }
+}
+
+/// The feature one step from `at` in `order`, wrapping around (`delta` is
+/// 1 or -1); `at` itself when it is not in the list.
+pub fn step_preview(order: &[PromoFeature], at: PromoFeature, delta: i32) -> PromoFeature {
+    let Some(index) = order.iter().position(|feature| *feature == at) else {
+        return at;
+    };
+    let count = order.len() as i64;
+    let next = (index as i64 + i64::from(delta)).rem_euclid(count) as usize;
+    order.get(next).copied().unwrap_or(at)
 }
 
 /// One `premiumStatePaymentOption`.
@@ -66,58 +182,56 @@ pub fn parse_plans(state: &Value) -> Vec<PremiumPlan> {
         .unwrap_or_default()
 }
 
-/// One promotion clip: which feature (by its row title) and the file.
+/// One promotion clip: which feature and the file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PremiumAnimation {
-    pub title: &'static str,
+    pub feature: PromoFeature,
     pub file_id: i32,
     pub width: i32,
     pub height: i32,
 }
 
-/// `premiumState.animations`; unknown features and clips without a file
-/// are dropped.
+/// `premiumState.animations` and `business_animations`; unknown features
+/// and clips without a file are dropped.
 pub fn parse_animations(state: &Value) -> Vec<PremiumAnimation> {
-    state
-        .get("animations")
-        .and_then(Value::as_array)
-        .map(|rows| {
-            rows.iter()
-                .filter_map(|row| {
-                    let kind = row.get("feature")?.get("@type")?.as_str()?;
-                    let title = super::feature_row(kind)?.title;
-                    let clip = row.get("animation")?;
-                    let file_id = i32::try_from(int(clip.get("animation")?.get("id"))).ok()?;
-                    if file_id <= 0 {
-                        return None;
-                    }
-                    Some(PremiumAnimation {
-                        title,
-                        file_id,
-                        width: int(clip.get("width")) as i32,
-                        height: int(clip.get("height")) as i32,
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+    let rows = |key: &str| {
+        state
+            .get(key)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+    };
+    let premium = rows("animations").filter_map(|row| {
+        let kind = row.get("feature")?.get("@type")?.as_str()?;
+        clip_of(row, PremiumFeature::from_td(kind)?.into())
+    });
+    let business = rows("business_animations").filter_map(|row| {
+        let kind = row.get("feature")?.get("@type")?.as_str()?;
+        clip_of(row, BusinessFeature::from_td(kind)?.into())
+    });
+    premium.chain(business).collect()
 }
 
-/// The clip of the feature with this row title.
-pub fn animation_for<'a>(
-    animations: &'a [PremiumAnimation],
-    title: &str,
-) -> Option<&'a PremiumAnimation> {
-    animations.iter().find(|a| a.title == title)
-}
-
-/// The preview page one step from `index` in a list of `count` features,
-/// wrapping around (`delta` is 1 or -1).
-pub fn step_preview(index: usize, count: usize, delta: i32) -> usize {
-    if count == 0 {
-        return 0;
+fn clip_of(row: &Value, feature: PromoFeature) -> Option<PremiumAnimation> {
+    let clip = row.get("animation")?;
+    let file_id = i32::try_from(int(clip.get("animation")?.get("id"))).ok()?;
+    if file_id <= 0 {
+        return None;
     }
-    (index as i64 + i64::from(delta)).rem_euclid(count as i64) as usize
+    Some(PremiumAnimation {
+        feature,
+        file_id,
+        width: int(clip.get("width")) as i32,
+        height: int(clip.get("height")) as i32,
+    })
+}
+
+/// The clip of `feature`.
+pub fn animation_for(
+    animations: &[PremiumAnimation],
+    feature: PromoFeature,
+) -> Option<&PremiumAnimation> {
+    animations.iter().find(|a| a.feature == feature)
 }
 
 impl PremiumPlan {
@@ -271,29 +385,80 @@ mod tests {
     }
 
     #[test]
-    fn animations_map_to_feature_rows() {
-        let state = json!({"animations": [
-            {"feature": {"@type": "premiumFeatureVoiceRecognition"},
-             "animation": {"width": 640, "height": 480, "animation": {"id": 77}}},
-            {"feature": {"@type": "premiumFeatureNewerThanThis"},
-             "animation": {"animation": {"id": 5}}},
-            {"feature": {"@type": "premiumFeatureDisabledAds"},
-             "animation": {"animation": {"id": 0}}}
-        ]});
+    fn animations_map_to_premium_and_business_features() {
+        let state = json!({
+            "animations": [
+                {"feature": {"@type": "premiumFeatureVoiceRecognition"},
+                 "animation": {"width": 640, "height": 480, "animation": {"id": 77}}},
+                {"feature": {"@type": "premiumFeatureNewerThanThis"},
+                 "animation": {"animation": {"id": 5}}},
+                {"feature": {"@type": "premiumFeatureDisabledAds"},
+                 "animation": {"animation": {"id": 0}}}
+            ],
+            "business_animations": [
+                {"feature": {"@type": "businessFeatureAccountLinks"},
+                 "animation": {"width": 720, "height": 720, "animation": {"id": 91}}}
+            ]
+        });
         let clips = parse_animations(&state);
-        assert_eq!(clips.len(), 1);
-        let clip = animation_for(&clips, "Voice-to-text conversion").unwrap();
+        assert_eq!(clips.len(), 2);
+        let clip = animation_for(&clips, PremiumFeature::VoiceRecognition.into()).unwrap();
         assert_eq!((clip.file_id, clip.width, clip.height), (77, 640, 480));
-        assert!(animation_for(&clips, "No ads").is_none());
+        assert!(animation_for(&clips, PremiumFeature::DisabledAds.into()).is_none());
+        let links = animation_for(&clips, BusinessFeature::AccountLinks.into()).unwrap();
+        assert_eq!(links.file_id, 91);
         assert_eq!(parse_premium_state(&state).animations, clips);
     }
 
     #[test]
-    fn preview_paging_wraps() {
-        assert_eq!(step_preview(0, 5, -1), 4);
-        assert_eq!(step_preview(4, 5, 1), 0);
-        assert_eq!(step_preview(2, 5, 1), 3);
-        assert_eq!(step_preview(0, 0, 1), 0);
+    fn preview_pages_through_the_list_that_holds_the_feature() {
+        use PremiumFeature as P;
+        let premium = [P::IncreasedLimits, P::VoiceRecognition, P::EmojiStatus];
+        let business = [BusinessFeature::QuickReplies, BusinessFeature::AccountLinks];
+        let order = preview_order(&premium, &business, P::EmojiStatus.into());
+        assert_eq!(
+            order,
+            [P::VoiceRecognition.into(), P::EmojiStatus.into()],
+            "the limits row has its own page"
+        );
+        assert_eq!(
+            step_preview(&order, P::EmojiStatus.into(), 1),
+            P::VoiceRecognition.into()
+        );
+        assert_eq!(
+            step_preview(&order, P::VoiceRecognition.into(), -1),
+            P::EmojiStatus.into()
+        );
+        let links = BusinessFeature::AccountLinks.into();
+        assert_eq!(preview_order(&premium, &business, links).len(), 2);
+        // Not in the server list: shown alone, as tdesktop does.
+        assert_eq!(
+            preview_order(&premium, &business, P::AccentColor.into()),
+            [P::AccentColor.into()]
+        );
+        assert_eq!(
+            preview_order(&premium, &business, PromoFeature::Gifts),
+            [PromoFeature::Gifts]
+        );
+        assert_eq!(
+            step_preview(&[], PromoFeature::Gifts, 1),
+            PromoFeature::Gifts
+        );
+    }
+
+    #[test]
+    fn the_limits_feature_opens_the_limits_page() {
+        assert_eq!(
+            PromoPage::for_feature(PremiumFeature::IncreasedLimits.into(), PreviewOpen::Box),
+            PromoPage::Limits
+        );
+        assert_eq!(
+            PromoPage::for_feature(PromoFeature::Gifts, PreviewOpen::Box),
+            PromoPage::Preview {
+                feature: PromoFeature::Gifts,
+                opened: PreviewOpen::Box
+            }
+        );
     }
 
     #[test]
