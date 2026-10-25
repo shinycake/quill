@@ -388,6 +388,10 @@ fn receive_one(
     let Some(json) = source(RECEIVE_TIMEOUT_SECS) else {
         return;
     };
+    // Answers to agent requests go to the agent, never to an account's session.
+    if crate::agent::td::intercept(&json) {
+        return;
+    }
     let Some(owned) = copy_and_parse(&json, seq, sink) else {
         return;
     };

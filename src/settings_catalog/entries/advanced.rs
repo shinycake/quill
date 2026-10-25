@@ -18,6 +18,12 @@ pub(super) const ENTRIES: &[Entry] = &[
     Entry::new("advanced.fast_buttons", P, keys::Q_MEDIA_FAST_BUTTONS_MODE)
         .section(keys::SETTINGS_EXPERIMENTAL)
         .keywords(&["inline keyboard", "1-9", "bots"]),
+    Entry::new("advanced.agent_access", P, keys::Q_AGENT_ACCESS).keywords(&[
+        "mcp",
+        "ai",
+        "claude",
+        "automation",
+    ]),
     Entry::new("advanced.welcome_intro", P, keys::Q_FIRST_RUN_REPLAY).keywords(&[
         "first run",
         "onboarding",
