@@ -329,6 +329,11 @@ impl A11y {
         self.debug.to_json()
     }
 
+    /// How many frames built a tree so far.
+    pub(crate) fn frame_number(&self) -> u64 {
+        self.debug.frame_number()
+    }
+
     /// The last finished tree as plain data, with each node's bounds in
     /// window logical pixels. `None` before the first frame built a tree.
     pub(crate) fn snapshot(&self, scale_factor: f32) -> Option<A11yTreeSnapshot> {

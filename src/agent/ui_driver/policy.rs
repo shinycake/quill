@@ -76,6 +76,38 @@ pub fn chord_refusal(chord: &KeyChord, focus_in_text: Option<bool>, mode: SendKe
     None
 }
 
+/// The window drew no new frame in time.
+pub fn no_frame() -> String {
+    "Quill's window did not redraw in time. Make sure it is open and visible, then retry.".into()
+}
+
+/// The window closed before the command ran.
+pub fn window_closed() -> String {
+    "Quill's window closed before the command ran.".into()
+}
+
+/// A node id that is not in the current tree.
+pub fn node_gone(id: &str) -> String {
+    format!("Node {id} is not on screen any more. Call read_ui_tree again and use a current id.")
+}
+
+/// A node that is in the tree but hidden.
+pub fn node_hidden(id: &str, role: &str, name: &str) -> String {
+    format!("Node {id} ({role} \"{name}\") is hidden right now. Call read_ui_tree again.")
+}
+
+/// A node without a rectangle, so nothing can be pointed at it.
+pub fn node_without_bounds(id: &str, role: &str, name: &str) -> String {
+    format!(
+        "Node {id} ({role} \"{name}\") has no position on screen, so it cannot be pointed at. Pick a node with bounds."
+    )
+}
+
+/// A point outside the window.
+pub fn point_outside(x: f32, y: f32, width: f32, height: f32) -> String {
+    format!("The point ({x}, {y}) is outside the window ({width}x{height} px).")
+}
+
 /// The open chat changed between the grant check and the command.
 pub fn moved_refusal(expected: Option<i64>, open: Option<i64>) -> String {
     format!(

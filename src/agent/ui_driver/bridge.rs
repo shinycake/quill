@@ -135,22 +135,40 @@ pub fn send(
     expect_open_chat: Option<Option<i64>>,
     timeout: Duration,
 ) -> Result<UiReply, BridgeError> {
-    let (id, rx) = file(agent, command, expect_open_chat).ok_or(BridgeError::Busy)?;
-    if let Ok(reply) = rx.recv_timeout(timeout) {
-        return Ok(reply);
-    }
-    withdraw(id);
-    rx.try_recv().map_err(|_| BridgeError::Timeout)
+    post(agent, command, expect_open_chat)?.wait(timeout)
 }
 
-fn file(
+/// A filed command, waiting for the UI's answer.
+pub struct Ticket {
+    id: u64,
+    rx: Receiver<UiReply>,
+}
+
+impl Ticket {
+    /// The answer, if it is in already.
+    pub fn poll(&self) -> Option<UiReply> {
+        self.rx.try_recv().ok()
+    }
+
+    /// Wait up to `timeout`; on timeout the command is withdrawn.
+    pub fn wait(self, timeout: Duration) -> Result<UiReply, BridgeError> {
+        if let Ok(reply) = self.rx.recv_timeout(timeout) {
+            return Ok(reply);
+        }
+        withdraw(self.id);
+        self.rx.try_recv().map_err(|_| BridgeError::Timeout)
+    }
+}
+
+/// File `command` without waiting (the UI thread is woken).
+pub fn post(
     agent: &str,
     command: UiCommand,
     expect_open_chat: Option<Option<i64>>,
-) -> Option<(u64, Receiver<UiReply>)> {
+) -> Result<Ticket, BridgeError> {
     let mut queue = crate::locks::lock_or_recover(&QUEUE);
     if queue.len() >= MAX_WAITING {
-        return None;
+        return Err(BridgeError::Busy);
     }
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
     let (reply, rx) = mpsc::sync_channel(1);
@@ -165,7 +183,7 @@ fn file(
     });
     drop(queue);
     crate::wake::AGENT.poke();
-    Some((id, rx))
+    Ok(Ticket { id, rx })
 }
 
 fn withdraw(id: u64) {

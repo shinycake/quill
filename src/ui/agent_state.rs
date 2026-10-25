@@ -49,17 +49,20 @@ impl AgentUi {
         QuillApp::spawn_main_in(window, cx, async move |app, cx| {
             let mut announced = 0u64;
             let mut seen = quill::wake::AGENT.epoch();
+            // Shorter while the UI driver forces the element tree, so it
+            // is released once the agent stops driving.
+            let mut timeout = Duration::from_secs(300);
             loop {
                 super::wake_wait::sleep_or_wake(
                     cx.background_executor(),
                     &quill::wake::AGENT,
                     seen,
-                    Duration::from_secs(300),
+                    timeout,
                 )
                 .await;
                 seen = quill::wake::AGENT.epoch();
                 let alive = app
-                    .update_in(cx, |_, window, cx| {
+                    .update_in(cx, |app, window, cx| {
                         // The user is usually in another app: a request
                         // they have not seen yet brings Quill forward.
                         let fresh = prompts::current_for(&active_account())
@@ -69,6 +72,11 @@ impl AgentUi {
                             announced = id;
                             super::link_inbox::raise_main_window(window, cx);
                         }
+                        timeout = if app.agent_driver_tick(window, cx) {
+                            super::agent_driver::FORCED_WAKE
+                        } else {
+                            Duration::from_secs(300)
+                        };
                         cx.notify();
                     })
                     .is_ok();

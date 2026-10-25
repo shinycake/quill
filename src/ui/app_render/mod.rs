@@ -42,7 +42,7 @@ impl Render for QuillApp {
         let outer_scope = self.windows.scope;
         self.set_window_scope(None);
         self.windows.main = Some(window.window_handle());
-        self.slices.a11y_active.set(self.screen_reader_on(window));
+        self.slices.a11y_active.set(self.a11y_tree_wanted(window));
         self.release_viewer_key_probe(window, cx);
         // Bounded image memory: retired images and path images nothing can
         // show any more leave the atlas (`image_budget`).

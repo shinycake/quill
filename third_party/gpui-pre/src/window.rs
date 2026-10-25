@@ -7067,6 +7067,13 @@ impl Window {
         self.a11y.snapshot(self.scale_factor)
     }
 
+    /// How many frames built an accessibility tree so far (the
+    /// `frame_number` the next [`Self::a11y_tree_snapshot`] carries), without
+    /// copying the tree.
+    pub fn a11y_tree_frame(&self) -> u64 {
+        self.a11y.frame_number()
+    }
+
     /// Register a listener for an accessibility action on a specific node.
     /// The listener will be called when a screen reader requests the given
     /// action on the node identified by `node_id`.

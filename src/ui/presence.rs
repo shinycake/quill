@@ -39,6 +39,16 @@ pub(super) fn idle_ms() -> u64 {
     now_ms().saturating_sub(LAST_INPUT_MS.load(Ordering::Relaxed))
 }
 
+/// Input from the user. Input the agent UI driver injects is not the user
+/// (it neither keeps them online nor counts as their activity).
+fn note_real_input() {
+    if super::agent_driver_input::injecting() {
+        return;
+    }
+    note_input();
+    quill::agent::ui_driver::bridge::note_real_input();
+}
+
 /// An invisible element that notes every mouse move, press, scroll and
 /// key press in the window. Capture phase, so nothing that handles an
 /// event can hide it.
@@ -46,10 +56,10 @@ pub(super) fn input_probe() -> impl IntoElement {
     canvas(
         |_, _, _| (),
         |_, _, window, _| {
-            window.on_mouse_event(|_: &MouseMoveEvent, _, _, _| note_input());
-            window.on_mouse_event(|_: &MouseDownEvent, _, _, _| note_input());
-            window.on_mouse_event(|_: &ScrollWheelEvent, _, _, _| note_input());
-            window.on_key_event(|_: &KeyDownEvent, _, _, _| note_input());
+            window.on_mouse_event(|_: &MouseMoveEvent, _, _, _| note_real_input());
+            window.on_mouse_event(|_: &MouseDownEvent, _, _, _| note_real_input());
+            window.on_mouse_event(|_: &ScrollWheelEvent, _, _, _| note_real_input());
+            window.on_key_event(|_: &KeyDownEvent, _, _, _| note_real_input());
         },
     )
     .absolute()
