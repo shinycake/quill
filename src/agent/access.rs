@@ -17,13 +17,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const SETTINGS_FILE: &str = "agent_access.json";
 const TOKEN_FILE: &str = "agent-token";
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 #[serde(default)]
 struct Stored {
     enabled: bool,
+    /// Every write waits for the user's click in Quill.
+    confirm_sends: bool,
 }
 
-static ENABLED: RwLock<Option<bool>> = RwLock::new(None);
+static STORED: RwLock<Option<Stored>> = RwLock::new(None);
 /// Bumped whenever the switch goes off, so open connections notice.
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 
@@ -31,46 +33,67 @@ fn root() -> Option<PathBuf> {
     crate::settings::safe_app_root()
 }
 
-fn load(path: &Path) -> bool {
+fn load(path: &Path) -> Stored {
     std::fs::read(path)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Stored>(&bytes).ok())
-        .is_some_and(|stored| stored.enabled)
+        .unwrap_or_default()
 }
 
-/// Whether agents may connect.
-pub fn enabled() -> bool {
-    if let Ok(guard) = ENABLED.read()
-        && let Some(on) = *guard
+fn stored() -> Stored {
+    if let Ok(guard) = STORED.read()
+        && let Some(stored) = *guard
     {
-        return on;
+        return stored;
     }
-    let loaded = root().is_some_and(|root| load(&root.join(SETTINGS_FILE)));
-    if let Ok(mut guard) = ENABLED.write() {
+    let loaded = root()
+        .map(|root| load(&root.join(SETTINGS_FILE)))
+        .unwrap_or_default();
+    if let Ok(mut guard) = STORED.write() {
         return *guard.get_or_insert(loaded);
     }
     loaded
 }
 
-/// Turn agent access on or off. Off deletes the token and ends every open
-/// agent connection.
-pub fn set_enabled(on: bool) {
+fn save(change: impl FnOnce(&mut Stored)) {
+    let mut next = stored();
+    change(&mut next);
     if crate::fast_buttons::persistence_enabled()
         && let Some(root) = root()
-        && let Err(err) =
-            crate::settings::write_json_atomic(&root.join(SETTINGS_FILE), &Stored { enabled: on })
+        && let Err(err) = crate::settings::write_json_atomic(&root.join(SETTINGS_FILE), &next)
     {
         eprintln!("quill: could not save {SETTINGS_FILE}: {err}");
     }
-    if let Ok(mut guard) = ENABLED.write() {
-        *guard = Some(on);
+    if let Ok(mut guard) = STORED.write() {
+        *guard = Some(next);
     }
+}
+
+/// Whether agents may connect.
+pub fn enabled() -> bool {
+    stored().enabled
+}
+
+/// Turn agent access on or off. Off deletes the token and ends every open
+/// agent connection.
+pub fn set_enabled(on: bool) {
+    save(|stored| stored.enabled = on);
     if !on {
         GENERATION.fetch_add(1, Ordering::SeqCst);
         super::prompts::deny_all();
     }
     crate::wake::AGENT.poke();
     publish_token();
+}
+
+/// Whether each write an agent makes waits for the user's click in Quill.
+pub fn confirm_sends() -> bool {
+    stored().confirm_sends
+}
+
+pub fn set_confirm_sends(on: bool) {
+    save(|stored| stored.confirm_sends = on);
+    crate::wake::AGENT.poke();
 }
 
 /// The switch's generation; a connection opened under one generation ends
@@ -153,7 +176,7 @@ fn write_owner_only(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 /// Whether the switch is on in the settings under `root`, read from disk
 /// (for `quill mcp`, which runs in its own process).
 pub fn enabled_on_disk(root: &Path) -> bool {
-    load(&root.join(SETTINGS_FILE))
+    load(&root.join(SETTINGS_FILE)).enabled
 }
 
 /// Read the token a running Quill published under `root`.

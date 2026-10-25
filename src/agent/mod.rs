@@ -11,6 +11,7 @@
 #![deny(clippy::indexing_slicing)]
 
 pub mod access;
+pub mod activity;
 pub mod events;
 pub mod grants;
 pub mod guide;
