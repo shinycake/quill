@@ -239,12 +239,8 @@ impl QuillApp {
     /// otherwise the original alone under "Original".
     fn ai_compose_preview(&self, ai: &AiComposeBox, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
-        let (muted, border, surface, radius) = (
-            theme.muted_foreground,
-            theme.border,
-            theme.muted,
-            theme.radius_lg,
-        );
+        let (muted, surface, radius) = (theme.muted_foreground, theme.muted, theme.radius_lg);
+        let line = muted.opacity(0.25);
         let original = quill::composer::parse_format_markup(ai.source_text()).0;
         let font = self.msg_font();
         let mut card = v_flex()
@@ -305,7 +301,7 @@ impl QuillApp {
                         text.truncate().child(shown)
                     }
                 }))
-                .child(div().h(px(1.)).w_full().my_1().bg(border.opacity(0.6)));
+                .child(div().h(px(1.)).w_full().my_1().bg(line));
         }
         let title = ai.result_title();
         let styles = self
@@ -332,9 +328,9 @@ impl QuillApp {
             CardState::Loading { .. } => v_flex()
                 .gap_2()
                 .py_1()
-                .child(Skeleton::new().h(px(12.)).w_full().bg(border))
-                .child(Skeleton::new().h(px(12.)).w_full().bg(border))
-                .child(Skeleton::new().h(px(12.)).w(relative(0.6)).bg(border))
+                .child(Skeleton::new().h(px(12.)).w_full().bg(line))
+                .child(Skeleton::new().h(px(12.)).w_full().bg(line))
+                .child(Skeleton::new().h(px(12.)).w(relative(0.6)).bg(line))
                 .into_any_element(),
             CardState::Ready(result) => self.ai_compose_result(ai.mode(), result, font, cx),
             CardState::Waiting | CardState::Failed => {
