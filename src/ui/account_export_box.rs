@@ -50,6 +50,10 @@ fn format_label(format: ExportFormat) -> &'static str {
 impl QuillApp {
     /// Open the box. While an export is running it shows that export.
     pub(super) fn open_account_export(&mut self, cx: &mut Context<Self>) {
+        // No bulk export for an agent driving the window.
+        if quill::agent::ui_driver::guard::refuse_if_injecting("export the account's data") {
+            return;
+        }
         if self
             .session()
             .is_some_and(|s| s.settings.account_export.is_some())
@@ -97,6 +101,9 @@ impl QuillApp {
     /// Start the export with the box's choices; progress shows in this
     /// same dialog.
     fn run_account_export(&mut self, cx: &mut Context<Self>) {
+        if quill::agent::ui_driver::guard::refuse_if_injecting("export the account's data") {
+            return;
+        }
         let Some(draft) = self.dialogs.account_export_dialog.as_mut() else {
             return;
         };

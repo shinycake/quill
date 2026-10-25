@@ -505,8 +505,12 @@ pub fn mailto_url(address: &str) -> Option<String> {
         .then(|| format!("mailto:{address}"))
 }
 
-/// Open the mail client on a new message to `address`.
+/// Open the mail client on a new message to `address`. Never while the
+/// agent UI driver injects input (`ui_driver::guard`).
 pub fn open_mailto(address: &str) -> bool {
+    if crate::agent::ui_driver::guard::refuse_outside_if_injecting("open the mail client") {
+        return false;
+    }
     mailto_url(address).is_some_and(|url| os_open(std::ffi::OsStr::new(&url)))
 }
 
@@ -554,14 +558,23 @@ fn os_open(target: &std::ffi::OsStr) -> bool {
 /// MED3: open a downloaded file with the system viewer (`xdg-open` /
 /// `open`). Reuses the same OS-open mechanism as URLs, without the
 /// http-scheme gate (a local path is the point here). No shell involved.
+/// Never while the agent UI driver injects input (`ui_driver::guard`):
+/// what leaves Quill for the OS stays with the user.
 pub fn open_local_file(path: &std::path::Path) -> bool {
+    if crate::agent::ui_driver::guard::refuse_outside_if_injecting("open a file with its app") {
+        return false;
+    }
     os_open(path.as_os_str())
 }
 
 /// MED3: reveal a file in the file manager — macOS `open -R` (selects the
 /// file in Finder), Windows `explorer /select,`, Linux opens the parent
-/// directory with `xdg-open` (no portable select-file equivalent).
+/// directory with `xdg-open` (no portable select-file equivalent). Never
+/// while the agent UI driver injects input, like [`open_local_file`].
 pub fn reveal_in_file_manager(path: &std::path::Path) -> bool {
+    if crate::agent::ui_driver::guard::refuse_outside_if_injecting("reveal a file in its folder") {
+        return false;
+    }
     if cfg!(target_os = "macos") {
         let mut command = std::process::Command::new("open");
         return command.args(["-R"]).arg(path).spawn().is_ok();

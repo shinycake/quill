@@ -388,8 +388,13 @@ impl QuillApp {
         )
     }
 
-    /// The confirmed paid search: the only request that spends Stars.
+    /// The confirmed paid search: the only request that spends Stars. Never
+    /// for an agent driving the window (the sender refuses the request
+    /// too, by its `star_count`).
     pub(super) fn search_public_posts_paid_ui(&mut self, cx: &mut Context<Self>) {
+        if quill::agent::ui_driver::guard::refuse_if_injecting("pay for a public post search") {
+            return;
+        }
         if let Some(live) = self.live.as_mut()
             && live.driver.search_public_posts_paid().is_err()
         {

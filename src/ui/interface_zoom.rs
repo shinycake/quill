@@ -50,6 +50,7 @@ use gpui_kit::{
     WindowButtonLayout, WindowControlArea, WindowControls, WindowDecorations, WindowInsets,
     WindowParams, WindowVisibility, WindowingRequest, px,
 };
+use quill::agent::ui_driver::guard;
 use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle,
 };
@@ -454,7 +455,15 @@ impl Platform for ZoomPlatform {
     fn button_layout(&self) -> Option<WindowButtonLayout> {
         self.inner.button_layout()
     }
+    // Every `cx.open_url`, `cx.reveal_path` and `cx.open_with_system` in
+    // the app passes through here: while the agent UI driver injects
+    // input, nothing leaves Quill for the OS (`ui_driver::guard`), whatever
+    // element the agent clicked (a message link, a bot button, a link
+    // preview, a custom scheme).
     fn open_url(&self, url: &str) {
+        if guard::refuse_outside_if_injecting("open a link in the browser") {
+            return;
+        }
         self.inner.open_url(url)
     }
     fn on_open_urls(&self, callback: Box<dyn FnMut(Vec<String>)>) {
@@ -480,9 +489,15 @@ impl Platform for ZoomPlatform {
         self.inner.can_select_mixed_files_and_dirs()
     }
     fn reveal_path(&self, path: &Path) {
+        if guard::refuse_outside_if_injecting("reveal a file in its folder") {
+            return;
+        }
         self.inner.reveal_path(path)
     }
     fn open_with_system(&self, path: &Path) {
+        if guard::refuse_outside_if_injecting("open a file with its app") {
+            return;
+        }
         self.inner.open_with_system(path)
     }
     fn on_quit(&self, callback: Box<dyn FnMut() -> bool>) {

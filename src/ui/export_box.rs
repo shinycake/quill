@@ -61,6 +61,10 @@ impl QuillApp {
     /// Open the options box for `chat_id`; the export starts from its button.
     /// While an export is running the box shows that export instead.
     pub(super) fn start_chat_export(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        // No bulk export for an agent driving the window.
+        if quill::agent::ui_driver::guard::refuse_if_injecting("export a chat") {
+            return;
+        }
         if self
             .session()
             .is_some_and(|s| s.settings.chat_export.is_some())
@@ -103,6 +107,9 @@ impl QuillApp {
     /// Start the export with the box's choices. The worker thread pages
     /// history and copies media; progress shows in this same dialog.
     fn run_chat_export(&mut self, cx: &mut Context<Self>) {
+        if quill::agent::ui_driver::guard::refuse_if_injecting("export a chat") {
+            return;
+        }
         let Some(draft) = self.dialogs.chat_export_dialog.as_mut() else {
             return;
         };

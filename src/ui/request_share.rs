@@ -110,6 +110,10 @@ impl QuillApp {
 
     /// (Re)start the location lookup of the open request.
     fn locate_for_request(&mut self, cx: &mut Context<Self>) {
+        // The device location is the user's to share, never an agent's.
+        if quill::agent::ui_driver::guard::refuse_if_injecting("look up the device location") {
+            return;
+        }
         if let Some(share) = self.message_ui.request_share.as_mut() {
             share.locate = None;
         }

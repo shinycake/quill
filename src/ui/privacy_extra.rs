@@ -19,6 +19,7 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::agent::ui_driver::guard;
 use quill::file_prefs::{self, OpenWarning};
 use quill::lang::{keys, tr, tr_with};
 use quill::privacy::GiftSettings;
@@ -535,6 +536,11 @@ impl QuillApp {
     /// tdesktop would (`LaunchWithWarning`). The sender-verified
     /// exemption is not applied: callers have no message at hand.
     pub(super) fn open_file_guarded(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        // An agent driving the window never opens a file with the OS, nor
+        // reaches the warning whose "don't ask again" widens the list.
+        if guard::refuse_outside_if_injecting("open a file with its app") {
+            return;
+        }
         let prefs = file_prefs::current();
         match file_prefs::open_warning(&path, &prefs, false) {
             None => self.open_file_now(&path, cx),
@@ -547,6 +553,9 @@ impl QuillApp {
     }
 
     fn open_file_now(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        if guard::refuse_outside_if_injecting("open a file with its app") {
+            return;
+        }
         self.connection
             .set_note(if quill::platform::open_local_file(path) {
                 StatusNote::silent(tr(keys::Q_PREFS_OPENED_FILE))
@@ -558,6 +567,9 @@ impl QuillApp {
 
     /// The warning's confirm: remember the choice when ticked, then open.
     pub(super) fn confirm_file_open(&mut self, cx: &mut Context<Self>) {
+        if guard::refuse_outside_if_injecting("confirm opening a file with its app") {
+            return;
+        }
         let Some(confirm) = self.privacy.extra.file_open.take() else {
             return;
         };

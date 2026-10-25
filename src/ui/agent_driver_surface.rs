@@ -9,7 +9,7 @@
 //! the hard list stays blocked in every mode: the agent's own prompts, the
 //! Agent access settings, log out and account deletion, payments, Stars,
 //! gifts and Premium, the passcode lock and the passcode and 2FA settings,
-//! and Active Sessions.
+//! Active Sessions, the file-open warning and the chat and account exports.
 #![deny(clippy::indexing_slicing)]
 
 use super::agent_state::{active_account, is_secret_chat_id};
@@ -69,6 +69,10 @@ pub(super) const HARD_DIALOGS: &[&str] = &[
     "SuggestGramsNeeded",
     "LiveStoryStars",
     "DebugModeConfirm",
+    // Local effects outside TDLib: opening a file with the OS, bulk export.
+    "FileOpenConfirm",
+    "ChatExport",
+    "AccountExport",
 ];
 
 /// Hand-drawn layers (`esc_stack::ESC_LAYERS` names) blocked in any mode.

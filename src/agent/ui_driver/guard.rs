@@ -12,13 +12,17 @@
 //!   ungranted chat).
 //! - [`screen_request`], in the live TDLib sender: every request the window
 //!   would send while injecting is checked against a short allowlist of
-//!   reads and harmless changes ([`request_allowed`]); anything else is
-//!   dropped with a refusal, so a click that reaches a send, a reaction, a
-//!   poll vote, a bot button or a payment sends nothing.
+//!   reads and harmless changes ([`request_allowed`]), and then, whatever
+//!   its method, for money in its parameters ([`carries_money`]); anything
+//!   else is dropped with a refusal, so a click that reaches a send, a
+//!   reaction, a poll vote, a bot button, a payment or a paid search sends
+//!   nothing.
 //!
 //! The flag is per thread: input is injected on the UI thread, and every
 //! handler and the sender run on it in the same call.
 
+use crate::agent::tools::{td_policy, td_request};
+use serde_json::Value;
 use std::cell::{Cell, RefCell};
 
 thread_local! {
@@ -60,6 +64,20 @@ pub fn refuse_if_injecting(what: &str) -> bool {
     }
     refuse(format!(
         "Quill does not let agents {what} through the window. Use the agent tools, or ask the user."
+    ));
+    true
+}
+
+/// At the edge of the process: `true` (and a refusal recorded) when the
+/// driver is injecting, so nothing leaves Quill for the OS (a link in the
+/// browser, a file in its app, a folder in the file manager, a mail
+/// client). `what` is the verb phrase, like "open a link in the browser".
+pub fn refuse_outside_if_injecting(what: &str) -> bool {
+    if !injecting() {
+        return false;
+    }
+    refuse(format!(
+        "Quill did not {what} while an agent was driving the window: anything outside Quill (the browser, files, folders, other apps) stays with the user. Give the user the link or the file name instead."
     ));
     true
 }
@@ -115,34 +133,98 @@ pub fn request_allowed(method: &str) -> bool {
     if DENIED_READS.contains(&method) {
         return false;
     }
-    crate::agent::tools::td_policy::is_read(method) || ALLOWED_CHANGES.contains(&method)
+    td_policy::is_read(method) || ALLOWED_CHANGES.contains(&method)
 }
 
-/// The `@type` of a request's JSON text, without parsing all of it.
-fn method_of(request: &str) -> Option<String> {
-    let value: serde_json::Value = serde_json::from_str(request).ok()?;
-    value.get("@type")?.as_str().map(str::to_string)
+/// Fields that carry a price, whatever the method: a positive number, or
+/// an object (a `suggestedPostPrice`, a `starAmount`) in one of them is
+/// money on the move.
+const MONEY_FIELDS: &[&str] = &[
+    "star_count",
+    "paid_message_star_count",
+    "price",
+    "amount",
+    "star_amount",
+    "total_amount",
+];
+
+/// How deep a request is walked for money; TDLib requests are shallow.
+const MONEY_DEPTH: usize = 32;
+
+fn money_value(value: &Value) -> bool {
+    match value {
+        Value::Number(number) => number.as_f64().is_some_and(|n| n > 0.0),
+        Value::String(text) => text.trim().parse::<i64>().is_ok_and(|n| n > 0),
+        Value::Object(_) | Value::Array(_) => true,
+        Value::Null | Value::Bool(_) => false,
+    }
+}
+
+fn money_below(value: &Value, depth: usize) -> bool {
+    if depth == 0 {
+        return true;
+    }
+    match value {
+        Value::Object(fields) => fields.iter().any(|(key, value)| {
+            (key == "@type" && value.as_str().is_some_and(td_policy::names_money))
+                || (MONEY_FIELDS.contains(&key.as_str()) && money_value(value))
+                || money_below(value, depth.saturating_sub(1))
+        }),
+        Value::Array(items) => items
+            .iter()
+            .any(|item| money_below(item, depth.saturating_sub(1))),
+        _ => false,
+    }
+}
+
+/// Whether a request would spend or move Stars or money, read from its
+/// parameters at any depth and from every type name in it, never from the
+/// method's prefix alone: `searchPublicPosts` with a positive `star_count`
+/// pays for the search, a `sendMessage` with `paid_message_star_count`
+/// pays per message, and any `*Payment*`, `*Star*`, `*Gift*` type at any
+/// depth is a payment. [`td_request::spends`] is the reading the `td_call`
+/// tool applies; this adds the method's own name and the price-shaped
+/// fields ([`MONEY_FIELDS`]).
+pub fn carries_money(request: &Value) -> bool {
+    request
+        .get("@type")
+        .and_then(Value::as_str)
+        .is_some_and(td_policy::names_money)
+        || td_request::spends(request)
+        || money_below(request, MONEY_DEPTH)
 }
 
 /// Screen a request the window is about to send. `Ok` when it may go
 /// (always while nothing is injected); `Err` names the method and records
-/// the refusal.
+/// the refusal. The method must be a read or a harmless change, and the
+/// request must carry no money ([`carries_money`]), so a paid read is
+/// refused for the money.
 pub fn screen_request(request: &str) -> Result<(), String> {
     if !injecting() {
         return Ok(());
     }
-    let method = method_of(request).unwrap_or_default();
-    if request_allowed(&method) {
+    let value: Value = serde_json::from_str(request).unwrap_or(Value::Null);
+    let method = value
+        .get("@type")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let named = if method.is_empty() {
+        "a request"
+    } else {
+        method.as_str()
+    };
+    let reason = if !request_allowed(&method) {
+        format!(
+            "Quill did not send {named} while an agent was driving the window: writes go through the agent tools (send_message, react, delete_messages, mark_read...) or the user."
+        )
+    } else if carries_money(&value) {
+        format!(
+            "Quill did not send {named} while an agent was driving the window: it would spend Stars or money. Payments, paid searches and paid messages stay with the user."
+        )
+    } else {
         return Ok(());
-    }
-    let reason = format!(
-        "Quill did not send {} while an agent was driving the window: writes go through the agent tools (send_message, react, delete_messages, mark_read...) or the user.",
-        if method.is_empty() {
-            "a request"
-        } else {
-            method.as_str()
-        }
-    );
+    };
     refuse(reason.clone());
     Err(reason)
 }
@@ -150,9 +232,12 @@ pub fn screen_request(request: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        injecting, refuse_if_injecting, request_allowed, screen_request, set_injecting,
-        take_refusals,
+        carries_money, injecting, refuse_if_injecting, request_allowed, screen_request,
+        set_injecting, take_refusals,
     };
+    use crate::ids::RequestId;
+    use crate::telegram::requests::search_public_posts_paid;
+    use serde_json::json;
 
     #[test]
     fn reads_and_looking_pass_and_writes_do_not() {
@@ -217,5 +302,54 @@ mod tests {
                 .any(|r| r.contains("answer its own request"))
         );
         assert!(take_refusals().is_empty());
+    }
+
+    #[test]
+    fn money_is_read_from_the_parameters_not_the_prefix() {
+        let paid = search_public_posts_paid(RequestId(1), "cats", 20, 50);
+        let free = paid.replace("\"star_count\":50", "\"star_count\":0");
+        let value = |text: &str| serde_json::from_str(text).unwrap_or_default();
+        assert!(carries_money(&value(&paid)), "{paid}");
+        assert!(!carries_money(&value(&free)), "{free}");
+        assert!(carries_money(&json!({
+            "@type": "sendMessage",
+            "options": {"paid_message_star_count": 5}
+        })));
+        assert!(!carries_money(&json!({
+            "@type": "sendMessage",
+            "options": {"paid_message_star_count": 0}
+        })));
+        assert!(carries_money(&json!({
+            "@type": "setChatDraftMessage",
+            "draft_message": {"suggested_post_info": {"price": {"@type": "suggestedPostPriceStar", "star_count": 10}}}
+        })));
+        assert!(carries_money(&json!({"@type": "getStarTransactions"})));
+        assert!(carries_money(&json!({"@type": "getPremiumFeatures"})));
+        assert!(carries_money(&json!({
+            "@type": "sendPaymentForm",
+            "credentials": {"@type": "inputCredentialsSaved", "saved_credentials_id": "x"}
+        })));
+        assert!(carries_money(&json!({
+            "@type": "x",
+            "deep": [{"a": {"b": {"star_amount": {"@type": "starAmount", "star_count": 1}}}}]
+        })));
+        assert!(!carries_money(
+            &json!({"@type": "getChatHistory", "chat_id": 1, "limit": 20})
+        ));
+        assert!(!carries_money(
+            &json!({"@type": "viewMessages", "chat_id": 1, "message_ids": [1]})
+        ));
+
+        let _ = take_refusals();
+        set_injecting(true);
+        let refused = screen_request(&paid);
+        assert!(
+            refused.as_ref().is_err_and(|r| r.contains("Stars")),
+            "{refused:?}"
+        );
+        assert_eq!(screen_request(&free), Ok(()));
+        set_injecting(false);
+        assert_eq!(screen_request(&paid), Ok(()), "only while injecting");
+        assert_eq!(take_refusals().len(), 1);
     }
 }

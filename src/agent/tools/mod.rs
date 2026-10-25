@@ -15,7 +15,7 @@ mod td_call;
 mod td_offset;
 pub(crate) mod td_policy;
 mod td_redact;
-mod td_request;
+pub(crate) mod td_request;
 mod td_schema;
 mod ui;
 mod write;
