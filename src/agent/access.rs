@@ -67,7 +67,9 @@ pub fn set_enabled(on: bool) {
     }
     if !on {
         GENERATION.fetch_add(1, Ordering::SeqCst);
+        super::prompts::deny_all();
     }
+    crate::wake::AGENT.poke();
     publish_token();
 }
 

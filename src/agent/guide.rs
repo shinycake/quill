@@ -7,8 +7,9 @@ pub const INSTRUCTIONS: &str = "Quill is the user's desktop Telegram client. Thr
 the user's Telegram account via the Quill that is already running on this computer. \
 Start with quill_status: it shows the signed-in account, the chats you may use and the tools that work now. \
 Capability comes in four layers: curated tools, raw TDLib calls, a UI driver and events; this version has \
-read-only curated tools. The user grants chats in Quill; right now agents may read Saved Messages only \
-(pass \"chat\": \"saved\"). Errors say what to do next. Read quill://guide for recipes.";
+read-only curated tools and events (wait_for_message). The user grants chats in Quill: by default Saved Messages, \
+bots and the user's own channels; anything else answers \"Chat not granted\", and request_access asks the user. \
+Chats can be named by id, title, @username or \"saved\". Errors say what to do next. Read quill://guide for recipes.";
 
 pub const GUIDE_URI: &str = "quill://guide";
 pub const GRANTS_URI: &str = "quill://grants";
@@ -34,9 +35,12 @@ pub fn resources() -> Vec<Value> {
     ]
 }
 
-/// The chats agents may use. Saved Messages, read only, in this version.
+/// The grants of the account agents act on.
 fn grants() -> Value {
-    json!({"grants": [{"chat": "Saved Messages", "chat_ref": "saved", "scope": "read"}]})
+    let account = crate::settings::safe_app_root()
+        .map(|root| crate::settings::active_account(&root))
+        .unwrap_or_else(crate::ids::AccountKey::primary);
+    json!({"account": account.0, "grants": crate::agent::grants::for_account(&account).describe()})
 }
 
 /// A `resources/read` result, or `None` for an unknown URI.

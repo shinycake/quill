@@ -120,7 +120,8 @@ pub(super) fn read_line_raw(stream: &Stream) -> Option<String> {
     None
 }
 
-fn authenticate(stream: &Stream) -> Result<Value, (Value, i64, &'static str)> {
+/// Check the `auth` request; returns its id and the agent's name.
+fn authenticate(stream: &Stream) -> Result<(Value, String), (Value, i64, &'static str)> {
     let line = read_line_raw(stream).ok_or((Value::Null, code::UNAUTHORIZED, "Expected auth."))?;
     let request: Value =
         serde_json::from_str(&line).map_err(|_| (Value::Null, code::PARSE, "Expected auth."))?;
@@ -139,7 +140,19 @@ fn authenticate(stream: &Stream) -> Result<Value, (Value, i64, &'static str)> {
             "Wrong or stale token. Quill makes a new one on every launch; reconnect to read it again.",
         ));
     }
-    Ok(id)
+    let agent = request
+        .get("params")
+        .and_then(|p| p.get("client"))
+        .and_then(Value::as_str)
+        .map(|name| {
+            name.chars()
+                .filter(|c| !c.is_control())
+                .take(60)
+                .collect::<String>()
+        })
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| "An agent".to_string());
+    Ok((id, agent))
 }
 
 /// Serve one agent connection whose header line was already read.
@@ -157,8 +170,8 @@ pub fn serve(stream: Stream) {
     }
     let generation = access::generation();
     let _ = stream.set_recv_timeout(Some(AUTH_TIMEOUT));
-    let auth_id = match authenticate(&stream) {
-        Ok(id) => id,
+    let (auth_id, agent) = match authenticate(&stream) {
+        Ok(found) => found,
         Err((id, code, message)) => {
             let _ = write_line(&mut out, &error_line(&id, code, message));
             return;
@@ -230,7 +243,7 @@ pub fn serve(stream: Stream) {
             );
             return;
         }
-        dispatch(text, &send, &in_flight, generation);
+        dispatch(text, &send, &in_flight, generation, &agent);
     }
 }
 
@@ -276,6 +289,7 @@ fn dispatch<W: Write + Send + 'static>(
     send: &Arc<Mutex<W>>,
     in_flight: &Arc<AtomicUsize>,
     generation: u64,
+    agent: &str,
 ) {
     let request: Value = match serde_json::from_str(&text) {
         Ok(request) => request,
@@ -313,13 +327,14 @@ fn dispatch<W: Write + Send + 'static>(
         generation,
         line: None,
     };
+    let agent = agent.to_string();
     // A failed spawn drops the closure, and with it `reply`, which answers.
     let _ = crate::thread_guard::spawn_guarded("quill-agent-request", move || {
-        let _ = reply.line.insert(answer(&request, &reply.id));
+        let _ = reply.line.insert(answer(&request, &reply.id, &agent));
     });
 }
 
-fn answer(request: &Value, id: &Value) -> String {
+fn answer(request: &Value, id: &Value, agent: &str) -> String {
     let params = request.get("params").cloned().unwrap_or(Value::Null);
     match request.get("method").and_then(Value::as_str) {
         Some("ping") => result_line(id, json!({})),
@@ -331,7 +346,7 @@ fn answer(request: &Value, id: &Value) -> String {
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
-            result_line(id, super::tools::call(name, &arguments))
+            result_line(id, super::tools::call(name, &arguments, agent))
         }
         Some("resources/read") => {
             let uri = params

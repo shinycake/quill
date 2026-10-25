@@ -11,8 +11,11 @@
 #![deny(clippy::indexing_slicing)]
 
 pub mod access;
+pub mod events;
+pub mod grants;
 pub mod guide;
 pub mod mcp;
+pub mod prompts;
 pub mod server;
 pub mod td;
 pub mod tools;

@@ -279,6 +279,21 @@ pub fn iso_time(unix: i64) -> String {
     )
 }
 
+/// A one-line preview of a TDLib message: its text, or its kind.
+pub fn preview(message: &Value) -> String {
+    let content = message.get("content").cloned().unwrap_or(Value::Null);
+    let text = content_text(&content);
+    if text.is_empty() {
+        let kind = content
+            .get("@type")
+            .and_then(Value::as_str)
+            .unwrap_or("message");
+        format!("[{}]", kind_of(kind))
+    } else {
+        truncate(&text.replace('\n', " "), 80)
+    }
+}
+
 fn truncate(text: &str, max: usize) -> String {
     match text.char_indices().nth(max) {
         Some((cut, _)) => format!("{}…", text.get(..cut).unwrap_or(text)),
