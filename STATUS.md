@@ -935,13 +935,12 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Fragment and TON wallet flows: sign-in codes, collectible info, phone and username Fragment links, low-TON top-up (#799), the Gram Balance screen with top-up and Collect via Fragment (#818, #827), the gift value box (#824) and gift transfer or export via Fragment (#819) <!-- parity:premium-fragment-ton -->
 - [x] Delete a received gift (TDLib 1.8.69 `deleteGift`, `can_be_deleted`) <!-- parity:gifts-delete -->
 - [x] Delete a channel's received gifts, for the channel's creator (tdesktop `canTransferGifts`) <!-- parity:gifts-delete-channel -->
-- [ ] AI compose in every message field: the AI button opens tdesktop's compose box with Translate, Style and Fix tabs, result diff, emoji toggle and the Premium flood notice <!-- parity:premium-ai-compose-box -->
-- [ ] AI writing styles: list, create, edit, share, remove and delete custom styles, the custom-style limit box, style links and style link previews <!-- parity:premium-ai-compose-styles -->
+- [x] AI compose in every message field: the AI button opens tdesktop's compose box with Translate, Style and Fix tabs, result diff, emoji toggle and the Premium flood notice <!-- parity:premium-ai-compose-box -->
+- [x] AI writing styles: list, create, edit, share, remove and delete custom styles, the custom-style limit box, style links and style link previews <!-- parity:premium-ai-compose-styles -->
 - [ ] Rich message drafts sync across devices, with the rich-paste notice and the discard button <!-- parity:premium-rich-drafts -->
 - [x] Private-chat sharing protection: Accept or Reject a request to turn sharing back on, ask the other person before re-enabling, and tell apart who turned it off <!-- parity:premium-noforwards-requests -->
 - [x] Move the "All chats" tab among folders (Premium) and keep its position from other devices <!-- parity:premium-main-list-position -->
-- [ ] Story stealth mode box: past and next periods, cooldown, Premium lock for free accounts <!-- parity:premium-story-stealth-box -->
-- [ ] Story Premium limits: lock 6, 12 and 48 hour expiry, story caption length limit, Premium note for older viewers <!-- parity:premium-story-limits -->
+- [x] Story stealth mode box: past and next periods, cooldown, Premium lock for free accounts <!-- parity:premium-story-stealth-box -->
 - [ ] Animated profile photos play beside messages in groups, as in tdesktop <!-- parity:premium-animated-userpics-history -->
 - [x] Reaction limits: up to 3 reactions per message with Premium (1 without), and locked Premium reactions open the Premium preview <!-- parity:premium-reaction-limits -->
 - [ ] Limit boxes read from TDLib and cover favorite stickers, pinned saved chats, story posting, similar channels and owned bots <!-- parity:premium-limit-boxes-more -->

@@ -19,6 +19,11 @@ pub const NO_FORWARDS_TITLE: &str = "Protect private chat content";
 pub const UNIQUE_REACTIONS_TITLE: &str = "Unique reactions";
 /// `premiumFeatureSavedMessagesTags`' title, which a tag opens.
 pub const SAVED_TAGS_TITLE: &str = "Tags for Saved Messages";
+pub const UPGRADED_STORIES_TITLE: &str = "Upgraded stories";
+
+/// `premiumFeatureTextComposition`'s title, which the AI compose box's
+/// Increase Limit opens.
+pub const AI_COMPOSE_TITLE: &str = "AI text tools";
 
 fn int(value: Option<&Value>) -> i64 {
     value
@@ -713,7 +718,7 @@ pub fn feature_row(constructor: &str) -> Option<PremiumFeatureRow> {
             "Translate entire chats in real time.",
         ),
         "premiumFeatureUpgradedStories" => (
-            "Upgraded stories",
+            UPGRADED_STORIES_TITLE,
             "Longer stories, more captions, link and permanent options.",
         ),
         "premiumFeatureChatBoost" => (
@@ -754,7 +759,7 @@ pub fn feature_row(constructor: &str) -> Option<PremiumFeatureRow> {
             "Restrict forwarding and saving of your private chats.",
         ),
         "premiumFeatureTextComposition" => (
-            "AI text tools",
+            AI_COMPOSE_TITLE,
             "Rewrite, translate and fix your messages while typing.",
         ),
         "premiumFeatureRichMessages" => {

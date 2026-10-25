@@ -57,6 +57,10 @@ pub enum LinkPreviewKind {
     /// `linkPreviewTypeGiftAuction`: its button reads "Join", "View" before
     /// the start or "View Results" after the end, so the dates are kept.
     GiftAuction { start_date: i32, end_date: i32 },
+    /// `linkPreviewTypeTextCompositionStyle` (TDLib 1.8.69,
+    /// `schema/td_api.tl:5037`): an `addstyle/` link, with the style's
+    /// emoji (0 if none).
+    TextCompositionStyle { custom_emoji_id: i64 },
 }
 
 impl LinkPreview {
@@ -175,6 +179,7 @@ pub(crate) fn view_button_label(preview_type: &Value) -> Option<&'static str> {
         "linkPreviewTypeGroupCall" => "Join call",
         "linkPreviewTypeWebApp" => "Launch",
         "linkPreviewTypeStickerSet" => "View stickers",
+        "linkPreviewTypeTextCompositionStyle" => "View Style",
         "linkPreviewTypeUpgradedGift" => "View collectible",
         "linkPreviewTypeGiftCollection" => "View Collection",
         // The label follows the clock; see `LinkPreview::button_label`.
@@ -297,6 +302,12 @@ pub(crate) fn parse_link_preview_kind(
                 )
                 .sat_i32(),
                 end_date: int53_or_zero(preview_type.get("auction_end_date")).sat_i32(),
+            },
+            Vec::new(),
+        ),
+        "linkPreviewTypeTextCompositionStyle" => (
+            LinkPreviewKind::TextCompositionStyle {
+                custom_emoji_id: json_i64_field(preview_type.get("custom_emoji_id"), 0),
             },
             Vec::new(),
         ),

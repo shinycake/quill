@@ -129,6 +129,7 @@ actions!(
         ShowScheduledMessages,
         ToggleLinkPreview,
         RecordRoundMessage,
+        AiComposeApply,
         ArchiveOpenChat,
         ShowAdminLog,
         /// Cmd/Ctrl+Shift+T: bring back the chat window closed last.

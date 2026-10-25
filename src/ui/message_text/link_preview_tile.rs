@@ -1,6 +1,7 @@
 //! The picture on a wallpaper or theme link preview (tdesktop
 //! `HistoryView::ThemeDocument`, the attach of `WebPageType::WallPaper` and
-//! `WebPageType::Theme`).
+//! `WebPageType::Theme`), and the emoji beside an AI compose style link
+//! (`WebPageType::ComposeAiTone`).
 //!
 //! A wallpaper is drawn the way the chat draws it, from the document's
 //! small preview (a pattern from its file, a fill from its colors) in a
@@ -26,6 +27,10 @@ const WALLPAPER_MIN_HEIGHT: f32 = 100.0;
 const WALLPAPER_MAX_HEIGHT: f32 = 240.0;
 /// `st::historyThemeSize`.
 const THEME_SIZE: (f32, f32) = (272.0, 176.0);
+/// `kStickerSetLines`: the style emoji is three lines tall.
+const STYLE_EMOJI_LINES: f32 = 3.0;
+/// `UnitedLineHeight()` over the message font size at the default size.
+const LINE_HEIGHT_RATIO: f32 = 19.0 / 14.0;
 
 /// The box of a wallpaper card's picture (`ThemeDocument::countOptimalSize`):
 /// a link with no document is the full 160 x 240 box; otherwise the
@@ -191,6 +196,60 @@ fn theme_picture(
     frame
         .when_some(size_pill(theme.size), |this, pill| this.child(pill))
         .into_any_element()
+}
+
+/// The style's emoji right of an `addstyle/` card's copy, as a sticker
+/// three lines tall (tdesktop draws it with the sticker set preview's
+/// `Sticker` view); its fallback emoji until the file is here, a sparkle
+/// while the emoji is unresolved. `None` for other cards and for a style
+/// without an emoji.
+pub(in crate::ui) fn style_emoji(
+    row_id: u64,
+    preview: &LinkPreview,
+    custom_emoji: Option<&quill::emoji::CustomEmojiStickers>,
+    files: &quill::state::FileMap,
+    media_roots: &[PathBuf],
+    font: Pixels,
+) -> Option<AnyElement> {
+    let LinkPreviewKind::TextCompositionStyle { custom_emoji_id } = preview.kind else {
+        return None;
+    };
+    if custom_emoji_id == 0 {
+        return None;
+    }
+    let side = font * LINE_HEIGHT_RATIO * STYLE_EMOJI_LINES;
+    let sticker = custom_emoji.and_then(|stickers| stickers.lookup(custom_emoji_id));
+    let path = sticker
+        .and_then(|sticker| sticker.display_file_id())
+        .and_then(|id| files.get(&id.0))
+        .and_then(|file| file.usable_path())
+        .and_then(|path| sandboxed_display_path(path, media_roots));
+    let glyph = match (path, sticker) {
+        (Some(path), _) => img(path)
+            .size(side)
+            .object_fit(ObjectFit::Contain)
+            .into_any_element(),
+        (None, Some(sticker)) if !sticker.emoji.is_empty() => div()
+            .text_size(side * 0.6)
+            .child(sticker.emoji.clone())
+            .into_any_element(),
+        _ => Icon::new(gpui_kit::assets::IconName::Sparkles)
+            .size(side * 0.5)
+            .text_color(accent())
+            .into_any_element(),
+    };
+    Some(
+        div()
+            .id(("link-preview-style-emoji", row_id))
+            .flex_none()
+            .size(side)
+            .flex()
+            .items_center()
+            .justify_center()
+            .role(Role::Image)
+            .child(glyph)
+            .into_any_element(),
+    )
 }
 
 /// The picture of a wallpaper or theme preview, `None` for other cards.

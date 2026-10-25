@@ -47,6 +47,8 @@ impl Session {
                 self.apply_quick_replies_option(&name, &value);
                 self.apply_business_option(&name, &value);
                 self.apply_earn_option(&name, &value);
+                self.apply_ai_compose_option(&name, &value);
+                self.stories.stealth_periods.apply_option(&name, &value);
                 if name == "disable_contact_registered_notifications"
                     && let OptionValue::Boolean(off) = &value
                 {
@@ -292,9 +294,6 @@ impl Session {
                     self.chats_state.background_url = Some(url);
                 }
             }
-            // Slice msg-richtext-ai-tools: `fixedText` / `formattedText`
-            // answers — captured by the driver before `apply` into
-            // `Session::ai_composer_text`; nothing to reduce here.
             CommonPayload::FormattedText { text, entities }
                 if matches!(
                     pending.map(|p| p.purpose),
@@ -309,7 +308,9 @@ impl Session {
                     self.finish_translation(job, Translation::Done { text, entities });
                 }
             }
-            CommonPayload::FixedText { .. } | CommonPayload::FormattedText { .. } => {}
+            CommonPayload::FormattedText { text, entities } => {
+                self.apply_ai_compose_formatted_text(pending, text, entities);
+            }
         }
     }
 }

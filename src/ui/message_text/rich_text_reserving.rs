@@ -298,6 +298,7 @@ pub(in crate::ui) fn message_text_block(
                 files,
                 downloading,
                 media_roots,
+                custom_emoji,
                 font,
                 room,
                 cx,
@@ -334,6 +335,7 @@ pub(in crate::ui) fn link_preview_card(
     files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
+    custom_emoji: Option<&quill::emoji::CustomEmojiStickers>,
     // Settings → Appearance: message font size.
     font: Pixels,
     room: crate::ui::history::bubble_width::BubbleRoom,
@@ -395,6 +397,16 @@ pub(in crate::ui) fn link_preview_card(
         }),
         _ => thumb,
     };
+    let thumb = thumb.or_else(|| {
+        super::link_preview_tile::style_emoji(
+            row_id,
+            preview,
+            custom_emoji,
+            files,
+            media_roots,
+            font,
+        )
+    });
     // MED4: album previews (`linkPreviewTypeAlbum`, schema:4392) show a
     // strip of up to 4 thumbnails under the card copy.
     let album_strip: Option<AnyElement> = match &preview.kind {

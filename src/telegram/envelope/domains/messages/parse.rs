@@ -426,7 +426,7 @@ pub(crate) fn parse_messages_payload(
                     .unwrap_or(false),
             },
         )),
-        _ => return Ok(None),
+        _ => return parse_ai_compose_payload(type_name, value),
     };
     payload.map(Some)
 }

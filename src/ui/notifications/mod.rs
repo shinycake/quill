@@ -732,6 +732,7 @@ impl QuillApp {
             | self.drain_earn(cx)
             | self.drain_language(cx)
             | self.drain_peer_qr(cx)
+            | self.drain_story_stealth(cx)
         {
             progressed = true;
         }
