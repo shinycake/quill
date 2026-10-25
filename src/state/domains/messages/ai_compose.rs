@@ -150,6 +150,34 @@ pub struct AiComposeState {
     pub(crate) op_names: HashMap<RequestId, String>,
 }
 
+/// An answer carrying the token of the request it answers.
+trait Tokened {
+    fn token(&self) -> u64;
+}
+
+impl Tokened for AiBoxAnswer {
+    fn token(&self) -> u64 {
+        self.token
+    }
+}
+
+impl Tokened for ApplyInPlaceAnswer {
+    fn token(&self) -> u64 {
+        self.token
+    }
+}
+
+/// Tokens only grow, so an older answer landing in the same drain as a
+/// newer one must not replace it.
+fn keep_newest<T: Tokened>(slot: &mut Option<T>, answer: T) {
+    if slot
+        .as_ref()
+        .is_none_or(|held| held.token() <= answer.token())
+    {
+        *slot = Some(answer);
+    }
+}
+
 fn ai_purpose(pending: Option<&PendingRequest>) -> Option<AiComposePurpose> {
     match pending.map(|p| p.purpose) {
         Some(RequestPurpose::Messages(MessagesPurpose::AiCompose(purpose))) => Some(purpose),
@@ -249,14 +277,17 @@ impl Session {
                 diff,
             } => {
                 if let Some(AiComposePurpose::BoxFix { token }) = asked {
-                    state.box_answer = Some(AiBoxAnswer {
-                        token,
-                        outcome: Ok(AiResult {
-                            text,
-                            entities,
-                            diff: Some(diff),
-                        }),
-                    });
+                    keep_newest(
+                        &mut state.box_answer,
+                        AiBoxAnswer {
+                            token,
+                            outcome: Ok(AiResult {
+                                text,
+                                entities,
+                                diff: Some(diff),
+                            }),
+                        },
+                    );
                 }
             }
         }
@@ -273,20 +304,26 @@ impl Session {
         let state = &mut self.messages.ai_compose;
         match ai_purpose(pending) {
             Some(AiComposePurpose::BoxCompose { token }) => {
-                state.box_answer = Some(AiBoxAnswer {
-                    token,
-                    outcome: Ok(AiResult {
-                        text,
-                        entities,
-                        diff: None,
-                    }),
-                });
+                keep_newest(
+                    &mut state.box_answer,
+                    AiBoxAnswer {
+                        token,
+                        outcome: Ok(AiResult {
+                            text,
+                            entities,
+                            diff: None,
+                        }),
+                    },
+                );
             }
             Some(AiComposePurpose::ApplyInPlace { token }) => {
-                state.apply_in_place = Some(ApplyInPlaceAnswer {
-                    token,
-                    outcome: Ok((text, entities)),
-                });
+                keep_newest(
+                    &mut state.apply_in_place,
+                    ApplyInPlaceAnswer {
+                        token,
+                        outcome: Ok((text, entities)),
+                    },
+                );
             }
             _ => {}
         }
@@ -342,16 +379,22 @@ impl Session {
         let state = &mut self.messages.ai_compose;
         match purpose {
             AiComposePurpose::BoxCompose { token } | AiComposePurpose::BoxFix { token } => {
-                state.box_answer = Some(AiBoxAnswer {
-                    token,
-                    outcome: Err(box_error(err)),
-                });
+                keep_newest(
+                    &mut state.box_answer,
+                    AiBoxAnswer {
+                        token,
+                        outcome: Err(box_error(err)),
+                    },
+                );
             }
             AiComposePurpose::ApplyInPlace { token } => {
-                state.apply_in_place = Some(ApplyInPlaceAnswer {
-                    token,
-                    outcome: Err(box_error(err)),
-                });
+                keep_newest(
+                    &mut state.apply_in_place,
+                    ApplyInPlaceAnswer {
+                        token,
+                        outcome: Err(box_error(err)),
+                    },
+                );
             }
             AiComposePurpose::CreateStyle | AiComposePurpose::EditStyle => {
                 if error == StyleError::SavedTooMany {
@@ -380,5 +423,29 @@ impl Session {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod keep_newest_tests {
+    use super::{AiBoxAnswer, keep_newest};
+    use crate::ai_compose::AiBoxError;
+
+    fn answer(token: u64) -> AiBoxAnswer {
+        AiBoxAnswer {
+            token,
+            outcome: Err(AiBoxError::TooLong),
+        }
+    }
+
+    #[test]
+    fn an_older_answer_never_replaces_a_newer_one() {
+        let mut slot = None;
+        keep_newest(&mut slot, answer(2));
+        keep_newest(&mut slot, answer(1));
+        assert_eq!(slot.map(|held| held.token), Some(2));
+        let mut slot = Some(answer(1));
+        keep_newest(&mut slot, answer(3));
+        assert_eq!(slot.map(|held| held.token), Some(3));
     }
 }

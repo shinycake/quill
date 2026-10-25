@@ -102,6 +102,9 @@ impl QuillApp {
     /// `HistoryWidget::showAiComposeBox`): a box over the draft, on the
     /// Style tab, which asks for nothing until a style is picked.
     pub(super) fn open_ai_compose(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.composer_ui.rich_editor_open {
+            return;
+        }
         let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
             return;
         };

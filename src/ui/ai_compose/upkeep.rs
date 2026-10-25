@@ -19,6 +19,15 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.sync_ai_compose_button(cx);
+        let open_chat = self.session().and_then(|s| s.open_chat);
+        if self
+            .ai_compose
+            .open
+            .as_ref()
+            .is_some_and(|open| Some(open.chat_id) != open_chat)
+        {
+            self.close_ai_compose(cx);
+        }
         let answer = session_mut(self).and_then(|s| s.messages.ai_compose.box_answer.take());
         if let Some(answer) = answer {
             let error = self
@@ -47,6 +56,9 @@ impl QuillApp {
     /// A style list that changed under the open box (tdesktop
     /// `refreshTones`) drops a picked style the server no longer lists.
     fn refresh_ai_compose_styles(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.ai_compose.open.is_none() {
+            return;
+        }
         let names = self.ai_compose_style_names();
         let Some(open) = self.ai_compose.open.as_mut() else {
             return;
