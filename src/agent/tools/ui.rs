@@ -292,6 +292,11 @@ fn finish_ui_send(send: UiSend) -> Result<String, ToolError> {
             target.title
         )));
     }
+    if let Some(what) = not_plain(&send.request) {
+        return Err(keep_draft(ToolError::new(format!(
+            "The request the window built {what}; the agent path sends plain text messages only. Use send_message, or ask the user."
+        ))));
+    }
     common::confirm(&ctx, &target, "ui_send", &send.text).map_err(keep_draft)?;
     let sent =
         common::send(&ctx, &target, "ui_send", &send.text, send.request, 1).map_err(keep_draft)?;
@@ -311,6 +316,42 @@ fn finish_ui_send(send: UiSend) -> Result<String, ToolError> {
         "Sent to \"{}\" through the agent path (message {id}).",
         target.title
     ))
+}
+
+/// What makes `request` more than a plain text `sendMessage`, if anything.
+/// The window builds the request from the composer's state and is trusted
+/// no further than this: a schedule, suggested-post terms, an effect, a
+/// paid message or any other content type stays with the user.
+fn not_plain(request: &Value) -> Option<&'static str> {
+    fn type_of(value: Option<&Value>) -> Option<&str> {
+        value.and_then(|v| v.get("@type")).and_then(Value::as_str)
+    }
+    if type_of(Some(request)) != Some("sendMessage") {
+        return Some("is not a sendMessage");
+    }
+    if type_of(request.get("input_message_content")) != Some("inputMessageText") {
+        return Some("is not a text message");
+    }
+    if super::td_request::spends(request) {
+        return Some("would spend Stars");
+    }
+    let option = |field: &str| request.get("options").and_then(|o| o.get(field));
+    let set = |field: &str| option(field).is_some_and(|v| !v.is_null());
+    if set("scheduling_state") {
+        return Some("is scheduled");
+    }
+    if set("suggested_post_info") {
+        return Some("is a suggested post");
+    }
+    let effect = option("effect_id").is_some_and(|v| match v {
+        Value::String(s) => s != "0" && !s.is_empty(),
+        Value::Number(n) => n.as_i64() != Some(0),
+        _ => false,
+    });
+    if effect {
+        return Some("carries a message effect");
+    }
+    None
 }
 
 fn keep_draft(error: ToolError) -> ToolError {
@@ -550,9 +591,57 @@ pub fn open_menu(args: &Value) -> Result<ToolOutput, ToolError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{click_element, read_ui_tree, target_arg, type_text};
+    use super::{click_element, not_plain, read_ui_tree, target_arg, type_text};
     use crate::agent::ui_driver::bridge::Target;
-    use serde_json::json;
+    use crate::composer::{ComposerScheduling, SendOptions};
+    use crate::ids::{ChatId, RequestId};
+    use crate::telegram::requests::send_text;
+    use serde_json::{Value, json};
+
+    fn built(options: &SendOptions) -> Value {
+        let request = send_text(RequestId(0), ChatId(11), None, "hi", None, options);
+        serde_json::from_str(&request).unwrap_or(Value::Null)
+    }
+
+    #[test]
+    fn only_a_plain_text_send_passes_the_agent_path() {
+        assert_eq!(not_plain(&built(&SendOptions::default())), None);
+        let scheduled = SendOptions {
+            scheduling: ComposerScheduling::SendWhenOnline,
+            ..SendOptions::default()
+        };
+        assert_eq!(not_plain(&built(&scheduled)), Some("is scheduled"));
+        let paid = SendOptions {
+            paid_message_star_count: 5,
+            ..SendOptions::default()
+        };
+        assert_eq!(not_plain(&built(&paid)), Some("would spend Stars"));
+        let effect = SendOptions {
+            effect_id: 5_046_509_860_389_126_442,
+            ..SendOptions::default()
+        };
+        assert_eq!(not_plain(&built(&effect)), Some("carries a message effect"));
+        let mut suggested = built(&SendOptions::default());
+        if let Some(options) = suggested.get_mut("options").and_then(Value::as_object_mut) {
+            options.insert(
+                "suggested_post_info".into(),
+                json!({"@type": "inputSuggestedPostInfo"}),
+            );
+        }
+        assert_eq!(not_plain(&suggested), Some("is a suggested post"));
+        let mut photo = built(&SendOptions::default());
+        if let Some(request) = photo.as_object_mut() {
+            request.insert(
+                "input_message_content".into(),
+                json!({"@type": "inputMessagePhoto"}),
+            );
+        }
+        assert_eq!(not_plain(&photo), Some("is not a text message"));
+        assert_eq!(
+            not_plain(&json!({"@type": "forwardMessages"})),
+            Some("is not a sendMessage")
+        );
+    }
 
     #[test]
     fn targets_are_a_node_id_or_a_point() {

@@ -10,6 +10,7 @@ use super::app::QuillApp;
 use gpui_kit::*;
 use quill::agent::ui_driver::bridge::UiSend;
 use quill::agent::ui_driver::guard;
+use quill::composer::SendOptions;
 use quill::ids::RequestId;
 use quill::telegram::requests::send_text;
 use serde_json::Value;
@@ -43,7 +44,18 @@ impl QuillApp {
         }
         let reply = self.send_reply_for(chat_id, cx);
         let topic_id = self.session().and_then(|session| session.open_topic);
-        let options = self.composer_post_options();
+        // A plain send: the composer's link preview choices travel, nothing
+        // else the box could carry does (a schedule, a silent send, an
+        // effect, a paid message, suggested-post terms). The tool path
+        // checks the request again before sending.
+        let composer = self.composer_send_options();
+        let options = SendOptions {
+            link_preview_disabled: composer.link_preview_disabled,
+            link_preview_above_text: composer.link_preview_above_text,
+            link_preview_link: composer.link_preview_link,
+            link_preview_media: composer.link_preview_media,
+            ..SendOptions::default()
+        };
         let request = send_text(RequestId(0), chat_id, topic_id, &text, reply, &options);
         let mut request: Value = serde_json::from_str(&request).unwrap_or(Value::Null);
         if let Some(map) = request.as_object_mut() {
