@@ -166,6 +166,9 @@ fn capture_frame(
             if let Some(note) = takeover::refusal() {
                 return Err(note);
             }
+            if cx.has_active_drag() {
+                return Err(shot::dragging());
+            }
             let surface = app.driver_surface();
             if let Some(note) = surface.read_refusal() {
                 return Err(note);
@@ -239,36 +242,37 @@ fn capture_failed(why: &str) -> String {
     )
 }
 
-/// The readback flattened onto [`HIDDEN_FILL`], shrunk unless
-/// `full_resolution`, as a PNG. `window_width` is the window's width in
-/// logical pixels, for the scale.
+/// The readback shrunk unless `full_resolution`, flattened onto
+/// [`HIDDEN_FILL`], as an RGB PNG. `window_width` is the window's width in
+/// logical pixels, for the scale. At most one smaller copy of the pixels
+/// is made: the shrink happens first and the flatten works in place.
 pub(super) fn encode(
     rgba: image::RgbaImage,
     options: ShotOptions,
     window_width: f32,
     scope: ShotScope,
 ) -> Result<Shot, String> {
-    let rgb = flatten(&rgba);
-    let (width, height) = shot::output_size(rgb.width(), rgb.height(), options.full_resolution);
-    let rgb = if (width, height) == rgb.dimensions() {
-        rgb
-    } else {
-        image::imageops::resize(&rgb, width, height, image::imageops::FilterType::Triangle)
+    let (width, height) = shot::output_size(rgba.width(), rgba.height(), options.full_resolution);
+    // The readback is premultiplied, which is what `resize` filters, so
+    // shrinking before the flatten gives the same picture. The full-size
+    // readback is dropped at the end of this block.
+    let rgba = {
+        let full = rgba;
+        if (width, height) == full.dimensions() {
+            full
+        } else {
+            image::imageops::resize(&full, width, height, image::imageops::FilterType::Triangle)
+        }
     };
+    let rgb = flatten(rgba);
     let mut png = Vec::new();
     let encoder = image::codecs::png::PngEncoder::new_with_quality(
         &mut png,
         image::codecs::png::CompressionType::Fast,
         image::codecs::png::FilterType::Adaptive,
     );
-    image::ImageEncoder::write_image(
-        encoder,
-        rgb.as_raw(),
-        width,
-        height,
-        image::ExtendedColorType::Rgb8,
-    )
-    .map_err(|error| capture_failed(&error.to_string()))?;
+    image::ImageEncoder::write_image(encoder, &rgb, width, height, image::ExtendedColorType::Rgb8)
+        .map_err(|error| capture_failed(&error.to_string()))?;
     let scale = if window_width > 0.0 {
         width as f32 / window_width
     } else {
@@ -283,22 +287,39 @@ pub(super) fn encode(
     })
 }
 
-/// Every pixel over [`HIDDEN_FILL`]: what the filter kept out of the frame
-/// was never drawn, so it is transparent in the readback. The renderers
-/// blend premultiplied, so a pixel's colour already carries its alpha.
-fn flatten(rgba: &image::RgbaImage) -> image::RgbImage {
-    let mut out = image::RgbImage::new(rgba.width(), rgba.height());
-    for (pixel, target) in rgba.pixels().zip(out.pixels_mut()) {
-        let [r, g, b, a] = pixel.0;
+/// Every pixel over [`HIDDEN_FILL`], as RGB rows, in the readback's own
+/// buffer: what the filter kept out of the frame was never drawn, so it is
+/// transparent in the readback. Every renderer's readback is premultiplied
+/// (Metal and Direct3D blend straight alpha onto a transparent target,
+/// which premultiplies; wgpu renders the capture in the window's own alpha
+/// mode, and either mode leaves it premultiplied), so a pixel's colour
+/// already carries its alpha.
+fn flatten(rgba: image::RgbaImage) -> Vec<u8> {
+    let mut raw = rgba.into_raw();
+    let pixels = raw.len() / 4;
+    let [fr, fg, fb] = HIDDEN_FILL;
+    // Pixel `index` is read from `4 * index` and written to `3 * index`:
+    // the write never reaches a pixel not yet read.
+    for index in 0..pixels {
+        let from = index * 4;
+        let Some(&[r, g, b, a]) = raw
+            .get(from..from + 4)
+            .and_then(|pixel| <&[u8; 4]>::try_from(pixel).ok())
+        else {
+            break;
+        };
         let rest = 255 - u16::from(a);
         let over = |channel: u8, fill: u8| {
             let value = u16::from(channel) + (u16::from(fill) * rest + 127) / 255;
             u8::try_from(value.min(255)).unwrap_or(u8::MAX)
         };
-        let [fr, fg, fb] = HIDDEN_FILL;
-        target.0 = [over(r, fr), over(g, fg), over(b, fb)];
+        let to = index * 3;
+        if let Some(target) = raw.get_mut(to..to + 3) {
+            target.copy_from_slice(&[over(r, fr), over(g, fg), over(b, fb)]);
+        }
     }
-    out
+    raw.truncate(pixels * 3);
+    raw
 }
 
 /// The tree an input command answers with, and the screenshot asked for:

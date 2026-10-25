@@ -5,19 +5,37 @@
 //! chat and one more; `everything` turns "All other chats" on.
 //! `QUILL_DEMO_SHOT_OUT=<file.png>` saves the screenshot the agent got;
 //! the window itself keeps showing the takeover layer the screenshot
-//! leaves out.
+//! leaves out. `QUILL_DEMO_SHOT_MENU=<chat id>` leaves that chat's context
+//! menu open and `QUILL_DEMO_SHOT_PEEK=<chat id>` its peek preview, to see
+//! them cut with the chat's row.
 #![deny(clippy::indexing_slicing)]
 
 use super::agent_state::active_account;
 use super::app::QuillApp;
+use super::chat_row::ChatPreviewState;
+use super::menu_states::ChatMenuState;
 use gpui_kit::*;
 use quill::agent::grants::{self, ChatGrant, Scope};
 use quill::agent::ui_driver::bridge::{self, UiCommand, UiReply};
 use quill::agent::ui_driver::shot::ShotOptions;
 use quill::agent::{access, activity};
+use quill::ids::ChatId;
 use std::time::Duration;
 
-fn demo_screenshot(_: &mut QuillApp, window: &mut Window, cx: &mut Context<QuillApp>) {
+/// The chat id an environment variable names, if any.
+fn env_chat(name: &str) -> Option<ChatId> {
+    std::env::var(name).ok()?.parse().ok().map(ChatId)
+}
+
+fn demo_screenshot(app: &mut QuillApp, window: &mut Window, cx: &mut Context<QuillApp>) {
+    // Over the second and third rows of the demo's chat list.
+    let anchor = point(px(48.), px(200.));
+    if let Some(chat_id) = env_chat("QUILL_DEMO_SHOT_MENU") {
+        app.chat_list.menu = Some(ChatMenuState::at(chat_id, anchor));
+    }
+    if let Some(chat_id) = env_chat("QUILL_DEMO_SHOT_PEEK") {
+        app.chat_list.preview = Some(ChatPreviewState { chat_id, anchor });
+    }
     quill::fast_buttons::set_persistence(false);
     access::set_enabled(true);
     access::set_ui_driver(true);

@@ -20,15 +20,19 @@ fn selectable(row: AnyElement, selector: &'static str) -> AnyElement {
 
 impl QuillApp {
     /// The popup frame of a chat menu: a backdrop that closes it and the
-    /// panel at `position`, kept inside the window.
+    /// panel at `position`, kept inside the window. The panel is tagged
+    /// with `chat_id`'s row as well as a menu, so the UI driver cuts it
+    /// (tree and screenshots) wherever it cuts that chat's row.
     pub(super) fn chat_menu_shell(
         &self,
+        chat_id: ChatId,
         position: Point<Pixels>,
         rows: Vec<AnyElement>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let panel = div()
             .id("chat-menu-panel")
+            .debug_selector(|| "chat-menu-panel".into())
             .role(gpui_kit::Role::Group)
             .a11y_tag(quill::agent::ui_driver::redact::REGION_MENU)
             .occlude()
@@ -69,7 +73,13 @@ impl QuillApp {
                 anchored()
                     .position(position)
                     .snap_to_window_with_margin(px(8.))
-                    .child(panel),
+                    .child(
+                        div()
+                            .id("chat-menu-chat")
+                            .role(gpui_kit::Role::Group)
+                            .a11y_tag(quill::agent::ui_driver::redact::chat_tag(chat_id.0))
+                            .child(panel),
+                    ),
             )
             .focus_trap("chat-menu-focus", &self.frame.context_menu_focus)
             .into_any_element()
@@ -214,6 +224,6 @@ impl QuillApp {
             .into_any_element(),
             "top-menu-disable",
         ));
-        self.chat_menu_shell(menu.position, rows, cx)
+        self.chat_menu_shell(menu.chat_id, menu.position, rows, cx)
     }
 }

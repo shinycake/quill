@@ -472,3 +472,318 @@ fn a_refused_row_under_a_drawn_container_is_covered(cx: &mut TestAppContext) {
     assert!(quads.iter().any(|q| is(q, 0xff_0000)));
     assert!(!quads.iter().any(is_hidden_fill));
 }
+
+/// A chat row's centre, a little in from its left edge, in window pixels:
+/// where a menu opened on it stays inside the chat list.
+fn row_anchor(vcx: &mut VisualTestContext, chat_id: u64) -> gpui_kit::Point<Pixels> {
+    vcx.update(|window, _| {
+        let bounds = window.find(("chat-row", chat_id)).bounds();
+        gpui_kit::point(
+            bounds.origin.x + gpui_kit::px(8.),
+            bounds.origin.y + bounds.size.height / 2.0,
+        )
+    })
+}
+
+/// The bounds of the element with debug selector `selector`, in device
+/// pixels.
+fn element(vcx: &mut VisualTestContext, selector: &'static str) -> Bounds<f32> {
+    let bounds = vcx
+        .debug_bounds(selector)
+        .unwrap_or_else(|| panic!("{selector} is drawn"));
+    let scale = vcx.update(|window, _| window.scale_factor());
+    device(bounds, scale)
+}
+
+/// Whether anything but the hidden fill is painted within `bounds`.
+fn drawn_within(bounds: Bounds<f32>) -> bool {
+    raster::captured()
+        .iter()
+        .any(|q| within(quad_bounds(q), bounds) && !is_hidden_fill(q))
+}
+
+/// A chat menu the user left open over a row goes with that row: over an
+/// ungranted chat it is neither in the tree nor in the picture, over a
+/// granted one it is in both.
+#[gpui_kit::test]
+fn a_chat_menu_is_cut_with_its_row(cx: &mut TestAppContext) {
+    use crate::ui::menu_states::ChatMenuState;
+    use quill::agent::ui_driver::redact::REGION_MENU;
+    use quill::ids::ChatId;
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    turn_on();
+    grant(11, Scope::ReadWrite);
+    let _presence = activity::connect("Test agent");
+    settle(vcx);
+    for (chat, shown) in [(12_i64, false), (11, true)] {
+        let anchor = row_anchor(vcx, chat as u64);
+        app.update(vcx, |app, cx| {
+            app.chat_list.menu = Some(ChatMenuState::at(ChatId(chat), anchor));
+            cx.notify();
+        });
+        settle(vcx);
+        let panel = element(vcx, "chat-menu-panel");
+        let (tree, full) = take(&app, vcx, FULL);
+        let in_tree = tree
+            .nodes
+            .iter()
+            .any(|n| n.tag.as_deref() == Some(REGION_MENU));
+        assert_eq!(in_tree, shown, "chat {chat}'s menu in the tree");
+        assert_eq!(drawn_within(panel), shown, "chat {chat}'s menu painted");
+        assert_eq!(
+            pixel_at(&full, panel) == HIDDEN_FILL,
+            !shown,
+            "chat {chat}'s menu in the picture"
+        );
+        app.update(vcx, |app, cx| {
+            app.chat_list.menu = None;
+            cx.notify();
+        });
+        settle(vcx);
+    }
+}
+
+/// With All chats on, the peek of a secret chat without its own grant is
+/// cut like that chat's row; another chat's peek is drawn.
+#[gpui_kit::test]
+fn a_secret_chat_peek_is_cut_with_all_chats_on(cx: &mut TestAppContext) {
+    use crate::ui::chat_row::ChatPreviewState;
+    use quill::agent::ui_driver::redact::chat_tag;
+    use quill::ids::ChatId;
+    // A secret chat's id (td/telegram/DialogId.h).
+    const SECRET: i64 = -2_000_000_000_000 + 7;
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    turn_on();
+    grant(11, Scope::ReadWrite);
+    grants::update(&AccountKey::primary(), |g| g.all_chats = Some(Scope::Read));
+    let _presence = activity::connect("Test agent");
+    settle(vcx);
+    for (chat, shown) in [(SECRET, false), (12, true)] {
+        app.update(vcx, |app, cx| {
+            app.chat_list.preview = Some(ChatPreviewState {
+                chat_id: ChatId(chat),
+                anchor: gpui_kit::point(gpui_kit::px(40.), gpui_kit::px(200.)),
+            });
+            cx.notify();
+        });
+        settle(vcx);
+        let panel = element(vcx, "chat-preview-panel");
+        let (tree, full) = take(&app, vcx, FULL);
+        assert_eq!(full.scope, ShotScope::AllChats);
+        let tag = chat_tag(chat);
+        let in_tree = tree
+            .nodes
+            .iter()
+            .any(|n| n.role == "Group" && n.tag.as_deref() == Some(tag.as_str()));
+        assert_eq!(in_tree, shown, "chat {chat}'s peek in the tree");
+        // The rows under the peek are drawn with All chats on, so what
+        // counts is what comes after the peek starts: a cover over it and
+        // nothing of its own, or its own background and no cover.
+        let quads = raster::captured();
+        let cover = quads
+            .iter()
+            .position(|q| is_hidden_fill(q) && same(quad_bounds(q), panel));
+        if shown {
+            assert!(cover.is_none(), "chat {chat}'s peek is not covered");
+            assert!(
+                quads
+                    .iter()
+                    .any(|q| same(quad_bounds(q), panel) && !is_hidden_fill(q)),
+                "chat {chat}'s peek painted"
+            );
+        } else {
+            let cover = cover.unwrap_or_else(|| panic!("chat {chat}'s peek is covered"));
+            assert!(
+                !quads
+                    .iter()
+                    .skip(cover + 1)
+                    .any(|q| within(quad_bounds(q), panel) && !is_hidden_fill(q)),
+                "nothing of chat {chat}'s peek painted"
+            );
+        }
+        assert_eq!(
+            pixel_at(&full, panel) == HIDDEN_FILL,
+            !shown,
+            "chat {chat}'s peek in the picture"
+        );
+        app.update(vcx, |app, cx| {
+            app.chat_list.preview = None;
+            cx.notify();
+        });
+        settle(vcx);
+    }
+    grants::update(&AccountKey::primary(), |g| g.all_chats = None);
+}
+
+/// A tooltip's picture: one solid square.
+struct Tip;
+
+impl gpui_kit::Render for Tip {
+    fn render(
+        &mut self,
+        _: &mut gpui_kit::Window,
+        _: &mut gpui_kit::Context<Self>,
+    ) -> impl gpui_kit::IntoElement {
+        use gpui_kit::{Styled, div, px, rgb};
+        div().size(px(30.)).bg(rgb(0xab_cdef))
+    }
+}
+
+/// Two rows with tooltips in an allowed region.
+struct TipRows;
+
+impl gpui_kit::Render for TipRows {
+    fn render(
+        &mut self,
+        _: &mut gpui_kit::Window,
+        _: &mut gpui_kit::Context<Self>,
+    ) -> impl gpui_kit::IntoElement {
+        use gpui_kit::{
+            AppContext, InteractiveElement, ParentElement, StatefulInteractiveElement, Styled, div,
+            px, rgb,
+        };
+        let row = |tag: &'static str, color: u32| {
+            div()
+                .id(tag)
+                .a11y_tag(tag)
+                .w(px(100.))
+                .h(px(40.))
+                .bg(rgb(color))
+                .tooltip(|_, cx| cx.new(|_| Tip).into())
+        };
+        div()
+            .id("region")
+            .a11y_tag(quill::agent::ui_driver::redact::REGION_CHAT)
+            .size_full()
+            .bg(rgb(0xff_ffff))
+            .child(row("chat=5", 0xff_0000))
+            .child(row("chat=6", 0x00_ff00))
+    }
+}
+
+/// A tooltip is drawn at the root, after everything else, but the paint
+/// filter decides it under its owner's tags: hidden over a refused row,
+/// drawn over an allowed one.
+#[gpui_kit::test]
+fn a_tooltip_is_filtered_with_its_owner(cx: &mut TestAppContext) {
+    use gpui_kit::{Modifiers, PaintFilter, SharedString, point, px, rgb, size};
+    use quill::agent::ui_driver::redact;
+    use quill::agent::ui_driver::surface::DriverScope;
+    let handle = cx.open_window(size(px(200.), px(100.)), |_, _| TipRows);
+    let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+    let is_tip = |q: &Quad| {
+        let want = Rgba::from(rgb(0xab_cdef));
+        q.background.as_solid().map(Rgba::from).is_some_and(|c| {
+            (c.r - want.r).abs() < 0.01
+                && (c.g - want.g).abs() < 0.01
+                && (c.b - want.b).abs() < 0.01
+        })
+    };
+    // Rows are stacked: chat 5's at y 0..40, chat 6's at 40..80.
+    for (y, chat, shown) in [(20.0, 5, false), (60.0, 6, true)] {
+        vcx.simulate_mouse_move(point(px(50.), px(y)), None, Modifiers::none());
+        vcx.executor().advance_clock(Duration::from_secs(1));
+        vcx.run_until_parked();
+        vcx.update(|window, cx| window.draw(cx).clear(cx));
+        let normal = vcx.update(|window, _| window.painted_quads());
+        assert!(
+            normal.iter().any(is_tip),
+            "chat {chat}'s tooltip shows on screen"
+        );
+        let filter = PaintFilter {
+            allows: std::rc::Rc::new(|tags: &[SharedString]| {
+                let innermost_first: Vec<String> =
+                    tags.iter().rev().map(|t| t.to_string()).collect();
+                redact::point_allowed(&innermost_first, DriverScope::Everything, &|chat| chat != 5)
+            }),
+            hidden: crate::ui::agent_driver_shot::hidden_fill(),
+            shown: rgb(0xff_ffff).into(),
+        };
+        let filtered = vcx.update(|window, cx| {
+            window.set_paint_filter(Some(filter));
+            window.draw(cx).clear(cx);
+            let quads = window.painted_quads();
+            window.set_paint_filter(None);
+            window.draw(cx).clear(cx);
+            quads
+        });
+        assert_eq!(
+            filtered.iter().any(is_tip),
+            shown,
+            "chat {chat}'s tooltip in the filtered frame"
+        );
+    }
+}
+
+/// The readback is premultiplied: a transparent pixel becomes the hidden
+/// fill, an opaque one stays, a half-covered one is blended over the fill.
+/// The PNG is RGB at the size asked for, shrunk before the flatten.
+#[test]
+fn encode_flattens_a_premultiplied_readback() {
+    use crate::ui::agent_driver_shot::encode;
+    let mut rgba = image::RgbaImage::new(3, 1);
+    rgba.put_pixel(1, 0, image::Rgba([255, 0, 0, 255]));
+    rgba.put_pixel(2, 0, image::Rgba([128, 128, 128, 128]));
+    let shot = encode(rgba, FULL, 3.0, ShotScope::Granted)
+        .unwrap_or_else(|error| panic!("encoded: {error}"));
+    let decoded = image::load_from_memory(&shot.png).unwrap_or_else(|e| panic!("a PNG: {e}"));
+    assert_eq!(decoded.color(), image::ColorType::Rgb8);
+    let pixels: Vec<[u8; 3]> = decoded.to_rgb8().pixels().map(|p| p.0).collect();
+    // 128 + 0x8a * (255 - 128) / 255, rounded.
+    assert_eq!(pixels, [HIDDEN_FILL, [255, 0, 0], [197, 197, 197]]);
+
+    let wide = image::RgbaImage::from_pixel(2560, 10, image::Rgba([128, 128, 128, 128]));
+    let shot = encode(wide, ShotOptions::default(), 1280.0, ShotScope::Granted)
+        .unwrap_or_else(|error| panic!("encoded: {error}"));
+    assert_eq!(
+        (shot.width, shot.height),
+        shot::output_size(2560, 10, false)
+    );
+    assert!((shot.scale - shot.width as f32 / 1280.0).abs() < 0.001);
+    let decoded = image::load_from_memory(&shot.png).unwrap_or_else(|e| panic!("a PNG: {e}"));
+    assert_eq!(
+        (decoded.width(), decoded.height()),
+        (shot.width, shot.height)
+    );
+    assert!(decoded.to_rgb8().pixels().all(|p| p.0 == [197, 197, 197]));
+}
+
+/// No screenshot while the user drags something: a drag's picture follows
+/// the pointer at the root, outside the row it came from.
+#[gpui_kit::test]
+fn no_screenshot_while_the_user_drags(cx: &mut TestAppContext) {
+    use gpui_kit::{Modifiers, MouseButton, point, px};
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    turn_on();
+    grant(11, Scope::ReadWrite);
+    let _presence = activity::connect("Test agent");
+    settle(vcx);
+    let from = vcx
+        .debug_bounds("sidebar-resize-hit")
+        .unwrap_or_else(|| panic!("the resize handle is drawn"))
+        .center();
+    let none = Modifiers::default();
+    vcx.simulate_mouse_move(from, None, none);
+    vcx.simulate_mouse_down(from, MouseButton::Left, none);
+    vcx.simulate_mouse_move(
+        point(from.x + px(6.), from.y),
+        Some(MouseButton::Left),
+        none,
+    );
+    assert!(vcx.update(|_, cx| cx.has_active_drag()), "a drag started");
+    let reply = drive_shot(&app, vcx, UiCommand::ReadTree, FULL);
+    assert!(refused(&reply, "dragging"), "{reply:?}");
+    let log = activity::recent(&AccountKey::primary());
+    assert!(log.iter().all(|a| a.tool != "ui_screenshot"), "{log:?}");
+
+    vcx.simulate_mouse_up(point(from.x + px(6.), from.y), MouseButton::Left, none);
+    settle(vcx);
+    assert!(!vcx.update(|_, cx| cx.has_active_drag()), "the drag ended");
+    let _ = take(&app, vcx, FULL);
+}

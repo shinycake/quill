@@ -438,6 +438,7 @@ impl QuillApp {
             .child(
                 div()
                     .id("sidebar-resize-hit")
+                    .debug_selector(|| "sidebar-resize-hit".into())
                     .absolute()
                     .top_0()
                     .bottom_0()

@@ -161,8 +161,14 @@ impl QuillApp {
                     .child(tr(keys::Q_CHAT_NO_MESSAGES_YET_2)),
             );
         }
+        // The peek shows the chat's messages: the UI driver cuts it
+        // wherever it cuts that chat's row (a secret chat with All chats
+        // on included).
         let panel = div()
             .id("chat-preview-panel")
+            .debug_selector(|| "chat-preview-panel".into())
+            .role(gpui_kit::Role::Group)
+            .a11y_tag(quill::agent::ui_driver::redact::chat_tag(chat_id.0))
             .flex()
             .flex_col()
             .w(px(320.))
@@ -619,6 +625,7 @@ impl QuillApp {
         }
         rows.sort_by_key(|(order, _)| *order);
         self.chat_menu_shell(
+            chat_id,
             menu.position,
             rows.into_iter().map(|(_, row)| row).collect(),
             cx,

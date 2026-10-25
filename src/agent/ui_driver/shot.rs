@@ -159,6 +159,13 @@ pub fn rate_limited(wait_ms: u64) -> String {
     )
 }
 
+/// The refusal while the user drags something: a drag's picture follows
+/// the pointer at the root of the window, outside the row it came from,
+/// so the paint filter could not cut it with that row.
+pub fn dragging() -> String {
+    "The user is dragging something in Quill's window, so no screenshot was taken. Try again in a moment, or use read_ui_tree.".to_string()
+}
+
 /// Forget every screenshot taken (tests).
 #[cfg(any(test, feature = "test-support"))]
 pub fn reset_limits() {

@@ -319,7 +319,9 @@ impl QuillApp {
         let panel = div()
             .id("archive-menu-panel")
             .role(gpui_kit::Role::Group)
-            .a11y_tag(quill::agent::ui_driver::redact::REGION_MENU)
+            // Cut with the "Archived chats" row: the archive tag sits
+            // inside the menu's, so it is read first.
+            .a11y_tag(quill::agent::ui_driver::redact::ARCHIVE)
             .occlude()
             .flex()
             .flex_col()
@@ -358,7 +360,13 @@ impl QuillApp {
                 anchored()
                     .position(position)
                     .snap_to_window_with_margin(px(8.))
-                    .child(panel),
+                    .child(
+                        div()
+                            .id("archive-menu-region")
+                            .role(gpui_kit::Role::Group)
+                            .a11y_tag(quill::agent::ui_driver::redact::REGION_MENU)
+                            .child(panel),
+                    ),
             )
             .focus_trap("archive-menu-focus", &self.frame.context_menu_focus)
             .into_any_element()

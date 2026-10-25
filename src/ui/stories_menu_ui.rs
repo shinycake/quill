@@ -198,7 +198,15 @@ impl QuillApp {
                 anchored()
                     .position(position)
                     .snap_to_window_with_margin(px(8.))
-                    .child(panel),
+                    .child(
+                        // The menu of a chat's stories is cut with that
+                        // chat's row by the UI driver.
+                        div()
+                            .id("story-menu-chat")
+                            .role(gpui_kit::Role::Group)
+                            .a11y_tag(quill::agent::ui_driver::redact::chat_tag(chat_id))
+                            .child(panel),
+                    ),
             )
             .focus_trap("story-menu-focus", &self.frame.context_menu_focus)
             .into_any_element()

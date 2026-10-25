@@ -7,6 +7,8 @@
 //! With [`DriverScope::Granted`] the tree keeps the chat list's search
 //! field, folder tabs and rows, the open chat, the forum column and any
 //! context menu; rows of ungranted chats go, and so does everything else.
+//! A menu or peek opened on a row carries that row's tag too (`chat=<id>`,
+//! or [`ARCHIVE`] inside [`REGION_MENU`]), so it goes wherever the row goes.
 //! With [`DriverScope::Everything`] the whole tree stays, less the rows of
 //! chats that still have no grant (secret chats, blocked ones).
 //!
@@ -507,5 +509,66 @@ mod tests {
         assert_eq!(chat_of_tag("chat=-100"), Some(-100));
         assert_eq!(chat_of_tag("region=chat"), None);
         assert_eq!(chat_tag(7), "chat=7");
+    }
+
+    /// A menu carries its row's tag: a chat menu's panel sits inside
+    /// `chat=<id>`, the archive menu's inside the menu region.
+    #[test]
+    fn a_menu_goes_with_its_row() {
+        let granted = |chat: i64| chat == 1;
+        let tags = |list: &[&str]| list.iter().map(|t| t.to_string()).collect::<Vec<_>>();
+        for scope in [DriverScope::Granted, DriverScope::Everything] {
+            assert!(point_allowed(
+                &tags(&[REGION_MENU, "chat=1"]),
+                scope,
+                &granted
+            ));
+            assert!(!point_allowed(
+                &tags(&[REGION_MENU, "chat=2"]),
+                scope,
+                &granted
+            ));
+        }
+        assert!(!point_allowed(
+            &tags(&[ARCHIVE, REGION_MENU]),
+            DriverScope::Granted,
+            &granted
+        ));
+        assert!(point_allowed(
+            &tags(&[ARCHIVE, REGION_MENU]),
+            DriverScope::Everything,
+            &granted
+        ));
+        let tree = |chat: &str| UiTree {
+            root: "root".into(),
+            nodes: vec![
+                node("root", "Window", None, &["row"]),
+                node("row", "", Some(chat), &["menu"]),
+                node("menu", "", Some(REGION_MENU), &["item"]),
+                node("item", "Pin", None, &[]),
+            ],
+            ..UiTree::default()
+        };
+        let has_item = |tree: UiTree| tree.nodes.iter().any(|node| node.id == "item");
+        assert!(has_item(redact(
+            tree("chat=1"),
+            DriverScope::Granted,
+            &granted
+        )));
+        assert!(has_item(redact(
+            tree("chat=1"),
+            DriverScope::Everything,
+            &granted
+        )));
+        assert!(!has_item(redact(
+            tree("chat=2"),
+            DriverScope::Granted,
+            &granted
+        )));
+        assert!(!has_item(redact(
+            tree("chat=2"),
+            DriverScope::Everything,
+            &granted
+        )));
     }
 }
