@@ -1,2 +1,0 @@
-# Private-chat sharing protection: Accept / Reject, the request box, my/peer split
-parity:premium-noforwards-requests
