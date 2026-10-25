@@ -307,6 +307,26 @@ fn background_links_open_the_wallpaper_preview() {
 }
 
 #[test]
+fn style_links_open_the_style_preview() {
+    assert_eq!(
+        parsed(json!({"@type":"internalLinkTypeTextCompositionStyle","style_name":"pirate"})),
+        InternalLink::TextCompositionStyle {
+            name: "pirate".into()
+        }
+    );
+    assert_eq!(
+        route_of(json!({"@type":"internalLinkTypeTextCompositionStyle","style_name":"pirate"})),
+        LinkRoute::Ui(DeepLinkUi::TextCompositionStyle {
+            name: "pirate".into()
+        })
+    );
+    assert_eq!(
+        route_of(json!({"@type":"internalLinkTypeTextCompositionStyle","style_name":""})),
+        LinkRoute::Message("This style was deleted or the link is invalid.".into())
+    );
+}
+
+#[test]
 fn folder_invite_links_open_the_add_folder_box() {
     assert_eq!(
         route_of(json!({

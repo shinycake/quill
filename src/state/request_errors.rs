@@ -84,6 +84,9 @@ pub(crate) fn sessions_error_line(action: &str, err: &TdError) -> String {
         // screen, so AiComposeFloodPremium shares the generic code-based
         // line (kept as an explicit arm: the match must stay exhaustive).
         ErrorClass::AiComposeFloodPremium
+        | ErrorClass::InputTextTooLong
+        | ErrorClass::StylesSavedTooMany
+        | ErrorClass::StyleInvalid
         | ErrorClass::StickersForbidden
         | ErrorClass::GifsForbidden
         | ErrorClass::CollectibleNotFound
@@ -131,10 +134,14 @@ pub(crate) fn error_reason(err: &TdError) -> String {
         // the AI arm in `apply_error` phrases this for the user; this
         // is the fallback for any generic path.
         ErrorClass::AiComposeFloodPremium => tr(keys::Q_OPS_ERR_AI_LIMIT).to_string(),
-        // Group-call classes keep the text their plain code gave.
-        ErrorClass::GroupCallRejoin | ErrorClass::GroupCallLeft | ErrorClass::StreamTimeTooBig => {
-            error_reason(&TdError::from_code(err.code))
-        }
+        // Group-call and AI style classes keep the text their plain code
+        // gave.
+        ErrorClass::GroupCallRejoin
+        | ErrorClass::GroupCallLeft
+        | ErrorClass::StreamTimeTooBig
+        | ErrorClass::InputTextTooLong
+        | ErrorClass::StylesSavedTooMany
+        | ErrorClass::StyleInvalid => error_reason(&TdError::from_code(err.code)),
         ErrorClass::StickersForbidden | ErrorClass::GifsForbidden => err
             .send_permission_notice()
             .unwrap_or_else(|| tr(keys::Q_OPS_ERR_NO_SEND_PERMISSION))

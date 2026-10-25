@@ -75,6 +75,7 @@ impl QuillApp {
             }
             DeepLinkUi::FolderInvite { link } => self.open_folder_invite(link, cx),
             DeepLinkUi::Background { name } => self.open_background_link(name, cx),
+            DeepLinkUi::TextCompositionStyle { .. } => {}
             DeepLinkUi::GiftCode { code } => self.open_gift_code_link(code, cx),
             DeepLinkUi::GiftAuction { auction_id } => {
                 self.open_gift_auction(0, &auction_id, cx);
