@@ -304,6 +304,22 @@ impl MediaCorners {
         )
     }
 
+    /// Corners for media drawn without a bubble (`media_bubble`): the
+    /// bubble's radius everywhere, small only on the top corner that joins
+    /// the sender's bubble above (Telegram Desktop `countMessageRounding`;
+    /// such media skips the tail).
+    pub(in crate::ui) fn bare(cx: &App, right: bool, joined_above: bool) -> Self {
+        let joined = |side: bool| !(joined_above && side);
+        Self::edges(
+            cx.theme().radius_2xl(),
+            joined(!right),
+            joined(right),
+            true,
+            true,
+            None,
+        )
+    }
+
     /// An album tile's corners: a corner keeps the mosaic's radius only where
     /// the tile touches that corner of the whole mosaic; against a neighbour
     /// it takes the small inner radius.

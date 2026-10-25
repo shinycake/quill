@@ -15,8 +15,18 @@ pub(super) fn reaction_chip_row(
     files: &quill::state::FileMap,
     media_roots: &[PathBuf],
     footer_meta: &super::super::message_text::FooterMeta,
+    // Under bubble-less media (`quill::media_bubble`): the chips stand on
+    // the chat background in the service pill colors and leave the time to
+    // the picture (tdesktop reactions without `Flag::InBubble`).
+    outside: bool,
     cx: &mut Context<QuillApp>,
 ) -> Stateful<Div> {
+    let outside_bg = super::super::chat_palette::service_bg(cx.theme().secondary.opacity(0.85));
+    let unchosen_bg = if outside {
+        outside_bg
+    } else {
+        bg_subtle().into()
+    };
     let message_id = message.id;
     let chat_id = message.chat_id;
     let mut row = div()
@@ -122,11 +132,15 @@ pub(super) fn reaction_chip_row(
                     .border_1()
                     .border_color(accent())
             })
-            .when(!chosen, |this| {
-                this.bg(bg_subtle())
+            .when(!chosen && !outside, |this| {
+                this.bg(unchosen_bg)
                     .text_color(text_primary())
                     .border_1()
                     .border_color(text_muted())
+            })
+            .when(!chosen && outside, |this| {
+                this.bg(unchosen_bg)
+                    .text_color(cx.theme().secondary_foreground)
             })
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.toggle_reaction(chat_id, message_id, choice.clone(), cx);
@@ -145,7 +159,7 @@ pub(super) fn reaction_chip_row(
                                 .when(ix > 0, |this| this.ml(px(-5.)))
                                 .rounded_full()
                                 .border_1()
-                                .border_color(bg_subtle())
+                                .border_color(unchosen_bg)
                                 .child(super::super::message_text::kit_avatar_element(
                                     name,
                                     photo.as_deref(),
@@ -185,7 +199,7 @@ pub(super) fn reaction_chip_row(
         });
     }
     // Telegram Desktop keeps the time on the reactions' line.
-    if let Some(footer) = message_footer_meta(footer_meta) {
+    if !outside && let Some(footer) = message_footer_meta(footer_meta) {
         row = row.child(div().ml_auto().pl_2().child(footer));
     }
     row

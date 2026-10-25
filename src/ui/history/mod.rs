@@ -221,14 +221,31 @@ pub(super) fn album_history_row(
         MessageContent::Video(video) => !video.caption.is_empty(),
         _ => false,
     });
-    let corner_base = MediaCorners::in_bubble(
-        cx,
-        first.is_outgoing,
-        look.plain,
-        true,
-        sender.is_none(),
-        !album_has_caption,
-    );
+    // Without a caption or a sender name the mosaic stands on its own
+    // (`GroupedMedia::computeNeedBubble`; `quill::media_bubble`).
+    let bubbleless = !look.plain
+        && !quill::media_bubble::MediaSurroundings {
+            caption: album_has_caption,
+            sender_name: sender.is_some(),
+            ..Default::default()
+        }
+        .needs_bubble();
+    let corner_base = if bubbleless {
+        MediaCorners::bare(
+            cx,
+            quill::chat_wide::has_right_layout(first.is_outgoing, look.wide),
+            look.joined_above,
+        )
+    } else {
+        MediaCorners::in_bubble(
+            cx,
+            first.is_outgoing,
+            look.plain,
+            true,
+            sender.is_none(),
+            !album_has_caption,
+        )
+    };
     for (index, message) in messages.iter().enumerate() {
         let Some(part) = layout.get(index) else {
             continue;
@@ -276,6 +293,7 @@ pub(super) fn album_history_row(
     }
     chrome.sender_status = sender_status;
     chrome.media_led = true;
+    chrome.bubbleless = bubbleless;
     chrome.media_width = Some(media_content_width(px(box_w as f32), px(0.), media_max));
     chrome.footer_overlay = !has_caption;
     chrome.actions = Some(message_actions_button(first.chat_id, first.id, cx));
