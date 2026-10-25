@@ -300,12 +300,7 @@ impl QuillApp {
             return false;
         }
         self.viewer.controls.boost_timer = None;
-        match self
-            .viewer
-            .controls
-            .boost
-            .release(cx.background_executor().now())
-        {
+        match self.viewer.controls.boost.release() {
             BoostRelease::TogglePause => {
                 self.viewer_note_activity(cx);
                 self.toggle_viewer_video(cx);

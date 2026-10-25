@@ -81,6 +81,9 @@ pub(crate) struct PlaybackUi {
     /// Shared with the history's animation layer, which draws the clips'
     /// current frames (`inline_video::LiveSource`).
     pub(super) inline_videos: std::rc::Rc<super::inline_players::InlineVideos>,
+    /// Premium users' video userpics beside messages and in the chat
+    /// list, shared with the layers that draw them.
+    pub(super) userpic_videos: std::rc::Rc<super::userpic_videos::UserpicVideos>,
     /// MED1: playback speed multiplier, 0.5–2.0 (TGX `PlaybackSpeed*`;
     /// applied by the pitch-preserving tempo stretcher + the playback clock rate).
     pub(super) speed: f64,
@@ -154,6 +157,7 @@ impl PlaybackUi {
             pending_gif_play: None,
             pending_media_seek: None,
             inline_videos: Default::default(),
+            userpic_videos: Default::default(),
             speed: 1.0,
             volume: 1.0,
             unmuted_volume: 1.0,

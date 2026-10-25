@@ -26,6 +26,7 @@ fn clip(file: i32) -> ChatPhotoAnimation {
     ChatPhotoAnimation {
         file_id: FileId(file),
         start_ms: 2000,
+        small_file_id: None,
     }
 }
 

@@ -46,6 +46,11 @@ impl QuillApp {
                 let sender_status = refs.first().and_then(|first| {
                     self.sender_status_element(chrome.sender.as_ref(), first.id.0, cx)
                 });
+                let avatar = self.history_sender_avatar(
+                    chrome,
+                    refs.first().and_then(|first| first.sender),
+                    cx,
+                );
                 album_history_row(
                     *album_id,
                     &refs,
@@ -55,7 +60,7 @@ impl QuillApp {
                     chrome.sender.clone(),
                     sender_status,
                     chrome.receipt,
-                    chrome.sender_avatar.clone(),
+                    avatar,
                     // Settings → Appearance: font size + bubble/plain style.
                     look,
                     session,
@@ -82,6 +87,7 @@ impl QuillApp {
                 self.tick_media_spoiler(message, cx);
                 let sender_status =
                     self.sender_status_element(chrome.sender.as_ref(), message.id.0, cx);
+                let avatar = self.history_sender_avatar(chrome, message.sender, cx);
                 let row = session_history_row(
                     message,
                     files,
@@ -90,7 +96,7 @@ impl QuillApp {
                     chrome.sender.clone(),
                     sender_status,
                     chrome.receipt,
-                    chrome.sender_avatar.clone(),
+                    avatar,
                     chrome.reply_header.clone(),
                     chrome.forward_header.clone(),
                     chrome.via_bot.clone(),

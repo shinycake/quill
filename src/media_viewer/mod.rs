@@ -642,6 +642,7 @@ mod tests {
         let clip = crate::telegram::envelope::ChatPhotoAnimation {
             file_id: FileId(19),
             start_ms: 1500,
+            small_file_id: None,
         };
         let items = profile_photo_items(&[photo(1, Some(clip)), photo(2, None)], ChatId(0));
         let (video, still) = (&items[0], &items[1]);

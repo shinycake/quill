@@ -335,6 +335,8 @@ mod tests {
             is_support: false,
             bot_active_users: 0,
             photo_small_file_id: 0,
+            photo_id: 0,
+            photo_has_animation: false,
             accent_color_id: 0,
             background_custom_emoji_id: 0,
             profile_accent_color_id: -1,
