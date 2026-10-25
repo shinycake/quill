@@ -510,13 +510,21 @@ impl QuillApp {
     /// `loginUrlInfoRequestConfirmation` shows the TDLib-reported domain
     /// for consent, then fetches the authorized URL via `getLoginUrl`
     /// (schema 1.8.67, line 12993); a failed resolution opens the button's
-    /// raw URL (schema:12993 doc).
+    /// raw URL (schema:12993 doc). An answer to a press an agent's step
+    /// made is refused as part of that step: no site, no consent box.
     pub(super) fn present_login_url_info(
         &mut self,
         info: LoginUrlInfo,
         request: Option<LoginUrlRequest>,
         cx: &mut Context<Self>,
     ) {
+        use quill::agent::ui_driver::guard;
+        let from_agent = request.as_ref().is_some_and(|request| request.from_agent);
+        if guard::with_injecting(from_agent, || {
+            guard::refuse_if_injecting("sign in to sites with a bot's login button")
+        }) {
+            return;
+        }
         match info {
             LoginUrlInfo::Open { url } => self.open_message_url(&url, cx),
             LoginUrlInfo::RequestConfirmation {

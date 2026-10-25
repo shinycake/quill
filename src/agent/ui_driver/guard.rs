@@ -116,6 +116,7 @@ pub fn refuse_outside_if_injecting(what: &str) -> bool {
 const DENIED_READS: &[&str] = &[
     "getCallbackQueryAnswer",
     "getLoginUrl",
+    "getLoginUrlInfo",
     "getInlineQueryResults",
     "getPaymentForm",
     "getWebAppUrl",
