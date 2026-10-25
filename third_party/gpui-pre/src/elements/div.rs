@@ -1344,6 +1344,17 @@ pub trait StatefulInteractiveElement: InteractiveElement {
         self
     }
 
+    /// Tag this element for an in-process reader of the accessibility tree
+    /// ([`crate::Window::a11y_tree_snapshot`]). The tag rides the element's
+    /// node in the snapshot and its hitbox
+    /// ([`crate::Window::hovered_a11y_tags`]); it is never sent to the
+    /// platform adapter, so assistive technology does not see it. An element
+    /// with a tag always gets a hitbox.
+    fn a11y_tag(mut self, tag: impl Into<SharedString>) -> Self {
+        self.interactivity().aria.tag = Some(tag.into());
+        self
+    }
+
     /// Set the accessible label for this element.
     fn aria_label(mut self, label: impl Into<SharedString>) -> Self {
         self.interactivity().aria.label = Some(label.into());
@@ -1941,6 +1952,10 @@ impl Element for Div {
         self.interactivity.write_a11y_info(node);
     }
 
+    fn a11y_tag(&self) -> Option<SharedString> {
+        self.interactivity.aria.tag.clone()
+    }
+
     fn a11y_synthetic_children(
         &mut self,
         _prepaint: &mut Self::PrepaintState,
@@ -2132,6 +2147,8 @@ impl IntoElement for Div {
 #[derive(Default)]
 pub(crate) struct AriaProperties {
     pub(crate) author_id: Option<SharedString>,
+    /// [`InteractiveElement::a11y_tag`]: for in-process readers only.
+    pub(crate) tag: Option<SharedString>,
     pub(crate) label: Option<SharedString>,
     pub(crate) description: Option<SharedString>,
     pub(crate) keyshortcuts: Option<SharedString>,
@@ -2415,7 +2432,11 @@ impl Interactivity {
                         style.overflow_mask(bounds, window.rem_size()),
                         |window| {
                             let hitbox = if self.should_insert_hitbox(&style, window, cx) {
-                                Some(window.insert_hitbox(bounds, self.hitbox_behavior))
+                                let hitbox = window.insert_hitbox(bounds, self.hitbox_behavior);
+                                if let Some(tag) = &self.aria.tag {
+                                    window.tag_hitbox(hitbox.id, tag.clone());
+                                }
+                                Some(hitbox)
                             } else {
                                 None
                             };
@@ -2432,7 +2453,8 @@ impl Interactivity {
     }
 
     fn should_insert_hitbox(&self, style: &Style, window: &Window, cx: &App) -> bool {
-        self.hitbox_behavior != HitboxBehavior::Normal
+        self.aria.tag.is_some()
+            || self.hitbox_behavior != HitboxBehavior::Normal
             || self.window_control.is_some()
             || style.mouse_cursor.is_some()
             || self.group.is_some()
@@ -4147,6 +4169,10 @@ where
 
     fn write_a11y_info(&self, node: &mut accesskit::Node) {
         self.element.write_a11y_info(node);
+    }
+
+    fn a11y_tag(&self) -> Option<SharedString> {
+        self.element.a11y_tag()
     }
 
     fn a11y_synthetic_children(

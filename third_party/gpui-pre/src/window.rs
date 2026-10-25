@@ -1045,6 +1045,9 @@ pub(crate) struct Frame {
     pub(crate) dispatch_tree: DispatchTree,
     pub(crate) scene: Scene,
     pub(crate) hitboxes: Vec<Hitbox>,
+    /// [`InteractiveElement::a11y_tag`] per tagged hitbox
+    /// ([`Window::hovered_a11y_tags`]).
+    pub(crate) hitbox_tags: FxHashMap<HitboxId, SharedString>,
     pub(crate) window_control_hitboxes: Vec<(WindowControlArea, Hitbox)>,
     pub(crate) deferred_draws: Vec<DeferredDraw>,
     pub(crate) input_handlers: Vec<Option<PlatformInputHandler>>,
@@ -1101,6 +1104,7 @@ impl Frame {
             dispatch_tree,
             scene: Scene::default(),
             hitboxes: Vec::new(),
+            hitbox_tags: FxHashMap::default(),
             window_control_hitboxes: Vec::new(),
             deferred_draws: Vec::new(),
             input_handlers: Vec::new(),
@@ -1131,6 +1135,7 @@ impl Frame {
         self.tooltip_requests.clear();
         self.cursor_styles.clear();
         self.hitboxes.clear();
+        self.hitbox_tags.clear();
         self.window_control_hitboxes.clear();
         self.deferred_draws.clear();
         self.tab_stops.clear();
@@ -5331,6 +5336,31 @@ impl Window {
         };
         self.next_frame.hitboxes.push(hitbox.clone());
         hitbox
+    }
+
+    /// Record the [`InteractiveElement::a11y_tag`] of a hitbox inserted this
+    /// frame, for [`Self::hovered_a11y_tags`].
+    pub(crate) fn tag_hitbox(&mut self, id: HitboxId, tag: SharedString) {
+        self.next_frame.hitbox_tags.insert(id, tag);
+    }
+
+    /// The tags ([`InteractiveElement::a11y_tag`]) of the hitboxes under the
+    /// mouse as of the last mouse event, topmost first: the window's own
+    /// z-ordered hit test, stopping at an occluding hitbox, so an overlay
+    /// over a tagged region hides the region's tag.
+    pub fn hovered_a11y_tags(&self) -> Vec<SharedString> {
+        self.mouse_hit_test
+            .ids
+            .iter()
+            .filter_map(|id| self.rendered_frame.hitbox_tags.get(id).cloned())
+            .collect()
+    }
+
+    /// Whether the focused element registered a text input handler in the
+    /// last frame ([`Self::handle_input`]): typed characters go into a text
+    /// field, not to key bindings alone.
+    pub fn focused_text_input(&self) -> bool {
+        !self.rendered_frame.input_handlers.is_empty()
     }
 
     /// Set a hitbox which will act as a control area of the platform window.

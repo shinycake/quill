@@ -116,3 +116,22 @@ pixels, from the element bounds GPUI recorded or, for synthetic children,
 AccessKit's physical rectangle divided by the scale factor).
 `src/window/a11y/debug.rs` exposes the retained update, focus and frame
 number to the snapshot.
+
+## Elements carry a tag for in-process readers of the tree
+
+Added in 2026 for Agent access's UI driver, step 1's security redesign
+(`docs/decisions/agent-access.md`, phase 5). `InteractiveElement::a11y_tag`
+(`src/elements/div.rs`, `AriaProperties.tag`; forwarded by `Stateful`
+and read through the new `Element::a11y_tag` default method in
+`src/element.rs`) marks an element with a string the application chooses,
+such as a region or a chat id. The tag rides two places and nowhere else:
+the element's node in `Window::a11y_tree_snapshot` (`A11yNodeSnapshot.tag`,
+from `A11y::node_tags` filled at prepaint) and the element's hitbox
+(`Frame.hitbox_tags`, `Window::tag_hitbox`); a tagged element always gets
+a hitbox. The platform adapter never sees a tag: it is not part of the
+`TreeUpdate`. `Window::hovered_a11y_tags` returns the tags of the hitboxes
+under the mouse as of the last mouse event, topmost first and stopping at
+an occluding hitbox, so a reader can tell what GPUI itself would deliver a
+click to after an overlay or a clip. `Window::focused_text_input` says
+whether the last frame registered a text input handler, so a reader knows
+typed characters would go into a text field.

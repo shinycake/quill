@@ -157,6 +157,9 @@ pub(crate) struct A11y {
     pub(crate) nodes: A11yNodeBuilder,
     pub(crate) focus_ids: FxHashMap<NodeId, FocusId>,
     pub(crate) node_bounds: FxHashMap<NodeId, Bounds<Pixels>>,
+    /// [`crate::InteractiveElement::a11y_tag`] per node, for the snapshot
+    /// only; never part of the [`TreeUpdate`].
+    pub(crate) node_tags: FxHashMap<NodeId, SharedString>,
     pub(crate) action_listeners: FxHashMap<NodeId, Vec<(Action, A11yActionListener)>>,
     /// The window's title, used to label the root node so assistive
     /// technology can tell windows apart.
@@ -187,6 +190,7 @@ impl A11y {
             nodes: A11yNodeBuilder::new(),
             focus_ids: FxHashMap::default(),
             node_bounds: FxHashMap::default(),
+            node_tags: FxHashMap::default(),
             action_listeners: FxHashMap::default(),
             window_title,
             last_focus_without_node: None,
@@ -306,6 +310,7 @@ impl A11y {
     pub(crate) fn begin_frame(&mut self) {
         self.focus_ids.clear();
         self.node_bounds.clear();
+        self.node_tags.clear();
         self.action_listeners.clear();
         self.nodes.begin_frame(self.window_title.as_ref());
     }
@@ -368,6 +373,7 @@ impl A11y {
                 .collect();
                 A11yNodeSnapshot {
                     id: *id,
+                    tag: self.node_tags.get(id).map(|tag| tag.to_string()),
                     role: node.role(),
                     label: node.label().map(str::to_string),
                     description: node.description().map(str::to_string),
@@ -401,6 +407,8 @@ impl A11y {
 pub struct A11yNodeSnapshot {
     /// AccessKit's id, stable across frames for the same element.
     pub id: NodeId,
+    /// The element's [`crate::InteractiveElement::a11y_tag`], if it set one.
+    pub tag: Option<String>,
     /// The node's role.
     pub role: accesskit::Role,
     /// The accessible name.

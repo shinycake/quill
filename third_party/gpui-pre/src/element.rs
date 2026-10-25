@@ -120,6 +120,12 @@ pub trait Element: 'static + IntoElement {
     /// See the [accessibility guide](crate::_accessibility) for an overview.
     fn write_a11y_info(&self, _node: &mut accesskit::Node) {}
 
+    /// The tag an in-process reader of the tree sees on this element's node
+    /// ([`InteractiveElement::a11y_tag`]). Never sent to the platform.
+    fn a11y_tag(&self) -> Option<crate::SharedString> {
+        None
+    }
+
     /// Add synthetic child nodes to an [`Element`] that has an
     /// [`.id()`][Element::id] and a [`.role()`][Element::a11y_role].
     ///
@@ -439,6 +445,9 @@ impl<E: Element> Drawable<E> {
                             });
                             self.element.write_a11y_info(&mut node);
                             window.a11y.node_bounds.insert(node_id, bounds);
+                            if let Some(tag) = self.element.a11y_tag() {
+                                window.a11y.node_tags.insert(node_id, tag);
+                            }
                             pushed_a11y_node = window.a11y.nodes.push(node_id, node);
                             #[cfg(debug_assertions)]
                             if pushed_a11y_node {
