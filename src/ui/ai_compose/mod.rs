@@ -7,9 +7,15 @@
 mod about;
 mod button;
 mod card;
+mod demo;
 mod dialog;
 mod languages;
 mod upkeep;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "dialog_tests.rs"]
+mod tests;
 
 use super::ai_compose_state::{AiComposeOpen, AiComposeView};
 use super::app::QuillApp;
