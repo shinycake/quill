@@ -170,6 +170,7 @@ impl Session {
 
     pub(crate) fn upsert_message(&mut self, message: ParsedMessage, pending: bool) {
         self.remember_files(&message.files);
+        self.note_message_effect(&message, pending);
         let chat_id = message.chat_id;
         // Slice bots-games: remember games seen in a bot's chat so the bot
         // info panel can offer to send them. Keyed by the chat's bot user

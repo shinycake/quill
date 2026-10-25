@@ -111,14 +111,65 @@ fn a_message_with_an_effect_asks_for_it_once() {
         .get(EFFECT)
         .expect("known");
     assert_eq!(effect.icon_file(), Some(FileId(600)));
-    // The badge's icon downloads with the chat's thumbnails.
+    // The badge's icon and the effect's animation download with the
+    // chat's thumbnails, so the effect is ready when the message shows
+    // (tdesktop `preloadEffect`); the select animation is not needed.
     f.driver.maybe_download_open_thumbs().unwrap();
-    assert!(
-        f.sent("downloadFile")
-            .iter()
-            .any(|request| request["file_id"] == 600)
-    );
+    let downloads = f.sent("downloadFile");
+    let asked_for = |file: i32| downloads.iter().any(|request| request["file_id"] == file);
+    assert!(asked_for(600));
+    assert!(asked_for(602));
+    assert!(!asked_for(601));
     assert_eq!(f.sent("getMessageEffect").len(), 1);
+}
+
+#[test]
+fn an_effect_left_to_play_follows_the_message_to_its_final_id() {
+    let mut f = Fixture::new();
+    let new_message = |id: i64, outgoing: bool, state: &str| {
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{}}}"#,
+            message_json(id, outgoing, state)
+        )
+    };
+    let unwatched = |f: &Fixture, id: i64| {
+        f.driver
+            .session
+            .stickers
+            .effects
+            .watch
+            .is_unwatched((7, id))
+    };
+    // Sent from here: the pending message has an effect to play, and keeps
+    // it under its final id.
+    let pending = r#","sending_state":{"@type":"messageSendingStatePending","sending_id":0}"#;
+    f.ingest(&new_message(-3, true, pending));
+    assert!(unwatched(&f, -3));
+    f.ingest(&format!(
+        r#"{{"@type":"updateMessageSendSucceeded","old_message_id":-3,"message":{}}}"#,
+        message_json(70, true, "")
+    ));
+    assert!(!unwatched(&f, -3));
+    assert!(unwatched(&f, 70));
+    // Sent from another device: it played there.
+    f.ingest(&new_message(71, true, ""));
+    assert!(!unwatched(&f, 71));
+    // Incoming and unread: still to play after it is read elsewhere.
+    f.ingest(&new_message(72, false, ""));
+    f.ingest(
+        r#"{"@type":"updateChatReadInbox","chat_id":7,"last_read_inbox_message_id":72,"unread_count":0}"#,
+    );
+    f.ingest(&new_message(72, false, ""));
+    assert!(unwatched(&f, 72));
+    // Incoming and already read when it arrives.
+    f.ingest(&new_message(60, false, ""));
+    assert!(!unwatched(&f, 60));
+}
+
+fn message_json(id: i64, outgoing: bool, sending_state: &str) -> String {
+    format!(
+        r#"{{"@type":"message","id":{id},"chat_id":7,"is_outgoing":{outgoing},"date":1,"effect_id":"{EFFECT}"{sending_state},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"hi","entities":[]}}}}}}"#
+    )
 }
 
 #[test]

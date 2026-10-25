@@ -2,10 +2,11 @@
 //! `playEffectOnRead`).
 //!
 //! A message sent with an effect plays it over the chat when its badge first
-//! shows while the effect has not played (an unread incoming message, or one
-//! just sent from here), and again whenever the badge is clicked. The first
-//! kind is skipped while effects are off in power saving; the message is
-//! then marked as played all the same. A click always plays.
+//! shows while the effect has not played (`quill::message_effect_watch`:
+//! an incoming message that was unread when it arrived, or one sent from
+//! here), and again whenever the badge is clicked. The first kind is
+//! skipped while effects are off in power saving; the message is then
+//! marked as played all the same. A click always plays.
 //!
 //! The effect's description comes from `getMessageEffect` and its animation
 //! from the sticker files it names. An effect that cannot play yet waits for
@@ -21,6 +22,7 @@ use quill::emoji_interaction::EmojiEffect;
 use quill::ids::{ChatId, MessageId};
 use quill::message_effects::{EffectAnimation, MessageEffect};
 use quill::power_saving::{self, Flag};
+use quill::state::Session;
 use quill::telegram::envelope::{StickerFormat, StickerItem};
 use std::cell::RefCell;
 use std::time::{Duration, Instant};
@@ -69,23 +71,45 @@ fn playable(effect: &MessageEffect) -> Option<EffectAnimation> {
 }
 
 impl QuillApp {
+    fn effects_session_mut(&mut self) -> Option<&mut Session> {
+        match self.live.as_mut() {
+            Some(live) => Some(&mut live.driver.session),
+            None => self.demo_session.as_deref_mut(),
+        }
+    }
+
     /// Start the message effects asked for since the last frame and those
     /// that were waiting for their description.
     pub(super) fn message_effects_pass(&mut self, cx: &mut Context<Self>) {
-        badge::set_app(cx.entity().downgrade());
         let open = self.viewed_chat();
+        badge::set_app(cx.entity().downgrade(), open.map(|chat| chat.0));
         let active = self.frame.window_active.get();
-        // First show of an unplayed effect: marked as played either way.
-        let automatic = badge::take_unwatched(active);
-        let automatic = automatic
+        // First show of an unplayed effect (tdesktop `playEffectOnRead`):
+        // marked as played whether or not power saving lets it play.
+        let shown: Vec<(Key, badge::Seen)> = badge::shown_unwatched(active)
+            .into_iter()
+            .filter(|(key, _)| open == Some(ChatId(key.0)))
+            .collect();
+        let marked: Vec<(Key, badge::Seen)> = match self.effects_session_mut() {
+            Some(session) => shown
+                .into_iter()
+                .filter(|(key, _)| session.stickers.effects.watch.mark_watched(*key))
+                .collect(),
+            None => Vec::new(),
+        };
+        if !marked.is_empty() {
+            // The badges drawn as unplayed stop asking for frames.
+            self.notify_conversation(cx);
+        }
+        let automatic = marked
             .into_iter()
             .filter(|_| !power_saving::on(Flag::ChatEffects));
         let replays = badge::take_replays()
             .into_iter()
-            .filter_map(|key| badge::seen(key).map(|seen| (key, seen)));
+            .filter_map(|key| badge::seen(key).map(|seen| (key, seen)))
+            .filter(|(key, _)| open == Some(ChatId(key.0)));
         let requests: Vec<(Key, i64, bool)> = automatic
             .chain(replays)
-            .filter(|(key, _)| open == Some(ChatId(key.0)))
             .map(|(key, seen)| (key, seen.effect_id, seen.outgoing))
             .collect();
         WAITING.with(|waiting| {

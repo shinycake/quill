@@ -487,6 +487,7 @@ impl Session {
             // Outside the loaded window: keep its files and any loaded
             // forum-topic copy, but leave the main history alone.
             self.remember_files(&message.files);
+            self.note_message_effect(&message, false);
             if let Some(topic_id) = message.topic_id
                 && self
                     .threads

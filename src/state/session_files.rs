@@ -307,16 +307,16 @@ impl Session {
             .flat_map(|history| history.messages.values())
             .chain(saved_rows)
         {
-            // The effect badge on a message sent with an effect.
-            if message.extras.effect_id != 0
-                && let Some(file) = self
-                    .stickers
-                    .effects
-                    .get(message.extras.effect_id)
-                    .and_then(|effect| effect.icon_file())
-                && self.should_download(file)
-            {
-                ids.push(file);
+            // The effect badge on a message sent with an effect, and the
+            // effect itself, ready to play when the message shows
+            // (tdesktop `preloadEffectImageFor` and `preloadEffect`).
+            if let Some(effect) = self.stickers.effects.get(message.extras.effect_id) {
+                let animation = effect.animation().map(|animation| animation.file);
+                for file in effect.icon_file().into_iter().chain(animation) {
+                    if self.should_download(file) && !ids.contains(&file) {
+                        ids.push(file);
+                    }
+                }
             }
             match &message.content {
                 MessageContent::Photo(photo) => {

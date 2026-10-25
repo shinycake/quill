@@ -191,6 +191,10 @@ impl Session {
                     crate::telegram::envelope::MessageSendState::Sent,
                 );
                 self.remember_files(&message.files);
+                self.stickers
+                    .effects
+                    .watch
+                    .renamed((chat_id.0, old_message_id.0), (chat_id.0, message.id.0));
                 let row = history_message(message, false);
                 self.index_poll(&row);
                 let history = self.history_entry(chat_id);
@@ -238,6 +242,10 @@ impl Session {
                     crate::telegram::envelope::MessageSendState::Failed,
                 );
                 self.remember_files(&message.files);
+                self.stickers
+                    .effects
+                    .watch
+                    .renamed((chat_id.0, old_message_id.0), (chat_id.0, message.id.0));
                 // M1: mark the row failed. The retry affordance is gated
                 // separately on `can_retry` (`resendMessages` via
                 // `driver.resend_failed_message`) — not every failed send

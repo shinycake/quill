@@ -1,7 +1,8 @@
 //! Message effects: `updateAvailableMessageEffects` and `getMessageEffect`
 //! answers land in `Session::stickers.effects`.
+use crate::message_effect_watch::EffectArrival;
 use crate::state::*;
-use crate::telegram::envelope::StickersPayload;
+use crate::telegram::envelope::{MessageSendState, ParsedMessage, StickersPayload};
 
 impl Session {
     /// Apply the two payloads that carry message effects.
@@ -20,6 +21,34 @@ impl Session {
                 .set_available(reaction_ids, sticker_ids),
             _ => {}
         }
+    }
+
+    /// A message reached the session: note whether it has an effect left
+    /// to play (tdesktop `applyInitialEffectWatched`). `pending`: the row
+    /// is this client's send in flight.
+    pub(crate) fn note_message_effect(&mut self, message: &ParsedMessage, pending: bool) {
+        if message.extras.effect_id == 0 {
+            return;
+        }
+        let arrival = if message.is_outgoing {
+            if pending || message.send_state != MessageSendState::Sent {
+                EffectArrival::SentHere
+            } else {
+                EffectArrival::SentElsewhere
+            }
+        } else {
+            // A chat whose read marker is unknown counts as read, like
+            // tdesktop with no `inboxReadTillId`.
+            let unread = self
+                .chats
+                .get(&message.chat_id.0)
+                .is_some_and(|chat| message.id > chat.last_read_inbox_message_id);
+            EffectArrival::Incoming { unread }
+        };
+        self.stickers
+            .effects
+            .watch
+            .note((message.chat_id.0, message.id.0), arrival);
     }
 
     /// The effect ids on the open chat's messages that were never looked

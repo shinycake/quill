@@ -31,6 +31,12 @@ are drawn (not empty), the time footer sits inside the bubble.
 - Scroll with `w:x,y,0,-200,s;w:x,y,0,-200,m;w:x,y,0,0,e`; a single wheel
   event without phases may not move the list.
 - `rg QUILL_DEMO_HISTORY_ANIM src` for the history animation switches.
+- Message effects: `ready-message-effects`. A click on the badge of
+  "Happy birthday!" (`450,153;p:400`) plays its effect again;
+  `QUILL_DEMO_EFFECTS=arrive` with `p:350` shows an unread message arriving
+  and playing its effect once. Set `QUILL_RLOTTIE_PATH` to the vendored
+  `librlottie.dylib` in a dev build, or the effect shows a renderer notice.
+  The demo's effect animation is a placeholder circle.
 - Messages arriving, reacted to and deleted in the open chat:
   `QUILL_DEMO_UPDATE_STREAM=4 QUILL_DEMO_STREAM_OPEN=1` with a pause step
   (`QUILL_DEMO_CLICK=p:7000`); `QUILL_TRACE_TICKS=1` prints row builds,
