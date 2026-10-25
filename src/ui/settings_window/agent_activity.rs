@@ -199,7 +199,7 @@ fn activity_row(index: usize, action: &Action, now: &CivilTime, cx: &App) -> Any
                                 .text_color(muted)
                                 .child(action.chat_title.clone()),
                         )
-                        .when(!action.ok, |this| {
+                        .when(!action.ok && !action.declined, |this| {
                             this.child(
                                 div()
                                     .id(SharedString::from(format!(

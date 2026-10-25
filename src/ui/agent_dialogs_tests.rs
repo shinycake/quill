@@ -182,7 +182,7 @@ fn ask_write() -> Ask {
     Ask::Write {
         chat_id: 7,
         title: "Ann Lee".into(),
-        action: "Send a message".into(),
+        kind: "send_message".into(),
         preview: "See you at 6".into(),
     }
 }
