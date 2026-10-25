@@ -576,8 +576,16 @@ impl QuillApp {
         let query = session.search.search.query.trim().to_string();
         let has_chat = session.open_chat.is_some();
         let strip = self.search_tab_strip(tab, cx);
+        // The strip and the chips name no chat: the UI driver keeps them
+        // inside the results list (`redact::CONTROLS`).
+        let controls = |id: &'static str| {
+            div()
+                .id(id)
+                .role(gpui_kit::Role::Group)
+                .a11y_tag(quill::agent::ui_driver::redact::CONTROLS)
+        };
         if query.is_empty() {
-            return Some(strip);
+            return Some(controls("search-strip").child(strip).into_any_element());
         }
         let mut scopes = Vec::new();
         if has_chat {
@@ -689,8 +697,7 @@ impl QuillApp {
         // Apps and Posts have no chat-type, archive or date narrowing.
         let narrowing = tab.searches_messages();
         Some(
-            div()
-                .id("search-filters")
+            controls("search-filters")
                 .flex()
                 .flex_col()
                 .gap_1()

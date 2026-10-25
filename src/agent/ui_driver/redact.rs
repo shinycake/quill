@@ -1,13 +1,26 @@
 //! Cutting the element tree to what the grants allow. The UI tags the
 //! containers it draws (`a11y_tag`): the regions of the window, the parts
-//! of the chat list, and every row that stands for a chat. The cut reads
-//! those tags only, never a label, so no text in the window can widen it.
+//! of the chat list, the lists whose rows stand for chats, and every row
+//! that stands for a chat. The cut reads those tags only, never a label,
+//! so no text in the window can widen it.
 //!
 //! With [`DriverScope::Granted`] the tree keeps the chat list's search
 //! field, folder tabs and rows, the open chat, the forum column and any
 //! context menu; rows of ungranted chats go, and so does everything else.
 //! With [`DriverScope::Everything`] the whole tree stays, less the rows of
 //! chats that still have no grant (secret chats, blocked ones).
+//!
+//! Lists are default-deny. A container tagged [`LIST`] (the chat rows
+//! and search results parts count as one) holds rows that stand for
+//! chats or for messages of chats: chat rows, search hits, media hits,
+//! downloads, reply and forward destinations, contacts. Inside it, in the
+//! granted scope, a node reaches the agent only under a `chat=<id>` tag of
+//! a granted chat, or under a [`CONTROLS`] tag (a filter strip, a "Load
+//! more" button: controls that name no chat). Everything else in a list
+//! (a row that forgot its tag, a heading, a "remove from recent" button
+//! whose label names the chat) is cut like a region outside the grants:
+//! kept nameless when it is an ancestor of something allowed, gone
+//! otherwise. So a new row leaks nothing until it says which chat it is.
 
 use super::surface::DriverScope;
 use super::tree::{UiNode, UiTree};
@@ -28,8 +41,15 @@ pub const ARCHIVE: &str = "archive";
 /// Parts of the chat list the granted scope shows.
 pub const PART_SEARCH: &str = "part=search";
 pub const PART_FOLDERS: &str = "part=folders";
+/// The chat rows and the search results: lists (see [`LIST`]).
 pub const PART_ROWS: &str = "part=rows";
 pub const PART_RESULTS: &str = "part=search-results";
+/// A container of rows that stand for chats, anywhere in the window: in
+/// the granted scope only `chat=` rows of granted chats and [`CONTROLS`]
+/// survive inside it.
+pub const LIST: &str = "list";
+/// Controls inside a list that name no chat (a filter strip, paging).
+pub const CONTROLS: &str = "controls";
 
 /// The tag of a row that stands for `chat_id` (a chat row, a search hit, a
 /// contact: a private chat's id is its user's id).
@@ -51,6 +71,9 @@ enum Zone {
     Allowed,
     /// Inside the chat list, outside its allowed parts.
     ChatList,
+    /// Inside a list of chat rows, under no granted `chat=` or controls
+    /// tag: kept only as a nameless ancestor, like [`Zone::Outside`].
+    List,
     /// A chat without a grant: gone with its whole subtree.
     Pruned,
 }
@@ -68,10 +91,11 @@ fn zone_below(
         return parent;
     };
     if let Some(chat_id) = chat_of_tag(tag) {
-        return if granted(chat_id) {
-            parent
-        } else {
-            Zone::Pruned
+        return match (granted(chat_id), parent) {
+            (false, _) => Zone::Pruned,
+            // A granted chat's row is what a list is allowed to show.
+            (true, Zone::List) => Zone::Allowed,
+            (true, parent) => parent,
         };
     }
     if tag == ARCHIVE {
@@ -87,9 +111,12 @@ fn zone_below(
         REGION_CHAT | REGION_FORUM | REGION_MENU => Zone::Allowed,
         REGION_CHAT_LIST => Zone::ChatList,
         REGION_PANELS => Zone::Outside,
-        PART_SEARCH | PART_FOLDERS | PART_ROWS | PART_RESULTS if parent == Zone::ChatList => {
-            Zone::Allowed
-        }
+        PART_SEARCH | PART_FOLDERS if parent == Zone::ChatList => Zone::Allowed,
+        PART_ROWS | PART_RESULTS if parent == Zone::ChatList => Zone::List,
+        // A list where content would otherwise show is default-deny; one
+        // in a zone that shows nothing changes nothing.
+        LIST if parent == Zone::Allowed => Zone::List,
+        CONTROLS if parent == Zone::List => Zone::Allowed,
         _ => parent,
     }
 }
@@ -171,7 +198,9 @@ pub fn redact(tree: UiTree, scope: DriverScope, granted: &dyn Fn(i64) -> bool) -
 
 /// Whether a pointer over the elements tagged `tags` (topmost first, as
 /// GPUI hit-tests them) may act: with the granted scope it must be over an
-/// allowed region, and in every scope never over an ungranted chat's row.
+/// allowed region, inside a list over a granted chat's row or a control,
+/// and in every scope never over an ungranted chat's row. The same rule
+/// decides a key going to the focused element, from the tags above it.
 pub fn point_allowed(tags: &[String], scope: DriverScope, granted: &dyn Fn(i64) -> bool) -> bool {
     if tags
         .iter()
@@ -184,9 +213,16 @@ pub fn point_allowed(tags: &[String], scope: DriverScope, granted: &dyn Fn(i64) 
         return true;
     }
     let mut in_part = false;
+    // A granted chat's row or a control was seen below the list.
+    let mut in_row = false;
     for tag in tags {
         match tag.as_str() {
             ARCHIVE => return false,
+            CONTROLS => in_row = true,
+            tag if chat_of_tag(tag).is_some() => in_row = true,
+            LIST if !in_row => return false,
+            LIST => {}
+            PART_ROWS | PART_RESULTS if !in_row => return false,
             PART_SEARCH | PART_FOLDERS | PART_ROWS | PART_RESULTS => in_part = true,
             REGION_CHAT | REGION_FORUM | REGION_MENU => return true,
             REGION_CHAT_LIST => return in_part,
@@ -236,6 +272,39 @@ mod tests {
                 node("chat", "", Some(REGION_CHAT), &["composer"]),
                 node("composer", "Message", None, &[]),
                 node("settings", "Settings", None, &[]),
+            ],
+            ..UiTree::default()
+        }
+    }
+
+    /// Search results: a filter strip (controls), a heading, a tagged hit
+    /// for chat 1, an untagged media hit naming chat 2, and a reply chooser
+    /// in the chat region with one tagged and one untagged destination.
+    fn lists() -> UiTree {
+        UiTree {
+            root: "w".into(),
+            nodes: vec![
+                node("w", "Quill", None, &["list", "chat"]),
+                node("list", "", Some(REGION_CHAT_LIST), &["results"]),
+                node(
+                    "results",
+                    "",
+                    Some(PART_RESULTS),
+                    &["filters", "heading", "hit1", "media2", "remove2"],
+                ),
+                node("filters", "", Some(CONTROLS), &["tab-media"]),
+                node("tab-media", "Media", None, &[]),
+                node("heading", "Messages", None, &[]),
+                node("hit1", "Ann · hello", Some("chat=1"), &["hit1-date"]),
+                node("hit1-date", "Mon", None, &[]),
+                node("media2", "photo.jpg · Bob", None, &["media2-sub"]),
+                node("media2-sub", "Bob · Mon", None, &[]),
+                node("remove2", "Remove Bob from recent", None, &[]),
+                node("chat", "", Some(REGION_CHAT), &["reply"]),
+                node("reply", "", Some(LIST), &["reply-search", "dest1", "dest2"]),
+                node("reply-search", "Search chats", Some(CONTROLS), &[]),
+                node("dest1", "Reply in Ann", Some("chat=1"), &[]),
+                node("dest2", "Reply in Bob", None, &[]),
             ],
             ..UiTree::default()
         }
@@ -312,8 +381,86 @@ mod tests {
         let tree = redact(window(), DriverScope::Granted, &|_| false);
         assert_eq!(
             ids(&tree),
-            ["w", "list", "search", "rows", "chat", "composer"]
+            ["w", "list", "search", "chat", "composer"],
+            "the rows list has nothing allowed under it, so it goes too"
         );
+    }
+
+    #[test]
+    fn lists_show_only_tagged_granted_rows_and_controls() {
+        let tree = redact(lists(), DriverScope::Granted, &|chat| chat == 1);
+        let mut kept = ids(&tree);
+        kept.sort_unstable();
+        assert_eq!(
+            kept,
+            [
+                "chat",
+                "dest1",
+                "filters",
+                "hit1",
+                "hit1-date",
+                "list",
+                "reply",
+                "reply-search",
+                "results",
+                "tab-media",
+                "w"
+            ],
+            "untagged rows, headings and the remove button are gone"
+        );
+        let names: Vec<&str> = tree
+            .nodes
+            .iter()
+            .filter_map(|n| n.name.as_deref())
+            .collect();
+        assert!(!names.iter().any(|n| n.contains("Bob")), "{names:?}");
+        assert_eq!(
+            tree.node("results").and_then(|n| n.name.clone()),
+            None,
+            "a list stays as a nameless ancestor"
+        );
+        // With All chats on, lists are plain containers.
+        let tree = redact(lists(), DriverScope::Everything, &|_| true);
+        assert_eq!(tree.nodes.len(), lists().nodes.len());
+    }
+
+    #[test]
+    fn a_point_in_a_list_needs_a_granted_row_or_a_control_under_it() {
+        let granted = |chat: i64| chat == 1;
+        let tags = |list: &[&str]| list.iter().map(|t| t.to_string()).collect::<Vec<_>>();
+        let scope = DriverScope::Granted;
+        assert!(point_allowed(
+            &tags(&["chat=1", PART_RESULTS, REGION_CHAT_LIST]),
+            scope,
+            &granted
+        ));
+        assert!(point_allowed(
+            &tags(&[CONTROLS, PART_RESULTS, REGION_CHAT_LIST]),
+            scope,
+            &granted
+        ));
+        assert!(
+            !point_allowed(&tags(&[PART_RESULTS, REGION_CHAT_LIST]), scope, &granted),
+            "an untagged row in the results"
+        );
+        assert!(
+            !point_allowed(&tags(&[PART_ROWS, REGION_CHAT_LIST]), scope, &granted),
+            "the space between chat rows"
+        );
+        assert!(point_allowed(
+            &tags(&["chat=1", LIST, REGION_CHAT]),
+            scope,
+            &granted
+        ));
+        assert!(
+            !point_allowed(&tags(&[LIST, REGION_CHAT]), scope, &granted),
+            "an untagged destination in the reply chooser"
+        );
+        assert!(point_allowed(
+            &tags(&[LIST, REGION_CHAT]),
+            DriverScope::Everything,
+            &granted
+        ));
     }
 
     #[test]

@@ -20,7 +20,7 @@ use quill::agent::{access, activity};
 use quill::ids::AccountKey;
 use std::time::Duration;
 
-fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+pub(super) fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     let root = quill::scratch::process_dir("quill-agent-driver-ui");
     let _ = std::fs::create_dir_all(&root);
     quill::settings::use_isolated_app_root(root);
@@ -43,7 +43,7 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     (app, VisualTestContext::from_window(handle.into(), cx))
 }
 
-fn settle(vcx: &mut VisualTestContext) {
+pub(super) fn settle(vcx: &mut VisualTestContext) {
     for _ in 0..3 {
         vcx.run_until_parked();
         vcx.executor().advance_clock(Duration::from_millis(300));
@@ -53,7 +53,7 @@ fn settle(vcx: &mut VisualTestContext) {
 
 /// What the agent wake task does in the app: start waiting commands, then
 /// let frames and timers run.
-fn pump(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+pub(super) fn pump(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     vcx.update(|window, cx| {
         app.update(cx, |app, cx| {
             app.agent_driver_tick(window, cx);
@@ -65,7 +65,7 @@ fn pump(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
 /// File `command` as a tool thread would and pump the window until it is
 /// answered. (Filed from the test thread: the test scheduler allows no
 /// wake-ups from other threads.)
-fn drive(
+pub(super) fn drive(
     app: &Entity<QuillApp>,
     vcx: &mut VisualTestContext,
     command: UiCommand,
@@ -81,14 +81,14 @@ fn drive(
 }
 
 /// Access and the driver on, no grants.
-fn turn_on() {
+pub(super) fn turn_on() {
     reset_for_test(&AccountKey::primary());
     access::set_enabled(true);
     access::set_ui_driver(true);
     bridge::set_paused(false);
 }
 
-fn grant(chat_id: i64, scope: Scope) {
+pub(super) fn grant(chat_id: i64, scope: Scope) {
     grants::update(&AccountKey::primary(), |g| {
         g.chats.insert(
             chat_id,
@@ -100,14 +100,14 @@ fn grant(chat_id: i64, scope: Scope) {
     });
 }
 
-fn read_tree(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> UiTree {
+pub(super) fn read_tree(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> UiTree {
     match drive(app, vcx, UiCommand::ReadTree) {
         Ok(UiReply::Tree(tree)) => tree,
         other => panic!("expected a tree, got {other:?}"),
     }
 }
 
-fn click(target: Target) -> UiCommand {
+pub(super) fn click(target: Target) -> UiCommand {
     UiCommand::Click {
         target,
         button: Button::Left,
@@ -115,7 +115,7 @@ fn click(target: Target) -> UiCommand {
     }
 }
 
-fn refused(reply: &Result<UiReply, BridgeError>, part: &str) -> bool {
+pub(super) fn refused(reply: &Result<UiReply, BridgeError>, part: &str) -> bool {
     matches!(reply, Ok(UiReply::Refused(text)) if text.contains(part))
 }
 
@@ -133,7 +133,7 @@ fn chat_rows(tree: &UiTree) -> Vec<i64> {
     ids
 }
 
-fn node_named<'a>(
+pub(super) fn node_named<'a>(
     tree: &'a UiTree,
     name: &str,
 ) -> Option<&'a quill::agent::ui_driver::tree::UiNode> {
@@ -144,7 +144,7 @@ fn node_named<'a>(
 
 /// The composer's text box (the chat list's search box is a multiline
 /// input too).
-fn message_box(tree: &UiTree) -> String {
+pub(super) fn message_box(tree: &UiTree) -> String {
     tree.nodes
         .iter()
         .find(|n| n.role == "MultilineTextInput" && n.name.as_deref() == Some("Message"))

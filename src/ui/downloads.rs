@@ -7,10 +7,40 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, FileId};
 use quill::lang::{keys, tr, tr_with};
+use quill::state::Session;
+use quill::telegram::envelope::MessageContent;
 use std::path::PathBuf;
+
+/// The chat of the loaded message `file_id` belongs to, for the UI
+/// driver's `chat=` tag on a download row; `None` when no loaded message
+/// carries the file (the row is then cut by the list's default-deny).
+fn download_chat(session: &Session, file_id: i32) -> Option<ChatId> {
+    let carries = |content: &MessageContent| match content {
+        MessageContent::Document(doc) => doc.file_id.0 == file_id,
+        MessageContent::Photo(photo) => photo.open_file_id().is_some_and(|f| f.0 == file_id),
+        MessageContent::Video(video) => video.file_id.0 == file_id,
+        MessageContent::VideoNote(note) => note.file_id.0 == file_id,
+        MessageContent::VoiceNote(note) => note.file_id.0 == file_id,
+        MessageContent::Audio(audio) => audio.file_id.0 == file_id,
+        MessageContent::Animation(animation) => animation.file_id.0 == file_id,
+        _ => false,
+    };
+    session
+        .histories
+        .iter()
+        .find(|(_, history)| {
+            history
+                .messages
+                .values()
+                .any(|message| carries(&message.content))
+        })
+        .map(|(chat_id, _)| ChatId(*chat_id))
+}
+
 impl QuillApp {
     pub(super) fn request_media_download(
         &mut self,
@@ -481,8 +511,17 @@ impl QuillApp {
         } else {
             None
         };
+        // The row names a file from a chat: tagged with that chat where it
+        // is known, so the UI driver prunes it with the chat's grant, and
+        // left to the list's default-deny otherwise.
+        let chat_tag = session
+            .as_ref()
+            .and_then(|s| download_chat(s, file_id))
+            .map(|chat| quill::agent::ui_driver::redact::chat_tag(chat.0));
         div()
             .id(("download-row", file_id as u64))
+            .role(gpui_kit::Role::Group)
+            .when_some(chat_tag, |this, tag| this.a11y_tag(tag))
             .mx_1()
             .px_2()
             .py_1p5()

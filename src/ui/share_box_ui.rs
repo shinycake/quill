@@ -65,6 +65,7 @@ fn share_dest_row(
         .py_1()
         .rounded_md()
         .role(gpui_kit::Role::Button)
+        .a11y_tag(quill::agent::ui_driver::redact::chat_tag(id.0))
         .aria_label(format!(
             "{title}, {}",
             if checked {

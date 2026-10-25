@@ -97,16 +97,20 @@ impl QuillApp {
                     } else {
                         row.subtitle
                     };
-                    section = section.child(search_result_row(
-                        (prefix, bot_id as u64),
-                        row.title,
-                        subtitle,
-                        None,
-                        query,
-                        photo,
-                        cx,
-                        move |this, _, cx| this.open_main_web_app(bot_id, "", cx),
-                    ));
+                    section = section.child(
+                        search_result_row(
+                            (prefix, bot_id as u64),
+                            row.title,
+                            subtitle,
+                            None,
+                            query,
+                            photo,
+                            cx,
+                            move |this, _, cx| this.open_main_web_app(bot_id, "", cx),
+                        )
+                        // A bot's chat id is its user id.
+                        .a11y_tag(quill::agent::ui_driver::redact::chat_tag(bot_id)),
+                    );
                 }
                 section
             };

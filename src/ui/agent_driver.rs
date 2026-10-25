@@ -392,3 +392,8 @@ async fn wait_for_tree(
 #[cfg(feature = "demo-capture")]
 #[path = "agent_driver_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "agent_driver_redact_tests.rs"]
+mod redact_tests;

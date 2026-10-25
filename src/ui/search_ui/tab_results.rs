@@ -6,11 +6,23 @@
 use super::*;
 use crate::ui::scroll_load::scrolled_near_end;
 use crate::ui::status_note::StatusNote;
+use quill::agent::ui_driver::redact;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{SearchConfirm, SearchMediaRow, SharedMediaTab, media_month_starts};
 
 /// tdesktop `kCollapsedChannelsCount`.
 const COLLAPSED_CHANNELS: usize = 5;
+
+/// A row of controls inside the results list that names no chat ("Show
+/// more", "Load more"): the UI driver's redaction keeps it, where an
+/// untagged row in the list would go (`redact::CONTROLS`).
+fn list_controls(id: &'static str) -> Stateful<Div> {
+    div()
+        .id(id)
+        .flex()
+        .role(gpui_kit::Role::Group)
+        .a11y_tag(redact::CONTROLS)
+}
 
 impl QuillApp {
     /// Channels tab on an empty field: the channels you joined (five, then
@@ -58,16 +70,19 @@ impl QuillApp {
                 .child(div().text_xs().font_semibold().child(heading.to_string()));
             for (chat_id, title, preview) in rows {
                 let photo = self.chat_photo_for_row(chat_id);
-                block = block.child(search_result_row(
-                    (prefix, chat_id.0 as u64),
-                    title,
-                    preview,
-                    None,
-                    "",
-                    photo,
-                    cx,
-                    move |this, window, cx| this.select_search_chat(chat_id, window, cx),
-                ));
+                block = block.child(
+                    search_result_row(
+                        (prefix, chat_id.0 as u64),
+                        title,
+                        preview,
+                        None,
+                        "",
+                        photo,
+                        cx,
+                        move |this, window, cx| this.select_search_chat(chat_id, window, cx),
+                    )
+                    .a11y_tag(redact::chat_tag(chat_id.0)),
+                );
             }
             block
         };
@@ -82,7 +97,7 @@ impl QuillApp {
             );
             if total > COLLAPSED_CHANNELS {
                 block = block.child(
-                    div().flex().child(
+                    list_controls("search-channels-controls").child(
                         Button::new("search-channels-more")
                             .label(if expanded {
                                 tr(keys::Q_CHAT_SHOW_LESS)
@@ -202,6 +217,7 @@ impl QuillApp {
             .py_1p5()
             .rounded_md()
             .role(gpui_kit::Role::Button)
+            .a11y_tag(redact::chat_tag(chat_id.0))
             .aria_label(format!("{label} · {chat_title}"))
             .tab_index(0)
             .cursor_pointer()
@@ -259,8 +275,7 @@ impl QuillApp {
         }
         if tabs.more_failed {
             return Some(
-                div()
-                    .flex()
+                list_controls("search-load-more-controls")
                     .justify_center()
                     .py_1()
                     .child(
