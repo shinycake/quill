@@ -135,7 +135,8 @@ fn method_of(request: &Value) -> Result<String, ToolError> {
 
 /// The longest request the user is shown; longer ones are refused, so
 /// what the user allows is always the whole request.
-const PREVIEW_CAP: usize = 4000;
+/// Fits a full 4096-character message with its JSON around it.
+const PREVIEW_CAP: usize = 6000;
 
 fn preview_of(request: &Value) -> Result<String, ToolError> {
     let preview = serde_json::to_string_pretty(request).unwrap_or_default();
@@ -247,7 +248,9 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
     if has_type(&request, "callbackQueryPayloadDataWithPassword") {
         class = Class::Blocked("agents never send the user's password.");
     }
-    if has_type(&request, "inputFileId") {
+    // Both name a file by its local id (inputFileGenerated through a
+    // "#file_id#" conversion TDLib runs itself), and ids reach any chat.
+    if has_type(&request, "inputFileId") || has_type(&request, "inputFileGenerated") {
         class = Class::Blocked(
             "file ids reach files from any chat; upload with inputFileLocal, or forward the message.",
         );
@@ -432,8 +435,21 @@ fn is_contacts(method: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::send_count;
+    use super::{run, send_count};
     use serde_json::json;
+
+    #[test]
+    fn files_named_by_id_never_go_out() {
+        for file in [
+            json!({"@type": "inputFileId", "id": 1234}),
+            json!({"@type": "inputFileGenerated", "original_path": "", "conversion": "#file_id#1234", "expected_size": 0}),
+        ] {
+            let args = json!({"request": {"@type": "sendMessage", "chat_id": 1,
+                "input_message_content": {"@type": "inputMessageDocument", "document": file}}});
+            let refused = run(&args).err().map(|error| error.0).unwrap_or_default();
+            assert!(refused.contains("file ids reach files"), "{refused}");
+        }
+    }
 
     #[test]
     fn albums_and_forwards_pace_per_message() {

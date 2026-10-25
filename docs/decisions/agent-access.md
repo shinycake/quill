@@ -300,7 +300,8 @@ and parsed on first use, `td_schema.rs`):
   receipts, online status or typing; `setTdlibParameters`, `close`, the
   sign-in flow, logs, push, `setDatabaseEncryptionKey`, file generation,
   terms of service, `openChat`/`closeChat`), any method with a `file_id`,
-  any request with a nested `inputFileId`, and
+  any request with a nested `inputFileId` or `inputFileGenerated`
+  (TDLib runs a `#file_id#` conversion itself, reaching a file by id), and
   `searchFileDownloads`/`getRemoteFile` (file ids are small integers handed
   out in order; `download_file` checks the chat a file came from), the TON
   wallet and its plumbing (TON Center, wallet bot, on-ramp; owner rule),
@@ -340,18 +341,18 @@ and parsed on first use, `td_schema.rs`):
 An allowed Ask still needs the grants on every chat it names, and an
 allowed send still goes through the queue. The Allow dialog shows the
 agent's reason and the whole sanitized request, scrollable; a request over
-4000 characters is refused rather than shown in part, since the agent
+6000 characters is refused rather than shown in part, since the agent
 controls field order and could push a field out of view.
 
 **Answers** pass through `td_redact.rs`. Anything belonging to a chat the
 agent may not read (`chat`, `supergroup`, `basicGroup`, `secretChat`, any
 object with a `chat_id`) is dropped from lists; elsewhere it becomes a stub
-with no id. An object is judged by its own id only: its other chat fields
+with no id. An object is judged by its own id only (a story by its poster): its other chat fields
 (`linked_chat_id`, `personal_chat_id`, `supergroup_id`...) read 0 when not
 granted, so a granted channel with an ungranted discussion group still
 shows. Every `…chat_ids` list keeps only granted chats. A list filtered by
-chat always has its `total_count` set to the items returned, even when
-nothing was dropped (otherwise `getChats` on a folder with a granted first
+chat, or left empty, always has its `total_count` set to the items
+returned, even when nothing was dropped (otherwise `getChats` on a folder with a granted first
 chat would count the folder). `phone_number` and `vcard` fields are
 dropped. `sponsored*` and `…Advertisement` objects get `"sponsored": true`.
 

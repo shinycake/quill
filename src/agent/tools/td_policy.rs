@@ -180,6 +180,7 @@ const ACCOUNT: &[&str] = &[
     "getConnectedWebsites",
     "getPasswordState",
     "getRecoveryEmailAddress",
+    "setProfileShareTheme",
 ];
 
 /// Methods that move Stars or boosts without a money word in their name.

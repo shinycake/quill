@@ -174,9 +174,9 @@ request as JSON (the `@type` is the method; fields as in the
   web logins, bot buttons, passport data, stream keys) and anything that can
   spend Stars, TON or money, a price in any field included. Pass `reason`;
   the user reads it next to the whole request. A request too long to show
-  in full (over 4000 characters) is refused.
+  in full (over 6000 characters) is refused.
 - Never available: Quill's own plumbing (`setOption`, the sign-in flow,
-  closing the client, logs, `openChat`), raw file access and `inputFileId`
+  closing the client, logs, `openChat`), raw file access, `inputFileId` and `inputFileGenerated`
   (use `download_file`; upload with `inputFileLocal` or forward), the TON
   wallet, `getCurrentState`, and uploads from Quill's data folder.
 - Answers leave out what you may not read: items from chats that aren't

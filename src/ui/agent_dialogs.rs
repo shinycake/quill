@@ -188,7 +188,7 @@ impl QuillApp {
             Ask::Write { preview, kind, .. } => {
                 // A raw request shows whole: what it does may sit in any field.
                 let raw = kind == "td_call";
-                let preview = clip(preview, if raw { 4000 } else { 600 });
+                let preview = clip(preview, if raw { 6000 } else { 600 });
                 if !preview.is_empty() {
                     body = body.child(
                         div()
@@ -255,7 +255,7 @@ impl QuillApp {
                                 .font_family(super::message_text::MONO_FONT)
                                 .max_h(px(240.))
                                 .overflow_y_scroll()
-                                .child(clip(preview, 4000)),
+                                .child(clip(preview, 6000)),
                         ),
                 );
             }

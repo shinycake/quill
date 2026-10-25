@@ -23,6 +23,7 @@ fn chat_of(fields: &Map<String, Value>) -> Option<i64> {
         "supergroup" => int("id").map(|id| SUPERGROUP_BASE.saturating_sub(id)),
         "basicGroup" => int("id").map(i64::saturating_neg),
         "secretChat" => int("id").map(|id| SECRET_BASE.saturating_add(id)),
+        "story" => int("poster_chat_id"),
         _ => int("chat_id"),
     };
     id.filter(|id| *id != 0)
@@ -108,7 +109,9 @@ impl Redactor<'_> {
                         .iter()
                         .any(|item| item.as_object().and_then(chat_of).is_some());
                     self.keep_list(items);
-                    if of_chats {
+                    // An empty page keeps no count either: TDLib's would
+                    // count matches in every chat.
+                    if of_chats || items.is_empty() {
                         filtered = Some(items.len());
                     }
                 }
@@ -178,6 +181,14 @@ mod tests {
         redact(&mut info, &mut |id| id != 5);
         assert_eq!(info["direct_messages_chat_id"], json!(0));
         assert_eq!(info["description"], json!("x"));
+
+        let mut empty = json!({"@type": "foundMessages", "total_count": 40, "messages": []});
+        redact(&mut empty, &mut |_| true);
+        assert_eq!(empty["total_count"], json!(0));
+
+        let mut story = json!({"@type": "story", "poster_chat_id": 5, "id": 1});
+        redact(&mut story, &mut |id| id != 5);
+        assert_eq!(story, json!({"hidden": "not granted to agents"}));
 
         let mut group = json!({"@type": "supergroup", "id": 77, "username": "secret"});
         redact(&mut group, &mut |_| false);
