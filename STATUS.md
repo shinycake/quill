@@ -948,7 +948,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Business features preview with per-feature animations for free accounts <!-- parity:premium-business-preview -->
 - [ ] Hidden read time and last seen: "Show my read time or get Premium" box, the subscribe row and the first-restrict warning in privacy settings <!-- parity:premium-readtime-box -->
 - [ ] Premium locks for wallpapers for both sides and the voice-message privacy subscribe button <!-- parity:premium-privacy-upsells -->
-- [ ] Recording voice and video notes is blocked for people who restricted them, with tdesktop's notice <!-- parity:premium-voice-restricted-send -->
+- [x] Recording voice and video notes is blocked for people who restricted them, with tdesktop's notice <!-- parity:premium-voice-restricted-send -->
 - [ ] "Gift Premium" from birthday suggestions <!-- parity:premium-birthday-gift -->
 - [ ] Suggestion box to archive and mute new chats from non-contacts <!-- parity:premium-archive-mute-suggestion -->
 - [ ] Message effects play when a message with an effect arrives or is tapped <!-- parity:premium-message-effects-play -->
