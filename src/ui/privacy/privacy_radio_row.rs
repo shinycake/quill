@@ -3,6 +3,8 @@
 use super::*;
 use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
+use gpui_kit::assets::IconName;
+use gpui_kit::prelude::FluentBuilder as _;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -15,6 +17,7 @@ impl QuillApp {
         current: Option<PrivacyWho>,
     ) -> AnyElement {
         let selected = current == Some(who);
+        let locked = self.privacy_choice_locked(target, who);
         div()
             .id(format!(
                 "privacy-choice-{}-{}",
@@ -38,76 +41,45 @@ impl QuillApp {
             })
             .child(div().text_xs().child(if selected { "●" } else { "○" }))
             .child(div().text_sm().child(who.label()))
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.set_privacy_target_who(target, who, cx);
+            .when(locked, |row| {
+                row.child(
+                    Icon::new(IconName::Lock)
+                        .size(px(12.))
+                        .text_color(cx.theme().muted_foreground),
+                )
+            })
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.set_privacy_target_who(target, who, window, cx);
             }))
             .into_any_element()
     }
 
-    /// Slice S3: change one rule's base choice. Live: optimistic `set`
-    /// that keeps the current exception rules (TGX `toggleGlobal`).
-    /// Demo: mutate the fixture directly.
+    /// Narrowing who can send voice messages needs Premium (tdesktop
+    /// `VoicesPrivacyController::premiumClickedCallback`).
+    fn privacy_choice_locked(&self, target: PrivacyEditorTarget, who: PrivacyWho) -> bool {
+        matches!(target, PrivacyEditorTarget::Rule(key) if key.restriction_needs_premium())
+            && who != PrivacyWho::Everybody
+            && !self.privacy_premium()
+    }
+
+    /// Slice S3: change one rule's base choice, keeping the current
+    /// exception rules (TGX `toggleGlobal`). A locked choice shows the
+    /// Premium toast instead.
     pub(in crate::ui) fn set_privacy_target_who(
         &mut self,
         target: PrivacyEditorTarget,
         who: PrivacyWho,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // tdesktop `VoicesPrivacyController::premiumClickedCallback`:
-        // narrowing who can send voice messages needs Premium.
-        if let PrivacyEditorTarget::Rule(key) = target
-            && key.restriction_needs_premium()
-            && who != PrivacyWho::Everybody
-            && !self
-                .session()
-                .is_some_and(|s| s.payments.premium_option == Some(true))
-        {
-            self.connection.set_note(StatusNote::info(tr(
-                keys::Q_PREFS_RESTRICTING_WHO_CAN_SEND_YOU,
-            )));
-            cx.notify();
+        if self.privacy_choice_locked(target, who) {
+            self.voice_privacy_premium_toast(window, cx);
             return;
         }
-        if let Some(live) = self.live.as_mut() {
-            // Scoped borrow: the driver result is owned, so the
-            // `status_note` write below doesn't alias the live borrow.
-            let result = {
-                match target {
-                    PrivacyEditorTarget::Rule(key) => {
-                        // Not Ready (Loading/Failed): ignore the click — sending
-                        // a base-only detail here would wipe the server exceptions.
-                        let detail = match live.driver.session.settings.privacy.get(&key) {
-                            Some(PrivacyKeyState::Ready(d)) => d.with_base(who),
-                            _ => return,
-                        };
-                        live.driver.set_privacy_rules(key, detail)
-                    }
-                    PrivacyEditorTarget::NewChat | PrivacyEditorTarget::FileOpen => return,
-                }
-            };
-            if let Err(err) = result {
-                self.connection.set_note(StatusNote::error(user_error_for(
-                    keys::Q_NOTES_FAILED_PRIVACY_UPDATE,
-                    &err,
-                )));
-            }
-        } else if let Some(demo) = self.demo_session.as_mut() {
-            match target {
-                PrivacyEditorTarget::Rule(key) => {
-                    // Not Ready (Loading/Failed): ignore the click — inserting
-                    // a base-only detail here would wipe the server exceptions.
-                    let detail = match demo.settings.privacy.get(&key) {
-                        Some(PrivacyKeyState::Ready(d)) => d.with_base(who),
-                        _ => return,
-                    };
-                    demo.settings
-                        .privacy
-                        .insert(key, PrivacyKeyState::Ready(detail));
-                }
-                PrivacyEditorTarget::NewChat | PrivacyEditorTarget::FileOpen => return,
-            }
-        }
-        cx.notify();
+        let PrivacyEditorTarget::Rule(key) = target else {
+            return;
+        };
+        self.mutate_privacy_detail(key, |detail| detail.who = Some(who), cx);
     }
 
     /// Slice S3: one always/never exception row with its user count.
@@ -570,7 +542,7 @@ impl QuillApp {
         body.into_any_element()
     }
 
-    /// Apply `edit` to the key's rule detail and send/store the result.
+    /// Apply `edit` to the key's rule detail and save the result.
     /// Not Ready (Loading/Failed): ignored — an empty detail would
     /// recompose into a base-less rule list (first-match => deny-all).
     pub(super) fn mutate_privacy_detail(
@@ -589,20 +561,7 @@ impl QuillApp {
             return;
         };
         edit(&mut detail);
-        if let Some(live) = self.live.as_mut() {
-            let result = { live.driver.set_privacy_rules(key, detail) };
-            if let Err(err) = result {
-                self.connection.set_note(StatusNote::error(user_error_for(
-                    keys::Q_NOTES_FAILED_PRIVACY_UPDATE,
-                    &err,
-                )));
-            }
-        } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.settings
-                .privacy
-                .insert(key, PrivacyKeyState::Ready(detail));
-        }
-        cx.notify();
+        self.save_privacy_rule(key, detail, cx);
     }
 
     /// Slice S3: add or remove one user from an always/never exception

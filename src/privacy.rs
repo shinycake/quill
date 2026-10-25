@@ -5,6 +5,8 @@
 //! untouched via `PrivacyRuleDetail::extra_rules`.
 #![deny(clippy::indexing_slicing)]
 
+pub mod prefs;
+
 use crate::telegram::requests::PrivacyWho;
 use serde_json::Value;
 

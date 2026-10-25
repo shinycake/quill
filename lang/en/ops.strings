@@ -10,6 +10,8 @@
 "lng_away_recipients" = "Recipients";
 "lng_away_schedule_outside" = "Outside of Business Hours";
 "lng_away_select" = "Select chats or entire chat categories for sending an away message.";
+"lng_background_apply_me" = "Apply for me";
+"lng_background_apply_both" = "Apply for me and {user}";
 "lng_background_share" = "Share";
 "lng_bad_phone" = "Invalid phone number. Please try again.";
 "lng_bot_share_phone" = "Do you want to share your phone number with this bot?";

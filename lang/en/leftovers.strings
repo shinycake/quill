@@ -139,7 +139,6 @@
 "qll_leftovers_violation_of_terms" = "Violation of Terms";
 "qll_leftovers_wallpaper_dark_blue" = "Dark blue";
 "qll_leftovers_wallpaper_dimming" = "Dimming in dark mode: {percent}%";
-"qll_leftovers_wallpaper_for_you_only" = "The wallpaper is set for you only. Telegram Premium can set it for {name} too.";
 "qll_leftovers_wallpaper_link_invalid" = "This wallpaper link is invalid or has expired ({error}).";
 "qll_leftovers_wallpaper_near_black" = "Near black";
 "qll_leftovers_wallpaper_plum" = "Plum";
