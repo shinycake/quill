@@ -37,7 +37,8 @@ impl QuillApp {
             PaneMode::Ready => self.sidebar_ready(list, focus_visible, window, cx),
         };
         let list = if mode == PaneMode::Ready {
-            list.children(self.chat_list_update_button(cx))
+            list.children(self.agent_connected_strip(cx))
+                .children(self.chat_list_update_button(cx))
         } else {
             list
         };

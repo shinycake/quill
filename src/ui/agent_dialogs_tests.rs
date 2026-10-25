@@ -177,3 +177,47 @@ fn a_request_for_another_account_waits(cx: &mut TestAppContext) {
     prompts::answer(id, Decision::Denied);
     assert_eq!(answer_of(id, &rx), Some(Decision::Denied));
 }
+
+fn ask_write() -> Ask {
+    Ask::Write {
+        chat_id: 7,
+        title: "Ann Lee".into(),
+        action: "Send a message".into(),
+        preview: "See you at 6".into(),
+    }
+}
+
+#[gpui_kit::test]
+fn a_write_request_shows_the_text_and_answers_allow_or_deny(cx: &mut TestAppContext) {
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (_app, shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    reset_for_test(&AccountKey::primary());
+    settle(vcx);
+
+    let (id, rx) = file(ask_write());
+    settle(vcx);
+    assert_eq!(open_kind(&shell, vcx), Some(DialogKind::AgentRequest));
+    assert!(vcx.debug_bounds("agent-request-preview").is_some());
+    vcx.update(|window, cx| window.click("agent-request-allow", cx));
+    settle(vcx);
+    assert_eq!(answer_of(id, &rx), Some(Decision::Allowed));
+    assert!(
+        grants::for_account(&AccountKey::primary()).chats.is_empty(),
+        "one confirmed write grants nothing"
+    );
+    assert_eq!(open_kind(&shell, vcx), None);
+
+    let (id, rx) = file(ask_write());
+    settle(vcx);
+    vcx.update(|window, cx| window.click("agent-request-deny", cx));
+    settle(vcx);
+    assert_eq!(answer_of(id, &rx), Some(Decision::Denied));
+
+    let (id, rx) = file(ask_write());
+    settle(vcx);
+    vcx.update(|window, cx| window.press("escape", cx));
+    settle(vcx);
+    assert_eq!(answer_of(id, &rx), Some(Decision::Denied));
+    assert_eq!(open_kind(&shell, vcx), None);
+}
