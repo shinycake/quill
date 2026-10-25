@@ -41,7 +41,12 @@ const SPANISH_DRAFT: &str = "Hola equipo,\nel lanzamiento pasa al jueves por la 
 const TYPO_DRAFT: &str =
     "Hi team,\nthe lanch moves to thursday afternon.\nLet me know if anythig really blocks review.";
 
-fn style(name: &str, title: &str, custom_emoji_id: i64, creator_user_id: i64) -> TextCompositionStyle {
+fn style(
+    name: &str,
+    title: &str,
+    custom_emoji_id: i64,
+    creator_user_id: i64,
+) -> TextCompositionStyle {
     TextCompositionStyle {
         name: name.into(),
         custom_emoji_id,

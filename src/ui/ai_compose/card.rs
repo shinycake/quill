@@ -109,7 +109,8 @@ impl QuillApp {
             return div().into_any_element();
         };
         let ai = &open.ai;
-        let style_hint = ai.mode() == AiComposeMode::Style && !prefs::current().style_tooltip_hidden;
+        let style_hint =
+            ai.mode() == AiComposeMode::Style && !prefs::current().style_tooltip_hidden;
         v_flex()
             .gap_3()
             .child(self.ai_compose_tabs(ai.mode(), cx))
@@ -205,7 +206,13 @@ impl QuillApp {
                 Button::new(SharedString::from(format!("ai-style-{}", style.name)))
                     .small()
                     .rounded(pill_radius())
-                    .map(|pill| if selected { pill.primary() } else { pill.outline() })
+                    .map(|pill| {
+                        if selected {
+                            pill.primary()
+                        } else {
+                            pill.outline()
+                        }
+                    })
                     .child(
                         h_flex()
                             .gap_1()
@@ -254,9 +261,15 @@ impl QuillApp {
             let expanded = ai.original_expanded();
             let expandable = original.contains('\n') || original.chars().count() > 48;
             let (icon, label) = if expanded {
-                (IconName::ChevronUp, tr(keys::SR_AI_COMPOSE_COLLAPSE_ORIGINAL))
+                (
+                    IconName::ChevronUp,
+                    tr(keys::SR_AI_COMPOSE_COLLAPSE_ORIGINAL),
+                )
             } else {
-                (IconName::ChevronDown, tr(keys::SR_AI_COMPOSE_EXPAND_ORIGINAL))
+                (
+                    IconName::ChevronDown,
+                    tr(keys::SR_AI_COMPOSE_EXPAND_ORIGINAL),
+                )
             };
             card = card
                 .child(
@@ -281,23 +294,17 @@ impl QuillApp {
                             )
                         }),
                 )
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(muted)
-                        .min_w_0()
-                        .map(|text| {
-                            if expanded {
-                                text.child(original.clone())
-                            } else {
-                                let shown = match original.split_once('\n') {
-                                    Some((first, _)) => format!("{first}…"),
-                                    None => original.clone(),
-                                };
-                                text.truncate().child(shown)
-                            }
-                        }),
-                )
+                .child(div().text_sm().text_color(muted).min_w_0().map(|text| {
+                    if expanded {
+                        text.child(original.clone())
+                    } else {
+                        let shown = match original.split_once('\n') {
+                            Some((first, _)) => format!("{first}…"),
+                            None => original.clone(),
+                        };
+                        text.truncate().child(shown)
+                    }
+                }))
                 .child(div().h(px(1.)).w_full().my_1().bg(border.opacity(0.6)));
         }
         let title = ai.result_title();
@@ -330,10 +337,9 @@ impl QuillApp {
                 .child(Skeleton::new().h(px(12.)).w(relative(0.6)).bg(border))
                 .into_any_element(),
             CardState::Ready(result) => self.ai_compose_result(ai.mode(), result, font, cx),
-            CardState::Waiting | CardState::Failed => div()
-                .text_size(font)
-                .child(original)
-                .into_any_element(),
+            CardState::Waiting | CardState::Failed => {
+                div().text_size(font).child(original).into_any_element()
+            }
         };
         let copy = ai.result().map(|result| result.text.clone());
         card.child(header)
@@ -447,7 +453,10 @@ impl QuillApp {
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| session.sender_label(sender));
         let marked = marked_link(tr(keys::AI_COMPOSE_AUTHOR), "user", "");
-        let start = marked.link.as_ref().map_or(marked.text.len(), |link| link.start);
+        let start = marked
+            .link
+            .as_ref()
+            .map_or(marked.text.len(), |link| link.start);
         let before = marked.text.get(..start).unwrap_or_default().to_string();
         let after = marked.text.get(start..).unwrap_or_default().to_string();
         let muted = cx.theme().muted_foreground;

@@ -32,10 +32,8 @@ impl QuillApp {
                 self.close_ai_compose(cx);
             }
             CocoonLink::Direct => {
-                self.pending_deep_link = Some(format!(
-                    "https://{}",
-                    tr(keys::TRANSLATE_COCOON_TEXT_LINK)
-                ));
+                self.pending_deep_link =
+                    Some(format!("https://{}", tr(keys::TRANSLATE_COCOON_TEXT_LINK)));
                 self.close_ai_compose(cx);
             }
             CocoonLink::Domain => {
@@ -72,11 +70,8 @@ impl QuillApp {
         let open = Rc::new(move |cx: &mut App| {
             let _ = app.update(cx, |this, cx| this.open_cocoon_link(link, cx));
         });
-        InteractiveText::new(
-            id,
-            StyledText::new(marked.text).with_highlights(highlights),
-        )
-        .on_click(marked.link.into_iter().collect(), move |_, _, cx| open(cx))
+        InteractiveText::new(id, StyledText::new(marked.text).with_highlights(highlights))
+            .on_click(marked.link.into_iter().collect(), move |_, _, cx| open(cx))
     }
 
     fn cocoon_row(

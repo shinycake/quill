@@ -352,11 +352,13 @@ impl QuillApp {
                                     row.when_some(self.bot_menu_button(cx), |row, button| {
                                         row.child(button)
                                     })
-                                    .child(self.ai_compose_attach_column(
-                                        self.attach_menu_button(polls_allowed, cx)
-                                            .into_any_element(),
-                                        cx,
-                                    ))
+                                    .child(
+                                        self.ai_compose_attach_column(
+                                            self.attach_menu_button(polls_allowed, cx)
+                                                .into_any_element(),
+                                            cx,
+                                        ),
+                                    )
                                     .child(
                                         Button::new("composer-emoji")
                                             .icon(IconName::FaceSlightlySmiling)
@@ -376,9 +378,7 @@ impl QuillApp {
                                     )
                                     .child(self.format_menu_button(cx))
                                 })
-                                .when(!show_attach, |row| {
-                                    row.children(self.ai_compose_button(cx))
-                                })
+                                .when(!show_attach, |row| row.children(self.ai_compose_button(cx)))
                                 .child(
                                     div()
                                         .relative()

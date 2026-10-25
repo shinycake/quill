@@ -162,5 +162,8 @@ fn the_daily_limit_offers_increase_limit(cx: &mut TestAppContext) {
         "the limit toast"
     );
     click(&mut main, "ai-compose-main-button");
-    assert!(card(&app, &mut main).is_none(), "Increase Limit leaves the box");
+    assert!(
+        card(&app, &mut main).is_none(),
+        "Increase Limit leaves the box"
+    );
 }

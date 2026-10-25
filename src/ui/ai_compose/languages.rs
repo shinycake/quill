@@ -50,11 +50,7 @@ impl QuillApp {
                     this.set_ai_compose_view(AiComposeView::Card, cx);
                 }))
                 .child(div().w(px(18.)).flex_none().when(selected, |slot| {
-                    slot.child(
-                        Icon::new(IconName::Check)
-                            .size(px(16.))
-                            .text_color(primary),
-                    )
+                    slot.child(Icon::new(IconName::Check).size(px(16.)).text_color(primary))
                 }))
                 .child(div().flex_1().min_w_0().text_sm().child(english))
                 .when(native != english, |row| {
@@ -101,7 +97,13 @@ impl QuillApp {
             Button::new(id)
                 .small()
                 .rounded(pill_radius())
-                .map(|pill| if selected { pill.primary() } else { pill.outline() })
+                .map(|pill| {
+                    if selected {
+                        pill.primary()
+                    } else {
+                        pill.outline()
+                    }
+                })
                 .child(h_flex().gap_1().items_center().child(glyph).child(title))
         };
         let neutral = pill(

@@ -80,7 +80,11 @@ impl QuillApp {
                 .find(|item| item.custom_emoji_id == Some(id));
             match sticker {
                 Some(item) if self.panel_still(item).is_none() => {
-                    files.extend([item.display_file_id(), item.thumb_file_id].into_iter().flatten());
+                    files.extend(
+                        [item.display_file_id(), item.thumb_file_id]
+                            .into_iter()
+                            .flatten(),
+                    );
                 }
                 Some(_) => {}
                 None if !self.ai_compose.emoji_asked.contains(&id) => unresolved.push(id),
@@ -109,9 +113,7 @@ impl QuillApp {
     ) {
         let toast = match error {
             AiBoxError::FloodPremium => self.ai_compose_flood_toast(cx),
-            AiBoxError::TooLong => {
-                Notification::new().message(tr(keys::AI_COMPOSE_ERROR_TOO_LONG))
-            }
+            AiBoxError::TooLong => Notification::new().message(tr(keys::AI_COMPOSE_ERROR_TOO_LONG)),
             AiBoxError::StyleInvalid(kind) | AiBoxError::Other(kind) if !kind.is_empty() => {
                 Notification::new().message(kind.clone())
             }
