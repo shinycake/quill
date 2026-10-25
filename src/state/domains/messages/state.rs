@@ -70,6 +70,13 @@ pub struct MessagesState {
     /// (TDLib 404s when the page has no Instant View). The UI drains it
     /// into the browser — TGX behaves the same.
     pub instant_view_fallback_url: Option<String>,
+    /// The fallback above answers a request an agent's step sent
+    /// (`instant_view_agent_requests`): the UI opens it as part of that
+    /// step (`guard::with_injecting`), so the browser stays closed.
+    pub instant_view_fallback_from_agent: bool,
+    /// `getWebPageInstantView` requests sent while the agent UI driver
+    /// injected input (`guard::injecting`).
+    pub instant_view_agent_requests: HashSet<RequestId>,
     /// MED4: pending `getWebPageInstantView` URLs by `RequestId`
     /// (`RequestPurpose` stays `Copy`, so the URL rides here).
     pub instant_view_urls: HashMap<RequestId, String>,
@@ -188,6 +195,8 @@ impl MessagesState {
             message_text_length_max: 4096,
             instant_view: None,
             instant_view_fallback_url: None,
+            instant_view_fallback_from_agent: false,
+            instant_view_agent_requests: HashSet::new(),
             instant_view_urls: HashMap::new(),
             composer_preview: None,
             composer_preview_urls: HashMap::new(),

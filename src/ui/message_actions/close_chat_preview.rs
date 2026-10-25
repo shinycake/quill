@@ -629,7 +629,9 @@ impl QuillApp {
     /// when the card offers it, fall back to the browser on 404 /
     /// unsupported). Drains `Session::instant_view_fallback_url` into
     /// the browser and renders `Session::instant_view` page blocks via
-    /// `message_rich_block`. A refusal is never rendered as a reader.
+    /// `message_rich_block`. A refusal is never rendered as a reader. A
+    /// fallback for a link an agent's step clicked opens as part of that
+    /// step (`guard::with_injecting`): the browser stays closed.
     pub(in crate::ui) fn instant_view_overlay(
         &mut self,
         cx: &mut Context<Self>,
@@ -642,7 +644,11 @@ impl QuillApp {
                 .instant_view_fallback_url
                 .take()
         {
-            self.open_message_url(&url, cx);
+            let messages = &mut live.driver.session.messages;
+            let from_agent = std::mem::take(&mut messages.instant_view_fallback_from_agent);
+            quill::agent::ui_driver::guard::with_injecting(from_agent, || {
+                self.open_message_url(&url, cx)
+            });
         }
         self.session()?.messages.instant_view.as_ref()?;
         self.instant_view_overlay_body(cx)
