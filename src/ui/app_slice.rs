@@ -360,6 +360,9 @@ impl QuillApp {
     /// with its layer painting the animated content just above it.
     pub(super) fn sidebar_slot(&self) -> AnyElement {
         let column = div()
+            .id("sidebar-slot")
+            .role(gpui_kit::Role::Group)
+            .a11y_tag(quill::agent::ui_driver::redact::REGION_CHAT_LIST)
             .relative()
             .w(self.list_width() + px(self.folder_rail_width()))
             .flex_none()
@@ -392,6 +395,8 @@ impl QuillApp {
         let send_fly = self.send_fly_overlay(cx);
         let slot = div()
             .id("conversation-slot")
+            .role(gpui_kit::Role::Group)
+            .a11y_tag(quill::agent::ui_driver::redact::REGION_CHAT)
             .debug_selector(|| "conversation-slot".into())
             .relative()
             .flex()

@@ -357,6 +357,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.agent_may_open(chat_id) {
+            return;
+        }
         let (text, reply, now_ms) = self.leaving_draft_parts(cx);
         let open = self.chat_open_at(chat_id, None);
         if let Some(live) = self.live.as_mut() {
@@ -408,6 +411,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.agent_may_open(chat_id) {
+            return;
+        }
         let (text, reply, now_ms) = self.leaving_draft_parts(cx);
         // The found message wins over the chat's saved scroll position.
         let _ = self.chat_open_at(chat_id, Some(message_id));
@@ -461,6 +467,8 @@ impl QuillApp {
     ) -> impl IntoElement {
         div()
             .id("sidebar-search")
+            .role(gpui_kit::Role::Group)
+            .a11y_tag(quill::agent::ui_driver::redact::PART_SEARCH)
             .flex()
             .items_center()
             .gap_2()

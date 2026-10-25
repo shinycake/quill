@@ -1,15 +1,41 @@
 //! GPUI's accessibility tree, as the UI driver hands it to agents
 //! (`quill::agent::ui_driver::tree::UiTree`). Read from the last frame
-//! GPUI built a tree for; `Window::set_a11y_forced` makes it build one
-//! every frame while an agent drives.
+//! GPUI built a tree for (`Window::set_a11y_forced` makes it build one
+//! every frame while an agent drives) and cut to the grants at once
+//! (`quill::agent::ui_driver::redact`), in the same update that decided
+//! the surface, so no unredacted tree ever leaves this module.
 #![deny(clippy::indexing_slicing)]
 
+use super::app::QuillApp;
 use gpui_kit::accesskit::{NodeId, Toggled};
 use gpui_kit::{A11yNodeSnapshot, Window};
+use quill::agent::ui_driver::redact;
+use quill::agent::ui_driver::surface::{self, Surface};
 use quill::agent::ui_driver::tree::{UiNode, UiTree, id_string};
 
-/// The tree of the last frame that built one.
-pub(super) fn read(window: &Window) -> Option<UiTree> {
+impl QuillApp {
+    /// The surface and, unless it is blocked, the tree of the last frame
+    /// that built one, cut to the grants. `Err` carries the note the agent
+    /// gets instead.
+    pub(super) fn agent_tree(&self, window: &Window) -> Result<(Surface, Option<UiTree>), String> {
+        if window.is_a11y_system_active() {
+            return Err(surface::screen_reader_active());
+        }
+        let surface = self.driver_surface();
+        if let Some(note) = surface.read_refusal() {
+            return Err(note);
+        }
+        let tree = read(window).map(|tree| {
+            redact::redact(tree, self.driver_scope(), &|chat_id| {
+                self.driver_may_open_chat(chat_id)
+            })
+        });
+        Ok((surface, tree))
+    }
+}
+
+/// The tree of the last frame that built one, uncut.
+fn read(window: &Window) -> Option<UiTree> {
     let snapshot = window.a11y_tree_snapshot()?;
     let viewport = window.viewport_size();
     let nodes = snapshot
@@ -26,6 +52,12 @@ pub(super) fn read(window: &Window) -> Option<UiTree> {
         frame: snapshot.frame_number,
         nodes,
     })
+}
+
+/// The uncut tree, for tests and the frame-cost measurement.
+#[cfg(test)]
+pub(super) fn raw_tree(window: &Window) -> Option<UiTree> {
+    read(window)
 }
 
 fn convert(node: &A11yNodeSnapshot, focus: Option<NodeId>) -> UiNode {
@@ -86,5 +118,6 @@ fn convert(node: &A11yNodeSnapshot, focus: Option<NodeId>) -> UiNode {
             .map(|action| format!("{action:?}"))
             .collect(),
         children: node.children.iter().map(|id| id_string(id.0)).collect(),
+        tag: node.tag.clone(),
     }
 }

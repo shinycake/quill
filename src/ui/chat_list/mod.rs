@@ -139,6 +139,10 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // An agent driving the window opens granted chats only.
+        if !self.agent_may_open(chat_id) {
+            return;
+        }
         // A chat with a window of its own shows there (Telegram Desktop
         // `showHistoryInDifferentWindow`); the main window stays put. A
         // chat chosen from inside a chat window shows in the main window.

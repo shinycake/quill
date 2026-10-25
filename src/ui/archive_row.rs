@@ -147,6 +147,7 @@ impl QuillApp {
         let height = chat_row_height(&[], self.appearance.preview_lines);
         div()
             .id("archive-row")
+            .a11y_tag(quill::agent::ui_driver::redact::ARCHIVE)
             .w_full()
             .px_2()
             .h(height)
@@ -317,6 +318,8 @@ impl QuillApp {
         ));
         let panel = div()
             .id("archive-menu-panel")
+            .role(gpui_kit::Role::Group)
+            .a11y_tag(quill::agent::ui_driver::redact::REGION_MENU)
             .occlude()
             .flex()
             .flex_col()

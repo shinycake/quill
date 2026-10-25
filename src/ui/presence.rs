@@ -42,7 +42,7 @@ pub(super) fn idle_ms() -> u64 {
 /// Input from the user. Input the agent UI driver injects is not the user
 /// (it neither keeps them online nor counts as their activity).
 fn note_real_input() {
-    if super::agent_driver_input::injecting() {
+    if quill::agent::ui_driver::guard::injecting() {
         return;
     }
     note_input();

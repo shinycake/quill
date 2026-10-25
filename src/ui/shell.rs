@@ -242,6 +242,18 @@ impl QuillShell {
         registry().iter().find(|r| (r.is_open)(app)).copied()
     }
 
+    /// The name of the kit dialog that shows now (`register_dialogs!`
+    /// name), for the agent UI driver's surface.
+    pub(super) fn open_dialog_name(app: &QuillApp) -> Option<&'static str> {
+        Self::first_open(app).map(|spec| spec.kind.0)
+    }
+
+    /// Every registered dialog's name.
+    #[cfg(test)]
+    pub(super) fn dialog_names() -> Vec<&'static str> {
+        registry().iter().map(|spec| spec.kind.0).collect()
+    }
+
     /// Keep the single kit dialog in sync with the app-side open flags.
     /// The kit dialog is modal, so at most one flag wins, by registry
     /// priority. A flag cleared without a kit close (e.g. an action

@@ -37,6 +37,9 @@ pub(crate) struct AgentUi {
     pub(super) consent: Option<AllChatsConsent>,
     /// How many activity rows Settings shows.
     pub(super) activity_shown: usize,
+    /// A send the composer handed to the agent path while the UI driver
+    /// injected input (`agent_driver_send`), until the task picks it up.
+    pub(super) ui_send: Option<quill::agent::ui_driver::bridge::UiSend>,
 }
 
 /// Activity rows shown at first, and added by each "Show more".
@@ -60,6 +63,8 @@ impl AgentUi {
                     timeout,
                 )
                 .await;
+                // Woken by a change, or only by the driver's timer?
+                let woke = quill::wake::AGENT.epoch() != seen;
                 seen = quill::wake::AGENT.epoch();
                 let alive = app
                     .update_in(cx, |app, window, cx| {
@@ -77,7 +82,10 @@ impl AgentUi {
                         } else {
                             Duration::from_secs(300)
                         };
-                        cx.notify();
+                        // The forced tick alone changes nothing to draw.
+                        if woke || fresh.is_some() {
+                            cx.notify();
+                        }
                     })
                     .is_ok();
                 if !alive {
@@ -90,7 +98,22 @@ impl AgentUi {
             picked: None,
             consent: None,
             activity_shown: ACTIVITY_PAGE,
+            ui_send: None,
         }
+    }
+}
+
+impl QuillApp {
+    /// Whether `chat_id` may open now: always for the user, and for an
+    /// agent driving the window only when the chat is granted. A refusal
+    /// is recorded for the agent's reply.
+    pub(super) fn agent_may_open(&self, chat_id: quill::ids::ChatId) -> bool {
+        use quill::agent::ui_driver::{guard, surface};
+        if !guard::injecting() || self.driver_may_open_chat(chat_id.0) {
+            return true;
+        }
+        guard::refuse(surface::ungranted_chat(chat_id.0));
+        false
     }
 }
 
@@ -217,6 +240,9 @@ impl QuillApp {
 
     /// The user said yes in the consent dialog.
     pub(super) fn confirm_all_chats(&mut self, cx: &mut Context<Self>) {
+        if quill::agent::ui_driver::guard::refuse_if_injecting("allow agents in all chats") {
+            return;
+        }
         if let Some(consent) = self.agent_ui.consent.take() {
             grants::update(&consent.account, |g| g.all_chats = Some(consent.scope));
         }

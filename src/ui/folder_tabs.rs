@@ -360,6 +360,8 @@ impl QuillApp {
         // fade marks an edge that hides tabs; wheel and trackpad scroll it.
         div()
             .id("folder-tabs-row")
+            .role(gpui_kit::Role::Group)
+            .a11y_tag(quill::agent::ui_driver::redact::PART_FOLDERS)
             .flex()
             .items_center()
             .gap_0p5()

@@ -29,6 +29,8 @@ impl QuillApp {
     ) -> AnyElement {
         let panel = div()
             .id("chat-menu-panel")
+            .role(gpui_kit::Role::Group)
+            .a11y_tag(quill::agent::ui_driver::redact::REGION_MENU)
             .occlude()
             .flex()
             .flex_col()

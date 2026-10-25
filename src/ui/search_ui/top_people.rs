@@ -135,6 +135,7 @@ impl QuillApp {
         let avatar = Self::top_tile_badge(avatar, person, cx);
         let tile = div()
             .id(("search-frequent", id.0 as u64))
+            .a11y_tag(quill::agent::ui_driver::redact::chat_tag(id.0))
             .debug_selector(move || format!("top-tile-{}", id.0))
             .flex_none()
             .w(px(width))

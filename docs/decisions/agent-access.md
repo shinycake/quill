@@ -371,9 +371,10 @@ agent can do either on its own.
 
 ## Phase 5: UI driver
 
-Step 1 (this record): the element tree, input injection and the tools, with
-no visuals. Step 2 adds the setting's row in Settings, the pause on real
-input and the on-screen sign that an agent is driving.
+Step 1 (this record): the element tree, input injection, the tools, the
+security model and the setting's row in Settings, with no other visuals.
+Step 2 adds the pause on real input and the on-screen sign that an agent
+is driving.
 
 ### Why an element tree, not pixels
 
@@ -440,44 +441,134 @@ with that tree and the nodes that appeared. Input goes through
 `Window::dispatch_event` and `dispatch_keystroke`, the platform's own
 path: a MouseMove, then MouseDown and MouseUp per click (`click_count`
 counts up for double clicks), a ScrollWheel with the delta negated so
-"dy > 0 scrolls down", keystrokes with `key_char` for typed characters. A
-thread-local `INJECTING` flag marks the dispatch; `presence::input_probe`
-skips injected input, so an agent's clicks keep nobody online and (step 2)
-real input can pause the driver.
+"dy > 0 scrolls down", a keystroke with `key_char` per typed character and
+a bare KeyDown per chord (`dispatch_keystroke` would also hand Enter's
+"\n" to the text box, which no platform does for a key the window let
+through; the message box would send and keep a line break). A command is
+split into steps, one pointer action, one character or one chord each
+(`agent_driver_input::steps`), and each step is checked on its own, below.
+A thread-local `INJECTING` flag (`ui_driver::guard`) spans the whole
+update that injects a step, so the effects a handler queues (an emitted
+event, a subscription) still run under it; `presence::input_probe` skips
+injected input, so an agent's clicks keep nobody online and (step 2) real
+input can pause the driver.
 
-### Gating, and why it does not weaken phase 3
+### Security model: the driver follows the chat grants
 
-- A separate setting, "Let agents drive Quill's window"
-  (`access::ui_driver`, off by default, serde default so old files load),
-  on top of Agent access. The tools refuse with the setting's name while
-  it is off.
-- The chat open in the window gates everything: reading the tree needs
-  `read` on it, any input needs `read_write`. The tool asks the UI for the
-  open chat, checks the grant on its own thread (TDLib), then files the
-  command with that chat as `expect_open_chat`; the UI refuses if another
-  chat is open by the time it runs, and checks again right before
-  injecting. With no chat open, the chat list and settings may be driven;
-  opening an ungranted chat makes the next read refuse. The history puts
-  message text in the tree only for the message a screen reader focused,
-  so a tree read exposes little content, but chat rows and previews are
-  the window's and the setting is the user's consent to that; step 2's
-  settings row says so.
-- Sends, deletes and payments through the window would skip the paced
-  queue, the activity log, "Confirm each send" and the Stars checks. So
-  `click_element` refuses nodes (or their nearest ancestors) whose name is
-  a guarded control: the translated "Send message", "Schedule message",
-  "Schedule" and "Delete" from the language packs, plus the English words
-  send, schedule, resend, delete, unsend, clear history, pay, buy,
-  purchase, subscribe, stars, gift, premium, top up, donate, transfer and
-  checkout as whole words in names of up to six words (longer names are
-  content). `press_keys` refuses Enter while it would send in the focused
-  text box under the user's send-key setting (and when focus is unknown),
-  and `type_text` types a line break as the non-sending chord. Keys that
-  quit, close or hide the window (Cmd/Ctrl+Q, +W, Cmd+H, Cmd+M, Alt+F4)
-  are never pressed. This is a second layer: the guarantee is that the
-  write tools are the documented way to send, and the guide says so.
-- Agent access going off refuses every waiting command, as it denies
-  prompts.
+The first cut gated the driver on the open chat alone and guarded clicks
+by matching English words in element names. That did not hold: an agent
+could click Allow in its own request dialog, open Settings > Agent access,
+read every chat row in the list, ctrl-tab into an ungranted chat and get
+its content back as "nodes that appeared", and a renamed button slipped
+the word list. The model now is structural, decided by app state and
+element identity, never by labels.
+
+Surface allowlist. `QuillApp::driver_surface`
+(`src/ui/agent_driver_surface.rs`) computes, from app state alone, what
+the window is showing right now: `Surface::ChatList`, `Surface::Chat
+{chat_id, scope}` or `Surface::Blocked(what)`
+(`src/agent/ui_driver/surface.rs`). In order: the sign-in screen, the
+passcode lock screen, the welcome screen and Settings are blocked; so is
+any agent prompt (the Allow/access/confirm/`td_call` dialogs and the
+All-chats consent); a dialog on `HARD_DIALOGS` (log out, delete account,
+passcode, 2FA, passkeys, every payment, Stars, gift, Premium and
+subscription dialog, the accounts switcher, web-app and login-URL
+confirmations, the callback-password prompt) is blocked in every mode and
+`every_hard_dialog_is_registered` keeps the list honest against
+`QuillShell`'s dialog registry; an open ESC layer on `HARD_LAYERS`
+(sessions, privacy, payment and earn layers, screen privacy, the first-run
+intro, pending deletes) is blocked likewise. Then the open chat: granted,
+or `Blocked("an ungranted chat")`. A blocked surface makes `read_ui_tree`
+answer a short note ("Quill is showing Settings; agents can't see or use
+it. Ask the user.") and refuses every input; an agent cannot approve its
+own request because the request is a surface it never sees. A system
+screen reader being active (`Window::is_a11y_system_active`) refuses
+reads and input outright: the tree then belongs to the user.
+
+Two scopes, one widening switch. `DriverScope::Granted` is the base: the
+chat list's own parts (search, folder tabs, rows of granted chats, search
+results of granted chats), the open granted chat, its forum column and
+context menus; other dialogs, side panels (chat info, shared media), the
+archive row and ESC layers not on `GRANTED_LAYERS` (menus, pickers, the
+chat search bar, reply and forward panels, selection mode) are blocked.
+"All other chats" (`grants.all_chats`) switches to
+`DriverScope::Everything`: every chat counts as granted except secret
+chats, which still need their own grant, and dialogs, panels, viewers and
+layers not on the hard lists are allowed. The hard lists apply in both
+scopes. One pure decision, tested without a window:
+`every_listed_layer_exists_and_no_layer_is_both`.
+
+Redaction by region and chat. Containers carry stable GPUI-side tags
+(`InteractiveElement::a11y_tag`, a `gpui-pre` addition; the tag is never
+sent to the platform adapter): `region=chat-list|chat|forum|menu|panels`,
+`part=search|folders|rows|search-results`, `chat=<id>` on every chat row,
+search result, contact and top-people tile, and `archive` on the archive
+row. `ui_driver::redact::redact` walks the snapshot from the root, zones
+each node (allowed, chat list, pruned) from its ancestors' tags and the
+scope, drops pruned subtrees and ungranted `chat=` nodes with their
+children, and keeps the ancestors of allowed nodes with their names,
+values and actions removed so the shape survives without the content.
+The tree an agent gets is computed in the same `cx.update` that checks
+the surface, so no answer describes a window other than the one checked.
+
+Checks per step (`agent_driver::check_step`). Before each step: the
+ticket is still waited for (a tool that timed out cancels it, so a late
+step never runs), the drive switch and Agent access are on, the grants
+generation has not changed since the command was filed, no screen reader
+appeared, the surface still allows input and is the one the step before
+left (a key that moved to another granted chat continues; one that would
+open an ungranted chat is refused by `QuillApp::agent_may_open` in
+`select_chat_with`, `select_search_chat` and `select_search_message`, and
+the sequence stops with no tree). Characters, line breaks, Enter and
+Space go only while GPUI reports a focused text input handler
+(`Window::focused_text_input`), a tab character is refused outright, and
+a line break is typed as the chord that inserts one under the user's
+send-key setting. A pointer step first injects a MouseMove, then asks
+GPUI which tagged hitboxes are under the pointer as it hit-tests them
+(`Window::hovered_a11y_tags`, topmost first, stopping at an occluding
+hitbox) and `redact::point_allowed` decides from those tags and the scope;
+only then does it press. A node target must have bounds inside the
+viewport. The `press_keys` chord list is checked chord by chord, so a
+sequence stops at the first refusal.
+
+Action guards. While `guard::injecting()` the handlers themselves refuse
+what the driver must not do, whatever element was clicked:
+`grants::update` and every `access` setter, `prompts::answer` (no
+self-approval), `confirm_all_chats`, voice and video recording, the paid
+and formatted send paths, and `LiveSender::send_json` screens every TDLib
+request against `td_policy` (`ConnectSendError::AgentDriving`), which
+covers reactions, poll votes, bot buttons, deletes, leaves, blocks,
+reports and payments from any surface the redaction missed. Each guard
+records a refusal (`guard::refuse_if_injecting`) that the tool reply
+lists under `refusals`.
+
+Sends are routed, not refused. Enter or the Send button in the message
+box of a granted chat while injecting goes through `submit_composer` to
+`QuillApp::agent_route_send` (`src/ui/agent_driver_send.rs`): it builds
+the same `sendMessage` request the window would (reply, topic, post
+options) and hands it over as `UiSend` instead of sending. The tool thread
+(`tools/ui.rs::finish_ui_send`) runs it through the agent write path:
+`target::granted` (read_write, no stranger bots), `common::confirm`
+("Confirm each send" waits for the user's dialog, which the driver cannot
+click) and `common::send` (the paced queue, the activity log as
+`ui_send`). On success the UI gets `ComposerSent` and clears the box; on
+a refusal the draft stays and the reply says why. Edits, forwards, files
+and formatted blocks through the driver are refused.
+
+Side effects and the activity log. The driver acts for real: opening or
+scrolling a chat marks it read, typing in the message box saves a draft
+and shows the other side a typing indicator. The tool descriptions and
+the guide say so. Every UI input command writes one activity-log entry
+(`log_agent_command`: tool `ui_click`, `ui_type`, `ui_keys`, `ui_scroll`,
+`ui_hover`, `ui_menu`, the open chat and a summary like `click "Search"`),
+so Settings > Advanced > Agent access shows what agents did in the
+window next to what they sent.
+
+The setting. "Let agents drive Quill's window" is a row in Settings >
+Advanced > Agent access (`agent_confirm_section`, off by default,
+`access::ui_driver`), with one line under it: agents can read, click and
+type only in the chats allowed below, and sends still go through the
+checks on that page. `quill_status` names it.
 
 ### Tools
 
@@ -487,29 +578,45 @@ dx?, dy?}`, `hover_element {target}`, `open_menu {target}`
 (`src/agent/tools/ui.rs`). A target is `{"node": id}` from the tree or
 `{"x", "y"}` in window pixels; node ids are AccessKit's ids in hex, stable
 while the element stays on screen. Input tools answer with the focused
-node and the nodes that appeared, so one call shows its effect.
+node, the nodes that appeared, `refusals` and, for a routed send, `sent`.
+`press_keys` presses chords and never types characters.
 `quill_status` reports `ui_driver {available, active, paused}`.
 
 ### Cross-platform
 
-`dispatch_event` and the accessibility tree work the same on macOS, Linux
-and Windows; nothing here is platform code. Out of reach everywhere:
-native menus and the macOS menu bar (those need `cx.dispatch_action`, a
-later tool), file and folder pickers, the IME, and system dialogs. A
-window that draws no frames (hidden, minimised, on some platforms
-occluded) answers "did not redraw" after 1.5 seconds.
+`dispatch_event`, the accessibility tree, the hitbox tags and the focused
+input handler work the same on macOS, Linux and Windows; nothing here is
+platform code. Out of reach everywhere: native menus and the macOS menu
+bar (those need `cx.dispatch_action`, a later tool), file and folder
+pickers, the IME, and system dialogs. A window that draws no frames
+(hidden, minimised, on some platforms occluded) answers "did not redraw"
+after 1.5 seconds.
+
+### Tests
+
+Window tests in `src/ui/agent_driver_tests.rs` (`demo-capture`,
+`ready-chats`): the tree has the granted rows only and a click by id
+lands (and is logged); a blocked surface (Settings, then an agent prompt)
+answers with the note and a click on Allow by point is refused with the
+prompt still waiting; a ctrl-tab that would open an ungranted chat stops
+the sequence with no tree; the composer's Enter hands the send to the
+agent path with the draft kept, a read-only chat is refused, and
+`ComposerSent` clears the box; a tool that gave up gets nothing injected.
+Unit tests cover the redaction zones and point rules
+(`ui_driver::redact`), the surface notes, the chord policy and the step
+split.
 
 ### Gaps left for step 2 and later
 
-- Settings row, consent text and the connected strip saying "driving".
-- Pause on real input: `bridge::note_real_input` and `set_paused` exist;
-  nothing sets the pause yet.
-- Chat rows in the chat list and most message rows carry no role, so they
-  can be clicked by point but not by id; giving them roles helps screen
-  readers too.
+- Pause on real input and the connected strip saying "driving":
+  `bridge::note_real_input` and `set_paused` exist; nothing sets the pause
+  yet.
+- Message rows join the tree only when a screen reader focuses them, so
+  history content is read through the chat tools, not the window.
 - `focus` is reported only when the focused element itself has a role; the
   kit `Input` registers its focus handle on a wrapper, so a focused text
   box shows no `focused` state (the typed value shows it worked).
 - `open_menu` reports the nodes that appeared one frame after the click; a
   menu that animates in over several frames may need a `read_ui_tree`.
-- No activity-log entries for UI commands yet; the log stays about writes.
+- A system screen reader and the driver do not share the window; a user
+  who runs both gets the driver refused until the reader disconnects.

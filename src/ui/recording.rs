@@ -93,6 +93,9 @@ impl QuillApp {
     }
 
     pub(super) fn start_recording(&mut self, cx: &mut Context<Self>) {
+        if quill::agent::ui_driver::guard::refuse_if_injecting("record a voice or video message") {
+            return;
+        }
         self.recording.lock_next = false;
         match self.record_mode() {
             RecordMode::Audio => self.start_voice_recording(cx),

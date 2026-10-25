@@ -262,7 +262,12 @@ impl QuillApp {
                 .text_color(cx.theme().muted_foreground)
                 .child(text)
         };
-        let mut list = div().id("contacts-list").flex().flex_col();
+        let mut list = div()
+            .id("contacts-list")
+            .role(gpui_kit::Role::Group)
+            .a11y_tag(quill::agent::ui_driver::redact::PART_RESULTS)
+            .flex()
+            .flex_col();
         if failed {
             list = list
                 .child(note(tr(keys::Q_PEOPLE_COULDN_T_LOAD_CONTACTS), cx))
@@ -367,6 +372,7 @@ impl QuillApp {
             .is_some_and(|user| !user.is_bot && user.status.is_online());
         div()
             .id(("contact-row", user_id as u64))
+            .a11y_tag(quill::agent::ui_driver::redact::chat_tag(user_id))
             .h_full()
             .px_2()
             .flex()

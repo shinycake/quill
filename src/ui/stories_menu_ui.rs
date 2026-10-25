@@ -158,6 +158,8 @@ impl QuillApp {
             .collect();
         let panel = div()
             .id("story-menu-panel")
+            .role(gpui_kit::Role::Group)
+            .a11y_tag(quill::agent::ui_driver::redact::REGION_MENU)
             .occlude()
             .flex()
             .flex_col()

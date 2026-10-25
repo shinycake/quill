@@ -76,6 +76,12 @@ impl QuillApp {
                 cx.notify();
             }
             PaneMode::Ready => {
+                // An agent driving the window never sends from here: the
+                // message goes through the agent write path.
+                if quill::agent::ui_driver::guard::injecting() {
+                    self.agent_route_send(text, cx);
+                    return;
+                }
                 if self.session().is_some_and(|s| s.is_frozen()) {
                     self.connection.set_note(StatusNote::error(tr(
                         keys::Q_CHAT_YOUR_ACCOUNT_IS_FROZEN_AND,

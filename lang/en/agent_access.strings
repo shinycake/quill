@@ -57,6 +57,8 @@
 "qll_agent_request_raw_later" = "Quill always asks before an agent changes your account or spends money. Allow covers this one request.";
 "qll_agent_confirm_sends" = "Confirm each send";
 "qll_agent_confirm_sends_hint" = "Ask here before an agent sends, forwards, edits, deletes, reacts or pins. Drafts, read marks, muting, archiving and folders never ask.";
+"qll_agent_ui_driver" = "Let agents drive Quill's window";
+"qll_agent_ui_driver_hint" = "Agents can read the window and click and type in it, only in the chats allowed below. Sends still go through the checks here.";
 "qll_agent_connected_one" = "{agent} connected";
 "qll_agent_connected_many" = "{count} agents connected";
 "qll_agent_connected_since" = "since {time}";
@@ -88,6 +90,13 @@
 "qll_agent_tool_unmute_chat" = "Unmute";
 "qll_agent_tool_unarchive_chat" = "Unarchive";
 "qll_agent_tool_remove_from_folder" = "Remove from folder";
+"qll_agent_tool_ui_click" = "Clicked in the window";
+"qll_agent_tool_ui_menu" = "Opened a menu in the window";
+"qll_agent_tool_ui_hover" = "Hovered in the window";
+"qll_agent_tool_ui_scroll" = "Scrolled the window";
+"qll_agent_tool_ui_type" = "Typed in the window";
+"qll_agent_tool_ui_keys" = "Pressed keys in the window";
+"qll_agent_tool_ui_send" = "Sent from the message box";
 "qll_agent_tool_td_call" = "Raw TDLib call";
 "qll_agent_activity_declined" = "declined in Quill";
 "qll_agent_confirm_send_message" = "{agent} wants to send a message in \"{chat}\"";

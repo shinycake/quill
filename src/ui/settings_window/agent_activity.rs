@@ -23,17 +23,30 @@ impl QuillApp {
     pub(super) fn agent_confirm_section(&self, cx: &mut Context<Self>) -> AnyElement {
         group(
             None,
-            [switch_row(
-                "agent-confirm-switch",
-                tr(keys::Q_AGENT_CONFIRM_SENDS),
-                Some(tr(keys::Q_AGENT_CONFIRM_SENDS_HINT)),
-                access::confirm_sends(),
-                cx.listener(|_, &next: &bool, _, cx| {
-                    access::set_confirm_sends(next);
-                    cx.notify();
-                }),
-                cx,
-            )],
+            [
+                switch_row(
+                    "agent-confirm-switch",
+                    tr(keys::Q_AGENT_CONFIRM_SENDS),
+                    Some(tr(keys::Q_AGENT_CONFIRM_SENDS_HINT)),
+                    access::confirm_sends(),
+                    cx.listener(|_, &next: &bool, _, cx| {
+                        access::set_confirm_sends(next);
+                        cx.notify();
+                    }),
+                    cx,
+                ),
+                switch_row(
+                    "agent-ui-driver-switch",
+                    tr(keys::Q_AGENT_UI_DRIVER),
+                    Some(tr(keys::Q_AGENT_UI_DRIVER_HINT)),
+                    access::ui_driver(),
+                    cx.listener(|_, &next: &bool, _, cx| {
+                        access::set_ui_driver(next);
+                        cx.notify();
+                    }),
+                    cx,
+                ),
+            ],
         )
         .into_any_element()
     }
