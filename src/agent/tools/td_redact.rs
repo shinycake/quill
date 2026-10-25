@@ -54,7 +54,7 @@ fn keep(value: &mut Value, allows: &mut dyn FnMut(i64) -> bool) -> bool {
                 if let Value::Array(items) = inner {
                     let before = items.len();
                     if is_chat_list(key) {
-                        items.retain(|id| id.as_i64().is_some_and(|id| allows(id)));
+                        items.retain(|id| id.as_i64().is_some_and(&mut *allows));
                     } else {
                         items.retain_mut(|item| keep(item, allows));
                     }

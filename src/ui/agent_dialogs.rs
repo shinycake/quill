@@ -11,6 +11,7 @@ use gpui_kit::component::alert::Alert;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::agent::grants::Scope;
 use quill::agent::prompts::{Ask, Prompt, Risk};
