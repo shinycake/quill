@@ -227,9 +227,10 @@ grants, pacing and confirmations.
 
 The user turns it on separately: "Let agents drive Quill's window" in
 Settings > Advanced > Agent access (off by default). `quill_status` shows
-`ui_driver {available, active, paused, stopped}`: `active` while you are
-driving, `paused` while the user has taken control, `stopped` after the
-user pressed Stop.
+`ui_driver {available, active, paused, stopped, resumes_when}`: `active`
+while you are driving, `paused` while the user has taken control,
+`stopped` after the user pressed Stop, and `resumes_when` says what lifts
+a pause or a Stop.
 
 | Tool | Use it to |
 | --- | --- |
@@ -320,11 +321,13 @@ Rules, all enforced by Quill:
   tool answers "The user took control of Quill..." until the user picks
   "Let it continue". Wait, call `quill_status`, and drive again when
   `ui_driver.paused` is false. Do not retry in a loop; the chat tools
-  still work meanwhile.
+  still work meanwhile. Reconnecting does not lift the pause. Answering
+  your own confirm or request in Quill does not pause you.
 - Stop in the pill refuses the command running and every one waiting,
-  and the UI tools stay refused for the rest of your session
-  (`ui_driver.stopped` is true). Tell the user; do not drive again. Agent
-  access itself stays on, so the chat tools still work.
+  and the UI tools stay refused (`ui_driver.stopped` is true) until the
+  user turns "Let agents drive Quill's window" off and on or restarts
+  Quill; reconnecting does not lift it. Tell the user; do not drive
+  again. Agent access itself stays on, so the chat tools still work.
 
 What it cannot reach: native menus (the macOS menu bar), file and folder
 pickers, the input method editor, and system dialogs. Quill's window must

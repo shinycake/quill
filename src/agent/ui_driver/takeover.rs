@@ -24,8 +24,9 @@ pub const FADE_OUT: Duration = Duration::from_millis(600);
 pub const GLIDE: Duration = Duration::from_millis(220);
 /// The ring that pulses out of the ghost cursor on a click.
 pub const PULSE: Duration = Duration::from_millis(380);
-/// After "Let it continue", pointer moves do not pause again for this long
-/// (the user is moving the pointer away from the button).
+/// After the user answers the pill ("Let it continue") or one of the
+/// agent's prompts (a confirm, a request), pointer moves do not pause for
+/// this long (the user is moving the pointer away from the button).
 pub const RESUME_GRACE: Duration = Duration::from_millis(1500);
 /// A pointer move shorter than this (logical pixels) is jitter, not the
 /// user reaching for the mouse.
@@ -93,10 +94,12 @@ pub struct Session {
 pub struct Facts {
     pub session: Option<Session>,
     pub paused: Option<PauseReason>,
-    /// The user pressed Stop: UI commands are refused until the agents
-    /// disconnect or the driving switch goes off.
+    /// The user pressed Stop: UI commands are refused until the driving
+    /// switch (or Agent access) goes off, or Quill restarts. A reconnect
+    /// does not clear it.
     pub stopped: bool,
-    /// When the user last pressed "Let it continue" (0: never).
+    /// When the user last pressed "Let it continue" or answered one of the
+    /// agent's prompts (0: never), for [`RESUME_GRACE`].
     pub resumed_ms: u64,
     /// The user's real pointer, for the jitter check.
     pub last_pointer: Option<(f32, f32)>,
@@ -216,15 +219,29 @@ pub fn phase(facts: &Facts, live: Live, now: u64) -> Phase {
     Phase::Idle
 }
 
-/// Record what [`Live`] says: with no agent connected or the switches off,
-/// a running session ends now (and fades), the pause is dropped, and Stop
-/// is forgotten (a new connection, or the switch turned back on, may drive).
+/// Record what [`Live`] says. With no agent connected or the switches off,
+/// a running session ends now (and fades). Only the switches going off
+/// forget the pause and Stop: an agent that disconnects and reconnects
+/// (it may kill its `quill mcp` and start another) finds both where the
+/// user left them. A pause seen again with an agent connected brings its
+/// pill back, fading in, so the user can let it continue.
 pub fn observe(facts: &mut Facts, live: Live, now: u64) {
+    if !live.allowed {
+        facts.paused = None;
+        facts.stopped = false;
+    }
     if live.connected && live.allowed {
+        if facts.paused.is_some()
+            && let Some(session) = facts.session.as_mut()
+            && session.ended_ms.is_some()
+        {
+            session.started_ms = now;
+            session.last_ms = now;
+            session.ended_ms = None;
+            session.action = None;
+        }
         return;
     }
-    facts.paused = None;
-    facts.stopped = false;
     if let Some(session) = facts.session.as_mut()
         && session.ended_ms.is_none()
         && now < session.last_ms.saturating_add(ms(HOLD))
@@ -331,6 +348,12 @@ pub fn pauses_on(facts: &Facts, phase: &Phase, input: RealInput, active: bool, n
             active && settled && moved
         }
     }
+}
+
+/// The user answered one of the agent's prompts: the hand leaving the
+/// button is not the user taking the window back.
+pub fn answered(facts: &mut Facts, now: u64) {
+    facts.resumed_ms = now;
 }
 
 /// The user handed control back to the agent.
@@ -519,6 +542,27 @@ pub fn pause(reason: PauseReason) {
     crate::wake::AGENT.poke();
 }
 
+/// The user answered one of the agent's prompts ([`answered`]).
+pub fn note_answered() {
+    with_facts(|facts, _, now| answered(facts, now));
+}
+
+/// The driving switch or Agent access went off: the pause and Stop are
+/// forgotten, so turning it back on lets agents drive again.
+pub fn forget_hold() {
+    let mut facts = crate::locks::lock_or_recover(&FACTS);
+    facts.paused = None;
+    facts.stopped = false;
+}
+
+/// The agent of the latest session, ended or not.
+pub fn last_agent() -> Option<String> {
+    crate::locks::lock_or_recover(&FACTS)
+        .session
+        .as_ref()
+        .map(|session| session.agent.clone())
+}
+
 /// "Let it continue".
 pub fn let_continue() {
     with_facts(|facts, _, now| resume(facts, now));
@@ -559,7 +603,7 @@ pub fn paused_refusal() -> String {
 }
 
 pub fn stopped_refusal() -> String {
-    "The user pressed Stop in Quill: don't drive its window again in this session. Tell the user; the chat tools (list_chats, read_history, send_message...) still work."
+    "The user pressed Stop in Quill: don't drive its window again. Tell the user; the chat tools (list_chats, read_history, send_message...) still work. Reconnecting does not undo Stop; only the user can, in Quill's settings."
         .into()
 }
 

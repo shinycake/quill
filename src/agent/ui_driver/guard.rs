@@ -28,6 +28,38 @@ use std::cell::{Cell, RefCell};
 thread_local! {
     static INJECTING: Cell<bool> = const { Cell::new(false) };
     static REFUSALS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    /// The agent and the log name (`ui_click`) of the latest input command,
+    /// for refusals in a step's deferred half ([`with_injecting`]).
+    static LAST_STEP: RefCell<Option<(String, &'static str)>> = const { RefCell::new(None) };
+    /// Input commands that have not answered yet ([`OpenCommand`]).
+    static OPEN: Cell<u32> = const { Cell::new(0) };
+}
+
+/// An input command between its first step and its answer. While one is
+/// open, refusals from a deferred half stay in the list its reply takes;
+/// once the last one closes, what is left goes to the activity log.
+pub struct OpenCommand(());
+
+impl OpenCommand {
+    /// An input command from `agent` starts; `tool` is its log name.
+    pub fn begin(agent: &str, tool: &'static str) -> Self {
+        LAST_STEP.with(|last| *last.borrow_mut() = Some((agent.to_string(), tool)));
+        OPEN.with(|open| open.set(open.get().saturating_add(1)));
+        Self(())
+    }
+}
+
+impl Drop for OpenCommand {
+    fn drop(&mut self) {
+        let left = OPEN.with(|open| {
+            let left = open.get().saturating_sub(1);
+            open.set(left);
+            left
+        });
+        if left == 0 {
+            log_deferred(take_refusals());
+        }
+    }
 }
 
 /// Whether the input being handled right now came from the driver.
@@ -44,15 +76,61 @@ pub fn set_injecting(on: bool) {
 /// agent's step (a clicked link run at render, a deep link's chat open
 /// once TDLib resolved it) meets the same refusals as the step itself.
 /// The flag goes back to what it was after.
+///
+/// While the command is still open ([`OpenCommand`]), its reply carries
+/// the refusals. After it answered (TDLib resolved a link later, a render
+/// after the reply), nobody waits for them and the next command's reply
+/// would carry them to the wrong step: they go to the activity log
+/// instead, as declined entries under the latest step's agent and tool.
 pub fn with_injecting<R>(on: bool, f: impl FnOnce() -> R) -> R {
     if !on {
         return f();
     }
     let was = injecting();
+    if was || OPEN.with(Cell::get) > 0 {
+        set_injecting(true);
+        let out = f();
+        set_injecting(was);
+        return out;
+    }
+    let outer = take_refusals();
     set_injecting(true);
     let out = f();
-    set_injecting(was);
+    set_injecting(false);
+    let deferred = take_refusals();
+    REFUSALS.with(|refusals| *refusals.borrow_mut() = outer);
+    log_deferred(deferred);
     out
+}
+
+fn log_deferred(refusals: Vec<String>) {
+    if refusals.is_empty() {
+        return;
+    }
+    let (agent, tool) = LAST_STEP
+        .with(|last| last.borrow().clone())
+        .unwrap_or_else(|| {
+            (
+                super::takeover::last_agent().unwrap_or_default(),
+                "ui_click",
+            )
+        });
+    let account = crate::settings::safe_app_root()
+        .map(|root| crate::settings::active_account(&root))
+        .unwrap_or_else(crate::ids::AccountKey::primary);
+    for summary in refusals {
+        crate::agent::activity::record(crate::agent::activity::Action {
+            time: 0,
+            account: account.clone(),
+            agent: agent.clone(),
+            tool: tool.to_string(),
+            chat_id: 0,
+            chat_title: String::new(),
+            summary,
+            ok: false,
+            declined: true,
+        });
+    }
 }
 
 /// Record why something was refused during the current injection.
@@ -285,11 +363,46 @@ pub fn refused_read_answer(request: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        carries_money, injecting, refuse_if_injecting, refused_read_answer, request_allowed,
-        screen_request, set_injecting, take_refusals,
+        OpenCommand, carries_money, injecting, refuse_if_injecting, refused_read_answer,
+        request_allowed, screen_request, set_injecting, take_refusals, with_injecting,
     };
     use crate::ids::RequestId;
     use crate::telegram::requests::search_public_posts_paid;
+
+    #[test]
+    fn a_deferred_half_logs_its_refusals_once_its_command_answered() {
+        let _ = take_refusals();
+        let account = crate::settings::safe_app_root()
+            .map(|root| crate::settings::active_account(&root))
+            .unwrap_or_else(crate::ids::AccountKey::primary);
+        // Still open: the command's reply takes them.
+        let open = OpenCommand::begin("Guard test agent", "ui_click");
+        assert!(with_injecting(true, || refuse_if_injecting(
+            "open the open-test box"
+        )));
+        assert!(!injecting());
+        let refusals = take_refusals();
+        assert!(
+            refusals.iter().any(|r| r.contains("open-test")),
+            "{refusals:?}"
+        );
+        drop(open);
+        // Answered: they go to the activity log, not to the next command.
+        assert!(with_injecting(true, || refuse_if_injecting(
+            "open the late-test box"
+        )));
+        assert!(
+            take_refusals().is_empty(),
+            "nothing left for the next reply"
+        );
+        let logged = crate::agent::activity::recent(&account)
+            .into_iter()
+            .find(|action| action.summary.contains("late-test"))
+            .unwrap_or_else(|| panic!("logged"));
+        assert_eq!(logged.agent, "Guard test agent");
+        assert_eq!(logged.tool, "ui_click");
+        assert!(logged.declined && !logged.ok);
+    }
     use serde_json::json;
 
     #[test]

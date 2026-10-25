@@ -233,10 +233,18 @@ fn a_blocked_surface_gets_no_screenshot(cx: &mut TestAppContext) {
     assert!(log.iter().all(|a| a.tool != "ui_screenshot"), "{log:?}");
     assert!(!vcx.update(|window, _| window.has_paint_filter()));
 
-    // The driver switched off: no screenshot either.
+    // The user took control: the window is theirs, no screenshot.
     vcx.update(|_, cx| {
         app.update(cx, |app, _| app.close_settings());
     });
+    settle(vcx);
+    takeover::reset_for_test();
+    takeover::pause(takeover::PauseReason::Input);
+    let reply = drive_shot(&app, vcx, UiCommand::ReadTree, FULL);
+    assert!(refused(&reply, "took control"), "{reply:?}");
+    takeover::reset_for_test();
+
+    // The driver switched off: no screenshot either.
     access::set_ui_driver(false);
     let reply = drive_shot(&app, vcx, UiCommand::ReadTree, FULL);
     assert!(!matches!(reply, Ok(UiReply::Shot { .. })), "{reply:?}");

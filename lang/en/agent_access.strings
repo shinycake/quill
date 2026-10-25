@@ -120,7 +120,7 @@
 "qll_agent_activity_clear_hint" = "Clears the log for every account";
 "qll_agent_takeover_driving" = "{agent} is driving";
 "qll_agent_takeover_stop" = "Stop";
-"qll_agent_takeover_stop_hint" = "Stops the agent's clicks and typing in this window. Agent access stays on.";
+"qll_agent_takeover_stop_hint" = "Stops the agent's clicks and typing in this window until you turn driving off and on in Settings. Agent access stays on.";
 "qll_agent_takeover_paused" = "Paused";
 "qll_agent_takeover_paused_line" = "{agent} will wait until you let it continue";
 "qll_agent_takeover_continue" = "Let it continue";

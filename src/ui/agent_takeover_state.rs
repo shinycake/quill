@@ -26,6 +26,9 @@ impl TakeoverUi {
                 || keystroke.key != "escape"
                 || keystroke.modifiers.modified()
                 || !super::agent_state::sees_agents()
+                // Esc on the agent's own prompt answers it (Deny), as on
+                // any dialog.
+                || super::agent_takeover::agent_prompt_open()
             {
                 return;
             }

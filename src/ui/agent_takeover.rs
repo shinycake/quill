@@ -49,18 +49,31 @@ thread_local! {
     /// Where the pill was painted last frame (window pixels), so pointer
     /// input on it answers the pill instead of pausing the agent.
     static PILL: Cell<Option<Bounds<Pixels>>> = const { Cell::new(None) };
+    /// One of the agent's own prompts was open last frame: its request or
+    /// confirm (`AgentRequest`) or the all-chats consent. Both are modal,
+    /// so all input goes to them.
+    static PROMPT: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Whether one of the agent's prompts is open (as of the last frame).
+pub(super) fn agent_prompt_open() -> bool {
+    PROMPT.with(Cell::get)
 }
 
 /// Real input from the window's input probe (`presence::input_probe`).
-/// Window tests on other threads (no agent state) stay out of the
-/// process-wide record.
+/// Input that answers the takeover's pill or one of the agent's prompts
+/// (Confirm on a send it asked for, a request, the consent) is the user
+/// answering, not taking the window back, so it never pauses. Window
+/// tests on other threads (no agent state) stay out of the process-wide
+/// record.
 pub(super) fn note_real_input(input: RealInput, window: &Window) {
     if !super::agent_state::sees_agents() {
         return;
     }
     let pointer = window.mouse_position();
-    let on_controls = !matches!(input, RealInput::Key)
+    let on_pill = !matches!(input, RealInput::Key)
         && PILL.with(|pill| pill.get().is_some_and(|bounds| bounds.contains(&pointer)));
+    let on_controls = on_pill || agent_prompt_open();
     takeover::note_real_input(input, window.is_window_active(), on_controls);
 }
 
@@ -77,6 +90,8 @@ impl QuillApp {
         }
         // The pill paints again below (and records itself) if still shown.
         PILL.with(|pill| pill.set(None));
+        let prompt = self.agent_request_open() || self.agent_consent_open();
+        PROMPT.with(|open| open.set(prompt));
         if !super::agent_state::sees_agents() {
             return None;
         }

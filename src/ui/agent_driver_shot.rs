@@ -30,6 +30,7 @@ use quill::agent::ui_driver::policy;
 use quill::agent::ui_driver::redact;
 use quill::agent::ui_driver::shot::{self, Shot, ShotOptions, ShotScope};
 use quill::agent::ui_driver::surface::{self, DriverScope, Surface};
+use quill::agent::ui_driver::takeover;
 use quill::agent::ui_driver::tree::{UiNode, UiTree};
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -160,6 +161,10 @@ fn capture_frame(
         .update_in(cx, |app, window, cx| {
             if window.is_a11y_system_active() {
                 return Err(surface::screen_reader_active());
+            }
+            // Paused or stopped, the window is the user's.
+            if let Some(note) = takeover::refusal() {
+                return Err(note);
             }
             let surface = app.driver_surface();
             if let Some(note) = surface.read_refusal() {

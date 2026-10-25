@@ -90,6 +90,7 @@ pub fn set_enabled(on: bool) {
     save(|stored| stored.enabled = on);
     if !on {
         GENERATION.fetch_add(1, Ordering::SeqCst);
+        super::ui_driver::takeover::forget_hold();
         super::prompts::deny_all();
         super::ui_driver::bridge::refuse_all(
             "Agent access was turned off in Quill, so nothing was sent to its window.",
@@ -123,6 +124,10 @@ pub fn set_ui_driver(on: bool) {
         return;
     }
     save(|stored| stored.ui_driver = on);
+    if !on {
+        // Off and on again is how the user lifts a Stop or a pause.
+        super::ui_driver::takeover::forget_hold();
+    }
     crate::wake::AGENT.poke();
 }
 

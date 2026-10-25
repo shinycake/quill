@@ -246,11 +246,13 @@ impl QuillApp {
         if let Some(consent) = self.agent_ui.consent.take() {
             grants::update(&consent.account, |g| g.all_chats = Some(consent.scope));
         }
+        note_prompt_answered();
         cx.notify();
     }
 
     pub(super) fn cancel_all_chats(&mut self, cx: &mut Context<Self>) {
         self.agent_ui.consent = None;
+        note_prompt_answered();
         cx.notify();
     }
 
@@ -288,7 +290,16 @@ impl QuillApp {
             prompts::Decision::Denied
         };
         prompts::answer(prompt.id, decision);
+        note_prompt_answered();
         cx.notify();
+    }
+}
+
+/// The user answered one of the agent's prompts: the pointer leaving the
+/// button does not pause an agent that is driving (`takeover::answered`).
+fn note_prompt_answered() {
+    if !quill::agent::ui_driver::guard::injecting() {
+        quill::agent::ui_driver::takeover::note_answered();
     }
 }
 

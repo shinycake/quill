@@ -36,9 +36,9 @@ pub fn run(_args: &Value) -> Result<ToolOutput, ToolError> {
     text.push_str(if !ui_driver {
         "UI driver: off. The user can turn on \"Let agents drive Quill's window\" in Settings > Advanced > Agent access.\n"
     } else if stopped {
-        "UI driver: stopped. The user pressed Stop in Quill; don't drive its window again in this session.\n"
+        "UI driver: stopped. The user pressed Stop in Quill; don't drive its window again. Reconnecting does not undo it; only the user can, in Quill's settings.\n"
     } else if paused {
-        "UI driver: paused. The user took control of Quill's window; wait, then check quill_status again.\n"
+        "UI driver: paused. The user took control of Quill's window and it stays paused, across reconnects, until they press \"Let it continue\" in Quill; wait, then check quill_status again.\n"
     } else {
         "UI driver: on (read_ui_tree, take_screenshot, click_element, type_text, press_keys, scroll_view, hover_element, open_menu). \
 Screenshots: one a second and 20 a minute, cut to your grants like the tree.\n"
@@ -61,6 +61,14 @@ Screenshots: one a second and 20 a minute, cut to your grants like the tree.\n"
                 "active": driving,
                 "paused": paused,
                 "stopped": stopped,
+                // What lifts the hold; neither clears when the agent reconnects.
+                "resumes_when": if stopped {
+                    Value::from("the user turns \"Let agents drive Quill's window\" off and on, or restarts Quill")
+                } else if paused {
+                    Value::from("the user presses \"Let it continue\" in Quill")
+                } else {
+                    Value::Null
+                },
                 "screenshots": {
                     "available": ui_driver && !stopped && crate::agent::ui_driver::shot::CAPTURE_BUILT,
                     "per_minute": crate::agent::ui_driver::shot::PER_MINUTE,

@@ -1005,7 +1005,9 @@ So the frame is cut where it is painted, by the rule that cuts clicks:
 - The surface check is the tree's: a blocked surface (Settings, a request
   to the user, sign-in, payments...) gets the same note as `read_ui_tree`
   and no frame is drawn. The tree in the reply is read right after the
-  filtered frame and must name the same surface.
+  filtered frame and must name the same surface. While the user has
+  taken control or pressed Stop, no screenshot is taken, the one after an
+  input included: the window is theirs.
 - The takeover overlay is left out (`takeover_layer` returns nothing while
   the screenshot's frame is drawn). A normal frame is drawn again before
   anything is presented, so the user never sees the filtered one.
