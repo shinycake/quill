@@ -109,15 +109,20 @@ impl Redactor<'_> {
                         .iter()
                         .any(|item| item.as_object().and_then(chat_of).is_some());
                     self.keep_list(items);
-                    // An empty page keeps no count either: TDLib's would
-                    // count matches in every chat.
-                    if of_chats || items.is_empty() {
+                    if of_chats {
                         filtered = Some(items.len());
                     }
                 }
             } else if !self.keep(inner) {
                 *inner = json!({"hidden": HIDDEN});
             }
+        }
+        // An empty page keeps no count either: TDLib's would count matches
+        // in every chat. Only when every list is empty, so `stories` with
+        // no pinned ids keeps its count.
+        let mut lists = fields.values().filter_map(Value::as_array).peekable();
+        if filtered.is_none() && lists.peek().is_some() && lists.all(Vec::is_empty) {
+            filtered = Some(0);
         }
         // A count of the whole list would tell how much is hidden, even
         // when this page happens to hold only granted items.
@@ -185,6 +190,10 @@ mod tests {
         let mut empty = json!({"@type": "foundMessages", "total_count": 40, "messages": []});
         redact(&mut empty, &mut |_| true);
         assert_eq!(empty["total_count"], json!(0));
+        let mut stories = json!({"@type": "stories", "total_count": 3,
+            "stories": [{"@type": "story", "poster_chat_id": 1, "id": 1}], "pinned_story_ids": []});
+        redact(&mut stories, &mut |_| true);
+        assert_eq!(stories["total_count"], json!(1));
 
         let mut story = json!({"@type": "story", "poster_chat_id": 5, "id": 1});
         redact(&mut story, &mut |id| id != 5);
