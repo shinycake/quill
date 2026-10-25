@@ -127,9 +127,7 @@ impl QuillApp {
             // the user's.
             Some(DeepLinkState::Ui(ui)) => {
                 if std::mem::take(&mut self.links.deep_link_from_agent) {
-                    guard::refuse(
-                        "Quill does not let agents open that kind of link through the window (settings, proxies, folders, sticker sets, backgrounds). Ask the user.",
-                    );
+                    guard::refuse_typed_link();
                 } else {
                     self.links.pending_deep_link_ui = Some(ui);
                 }

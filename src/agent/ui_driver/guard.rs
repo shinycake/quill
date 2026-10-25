@@ -83,6 +83,20 @@ pub fn refuse_if_injecting(what: &str) -> bool {
     true
 }
 
+/// A clipboard read (a paste by chord, menu or mini app) while injecting:
+/// the clipboard is the user's, so it reads as empty.
+pub fn refuse_clipboard_if_injecting() -> bool {
+    refuse_if_injecting("paste the user's clipboard")
+}
+
+/// A typed deep link (settings, a proxy, a folder, a sticker set, a
+/// background) resolved from an agent's step: none of them is an agent's.
+pub fn refuse_typed_link() {
+    refuse(
+        "Quill does not let agents open that kind of link through the window (settings, proxies, folders, sticker sets, backgrounds). Ask the user.",
+    );
+}
+
 /// At the edge of the process: `true` (and a refusal recorded) when the
 /// driver is injecting, so nothing leaves Quill for the OS (a link in the
 /// browser, a file in its app, a folder in the file manager, a mail

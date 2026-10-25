@@ -496,7 +496,7 @@ impl QuillApp {
     /// Windows line endings are normalized.
     pub(super) fn paste_plain_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.composer_focused(window, cx)
-            || quill::agent::ui_driver::guard::refuse_if_injecting("paste the user's clipboard")
+            || quill::agent::ui_driver::guard::refuse_clipboard_if_injecting()
         {
             return;
         }
