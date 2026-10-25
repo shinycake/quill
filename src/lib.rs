@@ -189,6 +189,7 @@ pub mod pull_next;
 pub mod quick_action;
 pub mod quick_replies;
 pub mod quote_source;
+pub mod reaction_limit;
 pub mod reaction_who;
 pub mod release_notes;
 pub mod reply_options;

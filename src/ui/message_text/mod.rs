@@ -20,7 +20,7 @@ use quill::local_path::sandboxed_display_path;
 use quill::rich::RichBlock;
 use quill::state::{OutboxReceipt, Session, message_time_hhmm};
 use quill::telegram::client::copy_and_parse;
-use quill::telegram::envelope::{MessageContent, MessageInteractionInfo, ParsedFile};
+use quill::telegram::envelope::{MessageContent, ParsedFile};
 use quill::text::{
     TextEntity, TextEntityKind, TextRun, collapsed_quote_len, quote_collapses, styled_runs,
     utf8_to_utf16_offset,
@@ -216,39 +216,6 @@ pub(super) fn apply_ready_text_entities(
             session.apply(owned);
         }
     }
-}
-
-pub(super) fn interaction_info_update_json(
-    chat_id: ChatId,
-    message_id: MessageId,
-    info: &MessageInteractionInfo,
-) -> String {
-    let reactions = match &info.reactions {
-        Some(list) if !list.reactions.is_empty() => {
-            let items: Vec<String> = list
-                .reactions
-                .iter()
-                .filter_map(|reaction| {
-                    let emoji = reaction.reaction_type.emoji_text()?;
-                    Some(format!(
-                        r#"{{"@type":"messageReaction","type":{{"@type":"reactionTypeEmoji","emoji":{}}},"total_count":{},"is_chosen":{},"used_sender_id":null,"recent_sender_ids":[]}}"#,
-                        serde_json::to_string(emoji).unwrap_or_else(|_| "\"\"".into()),
-                        reaction.total_count,
-                        reaction.is_chosen
-                    ))
-                })
-                .collect();
-            format!(
-                r#"{{"@type":"messageReactions","reactions":[{}],"are_tags":false,"paid_reactors":[],"can_get_added_reactions":false}}"#,
-                items.join(",")
-            )
-        }
-        _ => "null".into(),
-    };
-    format!(
-        r#"{{"@type":"updateMessageInteractionInfo","chat_id":{},"message_id":{},"interaction_info":{{"@type":"messageInteractionInfo","view_count":{},"forward_count":{},"reply_info":null,"reactions":{reactions}}}}}"#,
-        chat_id.0, message_id.0, info.view_count, info.forward_count
-    )
 }
 
 /// MED4: `show_caption_above_media` (TDLib 1.8.67, `schema/td_api.tl:6117`

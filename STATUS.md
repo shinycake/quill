@@ -943,7 +943,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Story stealth mode box: past and next periods, cooldown, Premium lock for free accounts <!-- parity:premium-story-stealth-box -->
 - [ ] Story Premium limits: lock 6, 12 and 48 hour expiry, story caption length limit, Premium note for older viewers <!-- parity:premium-story-limits -->
 - [ ] Animated profile photos play beside messages in groups, as in tdesktop <!-- parity:premium-animated-userpics-history -->
-- [ ] Reaction limits: up to 3 reactions per message with Premium (1 without), and locked Premium reactions open the Premium preview <!-- parity:premium-reaction-limits -->
+- [x] Reaction limits: up to 3 reactions per message with Premium (1 without), and locked Premium reactions open the Premium preview <!-- parity:premium-reaction-limits -->
 - [ ] Limit boxes read from TDLib and cover favorite stickers, pinned saved chats, story posting, similar channels and owned bots <!-- parity:premium-limit-boxes-more -->
 - [ ] Every Premium upsell opens the preview of its own feature <!-- parity:premium-preview-targets -->
 - [ ] Business features preview with per-feature animations for free accounts <!-- parity:premium-business-preview -->

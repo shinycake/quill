@@ -162,45 +162,6 @@ impl MessageInteractionInfo {
     }
 }
 
-/// Toggle the current user's chosen emoji (tdesktop chip click / Unigram
-/// ReactionButton). Used to build the next `updateMessageInteractionInfo`.
-pub fn toggle_chosen_emoji_reaction(
-    current: Option<&MessageInteractionInfo>,
-    emoji: &str,
-) -> MessageInteractionInfo {
-    let mut info = current.cloned().unwrap_or_default();
-    let mut reactions = info.reactions.take().unwrap_or_default();
-    if let Some(existing) = reactions
-        .reactions
-        .iter_mut()
-        .find(|reaction| reaction.reaction_type.emoji_text() == Some(emoji))
-    {
-        if existing.is_chosen {
-            existing.is_chosen = false;
-            existing.total_count = (existing.total_count - 1).max(0);
-        } else {
-            existing.is_chosen = true;
-            existing.total_count += 1;
-        }
-    } else {
-        reactions.reactions.push(MessageReaction {
-            reaction_type: ReactionType::emoji(emoji),
-            total_count: 1,
-            is_chosen: true,
-            recent_senders: Vec::new(),
-        });
-    }
-    reactions
-        .reactions
-        .retain(|reaction| reaction.total_count > 0);
-    info.reactions = if reactions.reactions.is_empty() {
-        None
-    } else {
-        Some(reactions)
-    };
-    info
-}
-
 pub(crate) fn parse_interaction_info(value: Option<&Value>) -> Option<MessageInteractionInfo> {
     let value = value?;
     if value.is_null() {

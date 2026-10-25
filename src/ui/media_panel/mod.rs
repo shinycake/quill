@@ -729,7 +729,9 @@ impl QuillApp {
                 // tdesktop's "edit" badge next to a set the user created.
                 let owned = set_id
                     .is_some_and(|id| self.session().is_some_and(|s| s.is_owned_sticker_set(id)));
+                let locked = set_id.filter(|_| self.reaction_pack_locked(set_id));
                 div()
+                    .w_full()
                     .px_3()
                     .pt_3()
                     .pb_1()
@@ -739,6 +741,9 @@ impl QuillApp {
                     .text_xs()
                     .font_semibold()
                     .text_color(cx.theme().muted_foreground)
+                    .when(locked.is_some(), |row| {
+                        row.child(Icon::new(gpui_kit::assets::IconName::Lock).xsmall())
+                    })
                     .child(div().truncate().child(label))
                     .when(owned, |row| {
                         row.child(
@@ -747,6 +752,7 @@ impl QuillApp {
                                 .child(tr(keys::CONTEXT_EDIT_MSG)),
                         )
                     })
+                    .children(locked.map(|id| self.reaction_pack_restore(id, cx)))
                     .into_any_element()
             }
             PanelRow::Cells { cells, sticker } => {
@@ -939,6 +945,7 @@ fn placeholder_cell(size: f32, cx: &App) -> AnyElement {
 
 mod categories;
 mod custom_emoji_cell;
+mod reaction_packs_demo;
 mod reaction_rows;
 mod status;
 #[cfg(feature = "demo-capture")]

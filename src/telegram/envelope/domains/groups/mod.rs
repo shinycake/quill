@@ -320,8 +320,8 @@ pub enum GroupsPayload {
     /// `boosts_per_sent_gift` (0 when the key is missing),
     /// `ton_blockchain_explorer_url`, `ton_usd_rate`, the affiliate
     /// switches `starref_connect_allowed` / `starref_program_allowed`, the
-    /// Premium purchase keys, the Fragment keys and
-    /// the passkey switches are kept.
+    /// Premium purchase keys, the Fragment keys, the passkey switches and
+    /// the per-user reaction limits are kept.
     ApplicationConfig {
         boosts_per_gift: i32,
         ton_explorer_url: Option<String>,
@@ -335,6 +335,7 @@ pub enum GroupsPayload {
         passkeys: crate::passkeys::PasskeysConfig,
         premium_purchase: crate::premium_hub::purchase::PremiumPurchase,
         fragment: crate::premium_hub::fragment::FragmentConfig,
+        reaction_limits: crate::reaction_limit::ReactionLimits,
     },
     /// Slice G2: `chatBoostSlots` (schema 1.8.67, line 6968) — the
     /// `getAvailableChatBoostSlots` / `boostChat` response.

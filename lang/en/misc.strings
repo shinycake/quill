@@ -236,7 +236,6 @@
 "qll_misc_custom" = "Custom";
 "qll_misc_custom_accent_color" = "Custom accent color";
 "qll_misc_custom_emoji" = "Custom emoji";
-"qll_misc_custom_emoji_reactions_need_telegram" = "Custom emoji reactions need Telegram Premium";
 "qll_misc_custom_themes" = "Custom themes";
 "qll_misc_cut" = "Cut";
 "qll_misc_cycle_auth_state" = "Cycle auth state";

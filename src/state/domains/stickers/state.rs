@@ -12,6 +12,8 @@ pub struct StickersState {
     pub default_reaction: Option<ReactionChoice>,
     /// The reaction options of the open picker are out of date.
     pub reaction_options_stale: bool,
+    /// The app config's per-user reaction limits.
+    pub reaction_limits: crate::reaction_limit::ReactionLimits,
     /// The sticker set the message menu's "View Sticker Set" opened.
     pub sticker_set_view: Option<StickerSetView>,
     /// A one-shot toast after editing an owned set ("Sticker added.",
@@ -50,6 +52,7 @@ impl StickersState {
             active_reactions: Vec::new(),
             default_reaction: None,
             reaction_options_stale: false,
+            reaction_limits: Default::default(),
             sticker_set_view: None,
             creator_note: None,
             creator_refetch_sets: false,
