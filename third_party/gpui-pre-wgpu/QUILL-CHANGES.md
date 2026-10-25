@@ -31,3 +31,11 @@ browsing (`docs/decisions/sweep-r3-browse-memory.md`):
   it holds images, and `allocate` only places a tile in a texture holding
   the same kind, so an image texture is freed once its images leave.
   Test: `glyphs_never_keep_an_image_texture_alive`.
+
+The Quill project also changed it in 2026 for Agent access's screenshots
+(`docs/decisions/agent-access.md`, phase 5 step 3):
+
+- `src/wgpu_renderer.rs`: `WgpuRenderer::capture_scene` renders a scene to
+  an offscreen texture in the surface format (BGRA8 or RGBA8; other formats
+  answer with an error), copies it to a mapped buffer with 5 s timeouts and
+  returns RGBA rows. Not built for wasm.

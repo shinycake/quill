@@ -1,5 +1,5 @@
 // Modified by the Quill project (2026) from gpui-pre-linux 0.3.9 (Apache-2.0):
-// the refresh timer parks while the window is idle. See third_party/gpui-pre-linux/QUILL-CHANGES.md.
+// the refresh timer parks while the window is idle; `capture_image`. See third_party/gpui-pre-linux/QUILL-CHANGES.md.
 use anyhow::{Context as _, anyhow};
 use x11rb::connection::RequestConnection;
 
@@ -1915,6 +1915,22 @@ impl PlatformWindow for X11Window {
         if renderer.needs_redraw() {
             inner.force_render_after_recovery = true;
         }
+    }
+
+    // Quill: `Window::capture_frame`, offscreen with this window's renderer.
+    fn capture_image(&self, scene: &Scene) -> anyhow::Result<image::RgbaImage> {
+        let mut inner = self
+            .0
+            .state
+            .try_borrow_mut()
+            .map_err(|_| anyhow!("the window is busy"))?;
+        let renderer = inner
+            .renderer
+            .as_mut()
+            .ok_or_else(|| anyhow!("the window has no renderer"))?;
+        let (width, height, pixels) = renderer.capture_scene(scene)?;
+        image::RgbaImage::from_raw(width, height, pixels)
+            .ok_or_else(|| anyhow!("the capture had the wrong size"))
     }
 
     fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas> {

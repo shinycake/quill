@@ -2590,6 +2590,14 @@ impl Interactivity {
                     tab_group = self.tab_index;
                 }
 
+                // The tag spans this element's own background and border
+                // and its children's paint: the focused element records it
+                // (`Window::focused_a11y_tags`) and a paint filter reads it
+                // (`Window::set_paint_filter`).
+                let tagged = self.aria.tag.is_some();
+                if let Some(tag) = &self.aria.tag {
+                    window.push_a11y_tag(tag.clone(), bounds);
+                }
                 window.with_element_opacity(style.opacity, |window| {
                     style.paint(bounds, window, cx, |window: &mut Window, cx: &mut App| {
                         window.with_text_style(style.text_style().cloned(), |window| {
@@ -2605,13 +2613,6 @@ impl Interactivity {
                                         // sibling groups every container would then sort ahead of
                                         // every item, and `focus_next` from a container would jump
                                         // to the first item in the whole window instead of its own.
-                                        // The tag spans this element's and its
-                                        // children's paint, so the focused one
-                                        // records it (`Window::focused_a11y_tags`).
-                                        let tagged = self.aria.tag.is_some();
-                                        if let Some(tag) = &self.aria.tag {
-                                            window.a11y_tag_stack.push(tag.clone());
-                                        }
                                         if let Some(focus_handle) = &self.tracked_focus_handle {
                                             window.next_frame.tab_stops.insert(focus_handle);
                                             if focus_handle.is_focused(window) {
@@ -2672,9 +2673,6 @@ impl Interactivity {
                                         }
 
                                         f(&style, window, cx);
-                                        if tagged {
-                                            window.a11y_tag_stack.pop();
-                                        }
 
                                         if let Some(_hitbox) = hitbox {
                                             #[cfg(any(feature = "inspector", debug_assertions))]
@@ -2694,6 +2692,9 @@ impl Interactivity {
                         });
                     });
                 });
+                if tagged {
+                    window.pop_a11y_tag();
+                }
 
                 ((), element_state)
             },

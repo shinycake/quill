@@ -1,5 +1,5 @@
 // Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
-// `AtlasBackend::insert_image`. See third_party/gpui-pre/QUILL-CHANGES.md.
+// `AtlasBackend::insert_image`, `PlatformWindow::capture_image`. See third_party/gpui-pre/QUILL-CHANGES.md.
 mod app_menu;
 mod keyboard;
 mod keystroke;
@@ -1405,6 +1405,14 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     #[cfg(any(test, feature = "test-support"))]
     fn render_to_image(&self, _scene: &Scene) -> Result<RgbaImage> {
         anyhow::bail!("render_to_image not implemented for this platform")
+    }
+
+    /// Quill: renders `scene` offscreen with this window's renderer and
+    /// reads the pixels back (RGBA, device pixels), without presenting it
+    /// or reading the screen. Backs [`Window::capture_frame`]; built in
+    /// every configuration, unlike [`Self::render_to_image`].
+    fn capture_image(&self, _scene: &Scene) -> Result<image::RgbaImage> {
+        anyhow::bail!("this platform's renderer cannot capture the window")
     }
 }
 

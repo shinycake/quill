@@ -163,3 +163,25 @@ caret rectangle of the input handler the platform types into, in window
 logical pixels, through the same `PlatformInputHandler::selected_bounds`
 the input method's candidate window uses; the handler is taken from the
 platform window and put back. Quill draws the agent's typing badge there.
+
+## Paint filter and window capture
+
+Added in 2026 for Agent access's UI driver, step 3 (screenshots,
+`docs/decisions/agent-access.md`).
+
+- `src/window.rs`: `Window::set_paint_filter(Option<PaintFilter>)`. While
+  a filter is set, `push_a11y_tag` / `pop_a11y_tag` ask it, with the tag
+  stack, whether what is painted now reaches the scene, and set
+  `Scene::suppressed` from the answer. A tagged element the filter turns
+  off is covered with `PaintFilter::hidden` over its bounds. Setting a
+  filter refreshes the window, and a filtered frame does not replay cached
+  paint (`Scene::filtered`), since that paint was never filtered.
+  `Window::capture_frame` hands the last drawn scene to
+  `PlatformWindow::capture_image`.
+- `src/scene.rs`: `insert_primitive` drops primitives while `suppressed`;
+  `replay` does nothing while `filtered`. Both reset in `clear`.
+- `src/elements/div.rs`: an element's tag is pushed around its own
+  background and border as well as its children (it used to wrap the
+  children only), so a filtered row loses its background too.
+- `src/platform.rs`: `PlatformWindow::capture_image(&Scene)`, by default an
+  error. `src/platform/test/window.rs` answers with `render_to_image`.

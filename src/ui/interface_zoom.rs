@@ -679,8 +679,7 @@ impl PlatformWindow for ZoomWindow {
         self.inner.prepare_frame()
     }
     fn resize(&mut self, size: Size<Pixels>) {
-        let zoom = self.zoom();
-        self.inner.resize(size_out(size, zoom))
+        self.inner.resize(size_out(size, self.zoom()))
     }
     fn scale_factor(&self) -> f32 {
         self.inner.scale_factor() * self.zoom()
@@ -994,6 +993,9 @@ impl PlatformWindow for ZoomWindow {
     #[cfg(feature = "demo-capture")]
     fn render_to_image(&self, scene: &Scene) -> AnyResult<image::RgbaImage> {
         self.inner.render_to_image(scene)
+    }
+    fn capture_image(&self, scene: &Scene) -> AnyResult<image::RgbaImage> {
+        self.inner.capture_image(scene)
     }
 }
 

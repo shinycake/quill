@@ -258,3 +258,13 @@ Added in 2026 to give back memory after browsing
   leave. Same change as gpui-pre-apple's `metal_atlas.rs`. Test:
   `test_glyphs_never_keep_an_image_texture_alive` (on WARP); not run on
   Windows by the author.
+
+The Quill project also changed it in 2026 for Agent access's screenshots
+(`docs/decisions/agent-access.md`, phase 5 step 3):
+
+- `src/directx_renderer.rs`: `render_to_image` is built in every
+  configuration (it was test-only).
+- `src/window.rs`: `WindowsWindow::capture_image` renders the scene through
+  it, and answers with an error while the renderer is borrowed. Not run on
+  Windows by the author. An HDR swap chain format refuses readback with an
+  error.

@@ -106,3 +106,10 @@ The Quill project also changed it in 2026 to give back idle window memory
   queue (`DRAWABLE_RELEASE_AFTER`); `FrameIdle::idle_stops` skips the
   release if the window drew in between. An occluded window releases at
   once.
+
+The Quill project also changed it in 2026 for Agent access's screenshots
+(`docs/decisions/agent-access.md`, phase 5 step 3):
+
+- `src/window.rs`: `MacWindow::capture_image` renders the scene through
+  `MetalRenderer::capture_scene`. No screen-recording permission is
+  involved: the window renders its own frame.

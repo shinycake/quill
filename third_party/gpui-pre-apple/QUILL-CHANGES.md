@@ -61,3 +61,13 @@ browsing (`docs/decisions/sweep-r3-browse-memory.md`):
   it holds images, and `allocate` only places a tile in a texture holding
   the same kind, so an image texture is freed once its images leave.
   Test: `test_glyphs_never_keep_an_image_texture_alive`.
+
+The Quill project also changed it in 2026 for Agent access's screenshots
+(`docs/decisions/agent-access.md`, phase 5 step 3):
+
+- `src/metal_renderer.rs`: `render_scene_to_image` and the texture readback
+  helpers are built in every configuration (they were test-only), the path
+  intermediate textures are resized only when the size changed, and
+  `MetalRenderer::capture_scene` renders a scene offscreen at the layer's
+  drawable size and reads it back. Nothing is presented and no drawable is
+  taken from the layer.

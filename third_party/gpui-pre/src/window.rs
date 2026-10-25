@@ -1,5 +1,6 @@
 // Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
-// `Window::paint_surface_frame`. See third_party/gpui-pre/QUILL-CHANGES.md.
+// `Window::paint_surface_frame`; the paint filter and `Window::capture_frame`.
+// See third_party/gpui-pre/QUILL-CHANGES.md.
 #[cfg(feature = "profiler")]
 use crate::DebugFrameOverlayMode;
 #[cfg(any(feature = "inspector", debug_assertions))]
@@ -463,6 +464,23 @@ impl Drop for ElementArenaScope {
             );
         }
     }
+}
+
+/// Quill: what [`Window::set_paint_filter`] takes.
+#[derive(Clone)]
+pub struct PaintFilter {
+    /// Given the tags of the elements being painted, outermost first,
+    /// whether their paint is drawn.
+    pub allows: std::rc::Rc<dyn Fn(&[SharedString]) -> bool>,
+    /// What covers the bounds of a tagged element whose paint the filter
+    /// refuses while its parent's was drawn, and the whole window when
+    /// paint outside every tagged element is refused: the hidden part
+    /// reads as hidden rather than empty.
+    pub hidden: Hsla,
+    /// What goes under a tagged element the filter draws while its
+    /// parent's paint was refused, standing in for the backgrounds the
+    /// filter left out (the window's own, usually).
+    pub shown: Hsla,
 }
 
 /// Returned when the element arena has been used and so must be cleared before the next draw.
@@ -1276,6 +1294,9 @@ pub struct Window {
     /// outermost first (pushed and popped around each tagged element's
     /// paint), so the focused element can record the tags above it.
     pub(crate) a11y_tag_stack: Vec<SharedString>,
+    /// Quill: decides from [`Self::a11y_tag_stack`] whether what is painted
+    /// now reaches the scene ([`Self::set_paint_filter`]).
+    paint_filter: Option<PaintFilter>,
     modifiers: Modifiers,
     capslock: Capslock,
     scale_factor: f32,
@@ -2177,6 +2198,7 @@ impl Window {
             mouse_position,
             mouse_hit_test: HitTest::default(),
             a11y_tag_stack: Vec::new(),
+            paint_filter: None,
             modifiers,
             capslock,
             scale_factor,
@@ -3475,6 +3497,9 @@ impl Window {
                 self.rendered_frame.input_handlers.push(Some(input_handler));
             }
         }
+        self.next_frame.scene.filtered = self.paint_filter.is_some();
+        self.update_paint_suppression();
+        self.cover_refused_window();
         if !cx.mode.skip_drawing() {
             self.draw_roots(cx);
             #[cfg(feature = "profiler")]
@@ -5401,6 +5426,91 @@ impl Window {
             .rev()
             .cloned()
             .collect()
+    }
+
+    /// Paint-time: an element tagged `tag` starts painting (its own
+    /// background and border included). Under a paint filter, an element
+    /// whose tag turns paint off is covered with the filter's `hidden`
+    /// fill over `bounds`, and one whose tag turns it back on gets the
+    /// `shown` fill under it.
+    pub(crate) fn push_a11y_tag(&mut self, tag: SharedString, bounds: Bounds<Pixels>) {
+        let was_hidden = self.next_frame.scene.suppressed;
+        self.a11y_tag_stack.push(tag);
+        self.update_paint_suppression();
+        let hidden = self.next_frame.scene.suppressed;
+        let Some(filter) = self.paint_filter.as_ref() else {
+            return;
+        };
+        let color = match (was_hidden, hidden) {
+            (false, true) => filter.hidden,
+            (true, false) => filter.shown,
+            _ => return,
+        };
+        self.next_frame.scene.suppressed = false;
+        self.paint_quad(fill(bounds, color));
+        self.next_frame.scene.suppressed = hidden;
+    }
+
+    /// Draw-time, under a paint filter that refuses paint outside every
+    /// tagged element: the window starts covered with the `hidden` fill.
+    fn cover_refused_window(&mut self) {
+        let Some(hidden) = self.paint_filter.as_ref().map(|filter| filter.hidden) else {
+            return;
+        };
+        if !self.next_frame.scene.suppressed {
+            return;
+        }
+        let bounds = Bounds::new(Point::default(), self.viewport_size()).scale(self.scale_factor());
+        self.next_frame.scene.suppressed = false;
+        self.next_frame.scene.insert_primitive(Quad {
+            bounds,
+            content_mask: ContentMask { bounds },
+            background: hidden.into(),
+            ..Quad::default()
+        });
+        self.next_frame.scene.suppressed = true;
+    }
+
+    /// Paint-time: the element [`Self::push_a11y_tag`] named is painted.
+    pub(crate) fn pop_a11y_tag(&mut self) {
+        self.a11y_tag_stack.pop();
+        self.update_paint_suppression();
+    }
+
+    fn update_paint_suppression(&mut self) {
+        self.next_frame.scene.suppressed = self
+            .paint_filter
+            .as_ref()
+            .is_some_and(|filter| !(filter.allows)(&self.a11y_tag_stack));
+    }
+
+    /// Draw only what `filter` allows from now on, `None` to draw
+    /// everything again. The filter gets the [`InteractiveElement::a11y_tag`]s
+    /// of the elements being painted, outermost first, and answers whether
+    /// what they paint reaches the scene; anything painted outside every
+    /// tagged element gets an empty list. A tagged element refused while
+    /// its parent was drawn is covered with the filter's `hidden` fill, one
+    /// drawn while its parent was refused gets the `shown` fill under it. A filtered frame renders every
+    /// view again (cached paint was never filtered and is not replayed).
+    /// Meant for one [`Self::draw`] followed by [`Self::capture_frame`]:
+    /// clear it and draw again before the frame is presented.
+    pub fn set_paint_filter(&mut self, filter: Option<PaintFilter>) {
+        self.paint_filter = filter;
+        self.refresh();
+    }
+
+    /// Whether a paint filter is set ([`Self::set_paint_filter`]).
+    pub fn has_paint_filter(&self) -> bool {
+        self.paint_filter.is_some()
+    }
+
+    /// The last drawn frame, rendered offscreen by the window's own
+    /// renderer and read back, in device pixels. Nothing is presented and
+    /// the screen is not read, so no other window can appear in it. An
+    /// error where the platform's renderer has no readback.
+    pub fn capture_frame(&self) -> anyhow::Result<image::RgbaImage> {
+        self.platform_window
+            .capture_image(&self.rendered_frame.scene)
     }
 
     /// Paint-time: the focused element is being painted; keep the tag
