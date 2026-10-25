@@ -38,6 +38,13 @@ fn deep_link_step_redraws(
     }
 }
 
+/// Whether `link`, taken from `QuillApp::pending_deep_link`, is the one an
+/// agent's step queued. Taken once; a link written there any other way
+/// (the launch argument, the OS) is the user's.
+fn queued_by_agent(agent_link: &mut Option<String>, link: &str) -> bool {
+    agent_link.take().is_some_and(|queued| queued == link)
+}
+
 impl QuillApp {
     /// Driver-facing half of the deep-link flow, run from `poll_live`.
     /// Fires `getDeepLinkInfo` once auth is Ready, then turns each
@@ -67,14 +74,21 @@ impl QuillApp {
         if live.driver.session.chats_state.deep_link.is_none()
             && let Some(link) = self.pending_deep_link.take()
         {
-            let _ = live.driver.request_deep_link_info(&link);
+            let from_agent = queued_by_agent(&mut self.links.agent_pending_link, &link);
+            let _ = live.driver.request_deep_link_info_from(&link, from_agent);
         }
         // Consume terminal states once, retaining the invite preview until a decision.
         let state = live.driver.session.chats_state.deep_link.take();
+        // The flow's origin is taken with its state and put back only while
+        // the flow goes on, so every terminal state (and no flow at all,
+        // after an error or a closed box) leaves none behind.
+        let from_agent = std::mem::take(&mut live.driver.session.chats_state.deep_link_from_agent)
+            && state.is_some();
         if !deep_link_step_redraws(state.as_ref(), self.links.deep_link_invite.as_ref()) {
             // Nothing new (this runs on every poll, ~8×/s when idle): put
             // the state back and don't redraw.
             live.driver.session.chats_state.deep_link = state;
+            live.driver.session.chats_state.deep_link_from_agent = from_agent;
             return;
         }
         match state {
@@ -82,6 +96,7 @@ impl QuillApp {
             | Some(DeepLinkState::ResolvingInfo { .. })
             | Some(DeepLinkState::ResolvingChat { .. }) => {
                 live.driver.session.chats_state.deep_link = state;
+                live.driver.session.chats_state.deep_link_from_agent = from_agent;
             }
             Some(DeepLinkState::Info {
                 text,
@@ -93,32 +108,29 @@ impl QuillApp {
                     // The real in-app updater is a queued future slice; the
                     // honest UI is TDLib's own text saying so.
                     (true, _) => {
-                        self.links.deep_link_from_agent = false;
                         self.links.deep_link_dialog = Some(text);
                     }
                     (false, Some(action)) => {
-                        let _ = live.driver.resolve_deep_link(action);
+                        live.driver.session.chats_state.deep_link_from_agent = from_agent;
+                        let _ = live.driver.continue_deep_link(action);
                     }
                     // Unknown link: TDLib's info text is the confirmation
                     // copy written for exactly this case.
                     (false, None) => {
-                        self.links.deep_link_from_agent = false;
                         self.links.deep_link_dialog = Some(text);
                     }
                 }
             }
+            // The user decides on the invite; Join starts its own origin.
             Some(preview @ DeepLinkState::InvitePreview { .. }) => {
-                self.links.deep_link_from_agent = false;
                 self.links.deep_link_invite = Some(preview.clone());
                 live.driver.session.chats_state.deep_link = Some(preview);
             }
             Some(DeepLinkState::ChatReady { chat_id, action }) => {
-                self.links.pending_deep_link_open_from_agent =
-                    std::mem::take(&mut self.links.deep_link_from_agent);
+                self.links.pending_deep_link_open_from_agent = from_agent;
                 self.links.pending_deep_link_open = Some((chat_id, action));
             }
             Some(DeepLinkState::ShowText(text)) => {
-                self.links.deep_link_from_agent = false;
                 self.links.deep_link_dialog = Some(text);
             }
             // Typed links (`deep_link_types`): the UI half runs in render.
@@ -126,7 +138,7 @@ impl QuillApp {
             // sticker sets, backgrounds): nothing an agent needs, all of it
             // the user's.
             Some(DeepLinkState::Ui(ui)) => {
-                if std::mem::take(&mut self.links.deep_link_from_agent) {
+                if from_agent {
                     guard::refuse_typed_link();
                 } else {
                     self.links.pending_deep_link_ui = Some(ui);
@@ -134,6 +146,7 @@ impl QuillApp {
             }
             // TDLib has no type for it: `getDeepLinkInfo` explains it.
             Some(DeepLinkState::Unknown { link }) => {
+                live.driver.session.chats_state.deep_link_from_agent = from_agent;
                 let _ = live.driver.request_deep_link_text(&link);
             }
         }
@@ -141,17 +154,13 @@ impl QuillApp {
     }
 
     /// Starts the deep-link flow for `link` at the next poll, remembering
-    /// whether the handler asking is a step the UI driver injected.
+    /// whether the handler asking is a step the UI driver injected. The
+    /// origin rides with the link: a later link queued by someone else
+    /// replaces both, and the flow keeps its own in the session
+    /// (`ChatsState::deep_link_from_agent`).
     pub(super) fn queue_deep_link(&mut self, link: String) {
+        self.links.agent_pending_link = guard::injecting().then(|| link.clone());
         self.pending_deep_link = Some(link);
-        self.note_deep_link_origin();
-    }
-
-    /// The flow starting now belongs to the running handler: an agent's
-    /// injected step, or the user. Called where a flow starts without
-    /// [`Self::queue_deep_link`] (a direct `resolve_deep_link`).
-    pub(super) fn note_deep_link_origin(&mut self) {
-        self.links.deep_link_from_agent = guard::injecting();
     }
 
     /// Render-time half: open the resolved chat (has the `Window` for
@@ -452,8 +461,20 @@ crate::ui::shell::register_dialogs! {
 
 #[cfg(test)]
 mod pump_tests {
-    use super::deep_link_step_redraws;
+    use super::{deep_link_step_redraws, queued_by_agent};
     use quill::state::DeepLinkState;
+
+    #[test]
+    fn a_queued_link_is_the_agents_only_if_the_agent_queued_that_link() {
+        let mut agent = Some("https://t.me/agentpick".to_string());
+        assert!(queued_by_agent(&mut agent, "https://t.me/agentpick"));
+        assert_eq!(agent, None, "taken once");
+        assert!(!queued_by_agent(&mut agent, "https://t.me/agentpick"));
+        // The launch argument or the OS replaced the agent's link.
+        let mut agent = Some("https://t.me/agentpick".to_string());
+        assert!(!queued_by_agent(&mut agent, "https://t.me/userpick"));
+        assert_eq!(agent, None);
+    }
 
     #[test]
     fn an_idle_poll_does_not_redraw() {

@@ -244,7 +244,6 @@ impl QuillApp {
             return;
         };
         self.close_bot_edit(cx);
-        self.note_deep_link_origin();
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.resolve_deep_link(DeepLinkAction::OpenUsername {
                 domain: owned_bots::BOT_MANAGER_USERNAME.to_string(),
