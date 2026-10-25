@@ -43,6 +43,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extras)
     }
 
+    /// [`Self::maybe_download_open_thumbs`] for the main window's chat, then
+    /// for each chat shown in a window of its own: a message arriving there
+    /// needs its thumbnails, and its effect described and downloaded, as
+    /// much as one in the main window's chat.
+    pub fn maybe_download_shown_thumbs(&mut self) -> Result<Vec<RequestId>, ConnectSendError> {
+        let mut extras = self.maybe_download_open_thumbs()?;
+        let windows: Vec<ChatId> = self.session.window_chats.iter().copied().collect();
+        for chat_id in windows {
+            extras.extend(
+                self.with_window_chat(chat_id, |driver| driver.maybe_download_open_thumbs())?,
+            );
+        }
+        Ok(extras)
+    }
+
     /// Ask TDLib for the map tile of every location in the open chat that
     /// has none yet (`getMapThumbnailFile`). Each place is asked once; the
     /// answered file then downloads like a photo thumbnail.

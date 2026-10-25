@@ -4,7 +4,8 @@
 //! A message sent with an effect plays it over the chat when its badge first
 //! shows while the effect has not played (`quill::message_effect_watch`:
 //! an incoming message that was unread when it arrived, or one sent from
-//! here), and again whenever the badge is clicked. The first kind is
+//! here), and again whenever the badge is clicked. Each window plays the
+//! effects of the chat it shows, over its own history. The first kind is
 //! skipped while effects are off in power saving; the message is then
 //! marked as played all the same. A click always plays.
 //!
@@ -71,6 +72,26 @@ fn playable(effect: &MessageEffect) -> Option<EffectAnimation> {
 }
 
 impl QuillApp {
+    /// The chats some window shows now (main window and chat windows). The
+    /// effect bookkeeping of any other chat goes.
+    pub(super) fn chats_on_screen(&self) -> Vec<i64> {
+        self.session()
+            .map(|session| {
+                session
+                    .chats_shown()
+                    .into_iter()
+                    .map(|chat| chat.0)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Whether the window being built counts as active for its effects
+    /// (tdesktop `markingContentsRead`): as its history last reported.
+    pub(super) fn effects_window_active(&self) -> bool {
+        self.history.window_active || super::frame_clock::assume_active()
+    }
+
     fn effects_session_mut(&mut self) -> Option<&mut Session> {
         match self.live.as_mut() {
             Some(live) => Some(&mut live.driver.session),
@@ -78,20 +99,22 @@ impl QuillApp {
         }
     }
 
-    /// Start the message effects asked for since the last frame and those
-    /// that were waiting for their description.
-    pub(super) fn message_effects_pass(&mut self, cx: &mut Context<Self>) {
-        let open = self.viewed_chat();
-        badge::set_app(cx.entity().downgrade(), open.map(|chat| chat.0));
-        let active = self.frame.window_active.get();
+    /// Start the message effects of the chat this window shows (its
+    /// `viewed_chat`) asked for since the last frame, and those that were
+    /// waiting for their description. Every window runs it for its own
+    /// chat (tdesktop: one `EmojiInteractions` per history widget);
+    /// `window_active` is this window's (`HistoryUi::window_active`).
+    pub(super) fn message_effects_pass(&mut self, window_active: bool, cx: &mut Context<Self>) {
+        badge::set_app(cx.entity().downgrade());
+        let Some(open) = self.viewed_chat() else {
+            return;
+        };
+        let shown = self.chats_on_screen();
         // First show of an unplayed effect (tdesktop `playEffectOnRead`):
         // marked as played whether or not power saving lets it play.
-        let shown: Vec<(Key, badge::Seen)> = badge::shown_unwatched(active)
-            .into_iter()
-            .filter(|(key, _)| open == Some(ChatId(key.0)))
-            .collect();
+        let shown_now = badge::shown_unwatched(open.0, window_active);
         let marked: Vec<(Key, badge::Seen)> = match self.effects_session_mut() {
-            Some(session) => shown
+            Some(session) => shown_now
                 .into_iter()
                 .filter(|(key, _)| session.stickers.effects.watch.mark_watched(*key))
                 .collect(),
@@ -104,10 +127,9 @@ impl QuillApp {
         let automatic = marked
             .into_iter()
             .filter(|_| !power_saving::on(Flag::ChatEffects));
-        let replays = badge::take_replays()
+        let replays = badge::take_replays(open.0, &|chat| shown.contains(&chat))
             .into_iter()
-            .filter_map(|key| badge::seen(key).map(|seen| (key, seen)))
-            .filter(|(key, _)| open == Some(ChatId(key.0)));
+            .filter_map(|key| badge::seen(key).map(|seen| (key, seen)));
         let requests: Vec<(Key, i64, bool)> = automatic
             .chain(replays)
             .map(|(key, seen)| (key, seen.effect_id, seen.outgoing))
@@ -122,10 +144,16 @@ impl QuillApp {
                     since: Instant::now(),
                 });
             }
-            waiting.retain(|w| open == Some(ChatId(w.key.0)) && w.since.elapsed() < WAIT);
+            waiting.retain(|w| shown.contains(&w.key.0) && w.since.elapsed() < WAIT);
         });
-        let ids: Vec<i64> =
-            WAITING.with(|waiting| waiting.borrow().iter().map(|w| w.effect_id).collect());
+        let ids: Vec<i64> = WAITING.with(|waiting| {
+            waiting
+                .borrow()
+                .iter()
+                .filter(|w| w.key.0 == open.0)
+                .map(|w| w.effect_id)
+                .collect()
+        });
         if ids.is_empty() {
             return;
         }
@@ -141,7 +169,7 @@ impl QuillApp {
             let mut waiting = waiting.borrow_mut();
             let mut ready = Vec::new();
             waiting.retain(|w| {
-                if badge::seen(w.key).is_none() {
+                if w.key.0 != open.0 || badge::seen(w.key).is_none() {
                     return true;
                 }
                 match session.stickers.effects.get(w.effect_id) {

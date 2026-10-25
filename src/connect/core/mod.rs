@@ -839,7 +839,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             || self.session.stickers.emoji.open
             || !self.session.stickers.stickers.suggestions.is_empty()
         {
-            self.maybe_download_open_thumbs()?;
+            self.maybe_download_shown_thumbs()?;
             self.maybe_download_open_chat_media()?;
         }
         // Parity slice: chat-list avatars download on every ingest; each
