@@ -65,11 +65,12 @@ pub enum ChatListPayload {
     /// `updateChatFolders` (TDLib 1.8.67, `schema/td_api.tl:10606`) — the
     /// full ordered folder list. There is no `getChatFolders` function in
     /// 1.8.67; TDLib pushes this update after authorization and whenever
-    /// folders change. `main_chat_list_position` is dropped (folder reorder
-    /// always sends position 0); `are_tags_enabled` is kept (parity slice:
-    /// folder tags UI).
+    /// folders change. `main_chat_list_position` places "All chats" among
+    /// the folder tabs (Premium only); `are_tags_enabled` drives folder tag
+    /// chips.
     UpdateChatFolders {
         folders: Vec<ChatFolderInfo>,
+        main_chat_list_position: usize,
         are_tags_enabled: bool,
     },
     /// Parity slice: `chatFolderInfo` as the response of `createChatFolder`

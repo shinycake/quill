@@ -141,16 +141,18 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Settings > Folders' up and down buttons: swap a folder with its
+    /// neighbour. "All chats" keeps its index among the tabs (with Premium)
+    /// or goes back in front (without, tdesktop `moveAllToFront`).
     pub(in crate::ui) fn move_folder(&mut self, folder_id: i32, up: bool, cx: &mut Context<Self>) {
         let Some(session) = self.session() else {
             return;
         };
-        let mut ids: Vec<i32> = session
-            .chat_list
-            .chat_folders
-            .iter()
-            .map(|f| f.id)
-            .collect();
+        let mut order = session.chat_list.folder_order();
+        if !session.my_is_premium() {
+            order.main_position = 0;
+        }
+        let ids = &mut order.folder_ids;
         let Some(pos) = ids.iter().position(|&id| id == folder_id) else {
             return;
         };
@@ -159,10 +161,18 @@ impl QuillApp {
             return;
         }
         ids.swap(pos, target);
+        self.send_folder_order(&order, cx);
+    }
+
+    pub(in crate::ui) fn send_folder_order(
+        &mut self,
+        order: &quill::folder_order::FolderOrder,
+        cx: &mut Context<Self>,
+    ) {
         let result = match self.live.as_mut() {
-            Some(live) => live.driver.reorder_chat_folders(&ids).map(|_| ()),
+            Some(live) => live.driver.reorder_chat_folders(order).map(|_| ()),
             None => {
-                self.apply_demo_folder_reorder(&ids);
+                self.apply_demo_folder_reorder(order);
                 Ok(())
             }
         };

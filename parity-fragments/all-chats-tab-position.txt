@@ -1,0 +1,2 @@
+# "All chats" among the folder tabs: parsed, rendered at its position, dragged with Premium, synced
+parity:premium-main-list-position

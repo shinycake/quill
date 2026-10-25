@@ -276,6 +276,7 @@ mod folder_glyphs;
 mod folder_picker_ui;
 mod folder_share;
 mod folder_tabs;
+mod folder_tabs_drag;
 mod folder_tabs_fit;
 mod folders;
 mod forum_extras;
