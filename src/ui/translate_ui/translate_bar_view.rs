@@ -269,7 +269,7 @@ impl QuillApp {
     /// Hide or show the chat's translate bar. A live account sends
     /// `toggleChatIsTranslatable` (the server flag, as in tdesktop); the
     /// demo keeps the choice locally.
-    pub(super) fn set_translate_bar_hidden(
+    pub(in crate::ui) fn set_translate_bar_hidden(
         &mut self,
         chat_id: ChatId,
         hidden: bool,

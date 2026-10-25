@@ -234,6 +234,26 @@ impl QuillApp {
         })
     }
 
+    /// tdesktop `Filler::addTranslate`: the header menu's Translate, offered
+    /// when the user hid the bar of a chat that would otherwise show it.
+    pub(in crate::ui) fn chat_translate_menu_offered(&self, chat_id: ChatId) -> bool {
+        let Some(session) = self.session() else {
+            return false;
+        };
+        let prefs = &self.settings.translate.prefs;
+        let hidden = !session.chat_is_translatable(chat_id) || prefs.bar_hidden(chat_id.0);
+        let ui = self.translate_ui_language();
+        hidden
+            && prefs.translate_chats
+            && session.is_premium()
+            && session.chat_translated_to(chat_id).is_none()
+            && session
+                .chats
+                .get(&chat_id.0)
+                .is_some_and(|chat| !matches!(chat.kind, ChatKind::Secret { .. }))
+            && self.translate_offer(chat_id, &prefs.skip(&ui)).is_some()
+    }
+
     /// The "Translate to" language for a box opened in `chat_id`.
     fn translate_target(&self, chat_id: ChatId) -> &'static str {
         let ui = self.translate_ui_language();
@@ -880,5 +900,6 @@ crate::ui::shell::register_dialogs! {
     ),
 }
 
+mod demo;
 mod pump_scan;
 mod translate_bar_view;

@@ -24,6 +24,8 @@ pub enum HeaderEntry {
     Wallpaper,
     ViewDiscussion,
     Export,
+    /// `lng_context_translate`: brings back a hidden translate bar.
+    Translate,
     Report,
     Archive,
     Folders,
@@ -60,6 +62,10 @@ pub struct HeaderFacts<'a> {
     /// (tdesktop `CanViewRevenue` / `CanViewCreditsRevenue`).
     pub can_view_revenue: bool,
     pub exportable: bool,
+    /// tdesktop `addTranslate`: the user hid the translate bar of a chat
+    /// whose messages are in a language to translate (Premium, "Translate
+    /// Entire Chats" on).
+    pub can_translate: bool,
     pub has_view_toggle: bool,
     pub can_create_topic: bool,
     pub has_discussion: bool,
@@ -118,6 +124,9 @@ pub fn header_entries(facts: &HeaderFacts<'_>) -> Vec<HeaderEntry> {
     if facts.exportable {
         out.push(HeaderEntry::Export);
     }
+    if facts.can_translate {
+        out.push(HeaderEntry::Translate);
+    }
     if facts.can_be_reported {
         out.push(HeaderEntry::Report);
     }
@@ -173,6 +182,7 @@ mod tests {
             can_get_statistics: false,
             can_view_revenue: false,
             exportable: false,
+            can_translate: false,
             has_view_toggle: false,
             can_create_topic: false,
             has_discussion: false,
@@ -296,6 +306,7 @@ mod tests {
         f.has_view_toggle = true;
         f.has_discussion = true;
         f.exportable = true;
+        f.can_translate = true;
         f.can_be_reported = true;
         f.can_get_statistics = true;
         f.auto_delete_ready = true;
@@ -311,6 +322,7 @@ mod tests {
                 E::CreatePoll,
                 E::ViewDiscussion,
                 E::Export,
+                E::Translate,
                 E::Report,
                 E::Archive,
                 E::Folders,

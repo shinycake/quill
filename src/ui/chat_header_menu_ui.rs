@@ -95,6 +95,7 @@ impl QuillApp {
                     can_get_statistics: supergroup_stats,
                     can_view_revenue,
                     exportable,
+                    can_translate: self.chat_translate_menu_offered(c.id),
                     has_view_toggle: view_toggle.is_some(),
                     can_create_topic: live
                         && c.is_forum_chat()
@@ -185,6 +186,7 @@ impl QuillApp {
                 }
             }
             HeaderEntry::AutoDelete => self.open_ttl_picker(chat_id, cx),
+            HeaderEntry::Translate => self.set_translate_bar_hidden(chat_id, false, cx),
             HeaderEntry::SendMoney => self.show_wallet_notice(WalletSurface::SendMoney, cx),
             HeaderEntry::CloseSecretChat => self.open_close_secret_chat_confirm(chat_id, cx),
             _ => {}
@@ -223,6 +225,7 @@ fn entry_label(
         HeaderEntry::Wallpaper => (tr(keys::CHAT_THEME_WALLPAPER), None),
         HeaderEntry::ViewDiscussion => (tr(keys::Q_CHAT_VIEW_DISCUSSION), None),
         HeaderEntry::Export => (tr(keys::PROFILE_EXPORT_CHAT), Some(N::ExportChat)),
+        HeaderEntry::Translate => (tr(keys::CONTEXT_TRANSLATE), None),
         HeaderEntry::Report => (tr(keys::Q_CHAT_REPORT), None),
         HeaderEntry::Archive => (
             if archived {
