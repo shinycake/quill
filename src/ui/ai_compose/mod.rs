@@ -5,11 +5,18 @@
 #![deny(clippy::indexing_slicing)]
 
 mod about;
+mod apply_in_place;
 mod button;
 mod card;
 mod demo;
 mod dialog;
 mod languages;
+mod style_demo;
+mod style_editor;
+mod style_icon;
+mod style_menu;
+mod style_notices;
+mod style_preview;
 mod upkeep;
 
 #[cfg(test)]
@@ -20,6 +27,8 @@ mod tests;
 use super::ai_compose_state::{AiComposeOpen, AiComposeView};
 use super::app::QuillApp;
 use super::status_note::StatusNote;
+use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::component::button::ButtonCustomVariant;
 use gpui_kit::*;
 use quill::ai_compose::{AiBoxError, AiComposeBox, AiSend};
 use quill::ids::ChatId;
@@ -66,6 +75,17 @@ fn pill_radius() -> Pixels {
     px(999.)
 }
 
+/// tdesktop `aiToneDeleteButton`: the attention colour on the box
+/// background (Delete Style, Remove Style).
+fn attention_button(cx: &App) -> ButtonCustomVariant {
+    let danger = cx.theme().danger;
+    ButtonCustomVariant::new(cx)
+        .color(transparent_black())
+        .foreground(danger)
+        .hover(danger.opacity(0.1))
+        .active(danger.opacity(0.16))
+}
+
 /// The session the UI shows, writable: the live one, else the demo's.
 fn session_mut(app: &mut QuillApp) -> Option<&mut Session> {
     match app.live.as_mut() {
@@ -107,6 +127,8 @@ impl QuillApp {
             ai,
             view: AiComposeView::Card,
             style_names: self.ai_compose_style_names(),
+            editor: None,
+            select_saved: None,
         });
         self.ai_compose_dispatch(send, window, cx);
     }

@@ -3,7 +3,7 @@
 //! result, and the "Style by" line under it.
 
 use super::button::hint_bubble;
-use super::{marked_link, pill_radius};
+use super::marked_link;
 use crate::ui::ai_compose_state::AiComposeView;
 use crate::ui::app::QuillApp;
 use crate::ui::message_text::rich_text_line;
@@ -16,8 +16,8 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ai_compose::{
-    AiComposeBox, AiComposeMode, AiResult, CardState, DiffSegmentKind, ResultTitle, StyleChoice,
-    StyleList, TextCompositionStyle, diff_segments, prefs,
+    AiComposeBox, AiComposeMode, AiResult, CardState, DiffSegmentKind, ResultTitle, StyleList,
+    TextCompositionStyle, diff_segments, prefs,
 };
 use quill::lang::{keys, tr, tr_with};
 use quill::telegram::envelope::MessageSender;
@@ -186,52 +186,6 @@ impl QuillApp {
                 .size(px(14.))
                 .into_any_element(),
         }
-    }
-
-    /// The Style tab's pills (tdesktop `LabeledEmojiScrollTabs`). The styles
-    /// delegate adds the "Create" pill and the pills' context menu here.
-    fn ai_compose_style_row(&self, picked: &StyleChoice, cx: &mut Context<Self>) -> AnyElement {
-        let Some(session) = self.session() else {
-            return div().into_any_element();
-        };
-        let pills = session
-            .messages
-            .ai_compose
-            .styles
-            .styles()
-            .iter()
-            .map(|style| {
-                let selected = matches!(picked, StyleChoice::Style(name) if *name == style.name);
-                let name = style.name.clone();
-                Button::new(SharedString::from(format!("ai-style-{}", style.name)))
-                    .small()
-                    .rounded(pill_radius())
-                    .map(|pill| {
-                        if selected {
-                            pill.primary()
-                        } else {
-                            pill.outline()
-                        }
-                    })
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .items_center()
-                            .child(self.ai_style_glyph(style))
-                            .child(style.title.clone()),
-                    )
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        prefs::update(|prefs| prefs.style_tooltip_hidden = true);
-                        this.ai_compose_update(window, cx, |ai| ai.select_style(&name));
-                    }))
-            });
-        h_flex()
-            .id("ai-compose-styles")
-            .gap_1p5()
-            .pb_1()
-            .overflow_x_scroll()
-            .children(pills)
-            .into_any_element()
     }
 
     /// The preview card (tdesktop `ComposeAiPreviewCard`): the original
@@ -487,7 +441,7 @@ impl QuillApp {
     }
 }
 
-fn section_title(text: impl Into<SharedString>, color: Hsla) -> Div {
+pub(super) fn section_title(text: impl Into<SharedString>, color: Hsla) -> Div {
     div()
         .text_xs()
         .font_semibold()

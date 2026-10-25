@@ -2,7 +2,7 @@
 //! the box's answers, a changed style list and the style pills' custom
 //! emoji, plus the error toasts (tdesktop `ComposeAiContent::showError`).
 
-use super::{marked_link, session_mut};
+use super::{MarkedLink, marked_link, session_mut};
 use crate::ui::app::QuillApp;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::notification::Notification;
@@ -34,8 +34,14 @@ impl QuillApp {
             }
             cx.notify();
         }
+        self.ai_style_edit_upkeep(window, cx);
         self.refresh_ai_compose_styles(window, cx);
+        self.select_saved_ai_style(window, cx);
+        self.ai_style_notice_upkeep(window, cx);
+        self.ai_apply_in_place_upkeep(window, cx);
+        self.ai_style_preview_upkeep(window, cx);
         self.fetch_ai_compose_emoji();
+        self.fetch_ai_style_icons();
     }
 
     /// A style list that changed under the open box (tdesktop
@@ -56,20 +62,31 @@ impl QuillApp {
         self.ai_compose_update(window, cx, |ai| ai.refresh_styles(&styles));
     }
 
-    /// The style pills' emoji: resolve each custom emoji once, then fetch
-    /// its still.
+    /// The custom emoji the box and the preview show (the style pills,
+    /// the editor's icon, the previewed style): resolve each once, then
+    /// fetch its still.
     fn fetch_ai_compose_emoji(&mut self) {
-        if self.ai_compose.open.is_none() {
-            return;
-        }
         let Some(session) = self.session() else {
             return;
         };
+        let open = self.ai_compose.open.as_ref();
+        let pills = open
+            .into_iter()
+            .flat_map(|_| session.messages.ai_compose.styles.styles())
+            .map(|style| style.custom_emoji_id);
+        let editor = open
+            .and_then(|open| open.editor.as_ref())
+            .map(|editor| editor.emoji_id);
+        let previewed = self
+            .ai_compose
+            .preview
+            .as_ref()
+            .and_then(|preview| preview.style.as_ref())
+            .map(|style| style.custom_emoji_id);
         let mut unresolved = Vec::new();
         let mut files: Vec<FileId> = Vec::new();
-        for style in session.messages.ai_compose.styles.styles() {
-            let id = style.custom_emoji_id;
-            if id <= 0 {
+        for id in pills.chain(editor).chain(previewed) {
+            if id <= 0 || self.ai_emoji_still(id).is_some() {
                 continue;
             }
             let sticker = session
@@ -134,34 +151,49 @@ impl QuillApp {
             "link",
             tr(keys::AI_COMPOSE_FLOOD_LINK),
         );
+        Self::marked_toast("ai-compose-flood-toast", marked, cx, |this, _, cx| {
+            this.open_premium(cx);
+        })
+        .icon(IconName::Star)
+    }
+
+    /// A toast whose text has bold runs and one link; a click on the link
+    /// runs `on_link`.
+    pub(super) fn marked_toast(
+        id: &'static str,
+        marked: MarkedLink,
+        cx: &mut Context<Self>,
+        on_link: fn(&mut QuillApp, &mut Window, &mut Context<QuillApp>),
+    ) -> Notification {
         let app = cx.entity().downgrade();
-        Notification::new()
-            .icon(IconName::Star)
-            .content(move |_, _, cx| {
-                let bold = HighlightStyle {
-                    font_weight: Some(FontWeight::SEMIBOLD),
-                    ..Default::default()
-                };
-                let link = HighlightStyle {
-                    color: Some(cx.theme().primary),
-                    ..bold
-                };
-                let mut highlights: Vec<_> = marked
-                    .bold
-                    .iter()
-                    .map(|range| (range.clone(), bold))
-                    .chain(marked.link.iter().map(|range| (range.clone(), link)))
-                    .collect();
-                highlights.sort_by_key(|(range, _)| range.start);
-                let app = app.clone();
-                InteractiveText::new(
-                    "ai-compose-flood-toast",
-                    StyledText::new(marked.text.clone()).with_highlights(highlights),
-                )
-                .on_click(marked.link.iter().cloned().collect(), move |_, _, cx| {
-                    let _ = app.update(cx, |this, cx| this.open_premium(cx));
-                })
-                .into_any_element()
-            })
+        Notification::new().content(move |_, _, cx| {
+            let bold = HighlightStyle {
+                font_weight: Some(FontWeight::SEMIBOLD),
+                ..Default::default()
+            };
+            let link = HighlightStyle {
+                color: Some(cx.theme().primary),
+                ..bold
+            };
+            let mut highlights: Vec<_> = marked
+                .bold
+                .iter()
+                .map(|range| (range.clone(), bold))
+                .chain(marked.link.iter().map(|range| (range.clone(), link)))
+                .collect();
+            highlights.sort_by_key(|(range, _)| range.start);
+            let app = app.clone();
+            InteractiveText::new(
+                id,
+                StyledText::new(marked.text.clone()).with_highlights(highlights),
+            )
+            .on_click(
+                marked.link.iter().cloned().collect(),
+                move |_, window, cx| {
+                    let _ = app.update(cx, |this, cx| on_link(this, window, cx));
+                },
+            )
+            .into_any_element()
+        })
     }
 }

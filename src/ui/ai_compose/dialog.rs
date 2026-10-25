@@ -58,6 +58,16 @@ impl QuillApp {
                     this.ai_compose_about_view(cx),
                     this.ai_compose_about_footer(cx),
                 ),
+                AiComposeView::StyleEditor => (
+                    Some(dialog_title(this.ai_style_editor_title()).into_any_element()),
+                    this.ai_style_editor_view(cx),
+                    this.ai_style_editor_footer(cx),
+                ),
+                AiComposeView::StyleIcon => (
+                    Some(dialog_title(tr(keys::AI_COMPOSE_TONE_ICON_TITLE)).into_any_element()),
+                    this.ai_style_icons_view(cx),
+                    this.ai_style_icons_footer(cx),
+                ),
             };
             let dialog = match title {
                 Some(title) => dialog.title(title),
@@ -80,13 +90,23 @@ impl QuillApp {
         })
     }
 
-    /// Escape, the backdrop or the close button. The language picker and
-    /// the Cocoon view go back to the card, as closing tdesktop's boxes on
-    /// top of the AI box does; the card closes the box.
+    /// Escape, the backdrop or the close button. The language picker, the
+    /// Cocoon view and the style editor go back to the card and the icon
+    /// picker to the editor, as closing tdesktop's boxes on top of the AI
+    /// box does; the card closes the box.
     fn ai_compose_dismissed(&mut self, cx: &mut Context<Self>) {
         match self.ai_compose.open.as_ref().map(|open| open.view) {
             Some(AiComposeView::Languages | AiComposeView::About) => {
                 self.set_ai_compose_view(AiComposeView::Card, cx);
+            }
+            Some(AiComposeView::StyleEditor) => {
+                if let Some(open) = self.ai_compose.open.as_mut() {
+                    open.editor = None;
+                }
+                self.set_ai_compose_view(AiComposeView::Card, cx);
+            }
+            Some(AiComposeView::StyleIcon) => {
+                self.set_ai_compose_view(AiComposeView::StyleEditor, cx);
             }
             _ => self.close_ai_compose(cx),
         }

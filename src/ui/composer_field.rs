@@ -206,7 +206,7 @@ impl QuillApp {
         self.replace_composer_content(range, InputContent::new(text.to_string()), window, cx);
     }
 
-    fn replace_composer_content(
+    pub(super) fn replace_composer_content(
         &mut self,
         range: Range<usize>,
         content: InputContent,

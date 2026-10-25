@@ -5,8 +5,9 @@
 //! author line), `fix` (a diff with inserted, replaced and deleted text),
 //! `loading` (Fix waiting on its answer), `waiting` (the Style tab with
 //! nothing picked), `flood` (the daily limit: Increase Limit),
-//! `languages` (the language picker), `about` (About AI Editor) or
-//! `button` (the box closed, the composer's AI button and its hint).
+//! `languages` (the language picker), `about` (About AI Editor),
+//! `button` (the box closed, the composer's AI button and its hint), or
+//! one of the style variants in `style_demo`.
 
 use super::session_mut;
 use crate::ui::ai_compose_state::AiComposeView;
@@ -161,6 +162,9 @@ impl QuillApp {
             prefs.tooltip_hidden = variant != "button";
             prefs.style_tooltip_hidden = variant != "waiting";
         });
+        if self.demo_ai_styles(&variant, window, cx) {
+            return;
+        }
         if variant == "button" {
             cx.notify();
             return;

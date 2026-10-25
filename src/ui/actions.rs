@@ -129,6 +129,9 @@ actions!(
         ShowScheduledMessages,
         ToggleLinkPreview,
         RecordRoundMessage,
+        /// Rewrite the composer's selection (or all of it) with the style
+        /// bound to this shortcut.
+        AiComposeApply,
         ArchiveOpenChat,
         ShowAdminLog,
         /// Cmd/Ctrl+Shift+T: bring back the chat window closed last.

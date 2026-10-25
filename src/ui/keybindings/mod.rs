@@ -1,18 +1,19 @@
 #![deny(clippy::indexing_slicing)]
 use super::actions::{
-    ArchiveOpenChat, AttachFile, CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow,
-    ComposerEditLink, ComposerPastePlain, DeleteSelection, FirstChat, FocusComposer, FocusSidebar,
-    FormatBlockQuote, FormatBold, FormatClear, FormatItalic, FormatMonospace, FormatSpoiler,
-    FormatStrikethrough, FormatUnderline, HistoryPageDown, HistoryPageUp, HistoryToBottom,
-    HistoryToTop, JustSend, LastChat, LoadOlder, LockApp, MarkChatRead, MinimizeWindow, NextChat,
-    NextFolder, OpenArchive, OpenChatSearch, OpenContacts, OpenHelp, OpenPinnedChat,
-    OpenSavedMessages, OpenSearch, OpenSettings, OpenShortcuts, PrevChat, PrevFolder, QuitApp,
-    RecordRoundMessage, ReopenClosedWindow, ReplyToNext, ReplyToPrevious, ScheduleSend,
-    SelectionExtendNewer, SelectionExtendOlder, SelectionFocusNewer, SelectionFocusOlder,
-    SendSilently, ShowAdminLog, ShowChatMenu, ShowChatPreview, ShowScheduledMessages,
-    StoryTogglePause, ToggleFullscreen, ToggleLinkPreview, ToggleMessageSelection, ToggleSidebar,
-    ToggleTheme, ViewerCopy, ViewerFlipHorizontal, ViewerFlipVertical, ViewerNext, ViewerPrev,
-    ViewerSave, ViewerZoomIn, ViewerZoomOut, ViewerZoomReset,
+    AiComposeApply, ArchiveOpenChat, AttachFile, CancelSearch, ChatSearchNewer, ChatSearchOlder,
+    CloseWindow, ComposerEditLink, ComposerPastePlain, DeleteSelection, FirstChat, FocusComposer,
+    FocusSidebar, FormatBlockQuote, FormatBold, FormatClear, FormatItalic, FormatMonospace,
+    FormatSpoiler, FormatStrikethrough, FormatUnderline, HistoryPageDown, HistoryPageUp,
+    HistoryToBottom, HistoryToTop, JustSend, LastChat, LoadOlder, LockApp, MarkChatRead,
+    MinimizeWindow, NextChat, NextFolder, OpenArchive, OpenChatSearch, OpenContacts, OpenHelp,
+    OpenPinnedChat, OpenSavedMessages, OpenSearch, OpenSettings, OpenShortcuts, PrevChat,
+    PrevFolder, QuitApp, RecordRoundMessage, ReopenClosedWindow, ReplyToNext, ReplyToPrevious,
+    ScheduleSend, SelectionExtendNewer, SelectionExtendOlder, SelectionFocusNewer,
+    SelectionFocusOlder, SendSilently, ShowAdminLog, ShowChatMenu, ShowChatPreview,
+    ShowScheduledMessages, StoryTogglePause, ToggleFullscreen, ToggleLinkPreview,
+    ToggleMessageSelection, ToggleSidebar, ToggleTheme, ViewerCopy, ViewerFlipHorizontal,
+    ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn, ViewerZoomOut,
+    ViewerZoomReset,
 };
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -295,6 +296,11 @@ pub const REBINDABLE_ACTIONS: &[RebindableAction] = &[
         label: keys::SHORTCUTS_ADMIN_LOG,
         defaults: &[],
     },
+    RebindableAction {
+        id: "ai-compose-apply",
+        label: keys::SHORTCUTS_AI_COMPOSE_APPLY,
+        defaults: &[],
+    },
 ];
 
 /// Parity slice (platform-custom-keybindings): build the key binding for a
@@ -348,6 +354,7 @@ pub fn keybinding_for(id: &str, keystroke: &str) -> Option<KeyBinding> {
         "schedule-send" => Some(KeyBinding::new(keystroke, ScheduleSend, None)),
         "toggle-link-preview" => Some(KeyBinding::new(keystroke, ToggleLinkPreview, None)),
         "record-round" => Some(KeyBinding::new(keystroke, RecordRoundMessage, None)),
+        "ai-compose-apply" => Some(KeyBinding::new(keystroke, AiComposeApply, None)),
         "show-admin-log" => Some(KeyBinding::new(keystroke, ShowAdminLog, None)),
         _ => None,
     }
