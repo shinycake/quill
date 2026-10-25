@@ -276,40 +276,70 @@ agent can't see.
 ## Phase 4: raw TDLib calls
 
 `td_call` (`src/agent/tools/td_call.rs`) passes one TDLib request through
-for what the curated tools don't cover. `src/agent/tools/td_policy.rs`
-sorts every method into one class:
+for what the curated tools don't cover.
 
-- **Blocked.** Quill's own plumbing never runs for an agent: `setOption`
-  (so no agent can turn off read receipts, online status or typing),
-  `setTdlibParameters`, `close`, `destroy`, the sign-in flow, logs, push
-  registration and custom requests.
-- **Ask.** The deny list waits for the user's Allow in Quill, once per
-  call, with the agent's reason and the request shown. There are two
-  groups. The account: `deleteAccount`, `logOut`, `terminateSession`,
+**The schema decides, not the method name alone.** The first review showed
+that guessing from names and fields lets a request lie: a decoy `chat_id`
+on a method that has none turned a deny-listed call into a granted one, and
+a chat id sent as a string skipped the grant check. So every request is
+read against `schema/td_api.tl` (the schema Quill is built with, embedded
+and parsed on first use, `td_schema.rs`):
+
+- An unknown method is refused. Fields the method or a nested constructor
+  doesn't have are dropped before anything else looks at the request, so
+  padding and decoy ids are gone (`td_request.rs`).
+- Every chat id (`chat_id`, `*_chat_id`, `*_chat_ids`, and the chats of
+  `supergroup_id`, `basic_group_id`, `secret_chat_id`) is made an integer;
+  anything that isn't one is refused.
+- A change runs under the grants only when the method has a top-level
+  `chat_id: int53`. Every other change asks.
+
+**Classes** (`td_policy.rs`):
+
+- **Blocked.** Quill's plumbing (`setOption`, so no agent can turn off read
+  receipts, online status or typing; `setTdlibParameters`, `close`, the
+  sign-in flow, logs, push), any method with a `file_id` and
+  `searchFileDownloads`/`getRemoteFile` (file ids are small integers;
+  `download_file` checks the chat a file came from), the TON wallet
+  (owner rule), `addLocalMessage`, `getCurrentState` and
+  `getChatFolderChatCount` (they cover chats agents may not see), and any
+  request carrying `callbackQueryPayloadDataWithPassword`.
+- **Ask, account.** `deleteAccount`, `logOut`, `terminateSession`,
   `terminateAllOtherSessions`, `setPassword`, `changePhoneNumber`, recovery
-  email, privacy rules, proxies, `transferChatOwnership`, `deleteChat`, and
-  any change that names no chat (the profile, joining by link). Money: any
-  method or nested type named for Stars, TON, payments, gifts, paid
-  content, Premium, giveaways, invoices, subscriptions or stakes, and any
-  request with a nonzero `paid_message_star_count`. Matching is by
-  camel-case word, so `startGroupCall` is not "Star".
-- **Granted.** Everything else runs under the chat grants. Methods that
-  start with `get`, `search`, `check`, `can`, `parse`, `validate` or `is`
-  need `read` on every chat they name. Other changes need `read_write` on
-  the chat they act in (top-level `chat_id`, `chat_ids`, and the chat of a
-  `supergroup_id`, `basic_group_id`, `secret_chat_id`, or for changes a
-  `user_id`), and `read` on any chat nested deeper (a forward's source).
-  Changes take a turn in the paced queue. Sends share it with
-  `send_message`, with the paid-chat check and the new-conversation cap.
+  and login email, privacy rules, proxies, `sharePhoneNumber`,
+  `addContact`, `importContacts`, `transferChatOwnership`, `deleteChat`;
+  reads that act for the user (`getCallbackQueryAnswer` presses a bot
+  button, `getLoginUrl` and `getWebAppUrl` sign in to sites and web apps,
+  passport elements, `validateOrderInfo`, inline queries that send a
+  location); and every change without a `chat_id`.
+- **Ask, money.** Any method or nested type named for Stars, TON, Grams,
+  payments, gifts, paid content, Premium, giveaways, invoices,
+  subscriptions, offers, stakes, revenue or withdrawals (whole camel-case
+  words, plurals listed, so `startGroupCall` is not "Star"), named methods
+  that move Stars or boosts without such a word (`boostChat`,
+  `joinChatByInviteLink`, refunds of unpaid-message charges, withdrawal
+  URLs), and any request with a positive `paid_message_star_count` or
+  `star_count`.
+- **Granted.** Reads need `read` on every chat they name. Chat-scoped
+  changes need `read_write` on every chat they act in (a forward's or an
+  external reply's source needs `read`), are refused for a bot the user
+  never talked to, wait for "Confirm each send" when it is on, and take a
+  turn in the paced queue. Sends also go through the paid-chat check, the
+  new-conversation cap and the delivery wait.
 
-Answers pass through a redactor. A `chat`, or any typed object with a
-`chat_id`, from a chat the agent may not read is replaced by a stub with
-`"hidden"`; `chat_ids` lists keep only granted chats; `phone_number` fields
-are dropped (agents never see phone numbers); `sponsored*` objects get
-`"sponsored": true` so agents can label ads. The contact-list reads need
-the contacts grant. Every call that isn't a read is logged under
-`td_call` with its method, and declines are logged as such.
+An allowed Ask still needs the grants on every chat it names, and an
+allowed send still goes through the queue. The Allow dialog shows the
+agent's reason and the whole sanitized request, scrollable.
 
-Why the deny list asks instead of refusing: the plan lets a user tell an
-agent "log out my old laptop session" or "send Ann a gift" and approve it,
-while no agent can do either on its own.
+**Answers** pass through `td_redact.rs`. Anything belonging to a chat the
+agent may not read (`chat`, `supergroup`, `basicGroup`, `secretChat`, any
+object with a `…chat_id`) is dropped from lists, and a list's
+`total_count` then counts what is left; elsewhere it becomes a stub with
+no id. Every `…chat_ids` list keeps only granted chats. `phone_number`
+fields are dropped. `sponsored*` objects get `"sponsored": true`. The
+contact-list reads need the contacts grant. Every call that isn't a read is
+logged under `td_call` with its method, and declines are logged as such.
+
+Why the deny list asks instead of refusing: a user can tell an agent "log
+out my old laptop session" or "send Ann a gift" and approve it, while no
+agent can do either on its own.

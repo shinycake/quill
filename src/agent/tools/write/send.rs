@@ -38,7 +38,7 @@ fn sent_output(
 }
 
 /// Whether `file` lives in Quill's data folder, resolving links first.
-fn in_quill_data(file: &Path) -> bool {
+pub(in crate::agent::tools) fn in_quill_data(file: &Path) -> bool {
     let Some(root) = crate::settings::safe_app_root() else {
         return false;
     };

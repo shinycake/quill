@@ -7,7 +7,7 @@
 mod change;
 pub(super) mod common;
 mod manage;
-mod send;
+pub(super) mod send;
 
 use super::Tool;
 

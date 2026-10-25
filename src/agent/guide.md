@@ -155,28 +155,32 @@ request as JSON (the `@type` is the method; fields as in the
 
     td_call {"request": {"@type": "getChatPinnedMessage", "chat_id": -1001234567890}}
 
-- Grants apply to every chat the request names: `chat_id`, `from_chat_id`,
-  `chat_ids`, and the chat behind a `supergroup_id`, `basic_group_id` or
-  `secret_chat_id`. Methods that start with `get`, `search` or `check` need
-  `read`; changes need `read_write` on the chat they act in. A change aimed
-  at a `user_id` acts in the private chat with that user.
-- Sends (`sendMessage`, `sendMessageAlbum`, `forwardMessages`...) share the
-  paced queue with `send_message`.
-- Reads that name no chat (`getMe`, `getChats`, `searchPublicChats`) just
-  run; their answers are filtered as below. Sends wait for delivery and
-  return the final message ids.
-- The account itself (sign-out, sessions, password, phone, privacy, the
-  profile, any change that names no chat) and anything that can spend Stars,
-  TON or money wait for the user to click Allow in Quill. Pass `reason`:
-  the user reads it. One Allow covers one call.
-- Quill's own plumbing never runs: `setOption`, the sign-in flow, closing
-  the client, logs.
-- Answers hide what you may not read: a chat that is not granted comes back
-  as `{"@type": "chat", "id": …, "hidden": "not granted to agents"}`, a
-  message from one as `{"@type": "message", "chat_id": …, "hidden": …}`,
-  and `chat_ids` lists keep only granted chats (with `total_count` to match). Phone numbers are removed.
-  Sponsored messages (ads) carry `"sponsored": true`; never present them as
-  something the channel posted.
+- Quill checks the request against TDLib 1.8.69: an unknown method is
+  refused and fields the method doesn't have are dropped. Chat ids may be
+  numbers or numeric strings.
+- Grants apply to every chat id in the request (`chat_id`, `from_chat_id`,
+  `chat_ids`, any `…_chat_id`, and the chat behind a `supergroup_id`,
+  `basic_group_id` or `secret_chat_id`). Reads (`get…`, `search…`,
+  `check…`) need `read`. A change needs `read_write` on every chat it acts
+  in; a forward's source needs only `read`.
+- Only changes that act on one chat (the method has a `chat_id`) run under
+  the grants, paced like other writes and covered by "Confirm each send".
+  Sends (`sendMessage`, `sendMessageAlbum`, `forwardMessages`...) also wait
+  for delivery and return final message ids.
+- Everything else asks the user to click Allow in Quill, once per call:
+  changes that name no chat (the profile, folders, joining by link), the
+  account (sessions, password, phone, privacy, web logins, bot buttons,
+  passport data) and anything that can spend Stars, TON or money. Pass
+  `reason`; the user reads it next to the whole request.
+- Never available: Quill's own plumbing (`setOption`, the sign-in flow,
+  closing the client, logs), raw file access (use `download_file`), the
+  TON wallet, `getCurrentState`, and uploads from Quill's data folder.
+- Answers leave out what you may not read: items from chats that aren't
+  granted are dropped from lists (and `total_count` counts only what is
+  left), `…chat_ids` lists keep only granted chats, and a single object from
+  such a chat becomes `{"hidden": "not granted to agents"}`. Phone numbers
+  are removed. Sponsored messages (ads) carry `"sponsored": true`; never
+  present them as something the channel posted.
 - `getContacts` and `searchContacts` need the contacts grant.
 
 ## Events

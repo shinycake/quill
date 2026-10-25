@@ -1,32 +1,39 @@
 //! `td_call`: any TDLib request, for what the curated tools do not cover.
 //!
-//! [`td_policy`](super::td_policy) classes the method. Grants apply to every
-//! chat the request names (and to the private chat of a user, the chat of a
-//! group or channel id); sends share the paced queue; the deny list waits
-//! for the user's click. Answers pass through [`redact`]: chats the agent
-//! may not read are hidden wherever they appear, phone numbers are dropped,
-//! and sponsored messages are labelled as ads.
+//! The request is checked against the schema Quill is built with
+//! ([`td_schema`](super::td_schema)): unknown methods are refused, unknown
+//! fields dropped, chat ids made integers. [`td_policy`](super::td_policy)
+//! classes the method. Grants apply to every chat the request names; writes
+//! respect "Confirm each send" and the paced queue, sends wait for delivery;
+//! the deny list waits for the user's click. Answers pass through
+//! [`td_redact`](super::td_redact).
 
 use super::target::{self, Target};
 use super::td_policy::{self, Class};
+use super::td_redact;
+use super::td_request::{chats_named, has_type, local_paths, sanitize, spends};
+use super::td_schema;
 use super::write::common::{self, ANSWER_WAIT, log_in, record, take_write_turn, write_error};
+use super::write::send::in_quill_data;
 use super::{Ctx, Tool, ToolError, ToolOutput, current_agent, still_allowed};
 use crate::agent::grants::{self, Scope};
 use crate::agent::prompts::{self, Ask, Decision, Risk};
-use crate::agent::td;
+use crate::agent::{access, td};
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
+use std::path::Path;
 
 pub(super) const TOOLS: &[Tool] = &[Tool {
     name: "td_call",
     title: "Raw TDLib call",
     description: "Use only when no other tool does the job: sends one TDLib request (https://core.telegram.org/tdlib/docs/td__api_8h.html) \
-as the user and returns TDLib's answer. Chat grants apply to every chat, user, group or channel id in the request; reads need read, \
-changes need read_write; sends are paced like send_message. Requests that touch the account (sign-out, sessions, password, phone, \
-profile) or can spend Stars, TON or money wait for the user to click Allow in Quill: pass reason. Chats the agent may not read come \
-back as {\"@type\": \"chat\", \"id\": …, \"hidden\": …}; phone numbers are removed; sponsored messages carry \"sponsored\": true. \
+as the user and returns TDLib's answer. Grants apply to every chat id in the request: reads need read, changes to one chat need \
+read_write, and sends are paced like send_message and return final message ids. Changes that name no chat, anything touching the \
+account (sessions, password, phone, privacy, web logins, bot buttons) and anything that can spend Stars, TON or money wait for the \
+user to click Allow in Quill: pass reason. Raw file access and Quill's own options never run. Answers leave out chats the agent may \
+not read (lists count only what is left), phone numbers are removed, sponsored messages carry \"sponsored\": true. \
 Example input: {\"request\": {\"@type\": \"getChatPinnedMessage\", \"chat_id\": -1001234567890}}, or {\"request\": {\"@type\": \"setBio\", \
-\"bio\": \"Building things\"}, \"reason\": \"The user asked me to update their bio.\"}. Output: result (TDLib's answer object).",
+\"bio\": \"Building things\"}, \"reason\": \"The user asked me to update their bio.\"}. Output: method, result (TDLib's answer object).",
     schema,
     run,
     read_only: false,
@@ -34,105 +41,17 @@ Example input: {\"request\": {\"@type\": \"getChatPinnedMessage\", \"chat_id\": 
 
 /// Text answers longer than this are cut; `structuredContent` keeps all.
 const TEXT_CAP: usize = 20_000;
-const HIDDEN: &str = "not granted to agents";
 
 fn schema() -> Value {
     json!({
         "type": "object",
         "properties": {
             "request": {"type": "object", "description": "The TDLib request: an object with \"@type\" (the method) and its fields, as in the TDLib JSON interface."},
-            "reason": {"type": "string", "description": "One sentence for the user on why, shown when Quill must ask (account changes, anything that can spend money)."},
+            "reason": {"type": "string", "description": "One sentence for the user on why, shown when Quill must ask (account changes, changes that name no chat, anything that can spend money)."},
         },
         "required": ["request"],
         "additionalProperties": false,
     })
-}
-
-/// Telegram's offsets between a group or channel id and its chat id.
-const SUPERGROUP_BASE: i64 = -1_000_000_000_000;
-const SECRET_BASE: i64 = -2_000_000_000_000;
-
-/// The chats a request names: (chat id, whether it is acted on rather than
-/// only read from). Top-level chat ids are acted on, except `from_chat_id`;
-/// ids deeper in the request are sources.
-fn chats_named(request: &Value, write: bool) -> Vec<(i64, bool)> {
-    let mut named = Vec::new();
-    let Some(fields) = request.as_object() else {
-        return named;
-    };
-    let int = |key: &str| {
-        fields
-            .get(key)
-            .and_then(Value::as_i64)
-            .filter(|id| *id != 0)
-    };
-    if let Some(id) = int("chat_id") {
-        named.push((id, true));
-    }
-    if let Some(id) = int("from_chat_id") {
-        named.push((id, false));
-    }
-    for id in fields
-        .get("chat_ids")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_i64)
-    {
-        named.push((id, true));
-    }
-    if let Some(id) = int("supergroup_id") {
-        named.push((SUPERGROUP_BASE.saturating_sub(id), true));
-    }
-    if let Some(id) = int("basic_group_id") {
-        named.push((id.saturating_neg(), true));
-    }
-    if let Some(id) = int("secret_chat_id") {
-        named.push((SECRET_BASE.saturating_add(id), true));
-    }
-    // A profile is not a chat to read, but a change aimed at a user acts in
-    // the private chat with them.
-    if write && let Some(id) = int("user_id") {
-        named.push((id, true));
-    }
-    for (key, value) in fields {
-        if !matches!(key.as_str(), "chat_id" | "from_chat_id" | "chat_ids") {
-            nested_chats(value, &mut named);
-        }
-    }
-    named
-}
-
-fn nested_chats(value: &Value, named: &mut Vec<(i64, bool)>) {
-    match value {
-        Value::Object(fields) => {
-            for (key, inner) in fields {
-                if matches!(key.as_str(), "chat_id" | "from_chat_id")
-                    && let Some(id) = inner.as_i64().filter(|id| *id != 0)
-                {
-                    named.push((id, false));
-                } else {
-                    nested_chats(inner, named);
-                }
-            }
-        }
-        Value::Array(items) => items.iter().for_each(|item| nested_chats(item, named)),
-        _ => {}
-    }
-}
-
-/// Whether any type in the request can spend money: `reactionTypePaid`,
-/// `inputMessageStakeDice`, an invoice.
-fn spends(value: &Value) -> bool {
-    match value {
-        Value::Object(fields) => fields.iter().any(|(key, inner)| {
-            (key == "@type" && inner.as_str().is_some_and(td_policy::names_money))
-                || (key == "paid_message_star_count" && inner.as_i64().is_some_and(|n| n > 0))
-                || spends(inner)
-        }),
-        Value::Array(items) => items.iter().any(spends),
-        _ => false,
-    }
 }
 
 /// Grant lookups for one call, cached.
@@ -183,49 +102,21 @@ impl<'a> Grants<'a> {
         }
         Ok(())
     }
-}
 
-/// Hide what the agent may not see in a TDLib answer.
-fn redact(value: &mut Value, grants: &mut Grants) {
-    match value {
-        Value::Object(fields) => {
-            let kind = fields
-                .get("@type")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string();
-            let own_chat = if kind == "chat" {
-                fields.get("id").and_then(Value::as_i64)
-            } else if kind.is_empty() {
-                None
-            } else {
-                fields.get("chat_id").and_then(Value::as_i64)
-            };
-            if let Some(chat_id) = own_chat.filter(|id| *id != 0)
-                && !grants.allows(chat_id, Scope::Read)
-            {
-                let key = if kind == "chat" { "id" } else { "chat_id" };
-                *value = json!({"@type": kind, key: chat_id, "hidden": HIDDEN});
-                return;
-            }
-            fields.remove("phone_number");
-            if kind.starts_with("sponsored") {
-                fields.insert("sponsored".into(), Value::Bool(true));
-            }
-            if let Some(Value::Array(ids)) = fields.get_mut("chat_ids") {
-                ids.retain(|id| id.as_i64().is_some_and(|id| grants.allows(id, Scope::Read)));
-                let kept = ids.len();
-                // A count of the whole list would tell how many chats are hidden.
-                if fields.contains_key("total_count") {
-                    fields.insert("total_count".into(), json!(kept));
-                }
-            }
-            for inner in fields.values_mut() {
-                redact(inner, grants);
-            }
+    /// The chat a write acts in, if granted and not a stranger's bot.
+    fn writable(&mut self, chat_id: i64) -> Result<Target, ToolError> {
+        let ctx = self.ctx;
+        let target = self
+            .target(chat_id)
+            .cloned()
+            .ok_or_else(|| ToolError::new("This change needs chat_id, the chat it acts in."))?;
+        if target::stranger_bot(ctx, &target) {
+            return Err(ToolError::new(format!(
+                "\"{}\" is a bot the user has never talked to, so the bots default does not cover writing to it. Call request_access {{\"chat\": {chat_id}, \"scope\": \"read_write\", \"reason\": \"<why>\"}} to ask the user.",
+                target.title
+            )));
         }
-        Value::Array(items) => items.iter_mut().for_each(|item| redact(item, grants)),
-        _ => {}
+        Ok(target)
     }
 }
 
@@ -242,6 +133,14 @@ fn method_of(request: &Value) -> Result<String, ToolError> {
         })
 }
 
+fn preview_of(request: &Value) -> String {
+    serde_json::to_string_pretty(request)
+        .unwrap_or_default()
+        .chars()
+        .take(2000)
+        .collect()
+}
+
 /// Wait for the user to allow a deny-listed call.
 fn ask_user(
     ctx: &Ctx,
@@ -255,22 +154,17 @@ fn ask_user(
             "{method} needs the user's click in Quill. Call td_call again with \"reason\": one sentence on why, which the user reads."
         )));
     }
-    let preview: String = serde_json::to_string_pretty(request)
-        .unwrap_or_default()
-        .chars()
-        .take(1000)
-        .collect();
     let ask = Ask::Raw {
         method: method.to_string(),
         risk,
-        preview,
+        preview: preview_of(request),
     };
     let (id, rx) = prompts::file(ctx.account.clone(), current_agent(), ask, reason.to_string())
         .ok_or_else(|| {
             ToolError::new("Several requests are already waiting for the user in Quill. Wait for those answers, then retry.")
         })?;
     match prompts::wait(id, &rx, ANSWER_WAIT) {
-        Some(Decision::Allowed) => Ok(()),
+        Some(Decision::Allowed) => still_allowed(),
         Some(Decision::Denied) => {
             record(ctx, 0, "", "td_call", method, false, true);
             Err(ToolError::new(
@@ -294,6 +188,31 @@ fn send_count(request: &Value) -> u32 {
         })
 }
 
+/// Send through the paced queue, waiting for delivery so the answer
+/// carries final message ids; `common::send` logs it.
+fn send(ctx: &Ctx, target: &Target, method: &str, request: Value) -> Result<Value, ToolError> {
+    let count = send_count(&request);
+    let mut sent = common::send(ctx, target, "td_call", method, request, count)?;
+    if sent.len() == 1 && method != "sendMessageAlbum" && method != "forwardMessages" {
+        Ok(sent.remove(0))
+    } else {
+        Ok(json!({"@type": "messages", "total_count": sent.len(), "messages": sent}))
+    }
+}
+
+/// Refuses uploads from Quill's own data folder (sign-in keys, the agent
+/// token, the cache).
+fn check_uploads(request: &Value) -> Result<(), ToolError> {
+    let mut paths = Vec::new();
+    local_paths(request, &mut paths);
+    match paths.iter().find(|path| in_quill_data(Path::new(path))) {
+        Some(path) => Err(ToolError::new(format!(
+            "{path} is inside Quill's own data folder; agents cannot upload files from there."
+        ))),
+        None => Ok(()),
+    }
+}
+
 fn run(args: &Value) -> Result<ToolOutput, ToolError> {
     let mut request = args
         .get("request")
@@ -305,66 +224,69 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
         .get("reason")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    if let Some(fields) = request.as_object_mut() {
-        // Quill routes answers by @extra; an agent's own would be dropped.
-        fields.remove("@extra");
-        fields.remove("@client_id");
+    let schema = td_schema::get();
+    let entry = schema.functions.get(&method).ok_or_else(|| {
+        ToolError::new(format!(
+            "TDLib has no method {method} (Quill is built with TDLib 1.8.69). Check the name and case in the TDLib API reference."
+        ))
+    })?;
+    let chat_scoped = entry.type_of("chat_id") == Some("int53");
+    let takes_file = entry.has("file_id");
+    sanitize(&mut request, schema, true).map_err(ToolError::new)?;
+    let mut class = td_policy::classify(&method, takes_file, chat_scoped);
+    if has_type(&request, "callbackQueryPayloadDataWithPassword") {
+        class = Class::Blocked("agents never send the user's password.");
     }
-    let ctx = Ctx::active()?;
-    let mut grants = Grants::new(&ctx)?;
-    let write_named = !matches!(
-        td_policy::classify(&method, true),
-        Class::Granted(Scope::Read)
-    );
-    let named = chats_named(&request, write_named);
-    let mut class = td_policy::classify(&method, !named.is_empty());
     if !matches!(class, Class::Blocked(_) | Class::Ask(_)) && spends(&request) {
         class = Class::Ask(Risk::Money);
     }
-    let first_chat = named.first().map(|(id, _)| *id).unwrap_or(0);
+    if let Class::Blocked(why) = class {
+        return Err(ToolError::new(format!(
+            "td_call does not run {method}: {why}"
+        )));
+    }
+    check_uploads(&request)?;
+    let ctx = Ctx::active()?;
+    let mut grants = Grants::new(&ctx)?;
+    let named = chats_named(&request);
+    let first_chat = request
+        .get("chat_id")
+        .and_then(Value::as_i64)
+        .or_else(|| named.first().map(|(id, _)| *id))
+        .unwrap_or(0);
     let answer = match class {
-        Class::Blocked(why) => {
-            return Err(ToolError::new(format!(
-                "td_call does not run {method}: {why}"
-            )));
-        }
+        Class::Blocked(_) => return Err(ToolError::new("Not available to agents.")),
         Class::Ask(risk) => {
+            grants.require(&named, Scope::ReadWrite)?;
             ask_user(&ctx, &method, risk, &request, reason)?;
-            still_allowed()?;
-            td::call(&ctx.client, request).map_err(write_error)
+            if td_policy::SENDS.contains(&method.as_str()) {
+                let target = grants.writable(first_chat)?;
+                send(&ctx, &target, &method, request)
+            } else {
+                td::call(&ctx.client, request).map_err(write_error)
+            }
         }
-        Class::Granted(scope) => {
+        Class::Granted(Scope::Read) => {
             if is_contacts(&method) && !grants::for_account(&ctx.account).contacts {
                 return Err(ToolError::new(
                     "The contact list is not granted. Call request_access {\"contacts\": true, \"reason\": \"<why>\"} to ask the user.",
                 ));
             }
-            grants.require(&named, scope)?;
-            if scope == Scope::ReadWrite {
-                take_write_turn(&ctx, first_chat)?;
-            }
-            let result = td::call(&ctx.client, request);
-            if scope == Scope::Read {
-                result.map_err(ToolError::from)
-            } else {
-                result.map_err(write_error)
-            }
+            grants.require(&named, Scope::Read)?;
+            td::call(&ctx.client, request).map_err(ToolError::from)
+        }
+        Class::Granted(Scope::ReadWrite) => {
+            grants.require(&named, Scope::ReadWrite)?;
+            let target = grants.writable(first_chat)?;
+            confirm(&ctx, &target, &request)?;
+            take_write_turn(&ctx, target.chat_id)?;
+            td::call(&ctx.client, request).map_err(write_error)
         }
         Class::Send => {
             grants.require(&named, Scope::ReadWrite)?;
-            let target = grants
-                .target(first_chat)
-                .cloned()
-                .ok_or_else(|| ToolError::new("A send needs chat_id, the chat to send in."))?;
-            // Paced, then waited on until Telegram delivers, so the answer
-            // carries final message ids; `send` logs it.
-            let count = send_count(&request);
-            let mut sent = common::send(&ctx, &target, "td_call", &method, request, count)?;
-            if sent.len() == 1 && method != "sendMessageAlbum" && method != "forwardMessages" {
-                Ok(sent.remove(0))
-            } else {
-                Ok(json!({"@type": "messages", "total_count": sent.len(), "messages": sent}))
-            }
+            let target = grants.writable(first_chat)?;
+            confirm(&ctx, &target, &request)?;
+            send(&ctx, &target, &method, request)
         }
     };
     if !matches!(class, Class::Granted(Scope::Read) | Class::Send) {
@@ -375,7 +297,22 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
         log_in(&ctx, first_chat, &title, "td_call", &method, answer.is_ok());
     }
     let mut result = answer?;
-    redact(&mut result, &mut grants);
+    td_redact::redact(&mut result, &mut |chat_id| {
+        grants.allows(chat_id, Scope::Read)
+    });
+    Ok(output(method, result))
+}
+
+/// "Confirm each send" covers raw writes too.
+fn confirm(ctx: &Ctx, target: &Target, request: &Value) -> Result<(), ToolError> {
+    if access::confirm_sends() {
+        common::confirm(ctx, target, "td_call", &preview_of(request))
+    } else {
+        Ok(())
+    }
+}
+
+fn output(method: String, result: Value) -> ToolOutput {
     let mut text = serde_json::to_string(&result).unwrap_or_default();
     if text.len() > TEXT_CAP {
         let cut = (0..=TEXT_CAP)
@@ -388,10 +325,10 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
     let mut data = Map::new();
     data.insert("method".into(), Value::String(method));
     data.insert("result".into(), result);
-    Ok(ToolOutput {
+    ToolOutput {
         text,
         data: Value::Object(data),
-    })
+    }
 }
 
 /// Methods that read the contact list, which has a grant of its own.
@@ -401,39 +338,8 @@ fn is_contacts(method: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{chats_named, send_count, spends};
+    use super::send_count;
     use serde_json::json;
-
-    #[test]
-    fn every_chat_a_request_names_is_checked() {
-        let forward = json!({"@type": "forwardMessages", "chat_id": 5, "from_chat_id": 6, "message_ids": [1, 2]});
-        assert_eq!(chats_named(&forward, true), vec![(5, true), (6, false)]);
-        let members = json!({"@type": "getSupergroupMembers", "supergroup_id": 77});
-        assert_eq!(
-            chats_named(&members, false),
-            vec![(-1_000_000_000_077, true)]
-        );
-        let nested = json!({"@type": "sendMessage", "chat_id": 5, "input_message_content":
-            {"@type": "inputMessageForwarded", "from_chat_id": 9, "message_id": 1}});
-        assert_eq!(chats_named(&nested, true), vec![(5, true), (9, false)]);
-        let profile = json!({"@type": "getUserFullInfo", "user_id": 42});
-        assert!(chats_named(&profile, false).is_empty());
-        let block = json!({"@type": "setUserPersonalProfilePhoto", "user_id": 42});
-        assert_eq!(chats_named(&block, true), vec![(42, true)]);
-    }
-
-    #[test]
-    fn paid_content_needs_the_user() {
-        assert!(spends(
-            &json!({"@type": "addMessageReaction", "reaction_type": {"@type": "reactionTypePaid"}})
-        ));
-        assert!(spends(
-            &json!({"@type": "sendMessage", "options": {"paid_message_star_count": 10}})
-        ));
-        assert!(!spends(
-            &json!({"@type": "sendMessage", "input_message_content": {"@type": "inputMessageText"}})
-        ));
-    }
 
     #[test]
     fn albums_and_forwards_pace_per_message() {
