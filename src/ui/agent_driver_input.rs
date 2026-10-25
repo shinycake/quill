@@ -20,6 +20,7 @@ use quill::agent::ui_driver::guard;
 use quill::agent::ui_driver::keys::{self, KeyChord};
 use quill::agent::ui_driver::policy;
 use quill::agent::ui_driver::redact;
+use quill::agent::ui_driver::takeover::{self, Aim};
 use quill::agent::ui_driver::tree::UiTree;
 use quill::composer::SendKeyMode;
 
@@ -47,6 +48,17 @@ pub(super) enum Step {
 }
 
 impl Step {
+    /// Whether the step clicks (the ghost cursor pulses).
+    pub(super) fn presses(&self) -> bool {
+        matches!(
+            self,
+            Step::Pointer {
+                pointer: Pointer::Click { .. } | Pointer::Menu,
+                ..
+            }
+        )
+    }
+
     /// Whether a frame should pass before this step, so the focus and the
     /// surface reflect the step before it. Plain characters run back to
     /// back; anything that could activate a control waits.
@@ -325,6 +337,38 @@ pub(super) fn perform_key_step(
             Ok(())
         }
     }
+}
+
+/// Show the takeover's ghost cursor where `step` is about to act: the
+/// pointer target, or the focused text box's caret for typing. Returns
+/// whether the cursor glides there (a pointer step waits for it). A target
+/// that does not resolve shows nothing; the step itself says why.
+pub(super) fn aim_step(step: &Step, tree: &UiTree, window: &mut Window, cx: &mut App) -> bool {
+    let (aim, to) = match step {
+        Step::Pointer { target, pointer } => {
+            let Ok(position) = resolve(target, tree, window) else {
+                return false;
+            };
+            let aim = match pointer {
+                Pointer::Click { .. } => Aim::Click,
+                Pointer::Menu => Aim::Menu,
+                Pointer::Hover => Aim::Hover,
+                Pointer::Scroll { .. } => Aim::Scroll,
+            };
+            (aim, (position.x.as_f32(), position.y.as_f32()))
+        }
+        Step::Char(_) | Step::Newline => {
+            let Some(caret) = window.focused_text_caret(cx) else {
+                return false;
+            };
+            let right = caret.origin.x + caret.size.width;
+            (Aim::Type, (right.as_f32(), caret.origin.y.as_f32()))
+        }
+        Step::Chord(_) => return false,
+    };
+    takeover::note_aim(aim, to);
+    window.refresh();
+    aim != Aim::Type
 }
 
 impl QuillApp {

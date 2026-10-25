@@ -23,6 +23,7 @@ use quill::agent::ui_driver::bridge::{self, Pending, Target, UiCommand, UiReply,
 use quill::agent::ui_driver::guard;
 use quill::agent::ui_driver::policy;
 use quill::agent::ui_driver::surface::{self, Surface};
+use quill::agent::ui_driver::takeover;
 use quill::agent::ui_driver::tree::UiTree;
 use quill::composer::SendKeyMode;
 use std::time::Duration;
@@ -92,6 +93,7 @@ impl QuillApp {
             return;
         }
         bridge::note_drive();
+        takeover::note_command(&pending.request.agent);
         window.set_a11y_forced(true);
         let send_key_mode = self.chat_prefs.send_key_mode;
         let generation = grants::generation();
@@ -133,6 +135,13 @@ impl QuillApp {
                     stopped = Some(note);
                     break;
                 }
+                // The ghost cursor glides to where the step lands first.
+                let glides = app
+                    .update_in(cx, |_, window, cx| input::aim_step(step, &tree, window, cx))
+                    .unwrap_or(false);
+                if glides {
+                    cx.background_executor().timer(takeover::GLIDE).await;
+                }
                 // Three synchronous parts on the UI thread, nothing runs in
                 // between: the checks hold the app, the injection holds only
                 // the window (its handlers update the app themselves).
@@ -165,6 +174,9 @@ impl QuillApp {
                     }
                     Ok(Ok(())) => {
                         done += 1;
+                        if step.presses() {
+                            takeover::note_press();
+                        }
                         if let Ok(Some(send)) = send {
                             ui_send = Some(send);
                         }

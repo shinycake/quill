@@ -315,6 +315,12 @@ fn sees_prompts() -> bool {
     true
 }
 
+/// Whether this window shows agent state: always, except in UI tests that
+/// did not set agent state up.
+pub(super) fn sees_agents() -> bool {
+    sees_prompts()
+}
+
 /// The agents connected now.
 pub(super) fn visible_connected() -> Vec<activity::Connected> {
     if sees_prompts() {

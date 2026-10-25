@@ -861,6 +861,9 @@ impl Render for QuillApp {
         let root = root.when(self.account.passcode.locked, |this| {
             this.child(self.lock_overlay(cx))
         });
+        // An agent driving the window: the glow, the ghost cursor and the
+        // pill, deferred above everything (`agent_takeover`).
+        let root = root.children(self.takeover_layer(window, cx));
         let root = match image_cache {
             Some(cache) => super::image_budget::CacheScope::new(cache, root).into_any_element(),
             None => root.into_any_element(),

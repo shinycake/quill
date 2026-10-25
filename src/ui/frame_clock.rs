@@ -37,6 +37,14 @@ impl QuillApp {
         self.request_tick(target, fps, false, cx);
     }
 
+    /// [`Self::request_animation_tick`] for the whole app that keeps
+    /// ticking behind another app: the agent takeover, which the user
+    /// watches from the app the agent runs in.
+    #[track_caller]
+    pub(super) fn request_background_animation_tick(&self, fps: u32, cx: &mut Context<Self>) {
+        self.request_tick(None, fps, true, cx);
+    }
+
     #[track_caller]
     fn request_tick(
         &self,
