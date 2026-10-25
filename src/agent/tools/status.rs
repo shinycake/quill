@@ -28,7 +28,12 @@ pub fn run(_args: &Value) -> Result<ToolOutput, ToolError> {
     }
     text.push_str("A chat that is not granted can be asked for with request_access.\n");
     text.push_str(&format!("Tools: {}.\n", tools.join(", ")));
-    text.push_str("UI driver: not available in this version.\n");
+    let ui_driver = crate::agent::access::ui_driver();
+    text.push_str(if ui_driver {
+        "UI driver: on (read_ui_tree, click_element, type_text, press_keys, scroll_view, hover_element, open_menu).\n"
+    } else {
+        "UI driver: off. The user can turn on \"Let agents drive Quill's window\" in Settings > Advanced > Agent access.\n"
+    });
     text.push_str("Next: list_unread to catch up, or list_chats to find a chat.");
     Ok(ToolOutput {
         text,
@@ -42,7 +47,11 @@ pub fn run(_args: &Value) -> Result<ToolOutput, ToolError> {
             },
             "grants": grants.describe(),
             "tools": tools,
-            "ui_driver": {"available": false, "active": false},
+            "ui_driver": {
+                "available": ui_driver,
+                "active": crate::agent::ui_driver::bridge::wants_forced(),
+                "paused": crate::agent::ui_driver::bridge::paused(),
+            },
         }),
     })
 }

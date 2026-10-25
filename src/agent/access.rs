@@ -23,6 +23,9 @@ struct Stored {
     enabled: bool,
     /// Every write waits for the user's click in Quill.
     confirm_sends: bool,
+    /// Agents may read Quill's window and click, type and scroll in it
+    /// ("Let agents drive Quill's window", `super::ui_driver`).
+    ui_driver: bool,
 }
 
 static STORED: RwLock<Option<Stored>> = RwLock::new(None);
@@ -85,6 +88,9 @@ pub fn set_enabled(on: bool) {
     if !on {
         GENERATION.fetch_add(1, Ordering::SeqCst);
         super::prompts::deny_all();
+        super::ui_driver::bridge::refuse_all(
+            "Agent access was turned off in Quill, so nothing was sent to its window.",
+        );
     }
     crate::wake::AGENT.poke();
     publish_token();
@@ -97,6 +103,17 @@ pub fn confirm_sends() -> bool {
 
 pub fn set_confirm_sends(on: bool) {
     save(|stored| stored.confirm_sends = on);
+    crate::wake::AGENT.poke();
+}
+
+/// Whether agents may drive Quill's window (read its element tree, click,
+/// type and scroll). Off by default; needs the main switch too.
+pub fn ui_driver() -> bool {
+    stored().ui_driver
+}
+
+pub fn set_ui_driver(on: bool) {
+    save(|stored| stored.ui_driver = on);
     crate::wake::AGENT.poke();
 }
 

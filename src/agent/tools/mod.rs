@@ -13,6 +13,7 @@ mod status;
 mod target;
 mod td_call;
 mod td_policy;
+mod ui;
 mod write;
 
 use crate::agent::td::{self, Client, TdError};
@@ -82,9 +83,13 @@ impl Ctx {
     }
 }
 
-/// Every tool: the read tools, the write tools, then `td_call`.
+/// Every tool: the read tools, the write tools, `td_call`, then the UI driver.
 fn all_tools() -> impl Iterator<Item = &'static Tool> {
-    READ_TOOLS.iter().chain(write::TOOLS).chain(td_call::TOOLS)
+    READ_TOOLS
+        .iter()
+        .chain(write::TOOLS)
+        .chain(td_call::TOOLS)
+        .chain(ui::TOOLS)
 }
 
 struct Tool {

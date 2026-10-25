@@ -7052,6 +7052,14 @@ impl Window {
         self.a11y.is_forced()
     }
 
+    /// Whether assistive technology asked for the tree this frame. Unlike
+    /// [`Self::is_a11y_active`], a tree forced with [`Self::set_a11y_forced`]
+    /// does not count, so behaviour meant for screen-reader users (focus
+    /// announcements, key handling) can key off this.
+    pub fn is_a11y_system_active(&self) -> bool {
+        self.a11y.is_system_active()
+    }
+
     /// The accessibility tree of the last frame that built one, with bounds
     /// in window logical pixels. `None` until a frame built a tree (see
     /// [`Self::is_a11y_active`] and [`Self::set_a11y_forced`]).
