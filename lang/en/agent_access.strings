@@ -124,3 +124,10 @@
 "qll_agent_takeover_paused" = "Paused";
 "qll_agent_takeover_paused_line" = "{agent} will wait until you let it continue";
 "qll_agent_takeover_continue" = "Let it continue";
+"qll_agent_takeover_effect" = "Takeover effect";
+"qll_agent_takeover_effect_auto" = "Automatic";
+"qll_agent_takeover_effect_sweep" = "Glow and sweep";
+"qll_agent_takeover_effect_still" = "Still glow";
+"qll_agent_takeover_effect_auto_hint" = "A light sweeps round the glow while an agent drives. It holds still with reduced motion, Power Saving or the system's low-power mode.";
+"qll_agent_takeover_effect_sweep_hint" = "A light always sweeps round the glow while an agent drives. With reduced motion it still holds still.";
+"qll_agent_takeover_effect_still_hint" = "The glow around the window holds still while an agent drives.";

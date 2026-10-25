@@ -1,99 +1,61 @@
 //! The glow around the window's edge while an agent drives, in the theme's
-//! accent. Three looks, picked with `QUILL_AGENT_GLOW` for comparison:
+//! accent: a thin accent border with a soft bloom inside it, and a light
+//! that sweeps round the edge on top of it while the agent drives.
 //!
-//! - `edge` (the default): a thin accent border with a soft bloom inside
-//!   it. It only fades in and out; the steady state does not move.
-//! - `breathe`: the bloom slowly brightens and dims.
-//! - `sweep`: a faint bloom with a short light travelling around the edge.
-//!
-//! With reduced motion every look is the still `edge`. Paint only: nothing
+//! The sweep runs only while the agent drives: paused it holds still where
+//! it was, and it fades out with the border on Stop or a disconnect.
+//! [`sweep_allowed`] is the one place that decides whether it may move at
+//! all ("Takeover effect", reduced motion, Power Saving, the system's
+//! low-power mode); otherwise the border holds still. Paint only: nothing
 //! here has a hitbox, so input goes to whatever is underneath.
 #![deny(clippy::indexing_slicing)]
 
 use gpui_kit::*;
+use quill::power_saving::{self, Flag};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum GlowStyle {
-    Edge,
-    Breathe,
-    Sweep,
-}
-
-/// One breath, and one lap of the sweep.
-const BREATH_MS: f32 = 2800.0;
-const SWEEP_MS: f32 = 3200.0;
+/// One lap of the sweep.
+const SWEEP_MS: f32 = 5000.0;
 /// The sweep's light, along the edge.
-const SWEEP_LENGTH: f32 = 260.0;
-/// Frames per second while a look moves by itself.
+const SWEEP_LENGTH: f32 = 340.0;
+/// How thick the light's core is, over the 2 px border.
+const SWEEP_THICKNESS: f32 = 5.0;
+/// Frames per second while the light sweeps. The window redraws whole on
+/// each frame, so this is the sweep's cost; a lap of 5 s moves the light
+/// about 48 px a frame on a 1100x720 window, a seventh of its length, so
+/// its soft ends still read as gliding.
+pub(super) const SWEEP_FPS: u32 = 15;
+/// Frames per second for the fades, glides and the press pulse.
 pub(super) const GLOW_FPS: u32 = 30;
 
-impl GlowStyle {
-    pub(super) fn parse(name: &str) -> Option<Self> {
-        match name.trim() {
-            "edge" => Some(Self::Edge),
-            "breathe" => Some(Self::Breathe),
-            "sweep" => Some(Self::Sweep),
-            _ => None,
-        }
-    }
-
-    /// `QUILL_AGENT_GLOW=edge|breathe|sweep`, else `edge`.
-    pub(super) fn chosen() -> Self {
-        static CHOSEN: std::sync::OnceLock<GlowStyle> = std::sync::OnceLock::new();
-        *CHOSEN.get_or_init(|| {
-            std::env::var("QUILL_AGENT_GLOW")
-                .ok()
-                .and_then(|name| Self::parse(&name))
-                .unwrap_or(Self::Edge)
-        })
-    }
-
-    /// The look actually drawn: reduced motion keeps it still.
-    pub(super) fn shown(self, reduce_motion: bool) -> Self {
-        if reduce_motion { Self::Edge } else { self }
-    }
-
-    /// Whether the steady look moves (and so asks for frames).
-    pub(super) fn moves(self) -> bool {
-        !matches!(self, Self::Edge)
-    }
+/// Whether the light may sweep right now: the "Takeover effect" preference
+/// against reduced motion (the system's, or `QUILL_REDUCED_MOTION`) and
+/// power saving: Quill's Power Saving for interface animations (which the
+/// system's battery saver or heat force on unless "Save Power on Low
+/// Battery" is off) or the system's low-power mode itself (macOS Low Power
+/// Mode, the Windows battery saver, Linux's power-saver profile; read by
+/// `battery_saving`, unknown counts as not saving). Read on every render,
+/// so a change shows on the next frame.
+pub(super) fn sweep_allowed() -> bool {
+    let saving = power_saving::on(Flag::Animations) || quill::battery_saving::state() == Some(true);
+    quill::agent::access::takeover_effect().sweeps(power_saving::os_reduce_motion(), saving)
 }
 
 /// The glow at one moment.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct GlowFrame {
-    /// Overall strength, 0 to 1 (the fade times the look's own level).
+    /// Overall strength, 0 to 1 (the takeover's fade).
     pub(super) strength: f32,
-    /// The solid border (`edge`).
-    pub(super) border: bool,
-    /// Where the sweep's light is, as a fraction of the way round.
+    /// Where the sweep's light is, as a fraction of the way round; `None`
+    /// for the still border.
     pub(super) sweep: Option<f32>,
 }
 
-/// The glow for `style` at `now`, `elapsed` ms into the session, with the
-/// takeover `presence` (its fade, 0 to 1).
-pub(super) fn glow_frame(style: GlowStyle, presence: f32, elapsed: u64) -> GlowFrame {
-    let t = elapsed as f32;
-    match style {
-        GlowStyle::Edge => GlowFrame {
-            strength: presence,
-            border: true,
-            sweep: None,
-        },
-        GlowStyle::Breathe => {
-            let phase = (t / BREATH_MS).fract() * std::f32::consts::TAU;
-            let level = 0.55 + 0.45 * (0.5 - 0.5 * phase.cos());
-            GlowFrame {
-                strength: presence * level,
-                border: false,
-                sweep: None,
-            }
-        }
-        GlowStyle::Sweep => GlowFrame {
-            strength: presence * 0.6,
-            border: false,
-            sweep: Some((t / SWEEP_MS).fract()),
-        },
+/// The glow with the takeover `presence` (its fade, 0 to 1) and the sweep
+/// `sweep_ms` into its run, or the still border for `None`.
+pub(super) fn glow_frame(presence: f32, sweep_ms: Option<u64>) -> GlowFrame {
+    GlowFrame {
+        strength: presence,
+        sweep: sweep_ms.map(|t| (t as f32 / SWEEP_MS).fract()),
     }
 }
 
@@ -172,49 +134,67 @@ pub(super) fn sweep_pieces(at: f32, width: f32, height: f32, thickness: f32) -> 
     pieces
 }
 
+/// The light's core. On a dark theme the accent lifted towards white reads
+/// as light; on a light theme a lighter core would read as a gap in the
+/// border, so there the core is a deeper, more saturated accent and the
+/// light is its halo spreading into the window.
+fn highlight(accent: Hsla, dark: bool) -> Hsla {
+    if dark {
+        Hsla {
+            l: accent.l + (1.0 - accent.l) * 0.55,
+            ..accent
+        }
+    } else {
+        Hsla {
+            s: (accent.s * 1.15).min(1.0),
+            l: accent.l * 0.82,
+            ..accent
+        }
+    }
+}
+
+/// How strong the accent border is: dimmer while the light sweeps, so the
+/// light stands out against it, full when it holds still.
+fn border_alpha(sweeps: bool) -> f32 {
+    if sweeps { 0.55 } else { 0.85 }
+}
+
 /// The glow as elements filling a `width` x `height` window. `corner`
-/// follows the window's own rounded corners.
+/// follows the window's own rounded corners; `dark` is the theme's.
 pub(super) fn glow_element(
     frame: GlowFrame,
     accent: Hsla,
+    dark: bool,
     window_size: Size<Pixels>,
     corner: Pixels,
 ) -> AnyElement {
     let strength = frame.strength.clamp(0.0, 1.0);
-    let (bloom_alpha, blur, spread) = if frame.border {
-        (0.32, 18.0, 0.0)
-    } else {
-        (0.55, 28.0, 2.0)
-    };
     let bloom = BoxShadow {
-        color: accent.opacity(bloom_alpha * strength),
+        color: accent.opacity(0.32 * strength),
         offset: point(px(0.), px(0.)),
-        blur_radius: px(blur),
-        spread_radius: px(spread),
+        blur_radius: px(18.),
+        spread_radius: px(0.),
         inset: true,
     };
-    let mut layer = div()
+    let layer = div()
         .absolute()
         .top_0()
         .left_0()
         .w(window_size.width)
         .h(window_size.height)
         .rounded(corner)
-        .shadow(vec![bloom]);
-    if frame.border {
-        layer = layer
-            .border_2()
-            .border_color(accent.opacity(0.85 * strength));
-    }
+        .shadow(vec![bloom])
+        .border_2()
+        .border_color(accent.opacity(border_alpha(frame.sweep.is_some()) * strength));
     let width = window_size.width.as_f32();
     let height = window_size.height.as_f32();
     let pieces = frame
         .sweep
-        .map(|at| sweep_pieces(at, width, height, 3.0))
+        .map(|at| sweep_pieces(at, width, height, SWEEP_THICKNESS))
         .unwrap_or_default();
-    let light = |alpha: f32| accent.opacity(alpha * strength / 0.6);
+    let core = highlight(accent, dark);
     let lights = pieces.into_iter().map(|piece| {
-        let glow = (piece.start_alpha + piece.end_alpha) / 2.0;
+        let glow = (piece.start_alpha + piece.end_alpha) / 2.0 * strength;
         div()
             .absolute()
             .left(piece.bounds.origin.x)
@@ -223,50 +203,57 @@ pub(super) fn glow_element(
             .h(piece.bounds.size.height)
             .bg(linear_gradient(
                 piece.angle,
-                linear_color_stop(light(piece.start_alpha), 0.0),
-                linear_color_stop(light(piece.end_alpha), 1.0),
+                linear_color_stop(core.opacity(piece.start_alpha * strength), 0.0),
+                linear_color_stop(core.opacity(piece.end_alpha * strength), 1.0),
             ))
-            .shadow(vec![BoxShadow {
-                color: accent.opacity(0.7 * glow * strength / 0.6),
-                offset: point(px(0.), px(0.)),
-                blur_radius: px(14.),
-                spread_radius: px(1.),
-                inset: false,
-            }])
+            // Half of each shadow falls outside the window, so the light
+            // is a tight bright halo plus a wide soft bloom inwards.
+            .shadow(vec![
+                BoxShadow {
+                    color: accent.opacity(glow),
+                    offset: point(px(0.), px(0.)),
+                    blur_radius: px(12.),
+                    spread_radius: px(2.),
+                    inset: false,
+                },
+                BoxShadow {
+                    color: accent.opacity(0.8 * glow),
+                    offset: point(px(0.), px(0.)),
+                    blur_radius: px(48.),
+                    spread_radius: px(10.),
+                    inset: false,
+                },
+            ])
     });
     layer.children(lights).into_any_element()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{GlowStyle, glow_frame, sweep_pieces};
+    use super::{SWEEP_MS, border_alpha, glow_frame, highlight, sweep_pieces};
+    use gpui_kit::hsla;
 
     #[test]
-    fn styles_parse_and_reduced_motion_keeps_the_edge_still() {
-        assert_eq!(GlowStyle::parse("sweep"), Some(GlowStyle::Sweep));
-        assert_eq!(GlowStyle::parse("glitter"), None);
-        assert_eq!(GlowStyle::Breathe.shown(true), GlowStyle::Edge);
-        assert_eq!(GlowStyle::Sweep.shown(false), GlowStyle::Sweep);
-        assert!(!GlowStyle::Edge.moves());
-        assert!(GlowStyle::Breathe.moves());
+    fn the_still_border_has_no_light_and_the_sweep_laps() {
+        assert_eq!(glow_frame(1.0, None).sweep, None);
+        assert_eq!(glow_frame(0.4, None).strength, 0.4);
+        let lap = SWEEP_MS as u64;
+        assert_eq!(glow_frame(1.0, Some(lap / 4)).sweep, Some(0.25));
+        assert_eq!(glow_frame(1.0, Some(lap + lap / 4)).sweep, Some(0.25));
     }
 
     #[test]
-    fn the_edge_holds_still_and_the_breath_stays_soft() {
-        assert_eq!(
-            glow_frame(GlowStyle::Edge, 1.0, 0),
-            glow_frame(GlowStyle::Edge, 1.0, 1234)
-        );
-        let levels: Vec<f32> = (0..28)
-            .map(|step| glow_frame(GlowStyle::Breathe, 1.0, step * 100).strength)
-            .collect();
-        let low = levels.iter().copied().fold(f32::MAX, f32::min);
-        let high = levels.iter().copied().fold(f32::MIN, f32::max);
-        assert!(
-            low >= 0.55 && high <= 1.0 && high - low > 0.3,
-            "{low} {high}"
-        );
-        assert_eq!(glow_frame(GlowStyle::Breathe, 0.0, 700).strength, 0.0);
+    fn the_light_stands_out_from_the_border_in_both_themes() {
+        for accent in [hsla(0.6, 0.8, 0.5, 1.0), hsla(0.6, 0.7, 0.7, 1.0)] {
+            let dark = highlight(accent, true);
+            assert!(dark.l > accent.l + 0.1 && dark.l < 1.0, "{accent:?}");
+            let light = highlight(accent, false);
+            assert!(
+                light.l < accent.l - 0.05 && light.s >= accent.s,
+                "{accent:?}"
+            );
+        }
+        assert!(border_alpha(true) < border_alpha(false));
     }
 
     #[test]

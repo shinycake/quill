@@ -758,11 +758,15 @@ and derives the phase from them on every read, with the current clock and
 whether an agent is connected and allowed:
 
 - `Idle`: no session, or the last one has faded out.
-- `Driving`: from the first UI command, for as long as commands keep
-  coming (each one extends a 4 s hold) and the agent stays connected with
-  access and the driving switch on.
-- `Paused`: Esc or real input while driving. It lasts as long as the
-  agent stays connected; the hold does not run out while paused.
+- `Driving`: from the first input command (click, type, keys, scroll,
+  hover, menu; reads such as `read_ui_tree` start and extend nothing), for
+  as long as they keep coming (each one extends a 4 s hold) and the agent
+  stays connected with access and the driving switch on.
+- `Paused`: Esc or real input while driving. The hold does not run out
+  while paused. An agent that disconnects fades the layer out, but the
+  pause stays: when an agent connects again the paused pill fades back in
+  and every UI tool still refuses until the user presses "Let it
+  continue". Only the switches going off forget it.
 - `FadingOut`: the hold ran out, the agent disconnected, the switch went
   off, or the user pressed Stop. 600 ms, starting from however far the
   240 ms fade-in had got.
@@ -790,24 +794,61 @@ by `guard::injecting` and never counts. While driving:
 - pointer input on the pill answers the pill. The pill records its painted
   bounds each frame, and presses, moves and scrolls inside them never
   pause, so pressing Stop refuses queued commands with the Stop message
-  rather than the pause one.
+  rather than the pause one;
+- input while one of the agent's own prompts is open answers the prompt:
+  its request or confirm (`AgentRequest`, including "Confirm each send"
+  and `td_call` asks) and the all-chats consent. They are modal, so all
+  input goes to them; the takeover layer records each frame whether one
+  is open, and the probe then treats every event like one on the pill.
+  Answering one starts the same 1.5 s pointer grace as "Let it continue",
+  and Esc on one denies it instead of pausing. (Recording the dialog's
+  bounds like the pill's was the other choice; a modal dialog makes the
+  whole window its surface, so the open flag is simpler and exact.)
+
+Without the last rule, confirming a send the agent typed paused it: the
+user's move to Confirm or the press on it counted as taking the window
+back, and the `ComposerSent` that clears the box after the send was then
+refused, so the text stayed and the next Enter sent it twice.
+`ComposerSent` is also answered before the switch and pause checks now:
+it is cleanup of a send the user confirmed, and still clears the box only
+when the same chat is open with the same text, after a pause or a Stop
+too.
 
 While paused every UI tool answers "The user took control of Quill, so the
 UI driver is paused. Wait, then call quill_status to see when you can
 drive again (ui_driver.paused turns false)." "Let it continue" unpauses.
 Both pill buttons refuse injected clicks (`guard::refuse_if_injecting`),
-so an agent cannot continue or stop itself through the window.
+so an agent cannot continue or stop itself through the window. A read
+that was waiting for its frame when the user paused checks the pause
+again once the frame came and refuses; the answer after an input command
+does the same, so no tree drawn after the user took over reaches the
+agent.
 
 ### Stop
 
 Stop refuses the running command and every queued one
 (`bridge::refuse_all`), ends the session with the fade, and keeps the UI
 tools refused ("The user pressed Stop in Quill: don't drive its window
-again in this session...") until every agent has disconnected or the
-driving switch has gone off. Agent access stays on and the chat tools keep
-working. There is no "allow again" in the pill on purpose: after a Stop
-the user brings driving back by reconnecting the agent or with the switch,
-not with a button an agent could ask them to press.
+again...") until the user turns "Let agents drive Quill's window" (or
+Agent access) off and on again, or restarts Quill. A disconnect and
+reconnect does not lift it: an agent with a shell could otherwise kill
+its `quill mcp`, start another and drive on. `quill_status` reports
+`ui_driver.stopped` and `resumes_when` (what lifts a Stop or a pause).
+Agent access stays on and the chat tools keep working. There is no "allow
+again" in the pill on purpose: the user brings driving back with the
+switch, not with a button an agent could ask them to press. The Stop
+button's tooltip says so.
+
+### Refusals after the step
+
+Some of a step's effects run later under `guard::with_injecting`: a link
+run at render, a bot login button's answer, a deep link TDLib resolved,
+an Instant View fallback. While the input command is still open (until it
+answers, `guard::OpenCommand`), what they refuse goes into that command's
+reply. After it answered nobody waits for them, and the thread-local list
+would hand them to the next command's reply, as if that step had been
+refused. They go to the activity log instead, as declined entries under
+the latest step's agent and tool (`ui_click`...).
 
 ### The overlay
 
@@ -819,7 +860,8 @@ and the row opens.
 
 - Glow: an inset shadow along the window edge plus a 2 px border in
   `theme.primary`, rounded like the window (16 px on macOS, 8 px
-  elsewhere). Theme tokens only, so it is the accent in light and dark.
+  elsewhere), with a light sweeping round it while the agent drives (see
+  "The glow"). Theme tokens only, so it is the accent in light and dark.
 - Ghost cursor: a ring with Lucide's `mouse-pointer-2`, its tip on the
   target. Before each pointer step the driver aims (`input::aim_step`) and
   waits 220 ms while the ghost glides there from its last spot on an
@@ -830,87 +872,192 @@ and the row opens.
   and keys add nothing.
 - Pill: `popover` background, border and shadow. Driving: a live dot,
   "{agent} is driving" and a ghost `Button` "Stop" whose tooltip says
-  access stays on. Paused: a hand icon, "Paused", "{agent} will wait until
-  you let it continue", a primary "Let it continue" and "Stop". Fading
-  out: the label only. Strings are in `lang/en/agent_access.strings`.
+  driving stays off until the switch is turned off and on, and access
+  stays on. Paused: a hand icon, "Paused", "{agent} will wait until you
+  let it continue", a primary "Let it continue" and "Stop". Fading out:
+  the label only. Strings are in `lang/en/agent_access.strings`. Its
+  hitbox is the pill alone: `occlude` sits on the pill, not on the
+  full-width row that centres it, so the title bar either side still
+  drags the window; only the pill's own 32 px tall box covers it.
 
-### Glow looks and the default
+### The glow
 
-`QUILL_AGENT_GLOW=edge|breathe|sweep` picks one of three looks. Each was
-recorded for the owner as a clip of the same scripted session: fade in,
-click a row, glide to the message box, click, hold, Stop, fade out.
+There is one look: the edge (a soft inset bloom and a 2 px accent border)
+with a band of light, 340 px long and 5 px thick, that runs round the edge
+once every 5 s while the agent drives. While it sweeps the border dims to
+55% so the light stands out; still, it is at 85%. The light's core is the
+accent lifted towards white on a dark theme, and a deeper, more saturated
+accent on a light one (a lighter core reads as a gap in the border on a
+white window). A tight halo and a wide bloom in the accent carry it into
+the window in both. The first captures used the plain accent on light and
+the light barely showed against the border; the dimmer border and deeper
+core fixed that.
 
-- `edge`: still. A soft inset bloom and a thin accent border; only the
-  fades move.
-- `breathe`: a wider inset glow whose strength eases between 55% and 100%
-  every 2.8 s.
-- `sweep`: a dim border with a 260 px band of light that runs round the
-  edge every 3.2 s.
+The first round of this phase offered three looks behind
+`QUILL_AGENT_GLOW` (still edge, a breathing glow, the sweep) and made the
+still edge the default. The owner picked the edge with the sweep after
+watching the clips: a window that moves on its own is easy to miss when
+the frame holds still, and the light moving round it says "something is
+acting here" in a way a border does not. The breathing look and the
+variable are gone; one demo kind records the look.
 
-The default is `edge`. The design guide's Motion section says motion
-explains change and is not ambient decoration, that reduced motion is
-honoured, and that state never depends on animation. With `edge` only
-changes move (the glow arriving and leaving, the ghost going where the
-agent acts, the click) and the steady state is still, so the eye goes to
-the ghost rather than the frame. It also draws no frames while steady
-(numbers below). `breathe` and `sweep` loop for as long as the agent
-drives. With reduced motion Quill shows `edge` whatever the variable says.
+The sweep shows only that an agent is acting, so it runs only then:
+
+- Paused: the light holds where it was, beside the "Paused" pill.
+- Stop or a disconnect: the border and the light fade out together.
+- Hidden window (minimised, on another space, fully covered where the OS
+  reports it): no frames; the light picks up where the clock says when
+  the window shows again.
+
+"Takeover effect", under "Let agents drive Quill's window" in Settings >
+Agent access, chooses whether it moves:
+
+| Takeover effect | Sweeps | Holds still |
+| --- | --- | --- |
+| Automatic (default) | otherwise | reduced motion, Power Saving or the system's low-power mode |
+| Glow and sweep | otherwise | reduced motion (the hint says so) |
+| Still glow | never | always |
+
+The signals:
+
+- Reduced motion: the system's, or `QUILL_REDUCED_MOTION`.
+- Power Saving: Quill's Power Saving for interface animations, which the
+  system's battery saver or heat turn on unless "Save Power on Low
+  Battery" is off.
+- Low-power mode: the system's own, read by `battery_saving`. That is
+  macOS Low Power Mode, the Windows battery saver, or Linux's
+  power-saver profile through the portal or power-profiles-daemon.
+  Unknown counts as not saving.
+
+`agent_takeover_glow::sweep_allowed` is the one place that combines them.
+The layer reads it on every render, so a change shows on the next frame.
+The battery watcher, which otherwise parks while nothing listens, keeps
+polling every 30 s while a takeover shows, so turning Low Power Mode on
+stops the sweep within that time. The preference lives in `access.rs`
+next to the driver switch (an old settings file reads as Automatic) and
+is hard-blocked from the driver like the switch itself.
+
+Why the design guide's Motion rules still hold:
+
+- The light marks a state (an agent is acting now) and stops the moment
+  that state ends or pauses. It is not decoration on an idle window.
+- Reduced motion always wins.
+- Nothing depends on it: the pill and the still border carry the same
+  state.
 
 ### Frame cost
 
 Animation runs on the existing frame clock only. The layer asks for frames
-at 30 fps only while `takeover::moving` says something moves (a fade, a
-glide, a press pulse) or the look loops. It uses the clock's background
-variant so the takeover keeps animating while Quill sits behind the
-terminal the agent runs in. Otherwise it sets one timer for the next phase
-change (the hold running out, the fade ending) and draws nothing in
-between. With no agent driving the layer is not built; the cost is one
-mutex read per render.
+at 30 fps while `takeover::moving` says something moves (a fade, a glide,
+a press pulse), and at 15 fps while the light sweeps. It uses the clock's
+background variant so the takeover keeps animating while Quill sits
+behind the terminal the agent runs in. Otherwise it sets one timer for the
+next phase change (the hold running out, the fade ending) and draws
+nothing in between. With no agent driving the layer is not built; the
+cost is one mutex read per render.
 
-Measured 2026-10-25 on an M1 Pro (macOS), release build, 1100x720
-window, the `ready-agent-steady` demo (driving, faded in, nothing in
-motion) against `ready-chats` with no agent. Each run waited 8 s, then
-sampled `ps` once a second for 20 s; CPU is a share of one core.
+GPUI redraws the whole window on each frame, and while an agent drives the
+element tree is forced on, so slices draw uncached (see "Cost of forcing
+the tree"). Each sweep frame therefore costs a full window draw, and the
+only levers are how many frames there are and when. Caching `QuillApp`'s
+root so a frame repaints only the layer would cut the per-frame cost, but
+it touches every refresh path and the forced tree, so it was left out.
+The levers used:
 
-| Window | CPU | RSS |
-| --- | --- | --- |
-| No agent (`ready-chats`) | 0.0% | 119.8 MB |
-| Driving, `edge` | 0.1% | 120.0 MB |
-| Driving, `breathe` | 13.0% | 120.5 MB |
-| Driving, `sweep` | 9.3% | 120.9 MB |
-| Paused (any look) | 0.0% | 119.7 MB |
+- 15 frames a second instead of 30, with a 5 s lap: about 48 px a frame on
+  a 1100x720 window, a seventh of the light's length, so its soft ends
+  still read as gliding (the clip shows the real rate).
+- Frames only while the agent drives: none while paused, fading or
+  saving, none when the window is hidden.
 
-A steady `edge` takeover costs nothing measurable; the looping looks
-redraw the whole window 30 times a second for as long as the agent drives
-(`breathe` costs more than `sweep` because its wide blurred shadow changes
-every frame). Fades, glides and pulses cost the same 30 fps for their
-240 to 600 ms, in every look. Memory is the same within noise.
-Script: `ready-agent-steady` per `QUILL_AGENT_GLOW`, sampled with
-`ps -o %cpu= -o rss=`.
+Measured 2026-10-25 on an M1 Pro (macOS), release build, 1100x720 window,
+the same demos as the first round: `ready-agent-steady` (driving, faded
+in, only the sweep moving), `ready-agent-still` (the same with Power
+Saving on), `ready-agent-paused`, and `ready-chats` with no agent. Each
+run waited 8 s and then measured 20 s. CPU is a share of one core.
+
+The first round's method (`ps` %cpu sampled once a second) gave two
+readings about 2.3 times apart from run to run on this machine, at every
+rate. Exact CPU time showed the same thing, so it is not sampling noise:
+the same frames take more time when macOS runs them on the efficiency
+cores at low clocks. A share of CPU time is therefore only comparable
+within one session. This round also reads the process's instructions,
+cycles and energy from `proc_pid_rusage`; instructions do not depend on
+which core ran them. The sweep rows are the mean of three runs, all in
+the same session and the same (slower) mode; the other rows are one
+`proc_pid_rusage` run, with three CPU-time runs agreeing.
+
+| Window | CPU | Instructions | Energy | RSS |
+| --- | --- | --- | --- | --- |
+| No agent (`ready-chats`) | 0.0% | 0 | 0 mW | 119.6 MB |
+| Driving, sweep at 30 fps (the first round's rate) | 27.0% | 693 M/s | 82.7 mW | 120.9 MB |
+| Driving, sweep at 20 fps | 20.0% | 469 M/s | 52.7 mW | 120.7 MB |
+| **Driving, sweep at 15 fps (shipped)** | **15.5%** | **353 M/s** | **40.3 mW** | 120.8 MB |
+| Driving, sweep at 10 fps | 11.3% | 238 M/s | 25.2 mW | 120.7 MB |
+| Driving, still glow (Power Saving) | 0.5% | 11 M/s | 1.7 mW | 120.3 MB |
+| Paused | 0.0% | 0 | 0 mW | 119.9 MB |
+
+Every sweep frame costs the same, about 23.5 M instructions, so the cost
+follows the rate: 15 fps is half the first round's 30 fps by every
+measure. In the faster mode seen in other runs of the same session, the
+CPU column read 5.3% at 15 fps, 7.2% at 20 fps and 10.2% at 30 fps. The
+first round's 9.3% for the 30 fps sweep was taken in that mode, so like
+for like the sweep now costs about 5% of a core where it cost 9.3%.
+
+The still glow's 0.5% is the demo's pinned clock: the hold never runs
+out, so the wake-up timer fires every few seconds and draws a frame. In
+the app the hold ends and nothing draws. Fades, glides and pulses still
+cost 30 fps for their 240 to 600 ms. Memory is the same within noise.
+
+Scripts (scratchpad, not in the repo): `p5b-rusage.sh` and
+`p5b-rusage-rates.sh` start each demo with `QUILL_DEMO_LINGER_MS=40000`
+and read `proc_pid_rusage(RUSAGE_INFO_V6)` before and after the 20 s.
+The rates came from one build with a temporary `QUILL_TMP_SWEEP_FPS`
+override, removed before commit.
 
 ### Tests
 
 - Core (`takeover_tests.rs`): driving lasts while commands come and fades
   after the hold; real input pauses and "Let it continue" hands back;
-  pointer moves pause only when deliberate; Stop ends the session at once
-  and holds until the agents leave; a disconnect or the switch fades out;
-  an interrupted fade-in carries on from the value reached; the glide's
-  ease and the pulse; what moves and when the next change is due; the
-  global record's refusal texts.
+  pointer moves pause only when deliberate; answering a prompt gives the
+  pointer the grace; Stop ends the session at once and holds through a
+  disconnect and a reconnect until the switch goes off; a pause outlives a
+  reconnect and its pill fades back in; a disconnect or the switch fades
+  out; an interrupted fade-in carries on from the value reached; the
+  glide's ease and the pulse; what moves and when the next change is due;
+  the global record's refusal texts.
 - Window (`agent_takeover_tests.rs`, `demo-capture`): a real click pauses,
   "Let it continue" hands back, the hold and a disconnect fade the layer
   out; Esc pauses and the open chat stays open; Stop refuses a queued
   command and a later one with the Stop text while access stays on; a
-  click under the glow and the ghost reaches the chat row; the frame clock
-  runs while fading in and stops once steady and when idle.
-- Glow (`agent_takeover_glow.rs`): look parsing, reduced motion, the
-  breath's range, the sweep wrapping round the corners.
+  reconnect lifts neither a pause nor Stop, the switch off and on lifts
+  Stop; a click under the glow and the ghost reaches the chat row; the
+  frame clock runs while fading in and stops when nothing moves and when
+  idle; the sweep keeps the clock going under each "Takeover effect" and
+  saving signal exactly as the table in "The glow" says, switching live,
+  and holds still while paused.
+- Confirmed sends (`agent_driver_confirm_tests.rs`): the agent types and
+  presses Enter, "Confirm each send" opens, a real mouse move and press on
+  Confirm answers it without pausing (and the hand leaving the button
+  after does not pause either), then `ComposerSent` clears the box only
+  for the same text; Stop while the confirm is open leaves the confirm up,
+  a confirmed send still clears the box, and Stop holds; a read filed
+  before a pause is refused once its frame comes.
+- Guard (`guard.rs`): a deferred half's refusals go to the open command's
+  reply, and after it answered to the activity log; the window test of a
+  deep link resolved after the step checks the same in the app.
+- Glow (`agent_takeover_glow.rs`, `access.rs`): the still border has no
+  light and the sweep laps; the light is brighter than the accent; the
+  sweep wraps round the corners; the three effects against reduced motion
+  and power saving; an old settings file reads as Automatic.
 
-Screenshot demos: `ready-agent-driving` (each look via
-`QUILL_AGENT_GLOW`), `ready-agent-steady`, `ready-agent-glide`,
-`ready-agent-typing` and `ready-agent-paused`. With
-`QUILL_DEMO_TAKEOVER_FRAMES=<dir>`, `ready-agent-driving` records the
-scripted session as one PNG per 33 ms of takeover time.
+Screenshot demos: `ready-agent-driving` (light along the top edge),
+`ready-agent-steady`, `ready-agent-still` (Power Saving on: the still
+border), `ready-agent-glide`, `ready-agent-typing` and
+`ready-agent-paused`; `ready-settings-agent-activity` shows the "Takeover
+effect" row. With `QUILL_DEMO_TAKEOVER_FRAMES=<dir>`,
+`ready-agent-driving` records the scripted session as one PNG per sweep tick
+of takeover time (15 a second).
 
 ### Cross-platform
 
@@ -918,7 +1065,10 @@ None of this is platform code: the deferred layer, shadows and gradients
 (Metal and wgpu), the input probe, keystroke interceptors and the input
 handler's selected bounds work the same on macOS, Linux and Windows. Only
 the corner radius differs, as a constant per OS rather than a value read
-from the window.
+from the window. The sweep's signals come from code that already has a
+backend per OS: `battery_saving` (macOS `NSProcessInfo`, Windows
+`GetSystemPowerStatus`, Linux portal or power-profiles-daemon) and GPUI's
+window visibility (see Gaps for what each OS reports).
 
 ### Gaps
 
@@ -932,6 +1082,17 @@ from the window.
 - The typing badge needs the focused input to report selected bounds; an
   input that does not shows no badge (typing still works).
 - The connected strip still says "connected", not "driving".
+- The system's reduce-motion setting is read once at startup (as it is
+  for the rest of Quill), so changing it while Quill runs reaches the
+  sweep only after a restart. Power Saving, low-power mode and the
+  preference switch live.
+- Low-power mode reaches the sweep within the battery watcher's 30 s
+  poll, not at once.
+- Windows keeps compositing a fully covered window and X11 compositors
+  never report one as obscured, so there a covered window keeps drawing
+  the sweep; minimised windows stop on every OS.
+- The sweep's visibility was checked in captures on macOS only; Linux
+  (wgpu) and Windows need a look on real hardware.
 
 ## Phase 5 step 3: screenshots
 

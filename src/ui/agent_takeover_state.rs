@@ -1,5 +1,6 @@
 //! The takeover state's UI side (`agent_takeover`): the wake-up for a
-//! phase change nothing animates towards, and Esc while an agent drives.
+//! phase change nothing animates towards, Esc while an agent drives, and a
+//! redraw when the window is shown again.
 //! The state itself is `quill::agent::ui_driver::takeover`.
 #![deny(clippy::indexing_slicing)]
 
@@ -19,7 +20,16 @@ impl TakeoverUi {
     /// is taking control, not closing a menu. Registered before the app's
     /// other keystroke interceptors (they run in order; this one stops
     /// the key reaching the key bindings).
-    pub(super) fn new(_window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
+    pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
+        // The glow's sweep asks for no frames while the window is hidden
+        // (covered, minimised, on another Space); shown again, a redraw
+        // lets it move on.
+        cx.observe_window_visibility(window, |_, _, _, cx| {
+            if takeover::current() != takeover::Phase::Idle {
+                cx.notify();
+            }
+        })
+        .detach();
         cx.intercept_keystrokes(|event, _window, cx| {
             let keystroke = &event.keystroke;
             if guard::injecting()

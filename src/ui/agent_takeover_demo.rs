@@ -1,16 +1,20 @@
 //! Screenshot demos of the agent takeover over the ready chat list, with
 //! the takeover clock pinned so the glow and the ghost cursor hold still:
 //!
-//! - `ready-agent-driving`: driving, the ghost just clicked a chat row.
-//! - `ready-agent-steady`: driving with nothing in motion (for measuring).
+//! - `ready-agent-driving`: driving, the ghost just clicked a chat row, the
+//!   sweep's light along the top edge.
+//! - `ready-agent-steady`: driving, faded in and the click's pulse over:
+//!   only the sweep asks for frames (for measuring its cost).
+//! - `ready-agent-still`: the same while Quill saves power (Power Saving's
+//!   interface animations): the still border, no sweep, no frames.
 //! - `ready-agent-glide`: the ghost halfway from that row to the message box.
 //! - `ready-agent-typing`: the keyboard badge at the message box's caret.
 //! - `ready-agent-paused`: the user took control.
 //!
-//! `QUILL_AGENT_GLOW=edge|breathe|sweep` picks the glow, `QUILL_DEMO_THEME`
-//! the theme. `QUILL_DEMO_TAKEOVER_FRAMES=<dir>` (demo-capture builds) makes
+//! `QUILL_DEMO_THEME` picks the theme. `QUILL_DEMO_TAKEOVER_FRAMES=<dir>`
+//! (demo-capture builds) makes
 //! `ready-agent-driving` record a scripted session instead, one PNG per
-//! 1/30 s of takeover time (`frame-000.png`...), to assemble into a clip.
+//! tick of the sweep (`SWEEP_FPS`) (`frame-000.png`...), to assemble into a clip.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
@@ -63,6 +67,15 @@ fn demo_steady(_: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) {
     at(760);
     takeover::note_press();
     at(2000);
+}
+
+/// [`demo_steady`] with Power Saving's interface animations on, set in the
+/// appearance prefs so a later `apply_appearance` (the demo theme) keeps it.
+fn demo_still(app: &mut QuillApp, window: &mut Window, cx: &mut Context<QuillApp>) {
+    use quill::power_saving::{Flag, with_flag};
+    app.appearance.power_saving = with_flag(app.appearance.power_saving, Flag::Animations, true);
+    app.apply_appearance(cx);
+    demo_steady(app, window, cx);
 }
 
 fn demo_glide(_: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) {
@@ -119,20 +132,22 @@ enum Beat {
 }
 
 /// The recorded session: fade in, a click on a row, a glide to the message
-/// box and a click there, a steady stretch (a full breath or lap of the
-/// sweep), then Stop and the fade out.
+/// box and a click there, a steady stretch (past a full lap of the sweep),
+/// then Stop and the fade out.
 #[cfg(feature = "demo-capture")]
 const SCRIPT: [(u64, Beat); 5] = [
     (500, Beat::Aim(Aim::Click, ROW)),
     (800, Beat::Press),
     (1300, Beat::Aim(Aim::Click, MESSAGE_BOX)),
     (1600, Beat::Press),
-    (4000, Beat::Stop),
+    (5300, Beat::Stop),
 ];
 #[cfg(feature = "demo-capture")]
-const RECORD_END_MS: u64 = 4700;
+const RECORD_END_MS: u64 = 6000;
+/// One frame per tick of the sweep (`SWEEP_FPS`), so the light moves in
+/// the clip as it does in the window (the fades run smoother there).
 #[cfg(feature = "demo-capture")]
-const FRAME_MS: u64 = 33;
+const FRAME_MS: u64 = 1000 / super::agent_takeover_glow::SWEEP_FPS as u64;
 
 #[cfg(feature = "demo-capture")]
 fn record(dir: std::path::PathBuf, window: &mut Window, cx: &mut Context<QuillApp>) {
@@ -185,6 +200,7 @@ fn record(_: std::path::PathBuf, _: &mut Window, _: &mut Context<QuillApp>) {}
 crate::ui::screenshot_demo::register_demos![
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-agent-driving").setup(demo_driving),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-agent-steady").setup(demo_steady),
+    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-agent-still").setup(demo_still),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-agent-glide").setup(demo_glide),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-agent-paused").setup(demo_paused),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-agent-typing")

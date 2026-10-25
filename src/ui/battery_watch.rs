@@ -4,6 +4,9 @@
 //! tdesktop is notified by the platform; here a task asks every half minute
 //! while the switch is on, and not at all while it is off (the first probe
 //! still runs so the switch is offered when the platform has a saver).
+//! While an agent drives the window it also asks every half minute, because
+//! the takeover glow's sweep stops in the system's low-power mode even with
+//! the switch off (`agent_takeover_glow::sweep_allowed`).
 //! The question can block (Linux runs `gdbus`), so it runs on the background
 //! executor. Only a change touches the UI: the flags and GPUI's reduced
 //! motion are updated and the windows redraw.
@@ -42,7 +45,12 @@ pub(crate) fn watch(cx: &mut App) {
                 .await;
             let changed = cx.update(|cx| apply_answer(answer, cx));
             let _ = changed;
-            let wait = if quill::battery_saving::ignored() {
+            // The agent takeover's sweep follows the system's low-power
+            // mode whatever the switch says, so it is asked while an agent
+            // drives (a new session pokes the wake as well).
+            let takeover_shown = quill::agent::ui_driver::takeover::current()
+                != quill::agent::ui_driver::takeover::Phase::Idle;
+            let wait = if quill::battery_saving::ignored() && !takeover_shown {
                 PARKED
             } else {
                 POLL

@@ -8,13 +8,17 @@
 //! of the phase. The layer is deferred above every popup and has no hitbox
 //! except the pill's, so clicks anywhere else land on what is underneath.
 //! It asks the frame clock for frames only while something moves (a fade,
-//! a glide, a press pulse, a moving glow look); otherwise one timer wakes
-//! the window when the phase is due to change, and an idle window does
-//! nothing at all.
+//! a glide, a press pulse, the glow's sweep while the agent drives and the
+//! window is visible); otherwise one timer wakes the window when the phase
+//! is due to change, and an idle window does nothing at all.
+//!
+//! The pill's hitbox is the pill itself (`occlude` on the pill, not on the
+//! full-width row that centres it), so the title bar either side of it
+//! still drags the window.
 #![deny(clippy::indexing_slicing)]
 
 use super::agent_labels::agent_label;
-use super::agent_takeover_glow::{GLOW_FPS, GlowStyle, glow_element, glow_frame};
+use super::agent_takeover_glow::{GLOW_FPS, SWEEP_FPS, glow_element, glow_frame, sweep_allowed};
 use super::app::QuillApp;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -99,21 +103,35 @@ impl QuillApp {
         if phase == Phase::Idle {
             return None;
         }
-        let style = GlowStyle::chosen().shown(cx.reduce_motion());
         let paused = matches!(phase, Phase::Paused { .. });
-        if takeover::moving(&phase, now) || (style.moves() && !paused) {
+        let sweeps = sweep_allowed();
+        // The light moves only while the agent drives, and only where it
+        // can be seen. Behind the terminal the agent runs in, the window is
+        // still visible, so the clock's background variant keeps it going.
+        let sweep_moving = sweeps && matches!(phase, Phase::Driving { .. }) && window.is_visible();
+        if takeover::moving(&phase, now) {
             self.request_background_animation_tick(GLOW_FPS, cx);
+        } else if sweep_moving {
+            self.request_background_animation_tick(SWEEP_FPS, cx);
         } else if let Some(at) = takeover::next_change_ms(&phase, &facts) {
             self.wake_takeover_at(at, now, cx);
         }
         let presence = phase.presence(now);
         let started = facts.session.as_ref().map_or(now, |s| s.started_ms);
-        let mut frame = glow_frame(style, presence, now.saturating_sub(started));
+        // Paused, the light holds where the pause found it; fading out, where
+        // the session ended.
+        let sweep_at = match &phase {
+            Phase::Paused { .. } => facts.paused_ms,
+            Phase::FadingOut { ended_ms, .. } => *ended_ms,
+            Phase::Driving { .. } | Phase::Idle => now,
+        };
+        let mut frame = glow_frame(presence, sweeps.then(|| sweep_at.saturating_sub(started)));
         if paused {
             frame.strength *= PAUSED_GLOW;
         }
         let theme = cx.theme();
         let (accent, on_accent, radius) = (theme.primary, theme.primary_foreground, theme.radius);
+        let dark = theme.is_dark();
         let viewport = window.viewport_size();
         let layer = div()
             .absolute()
@@ -121,7 +139,7 @@ impl QuillApp {
             .left_0()
             .w(viewport.width)
             .h(viewport.height)
-            .child(glow_element(frame, accent, viewport, WINDOW_CORNER))
+            .child(glow_element(frame, accent, dark, viewport, WINDOW_CORNER))
             .children(
                 phase
                     .action()

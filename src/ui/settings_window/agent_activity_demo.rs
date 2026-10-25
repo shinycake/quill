@@ -11,6 +11,7 @@ fn demo_activity(app: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) 
     quill::fast_buttons::set_persistence(false);
     quill::agent::access::set_enabled(true);
     quill::agent::access::set_confirm_sends(true);
+    quill::agent::access::set_ui_driver(true);
     let empty = std::env::var("QUILL_DEMO_AGENT").is_ok_and(|mode| mode == "empty");
     let account = crate::ui::agent_state::active_account();
     if !empty {
