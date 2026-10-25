@@ -3,6 +3,7 @@ mod account_hygiene;
 mod admin_extras;
 mod ai_compose;
 mod ai_tools;
+mod archive_mute;
 mod auth_leftovers;
 mod boost_box;
 mod boost_level_refresh;

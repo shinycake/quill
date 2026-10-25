@@ -175,6 +175,7 @@ mod app;
 mod app_demo;
 mod app_render;
 mod archive_hint;
+mod archive_mute_suggestion;
 mod archive_row;
 mod attach_bots;
 mod audio;
