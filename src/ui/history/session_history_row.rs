@@ -259,6 +259,39 @@ pub(in crate::ui) fn session_history_row(
                 cx,
             ))
         });
+    let fast_buttons = session.is_some_and(|session| {
+        session
+            .fast_button_target(message.chat_id)
+            .is_some_and(|target| {
+                target.message_id == message.id && quill::fast_buttons::is_enabled(target.bot_id)
+            })
+    });
+    let keyboard = inline_keyboard(message, fast_buttons, cx);
+    let has_caption = match &message.content {
+        MessageContent::Photo(photo) => !photo.caption.is_empty(),
+        MessageContent::Document(doc) => !doc.caption.is_empty(),
+        MessageContent::Video(video) => !video.caption.is_empty(),
+        MessageContent::Animation(animation) => !animation.caption.is_empty(),
+        _ => false,
+    };
+    // A picture, video or GIF with nothing else in its bubble stands on its
+    // own, as in Telegram Desktop (`quill::media_bubble`).
+    let bubbleless = !look.plain
+        && leads_with_media(effective_content(
+            &message.content,
+            message.ephemeral.as_ref(),
+        ))
+        && !quill::media_bubble::MediaSurroundings {
+            caption: has_caption,
+            header: header.is_some(),
+            sender_name: sender.is_some(),
+            comments_bar: reply_bar_el.is_some(),
+            keyboard: keyboard.is_some(),
+            fact_check: message.extras.fact_check.is_some(),
+            countdown: message.self_destruct_badge(unix_ms_now()).is_some()
+                || message.auto_delete_chip(unix_ms_now()).is_some(),
+        }
+        .needs_bubble();
     let chip_row = (!chips.is_empty() || message.paid_reaction().is_some()).then(|| {
         reaction_chip_row(
             message,
@@ -270,6 +303,7 @@ pub(in crate::ui) fn session_history_row(
             files,
             media_roots,
             &footer_meta,
+            bubbleless,
             cx,
         )
     });
@@ -287,19 +321,18 @@ pub(in crate::ui) fn session_history_row(
     // Media corners follow the bubble (Telegram Desktop `BubbleRounding`): a
     // picture that leads the bubble takes its radius on the edges that are
     // free of the sender name, a caption above/below, badges or reactions.
-    let corners = {
+    let corners = if bubbleless {
+        MediaCorners::bare(
+            cx,
+            quill::chat_wide::has_right_layout(message.is_outgoing, look.wide),
+            look.joined_above,
+        )
+    } else {
         let media_led = header.is_none()
             && leads_with_media(effective_content(
                 &message.content,
                 message.ephemeral.as_ref(),
             ));
-        let has_caption = match &message.content {
-            MessageContent::Photo(photo) => !photo.caption.is_empty(),
-            MessageContent::Document(doc) => !doc.caption.is_empty(),
-            MessageContent::Video(video) => !video.caption.is_empty(),
-            MessageContent::Animation(animation) => !animation.caption.is_empty(),
-            _ => false,
-        };
         let caption_above = has_caption && caption_above_media(&message.content);
         let caption_below = has_caption && !caption_above;
         let badges = message.self_destruct_badge(unix_ms_now()).is_some()
@@ -537,14 +570,6 @@ pub(in crate::ui) fn session_history_row(
                 .into_any_element(),
         ),
     };
-    let fast_buttons = session.is_some_and(|session| {
-        session
-            .fast_button_target(message.chat_id)
-            .is_some_and(|target| {
-                target.message_id == message.id && quill::fast_buttons::is_enabled(target.bot_id)
-            })
-    });
-    let keyboard = inline_keyboard(message, fast_buttons, cx);
     // Self-destruct badge: counts down locally against `unix_ms_now()` on
     // the 1-second tick (`ensure_self_destruct_tick`); TDLib deletes the
     // row when the timer fires.
@@ -743,7 +768,10 @@ pub(in crate::ui) fn session_history_row(
             message.ephemeral.as_ref(),
         ));
     // Media with nothing under it shows its time on the picture.
-    let footer_overlay = media_led && caption_below_el.is_none() && reserve_footer;
+    // Bubble-less media keeps it there even with reactions under it.
+    let footer_overlay = media_led
+        && caption_below_el.is_none()
+        && (reserve_footer || (bubbleless && message.date > 0));
     let caption_below_el = caption_below_el.map(|caption| {
         if media_led {
             div().px_2().py_1().child(caption).into_any_element()
@@ -753,6 +781,28 @@ pub(in crate::ui) fn session_history_row(
     });
     let extra_media = extra_media.map(|media| {
         crate::ui::forward_drag_source::media_block(session, message, media, media_led)
+    });
+    // Bubble-less media carries its time itself, so reactions under it
+    // don't push the pill off the picture.
+    let extra_media = extra_media.map(|media| {
+        if !bubbleless {
+            return media;
+        }
+        let pill = footer_overlay
+            .then(|| message_footer_meta(&footer_meta))
+            .flatten()
+            .map(|footer| {
+                let meta = footer_meta.clone();
+                crate::ui::synthetic::media_footer_pill(
+                    footer,
+                    Some(std::rc::Rc::new(move || message_footer_meta(&meta))),
+                )
+            });
+        div()
+            .relative()
+            .child(media)
+            .children(pill)
+            .into_any_element()
     });
     let extra_media_present = extra_media.is_some();
     let extra_is_empty =
@@ -822,8 +872,8 @@ pub(in crate::ui) fn session_history_row(
         }
         chrome.sender_status = sender_status.take();
         chrome.footer = message_footer_meta(&footer_meta);
-        if has_chips {
-            // The reaction row carries the time.
+        if has_chips || bubbleless {
+            // The reaction row or the media carries the time.
             chrome.footer = None;
         }
         chrome.footer_inline = footer_inline;
@@ -833,6 +883,7 @@ pub(in crate::ui) fn session_history_row(
             chrome.footer_rebuild = Some(std::rc::Rc::new(move || message_footer_meta(&meta)));
         }
         chrome.media_led = media_led;
+        chrome.bubbleless = bubbleless;
         chrome.media_width = media_width;
         chrome.max_width = max_width;
         chrome.actions = more_btn.take();

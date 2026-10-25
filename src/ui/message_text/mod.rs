@@ -518,6 +518,7 @@ pub(super) fn message_chrome(
         footer_overlay: false,
         footer_rebuild: None,
         media_led: false,
+        bubbleless: false,
         actions: None,
         actions_span: px(34.),
         bottom_bar: None,

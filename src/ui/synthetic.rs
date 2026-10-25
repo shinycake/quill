@@ -291,6 +291,10 @@ pub(crate) struct MessageChrome {
     pub footer_rebuild: Option<std::rc::Rc<dyn Fn() -> Option<AnyElement>>>,
     /// Media-led bubble: thin inset instead of text padding.
     pub media_led: bool,
+    /// The media stands on its own (`quill::media_bubble`): no fill,
+    /// border or gradient, and the media carries its own time pill
+    /// (`media_footer_pill`).
+    pub bubbleless: bool,
     /// Hover-revealed control in the bubble's top-right corner (message
     /// actions). Right-click opens the same menu.
     pub actions: Option<AnyElement>,
@@ -306,6 +310,32 @@ pub(crate) struct MessageChrome {
     /// The bubble's outer width limit when a monospace block needs more
     /// than `msgMaxWidth` (`bubble_width::bubble_width_limit`).
     pub max_width: Option<Pixels>,
+}
+
+/// The time on a picture: a dark pill in the bottom-right corner of the
+/// nearest positioned parent (the bubble, or a bubble-less media block).
+pub(crate) fn media_footer_pill(
+    footer: AnyElement,
+    rebuild: Option<std::rc::Rc<dyn Fn() -> Option<AnyElement>>>,
+) -> AnyElement {
+    let pill = |footer: AnyElement| {
+        div()
+            .px_1p5()
+            .rounded_full()
+            .bg(gpui_kit::black().opacity(0.45))
+            .text_color(gpui_kit::white())
+            .child(footer)
+    };
+    let pill_at = |footer| pill(footer).absolute().right(px(10.)).bottom(px(10.));
+    match rebuild {
+        // Over an inline video the history's animation layer draws: it
+        // draws the pill again, above the video.
+        Some(rebuild) => super::anim_layer::mirror(pill_at(footer), move || {
+            pill(rebuild().unwrap_or_else(|| Empty.into_any_element())).into_any_element()
+        })
+        .into_any_element(),
+        None => pill_at(footer).into_any_element(),
+    }
 }
 
 /// Width the time/receipt footer needs inside a bubble (`21:44 ✓✓` at
@@ -399,6 +429,7 @@ fn message_bubble_with_quote(
         footer_overlay,
         footer_rebuild,
         media_led,
+        bubbleless,
         actions,
         actions_span,
         bottom_bar,
@@ -429,19 +460,22 @@ fn message_bubble_with_quote(
     // the gradient laid over the message area.
     let gradient = look
         .out_fill
-        .filter(|_| row.outgoing && !look.plain)
+        .filter(|_| row.outgoing && !look.plain && !bubbleless)
         .and_then(|fill| super::bubble_theme::gradient_layer(fill, look.joined_above));
     let bubble_content = component::bubble::BubbleContent::new()
         .relative()
         .children(gradient)
         // Where a delete's dust starts.
         .child(super::vanish::bubble_tracker(row.id as i64))
-        .when(!look.plain, |this| {
+        .when(!look.plain && !bubbleless, |this| {
             this.bg(if row.outgoing {
                 look.outgoing_fill()
             } else {
                 bg_bubble_incoming()
             })
+        })
+        .when(bubbleless, |this| {
+            this.bg(gpui_kit::transparent_black()).border_0()
         })
         .text_color(if look.plain {
             look.text
@@ -520,32 +554,13 @@ fn message_bubble_with_quote(
         .when(media_led && !look.plain, |this| this.p_0())
         .when_some(media_width, |this, width| {
             this.w(super::message_media::bubble_outer_width(
-                width, media_led, look.plain,
+                width,
+                media_led,
+                look.plain || bubbleless,
             ))
         })
         .map(|this| match footer {
-            Some(footer) if footer_overlay => {
-                let pill = |footer: AnyElement| {
-                    div()
-                        .px_1p5()
-                        .rounded_full()
-                        .bg(gpui_kit::black().opacity(0.45))
-                        .text_color(gpui_kit::white())
-                        .child(footer)
-                };
-                let pill_at = |footer| pill(footer).absolute().right(px(10.)).bottom(px(10.));
-                match footer_rebuild {
-                    // Over an inline video the history's animation layer
-                    // draws: it draws the pill again, above the video.
-                    Some(rebuild) => {
-                        this.child(super::anim_layer::mirror(pill_at(footer), move || {
-                            pill(rebuild().unwrap_or_else(|| Empty.into_any_element()))
-                                .into_any_element()
-                        }))
-                    }
-                    None => this.child(pill_at(footer)),
-                }
-            }
+            Some(footer) if footer_overlay => this.child(media_footer_pill(footer, footer_rebuild)),
             Some(footer) if footer_inline => {
                 this.child(div().absolute().right(px(12.)).bottom(px(7.)).child(footer))
             }

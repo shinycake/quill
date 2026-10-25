@@ -115,6 +115,7 @@ pub mod location_picker;
 pub mod locks;
 pub mod main_menu;
 pub mod marketplace;
+pub mod media_bubble;
 pub mod media_capture;
 pub mod media_session;
 pub mod media_spoiler;
