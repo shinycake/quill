@@ -208,7 +208,7 @@ fn by_title(ctx: &Ctx, title: &str) -> Result<i64, ToolError> {
     match (exact.as_slice(), candidates.as_slice()) {
         ([(id, _)], _) | ([], [(id, _)]) => Ok(*id),
         ([], []) => Err(ToolError::new(format!(
-            "No chat is called \"{title}\". Call list_chats to see the chats, then pass a chat id."
+            "No chat is called \"{title}\", granted or not. Check the name, or call list_chats for the chats you can use."
         ))),
         (many, _) => {
             let pool: Vec<&(i64, String)> = if many.is_empty() {

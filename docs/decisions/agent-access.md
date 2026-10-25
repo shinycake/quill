@@ -119,3 +119,62 @@ Settings > Advanced > Agent access: an explanation, the Allow agents switch,
 and while it is on, the scope line and Connect an agent with copyable setup
 commands for Claude Code and any other MCP app. The page reads the switch
 from `agent::access` on every render; nothing caches it.
+
+## Phase 2: grants, read tools and events
+
+### Grants
+
+`src/agent/grants.rs`, saved in `agent_grants.json` per account key.
+
+| What | Default | Why |
+| --- | --- | --- |
+| Saved Messages | read and write | The user's own notes; the safest place for an agent to work. |
+| Bots | read and write | Talking to bots is what automation is for, and a bot is not a person whose words get read. |
+| Channels the user owns | read | Their own posts. Writing would reach every subscriber, so it is asked for, not assumed. |
+| All other chats | off | Reading other people's messages needs the user's explicit choice (API Terms 1.5, content licensing). Turning it on shows its own consent text. |
+| Secret chats | off, one at a time | Never covered by All chats: the user picked end-to-end encryption for them. |
+| Contacts | off | Names and usernames only, never phone numbers. |
+
+A per-chat entry overrides everything, including a block (`scope: None`)
+that keeps one chat out of All chats. Where a class default and All chats
+both apply, the wider scope wins. Every call reads the grants afresh, so a
+change in settings applies to the next call. A chat's class (Saved, bot,
+own channel, secret, other) comes from TDLib (`getChat`, then `getUser` or
+`getSupergroup`) and is cached per client.
+
+### Naming chats
+
+Tools take a chat id, `"saved"`, an `@username` or t.me link
+(`searchPublicChat`), or a title (`searchChats`, exact match first, then a
+single result; several matches answer with the candidates and their ids).
+
+### Tools
+
+`list_chats`, `list_folders`, `list_unread`, `get_chat_info`,
+`list_members`, `list_contacts`, `download_file`, `wait_for_message`,
+`request_access`, and `search_messages` across all granted chats. Only
+granted chats ever appear: a search across chats drops matches in other
+chats without saying how many there were. `list_unread` reads history with
+`getChatHistory`, which does not mark anything read. `download_file` copies
+from TDLib's cache to a path the agent names, or returns the cache path.
+
+### `request_access`
+
+The tool files a prompt (`src/agent/prompts.rs`) and waits up to two
+minutes. Quill shows it as a dialog naming the agent (the MCP client's
+`clientInfo`, which `quill mcp` passes at `auth`), what it asks for and its
+reason in its own words, raises the window, and applies the grant before it
+answers Allowed. Unanswered prompts are withdrawn. At most four wait at
+once. Turning access off answers every prompt Denied.
+
+### Events
+
+The hub passes every raw envelope to `agent::events::observe`. TDLib writes
+`@type` first, so a prefix test picks out `updateNewMessage` (kept in a
+256-message buffer, only while an agent is connected) and
+`updateChatFolders` (kept per client; TDLib sends it once at start, and
+there is no call that lists folders). Grants are applied by the readers on
+their own threads, never on the receive thread. `wait_for_message` waits on
+the buffer; `quill://unread` can be subscribed to, and a watcher thread per
+connection sends `notifications/resources/updated` when a message from
+someone else arrives in a granted chat.

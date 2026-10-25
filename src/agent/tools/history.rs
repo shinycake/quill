@@ -9,6 +9,8 @@ use std::collections::HashSet;
 
 /// TDLib returns at most this many messages per history request.
 const TD_PAGE: i64 = 100;
+/// Pages of cross-chat search looked through to fill one answer.
+const SEARCH_PAGES: usize = 5;
 /// Extra history requests made to fill a page TDLib answered short.
 const FILL_ROUNDS: usize = 5;
 
@@ -285,42 +287,73 @@ fn search_everywhere(
     limit: i64,
 ) -> Result<ToolOutput, ToolError> {
     let me = super::target::my_user_id(ctx)?;
-    let offset = args
+    let mut offset = args
         .get("cursor")
         .and_then(Value::as_str)
-        .unwrap_or_default();
-    let answer = ctx.call(json!({
-        "@type": "searchMessages",
-        "chat_list": null,
-        "query": query,
-        "offset": offset,
-        "limit": limit,
-        "filter": null,
-        "chat_type_filter": null,
-        "min_date": 0,
-        "max_date": 0,
-    }))?;
-    let next = answer
-        .get("next_offset")
-        .and_then(Value::as_str)
-        .filter(|next| !next.is_empty())
-        .map(str::to_string);
+        .unwrap_or_default()
+        .to_string();
     let mut chats: std::collections::HashMap<i64, Option<Target>> = Default::default();
     let mut names = Names::new(ctx);
     let mut shaped = Vec::new();
-    for message in messages::messages_of(&answer) {
-        let chat_id = message.get("chat_id").and_then(Value::as_i64).unwrap_or(0);
-        if let std::collections::hash_map::Entry::Vacant(slot) = chats.entry(chat_id) {
-            slot.insert(super::target::granted(ctx, chat_id, me)?);
+    let mut next = None;
+    let mut last_kept = None;
+    // Matches in chats that are not granted are dropped, so keep paging
+    // until the page is full, rather than hand back an empty page.
+    for _ in 0..SEARCH_PAGES {
+        let answer = ctx.call(json!({
+            "@type": "searchMessages",
+            "chat_list": null,
+            "query": query,
+            "offset": offset,
+            "limit": TD_PAGE,
+            "filter": null,
+            "chat_type_filter": null,
+            "min_date": 0,
+            "max_date": 0,
+        }))?;
+        let found = messages::messages_of(&answer);
+        let page_len = found.len();
+        let mut taken = 0usize;
+        for message in found {
+            taken += 1;
+            let chat_id = message.get("chat_id").and_then(Value::as_i64).unwrap_or(0);
+            if let std::collections::hash_map::Entry::Vacant(slot) = chats.entry(chat_id) {
+                slot.insert(super::target::granted(ctx, chat_id, me)?);
+            }
+            let Some(Some(target)) = chats.get(&chat_id) else {
+                continue;
+            };
+            let mut one = messages::shape(&message, me, Detail::Summary, &mut names);
+            if let Some(fields) = one.as_object_mut() {
+                fields.insert("chat".into(), target.summary());
+            }
+            shaped.push(one);
+            last_kept = Some(format!(
+                "{},{chat_id},{}",
+                message.get("date").and_then(Value::as_i64).unwrap_or(0),
+                message.get("id").and_then(Value::as_i64).unwrap_or(0),
+            ));
+            if shaped.len() as i64 >= limit {
+                break;
+            }
         }
-        let Some(Some(target)) = chats.get(&chat_id) else {
-            continue;
-        };
-        let mut one = messages::shape(&message, me, Detail::Summary, &mut names);
-        if let Some(fields) = one.as_object_mut() {
-            fields.insert("chat".into(), target.summary());
+        next = answer
+            .get("next_offset")
+            .and_then(Value::as_str)
+            .filter(|next| !next.is_empty())
+            .map(str::to_string);
+        if shaped.len() as i64 >= limit {
+            // Stopped inside the page: the rest of it would be skipped by
+            // TDLib's cursor, so continue from the last message kept.
+            if taken < page_len {
+                next = last_kept.clone();
+            }
+            break;
         }
-        shaped.push(one);
+        match &next {
+            Some(cursor) => offset = cursor.clone(),
+            None => break,
+        }
     }
     let mut text = format!(
         "{} match(es) for \"{query}\" in granted chats, newest first.\n",
@@ -335,9 +368,12 @@ fn search_everywhere(
         text.push_str(&format!("{title} · {}\n", messages::line(message)));
     }
     match &next {
+        Some(cursor) if shaped.is_empty() => text.push_str(&format!(
+            "No matches in granted chats among the newest results. Older messages may still match: pass \"cursor\": \"{cursor}\" to look further back."
+        )),
         Some(cursor) => text.push_str(&format!("More: pass \"cursor\": \"{cursor}\"")),
-        None if shaped.is_empty() => text.push_str("Nothing found. Try fewer or different words."),
-        None => {}
+        None if shaped.is_empty() => text.push_str("Nothing found in granted chats. Try fewer or different words."),
+        None => text.push_str("That is every match in granted chats."),
     }
     Ok(ToolOutput {
         text,

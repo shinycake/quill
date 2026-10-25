@@ -132,8 +132,8 @@ Example input: {\"chats\": 10, \"per_chat\": 3}. Output: chats [{chat {id, title
     Tool {
         name: "list_messages",
         title: "List recent messages",
-        description: "Use to see what is new in one chat: the latest messages, one line each, oldest first, \
-long texts cut to 200 characters. Then call get_message for one message in full or read_history to page further back. \
+        description: "Use for a quick look at one chat: its newest messages as one-line summaries (long texts cut to 200 \
+characters), oldest first. For full texts, reply and forward details, or older and newer pages, use read_history. \
 Example input: {\"chat\": \"Ann Lee\", \"limit\": 20}. Output: chat, messages [{id, date, from, kind, text}], older_cursor \
 (pass it to read_history as before_message_id).",
         schema: history::list_schema,
@@ -143,7 +143,8 @@ Example input: {\"chat\": \"Ann Lee\", \"limit\": 20}. Output: chat, messages [{
     Tool {
         name: "read_history",
         title: "Read chat history",
-        description: "Use to read a stretch of a chat in full, paging older or newer from a message id. \
+        description: "Use to read a chat in full detail (whole texts, reply targets, forward origins, files), paging older \
+or newer from a message id; with no id it starts at the newest message. For a quick summary use list_messages. \
 Example input: {\"chat\": \"saved\", \"before_message_id\": 4194304, \"limit\": 50}, or {\"chat\": -1001234567890, \
 \"after_message_id\": 4194304}. Output: chat, messages [{id, date, from, kind, text, reply_to, forwarded_from, file}] \
 oldest first, older_cursor and newer_cursor for the next page (null when there is none).",

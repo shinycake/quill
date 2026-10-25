@@ -44,7 +44,9 @@ answer. Ask for one thing per call, and do not ask again after a "no".
 `chat` takes a chat id (`-1001234567890`), `"saved"` for Saved Messages, an
 `@username` or t.me link, or the chat's title (`"Ann Lee"`). When a title
 matches several chats the error lists them with their ids. Leave `chat` out
-of `search_messages` to search every granted chat.
+of `search_messages` to search every granted chat. "No chat is called…"
+means the chat does not exist at all; a chat that exists but is not granted
+answers "Chat not granted". `list_chats` shows only granted chats.
 
 ## Tools
 
@@ -94,9 +96,11 @@ Wait for a bot's next message:
 
     wait_for_message {"chat": "@some_bot", "timeout_seconds": 60}
 
-A chat you need is not granted:
+Something you need is not granted. Ask for one of these per call:
 
     request_access {"chat": "Ann Lee", "scope": "read", "reason": "To summarize what Ann sent this week."}
+    request_access {"all_chats": true, "scope": "read", "reason": "To find every message about the trip."}
+    request_access {"contacts": true, "reason": "To find Ann's chat."}
 
 ## Events
 
