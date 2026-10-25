@@ -52,7 +52,12 @@ thread_local! {
 }
 
 /// Real input from the window's input probe (`presence::input_probe`).
+/// Window tests on other threads (no agent state) stay out of the
+/// process-wide record.
 pub(super) fn note_real_input(input: RealInput, window: &Window) {
+    if !super::agent_state::sees_agents() {
+        return;
+    }
     let pointer = window.mouse_position();
     let on_controls = !matches!(input, RealInput::Key)
         && PILL.with(|pill| pill.get().is_some_and(|bounds| bounds.contains(&pointer)));
@@ -189,13 +194,10 @@ impl QuillApp {
                         .font_semibold()
                         .child(tr(keys::Q_AGENT_TAKEOVER_PAUSED)),
                 )
-                .child(
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .text_color(muted)
-                        .child(tr_with(keys::Q_AGENT_TAKEOVER_PAUSED_LINE, &[("agent", &agent)])),
-                )
+                .child(div().min_w_0().truncate().text_color(muted).child(tr_with(
+                    keys::Q_AGENT_TAKEOVER_PAUSED_LINE,
+                    &[("agent", &agent)],
+                )))
                 .child(
                     Button::new("agent-takeover-continue")
                         .label(tr(keys::Q_AGENT_TAKEOVER_CONTINUE))
@@ -214,22 +216,18 @@ impl QuillApp {
                 .child(stop_button(cx)),
             Phase::Driving { .. } => pill
                 .child(live_dot(cx.theme().primary))
-                .child(
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .child(tr_with(keys::Q_AGENT_TAKEOVER_DRIVING, &[("agent", &agent)])),
-                )
+                .child(div().min_w_0().truncate().child(tr_with(
+                    keys::Q_AGENT_TAKEOVER_DRIVING,
+                    &[("agent", &agent)],
+                )))
                 .child(stop_button(cx)),
             Phase::FadingOut { .. } | Phase::Idle => pill
                 .pr_3()
                 .child(live_dot(cx.theme().primary))
-                .child(
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .child(tr_with(keys::Q_AGENT_TAKEOVER_DRIVING, &[("agent", &agent)])),
-                ),
+                .child(div().min_w_0().truncate().child(tr_with(
+                    keys::Q_AGENT_TAKEOVER_DRIVING,
+                    &[("agent", &agent)],
+                ))),
         };
         div()
             .absolute()

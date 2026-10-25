@@ -177,8 +177,8 @@ fn stop_refuses_what_waits_and_what_comes(cx: &mut TestAppContext) {
     let _presence = turn_on();
     drive_at(1000);
     settle(vcx);
-    let queued = bridge::post("Claude Code", UiCommand::ReadTree)
-        .unwrap_or_else(|_| panic!("filed"));
+    let queued =
+        bridge::post("Claude Code", UiCommand::ReadTree).unwrap_or_else(|_| panic!("filed"));
 
     vcx.update(|window, cx| window.click("agent-takeover-stop", cx));
     settle(vcx);
@@ -190,8 +190,8 @@ fn stop_refuses_what_waits_and_what_comes(cx: &mut TestAppContext) {
     assert!(matches!(takeover::current(), Phase::FadingOut { .. }));
     assert!(access::enabled() && access::ui_driver(), "access stays on");
 
-    let later = bridge::post("Claude Code", UiCommand::ReadTree)
-        .unwrap_or_else(|_| panic!("filed"));
+    let later =
+        bridge::post("Claude Code", UiCommand::ReadTree).unwrap_or_else(|_| panic!("filed"));
     vcx.update(|window, cx| {
         app.update(cx, |app, cx| {
             app.agent_driver_tick(window, cx);
@@ -224,7 +224,11 @@ fn the_layer_never_takes_a_click_meant_for_what_is_under_it(cx: &mut TestAppCont
     settle(vcx);
     vcx.simulate_click(spot, Modifiers::none());
     settle(vcx);
-    assert_eq!(open_chat(&app, vcx), Some(ChatId(12)), "the row got the click");
+    assert_eq!(
+        open_chat(&app, vcx),
+        Some(ChatId(12)),
+        "the row got the click"
+    );
     takeover::reset_for_test();
 }
 

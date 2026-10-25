@@ -155,7 +155,10 @@ pub(super) fn sweep_pieces(at: f32, width: f32, height: f32, thickness: f32) -> 
                         point(px(width - off - run), px(height - thickness)),
                         size(px(run), px(thickness)),
                     ),
-                    _ => Bounds::new(point(px(0.), px(height - off - run)), size(px(thickness), px(run))),
+                    _ => Bounds::new(
+                        point(px(0.), px(height - off - run)),
+                        size(px(thickness), px(run)),
+                    ),
                 };
                 pieces.push(SweepPiece {
                     bounds,
@@ -199,7 +202,9 @@ pub(super) fn glow_element(
         .rounded(corner)
         .shadow(vec![bloom]);
     if frame.border {
-        layer = layer.border_2().border_color(accent.opacity(0.85 * strength));
+        layer = layer
+            .border_2()
+            .border_color(accent.opacity(0.85 * strength));
     }
     let width = window_size.width.as_f32();
     let height = window_size.height.as_f32();
@@ -257,7 +262,10 @@ mod tests {
             .collect();
         let low = levels.iter().copied().fold(f32::MAX, f32::min);
         let high = levels.iter().copied().fold(f32::MIN, f32::max);
-        assert!(low >= 0.55 && high <= 1.0 && high - low > 0.3, "{low} {high}");
+        assert!(
+            low >= 0.55 && high <= 1.0 && high - low > 0.3,
+            "{low} {high}"
+        );
         assert_eq!(glow_frame(GlowStyle::Breathe, 0.0, 700).strength, 0.0);
     }
 

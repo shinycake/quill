@@ -323,8 +323,8 @@ pub fn pauses_on(facts: &Facts, phase: &Phase, input: RealInput, active: bool, n
     match input {
         RealInput::Press | RealInput::Scroll | RealInput::Key => true,
         RealInput::Move { x, y } => {
-            let settled = facts.resumed_ms == 0
-                || now >= facts.resumed_ms.saturating_add(ms(RESUME_GRACE));
+            let settled =
+                facts.resumed_ms == 0 || now >= facts.resumed_ms.saturating_add(ms(RESUME_GRACE));
             let moved = facts
                 .last_pointer
                 .is_some_and(|(px, py)| ((x - px).powi(2) + (y - py).powi(2)).sqrt() >= JITTER_PX);

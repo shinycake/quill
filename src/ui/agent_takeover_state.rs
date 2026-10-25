@@ -22,7 +22,11 @@ impl TakeoverUi {
     pub(super) fn new(_window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         cx.intercept_keystrokes(|event, _window, cx| {
             let keystroke = &event.keystroke;
-            if guard::injecting() || keystroke.key != "escape" || keystroke.modifiers.modified() {
+            if guard::injecting()
+                || keystroke.key != "escape"
+                || keystroke.modifiers.modified()
+                || !super::agent_state::sees_agents()
+            {
                 return;
             }
             if takeover::note_escape() {

@@ -93,7 +93,10 @@ fn pointer_moves_pause_only_when_deliberate() {
     command(&mut facts, "Claude Code", 100);
     let shown = phase(&facts, ON, 150);
     let far = RealInput::Move { x: 50.0, y: 50.0 };
-    assert!(!pauses_on(&facts, &shown, far, true, 150), "no baseline yet");
+    assert!(
+        !pauses_on(&facts, &shown, far, true, 150),
+        "no baseline yet"
+    );
     facts.last_pointer = Some((10.0, 10.0));
     assert!(pauses_on(&facts, &shown, far, true, 150));
     assert!(
@@ -242,7 +245,10 @@ fn only_fades_glides_and_pulses_move_and_the_next_change_is_known() {
     let early = phase(&facts, ON, 10);
     assert!(moving(&early, 10), "fading in");
     let steady = phase(&facts, ON, ms(FADE_IN) + 10);
-    assert!(!moving(&steady, ms(FADE_IN) + 10), "nothing moves: no frames");
+    assert!(
+        !moving(&steady, ms(FADE_IN) + 10),
+        "nothing moves: no frames"
+    );
     assert_eq!(next_change_ms(&steady, &facts), Some(ms(HOLD)));
     aim(&mut facts, Aim::Hover, (5.0, 5.0), 1000);
     assert!(moving(&phase(&facts, ON, 1010), 1010));
