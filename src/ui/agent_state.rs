@@ -142,7 +142,7 @@ pub(super) fn apply_ask(grants: &mut AccountGrants, ask: &Ask) {
         Ask::AllChats { scope } => grants.all_chats = Some(*scope),
         Ask::Contacts => grants.contacts = true,
         // A confirmation changes no grant: it covers this one write.
-        Ask::Write { .. } => {}
+        Ask::Write { .. } | Ask::Raw { .. } => {}
     }
 }
 

@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use std::time::Duration;
 
 /// How long the user has to answer a confirmation.
-const ANSWER_WAIT: Duration = Duration::from_secs(120);
+pub const ANSWER_WAIT: Duration = Duration::from_secs(120);
 /// How long a send waits for Telegram to deliver it.
 const DELIVERY_WAIT: Duration = Duration::from_secs(30);
 /// Telegram's limits on one message's text and on a caption.
@@ -267,7 +267,15 @@ pub fn confirm(ctx: &Ctx, target: &Target, kind: &str, preview: &str) -> Result<
     match prompts::wait(id, &rx, ANSWER_WAIT) {
         Some(Decision::Allowed) => Ok(()),
         Some(Decision::Denied) => {
-            record(ctx, target, kind, preview, false, true);
+            record(
+                ctx,
+                target.chat_id,
+                &target.title,
+                kind,
+                preview,
+                false,
+                true,
+            );
             Err(ToolError::new(
                 "The user declined this in Quill. Do not retry it; ask the user what they want instead.",
             ))
@@ -281,17 +289,30 @@ pub fn confirm(ctx: &Ctx, target: &Target, kind: &str, preview: &str) -> Result<
 
 /// Add a line to the action log the user sees in Settings.
 pub fn log(ctx: &Ctx, target: &Target, tool: &str, summary: &str, ok: bool) {
-    record(ctx, target, tool, summary, ok, false);
+    record(ctx, target.chat_id, &target.title, tool, summary, ok, false);
 }
 
-fn record(ctx: &Ctx, target: &Target, tool: &str, summary: &str, ok: bool, declined: bool) {
+/// [`log`] for an action that may name no chat (`chat_id` 0).
+pub fn log_in(ctx: &Ctx, chat_id: i64, chat_title: &str, tool: &str, summary: &str, ok: bool) {
+    record(ctx, chat_id, chat_title, tool, summary, ok, false);
+}
+
+pub fn record(
+    ctx: &Ctx,
+    chat_id: i64,
+    chat_title: &str,
+    tool: &str,
+    summary: &str,
+    ok: bool,
+    declined: bool,
+) {
     activity::record(Action {
         time: 0,
         account: ctx.account.clone(),
         agent: current_agent(),
         tool: tool.to_string(),
-        chat_id: target.chat_id,
-        chat_title: target.title.clone(),
+        chat_id,
+        chat_title: chat_title.to_string(),
         summary: summary.chars().take(200).collect(),
         ok,
         declined,
@@ -300,6 +321,13 @@ fn record(ctx: &Ctx, target: &Target, tool: &str, summary: &str, ok: bool, decli
 
 /// Run a write that is not a send, logging how it went. It takes a turn in
 /// the paced queue like a send, so a flood wait stops it too.
+/// [`change`]'s queue turn and switch check, for writes that build their
+/// own call.
+pub fn take_write_turn(ctx: &Ctx, chat_id: i64) -> Result<(), ToolError> {
+    pacing::take_turn(ctx.client.id(), chat_id, 1, false).map_err(refusal_error)?;
+    still_allowed()
+}
+
 pub fn change(
     ctx: &Ctx,
     target: &Target,
@@ -307,8 +335,7 @@ pub fn change(
     summary: &str,
     request: Value,
 ) -> Result<Value, ToolError> {
-    pacing::take_turn(ctx.client.id(), target.chat_id, 1, false).map_err(refusal_error)?;
-    still_allowed()?;
+    take_write_turn(ctx, target.chat_id)?;
     let result = td::call(&ctx.client, request).map_err(write_error);
     log(ctx, target, tool, summary, result.is_ok());
     result

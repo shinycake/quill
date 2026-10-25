@@ -12,6 +12,7 @@ const SAVED_NAMES: [&str; 5] = ["saved", "saved messages", "me", "self", "myself
 const TITLE_CANDIDATES: i64 = 20;
 
 /// A chat a call may use.
+#[derive(Clone)]
 pub(crate) struct Target {
     pub chat_id: i64,
     pub title: String,
@@ -260,6 +261,19 @@ pub(crate) fn granted(ctx: &Ctx, chat_id: i64, me: i64) -> Result<Option<Target>
         scope,
         me,
     }))
+}
+
+/// A bot the user never talked to, written to only with its own grant: the
+/// bots default covers bots the user already uses, not a stranger's bot an
+/// agent just looked up.
+pub(crate) fn stranger_bot(ctx: &Ctx, target: &Target) -> bool {
+    target.class == ChatClass::Bot
+        && !grants::for_account(&ctx.account)
+            .chats
+            .contains_key(&target.chat_id)
+        && ctx
+            .call(json!({"@type": "getChat", "chat_id": target.chat_id}))
+            .is_ok_and(|chat| chat.get("last_message").is_none_or(Value::is_null))
 }
 
 /// A chat found by the `chat` argument, before any grant check.

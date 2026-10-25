@@ -7,7 +7,7 @@ pub const INSTRUCTIONS: &str = "Quill is the user's desktop Telegram client. Thr
 the user's Telegram account via the Quill that is already running on this computer. \
 Start with quill_status: it shows the signed-in account, the chats you may use and the tools that work now. \
 Capability comes in four layers: curated tools, raw TDLib calls, a UI driver and events; this version has \
-curated read and write tools and events (wait_for_message). You act as the user: sends go out in their name and \
+curated read and write tools, events (wait_for_message) and td_call for anything else TDLib can do. You act as the user: sends go out in their name and \
 show in their activity log in Quill. The user grants chats in Quill: by default Saved Messages and bots (read and \
 write) and the user's own channels (read); anything else answers \"Chat not granted\", and request_access asks the user. \
 Chats can be named by id, title, @username or \"saved\". Errors say what to do next. Read quill://guide for recipes.";

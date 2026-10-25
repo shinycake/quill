@@ -11,9 +11,10 @@ use gpui_kit::component::alert::Alert;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::agent::grants::Scope;
-use quill::agent::prompts::{Ask, Prompt};
+use quill::agent::prompts::{Ask, Prompt, Risk};
 use quill::lang::{keys, tr, tr_with};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -71,6 +72,10 @@ fn request_title(prompt: &Prompt) -> String {
         Ask::Write { title, kind, .. } => tr_with(
             super::agent_labels::confirm_title_key(kind),
             &[("agent", &agent), ("chat", &clip(title, 60))],
+        ),
+        Ask::Raw { method, .. } => tr_with(
+            keys::Q_AGENT_REQUEST_RAW,
+            &[("agent", &agent), ("method", &clip(method, 60))],
         ),
     }
 }
@@ -181,7 +186,9 @@ impl QuillApp {
                 );
             }
             Ask::Write { preview, kind, .. } => {
-                let preview = clip(preview, 600);
+                // A raw request shows whole: what it does may sit in any field.
+                let raw = kind == "td_call";
+                let preview = clip(preview, if raw { 6000 } else { 600 });
                 if !preview.is_empty() {
                     body = body.child(
                         div()
@@ -203,18 +210,61 @@ impl QuillApp {
                                     .rounded(radius)
                                     .bg(quote_bg)
                                     .text_sm()
-                                    .line_clamp(4)
-                                    .child(format!("\"{preview}\"")),
+                                    .when(!raw, |this| this.line_clamp(4))
+                                    .when(raw, |this| this.max_h(px(240.)).overflow_y_scroll())
+                                    .child(if raw {
+                                        preview
+                                    } else {
+                                        format!("\"{preview}\"")
+                                    }),
                             ),
                     );
                 }
             }
+            Ask::Raw { risk, preview, .. } => {
+                let (id, text) = match risk {
+                    Risk::Account => (
+                        "agent-request-raw-account",
+                        tr(keys::Q_AGENT_REQUEST_RAW_ACCOUNT),
+                    ),
+                    Risk::Money => (
+                        "agent-request-raw-money",
+                        tr(keys::Q_AGENT_REQUEST_RAW_MONEY),
+                    ),
+                };
+                body = body.child(warning(id, text, cx)).child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(muted)
+                                .child(tr(keys::Q_AGENT_REQUEST_RAW_PREVIEW)),
+                        )
+                        .child(
+                            div()
+                                .id("agent-request-raw")
+                                .debug_selector(|| "agent-request-raw".to_string())
+                                .px_3()
+                                .py_2()
+                                .rounded(radius)
+                                .bg(quote_bg)
+                                .text_xs()
+                                .font_family(super::message_text::MONO_FONT)
+                                .max_h(px(240.))
+                                .overflow_y_scroll()
+                                .child(clip(preview, 6000)),
+                        ),
+                );
+            }
             Ask::Chat { .. } => {}
         }
-        let later = if matches!(prompt.ask, Ask::Write { .. }) {
-            keys::Q_AGENT_REQUEST_WRITE_LATER
-        } else {
-            keys::Q_AGENT_REQUEST_LATER
+        let later = match prompt.ask {
+            Ask::Write { .. } => keys::Q_AGENT_REQUEST_WRITE_LATER,
+            Ask::Raw { .. } => keys::Q_AGENT_REQUEST_RAW_LATER,
+            _ => keys::Q_AGENT_REQUEST_LATER,
         };
         body = body.child(div().text_xs().text_color(muted).child(tr(later)));
         let title = request_title(&prompt);
