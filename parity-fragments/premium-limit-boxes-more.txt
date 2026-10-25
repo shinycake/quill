@@ -1,0 +1,2 @@
+# Limit boxes and toasts read from TDLib: favorite stickers, Saved Messages pins, story posting, similar channels, owned bots
+parity:premium-limit-boxes-more

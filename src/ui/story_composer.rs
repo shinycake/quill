@@ -262,6 +262,9 @@ impl QuillApp {
         } else if let Some(result) = eligibility {
             if !result.can_post() {
                 self.stories.composer.local_error = Some(result.user_message());
+                if let Some(kind) = result.premium_limit() {
+                    self.show_premium_limit(kind, 0, cx);
+                }
             } else {
                 // Phase 9.5: the target chat matches the eligibility
                 // check (the picker is disabled while `check_sent`).

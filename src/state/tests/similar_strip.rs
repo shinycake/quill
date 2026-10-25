@@ -184,3 +184,20 @@ fn clicking_the_notice_toggles_the_strip_and_rebuilds_the_rows() {
     // Nothing to toggle in a chat that was not joined here.
     assert_eq!(session.toggle_similar_strip(ChatId(99)), None);
 }
+
+#[test]
+fn the_strip_lists_as_many_channels_as_tdlib_allows_a_free_account() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, CHANNEL);
+    join(&mut session, &seq, &sink, 13);
+    similar_answer(&mut session, &seq, &sink, 13, &[101, 102, 103, 104], 9);
+    session
+        .payments
+        .hub
+        .limits
+        .apply_premium_limit("premiumLimitTypeSimilarChatCount", 2, 100);
+    let tiles = session.similar_strip_tiles(ChatId(13)).expect("tiles");
+    assert_eq!(tiles.len(), 2);
+    assert!(matches!(tiles[1], SimilarTile::More { count: 7, .. }));
+}
