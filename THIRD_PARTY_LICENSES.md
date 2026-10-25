@@ -8135,7 +8135,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [crypto-bigint 0.7.5](https://github.com/RustCrypto/crypto-bigint)
+- [crypto-bigint 0.7.8](https://github.com/RustCrypto/crypto-bigint)
 - [sec1 0.8.1](https://github.com/RustCrypto/formats)
 
 ````text
