@@ -92,7 +92,8 @@ Messages come back as text lines like
 and as JSON in `structuredContent`: `id`, `date` (UTC), `from`, `kind`
 (`text`, `photo`, `document`, `voice_note`...), `text` (the text or caption),
 `file` when there is one, and in full reads `reply_to`, `forwarded_from`,
-`links`, `edited`. Results that span chats add `chat` to each message.
+`links`, `styles` (formatted spans, like `{"style": "bold", "text": "agent"}`),
+`edited`. Results that span chats add `chat` to each message.
 
 ## Recipes
 

@@ -1,6 +1,7 @@
 //! Tools that change messages already in a chat: edit, delete, react, pin.
 //! Edits and deletes touch only the user's own messages.
 
+use super::super::messages::{self, Detail, Names};
 use super::super::target::{Target, chat_schema, require};
 use super::super::{Ctx, ToolError, ToolOutput, int_arg};
 use super::common::{self, TEXT_LIMIT, change, confirm, formatted, message_ids, required_text};
@@ -100,9 +101,15 @@ pub fn edit_message(args: &Value) -> Result<ToolOutput, ToolError> {
         &format!("Edited message {id}"),
         request,
     )?;
+    let edited = get_message(&ctx, &target, id)?;
+    let shaped = messages::shape(&edited, target.me, Detail::Full, &mut Names::new(&ctx));
     Ok(done(
-        format!("Edited message {id} in \"{}\".", target.title),
-        json!({"chat": target.summary(), "message_id": id, "edited": true}),
+        format!(
+            "Edited message {id} in \"{}\":\n{}",
+            target.title,
+            messages::line(&shaped)
+        ),
+        json!({"chat": target.summary(), "message": shaped}),
     ))
 }
 
@@ -170,6 +177,8 @@ pub fn delete_messages(args: &Value) -> Result<ToolOutput, ToolError> {
     )?;
     let whom = if revoke {
         "for everyone"
+    } else if for_everyone {
+        "for the user only (Telegram allows no more here: Saved Messages and bots keep one copy, and old or service messages cannot be revoked)"
     } else {
         "for the user only"
     };

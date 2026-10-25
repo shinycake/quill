@@ -276,6 +276,44 @@ fn links_of(content: &Value) -> Vec<String> {
     links
 }
 
+/// The styled spans of a formatted text, so an agent can see that its
+/// markup took: `[{"style": "bold", "text": "agent"}]`.
+fn styles_of(content: &Value) -> Vec<Value> {
+    let Some(text) = content.get("text").or_else(|| content.get("caption")) else {
+        return Vec::new();
+    };
+    let body = text.get("text").and_then(Value::as_str).unwrap_or_default();
+    let utf16: Vec<u16> = body.encode_utf16().collect();
+    let mut styles = Vec::new();
+    for entity in text
+        .get("entities")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let kind = entity.get("type");
+        let style = match kind.and_then(|k| k.get("@type")).and_then(Value::as_str) {
+            Some("textEntityTypeBold") => "bold",
+            Some("textEntityTypeItalic") => "italic",
+            Some("textEntityTypeUnderline") => "underline",
+            Some("textEntityTypeStrikethrough") => "strikethrough",
+            Some("textEntityTypeSpoiler") => "spoiler",
+            Some("textEntityTypeCode") => "code",
+            Some("textEntityTypePre" | "textEntityTypePreCode") => "pre",
+            Some("textEntityTypeBlockQuote" | "textEntityTypeExpandableBlockQuote") => "quote",
+            Some("textEntityTypeTextUrl") => "link",
+            Some("textEntityTypeMentionName") => "mention",
+            _ => continue,
+        };
+        let offset = entity.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize;
+        let length = entity.get("length").and_then(Value::as_u64).unwrap_or(0) as usize;
+        if let Some(slice) = utf16.get(offset..offset.saturating_add(length)) {
+            styles.push(json!({"style": style, "text": String::from_utf16_lossy(slice)}));
+        }
+    }
+    styles
+}
+
 /// Unix time → `2026-10-24T14:02:05Z`.
 pub fn iso_time(unix: i64) -> String {
     let days = unix.div_euclid(86_400);
@@ -372,6 +410,10 @@ pub fn shape(message: &Value, me: i64, detail: Detail, names: &mut Names) -> Val
                 json!({"chat_id": reply.get("chat_id"), "message_id": reply.get("message_id")}),
             );
         }
+        let styles = styles_of(&content);
+        if !styles.is_empty() {
+            out.insert("styles".into(), json!(styles));
+        }
         let links = links_of(&content);
         if !links.is_empty() {
             out.insert("links".into(), json!(links));
@@ -443,7 +485,7 @@ pub fn messages_of(answer: &Value) -> Vec<Value> {
 
 #[cfg(test)]
 mod tests {
-    use super::{iso_time, kind_of, line, links_of, truncate};
+    use super::{iso_time, kind_of, line, links_of, styles_of, truncate};
     use serde_json::json;
 
     #[test]
@@ -483,6 +525,18 @@ mod tests {
         assert_eq!(
             links_of(&content),
             vec!["x.org".to_string(), "https://a.b".to_string()]
+        );
+    }
+
+    #[test]
+    fn styles_name_the_spans_an_agent_formatted() {
+        let content = json!({"@type": "messageText", "text": {"text": "🙂 hello agent", "entities": [
+            {"offset": 9, "length": 5, "type": {"@type": "textEntityTypeBold"}},
+            {"offset": 3, "length": 5, "type": {"@type": "textEntityTypeUrl"}}
+        ]}});
+        assert_eq!(
+            styles_of(&content),
+            vec![json!({"style": "bold", "text": "agent"})]
         );
     }
 

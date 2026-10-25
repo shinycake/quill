@@ -17,7 +17,7 @@ pub(super) const TOOLS: &[Tool] = &[
         title: "Send a message",
         description: "Use to send a text message as the user in a chat granted read_write. Waits until Telegram delivers it. \
 Example input: {\"chat\": \"saved\", \"text\": \"Remember the *demo*\", \"format\": \"markdown\"}, or {\"chat\": \"@some_bot\", \"text\": \"/start\"}. \
-Output: chat, messages [{id, date, from, kind, text}] with the final message id, scheduled.",
+Output: chat, messages [{id, date, from, kind, text, styles}] with the final message id, scheduled. styles lists the formatted spans, e.g. [{style: bold, text: agent}].",
         schema: send::send_message_schema,
         run: send::send_message,
         read_only: false,
@@ -65,7 +65,7 @@ Output: chat (the destination), messages [{id, forwarded_from}].",
         name: "edit_message",
         title: "Edit a message",
         description: "Use to change the text or caption of one of the user's own messages. \
-Example input: {\"chat\": \"saved\", \"message_id\": 4194304, \"text\": \"Fixed typo\"}. Output: chat, message_id, edited.",
+Example input: {\"chat\": \"saved\", \"message_id\": 4194304, \"text\": \"Fixed typo\"}. Output: chat, message (the edited message, with styles).",
         schema: change::edit_schema,
         run: change::edit_message,
         read_only: false,
@@ -74,7 +74,7 @@ Example input: {\"chat\": \"saved\", \"message_id\": 4194304, \"text\": \"Fixed 
         name: "delete_messages",
         title: "Delete messages",
         description: "Use to delete the user's own messages (never other people's), for everyone where Telegram allows it. \
-Example input: {\"chat\": \"saved\", \"message_ids\": [4194304]}. Output: chat, deleted, for_everyone.",
+Example input: {\"chat\": \"saved\", \"message_ids\": [4194304]}. Output: chat, deleted, for_everyone (false where Telegram keeps one copy, as in Saved Messages).",
         schema: change::delete_schema,
         run: change::delete_messages,
         read_only: false,
@@ -101,7 +101,7 @@ Example input: {\"chat\": \"saved\", \"message_id\": 4194304}. Output: chat, mes
         name: "set_draft",
         title: "Set the draft",
         description: "Use to put text in a chat's message box for the user to review and send themselves. \
-Example input: {\"chat\": \"Ann Lee\", \"text\": \"Sounds good, see you at 6\"}. Output: chat, cleared.",
+Example input: {\"chat\": \"Ann Lee\", \"text\": \"Sounds good, see you at 6\"}. Output: chat, draft (the text, or null once cleared).",
         schema: manage::draft_schema,
         run: manage::set_draft,
         read_only: false,

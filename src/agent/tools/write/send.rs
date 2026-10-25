@@ -23,7 +23,7 @@ fn sent_output(
     let mut names = Names::new(ctx);
     let shaped: Vec<Value> = sent
         .iter()
-        .map(|m| messages::shape(m, target.me, Detail::Summary, &mut names))
+        .map(|m| messages::shape(m, target.me, Detail::Full, &mut names))
         .collect();
     let when = if scheduled { " (scheduled)" } else { "" };
     let mut text = format!("{verb} in \"{}\"{when}:\n", target.title);

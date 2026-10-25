@@ -67,7 +67,7 @@ pub fn set_draft(args: &Value) -> Result<ToolOutput, ToolError> {
             "{summary} in \"{}\". The user sends it from Quill.",
             target.title
         ),
-        json!({"chat": target.summary(), "cleared": cleared}),
+        json!({"chat": target.summary(), "draft": if cleared { Value::Null } else { Value::String(text) }}),
     ))
 }
 
