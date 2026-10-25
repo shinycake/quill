@@ -959,8 +959,8 @@ to an offscreen texture with the window's own renderer and reads it back:
 | Platform | Path | Fallback |
 | --- | --- | --- |
 | macOS | `MetalRenderer::capture_scene`: `render_scene_to_image` at the layer's drawable size. No drawable is taken from the layer and nothing is presented. | A window without a layer answers "the window has no layer to capture". |
-| Windows | `DirectXRenderer::render_to_image` (offscreen texture, staging copy). | An HDR (scRGB) swap chain refuses readback; the agent gets "Quill could not capture its window (...)". |
-| Linux X11 and Wayland | `WgpuRenderer::capture_scene`: an offscreen texture in the surface format, copied to a mapped buffer, 5 s timeouts. | A surface format other than BGRA8 or RGBA8 answers with an error. |
+| Windows | `DirectXRenderer::render_to_image` (the back buffer, staging copy). | An HDR (scRGB) swap chain refuses readback; the agent gets "Quill could not capture its window (...)". A render target with more than one sample would too (see below). |
+| Linux X11 and Wayland | `WgpuRenderer::capture_scene`: an offscreen texture in the surface format and the surface's alpha mode, copied to a mapped buffer, 5 s timeouts. | A surface format other than BGRA8 or RGBA8 answers with an error. |
 | Others, and builds without the UI | `capture_image`'s default body: "this platform's renderer cannot capture the window". | `quill_status` reports `ui_driver.screenshots.available` false. |
 
 Rejected: ScreenCaptureKit, `CGWindowListCreateImage`, `PrintWindow` /
@@ -976,6 +976,31 @@ tagged element while unset.
 
 `interface_zoom.rs`'s `ZoomWindow` forwards the new method (its
 `forwards_every_trait_method` test caught the gap).
+
+Details that matter for the pixels:
+
+- Every readback is premultiplied, and the flatten onto the grey assumes
+  it. Metal and Direct3D blend straight alpha (`SourceAlpha`,
+  `OneMinusSourceAlpha`) onto a transparent target, which leaves the
+  colour multiplied by coverage. wgpu builds its pipelines for the
+  surface's alpha mode, so the capture renders in that mode too (it used
+  to pass "straight" always, which was wrong on a premultiplied surface):
+  the opaque mode premultiplies through the blend, the premultiplied mode
+  already is.
+- Direct3D copies the back buffer into a one-sample staging texture with
+  `CopyResource`, which needs matching sample counts. The back buffer of
+  a flip-model swap chain always has one sample (the 4x MSAA texture is
+  path rasterization's own and is resolved before it reaches the target),
+  so no `ResolveSubresource` is needed; `render_to_image` checks the
+  count and refuses with an error rather than copy if that ever changes.
+- Metal waits for the capture with `wait_until_completed`, which has no
+  timeout, as upstream's present already waits on every frame
+  (`wait_until_scheduled`). wgpu has its own 5 s timeouts.
+- Memory at full resolution: the encode shrinks the readback first (it is
+  premultiplied, which is what `resize` filters, so the picture is the
+  same) and drops the full-size copy, then flattens to RGB in place in
+  the remaining buffer. Before, the flatten made a second full-size
+  buffer and the shrink a third.
 
 ### Privacy: the paint filter
 
@@ -1000,12 +1025,28 @@ So the frame is cut where it is painted, by the rule that cuts clicks:
 - It fails closed. Cached paint is not replayed under a filter (it was
   never filtered), so every view renders again; an element that carries a
   tag but does not push it is drawn as its parent decides; a deferred draw
-  (tooltip, toast, popover) carries only its own tags, so in the granted
-  scope an untagged one is left out.
+  (toast, popover) carries only its own tags, so in the granted scope an
+  untagged one is left out.
+- What is opened on a row is cut with the row. A chat's context menu
+  (chat list and the search's top people), its stories menu and its peek
+  preview carry `chat=<id>` as well as their own tags, so over an
+  ungranted chat (or, with All chats on, a secret chat without its own
+  grant) they are neither in the tree nor in the picture. The archive
+  menu carries `archive` inside its menu region, so the granted scope
+  cuts it with the "Archived chats" row. A tooltip is drawn at the root
+  after everything else, where no tags are above it, so GPUI now records
+  the tags its owner was painted under and paints the tooltip under the
+  same tags. A drag's picture follows the pointer at the root too and is
+  not tied to its row, so no screenshot is taken while the user drags
+  something ("The user is dragging something...").
 - The surface check is the tree's: a blocked surface (Settings, a request
   to the user, sign-in, payments...) gets the same note as `read_ui_tree`
   and no frame is drawn. The tree in the reply is read right after the
-  filtered frame and must name the same surface. While the user has
+  filtered frame and must name the same surface. That re-check is
+  load-bearing: `region=chat` allows whatever chat is open, granted or
+  not, so a chat that opened between the check and the frame (a click
+  the user made, a link) would be drawn in full if the surface were not
+  read again from the same frame. While the user has
   taken control or pressed Stop, no screenshot is taken, the one after an
   input included: the window is theirs.
 - The takeover overlay is left out (`takeover_layer` returns nothing while
@@ -1046,7 +1087,16 @@ executor. The default 1280-px image is smaller and encodes faster.
   surface gets no screenshot and no log line; an input with a screenshot
   answers with the frame after it; the takeover pill is in the window and
   not in the screenshot; a refused row under a drawn container is covered
-  and none of its paint is drawn.
+  and none of its paint is drawn; a chat menu over an ungranted row is
+  absent from the tree and painted over, over a granted row it shows; with
+  All chats on, the peek of an ungranted secret chat is cut and another
+  chat's peek is drawn; a tooltip over a refused row is hidden in the
+  filtered frame and one over an allowed row is drawn; no screenshot
+  while the user drags the chat list's edge, one again after; the encode
+  flattens a premultiplied readback (transparent, opaque, half-covered)
+  and shrinks before it, as an RGB PNG of the asked size.
+- `redact.rs`: a menu inside a granted or ungranted `chat=` row, in both
+  scopes, and the archive menu's tag order.
 - `shot.rs`: the 1280-px shrink, one a second, 20 a minute.
 - `tools::ui_shot`: the schema options, the image block, the refusal with
   the driver off.
@@ -1065,8 +1115,9 @@ executor. The default 1280-px image is smaller and encodes faster.
 - Text and images are drawn by the renderer like everything else, so the
   screenshot matches the screen. Video surfaces and webviews were not
   checked.
-- A context menu the user opened over an ungranted row is a deferred
-  draw tagged as a menu, so it is drawn; its items name actions, not the
-  chat, but it is a case to watch.
+- Other popovers opened from a chat-related element (a message's menu in
+  the open chat, the folder tab menu) carry only the menu tag. The open
+  chat passed the surface check, so its menu is allowed; a folder's menu
+  names the folder, not a chat.
 - The limit is per process, not per agent; one busy agent can use the
   minute's budget for all.
