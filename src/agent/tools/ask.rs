@@ -1,7 +1,7 @@
 //! `request_access`: ask the user, in Quill, for a chat, all chats or the
 //! contact list. The call waits for the answer.
 
-use super::target::{chat_schema, lookup};
+use super::target::{Reach, chat_schema, lookup};
 use super::{Ctx, ToolError, ToolOutput};
 use crate::agent::grants::{self, ChatClass, Scope};
 use crate::agent::prompts::{self, Ask, Decision};
@@ -58,6 +58,7 @@ pub fn run(args: &Value) -> Result<ToolOutput, ToolError> {
     }
     let ctx = Ctx::active()?;
     let current = grants::for_account(&ctx.account);
+    let mut granted_chat = None;
     let (ask, what) = if wants_contacts {
         if current.contacts {
             return Ok(already("the contact list"));
@@ -69,14 +70,19 @@ pub fn run(args: &Value) -> Result<ToolOutput, ToolError> {
         }
         (Ask::AllChats { scope }, "all chats".to_string())
     } else {
-        let found = lookup(&ctx, args)?;
+        let found = lookup(&ctx, args, Reach::Any)?;
         if current
             .scope_for(found.chat_id, found.class)
             .is_some_and(|s| s.allows(scope))
         {
             return Ok(already(&found.title));
         }
-        let what = format!("\"{}\"", found.title);
+        // Until the user allows it, the agent hears only its own words back.
+        let what = match args.get("chat") {
+            Some(Value::String(name)) => format!("\"{}\"", name.trim()),
+            _ => format!("chat {}", found.chat_id),
+        };
+        granted_chat = Some((found.chat_id, found.title.clone()));
         (
             Ask::Chat {
                 chat_id: found.chat_id,
@@ -92,9 +98,18 @@ pub fn run(args: &Value) -> Result<ToolOutput, ToolError> {
         ToolError::new("Several requests are already waiting for the user in Quill. Wait for those answers, then retry.")
     })?;
     match prompts::wait(id, &rx, ANSWER_WAIT) {
-        Some(Decision::Allowed) => Ok(ToolOutput {
-            text: format!("The user allowed {what} ({}). Go ahead.", scope.as_str()),
-            data: json!({"granted": true, "scope": scope.as_str()}),
+        Some(Decision::Allowed) => Ok(match granted_chat {
+            Some((chat_id, title)) => ToolOutput {
+                text: format!(
+                    "The user allowed \"{title}\" (chat {chat_id}, {}). Go ahead.",
+                    scope.as_str()
+                ),
+                data: json!({"granted": true, "scope": scope.as_str(), "chat": {"id": chat_id, "title": title}}),
+            },
+            None => ToolOutput {
+                text: format!("The user allowed {what} ({}). Go ahead.", scope.as_str()),
+                data: json!({"granted": true, "scope": scope.as_str()}),
+            },
         }),
         Some(Decision::Denied) => Ok(ToolOutput {
             text: format!(

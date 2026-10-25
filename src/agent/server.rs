@@ -11,7 +11,7 @@ use super::access;
 use interprocess::local_socket::{Stream, prelude::*};
 use serde_json::{Value, json};
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -224,7 +224,7 @@ pub fn serve(stream: Stream) {
     let (recv, send) = stream.split();
     let send = Arc::new(Mutex::new(send));
     let in_flight = Arc::new(AtomicUsize::new(0));
-    let watching = Arc::new(AtomicBool::new(false));
+    let watching = Arc::new(AtomicU64::new(0));
     // A subscription's watcher stops with its connection.
     let _stop_watching = StopOnDrop(watching.clone());
     let mut reader = BufReader::new(recv);
@@ -272,13 +272,18 @@ pub fn serve(stream: Stream) {
     }
 }
 
-struct StopOnDrop(Arc<AtomicBool>);
+/// The connection's current watcher (0 = none). A watcher runs only while
+/// this holds its own number, so an unsubscribe followed by a subscribe
+/// retires the old one instead of running two.
+struct StopOnDrop(Arc<AtomicU64>);
 
 impl Drop for StopOnDrop {
     fn drop(&mut self) {
-        self.0.store(false, Ordering::SeqCst);
+        self.0.store(0, Ordering::SeqCst);
     }
 }
+
+static NEXT_WATCHER: AtomicU64 = AtomicU64::new(0);
 
 /// `resources/subscribe` and `resources/unsubscribe`: only `quill://unread`
 /// can be watched. While subscribed, a watcher thread sends
@@ -288,7 +293,7 @@ fn subscription<W: Write + Send + 'static>(
     request: &Value,
     id: &Value,
     send: &Arc<Mutex<W>>,
-    watching: &Arc<AtomicBool>,
+    watching: &Arc<AtomicU64>,
     generation: u64,
 ) -> String {
     let uri = request
@@ -305,10 +310,17 @@ fn subscription<W: Write + Send + 'static>(
     }
     let subscribe = request.get("method").and_then(Value::as_str) == Some("resources/subscribe");
     if !subscribe {
-        watching.store(false, Ordering::SeqCst);
+        watching.store(0, Ordering::SeqCst);
         return result_line(id, json!({}));
     }
-    if !watching.swap(true, Ordering::SeqCst) {
+    let mine = NEXT_WATCHER
+        .fetch_add(1, Ordering::SeqCst)
+        .wrapping_add(1)
+        .max(1);
+    if watching
+        .compare_exchange(0, mine, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+    {
         let send = send.clone();
         let flag = watching.clone();
         let started = crate::thread_guard::spawn_guarded("quill-agent-watch", move || {
@@ -319,7 +331,7 @@ fn subscription<W: Write + Send + 'static>(
             })
             .to_string();
             let mut since = super::events::latest_seq();
-            while flag.load(Ordering::SeqCst) && still_on(generation) {
+            while flag.load(Ordering::SeqCst) == mine && still_on(generation) {
                 match super::tools::granted_message_arrived(&mut since, WATCH_WAIT) {
                     Ok(true) => {
                         let mut out = crate::locks::lock_or_recover(&send);
@@ -332,10 +344,10 @@ fn subscription<W: Write + Send + 'static>(
                     Err(_) => std::thread::sleep(WATCH_WAIT),
                 }
             }
-            flag.store(false, Ordering::SeqCst);
+            let _ = flag.compare_exchange(mine, 0, Ordering::SeqCst, Ordering::SeqCst);
         });
         if started.is_err() {
-            watching.store(false, Ordering::SeqCst);
+            watching.store(0, Ordering::SeqCst);
             return error_line(id, code::INTERNAL, "Quill could not start watching. Retry.");
         }
     }
@@ -386,7 +398,7 @@ fn dispatch<W: Write + Send + 'static>(
     text: String,
     send: &Arc<Mutex<W>>,
     in_flight: &Arc<AtomicUsize>,
-    watching: &Arc<AtomicBool>,
+    watching: &Arc<AtomicU64>,
     generation: u64,
     agent: &str,
 ) {

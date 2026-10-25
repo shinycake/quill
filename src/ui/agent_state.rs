@@ -56,7 +56,7 @@ impl AgentUi {
                     .update_in(cx, |_, window, cx| {
                         // The user is usually in another app: a request
                         // they have not seen yet brings Quill forward.
-                        let fresh = prompts::current()
+                        let fresh = prompts::current_for(&active_account())
                             .map(|prompt| prompt.id)
                             .filter(|id| *id != announced);
                         if let Some(id) = fresh {
@@ -172,7 +172,7 @@ impl QuillApp {
         if !sees_prompts() {
             return None;
         }
-        prompts::current().filter(|prompt| prompt.account == active_account())
+        prompts::current_for(&active_account())
     }
 
     /// The user picked `scope` for a row. "All other chats" asks first when
@@ -234,7 +234,8 @@ impl QuillApp {
         allow: bool,
         cx: &mut Context<Self>,
     ) {
-        let waiting = prompts::current().is_some_and(|current| current.id == prompt.id);
+        let waiting =
+            prompts::current_for(&prompt.account).is_some_and(|current| current.id == prompt.id);
         if waiting && allow {
             grants::update(&prompt.account, |g| apply_ask(g, &prompt.ask));
         }

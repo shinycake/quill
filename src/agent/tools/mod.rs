@@ -289,7 +289,7 @@ pub fn granted_message_arrived(
     let ctx = Ctx::active()?;
     let me = target::my_user_id(&ctx)?;
     let mut known = std::collections::HashMap::new();
-    let arrived = crate::agent::events::wait_for(ctx.client.id(), *since, wait, |new| {
+    let (arrived, checked) = crate::agent::events::wait_for(ctx.client.id(), *since, wait, |new| {
         !new.outgoing
             && *known.entry(new.chat_id).or_insert_with(|| {
                 target::granted(&ctx, new.chat_id, me)
@@ -298,12 +298,7 @@ pub fn granted_message_arrived(
                     .is_some()
             })
     });
-    *since = arrived
-        .iter()
-        .map(|new| new.seq)
-        .max()
-        .unwrap_or_else(crate::agent::events::latest_seq)
-        .max(*since);
+    *since = checked.max(*since);
     Ok(!arrived.is_empty())
 }
 

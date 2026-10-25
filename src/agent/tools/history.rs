@@ -279,6 +279,18 @@ pub fn search_messages(args: &Value) -> Result<ToolOutput, ToolError> {
     })
 }
 
+/// The `searchMessages` offset that continues after `message`:
+/// "date,chat_id,server_message_id". TDLib message ids are server ids
+/// shifted left by 20; a message not yet on the server has no place in it.
+fn cursor_after(message: &Value, chat_id: i64) -> Option<String> {
+    let id = message.get("id").and_then(Value::as_i64)?;
+    if id & 0xF_FFFF != 0 {
+        return None;
+    }
+    let date = message.get("date").and_then(Value::as_i64).unwrap_or(0);
+    Some(format!("{date},{chat_id},{}", id >> 20))
+}
+
 /// Search every chat, keeping only matches in granted chats.
 fn search_everywhere(
     ctx: &Ctx,
@@ -328,11 +340,9 @@ fn search_everywhere(
                 fields.insert("chat".into(), target.summary());
             }
             shaped.push(one);
-            last_kept = Some(format!(
-                "{},{chat_id},{}",
-                message.get("date").and_then(Value::as_i64).unwrap_or(0),
-                message.get("id").and_then(Value::as_i64).unwrap_or(0),
-            ));
+            if let Some(cursor) = cursor_after(&message, chat_id) {
+                last_kept = Some(cursor);
+            }
             if shaped.len() as i64 >= limit {
                 break;
             }
@@ -420,4 +430,17 @@ pub fn get_message(args: &Value) -> Result<ToolOutput, ToolError> {
         text: messages::line(&shaped),
         data: shaped,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn search_cursors_carry_server_message_ids() {
+        let message = serde_json::json!({"id": 5i64 << 20, "date": 1_700_000_000});
+        assert_eq!(
+            super::cursor_after(&message, -100),
+            Some("1700000000,-100,5".to_string())
+        );
+        assert_eq!(super::cursor_after(&serde_json::json!({"id": 7}), 1), None);
+    }
 }

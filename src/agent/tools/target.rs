@@ -130,7 +130,7 @@ fn chat_id_of(chat: &Value) -> Option<i64> {
 }
 
 /// The chat id `wanted` names. `None` means Saved Messages.
-fn resolve_id(ctx: &Ctx, wanted: Option<&Value>, me: i64) -> Result<i64, ToolError> {
+fn resolve_id(ctx: &Ctx, wanted: Option<&Value>, me: i64, reach: Reach) -> Result<i64, ToolError> {
     let text = match wanted {
         None | Some(Value::Null) => return saved_chat_id(ctx, me),
         Some(Value::Number(n)) => {
@@ -162,7 +162,7 @@ fn resolve_id(ctx: &Ctx, wanted: Option<&Value>, me: i64) -> Result<i64, ToolErr
             })?;
         return chat_id_of(&chat).ok_or_else(|| ToolError::new("Telegram returned no chat id."));
     }
-    by_title(ctx, &text)
+    by_title(ctx, &text, me, reach)
 }
 
 fn saved_chat_id(ctx: &Ctx, me: i64) -> Result<i64, ToolError> {
@@ -182,24 +182,37 @@ fn username_of(text: &str) -> Option<&str> {
     valid.then_some(name)
 }
 
+/// Which chats a name may resolve to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Reach {
+    /// Granted chats only: tools never learn that other chats exist.
+    Granted,
+    /// Any chat, for `request_access`, which shows the match to the user
+    /// and tells the agent nothing about it until the user allows it.
+    Any,
+}
+
 /// The one chat whose title matches `title`: an exact match (ignoring case)
-/// wins, then a single search result.
-fn by_title(ctx: &Ctx, title: &str) -> Result<i64, ToolError> {
+/// wins, then a single search result. With [`Reach::Granted`], chats that
+/// are not granted are left out of the matches and of every error.
+fn by_title(ctx: &Ctx, title: &str, me: i64, reach: Reach) -> Result<i64, ToolError> {
     let found = ctx.call(json!({"@type": "searchChats", "query": title, "type_filter": null, "limit": TITLE_CANDIDATES}))?;
     let ids: Vec<i64> = found
         .get("chat_ids")
         .and_then(Value::as_array)
         .map(|ids| ids.iter().filter_map(Value::as_i64).collect())
         .unwrap_or_default();
+    let grants = grants::for_account(&ctx.account);
     let mut candidates = Vec::new();
+    let mut hidden = 0usize;
     for id in ids {
         let chat = ctx.call(json!({"@type": "getChat", "chat_id": id}))?;
-        let name = chat
-            .get("title")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        candidates.push((id, name));
+        let class = classify(ctx, &chat, me)?;
+        if reach == Reach::Granted && grants.scope_for(id, class).is_none() {
+            hidden += 1;
+            continue;
+        }
+        candidates.push((id, chat_title(&chat, class)));
     }
     let exact: Vec<&(i64, String)> = candidates
         .iter()
@@ -207,8 +220,14 @@ fn by_title(ctx: &Ctx, title: &str) -> Result<i64, ToolError> {
         .collect();
     match (exact.as_slice(), candidates.as_slice()) {
         ([(id, _)], _) | ([], [(id, _)]) => Ok(*id),
+        ([], []) if hidden > 0 => Err(ToolError::new(format!(
+            "No granted chat is called \"{title}\". If you need a chat by that name, call request_access {{\"chat\": \"{title}\", \"scope\": \"read\", \"reason\": \"<why>\"}}; Quill shows the user the match and asks."
+        ))),
         ([], []) => Err(ToolError::new(format!(
-            "No chat is called \"{title}\", granted or not. Check the name, or call list_chats for the chats you can use."
+            "No chat is called \"{title}\". Check the name, or call list_chats for the chats you can use."
+        ))),
+        _ if reach == Reach::Any => Err(ToolError::new(format!(
+            "Several chats match \"{title}\". Ask with the chat's exact title or @username, or with its id if you have it."
         ))),
         (many, _) => {
             let pool: Vec<&(i64, String)> = if many.is_empty() {
@@ -222,7 +241,7 @@ fn by_title(ctx: &Ctx, title: &str) -> Result<i64, ToolError> {
                 .map(|(id, name)| format!("{name} (chat {id})"))
                 .collect();
             Err(ToolError::new(format!(
-                "Several chats match \"{title}\": {}. Pass the chat id.",
+                "Several granted chats match \"{title}\": {}. Pass the chat id.",
                 names.join(", ")
             )))
         }
@@ -255,9 +274,9 @@ pub(crate) struct Found {
 }
 
 /// The chat `args.chat` names.
-pub(crate) fn lookup(ctx: &Ctx, args: &Value) -> Result<Found, ToolError> {
+pub(crate) fn lookup(ctx: &Ctx, args: &Value, reach: Reach) -> Result<Found, ToolError> {
     let me = my_user_id(ctx)?;
-    let chat_id = resolve_id(ctx, args.get("chat"), me)?;
+    let chat_id = resolve_id(ctx, args.get("chat"), me, reach)?;
     let chat = ctx
         .call(json!({"@type": "getChat", "chat_id": chat_id}))
         .map_err(|_| {
@@ -281,7 +300,7 @@ pub(crate) fn require(ctx: &Ctx, args: &Value, needed: Scope) -> Result<Target, 
         title,
         class,
         me,
-    } = lookup(ctx, args)?;
+    } = lookup(ctx, args, Reach::Granted)?;
     let scope = grants::for_account(&ctx.account).scope_for(chat_id, class);
     match scope {
         Some(scope) if scope.allows(needed) => Ok(Target {
@@ -294,8 +313,10 @@ pub(crate) fn require(ctx: &Ctx, args: &Value, needed: Scope) -> Result<Target, 
         Some(_) => Err(ToolError::new(format!(
             "\"{title}\" is granted for reading only. Call request_access {{\"chat\": {chat_id}, \"scope\": \"read_write\", \"reason\": \"<why>\"}} to ask the user for more."
         ))),
+        // No title: an agent must not learn what an ungranted chat is.
         None => Err(ToolError::new(format!(
-            "Chat not granted: \"{title}\". Call request_access {{\"chat\": {chat_id}, \"scope\": \"{}\", \"reason\": \"<why>\"}} to ask the user.",
+            "Chat not granted: {}. Call request_access {{\"chat\": {chat_id}, \"scope\": \"{}\", \"reason\": \"<why>\"}} to ask the user.",
+            chat_id,
             needed.as_str()
         ))),
     }
