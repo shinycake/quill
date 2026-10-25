@@ -104,9 +104,7 @@ fn strip_cell(
 }
 
 fn premium_page(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Option<PromoPage> {
-    app.read_with(cx, |app, _| {
-        Some(app.session()?.payments.hub.promo_page.clone())
-    })
+    app.read_with(cx, |app, _| Some(app.session()?.payments.hub.promo_page))
 }
 
 fn reactions(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Vec<(String, i32, bool)> {
