@@ -509,6 +509,7 @@ mod story_composer;
 mod story_insights_ui;
 mod story_more;
 mod story_ring;
+mod story_stealth_ui;
 mod story_viewer;
 mod subsection_tabs;
 mod subsection_tabs_fit;

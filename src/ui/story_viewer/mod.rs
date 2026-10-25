@@ -632,59 +632,23 @@ impl QuillApp {
             .update(cx, |input, cx| input.set_value("", window, cx));
     }
 
-    /// Phase 9.5: stealth-mode toggle. The button reflects
-    /// `Session::story_stealth` (from `updateStoryStealthMode` — the
-    /// schema exposes no getter, so the button is honest about only
-    /// knowing pushed state): active → informational; cooling down →
-    /// disabled; otherwise sends `activateStoryStealthMode`.
-    pub(super) fn toggle_story_stealth(&mut self, cx: &mut Context<Self>) {
-        let now = now_unix_secs();
-        let stealth = self
-            .session()
-            .map(|session| session.stories.stealth)
-            .unwrap_or_default();
-        if stealth.is_active(now) {
-            self.connection.set_note(StatusNote::silent(tr(
-                keys::Q_MEDIA_STEALTH_MODE_IS_ACTIVE_YOUR,
-            )));
-            cx.notify();
-            return;
-        }
-        if stealth.is_cooling_down(now) {
-            self.connection.set_note(StatusNote::silent(tr(
-                keys::Q_MEDIA_STEALTH_MODE_IS_COOLING_DOWN,
-            )));
-            cx.notify();
-            return;
-        }
-        if let Some(live) = self.live.as_mut() {
-            self.connection
-                .set_note(match live.driver.activate_story_stealth_mode() {
-                    Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_ENABLING_STEALTH_MODE)),
-                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_ENABLE_STEALTH_MODE)),
-                });
-        } else if self.demo_session.is_some() {
-            self.connection.set_note(StatusNote::info(tr(
-                keys::Q_MEDIA_DEMO_STEALTH_MODE_NEEDS_LIVE,
-            )));
-        }
-        cx.notify();
-    }
-
-    /// Phase 9.5: stealth button label for the action row.
-    pub(super) fn story_stealth_label(&self) -> &'static str {
-        let now = now_unix_secs();
-        let stealth = self
-            .session()
-            .map(|session| session.stories.stealth)
-            .unwrap_or_default();
-        if stealth.is_active(now) {
-            tr(keys::Q_MEDIA_STEALTH_ON)
-        } else if stealth.is_cooling_down(now) {
-            tr(keys::Q_MEDIA_STEALTH_COOLING_DOWN)
-        } else {
-            tr(keys::Q_MEDIA_STEALTH)
-        }
+    pub(super) fn story_stealth_entry(
+        &self,
+        item: &StoryViewerItem,
+    ) -> Option<quill::story_stealth::StealthEntry> {
+        let session = self.session()?;
+        let is_user = matches!(
+            session.chats.get(&item.chat_id.0).map(|chat| &chat.kind),
+            Some(quill::telegram::envelope::ChatKind::Private { user_id })
+                if session.my_user_id != Some(user_id.0)
+        );
+        (is_user && !item.is_live && session.premium_possible()).then(|| {
+            quill::story_stealth::StealthEntry::of(
+                session.my_is_premium(),
+                session.stories.stealth,
+                now_unix_secs(),
+            )
+        })
     }
 
     /// Close the viewer itself: `closeStory` for the story it showed, no
@@ -752,6 +716,7 @@ impl QuillApp {
                 .is_some_and(|open| open.if_gone.is_some())
             || self.stories.share_open
             || self.stories.close_friends_edit.is_some()
+            || self.stories.stealth_box.is_some()
     }
 
     /// Phase 9.6: 100ms tick while the story viewer is open (mirrors

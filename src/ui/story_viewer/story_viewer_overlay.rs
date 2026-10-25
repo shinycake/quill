@@ -354,6 +354,7 @@ impl QuillApp {
                     .children(live_composer),
             )
             .children(reply_panel)
+            .children(self.story_stealth_toast())
     }
 
     /// tdesktop's story header (`media_stories_header.cpp`): the poster's

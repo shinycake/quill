@@ -251,6 +251,7 @@ pub mod story_repost;
 pub mod story_restriction;
 pub mod story_ring;
 pub mod story_sibling_layout;
+pub mod story_stealth;
 pub mod story_tray_walk;
 pub mod story_viewer;
 pub mod subsection_tabs;

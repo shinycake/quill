@@ -33,10 +33,6 @@ impl Session {
                         }),
                 );
             }
-            // Phase 9.5: a `getStoryInteractions` / `reportStory` /
-            // `activateStoryStealthMode` error — the viewer panel /
-            // report flow / stealth button shows it instead of
-            // spinning forever.
             Some(RequestPurpose::GetStoryInteractions) => {
                 if let Some(pending) = pending {
                     self.fail_story_viewers(
@@ -87,10 +83,6 @@ impl Session {
                         format!("Reporting failed: {}", error_reason(err)),
                     );
                 }
-            }
-            Some(RequestPurpose::ActivateStoryStealthMode) => {
-                self.stories.stealth_error =
-                    Some(format!("Stealth mode failed: {}", error_reason(err)));
             }
             // Phase 9.5: a posted-story management call failed —
             // clear the spinner and surface the sanitized error.

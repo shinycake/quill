@@ -289,12 +289,6 @@ impl QuillApp {
         if self.stories.report_open {
             column = column.child(self.story_report_ui(cx));
         }
-        if let Some(stealth_err) = self
-            .session()
-            .and_then(|session| session.stories.stealth_error.clone())
-        {
-            column = column.child(div().text_sm().text_color(danger()).child(stealth_err));
-        }
         // Phase 9.5: cover-frame editor row (video stories) + privacy
         // editor panel + the management status line (pending / error).
         if self.stories.cover.is_some() {

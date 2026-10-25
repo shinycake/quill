@@ -156,7 +156,9 @@ gpui_kit::assets::icon_assets!(
         // Send Location's Show my location (`ui::location_picker`).
         LocateFixed,
         Sparkles,
-        SpellCheck
+        SpellCheck,
+        HatGlasses,
+        RotateCcwClock
     ]
 );
 
