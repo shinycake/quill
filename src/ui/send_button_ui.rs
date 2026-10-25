@@ -19,6 +19,7 @@ use quill::lang::{keys, tr};
 use quill::send_button::{
     SendButtonInputs, SendButtonKind, SendMorph, format_slowmode, morph_layers, send_button_kind,
 };
+use quill::send_rights::SendKind;
 use std::sync::OnceLock;
 use std::time::Instant;
 
@@ -26,6 +27,9 @@ use std::time::Instant;
 const BUTTON_SIZE: f32 = 32.;
 /// Glyph size at full scale.
 const GLYPH_SIZE: f32 = 16.;
+/// A record button whose recording the chat refuses is drawn at this
+/// opacity (tdesktop `kForbiddenOpacity`); clicking it says why.
+const FORBIDDEN_OPACITY: f32 = 0.5;
 
 /// Milliseconds on a monotonic clock shared by every caller.
 fn now_ms() -> u64 {
@@ -49,6 +53,20 @@ impl QuillApp {
         })
     }
 
+    /// tdesktop's `SendButton::State::forbidden`: the button records, and
+    /// the chat refuses that kind of recording.
+    pub(super) fn record_forbidden(&self, kind: SendButtonKind) -> bool {
+        let SendButtonKind::Record { video } = kind else {
+            return false;
+        };
+        let refused = if video {
+            SendKind::VideoMessages
+        } else {
+            SendKind::VoiceMessages
+        };
+        self.send_denial(refused).is_some()
+    }
+
     /// Same guard as Enter-to-send: text, or attachments without a caption.
     pub(super) fn submit_from_send_button(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.composer.read(cx).value().to_string();
@@ -70,6 +88,7 @@ impl QuillApp {
     ) -> AnyElement {
         let kind = self.send_button_kind_now(can_record, sendable);
         let wait = self.slow_mode_wait_secs();
+        let forbidden = self.record_forbidden(kind);
 
         let now = now_ms();
         let mut morph = self
@@ -110,6 +129,7 @@ impl QuillApp {
         let glyphs = div()
             .relative()
             .size_full()
+            .when(forbidden, |glyphs| glyphs.opacity(FORBIDDEN_OPACITY))
             .when(animating, |glyphs| {
                 glyphs.child(glyph_layer(morph.source(), wait, outgoing, cx))
             })

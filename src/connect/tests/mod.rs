@@ -133,6 +133,7 @@ mod ton_wallet_own;
 mod tone_upload;
 mod translate;
 mod update_batch;
+mod voice_restricted;
 mod web_apps;
 
 pub(crate) use calls::{READY_CALL_JSON, group_call_test_driver};

@@ -7,11 +7,15 @@
 //! the refusal text depends on whether everyone is restricted ("Sending
 //! photos isn't allowed in this group."), only this member is ("The admins
 //! of this group restricted you from sending photos here."), or the member
-//! is restricted until a date. Pure logic; the UI reads it to replace the
-//! composer, to refuse a recording or an attachment, and to explain why.
+//! is restricted until a date. In a private chat the only refusal is the
+//! user's own: they accept no voice or video messages (`amRestricted` for
+//! `VoiceMessagesForbidden`, "{user} doesn't accept voice messages.").
+//! Pure logic; the UI reads it to replace the composer, to refuse a
+//! recording or an attachment, and to explain why.
 #![deny(clippy::indexing_slicing)]
 
 use crate::composer::AttachmentKind;
+use crate::lang::{keys, tr_with};
 use crate::state::{ChatSummary, Session};
 use crate::telegram::envelope::{
     ChannelMemberStatus, ChatKind, ChatPermissions, MemberRestriction,
@@ -84,10 +88,10 @@ impl SendKind {
 const FOREVER_SECS: i64 = 366 * 24 * 3600;
 
 /// The facts the decision reads.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct SendRights {
     /// A basic group or supergroup. Private chats and channels have no
-    /// per-kind rights to enforce here.
+    /// group rights to enforce here.
     pub group: bool,
     /// The viewer's own status, once known.
     pub status: Option<ChannelMemberStatus>,
@@ -97,6 +101,9 @@ pub struct SendRights {
     pub restriction: Option<MemberRestriction>,
     /// Now, in unix seconds.
     pub now: i64,
+    /// The private chat's user, by name, when they accept no voice or
+    /// video messages (`userFullInfo.has_restricted_voice_and_video_note_messages`).
+    pub voice_refused_by: Option<String>,
 }
 
 impl SendRights {
@@ -118,13 +125,38 @@ impl SendRights {
             } => (true, chat.my_member_status),
             _ => (false, None),
         };
+        let voice_refused_by = match chat.kind {
+            ChatKind::Private { user_id } => session
+                .user_full_info(user_id.0)
+                .filter(|info| info.voice_notes_restricted)
+                .map(|_| chat.title.clone()),
+            _ => None,
+        };
         Self {
             group,
             status,
             defaults: chat.permissions,
             restriction: chat.my_restriction,
             now,
+            voice_refused_by,
         }
+    }
+
+    fn refused_by_user(&self, kind: SendKind) -> bool {
+        self.voice_refused_by.is_some()
+            && matches!(kind, SendKind::VoiceMessages | SendKind::VideoMessages)
+    }
+
+    /// `lng_restricted_send_voice_messages` / `_video_messages`: the user's
+    /// own refusal of `kind`.
+    fn user_refusal(&self, kind: SendKind) -> Option<String> {
+        let user = self.voice_refused_by.as_deref()?;
+        let key = match kind {
+            SendKind::VoiceMessages => keys::RESTRICTED_SEND_VOICE_MESSAGES,
+            SendKind::VideoMessages => keys::RESTRICTED_SEND_VIDEO_MESSAGES,
+            _ => return None,
+        };
+        Some(tr_with(key, &[("user", user)]))
     }
 
     fn personal(&self) -> Option<&MemberRestriction> {
@@ -156,7 +188,8 @@ impl SendRights {
 
     /// `Data::CanSend` for one kind.
     pub fn allows(&self, kind: SendKind) -> bool {
-        self.exempt() || !(self.denied_for_everyone(kind) || self.denied_for_me(kind))
+        !self.refused_by_user(kind)
+            && (self.exempt() || !(self.denied_for_everyone(kind) || self.denied_for_me(kind)))
     }
 
     /// `Data::CanSendAnyOf(thread, FilesSendRestrictions())`: at least one
@@ -186,6 +219,9 @@ impl SendRights {
     /// `Data::RestrictionError`: why `kind` is refused, or `None` when it
     /// is allowed. `until_text` formats a restriction's end date.
     pub fn denial(&self, kind: SendKind, until_text: &dyn Fn(i32) -> String) -> Option<String> {
+        if let Some(refusal) = self.user_refusal(kind) {
+            return Some(refusal);
+        }
         if self.allows(kind) {
             return None;
         }
@@ -334,6 +370,7 @@ mod tests {
             defaults: Some(ChatPermissions::all()),
             restriction: None,
             now: NOW,
+            voice_refused_by: None,
         }
     }
 
@@ -548,6 +585,37 @@ mod tests {
                 .as_deref(),
             Some("Sending video messages isn't allowed in this group.")
         );
+    }
+
+    #[test]
+    fn a_user_who_refuses_voice_notes_refuses_both_kinds_by_name() {
+        let r = SendRights {
+            group: false,
+            status: None,
+            defaults: Some(ChatPermissions::all()),
+            voice_refused_by: Some("Ada Lovelace".into()),
+            ..rights()
+        };
+        assert_eq!(
+            r.denial(SendKind::VoiceMessages, &when).as_deref(),
+            Some("Ada Lovelace doesn't accept voice messages.")
+        );
+        assert_eq!(
+            r.denial(SendKind::VideoMessages, &when).as_deref(),
+            Some("Ada Lovelace doesn't accept video messages.")
+        );
+        assert_eq!(
+            r.attachment_denial([AttachmentKind::VideoNote], &when)
+                .as_deref(),
+            Some("Ada Lovelace doesn't accept video messages.")
+        );
+        for kind in SendKind::ALL {
+            let refused = matches!(kind, SendKind::VoiceMessages | SendKind::VideoMessages);
+            assert_eq!(r.allows(kind), !refused, "{kind:?}");
+        }
+        assert!(!r.blocks_everything());
+        assert_eq!(r.composer_block(&when), None);
+        assert!(r.allows_any_file());
     }
 
     #[test]

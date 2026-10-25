@@ -43,6 +43,7 @@ impl Session {
                         blocked,
                         extras,
                         ratings: Default::default(),
+                        voice_notes_restricted: false,
                     },
                 );
                 if let Some(bot_id) = pending

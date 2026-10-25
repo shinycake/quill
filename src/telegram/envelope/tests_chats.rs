@@ -472,6 +472,7 @@ fn user_full_info_bot_info_parsed() {
             blocked,
             share_theme: _,
             ratings: _,
+            voice_notes_restricted: _,
         }) => {
             let info = bot_info.expect("bot_info");
             assert_eq!(info.short_description, "A demo bot");
