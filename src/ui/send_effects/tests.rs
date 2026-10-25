@@ -1,12 +1,13 @@
-//! UI tests on the `ready-message-effects` demo: a click on a message's
-//! effect badge plays the effect again, and the send menu's picker (strip,
-//! card, full list, search, sending). Nothing is sent: the demo session has
-//! no sender, so a send is checked by the options it would carry.
+//! UI tests on the `ready-message-effects` demo: an unread message plays its
+//! effect once when it shows, a click on a message's effect badge plays the
+//! effect again, and the send menu's picker (strip, card, full list, search,
+//! sending). Nothing is sent: the demo session has no sender, so a send is
+//! checked by the options it would carry.
 
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
-use crate::ui::send_effects::demo::{CHAT, REACTION_EFFECTS, STICKER_EFFECTS};
+use crate::ui::send_effects::demo::{ARRIVING, CHAT, REACTION_EFFECTS, STICKER_EFFECTS};
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
@@ -59,6 +60,72 @@ fn a_click_on_the_badge_plays_the_effect_again(cx: &mut TestAppContext) {
     vcx.update(|window, cx| window.click(("message-effect", 99u64), cx));
     frames(vcx);
     assert!(crate::ui::emoji_effect::message_effect_playing(key));
+}
+
+/// A message sent with an effect arrives, unread, while Quill is in front.
+fn arrive(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    vcx.update(|window, _| window.activate_window());
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_deref_mut() {
+            crate::ui::send_effects::demo::arrive(session);
+        }
+        cx.notify();
+    });
+    frames(vcx);
+}
+
+fn unwatched(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, key: (i64, i64)) -> bool {
+    app.update(vcx, |app, _| {
+        app.session()
+            .is_some_and(|session| session.stickers.effects.watch.is_unwatched(key))
+    })
+}
+
+/// Let whatever plays run out (the test sticker never decodes, so an effect
+/// waits for it until its wait is over), then draw everything again.
+fn let_effects_end(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    vcx.executor().advance_clock(Duration::from_secs(61));
+    frames(vcx);
+    app.update(vcx, |_, cx| cx.notify());
+    frames(vcx);
+}
+
+#[gpui_kit::test]
+fn an_unread_message_plays_its_effect_once_when_it_shows(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let key = (CHAT, ARRIVING);
+    arrive(&app, vcx);
+    assert!(shown(vcx, ("message-effect", ARRIVING as u64)));
+    assert!(crate::ui::emoji_effect::message_effect_playing(key));
+    assert!(!unwatched(&app, vcx, key));
+    // Shown again (the history drawn anew, as after scrolling back): it
+    // does not play by itself a second time.
+    let_effects_end(&app, vcx);
+    assert!(shown(vcx, ("message-effect", ARRIVING as u64)));
+    assert!(!crate::ui::emoji_effect::message_effect_playing(key));
+    // A tap on its badge plays it again.
+    vcx.update(|window, cx| window.click(("message-effect", ARRIVING as u64), cx));
+    frames(vcx);
+    assert!(crate::ui::emoji_effect::message_effect_playing(key));
+}
+
+#[gpui_kit::test]
+fn power_saving_skips_the_effect_on_arrival_but_a_tap_plays_it(cx: &mut TestAppContext) {
+    quill::power_saving::isolate_for_tests();
+    let (app, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    // After the demo applied its settings.
+    quill::power_saving::set(quill::power_saving::Flag::ChatEffects.bit());
+    let key = (CHAT, ARRIVING);
+    arrive(&app, vcx);
+    assert!(!crate::ui::emoji_effect::message_effect_playing(key));
+    // Marked as played all the same (tdesktop `playEffectOnRead`).
+    assert!(!unwatched(&app, vcx, key));
+    vcx.update(|window, cx| window.click(("message-effect", ARRIVING as u64), cx));
+    frames(vcx);
+    assert!(crate::ui::emoji_effect::message_effect_playing(key));
+    quill::power_saving::set(0);
 }
 
 #[gpui_kit::test]

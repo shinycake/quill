@@ -3,6 +3,7 @@
 //! fixtures' sticker plays every effect; the thumbnail is every icon.
 //!
 //! `QUILL_DEMO_EFFECTS` picks what is open over it: `badge` (nothing, the default),
+//! `arrive` (an unread message sent with an effect arrives and plays it),
 //! `strip` (the send menu), `expanded` (the full list),
 //! `card` (the "Send with Effect" card) or `premium` (the card of a Premium
 //! effect, offering Premium).
@@ -141,12 +142,35 @@ pub(super) fn seed_message_effects_session(sink: Arc<MemorySink>) -> Session {
     session
 }
 
+/// The message that arrives sent with an effect, unread, in the open chat.
+pub(super) const ARRIVING: i64 = 130;
+
+/// An incoming message sent with the party effect arrives in the open chat
+/// (`QUILL_DEMO_EFFECTS=arrive`).
+pub(super) fn arrive(session: &mut Session) {
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let seq = AtomicU64::new(session.last_seq);
+    let (party, _, _) = REACTION_EFFECTS[3];
+    let json = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":{ARRIVING},"chat_id":{CHAT},"is_outgoing":false,"date":1790632260,"effect_id":"{party}","content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"See you at the party","entities":[]}}}}}}}}"#
+    );
+    if let Some(owned) = copy_and_parse(&json, &seq, &sink) {
+        session.apply(owned);
+    }
+}
+
 impl QuillApp {
     fn demo_message_effects(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.composer.update(cx, |input, cx| {
             input.set_value("See you tonight", window, cx);
         });
         let stage = std::env::var("QUILL_DEMO_EFFECTS").unwrap_or_default();
+        if stage == "arrive" {
+            if let Some(session) = self.demo_session.as_deref_mut() {
+                arrive(session);
+            }
+            return;
+        }
         if stage.is_empty() || stage == "badge" {
             return;
         }

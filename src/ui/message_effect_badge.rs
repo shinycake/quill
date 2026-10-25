@@ -8,8 +8,9 @@
 //! the badge leaves its click in a queue (`REPLAYS`) and wakes the app,
 //! whose overlay (`message_effect_play`) starts the effect. The badge also
 //! notes where it was painted, when all of it is on screen: the effect is
-//! centred on it, and a message that has not played its effect yet starts
-//! it the first time its badge shows.
+//! centred on it, and a message that has not played its effect yet
+//! (`quill::message_effect_watch`) starts it the first time its badge
+//! shows.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
@@ -21,7 +22,7 @@ use quill::local_path::sandboxed_display_path;
 use quill::message_effects::MessageEffect;
 use quill::state::{HistoryMessage, Session};
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// The chat id and message id of a message.
@@ -31,8 +32,6 @@ pub(super) type Key = (i64, i64);
 pub(super) const CELL: f32 = 15.0;
 /// `st::effectInfoImage`: the picture inside the cell.
 pub(super) const IMAGE: f32 = 12.0;
-/// Messages remembered as having played, at most.
-const MAX_WATCHED: usize = 16_384;
 
 /// What the cell shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,23 +50,10 @@ pub(super) struct FooterEffect {
     pub key: Key,
     pub effect_id: i64,
     pub outgoing: bool,
-    /// The effect has not played for this message yet: an incoming message
-    /// that is still unread, or one just sent from here (tdesktop
+    /// The effect has not played for this message yet (tdesktop
     /// `hasUnwatchedEffect`).
     pub unwatched: bool,
     pub icon: BadgeIcon,
-}
-
-/// tdesktop `hasUnwatchedEffect` for a message with an effect: an incoming
-/// message that is still unread, or one just sent from here. A message that
-/// came from the server already read or sent (also from another device) has
-/// played.
-fn unwatched(outgoing: bool, pending: bool, id: i64, last_read_inbox: i64) -> bool {
-    if outgoing {
-        pending
-    } else {
-        id > last_read_inbox
-    }
 }
 
 /// What the badge cell shows for `effect`: its static icon once
@@ -101,24 +87,17 @@ pub(super) fn footer_effect(
     if effect_id == 0 {
         return None;
     }
-    let last_read = session
-        .and_then(|session| session.chats.get(&message.chat_id.0))
-        .map_or(0, |chat| chat.last_read_inbox_message_id.0);
+    let key = (message.chat_id.0, message.id.0);
     let icon = session
         .and_then(|session| session.stickers.effects.get(effect_id))
         .map_or(BadgeIcon::Waiting, |effect| {
             effect_icon(effect, files, media_roots)
         });
     Some(FooterEffect {
-        key: (message.chat_id.0, message.id.0),
+        key,
         effect_id,
         outgoing: message.is_outgoing,
-        unwatched: unwatched(
-            message.is_outgoing,
-            message.pending,
-            message.id.0,
-            last_read,
-        ),
+        unwatched: session.is_some_and(|session| session.stickers.effects.watch.is_unwatched(key)),
         icon,
     })
 }
@@ -133,34 +112,20 @@ pub(super) struct Seen {
     pub unwatched: bool,
 }
 
-#[derive(Default)]
-struct Watched {
-    keys: HashSet<Key>,
-}
-
-impl Watched {
-    fn contains(&self, key: Key) -> bool {
-        self.keys.contains(&key)
-    }
-
-    fn insert(&mut self, key: Key) {
-        if self.keys.len() >= MAX_WATCHED {
-            self.keys.clear();
-        }
-        self.keys.insert(key);
-    }
-}
-
 thread_local! {
     static BADGES: RefCell<HashMap<Key, Seen>> = RefCell::new(HashMap::new());
-    static WATCHED: RefCell<Watched> = RefCell::new(Watched::default());
     static REPLAYS: RefCell<Vec<Key>> = const { RefCell::new(Vec::new()) };
     static APP: RefCell<Option<WeakEntity<QuillApp>>> = const { RefCell::new(None) };
+    /// The chat open in the main window, the only one effects play over.
+    static MAIN_CHAT: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
 }
 
-/// Remember the app, so a click on a badge can wake it.
-pub(super) fn set_app(app: WeakEntity<QuillApp>) {
+/// Remember the app, so a click on a badge can wake it, and the chat open
+/// in its main window: badges painted for other chats (a separate chat
+/// window) are not noted.
+pub(super) fn set_app(app: WeakEntity<QuillApp>, main_chat: Option<i64>) {
     APP.with(|slot| *slot.borrow_mut() = Some(app));
+    MAIN_CHAT.with(|slot| slot.set(main_chat));
 }
 
 /// The history list is being rebuilt: forget where the badges were.
@@ -205,35 +170,22 @@ pub(super) fn take_replays() -> Vec<Key> {
     REPLAYS.with(|replays| std::mem::take(&mut *replays.borrow_mut()))
 }
 
-/// Messages whose effect should play now because their badge showed for
-/// the first time while unwatched (tdesktop `playEffectOnRead`). Each is
-/// marked watched whether or not it plays: with effects off in power saving
-/// it never plays by itself afterwards. Nothing starts while the window is
-/// not active (tdesktop `markingContentsRead`).
-pub(super) fn take_unwatched(window_active: bool) -> Vec<(Key, Seen)> {
+/// Badges on screen whose message had not played its effect when they were
+/// painted (tdesktop `startEffectOnRead`). Nothing counts as shown while
+/// the window is not active (tdesktop `markingContentsRead`). The caller
+/// marks each watched in the session, which decides whether it plays.
+pub(super) fn shown_unwatched(window_active: bool) -> Vec<(Key, Seen)> {
     if !window_active {
         return Vec::new();
     }
-    let candidates: Vec<(Key, Seen)> = BADGES.with(|badges| {
+    BADGES.with(|badges| {
         badges
             .borrow()
             .iter()
-            .filter(|(key, badge)| badge.unwatched && !WATCHED.with(|w| w.borrow().contains(**key)))
+            .filter(|(_, badge)| badge.unwatched)
             .map(|(key, badge)| (*key, *badge))
             .collect()
-    });
-    WATCHED.with(|watched| {
-        let mut watched = watched.borrow_mut();
-        for (key, _) in &candidates {
-            watched.insert(*key);
-        }
-    });
-    candidates
-}
-
-/// Whether `key` still has an effect that has not played.
-fn is_watched(key: Key) -> bool {
-    WATCHED.with(|watched| watched.borrow().contains(key))
+    })
 }
 
 /// The badge's picture: the icon or the emoji, nothing while waiting.
@@ -277,7 +229,9 @@ pub(super) fn badge(effect: &FooterEffect) -> AnyElement {
                 size(px(IMAGE), px(IMAGE)),
             );
             // Only a badge that shows whole counts as shown.
-            if image.intersect(&window.content_mask().bounds) != image {
+            if MAIN_CHAT.with(std::cell::Cell::get) != Some(key.0)
+                || image.intersect(&window.content_mask().bounds) != image
+            {
                 return;
             }
             BADGES.with(|badges| {
@@ -293,7 +247,7 @@ pub(super) fn badge(effect: &FooterEffect) -> AnyElement {
             });
             // The overlay already ran for this frame: ask for another to
             // start an effect that has not played.
-            if unwatched && !is_watched(key) {
+            if unwatched {
                 window.request_animation_frame();
             }
         },
@@ -328,53 +282,27 @@ pub(super) fn badge(effect: &FooterEffect) -> AnyElement {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        BADGES, MAX_WATCHED, Seen, Watched, begin_pass, nearest, seen, take_unwatched, unwatched,
-    };
+    use super::{BADGES, Seen, begin_pass, nearest, seen, shown_unwatched};
     use gpui_kit::{Bounds, point, px, size};
 
     #[test]
-    fn only_unread_incoming_and_just_sent_messages_have_unplayed_effects() {
-        // Incoming: unread past the read marker.
-        assert!(unwatched(false, false, 200, 100));
-        assert!(!unwatched(false, false, 100, 100));
-        assert!(!unwatched(false, false, 50, 100));
-        // Outgoing: only while it is being sent from here.
-        assert!(unwatched(true, true, -3, 100));
-        assert!(!unwatched(true, false, 300, 100));
-    }
-
-    #[test]
-    fn watched_keys_are_remembered_and_the_set_is_bounded() {
-        let mut watched = Watched::default();
-        assert!(!watched.contains((1, 2)));
-        watched.insert((1, 2));
-        assert!(watched.contains((1, 2)));
-        for message in 0..MAX_WATCHED as i64 + 1 {
-            watched.insert((9, message));
-        }
-        assert!(watched.keys.len() <= MAX_WATCHED);
-    }
-
-    #[test]
-    fn nothing_starts_while_the_window_is_inactive() {
+    fn nothing_counts_as_shown_while_the_window_is_inactive() {
+        let badge = |unwatched| Seen {
+            bounds: Bounds::default(),
+            effect_id: 1,
+            outgoing: false,
+            unwatched,
+        };
         BADGES.with(|badges| {
-            badges.borrow_mut().insert(
-                (5, 6),
-                Seen {
-                    bounds: Bounds::default(),
-                    effect_id: 1,
-                    outgoing: false,
-                    unwatched: true,
-                },
-            );
+            let mut badges = badges.borrow_mut();
+            badges.clear();
+            badges.insert((5, 6), badge(true));
+            badges.insert((5, 7), badge(false));
         });
-        assert!(take_unwatched(false).is_empty());
-        let started = take_unwatched(true);
-        assert_eq!(started.len(), 1);
-        assert_eq!(started[0].0, (5, 6));
-        // Once started it is watched: not again.
-        assert!(take_unwatched(true).is_empty());
+        assert!(shown_unwatched(false).is_empty());
+        let shown = shown_unwatched(true);
+        assert_eq!(shown.len(), 1);
+        assert_eq!(shown[0].0, (5, 6));
         begin_pass();
         assert!(seen((5, 6)).is_none());
     }

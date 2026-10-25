@@ -193,6 +193,8 @@ pub struct MessageEffects {
     failed: HashSet<i64>,
     /// Bumped when an effect arrives, so a view can tell it changed.
     revision: u64,
+    /// Which messages have not played their effect here yet.
+    pub watch: crate::message_effect_watch::EffectWatch,
 }
 
 impl MessageEffects {
