@@ -1,6 +1,7 @@
 //! The element tree an agent reads: GPUI's accessibility tree as plain
-//! data, with the lookups the tools need (filter, hit test, the controls
-//! an agent may not click).
+//! data, with the lookups the tools need (filter, hit test, what appeared
+//! since). What an agent may click is not decided here: the tree is cut
+//! by `super::redact` and the actions are guarded by `super::guard`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -31,6 +32,10 @@ pub struct UiNode {
     /// Ids of the child nodes, in order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<String>,
+    /// The UI's marker for the element (`chat=<id>` on a row that stands
+    /// for a chat, `region=chat-list` on the list), see `super::redact`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
 }
 
 /// The whole window.
@@ -44,7 +49,7 @@ pub struct UiTree {
     pub focus: Option<String>,
     /// GPUI's frame counter when the tree was read.
     pub frame: u64,
-    /// Parents before their children.
+    /// In no particular order; `children` gives the shape.
     pub nodes: Vec<UiNode>,
 }
 
@@ -57,103 +62,6 @@ pub fn id_string(id: u64) -> String {
 pub fn parse_id(text: &str) -> Option<u64> {
     let text = text.trim();
     (!text.is_empty()).then(|| u64::from_str_radix(text, 16).ok())?
-}
-
-/// Why a control may not be clicked through the UI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Guarded {
-    /// Sends a message (would skip the paced queue and the confirmations).
-    Send,
-    /// Deletes messages or history.
-    Delete,
-    /// Spends Stars, Premium or money.
-    Pay,
-}
-
-impl Guarded {
-    /// The write tool an agent uses instead.
-    pub fn advice(self) -> &'static str {
-        match self {
-            Guarded::Send => {
-                "Sending through the window skips Quill's pacing and confirmations: use send_message, send_file or set_draft instead."
-            }
-            Guarded::Delete => {
-                "Deleting through the window skips Quill's checks: use delete_messages (your own messages only) instead."
-            }
-            Guarded::Pay => "Agents cannot spend Stars, Premium or money through Quill.",
-        }
-    }
-}
-
-/// English words that mark a guarded control, matched as whole words in a
-/// short name. The user's language is covered by [`guarded_phrases`].
-const SEND_WORDS: &[&str] = &["send", "schedule", "resend"];
-const DELETE_WORDS: &[&str] = &["delete", "unsend", "clear history"];
-const PAY_WORDS: &[&str] = &[
-    "pay",
-    "buy",
-    "purchase",
-    "subscribe",
-    "stars",
-    "star",
-    "gift",
-    "premium",
-    "top up",
-    "donate",
-    "transfer",
-    "checkout",
-];
-/// Names longer than this are content (a message), not a control.
-const CONTROL_NAME_WORDS: usize = 6;
-
-/// The translated names of the controls Quill draws, so the check holds in
-/// every interface language.
-fn guarded_phrases() -> Vec<(String, Guarded)> {
-    use crate::lang::{keys, tr};
-    vec![
-        (tr(keys::CONTEXT_SEND_MESSAGE).to_string(), Guarded::Send),
-        (
-            tr(keys::Q_MONEY_SCHEDULE_MESSAGE).to_string(),
-            Guarded::Send,
-        ),
-        (tr(keys::SCHEDULE_BUTTON).to_string(), Guarded::Send),
-        (tr(keys::BOX_DELETE).to_string(), Guarded::Delete),
-    ]
-}
-
-fn has_word(name: &str, word: &str) -> bool {
-    if word.contains(' ') {
-        return name.contains(word);
-    }
-    name.split(|c: char| !c.is_alphanumeric())
-        .any(|part| part == word)
-}
-
-/// Whether a control with `name` is one agents may not click.
-pub fn guarded_by_name(name: &str) -> Option<Guarded> {
-    let lower = name.trim().to_lowercase();
-    if lower.is_empty() {
-        return None;
-    }
-    for (phrase, kind) in guarded_phrases() {
-        let phrase = phrase.trim().to_lowercase();
-        if !phrase.is_empty() && (lower == phrase || lower.starts_with(&format!("{phrase} "))) {
-            return Some(kind);
-        }
-    }
-    if lower.split_whitespace().count() > CONTROL_NAME_WORDS {
-        return None;
-    }
-    if SEND_WORDS.iter().any(|w| has_word(&lower, w)) {
-        return Some(Guarded::Send);
-    }
-    if DELETE_WORDS.iter().any(|w| has_word(&lower, w)) {
-        return Some(Guarded::Delete);
-    }
-    if PAY_WORDS.iter().any(|w| has_word(&lower, w)) {
-        return Some(Guarded::Pay);
-    }
-    None
 }
 
 impl UiNode {
@@ -251,25 +159,15 @@ impl UiTree {
             .collect()
     }
 
-    /// Why clicking `id` is refused, if it is: the node or an ancestor is a
-    /// guarded control, or it is disabled.
+    /// Why clicking `id` is pointless, if it is: the node is disabled.
     pub fn click_refusal(&self, id: &str) -> Option<String> {
-        let lineage = self.lineage(id);
-        let node = lineage.first()?;
-        if node.states.iter().any(|s| s == "disabled") {
-            return Some(format!(
+        let node = self.node(id)?;
+        node.states.iter().any(|s| s == "disabled").then(|| {
+            format!(
                 "{} \"{}\" is disabled right now, so a click would do nothing.",
                 node.role,
                 node.name.as_deref().unwrap_or("")
-            ));
-        }
-        lineage.iter().take(3).find_map(|node| {
-            let name = node.name.as_deref()?;
-            let kind = guarded_by_name(name)?;
-            Some(format!(
-                "Quill does not let agents click \"{name}\" through the window. {}",
-                kind.advice()
-            ))
+            )
         })
     }
 
@@ -354,7 +252,7 @@ fn shorten(text: &str, max: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Guarded, UiNode, UiTree, guarded_by_name, id_string, parse_id};
+    use super::{UiNode, UiTree, id_string, parse_id};
 
     fn node(id: &str, role: &str, name: &str, bounds: [f32; 4], children: &[&str]) -> UiNode {
         UiNode {
@@ -445,40 +343,12 @@ mod tests {
     }
 
     #[test]
-    fn guarded_controls_are_recognised_by_name() {
-        assert_eq!(guarded_by_name("Send message"), Some(Guarded::Send));
-        assert_eq!(guarded_by_name("Schedule"), Some(Guarded::Send));
-        assert_eq!(
-            guarded_by_name("Delete for everyone"),
-            Some(Guarded::Delete)
-        );
-        assert_eq!(guarded_by_name("Clear history"), Some(Guarded::Delete));
-        assert_eq!(guarded_by_name("Buy Stars"), Some(Guarded::Pay));
-        assert_eq!(guarded_by_name("Top up"), Some(Guarded::Pay));
-        assert_eq!(guarded_by_name("Search"), None);
-        assert_eq!(
-            guarded_by_name("Sender settings"),
-            None,
-            "no substring match"
-        );
-        assert_eq!(
-            guarded_by_name("Ann, 14:02: please send me the file when you can, thanks"),
-            None,
-            "a message is content, not a control"
-        );
-        assert_eq!(guarded_by_name(""), None);
-    }
-
-    #[test]
-    fn click_refusal_looks_at_the_node_and_its_parents() {
+    fn click_refusal_names_a_disabled_node_only() {
         let mut tree = tree();
-        assert!(
-            tree.click_refusal("3")
-                .is_some_and(|r| r.contains("send_message"))
-        );
-        assert!(tree.click_refusal("2").is_some());
+        assert_eq!(tree.click_refusal("2"), None, "a name never refuses");
         assert_eq!(tree.click_refusal("1"), None);
         assert_eq!(tree.click_refusal("missing"), None);
+        assert_eq!(tree.lineage("3").len(), 3);
         if let Some(search) = tree.nodes.get_mut(1) {
             search.states.push("disabled".into());
         }

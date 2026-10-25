@@ -84,6 +84,9 @@ pub fn enabled() -> bool {
 /// Turn agent access on or off. Off deletes the token and ends every open
 /// agent connection.
 pub fn set_enabled(on: bool) {
+    if super::ui_driver::guard::refuse_if_injecting("change the Agent access settings") {
+        return;
+    }
     save(|stored| stored.enabled = on);
     if !on {
         GENERATION.fetch_add(1, Ordering::SeqCst);
@@ -102,6 +105,9 @@ pub fn confirm_sends() -> bool {
 }
 
 pub fn set_confirm_sends(on: bool) {
+    if super::ui_driver::guard::refuse_if_injecting("change the Agent access settings") {
+        return;
+    }
     save(|stored| stored.confirm_sends = on);
     crate::wake::AGENT.poke();
 }
@@ -113,6 +119,9 @@ pub fn ui_driver() -> bool {
 }
 
 pub fn set_ui_driver(on: bool) {
+    if super::ui_driver::guard::refuse_if_injecting("change the Agent access settings") {
+        return;
+    }
     save(|stored| stored.ui_driver = on);
     crate::wake::AGENT.poke();
 }

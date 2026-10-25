@@ -3,14 +3,19 @@
 //! the UI thread (`crate::agent::ui_driver::bridge`) and waits for its
 //! answer; this thread never touches GPUI.
 //!
-//! Gating (`crate::agent::ui_driver::policy`): the "Let agents drive
-//! Quill's window" switch, the open chat's grant (`read` to read, `read_write`
-//! for input), and never the controls that send, delete or pay.
+//! The UI decides everything about what the agent may see and do, from
+//! its own state (`src/ui/agent_driver_surface.rs`): the tree comes back
+//! cut to the granted chats, a blocked surface comes back as a note, and
+//! every refused action is listed in the reply. The one thing finished
+//! here is a send the composer handed over ([`finish_ui_send`]): it goes
+//! through the same write path as `send_message`.
 
-use super::target::{granted, my_user_id};
+use super::target::{granted, my_user_id, stranger_bot};
+use super::write::common;
 use super::{Ctx, Tool, ToolError, ToolOutput, current_agent};
+use crate::agent::grants::Scope;
 use crate::agent::ui_driver::bridge::{
-    self, BridgeError, Button, Target, UiCommand, UiReply, UiState,
+    self, BridgeError, Button, Target, UiCommand, UiReply, UiSend,
 };
 use crate::agent::ui_driver::keys;
 use crate::agent::ui_driver::policy;
@@ -18,13 +23,14 @@ use crate::agent::ui_driver::tree::{UiNode, UiTree, parse_id};
 use serde_json::{Value, json};
 use std::time::Duration;
 
-/// How long `State` may take (no frame needed).
-const STATE_WAIT: Duration = Duration::from_secs(5);
 /// How long a read or an input may take (it waits for frames).
 const COMMAND_WAIT: Duration = Duration::from_secs(15);
 /// Nodes returned by default and at most.
 const DEFAULT_LIMIT: i64 = 300;
 const MAX_LIMIT: i64 = 3000;
+
+const SIDE_EFFECTS: &str = "Quill's window acts for real: opening or scrolling a chat marks it read, \
+typing in the message box saves a draft and shows the other side that you are typing.";
 
 pub(super) const TOOLS: &[Tool] = &[
     Tool {
@@ -32,8 +38,10 @@ pub(super) const TOOLS: &[Tool] = &[
         title: "Read Quill's window",
         description: "Use to see what Quill's window shows: its elements as a tree (role, name, value, bounds in window \
 pixels, states, children), to find something to click or type into. Needs \"Let agents drive Quill's window\" on in Quill. \
+The tree follows the chat grants: it has the chat list's granted rows and the open chat when it is granted; with \"All other chats\" on, \
+most of the window. Settings, agent prompts, payments and the lock screen are never shown: the reply says what is in the way. \
 Example input: {}, or {\"filter\": \"search\"}, or {\"role\": \"Button\", \"limit\": 100}. \
-Output: window {width, height, scale}, focus (node id), nodes [{id, role, name, value, bounds [x, y, w, h], states, actions, children}], total, truncated.",
+Output: window {width, height, scale}, focus (node id), nodes [{id, role, name, value, bounds [x, y, w, h], states, actions, children, tag}], total, truncated.",
         schema: read_schema,
         run: read_ui_tree,
         read_only: true,
@@ -41,10 +49,12 @@ Output: window {width, height, scale}, focus (node id), nodes [{id, role, name, 
     Tool {
         name: "click_element",
         title: "Click in Quill's window",
-        description: "Use to click an element from read_ui_tree (by node id) or a window point. Controls that send, delete or pay \
-are refused: use send_message, delete_messages and the other write tools for those. \
+        description: "Use to click an element from read_ui_tree (by node id) or a window point, inside the parts of the window \
+agents may use (the point must be over them). Pressing Send in the message box sends through the agent path (grants, pacing, \
+\"Confirm each send\", the activity log) and the reply says so; other sends, deletions, payments and settings changes are refused and listed under refusals. \
+Opening or scrolling a chat marks it read. \
 Example input: {\"target\": {\"node\": \"3f2a\"}}, or {\"target\": {\"x\": 120, \"y\": 40}, \"button\": \"right\", \"count\": 2}. \
-Output: {clicked {id, role, name}, focus {id, role, name}, added [nodes that appeared]}.",
+Output: {clicked {id, role, name}, focus {id, role, name}, added [nodes that appeared], refusals, sent}.",
         schema: click_schema,
         run: click_element,
         read_only: false,
@@ -52,9 +62,10 @@ Output: {clicked {id, role, name}, focus {id, role, name}, added [nodes that app
     Tool {
         name: "type_text",
         title: "Type in Quill's window",
-        description: "Use to type text into the focused field (click it first). A line break is typed as the chord that \
-inserts one in Quill's message box, never as a send. \
-Example input: {\"text\": \"hello\"}. Output: {typed (characters), focus {id, role, name, value}}.",
+        description: "Use to type text into the focused text box (click it first; nothing is typed while a button or a list has the focus). \
+A line break is typed as the chord that inserts one in Quill's message box, never as a send; a tab character is refused. \
+Typing in the message box saves a draft and shows the other side that you are typing. \
+Example input: {\"text\": \"hello\"}. Output: {typed (characters), focus {id, role, name, value}, refusals}.",
         schema: type_schema,
         run: type_text,
         read_only: false,
@@ -63,9 +74,11 @@ Example input: {\"text\": \"hello\"}. Output: {typed (characters), focus {id, ro
         name: "press_keys",
         title: "Press keys in Quill's window",
         description: "Use to press one or more key chords, GPUI style: modifiers ctrl, alt, shift, cmd (Win on Linux and Windows), \
-joined with - or +, chords separated by spaces. Keys that quit or close Quill, and Enter while it would send the message, are refused. \
+joined with - or +, chords separated by spaces. Each chord is checked on its own: keys that quit or close Quill are refused, \
+Enter and Space only go to a focused text box (Enter in the message box sends through the agent path), and a chord that \
+moves to an ungranted chat stops the sequence. Chords never type characters; use type_text for text. \
 Example input: {\"keys\": \"cmd-k\"}, or {\"keys\": \"escape escape\"}, or {\"keys\": \"ctrl-shift-a\"}. \
-Output: {pressed [chords], focus {id, role, name}, added [nodes that appeared]}.",
+Output: {pressed [chords], focus {id, role, name}, added [nodes that appeared], refusals}.",
         schema: keys_schema,
         run: press_keys,
         read_only: false,
@@ -74,8 +87,9 @@ Output: {pressed [chords], focus {id, role, name}, added [nodes that appeared]}.
         name: "scroll_view",
         title: "Scroll in Quill's window",
         description: "Use to scroll the element under a node or point by dx, dy pixels: dy > 0 scrolls down (shows what is below), \
-dy < 0 scrolls up. Example input: {\"target\": {\"node\": \"3f2a\"}, \"dy\": 400}, or {\"target\": {\"x\": 600, \"y\": 300}, \"dy\": -200}. \
-Output: {scrolled {dx, dy}, focus, added}.",
+dy < 0 scrolls up. Scrolling a chat's history marks what comes into view as read. \
+Example input: {\"target\": {\"node\": \"3f2a\"}, \"dy\": 400}, or {\"target\": {\"x\": 600, \"y\": 300}, \"dy\": -200}. \
+Output: {scrolled {dx, dy}, focus, added, refusals}.",
         schema: scroll_schema,
         run: scroll_view,
         read_only: false,
@@ -93,8 +107,8 @@ Example input: {\"target\": {\"node\": \"3f2a\"}}. Output: {hovered {id, role, n
         name: "open_menu",
         title: "Open a context menu in Quill's window",
         description: "Use to right-click an element and get the menu that opens. Then click_element one of the menu nodes, or press_keys \
-{\"keys\": \"escape\"} to close it. Example input: {\"target\": {\"node\": \"3f2a\"}}. \
-Output: {menu [{id, role, name}], added [nodes that appeared]}.",
+{\"keys\": \"escape\"} to close it. Menu items that delete, report, block or leave are refused when clicked. \
+Example input: {\"target\": {\"node\": \"3f2a\"}}. Output: {menu [{id, role, name}], added [nodes that appeared]}.",
         schema: target_only_schema,
         run: open_menu,
         read_only: false,
@@ -183,32 +197,6 @@ fn target_only_schema() -> Value {
     })
 }
 
-/// The switches, the open chat and its grant. Returns the open chat the
-/// grant was checked for, which the UI holds the command to.
-fn begin(input: bool) -> Result<Option<i64>, ToolError> {
-    if let Some(refusal) = policy::switch_refusal() {
-        return Err(ToolError::new(refusal));
-    }
-    let ctx = Ctx::active()?;
-    let state = ui_state()?;
-    let scope = match state.open_chat {
-        Some(chat) => {
-            let me = my_user_id(&ctx)?;
-            granted(&ctx, chat, me)?.map(|target| target.scope)
-        }
-        None => None,
-    };
-    let refusal = if input {
-        policy::input_refusal(state.open_chat, scope)
-    } else {
-        policy::read_refusal(state.open_chat, scope)
-    };
-    match refusal {
-        Some(refusal) => Err(ToolError::new(refusal)),
-        None => Ok(state.open_chat),
-    }
-}
-
 fn bridge_error(error: BridgeError) -> ToolError {
     match error {
         BridgeError::Busy => ToolError::new(
@@ -220,23 +208,13 @@ fn bridge_error(error: BridgeError) -> ToolError {
     }
 }
 
-fn ui_state() -> Result<UiState, ToolError> {
-    match bridge::send(&current_agent(), UiCommand::State, None, STATE_WAIT)
-        .map_err(bridge_error)?
-    {
-        UiReply::State(state) => Ok(state),
-        UiReply::Refused(reason) => Err(ToolError::new(reason)),
-        _ => Err(ToolError::new(
-            "Quill's window gave an unexpected answer. Retry.",
-        )),
+/// The switches, then `command` on the UI thread, which decides the rest
+/// from its own state.
+fn run(command: UiCommand) -> Result<UiReply, ToolError> {
+    if let Some(refusal) = policy::switch_refusal() {
+        return Err(ToolError::new(refusal));
     }
-}
-
-/// Run `command` on the UI thread, holding it to `expect` as the open chat.
-fn run(command: UiCommand, expect: Option<i64>) -> Result<UiReply, ToolError> {
-    match bridge::send(&current_agent(), command, Some(expect), COMMAND_WAIT)
-        .map_err(bridge_error)?
-    {
+    match bridge::send(&current_agent(), command, COMMAND_WAIT).map_err(bridge_error)? {
         UiReply::Refused(reason) => Err(ToolError::new(reason)),
         reply => Ok(reply),
     }
@@ -290,15 +268,82 @@ fn describe(node: Option<&UiNode>) -> String {
     }
 }
 
+/// A send the composer handed over: the same path as `send_message`
+/// (grant at read_write, no stranger bots, "Confirm each send", the paced
+/// queue, the activity log), then the box is told to clear.
+fn finish_ui_send(send: UiSend) -> Result<String, ToolError> {
+    let ctx = Ctx::active()?;
+    let me = my_user_id(&ctx)?;
+    let target = granted(&ctx, send.chat_id, me)?.ok_or_else(|| {
+        ToolError::new(format!(
+            "The message stays in Quill's message box: chat {} is not granted to agents. Call request_access {{\"chat\": {}, \"scope\": \"read_write\", \"reason\": ...}}.",
+            send.chat_id, send.chat_id
+        ))
+    })?;
+    if !target.scope.allows(Scope::ReadWrite) {
+        return Err(ToolError::new(format!(
+            "The message stays in Quill's message box: \"{}\" is granted for reading only. Call request_access {{\"chat\": {}, \"scope\": \"read_write\", \"reason\": ...}}.",
+            target.title, target.chat_id
+        )));
+    }
+    if stranger_bot(&ctx, &target) {
+        return Err(ToolError::new(format!(
+            "The message stays in Quill's message box: \"{}\" is a bot the user never wrote to. Ask the user to start it, or request_access for it.",
+            target.title
+        )));
+    }
+    common::confirm(&ctx, &target, "ui_send", &send.text).map_err(|e| keep_draft(e))?;
+    let sent = common::send(&ctx, &target, "ui_send", &send.text, send.request, 1)
+        .map_err(|e| keep_draft(e))?;
+    let _ = bridge::post(
+        &current_agent(),
+        UiCommand::ComposerSent {
+            chat_id: send.chat_id,
+            text: send.text,
+        },
+    );
+    let id = sent
+        .first()
+        .and_then(|message| message.get("id"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    Ok(format!(
+        "Sent to \"{}\" through the agent path (message {id}).",
+        target.title
+    ))
+}
+
+fn keep_draft(error: ToolError) -> ToolError {
+    ToolError::new(format!(
+        "The message stays in Quill's message box, not sent. {}",
+        error.0
+    ))
+}
+
 /// The answer of an input command as text and JSON, with `lead` first.
 fn done_output(reply: UiReply, lead: String, extra: Value) -> Result<ToolOutput, ToolError> {
-    let UiReply::Done { tree, added } = reply else {
+    let UiReply::Done {
+        tree,
+        added,
+        refusals,
+        ui_send,
+    } = reply
+    else {
         return Err(ToolError::new(
             "Quill's window gave an unexpected answer. Retry.",
         ));
     };
+    let sent = ui_send.map(finish_ui_send).transpose()?;
     let focus = tree.focus.as_deref().and_then(|id| tree.node(id));
     let mut text = lead;
+    if let Some(sent) = &sent {
+        text.push('\n');
+        text.push_str(sent);
+    }
+    for refusal in &refusals {
+        text.push_str("\nRefused: ");
+        text.push_str(refusal);
+    }
     text.push_str(&format!("\nFocus: {}.", describe(focus)));
     let added_refs: Vec<&UiNode> = added.iter().collect();
     if added.is_empty() {
@@ -311,6 +356,8 @@ fn done_output(reply: UiReply, lead: String, extra: Value) -> Result<ToolOutput,
         "ok": true,
         "focus": node_json(focus),
         "added": added.iter().take(80).map(|n| serde_json::to_value(n).unwrap_or(Value::Null)).collect::<Vec<_>>(),
+        "refusals": refusals,
+        "sent": sent,
         "frame": tree.frame,
     });
     if let (Some(map), Some(extra)) = (data.as_object_mut(), extra.as_object()) {
@@ -329,18 +376,17 @@ fn target_json(target: &Target, tree: &UiTree) -> Value {
 }
 
 pub fn read_ui_tree(args: &Value) -> Result<ToolOutput, ToolError> {
-    let expect = begin(false)?;
     let filter = args.get("filter").and_then(Value::as_str);
     let role = args.get("role").and_then(Value::as_str);
     let limit = super::int_arg(args, "limit", DEFAULT_LIMIT, 1, MAX_LIMIT)? as usize;
-    let UiReply::Tree(tree) = run(UiCommand::ReadTree, expect)? else {
+    let UiReply::Tree(tree) = run(UiCommand::ReadTree)? else {
         return Err(ToolError::new(
             "Quill's window gave an unexpected answer. Retry.",
         ));
     };
     let nodes = tree.filter(filter, role);
     let mut text = format!(
-        "Quill window {}x{} px (scale {}), {} elements{}.\n",
+        "Quill window {}x{} px (scale {}), {} elements{}. {SIDE_EFFECTS}\n",
         tree.width,
         tree.height,
         tree.scale,
@@ -372,15 +418,11 @@ pub fn click_element(args: &Value) -> Result<ToolOutput, ToolError> {
         }
     };
     let count = super::int_arg(args, "count", 1, 1, 3)? as u32;
-    let expect = begin(true)?;
-    let reply = run(
-        UiCommand::Click {
-            target: target.clone(),
-            button,
-            count,
-        },
-        expect,
-    )?;
+    let reply = run(UiCommand::Click {
+        target: target.clone(),
+        button,
+        count,
+    })?;
     let clicked = match &reply {
         UiReply::Done { tree, .. } => target_json(&target, tree),
         _ => Value::Null,
@@ -411,13 +453,12 @@ pub fn type_text(args: &Value) -> Result<ToolOutput, ToolError> {
             "text is longer than 4000 characters. Type it in parts.",
         ));
     }
-    let expect = begin(true)?;
-    let reply = run(
-        UiCommand::TypeText {
-            text: text.to_string(),
-        },
-        expect,
-    )?;
+    if text.contains('\t') {
+        return Err(ToolError::new(policy::tab_in_text()));
+    }
+    let reply = run(UiCommand::TypeText {
+        text: text.to_string(),
+    })?;
     let typed = text.chars().count();
     done_output(
         reply,
@@ -440,9 +481,8 @@ pub fn press_keys(args: &Value) -> Result<ToolOutput, ToolError> {
             )));
         }
     }
-    let expect = begin(true)?;
     let pressed: Vec<String> = chords.iter().map(|chord| chord.describe()).collect();
-    let reply = run(UiCommand::PressKeys { chords }, expect)?;
+    let reply = run(UiCommand::PressKeys { chords })?;
     done_output(
         reply,
         format!("Pressed {}.", pressed.join(", ")),
@@ -468,8 +508,7 @@ pub fn scroll_view(args: &Value) -> Result<ToolOutput, ToolError> {
             "Pass dx or dy: pixels to scroll, dy > 0 scrolls down.",
         ));
     }
-    let expect = begin(true)?;
-    let reply = run(UiCommand::Scroll { target, dx, dy }, expect)?;
+    let reply = run(UiCommand::Scroll { target, dx, dy })?;
     done_output(
         reply,
         format!("Scrolled by ({dx}, {dy})."),
@@ -479,13 +518,9 @@ pub fn scroll_view(args: &Value) -> Result<ToolOutput, ToolError> {
 
 pub fn hover_element(args: &Value) -> Result<ToolOutput, ToolError> {
     let target = target_arg(args)?;
-    let expect = begin(true)?;
-    let reply = run(
-        UiCommand::Hover {
-            target: target.clone(),
-        },
-        expect,
-    )?;
+    let reply = run(UiCommand::Hover {
+        target: target.clone(),
+    })?;
     let hovered = match &reply {
         UiReply::Done { tree, .. } => target_json(&target, tree),
         _ => Value::Null,
@@ -495,8 +530,7 @@ pub fn hover_element(args: &Value) -> Result<ToolOutput, ToolError> {
 
 pub fn open_menu(args: &Value) -> Result<ToolOutput, ToolError> {
     let target = target_arg(args)?;
-    let expect = begin(true)?;
-    let reply = run(UiCommand::OpenMenu { target }, expect)?;
+    let reply = run(UiCommand::OpenMenu { target })?;
     let menu: Vec<Value> = match &reply {
         UiReply::Done { added, .. } => added
             .iter()
@@ -516,7 +550,7 @@ pub fn open_menu(args: &Value) -> Result<ToolOutput, ToolError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{click_element, read_ui_tree, target_arg};
+    use super::{click_element, read_ui_tree, target_arg, type_text};
     use crate::agent::ui_driver::bridge::Target;
     use serde_json::json;
 
@@ -557,5 +591,14 @@ mod tests {
             .map(|e| e.0)
             .unwrap_or_default();
         assert!(error.contains("Agent access is off"), "{error}");
+    }
+
+    #[test]
+    fn a_tab_character_is_refused_before_the_window_is_asked() {
+        let error = type_text(&json!({"text": "a\tb"}))
+            .err()
+            .map(|e| e.0)
+            .unwrap_or_default();
+        assert!(error.contains("tab"), "{error}");
     }
 }

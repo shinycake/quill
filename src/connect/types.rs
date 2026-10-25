@@ -219,6 +219,9 @@ pub enum ConnectSendError {
     TextTooLong {
         limit: i32,
     },
+    /// The agent UI driver was injecting input and the request is not one
+    /// the window may send for an agent (`agent::ui_driver::guard`).
+    AgentDriving,
 }
 
 /// MED4: outcome of an Instant View open attempt (TGX

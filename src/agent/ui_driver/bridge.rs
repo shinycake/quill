@@ -9,10 +9,11 @@
 
 use super::keys::KeyChord;
 use super::tree::{UiNode, UiTree};
+use serde_json::Value;
 use std::collections::VecDeque;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// Where a click, hover or scroll lands.
@@ -62,12 +63,38 @@ pub enum UiCommand {
     OpenMenu {
         target: Target,
     },
+    /// A send the composer handed to the agent path ([`UiSend`]) went out:
+    /// clear the composer if it still holds `text` for `chat_id`. Answered
+    /// at once.
+    ComposerSent {
+        chat_id: i64,
+        text: String,
+    },
 }
 
 impl UiCommand {
     /// Whether the command sends input to the window.
     pub fn is_input(&self) -> bool {
-        !matches!(self, UiCommand::State | UiCommand::ReadTree)
+        !matches!(
+            self,
+            UiCommand::State | UiCommand::ReadTree | UiCommand::ComposerSent { .. }
+        )
+    }
+
+    /// The tool's name in the activity log (`ui_click`), `None` for the
+    /// commands that are not logged.
+    pub fn log_name(&self) -> Option<&'static str> {
+        Some(match self {
+            UiCommand::Click { .. } => "ui_click",
+            UiCommand::Hover { .. } => "ui_hover",
+            UiCommand::Scroll { .. } => "ui_scroll",
+            UiCommand::TypeText { .. } => "ui_type",
+            UiCommand::PressKeys { .. } => "ui_keys",
+            UiCommand::OpenMenu { .. } => "ui_menu",
+            UiCommand::State | UiCommand::ReadTree | UiCommand::ComposerSent { .. } => {
+                return None;
+            }
+        })
     }
 }
 
@@ -77,9 +104,6 @@ pub struct UiRequest {
     /// The MCP client's name, for the log.
     pub agent: String,
     pub command: UiCommand,
-    /// The chat the tool checked the grants for: the UI refuses when another
-    /// chat is open by the time the command runs. `None` skips the check.
-    pub expect_open_chat: Option<Option<i64>>,
 }
 
 /// What `UiCommand::State` answers.
@@ -91,15 +115,35 @@ pub struct UiState {
     pub forced: bool,
 }
 
+/// A message the composer was told to send while an agent drove: the UI
+/// built the request as it would have sent it and kept the draft; the tool
+/// thread sends it through the agent path (grants, pacing, confirmation,
+/// activity log) and tells the UI with [`UiCommand::ComposerSent`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct UiSend {
+    pub chat_id: i64,
+    pub chat_title: String,
+    /// The composer's text, as the draft holds it.
+    pub text: String,
+    /// The `sendMessage` request, without `@extra`.
+    pub request: Value,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum UiReply {
     State(UiState),
     Tree(UiTree),
-    /// Input ran; `added` lists the nodes that appeared since.
+    /// Input ran; `added` lists the nodes that appeared since, `refusals`
+    /// what a handler refused to do for the agent, `ui_send` a composer
+    /// send handed to the agent path.
     Done {
         tree: UiTree,
         added: Vec<UiNode>,
+        refusals: Vec<String>,
+        ui_send: Option<UiSend>,
     },
+    /// A command without a tree ran (`ComposerSent`).
+    Ok,
     /// The UI did not run the command; the text says why and what to do.
     Refused(String),
 }
@@ -108,11 +152,19 @@ pub enum UiReply {
 pub struct Pending {
     pub request: UiRequest,
     reply: SyncSender<UiReply>,
+    /// Set when the tool stopped waiting: the UI must not inject any more.
+    cancelled: Arc<AtomicBool>,
 }
 
 impl Pending {
     pub fn answer(self, reply: UiReply) {
         let _ = self.reply.try_send(reply);
+    }
+
+    /// Whether the tool gave up on this command (a retry may be on its way,
+    /// so injecting now would act twice).
+    pub fn cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
     }
 }
 
@@ -130,21 +182,17 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 const MAX_WAITING: usize = 8;
 
 /// File `command` and wait up to `timeout` for the UI's answer. On timeout
-/// the command is withdrawn (an answer that raced the withdrawal still
-/// counts).
-pub fn send(
-    agent: &str,
-    command: UiCommand,
-    expect_open_chat: Option<Option<i64>>,
-    timeout: Duration,
-) -> Result<UiReply, BridgeError> {
-    post(agent, command, expect_open_chat)?.wait(timeout)
+/// the command is withdrawn or, if the UI took it already, cancelled (an
+/// answer that raced the withdrawal still counts).
+pub fn send(agent: &str, command: UiCommand, timeout: Duration) -> Result<UiReply, BridgeError> {
+    post(agent, command)?.wait(timeout)
 }
 
 /// A filed command, waiting for the UI's answer.
 pub struct Ticket {
     id: u64,
     rx: Receiver<UiReply>,
+    cancelled: Arc<AtomicBool>,
 }
 
 impl Ticket {
@@ -153,40 +201,39 @@ impl Ticket {
         self.rx.try_recv().ok()
     }
 
-    /// Wait up to `timeout`; on timeout the command is withdrawn.
+    /// Wait up to `timeout`; on timeout the command is withdrawn and
+    /// cancelled.
     pub fn wait(self, timeout: Duration) -> Result<UiReply, BridgeError> {
         if let Ok(reply) = self.rx.recv_timeout(timeout) {
             return Ok(reply);
         }
+        self.cancelled.store(true, Ordering::SeqCst);
         withdraw(self.id);
         self.rx.try_recv().map_err(|_| BridgeError::Timeout)
     }
 }
 
 /// File `command` without waiting (the UI thread is woken).
-pub fn post(
-    agent: &str,
-    command: UiCommand,
-    expect_open_chat: Option<Option<i64>>,
-) -> Result<Ticket, BridgeError> {
+pub fn post(agent: &str, command: UiCommand) -> Result<Ticket, BridgeError> {
     let mut queue = crate::locks::lock_or_recover(&QUEUE);
     if queue.len() >= MAX_WAITING {
         return Err(BridgeError::Busy);
     }
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
     let (reply, rx) = mpsc::sync_channel(1);
+    let cancelled = Arc::new(AtomicBool::new(false));
     queue.push_back(Pending {
         request: UiRequest {
             id,
             agent: agent.to_string(),
             command,
-            expect_open_chat,
         },
         reply,
+        cancelled: cancelled.clone(),
     });
     drop(queue);
     crate::wake::AGENT.poke();
-    Ok(Ticket { id, rx })
+    Ok(Ticket { id, rx, cancelled })
 }
 
 fn withdraw(id: u64) {
@@ -273,7 +320,7 @@ pub fn paused() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{BridgeError, UiCommand, UiReply, UiState, send, take, waiting};
+    use super::{BridgeError, UiCommand, UiReply, UiState, post, send, take, waiting};
     use std::time::Duration;
 
     /// The queue is process-wide and turning the switch off drains it, so
@@ -285,8 +332,7 @@ mod tests {
     #[test]
     fn a_command_goes_in_and_its_reply_comes_out() {
         let _guard = lock();
-        let agent =
-            std::thread::spawn(|| send("Test", UiCommand::State, None, Duration::from_secs(5)));
+        let agent = std::thread::spawn(|| send("Test", UiCommand::State, Duration::from_secs(5)));
         let pending = loop {
             let mut taken = take();
             if let Some(pending) = taken.pop() {
@@ -296,6 +342,7 @@ mod tests {
         };
         assert_eq!(pending.request.command, UiCommand::State);
         assert_eq!(pending.request.agent, "Test");
+        assert!(!pending.cancelled());
         pending.answer(UiReply::State(UiState {
             open_chat: Some(7),
             window_active: true,
@@ -316,9 +363,22 @@ mod tests {
     #[test]
     fn an_unanswered_command_times_out_and_is_withdrawn() {
         let _guard = lock();
-        let result = send("Test", UiCommand::ReadTree, None, Duration::from_millis(20));
+        let result = send("Test", UiCommand::ReadTree, Duration::from_millis(20));
         assert_eq!(result, Err(BridgeError::Timeout));
         assert_eq!(waiting(), 0, "withdrawn");
+    }
+
+    #[test]
+    fn a_taken_command_is_cancelled_when_its_tool_gives_up() {
+        let _guard = lock();
+        let ticket = post("Test", UiCommand::ReadTree).unwrap();
+        let pending = take().pop().unwrap();
+        assert!(!pending.cancelled());
+        assert_eq!(
+            ticket.wait(Duration::from_millis(5)),
+            Err(BridgeError::Timeout)
+        );
+        assert!(pending.cancelled(), "the UI sees the tool gave up");
     }
 
     #[test]
@@ -336,5 +396,21 @@ mod tests {
         assert!(super::paused());
         super::set_paused(false);
         assert!(!super::paused());
+    }
+
+    #[test]
+    fn commands_know_their_log_names() {
+        assert_eq!(UiCommand::ReadTree.log_name(), None);
+        assert_eq!(
+            UiCommand::TypeText { text: "a".into() }.log_name(),
+            Some("ui_type")
+        );
+        assert!(
+            !UiCommand::ComposerSent {
+                chat_id: 1,
+                text: String::new()
+            }
+            .is_input()
+        );
     }
 }

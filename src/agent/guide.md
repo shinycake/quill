@@ -22,7 +22,8 @@ Quill exposes four layers. This version ships three of them:
 2. Events: `wait_for_message`, and the `quill://unread` resource, which you
    can subscribe to.
 3. Raw TDLib calls (`td_call`): any TDLib request, under the same grants.
-4. UI driver (click, type and look at Quill's window): coming later.
+4. UI driver (click, type and look at Quill's window), under the same
+   grants, when the user turns it on.
 
 ## Grants
 
@@ -257,14 +258,30 @@ stays on screen; after the window changes a lot, read it again.
 
 Rules, all enforced by Quill:
 
-- The chat open in the window must be granted: `read` to read the window,
-  `read_write` for any click, key or scroll. Otherwise the tool says so and
-  names the chat for `request_access`.
-- Controls that send, schedule, delete or pay (Stars, Premium, gifts) are
-  never clicked, and Enter is not pressed while it would send the message
-  in the focused box. Use `send_message`, `set_draft`, `delete_messages`.
-  `type_text` types a line break as the chord that inserts one.
+- The window follows your chat grants. The tree has the chat list's rows
+  for chats you may read, and the open chat when it is granted: `read` to
+  read the window, `read_write` for any click, key or scroll. With "All
+  other chats" on you see most of the window; secret chats still need
+  their own grant. An ungranted chat is not in the tree, and a key or
+  click that would open one is refused, so a sequence stops there; the
+  tool names the chat for `request_access`.
+- Some screens are never yours: Settings, Quill's requests to the user
+  (including your own), sign-in, the passcode lock, log out, payments,
+  Stars, gifts, Premium, passkeys and sessions. `read_ui_tree` then
+  answers "Quill is showing <that>; agents can't see or use it. Ask the
+  user." and every input is refused.
+- Enter or Send in the message box of a granted chat sends through the
+  same path as `send_message`: grants, pacing, "Confirm each send" and the
+  activity log; the reply has `sent` or says why not, and the draft stays
+  in the box. Other sends, deletes, reactions, votes, bot buttons,
+  payments and settings changes are refused and listed under `refusals`.
+- `type_text` goes only into a focused text box, types a line break as the
+  chord that inserts one, and refuses a tab character; Enter and Space go
+  only to a text box. `press_keys` never types characters.
 - Keys that quit, close or hide Quill are never pressed.
+- The window acts for real: opening or scrolling a chat marks it read,
+  typing in the message box saves a draft and shows the other side that
+  you are typing. Every command is in the user's activity log.
 - While the user is using the window the driver pauses and the tools say
   so. Wait and retry, or use the chat tools.
 

@@ -25,6 +25,7 @@
 "qll_notes_server_error" = "Telegram had a problem. Try again in a moment.";
 "qll_notes_something_went_wrong" = "Something went wrong. Try again.";
 "qll_notes_text_too_long" = "The message is too long (max {limit} characters).";
+"qll_notes_agent_driving" = "An agent was driving Quill, so this was not sent. Agents write through their own tools.";
 "qll_notes_value_copied" = "{label} copied";
 "qll_notes_voice_note_not_sent_window_closed" = "Voice message not sent: its chat window closed.";
 "qll_notes_no_story_can_be_added" = "None of these stories can be added to an album.";

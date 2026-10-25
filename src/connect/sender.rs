@@ -198,6 +198,11 @@ impl LiveSender {
 
 impl JsonSender for LiveSender {
     fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
+        // While the agent UI driver injects input, only reads and the
+        // changes that looking around makes go out (`guard::screen_request`).
+        if crate::agent::ui_driver::guard::screen_request(request).is_err() {
+            return Err(ConnectSendError::AgentDriving);
+        }
         // A send into a paid chat waits for the user's confirmation.
         let Some(request) = self.guard.screen(request) else {
             return Ok(());
