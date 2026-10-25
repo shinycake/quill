@@ -55,8 +55,15 @@ pub fn today_birthdays(list: &[CloseBirthday], month: u8, day: u8) -> Vec<i64> {
 }
 
 /// The suggestion to show, if any. The account-safety ones come first,
-/// then birthdays, the profile nudges and the Premium offer.
-pub fn pick(facts: &SuggestionFacts, month: u8, day: u8) -> Option<Suggestion> {
+/// then birthdays, the profile nudges and the Premium offer. Birthdays
+/// suggest a gift, so they need `premium_can_buy` (tdesktop
+/// `Session::premiumCanBuy`).
+pub fn pick(
+    facts: &SuggestionFacts,
+    month: u8,
+    day: u8,
+    premium_can_buy: bool,
+) -> Option<Suggestion> {
     let has = |name: &str| facts.actions.contains(name);
     if has(ACTION_PHONE) {
         return Some(Suggestion::CheckPhone);
@@ -64,7 +71,7 @@ pub fn pick(facts: &SuggestionFacts, month: u8, day: u8) -> Option<Suggestion> {
     if has(ACTION_PASSWORD) {
         return Some(Suggestion::CheckPassword);
     }
-    if !facts.birthdays_hidden {
+    if premium_can_buy && !facts.birthdays_hidden {
         let today = today_birthdays(&facts.close_birthdays, month, day);
         if !today.is_empty() {
             return Some(Suggestion::Birthdays(today));
@@ -171,7 +178,7 @@ fn days_in(month: u8) -> u8 {
         .unwrap_or(31)
 }
 
-fn day_after(month: u8, day: u8) -> (u8, u8) {
+pub(crate) fn day_after(month: u8, day: u8) -> (u8, u8) {
     let last = days_in(month);
     if day < last {
         (month, day + 1)
@@ -180,7 +187,7 @@ fn day_after(month: u8, day: u8) -> (u8, u8) {
     }
 }
 
-fn day_before(month: u8, day: u8) -> (u8, u8) {
+pub(crate) fn day_before(month: u8, day: u8) -> (u8, u8) {
     if day > 1 {
         (month, day - 1)
     } else {
@@ -211,10 +218,15 @@ mod tests {
 
     #[test]
     fn nothing_to_suggest() {
-        assert_eq!(pick(&facts(&[], &[], false), 3, 14), None);
+        assert_eq!(pick(&facts(&[], &[], false), 3, 14, true), None);
         // Another action TDLib knows but the block does not show.
         assert_eq!(
-            pick(&facts(&["suggestedActionSetPassword"], &[], false), 3, 14),
+            pick(
+                &facts(&["suggestedActionSetPassword"], &[], false),
+                3,
+                14,
+                true
+            ),
             None
         );
     }
@@ -226,9 +238,9 @@ mod tests {
             &[(5, 3, 14)],
             false,
         );
-        assert_eq!(pick(&f, 3, 14), Some(Suggestion::CheckPhone));
+        assert_eq!(pick(&f, 3, 14, true), Some(Suggestion::CheckPhone));
         let f = facts(&[ACTION_PHOTO, ACTION_PASSWORD], &[(5, 3, 14)], false);
-        assert_eq!(pick(&f, 3, 14), Some(Suggestion::CheckPassword));
+        assert_eq!(pick(&f, 3, 14, true), Some(Suggestion::CheckPassword));
     }
 
     #[test]
@@ -238,11 +250,19 @@ mod tests {
             &[(5, 3, 13), (6, 3, 14), (7, 3, 14)],
             false,
         );
-        assert_eq!(pick(&f, 3, 14), Some(Suggestion::Birthdays(vec![6, 7])));
+        assert_eq!(
+            pick(&f, 3, 14, true),
+            Some(Suggestion::Birthdays(vec![6, 7]))
+        );
         let hidden = facts(&[ACTION_PHOTO], &[(6, 3, 14)], true);
-        assert_eq!(pick(&hidden, 3, 14), Some(Suggestion::SetProfilePhoto));
+        assert_eq!(
+            pick(&hidden, 3, 14, true),
+            Some(Suggestion::SetProfilePhoto)
+        );
         let tomorrow_only = facts(&[], &[(6, 3, 15)], false);
-        assert_eq!(pick(&tomorrow_only, 3, 14), None);
+        assert_eq!(pick(&tomorrow_only, 3, 14, true), None);
+        // No gift can be bought here: the birthday card would offer one.
+        assert_eq!(pick(&f, 3, 14, false), Some(Suggestion::SetProfilePhoto));
     }
 
     #[test]
@@ -252,11 +272,11 @@ mod tests {
             &[],
             false,
         );
-        assert_eq!(pick(&all, 1, 1), Some(Suggestion::SetBirthdate));
+        assert_eq!(pick(&all, 1, 1, true), Some(Suggestion::SetBirthdate));
         let rest = facts(&[ACTION_PREMIUM, ACTION_PHOTO], &[], false);
-        assert_eq!(pick(&rest, 1, 1), Some(Suggestion::SetProfilePhoto));
+        assert_eq!(pick(&rest, 1, 1, true), Some(Suggestion::SetProfilePhoto));
         let premium = facts(&[ACTION_PREMIUM], &[], false);
-        assert_eq!(pick(&premium, 1, 1), Some(Suggestion::UpgradePremium));
+        assert_eq!(pick(&premium, 1, 1, true), Some(Suggestion::UpgradePremium));
     }
 
     #[test]

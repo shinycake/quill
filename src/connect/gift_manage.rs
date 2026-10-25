@@ -500,13 +500,25 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Open the send-gift dialog for the user or channel of `chat_id` and
     /// load the gifts. Nothing is bought here.
     pub fn open_send_gift(&mut self, chat_id: ChatId) -> Result<(), ConnectSendError> {
+        let recipient = self.session.gift_recipient(chat_id);
+        self.open_send_gift_to(recipient)
+    }
+
+    /// The same for a user picked by id (the birthday suggestion and the
+    /// gift recipient list), whether or not a chat with them is loaded.
+    pub fn open_send_gift_to_user(&mut self, user_id: i64) -> Result<(), ConnectSendError> {
+        let recipient = self.session.gift_recipient_user(user_id);
+        self.open_send_gift_to(recipient)
+    }
+
+    fn open_send_gift_to(
+        &mut self,
+        recipient: Option<crate::gift_manage::GiftRecipient>,
+    ) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let recipient = self
-            .session
-            .gift_recipient(chat_id)
-            .ok_or(ConnectSendError::InvalidRequest)?;
+        let recipient = recipient.ok_or(ConnectSendError::InvalidRequest)?;
         let with_premium = !recipient.is_self && !recipient.is_channel;
         let send = &mut self.session.payments.gifts_manage.send;
         *send = SendGiftState {

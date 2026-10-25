@@ -15,12 +15,18 @@ use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     fn current_suggestion(&self) -> Option<Suggestion> {
-        let facts = &self.session()?.chat_list.suggestions;
+        let session = self.session()?;
         let today = quill::local_time::civil_local(quill::local_time::now_unix());
-        pick(facts, today.month, today.day)
+        pick(
+            &session.chat_list.suggestions,
+            today.month,
+            today.day,
+            session.premium_possible(),
+        )
     }
 
-    /// Dismiss: `hideSuggestedAction` / `hideContactCloseBirthdays`.
+    /// Dismiss: `hideSuggestedAction` / `hideContactCloseBirthdays`. The
+    /// birthday card says where gifts can still be sent.
     pub(super) fn dismiss_suggestion(&mut self, suggestion: &Suggestion, cx: &mut Context<Self>) {
         match self.live.as_mut() {
             Some(live) => {
@@ -28,6 +34,8 @@ impl QuillApp {
                     self.connection.set_note(StatusNote::error(tr(
                         keys::Q_MISC_COULD_NOT_HIDE_THE_SUGGESTION,
                     )));
+                    cx.notify();
+                    return;
                 }
             }
             None => {
@@ -41,6 +49,11 @@ impl QuillApp {
                 }
             }
         }
+        if matches!(suggestion, Suggestion::Birthdays(_)) {
+            self.connection.set_note(StatusNote::info(tr(
+                keys::DIALOGS_SUGGESTIONS_BIRTHDAY_CONTACT_DISMISS,
+            )));
+        }
         cx.notify();
     }
 
@@ -53,11 +66,12 @@ impl QuillApp {
     ) {
         use super::navigation::NavigationAction as Nav;
         match suggestion {
-            Suggestion::Birthdays(ids) => {
-                if let Some(user_id) = ids.first() {
-                    self.open_user_chat(*user_id, window, cx);
-                }
-            }
+            // tdesktop: one contact opens the gift picker for them, more
+            // open the gift recipient list.
+            Suggestion::Birthdays(ids) => match ids.as_slice() {
+                [user_id] => self.open_send_gift_to_user(*user_id, window, cx),
+                _ => self.open_gift_recipients(window, cx),
+            },
             Suggestion::SetBirthdate | Suggestion::SetProfilePhoto => {
                 self.navigate(Nav::Profile, window, cx)
             }
@@ -166,12 +180,17 @@ impl QuillApp {
         let keep = suggestion.clone();
         let body = div()
             .id("suggestion-body")
+            .debug_selector(|| "suggestion-body".into())
             .flex_1()
             .min_w_0()
             .flex()
             .flex_col()
             .gap_0p5()
-            .when(!phone_check, |this| this.cursor_pointer())
+            .when(!phone_check, |this| {
+                this.cursor_pointer()
+                    .role(gpui_kit::Role::Button)
+                    .aria_label(title.clone())
+            })
             .child(div().text_sm().font_semibold().child(title))
             .child(div().text_xs().text_color(muted).child(about))
             .when(!phone_check, |this| {

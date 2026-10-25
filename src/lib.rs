@@ -93,6 +93,7 @@ pub mod gif_grid;
 pub mod gift_colors;
 pub mod gift_manage;
 pub mod gift_market;
+pub mod gift_recipients;
 pub mod giveaway;
 pub mod go_to_message;
 pub mod group_info_edit;
