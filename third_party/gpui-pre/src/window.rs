@@ -5409,6 +5409,16 @@ impl Window {
         self.next_frame.focus_tags = self.a11y_tag_stack.clone();
     }
 
+    /// The caret (or the start of the text being composed) of the text
+    /// input the platform types into, in window logical pixels: the
+    /// rectangle the input method's candidate window is placed by.
+    pub fn focused_text_caret(&mut self, cx: &mut App) -> Option<Bounds<Pixels>> {
+        let mut handler = self.platform_window.take_input_handler()?;
+        let bounds = handler.selected_bounds(self, cx);
+        self.platform_window.set_input_handler(handler);
+        bounds
+    }
+
     /// Set a hitbox which will act as a control area of the platform window.
     ///
     /// This method should only be called as part of the paint phase of element drawing.

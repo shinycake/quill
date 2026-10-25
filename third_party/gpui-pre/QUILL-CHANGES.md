@@ -154,3 +154,12 @@ key event would land the way it tells where a click would. A tag
 reaches the accessibility node (`A11y::node_tags`, `src/element.rs`)
 only when the element has a role; it always tags the hitbox and the
 stack.
+
+## The focused text input's caret can be read
+
+Added in 2026 for Agent access's UI driver, step 2 (the takeover state,
+`docs/decisions/agent-access.md`). `Window::focused_text_caret` returns the
+caret rectangle of the input handler the platform types into, in window
+logical pixels, through the same `PlatformInputHandler::selected_bounds`
+the input method's candidate window uses; the handler is taken from the
+platform window and put back. Quill draws the agent's typing badge there.
