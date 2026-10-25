@@ -56,6 +56,7 @@ pub fn edit_message(args: &Value) -> Result<ToolOutput, ToolError> {
     let target = require(&ctx, args, Scope::ReadWrite)?;
     let message = get_message(&ctx, &target, id)?;
     if !flag(&message, "is_outgoing") || !flag(&properties(&ctx, &target, id), "can_be_edited") {
+        common::log(&ctx, &target, "edit_message", &id.to_string(), false);
         return Err(ToolError::new(format!(
             "Message {id} cannot be edited: agents edit only the user's own messages, and Telegram allows edits for 48 hours in most chats."
         )));
@@ -93,12 +94,13 @@ pub fn edit_message(args: &Value) -> Result<ToolOutput, ToolError> {
             "show_caption_above_media": false,
         })
     };
-    confirm(&ctx, &target, "edit_message", "Edit a message", &text)?;
+    confirm(&ctx, &target, "edit_message", &text)?;
+    let clipped: String = text.chars().take(60).collect();
     change(
         &ctx,
         &target,
         "edit_message",
-        &format!("Edited message {id}"),
+        &format!("\"{clipped}\""),
         request,
     )?;
     let edited = get_message(&ctx, &target, id)?;
@@ -149,30 +151,23 @@ pub fn delete_messages(args: &Value) -> Result<ToolOutput, ToolError> {
         }
     }
     if !refused.is_empty() {
+        common::log(&ctx, &target, "delete_messages", &refused.join(", "), false);
         return Err(ToolError::new(format!(
             "Agents may delete only the user's own messages. These are not: {}. Nothing was deleted.",
             refused.join(", ")
         )));
     }
-    confirm(
-        &ctx,
-        &target,
-        "delete_messages",
-        "Delete messages",
-        &format!(
-            "{} message(s): {}",
-            ids.len(),
-            ids.iter()
-                .map(i64::to_string)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-    )?;
+    let listed = ids
+        .iter()
+        .map(i64::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    confirm(&ctx, &target, "delete_messages", &listed)?;
     change(
         &ctx,
         &target,
         "delete_messages",
-        &format!("Deleted {} message(s)", ids.len()),
+        &listed,
         json!({"@type": "deleteMessages", "chat_id": target.chat_id, "message_ids": ids, "revoke": revoke}),
     )?;
     let whom = if revoke {
@@ -219,19 +214,16 @@ pub fn react(args: &Value) -> Result<ToolOutput, ToolError> {
     } else {
         json!({"@type": "addMessageReaction", "chat_id": target.chat_id, "message_id": id, "reaction_type": reaction, "is_big": false, "update_recent_reactions": true})
     };
-    let (action, summary) = if remove {
+    let (kind, summary) = if remove {
         (
-            "Remove a reaction",
+            "remove_reaction",
             format!("Removed {} from message {id}", emoji.trim()),
         )
     } else {
-        (
-            "React to a message",
-            format!("Reacted {} to message {id}", emoji.trim()),
-        )
+        ("react", format!("Reacted {} to message {id}", emoji.trim()))
     };
-    confirm(&ctx, &target, "react", action, emoji.trim())?;
-    change(&ctx, &target, "react", &summary, request).map_err(|error| {
+    confirm(&ctx, &target, kind, emoji.trim())?;
+    change(&ctx, &target, kind, emoji.trim(), request).map_err(|error| {
         if error.0.contains("REACTION_INVALID") || error.0.contains("Invalid reaction") {
             ToolError::new(format!("{} is not an allowed reaction in this chat. get_chat_info does not list them; try 👍 or ❤️.", emoji.trim()))
         } else {
@@ -270,25 +262,13 @@ pub fn pin_message(args: &Value) -> Result<ToolOutput, ToolError> {
     } else {
         json!({"@type": "pinChatMessage", "chat_id": target.chat_id, "message_id": id, "disable_notification": silent, "only_for_self": false})
     };
-    let verb = if unpin { "Unpinned" } else { "Pinned" };
-    confirm(
-        &ctx,
-        &target,
-        "pin_message",
-        if unpin {
-            "Unpin a message"
-        } else {
-            "Pin a message"
-        },
-        &format!("Message {id}"),
-    )?;
-    change(
-        &ctx,
-        &target,
-        "pin_message",
-        &format!("{verb} message {id}"),
-        request,
-    )?;
+    let (verb, kind) = if unpin {
+        ("Unpinned", "unpin_message")
+    } else {
+        ("Pinned", "pin_message")
+    };
+    confirm(&ctx, &target, kind, &id.to_string())?;
+    change(&ctx, &target, kind, &id.to_string(), request)?;
     Ok(done(
         format!("{verb} message {id} in \"{}\".", target.title),
         json!({"chat": target.summary(), "message_id": id, "pinned": !unpin}),

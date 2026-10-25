@@ -9,8 +9,8 @@
 
 use super::target::{self, Target};
 use super::td_policy::{self, Class};
-use super::write::common::{ANSWER_WAIT, admit, log_in, write_error};
-use super::{Ctx, Tool, ToolError, ToolOutput, current_agent};
+use super::write::common::{ANSWER_WAIT, admit, log_in, record, take_write_turn, write_error};
+use super::{Ctx, Tool, ToolError, ToolOutput, current_agent, still_allowed};
 use crate::agent::grants::{self, Scope};
 use crate::agent::prompts::{self, Ask, Decision, Risk};
 use crate::agent::td;
@@ -256,7 +256,7 @@ fn ask_user(ctx: &Ctx, method: &str, risk: Risk, request: &Value, reason: &str) 
     match prompts::wait(id, &rx, ANSWER_WAIT) {
         Some(Decision::Allowed) => Ok(()),
         Some(Decision::Denied) => {
-            log_in(ctx, 0, "", "td_call", &format!("Declined: {method}"), false);
+            record(ctx, 0, "", "td_call", method, false, true);
             Err(ToolError::new(
                 "The user declined this in Quill. Do not retry it; ask the user what they want instead.",
             ))
@@ -304,6 +304,7 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
         }
         Class::Ask(risk) => {
             ask_user(&ctx, &method, risk, &request, reason)?;
+            still_allowed()?;
             td::call(&ctx.client, request).map_err(write_error)
         }
         Class::Granted(scope) => {
@@ -313,6 +314,9 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
                 ));
             }
             grants.require(&named, scope)?;
+            if scope == Scope::ReadWrite {
+                take_write_turn(&ctx, first_chat)?;
+            }
             let result = td::call(&ctx.client, request);
             if scope == Scope::Read {
                 result.map_err(ToolError::from)

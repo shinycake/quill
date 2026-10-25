@@ -159,7 +159,16 @@ fn activity_row(index: usize, action: &Action, now: &CivilTime, cx: &App) -> Any
     let muted = cx.theme().muted_foreground;
     let danger = cx.theme().danger;
     let stamp = chat_list_stamp(&civil_local(action.time), now);
-    let detail = format!("{}: {}", agent_label(&action.agent), action.summary);
+    let what = if action.declined {
+        tr(keys::Q_AGENT_ACTIVITY_DECLINED).to_string()
+    } else {
+        action.summary.clone()
+    };
+    let detail = if what.is_empty() {
+        agent_label(&action.agent)
+    } else {
+        format!("{}: {what}", agent_label(&action.agent))
+    };
     div()
         .id(SharedString::from(format!("agent-activity-{index}")))
         .debug_selector(move || format!("agent-activity-{index}"))

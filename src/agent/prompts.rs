@@ -26,12 +26,13 @@ pub enum Ask {
     AllChats { scope: super::grants::Scope },
     /// The contact list.
     Contacts,
-    /// One write in `chat_id`, while "Confirm each send" is on. `action` is a
-    /// short sentence ("Send a message"), `preview` what will be sent.
+    /// One write in `chat_id`, while "Confirm each send" is on. `kind` names
+    /// it as the action log does (`send_message`, `unpin_message`), so the
+    /// UI words it in the user's language; `preview` is what it carries.
     Write {
         chat_id: i64,
         title: String,
-        action: String,
+        kind: String,
         preview: String,
     },
     /// One raw TDLib call on the deny list (`td_call`): it touches the

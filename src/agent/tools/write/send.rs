@@ -37,6 +37,16 @@ fn sent_output(
     }
 }
 
+/// Whether `file` lives in Quill's data folder, resolving links first.
+fn in_quill_data(file: &Path) -> bool {
+    let Some(root) = crate::settings::safe_app_root() else {
+        return false;
+    };
+    let root = std::fs::canonicalize(&root).unwrap_or(root);
+    let file = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    file.starts_with(root)
+}
+
 fn clip(text: &str) -> String {
     let one_line = text.replace('\n', " ");
     if one_line.chars().count() > 60 {
@@ -92,8 +102,8 @@ pub fn send_message(args: &Value) -> Result<ToolOutput, ToolError> {
             "clear_draft": false,
         },
     });
-    confirm(&ctx, &target, "send_message", "Send a message", &text)?;
-    let summary = format!("Sent \"{}\"", clip(&text));
+    confirm(&ctx, &target, "send_message", &text)?;
+    let summary = format!("\"{}\"", clip(&text));
     let sent = common::send(&ctx, &target, "send_message", &summary, request, 1)?;
     Ok(sent_output(
         &ctx,
@@ -224,6 +234,11 @@ pub fn send_file(args: &Value) -> Result<ToolOutput, ToolError> {
         if !file.is_file() {
             return Err(ToolError::new(format!("There is no file at {path}.")));
         }
+        if in_quill_data(file) {
+            return Err(ToolError::new(format!(
+                "{path} is inside Quill's own data folder (sign-in keys, the agent token, the message cache); agents cannot send files from there."
+            )));
+        }
     }
     let forced = match args.get("as").and_then(Value::as_str) {
         None => None,
@@ -305,8 +320,8 @@ pub fn send_file(args: &Value) -> Result<ToolOutput, ToolError> {
             format!("\n{caption_text}")
         }
     );
-    confirm(&ctx, &target, "send_file", "Send files", &preview)?;
-    let summary = format!("Sent {}", clip(&names.join(", ")));
+    confirm(&ctx, &target, "send_file", &preview)?;
+    let summary = clip(&names.join(", "));
     let count = u32::try_from(paths.len()).unwrap_or(10);
     let sent = common::send(&ctx, &target, "send_file", &summary, request, count)?;
     Ok(sent_output(
@@ -401,8 +416,8 @@ pub fn send_poll(args: &Value) -> Result<ToolOutput, ToolError> {
         },
     });
     let preview = format!("{question}\n• {}", options.join("\n• "));
-    confirm(&ctx, &target, "send_poll", "Send a poll", &preview)?;
-    let summary = format!("Sent a poll: \"{}\"", clip(&question));
+    confirm(&ctx, &target, "send_poll", &preview)?;
+    let summary = format!("\"{}\"", clip(&question));
     let sent = common::send(&ctx, &target, "send_poll", &summary, request, 1)?;
     Ok(sent_output(&ctx, &target, "Sent", &sent, false))
 }
@@ -467,8 +482,8 @@ pub fn send_sticker(args: &Value) -> Result<ToolOutput, ToolError> {
             "emoji": emoji.trim(),
         },
     });
-    confirm(&ctx, &target, "send_sticker", "Send a sticker", &emoji)?;
-    let summary = format!("Sent a {} sticker", emoji.trim());
+    confirm(&ctx, &target, "send_sticker", &emoji)?;
+    let summary = emoji.trim().to_string();
     let sent = common::send(&ctx, &target, "send_sticker", &summary, request, 1)?;
     Ok(sent_output(&ctx, &target, "Sent", &sent, false))
 }
@@ -511,9 +526,9 @@ pub fn forward_messages(args: &Value) -> Result<ToolOutput, ToolError> {
         "send_copy": hide_sender,
         "remove_caption": false,
     });
-    let preview = format!("{} message(s) from \"{}\"", ids.len(), from.title);
-    confirm(&ctx, &to, "forward_messages", "Forward messages", &preview)?;
-    let summary = format!("Forwarded {} message(s) from \"{}\"", ids.len(), from.title);
+    let preview = format!("{} × \"{}\"", ids.len(), from.title);
+    confirm(&ctx, &to, "forward_messages", &preview)?;
+    let summary = preview.clone();
     let count = u32::try_from(ids.len()).unwrap_or(100);
     let sent = common::send(&ctx, &to, "forward_messages", &summary, request, count)?;
     Ok(sent_output(&ctx, &to, "Forwarded", &sent, false))

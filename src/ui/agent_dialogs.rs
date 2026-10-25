@@ -68,27 +68,15 @@ fn request_title(prompt: &Prompt) -> String {
             tr_with(key, &[("agent", &agent)])
         }
         Ask::Contacts => tr_with(keys::Q_AGENT_REQUEST_CONTACTS, &[("agent", &agent)]),
-        Ask::Write { title, action, .. } => tr_with(
-            keys::Q_AGENT_REQUEST_WRITE,
-            &[
-                ("agent", &agent),
-                ("action", &lower_first(&clip(action, 60))),
-                ("chat", &clip(title, 60)),
-            ],
+        Ask::Write { title, kind, .. } => tr_with(
+            super::agent_labels::confirm_title_key(kind),
+            &[("agent", &agent), ("chat", &clip(title, 60))],
         ),
         Ask::Raw { method, .. } => tr_with(
             keys::Q_AGENT_REQUEST_RAW,
             &[("agent", &agent), ("method", &clip(method, 60))],
         ),
     }
-}
-
-/// `Send a message` read inside a sentence: `send a message`.
-fn lower_first(text: &str) -> String {
-    let mut chars = text.chars();
-    chars.next().map_or_else(String::new, |first| {
-        first.to_lowercase().chain(chars).collect()
-    })
 }
 
 /// Opens a dialog's body and footer closures from elements built once.
@@ -196,7 +184,7 @@ impl QuillApp {
                         .child(tr(keys::Q_AGENT_REQUEST_CONTACTS_HINT)),
                 );
             }
-            Ask::Write { preview, .. } => {
+            Ask::Write { preview, kind, .. } => {
                 let preview = clip(preview, 600);
                 if !preview.is_empty() {
                     body = body.child(
@@ -208,7 +196,7 @@ impl QuillApp {
                                 div()
                                     .text_xs()
                                     .text_color(muted)
-                                    .child(tr(keys::Q_AGENT_REQUEST_WRITE_PREVIEW)),
+                                    .child(tr(super::agent_labels::confirm_preview_key(kind))),
                             )
                             .child(
                                 div()

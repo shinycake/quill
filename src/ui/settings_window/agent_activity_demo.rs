@@ -74,6 +74,7 @@ fn demo_activity(app: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) 
                 chat_title: chat.into(),
                 summary: summary.into(),
                 ok,
+                declined: false,
             });
         }
     }

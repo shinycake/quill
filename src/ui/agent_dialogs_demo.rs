@@ -49,7 +49,7 @@ fn demo_write_request(_: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp
         Ask::Write {
             chat_id: 7,
             title: "Ann Lee".into(),
-            action: "Send a message".into(),
+            kind: "send_message".into(),
             preview: "Hi Ann, the trip plan is ready. Flights are booked for the 14th, and I put the hotel and the train times in the shared doc. Tell me if the Friday dinner still works for you.".into(),
         },
         // Write confirmations carry no reason: the preview is the point.
