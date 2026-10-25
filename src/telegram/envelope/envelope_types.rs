@@ -217,6 +217,8 @@ pub struct MessageActions {
     pub can_edit_suggested_post_info: bool,
     /// `getMessageAuthor` works: who wrote a post sent on behalf of a chat.
     pub can_get_author: bool,
+    pub has_protected_content_by_current_user: bool,
+    pub has_protected_content_by_other_user: bool,
 }
 
 impl MessageActions {

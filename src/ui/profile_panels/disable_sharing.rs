@@ -2,7 +2,7 @@
 //! and `ShowDisableSharingBox` in `window_peer_menu.cpp`): the first three
 //! times a box explains No Forwarding and No Saving, after that the entry
 //! acts at once. Without Premium the box's button, and the entry, open the
-//! Premium preview instead. Enabling sharing again needs no box.
+//! Premium preview instead.
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
@@ -30,7 +30,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if disabled_now {
-            self.set_private_sharing(chat_id, false, cx);
+            self.enable_private_sharing(chat_id, cx);
             return;
         }
         if self.chat_prefs.disable_sharing_box_shown < BOX_MAX_SHOWS {
@@ -44,21 +44,21 @@ impl QuillApp {
 
     fn disable_sharing_or_upsell(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if self.session().is_some_and(|s| s.my_is_premium()) {
-            self.set_private_sharing(chat_id, true, cx);
+            self.disable_private_sharing(chat_id, cx);
         } else {
             self.dismiss_profile_modal();
             self.show_premium_no_forwards_preview(cx);
         }
     }
 
-    fn set_private_sharing(&mut self, chat_id: ChatId, disabled: bool, cx: &mut Context<Self>) {
+    fn disable_private_sharing(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         let Some(live) = self.live.as_mut() else {
             self.connection
                 .set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
             cx.notify();
             return;
         };
-        if let Err(err) = live.driver.set_chat_protected_content(chat_id, disabled) {
+        if let Err(err) = live.driver.set_chat_protected_content(chat_id, true) {
             self.connection.set_note(StatusNote::error(user_error_for(
                 keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
                 &err,

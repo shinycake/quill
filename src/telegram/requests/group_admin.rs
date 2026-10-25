@@ -111,6 +111,25 @@ pub fn toggle_chat_has_protected_content(
     .to_string()
 }
 
+/// `processChatHasProtectedContentDisableRequest chat_id:int53
+/// request_message_id:int53 approve:Bool = Ok;`: Accept or Reject the
+/// other person's request to enable sharing in a private chat.
+pub fn process_chat_has_protected_content_disable_request(
+    extra: RequestId,
+    chat_id: i64,
+    request_message_id: i64,
+    approve: bool,
+) -> String {
+    json!({
+        "@type": "processChatHasProtectedContentDisableRequest",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "request_message_id": request_message_id,
+        "approve": approve,
+    })
+    .to_string()
+}
+
 /// `getSuitableDiscussionChats = Chats;` (line 11687): the groups the
 /// user may set as a channel's discussion group.
 pub fn get_suitable_discussion_chats(extra: RequestId) -> String {

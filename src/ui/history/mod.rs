@@ -519,6 +519,7 @@ pub use session_history_row::*;
 mod custom_emoji_chip_glyph;
 mod fact_check_block;
 mod load_older_action;
+pub(in crate::ui) mod sharing_request;
 pub(in crate::ui) mod suggested_post_block;
 #[allow(unused_imports)]
 pub use custom_emoji_chip_glyph::*;

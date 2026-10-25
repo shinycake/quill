@@ -268,6 +268,7 @@ pub struct GroupsState {
     /// Slice G1: own `rights.can_manage_tags` per supergroup (schema
     /// 1.8.67, line 1092) — gates custom-title changes for others.
     pub supergroup_manage_tags_right: HashMap<i64, bool>,
+    pub private_sharing: PrivateSharingState,
 }
 
 impl GroupsState {
@@ -357,6 +358,7 @@ impl GroupsState {
             admin_rights: HashMap::new(),
             supergroup_promote_right: HashMap::new(),
             supergroup_manage_tags_right: HashMap::new(),
+            private_sharing: PrivateSharingState::default(),
         }
     }
 }

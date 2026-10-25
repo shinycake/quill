@@ -220,9 +220,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.group_admin_controls(chat_id).protected_content
-            && self.session.private_sharing_disabled(chat_id).is_none()
-        {
+        let private = self.session.private_sharing_disabled(chat_id).is_some();
+        if !self.session.group_admin_controls(chat_id).protected_content && !private {
             return Ok(None);
         }
         let purpose = RequestPurpose::ToggleChatHasProtectedContent;
@@ -234,6 +233,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra,
             &toggle_chat_has_protected_content(extra, chat_id.0, value),
         )?;
+        if private && !value {
+            // The other person may hold the protection, which makes this a
+            // request: the chat stays protected until TDLib says otherwise.
+            return Ok(Some(extra));
+        }
+        if private {
+            self.session
+                .groups
+                .private_sharing
+                .record_disabled(chat_id, crate::local_time::now_unix());
+        }
         let previous = self.session.chat_has_protected_content(chat_id);
         self.session.set_chat_protected(chat_id.0, value);
         if let Some(pending) = self.session.requests.pending_mut(extra) {

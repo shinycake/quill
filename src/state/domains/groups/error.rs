@@ -47,6 +47,12 @@ impl Session {
             Some(RequestPurpose::Groups(GroupsPurpose::TransferChatOwnership { .. })) => {
                 self.fail_ownership_transfer(err);
             }
+            Some(RequestPurpose::Groups(GroupsPurpose::AnswerSharingRequest { .. })) => {
+                self.chats_state.chat_action_error = Some(call_request_error_line(
+                    err,
+                    crate::lang::tr(crate::lang::keys::Q_SHARING_ANSWER_FAILED),
+                ));
+            }
             Some(RequestPurpose::GetChatOwnerAfterLeaving) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                     self.fail_owner_lookup(chat_id.0, err);

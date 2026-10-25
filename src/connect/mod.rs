@@ -74,6 +74,7 @@ mod peer_qr;
 mod polls;
 mod premium_hub;
 mod privacy_data;
+mod private_sharing;
 mod profile;
 mod profile_panels;
 mod profile_photo_sources;

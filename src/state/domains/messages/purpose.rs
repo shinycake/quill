@@ -124,6 +124,12 @@ pub enum MessagesPurpose {
         chat_id: ChatId,
         message_id: MessageId,
     },
+    /// `getMessageProperties` for a private chat's last message before
+    /// Enable Sharing: its `has_protected_content_by_other_user` says
+    /// whether TDLib will send the other person a request.
+    GetSharingProtection {
+        chat_id: ChatId,
+    },
     /// `reportChat` with message ids from the message menu; each answer
     /// drives `Session::message_report` (reason list, details, done).
     ReportMessages,

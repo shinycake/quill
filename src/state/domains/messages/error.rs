@@ -39,6 +39,11 @@ impl Session {
         {
             self.fail_message_reaction_options(chat_id, MessageId(message_id));
         }
+        if let Some(RequestPurpose::Messages(MessagesPurpose::GetSharingProtection { chat_id })) =
+            pending.map(|p| p.purpose)
+        {
+            self.groups.private_sharing.enable = Some(EnableSharing::TurnOff(chat_id));
+        }
         match pending.map(|p| p.purpose) {
             // The message menu's Report flow and audience lists.
             Some(RequestPurpose::ReportMessages) => {
