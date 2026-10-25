@@ -427,7 +427,7 @@ fn search_open_flushes_leaving_draft_and_media_send_drops_reply() {
     driver
         .select_search_chat(
             ChatId(8),
-            "hello",
+            crate::composer::DraftContent::Text("hello".into()),
             Some(SendReply::plain(MessageId(3))),
             1_500,
         )
@@ -469,7 +469,13 @@ fn search_open_flushes_leaving_draft_and_media_send_drops_reply() {
         )
         .unwrap();
     driver
-        .select_search_message(ChatId(8), MessageId(1), "  ", None, 3_100)
+        .select_search_message(
+            ChatId(8),
+            MessageId(1),
+            crate::composer::DraftContent::Text("  ".into()),
+            None,
+            3_100,
+        )
         .unwrap();
     assert!(driver.session.chats.get(&7).unwrap().draft.is_none());
     assert!(!sink.rendered().contains("CANARY"));

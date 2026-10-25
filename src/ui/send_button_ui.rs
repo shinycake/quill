@@ -69,6 +69,9 @@ impl QuillApp {
 
     /// Same guard as Enter-to-send: text, or attachments without a caption.
     pub(super) fn submit_from_send_button(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.submit_rich_draft(window, cx) {
+            return;
+        }
         let text = self.composer.read(cx).value().to_string();
         if !text.trim().is_empty()
             || !self.pending_attachments().is_empty()

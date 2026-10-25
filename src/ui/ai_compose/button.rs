@@ -137,7 +137,12 @@ impl QuillApp {
         v_flex()
             .self_stretch()
             .items_center()
-            .children(self.ai_compose_button(cx))
+            // A rich draft's discard button takes the AI button's place
+            // (tdesktop `updateDiscardRichDraftGeometry`).
+            .children(
+                self.rich_draft_discard_button(cx)
+                    .or_else(|| self.ai_compose_button(cx)),
+            )
             .child(div().flex_1())
             .child(attach)
             .into_any_element()

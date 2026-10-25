@@ -1,14 +1,15 @@
 //! Connect driver: composer drafts and open-chat bookkeeping.
 use super::*;
 use crate::composer::{
-    DraftSaveClock, DraftSaveStep, DraftTopic, draft_text_to_store, schedule_draft_save,
+    DraftContent, DraftSaveClock, DraftSaveStep, DraftTopic, schedule_draft_save,
 };
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::RequestPurpose;
 use crate::suggested_posts::SuggestTerms;
 use crate::telegram::envelope::ChatDraft;
 use crate::telegram::requests::{
-    SendReply, close_chat, open_chat, set_suggested_draft_message, view_messages,
+    SendReply, close_chat, open_chat, set_rich_draft_message, set_suggested_draft_message,
+    view_messages,
 };
 use std::time::Duration;
 
@@ -42,14 +43,38 @@ impl<S: JsonSender> ConnectDriver<S> {
         now_ms: u64,
         delayed: bool,
     ) -> Result<DraftSaveOutcome, ConnectSendError> {
+        self.note_composer_content_in(
+            chat_id,
+            topic,
+            DraftContent::Text(text.to_string()),
+            reply_to,
+            now_ms,
+            delayed,
+        )
+    }
+
+    /// [`Self::note_composer_draft_in`] for either kind of content. A rich
+    /// draft with a block Quill cannot write back (media or buttons another
+    /// app saved) is never saved: the save would drop that block.
+    pub fn note_composer_content_in(
+        &mut self,
+        chat_id: ChatId,
+        topic: DraftTopic,
+        content: DraftContent,
+        reply_to: Option<SendReply>,
+        now_ms: u64,
+        delayed: bool,
+    ) -> Result<DraftSaveOutcome, ConnectSendError> {
         if !self.chats_path_active() || !self.session.accepts_composer_draft(chat_id, topic) {
             return Ok(DraftSaveOutcome::Skipped);
         }
+        if content.rich().is_some_and(|rich| rich.input().is_none()) {
+            return Ok(DraftSaveOutcome::Skipped);
+        }
         let terms = self.draft_suggestion(chat_id, topic);
-        let stored =
-            draft_text_to_store(text, reply_to.is_some() || terms.is_some()).map(str::to_string);
+        let stored = content.to_store(reply_to.is_some() || terms.is_some());
         let reply_to = stored.as_ref().and(reply_to);
-        if self.draft_matches(chat_id, topic, stored.as_deref(), reply_to.as_ref(), terms) {
+        if self.draft_matches(chat_id, topic, stored.as_ref(), reply_to.as_ref(), terms) {
             self.pending_draft = None;
             self.draft_clock = DraftSaveClock::idle();
             let existing = self.session.draft_for(chat_id, topic).cloned();
@@ -71,7 +96,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     token,
                     chat_id,
                     topic,
-                    text: stored.unwrap_or_default(),
+                    content: stored.unwrap_or(DraftContent::Text(String::new())),
                     reply_to,
                 });
                 Ok(DraftSaveOutcome::Debounced {
@@ -82,7 +107,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             DraftSaveStep::Write => {
                 self.pending_draft = None;
                 self.draft_clock = DraftSaveClock::idle();
-                self.send_draft(chat_id, topic, stored.as_deref(), reply_to.as_ref(), terms)?;
+                self.send_draft(chat_id, topic, stored.as_ref(), reply_to.as_ref(), terms)?;
                 Ok(DraftSaveOutcome::Sent)
             }
         }
@@ -102,13 +127,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.draft_clock = DraftSaveClock::idle();
         let terms = self.draft_suggestion(pending.chat_id, pending.topic);
-        let text =
-            draft_text_to_store(&pending.text, pending.reply_to.is_some() || terms.is_some());
-        let reply_to = text.and(pending.reply_to);
+        let content = pending
+            .content
+            .to_store(pending.reply_to.is_some() || terms.is_some());
+        let reply_to = content.as_ref().and(pending.reply_to);
         if self.draft_matches(
             pending.chat_id,
             pending.topic,
-            text,
+            content.as_ref(),
             reply_to.as_ref(),
             terms,
         ) {
@@ -123,7 +149,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_draft(
             pending.chat_id,
             pending.topic,
-            text,
+            content.as_ref(),
             reply_to.as_ref(),
             terms,
         )
@@ -169,15 +195,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         &self,
         chat_id: ChatId,
         topic: DraftTopic,
-        text: Option<&str>,
+        content: Option<&DraftContent>,
         reply_to: Option<&SendReply>,
         terms: Option<SuggestTerms>,
     ) -> bool {
         let current = self.session.draft_for(chat_id, topic);
-        match (current, text) {
+        match (current, content) {
             (None, None) => true,
-            (Some(draft), Some(text)) => {
-                draft.text == text
+            (Some(draft), Some(content)) => {
+                draft.text == content.text()
+                    && draft.rich.as_ref() == content.rich()
                     && draft.reply_to_message_id == reply_to.map(|reply| reply.message_id)
                     // The same part of the message: TDLib may echo the
                     // formatting in another shape.
@@ -197,22 +224,43 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: ChatId,
         topic: DraftTopic,
-        text: Option<&str>,
+        content: Option<&DraftContent>,
         reply_to: Option<&SendReply>,
         terms: Option<SuggestTerms>,
     ) -> Result<RequestId, ConnectSendError> {
+        let rich_input = match content {
+            Some(DraftContent::Rich(rich)) => {
+                Some(rich.input().ok_or(ConnectSendError::InvalidRequest)?)
+            }
+            _ => None,
+        };
         let extra = self
             .session
             .request(RequestPurpose::SetChatDraftMessage, Some(chat_id));
-        let terms = text.and(terms);
-        match self.sender.send_json(&set_suggested_draft_message(
-            extra, chat_id, topic, text, reply_to, terms,
-        )) {
+        let terms = content.and(terms);
+        let request = match rich_input {
+            Some(input) => set_rich_draft_message(extra, chat_id, topic, input, reply_to, terms),
+            None => set_suggested_draft_message(
+                extra,
+                chat_id,
+                topic,
+                content.map(DraftContent::text),
+                reply_to,
+                terms,
+            ),
+        };
+        match self.sender.send_json(&request) {
             Ok(()) => {
-                let draft = text
-                    .filter(|text| !text.trim().is_empty() || reply_to.is_some() || terms.is_some())
-                    .map(|text| ChatDraft {
-                        text: text.to_string(),
+                let draft = content
+                    .filter(|content| {
+                        content.rich().is_some()
+                            || !content.text().trim().is_empty()
+                            || reply_to.is_some()
+                            || terms.is_some()
+                    })
+                    .map(|content| ChatDraft {
+                        text: content.text().to_string(),
+                        rich: content.rich().cloned(),
                         reply_to_message_id: reply_to.map(|reply| reply.message_id),
                         quote: reply_to.and_then(|reply| reply.quote.clone()),
                         item: reply_to.map(|reply| reply.item.clone()).unwrap_or_default(),
@@ -350,7 +398,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub(crate) fn flush_leaving_composer(
         &mut self,
         next_chat: ChatId,
-        leaving_text: &str,
+        leaving: DraftContent,
         leaving_reply: Option<SendReply>,
         now_ms: u64,
     ) -> Result<(), ConnectSendError> {
@@ -360,7 +408,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if prev == next_chat {
             return Ok(());
         }
-        self.note_composer_draft(prev, leaving_text, leaving_reply, now_ms, false)?;
+        let topic = self.session.open_draft_topic(prev);
+        self.note_composer_content_in(prev, topic, leaving, leaving_reply, now_ms, false)?;
         Ok(())
     }
 }

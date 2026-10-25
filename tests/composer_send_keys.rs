@@ -119,6 +119,7 @@ fn chat_prefs_roundtrip_and_missing_file() {
         system_text_replace: false,
         profile_media_tabs_expanded: true,
         disable_sharing_box_shown: 2,
+        rich_paste_toast_hidden: true,
     };
     save_chat_prefs(&paths, &prefs).unwrap();
     assert_eq!(load_chat_prefs(&paths), prefs);

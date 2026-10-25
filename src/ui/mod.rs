@@ -436,6 +436,7 @@ mod reply_options_ui;
 mod reply_pattern;
 mod request_share;
 mod restricted_exceptions;
+mod rich_draft;
 mod round_record;
 mod round_seek;
 mod saved_sublists;

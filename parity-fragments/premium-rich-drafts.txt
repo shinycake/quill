@@ -1,0 +1,2 @@
+# Rich drafts sync both ways, with the paste notice and the discard button
+parity:premium-rich-drafts

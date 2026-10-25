@@ -76,6 +76,10 @@ pub struct ChatPrefs {
     /// three times, then the menu entry acts at once.
     #[serde(default)]
     pub disable_sharing_box_shown: u32,
+    /// "Got it" on the rich paste notice for non-Premium users (tdesktop
+    /// `rich_paste_toast_hidden`): it never shows again.
+    #[serde(default)]
+    pub rich_paste_toast_hidden: bool,
 }
 
 impl Default for ChatPrefs {
@@ -89,6 +93,7 @@ impl Default for ChatPrefs {
             system_text_replace: true,
             profile_media_tabs_expanded: false,
             disable_sharing_box_shown: 0,
+            rich_paste_toast_hidden: false,
         }
     }
 }

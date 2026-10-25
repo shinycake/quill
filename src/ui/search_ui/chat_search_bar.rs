@@ -363,7 +363,7 @@ impl QuillApp {
             self.connection.set_note(
                 match live
                     .driver
-                    .select_search_chat_open(chat_id, open, &text, reply, now_ms)
+                    .select_search_chat_open(chat_id, open, text, reply, now_ms)
                 {
                     Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_CHAT_SELECTED)),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_OPEN_CHAT)),
@@ -374,19 +374,11 @@ impl QuillApp {
                 && prev != chat_id
             {
                 let topic = session.open_draft_topic(prev);
-                let stored = draft_text_to_store(&text, reply.is_some()).map(str::to_string);
-                let reply_to = stored.as_ref().and(reply);
-                let draft = stored.map(|body| ChatDraft {
-                    text: body,
-                    reply_to_message_id: reply_to.as_ref().map(|reply| reply.message_id),
-                    item: reply_to
-                        .as_ref()
-                        .map(|reply| reply.item.clone())
-                        .unwrap_or_default(),
-                    quote: reply_to.and_then(|reply| reply.quote),
-                    suggested_post: None,
-                });
-                session.store_composer_draft(prev, topic, draft);
+                session.store_composer_draft(
+                    prev,
+                    topic,
+                    crate::ui::drafts::demo_draft(text, reply),
+                );
             }
             session.close_search();
             session.open_chat(chat_id);
@@ -415,7 +407,7 @@ impl QuillApp {
             self.connection.set_note(
                 match live
                     .driver
-                    .select_search_message(chat_id, message_id, &text, reply, now_ms)
+                    .select_search_message(chat_id, message_id, text, reply, now_ms)
                 {
                     Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_OPENED_CHAT)),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_OPEN_CHAT)),
@@ -426,19 +418,11 @@ impl QuillApp {
                 && prev != chat_id
             {
                 let topic = session.open_draft_topic(prev);
-                let stored = draft_text_to_store(&text, reply.is_some()).map(str::to_string);
-                let reply_to = stored.as_ref().and(reply);
-                let draft = stored.map(|body| ChatDraft {
-                    text: body,
-                    reply_to_message_id: reply_to.as_ref().map(|reply| reply.message_id),
-                    item: reply_to
-                        .as_ref()
-                        .map(|reply| reply.item.clone())
-                        .unwrap_or_default(),
-                    quote: reply_to.and_then(|reply| reply.quote),
-                    suggested_post: None,
-                });
-                session.store_composer_draft(prev, topic, draft);
+                session.store_composer_draft(
+                    prev,
+                    topic,
+                    crate::ui::drafts::demo_draft(text, reply),
+                );
             }
             session.promote_search_message(chat_id, message_id);
             session.close_search();

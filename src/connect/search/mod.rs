@@ -491,14 +491,14 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn select_search_chat(
         &mut self,
         chat_id: ChatId,
-        leaving_text: &str,
+        leaving: crate::composer::DraftContent,
         leaving_reply: Option<SendReply>,
         now_ms: u64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         self.select_search_chat_open(
             chat_id,
             HistoryOpen::Default,
-            leaving_text,
+            leaving,
             leaving_reply,
             now_ms,
         )
@@ -510,11 +510,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: ChatId,
         open: HistoryOpen,
-        leaving_text: &str,
+        leaving: crate::composer::DraftContent,
         leaving_reply: Option<SendReply>,
         now_ms: u64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.flush_leaving_composer(chat_id, leaving_text, leaving_reply, now_ms)?;
+        self.flush_leaving_composer(chat_id, leaving, leaving_reply, now_ms)?;
         self.remember_found_chat(chat_id);
         self.session.close_search();
         self.select_chat_open(chat_id, open)
@@ -526,11 +526,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
-        leaving_text: &str,
+        leaving: crate::composer::DraftContent,
         leaving_reply: Option<SendReply>,
         now_ms: u64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.flush_leaving_composer(chat_id, leaving_text, leaving_reply, now_ms)?;
+        self.flush_leaving_composer(chat_id, leaving, leaving_reply, now_ms)?;
         self.remember_found_chat(chat_id);
         self.session.close_search();
         let opened = self.select_chat(chat_id)?;

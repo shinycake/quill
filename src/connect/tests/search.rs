@@ -115,7 +115,13 @@ fn driver_search_happy_empty_error_and_select() {
     assert_eq!(driver.session.search.search.status, SearchStatus::Ready);
     assert_eq!(driver.session.search.search.chat_ids, vec![ChatId(7)]);
     driver
-        .select_search_message(ChatId(7), MessageId(50), "", None, 0)
+        .select_search_message(
+            ChatId(7),
+            MessageId(50),
+            crate::composer::DraftContent::Text(String::new()),
+            None,
+            0,
+        )
         .unwrap();
     assert_eq!(driver.session.search.search.status, SearchStatus::Closed);
     assert_eq!(driver.session.open_chat, Some(ChatId(7)));
