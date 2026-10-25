@@ -236,4 +236,5 @@ pub enum MessagesPayload {
         chat_id: i64,
         is_translatable: bool,
     },
+    AiCompose(AiComposePayload),
 }

@@ -1,0 +1,3 @@
+# AI compose: the composer AI button and box (Translate / Style / Fix), custom writing styles, style links and previews
+parity:premium-ai-compose-box
+parity:premium-ai-compose-styles

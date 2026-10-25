@@ -153,7 +153,7 @@ impl QuillApp {
 
     /// The app language tag ("Translate to" and "Do Not Translate" default
     /// to it).
-    fn translate_ui_language(&self) -> String {
+    pub(in crate::ui) fn translate_ui_language(&self) -> String {
         self.session()
             .map(|s| s.settings.language_prefs.system_language_code.clone())
             .unwrap_or_else(|| quill::settings::DEFAULT_LANGUAGE_CODE.to_string())

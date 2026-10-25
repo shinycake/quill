@@ -20,6 +20,10 @@ pub const UNIQUE_REACTIONS_TITLE: &str = "Unique reactions";
 /// `premiumFeatureSavedMessagesTags`' title, which a tag opens.
 pub const SAVED_TAGS_TITLE: &str = "Tags for Saved Messages";
 
+/// `premiumFeatureTextComposition`'s title, which the AI compose box's
+/// Increase Limit opens.
+pub const AI_COMPOSE_TITLE: &str = "AI text tools";
+
 fn int(value: Option<&Value>) -> i64 {
     value
         .and_then(|v| v.as_i64().or_else(|| v.as_str()?.parse().ok()))
@@ -754,7 +758,7 @@ pub fn feature_row(constructor: &str) -> Option<PremiumFeatureRow> {
             "Restrict forwarding and saving of your private chats.",
         ),
         "premiumFeatureTextComposition" => (
-            "AI text tools",
+            AI_COMPOSE_TITLE,
             "Rewrite, translate and fix your messages while typing.",
         ),
         "premiumFeatureRichMessages" => {

@@ -50,6 +50,16 @@ pub enum ErrorClass {
     /// Classified from the raw error message in `parse_error` (the only
     /// place it is still available); the message text itself is dropped.
     AiComposeFloodPremium,
+    /// `INPUT_TEXT_TOO_LONG`: the text sent to `composeTextWithAi` /
+    /// `fixTextWithAi` is over the server's limit.
+    InputTextTooLong,
+    /// `TONES_SAVED_TOO_MANY`: no more custom text composition styles can
+    /// be added (`createTextCompositionStyle`, `addTextCompositionStyle`).
+    StylesSavedTooMany,
+    /// `AICOMPOSE_TONE_SLUG_INVALID`, `AICOMPOSE_TONE_INVALID` or
+    /// `TONE_NOT_FOUND`: the text composition style was deleted or its
+    /// name is bad (tdesktop api_compose_with_ai.cpp).
+    StyleInvalid,
     StickersForbidden,
     GifsForbidden,
     /// `PHONE_NUMBER_BANNED` while signing in (tdesktop's banned-number box).
@@ -507,17 +517,19 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
             server_type,
         };
     }
-    // Slice msg-richtext-ai-tools: the documented AI flood error
-    // (`AICOMPOSE_FLOOD_PREMIUM`) is a known constant, safe to match —
-    // it names a product state, not a secret.
-    if value
-        .and_then(|v| v.get("message"))
-        .and_then(Value::as_str)
-        .is_some_and(|message| message == "AICOMPOSE_FLOOD_PREMIUM")
-    {
+    let ai_class = match value.and_then(|v| v.get("message")).and_then(Value::as_str) {
+        Some("AICOMPOSE_FLOOD_PREMIUM") => Some(ErrorClass::AiComposeFloodPremium),
+        Some("INPUT_TEXT_TOO_LONG") => Some(ErrorClass::InputTextTooLong),
+        Some("TONES_SAVED_TOO_MANY") => Some(ErrorClass::StylesSavedTooMany),
+        Some("AICOMPOSE_TONE_SLUG_INVALID" | "AICOMPOSE_TONE_INVALID" | "TONE_NOT_FOUND") => {
+            Some(ErrorClass::StyleInvalid)
+        }
+        _ => None,
+    };
+    if let Some(class) = ai_class {
         return TdError {
             code,
-            class: ErrorClass::AiComposeFloodPremium,
+            class,
             flood_wait_secs,
             limit_hint: None,
             premium_limit: None,
@@ -609,6 +621,23 @@ mod tests {
         assert_eq!(parse("Invalid code 12345"), None);
         assert_eq!(parse(""), None);
         assert_eq!(parse(&"A".repeat(65)), None);
+    }
+
+    #[test]
+    fn parse_error_classifies_ai_compose_errors() {
+        for (message, class) in [
+            ("AICOMPOSE_FLOOD_PREMIUM", ErrorClass::AiComposeFloodPremium),
+            ("INPUT_TEXT_TOO_LONG", ErrorClass::InputTextTooLong),
+            ("TONES_SAVED_TOO_MANY", ErrorClass::StylesSavedTooMany),
+            ("AICOMPOSE_TONE_SLUG_INVALID", ErrorClass::StyleInvalid),
+            ("AICOMPOSE_TONE_INVALID", ErrorClass::StyleInvalid),
+            ("TONE_NOT_FOUND", ErrorClass::StyleInvalid),
+        ] {
+            let value = serde_json::json!({"@type": "error", "code": 400, "message": message});
+            let err = parse_error(Some(&value));
+            assert_eq!(err.class, class, "{message}");
+            assert_eq!(err.server_type.as_deref(), Some(message));
+        }
     }
 
     #[test]

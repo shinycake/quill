@@ -45,6 +45,9 @@ impl Session {
             self.groups.private_sharing.enable = Some(EnableSharing::TurnOff(chat_id));
         }
         match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::Messages(MessagesPurpose::AiCompose(purpose))) => {
+                self.fail_ai_compose_request(purpose, err, pending);
+            }
             // The message menu's Report flow and audience lists.
             Some(RequestPurpose::ReportMessages) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {

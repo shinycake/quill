@@ -1,6 +1,7 @@
 #![deny(clippy::indexing_slicing)]
 
 mod account_notices;
+mod ai_compose;
 mod auth;
 mod backgrounds;
 mod boost_features;
@@ -120,6 +121,7 @@ mod tests_view_button;
 
 pub use super::story_areas::{StoryAreaKind, StoryAreaView};
 pub use account_notices::*;
+pub use ai_compose::*;
 pub use auth::*;
 pub use backgrounds::*;
 pub use boost_features::*;

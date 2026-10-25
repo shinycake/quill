@@ -154,7 +154,9 @@ gpui_kit::assets::icon_assets!(
         QrCode,
         TimerOff,
         // Send Location's Show my location (`ui::location_picker`).
-        LocateFixed
+        LocateFixed,
+        Sparkles,
+        SpellCheck
     ]
 );
 
