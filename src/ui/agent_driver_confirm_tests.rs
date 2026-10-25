@@ -207,7 +207,9 @@ fn a_prompt_hidden_behind_another_dialog_neither_lets_it_drive_nor_eats_a_pause(
     let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
     let (app, mut vcx, _presence) = setup(cx);
     let vcx = &mut vcx;
-    grants::update(&AccountKey::primary(), |g| g.all_chats = Some(Scope::ReadWrite));
+    grants::update(&AccountKey::primary(), |g| {
+        g.all_chats = Some(Scope::ReadWrite)
+    });
     settle(vcx);
     let tree = read_tree(&app, vcx);
     let reply = drive(&app, vcx, click(Target::Node(message_box(&tree))));
