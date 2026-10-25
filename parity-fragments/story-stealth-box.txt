@@ -1,2 +1,0 @@
-# Story Stealth Mode box with Premium lock, cooldown and TDLib periods
-parity:premium-story-stealth-box
