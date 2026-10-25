@@ -145,6 +145,7 @@ mod tests {
 
     #[test]
     fn a_prompt_waits_for_the_user_and_withdraws_on_timeout() {
+        let _guard = crate::locks::lock_or_recover(&crate::agent::access::TEST_LOCK);
         let (id, rx) = file(
             AccountKey::primary(),
             "Test agent".into(),

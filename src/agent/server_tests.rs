@@ -46,6 +46,7 @@ fn agents_need_the_switch_and_this_launchs_token() {
     );
     let app_root = crate::settings::safe_app_root().unwrap_or_default();
 
+    let _guard = crate::locks::lock_or_recover(&access::TEST_LOCK);
     assert!(!access::enabled(), "off by default");
     assert_eq!(access::read_published_token(&app_root), None);
     let answers = session(&endpoint, &[auth("x")]);
