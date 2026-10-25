@@ -143,7 +143,7 @@ impl QuillApp {
         self.viewer.state = MediaViewer::open_profile(items, 0, gallery.total);
         self.viewer.extra.profile_owner = Some(owner);
         self.viewer.open_gen += 1;
-        self.viewer_note_activity(false, cx);
+        self.viewer_note_activity(cx);
         self.reset_viewer_item_state(cx);
         cx.notify();
     }

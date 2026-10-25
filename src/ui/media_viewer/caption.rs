@@ -172,7 +172,7 @@ impl QuillApp {
             .go(to, EXPAND_DURATION, animate, Instant::now());
         // Either way the text starts from its first line.
         caption.scroll.set_offset(point(px(0.), px(0.)));
-        self.viewer_note_activity(false, cx);
+        self.viewer_note_activity(cx);
         cx.notify();
     }
 

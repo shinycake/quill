@@ -124,7 +124,7 @@ impl QuillApp {
     /// A click on a thumb: open its item, as the arrows do.
     fn open_viewer_group_item(&mut self, index: usize, cx: &mut Context<Self>) {
         self.viewer.state.go_to(index);
-        self.viewer_note_activity(false, cx);
+        self.viewer_note_activity(cx);
         self.reset_viewer_item_state(cx);
         cx.notify();
     }

@@ -180,7 +180,7 @@ fn header(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<String>
 /// time measured on the wall clock, which a slow runner spends on the
 /// first frames' image decoding alone.
 fn hold_controls(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
-    app.update(vcx, |app, cx| app.viewer_note_activity(true, cx));
+    app.update(vcx, |app, cx| app.viewer_note_pointer(true, cx));
     settle(vcx);
 }
 
@@ -223,4 +223,42 @@ fn a_group_photo_gallery_shows_a_strip_and_a_thumb_opens_its_photo(cx: &mut Test
     assert_eq!(header(&app, vcx).as_deref(), Some("Photo 2 of 3"));
     let second = vcx.debug_bounds(THUMBS[1]).expect("thumb 2");
     assert!((f32::from(second.size.width) - PHOTO_WIDTH).abs() < 1.0);
+}
+
+/// Past the idle wait on both clocks: the wall clock the viewer measures
+/// idle time on, and the executor clock its hide timer sleeps on.
+fn idle(vcx: &mut VisualTestContext) {
+    std::thread::sleep(Duration::from_millis(1200));
+    vcx.executor().advance_clock(Duration::from_millis(1200));
+    settle(vcx);
+}
+
+#[gpui_kit::test]
+fn the_strip_stays_up_while_the_pointer_rests_on_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    album_of_three(&app, vcx);
+    let second = vcx.debug_bounds(THUMBS[1]).expect("thumb 2");
+    vcx.simulate_mouse_move(second.center(), None, Modifiers::default());
+    settle(vcx);
+    vcx.simulate_click(second.center(), Modifiers::default());
+    slide(vcx);
+    idle(vcx);
+    assert_eq!(current(&app, vcx), 8902);
+    assert!(
+        app.read_with(vcx, |app, _| !app.viewer.controls_hidden),
+        "a click on a thumb under the resting pointer keeps the strip up"
+    );
+
+    let band = vcx
+        .debug_bounds("media-viewer-bottom-band")
+        .expect("the band");
+    let above = gpui_kit::point(band.center().x, band.top() - px(80.0));
+    vcx.simulate_mouse_move(above, None, Modifiers::default());
+    settle(vcx);
+    idle(vcx);
+    assert!(
+        app.read_with(vcx, |app, _| app.viewer.controls_hidden),
+        "off the strip, the controls fade after the idle wait"
+    );
 }

@@ -88,7 +88,7 @@ impl QuillApp {
         ) else {
             return false;
         };
-        self.viewer_note_activity(false, cx);
+        self.viewer_note_activity(cx);
         match action {
             ViewerKeyAction::TogglePlayback => self.toggle_viewer_video(cx),
             ViewerKeyAction::HoldSpace => self.viewer_space_down(window, cx),

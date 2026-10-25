@@ -538,8 +538,20 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> impl Fn(&MouseMoveEvent, &mut Window, &mut App) + 'static {
         cx.listener(|this, _: &MouseMoveEvent, _, cx| {
-            this.viewer_note_activity(true, cx);
+            this.viewer_note_pointer(true, cx);
         })
+    }
+
+    /// The pointer moved over the viewer, onto a control or off them. Only
+    /// pointer moves change `over_controls`: a click, key or step under a
+    /// resting pointer leaves it where the pointer is.
+    pub(in crate::ui) fn viewer_note_pointer(
+        &mut self,
+        over_controls: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.viewer.over_controls = over_controls;
+        self.viewer_note_activity(cx);
     }
 
     /// The controls finished fading out: from then on they take no pointer
@@ -561,16 +573,11 @@ impl QuillApp {
         .detach();
     }
 
-    /// Mouse moved over the viewer: show the controls and restart the
-    /// 1100 ms idle clock (tdesktop `mediaviewWaitHide`). `over_controls`
-    /// keeps them up while the pointer rests on one.
-    pub(in crate::ui) fn viewer_note_activity(
-        &mut self,
-        over_controls: bool,
-        cx: &mut Context<Self>,
-    ) {
+    /// Activity in the viewer: show the controls and restart the 1100 ms
+    /// idle clock (tdesktop `mediaviewWaitHide`). They stay up while the
+    /// pointer rests on one (`over_controls`).
+    pub(in crate::ui) fn viewer_note_activity(&mut self, cx: &mut Context<Self>) {
         self.viewer.last_activity = std::time::Instant::now();
-        self.viewer.over_controls = over_controls;
         if self.viewer.controls_hidden {
             self.viewer.controls_hidden = false;
             self.viewer.controls_gen += 1;

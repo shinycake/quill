@@ -300,7 +300,7 @@ impl QuillApp {
             None => MediaViewer::open(vec![item], 0),
         };
         self.viewer.open_gen += 1;
-        self.viewer_note_activity(false, cx);
+        self.viewer_note_activity(cx);
         self.reset_viewer_item_state(cx);
         let taken = self
             .viewer
