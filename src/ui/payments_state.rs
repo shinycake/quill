@@ -32,6 +32,11 @@ pub(crate) struct PaymentUi {
     /// Stars, members to award, countries (`stars_gift_ui`,
     /// `giveaway_pick_ui`).
     pub(super) pick_search: Entity<InputState>,
+    /// "Gift Premium or Stars", the gift recipient list, is open
+    /// (`gift_recipients_ui`).
+    pub(super) gift_recipients_open: bool,
+    /// Its search field.
+    pub(super) gift_recipient_search: Entity<InputState>,
     /// The scroll region of the giveaway dialog, which pages the members
     /// list near its end (`scroll_load`).
     pub(super) pick_scroll: ScrollHandle,
@@ -82,6 +87,21 @@ impl PaymentUi {
             |this, _, event: &InputEvent, _, cx| {
                 if matches!(event, InputEvent::Change) {
                     this.pick_search_changed(cx);
+                }
+            },
+        )
+        .detach();
+        let gift_recipient_search = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(tr(keys::GIFT_RECIPIENT_SEARCH))
+                .submit_on_enter(false)
+        });
+        cx.subscribe_in(
+            &gift_recipient_search,
+            window,
+            |_, _, event: &InputEvent, _, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
                 }
             },
         )
@@ -152,6 +172,8 @@ impl PaymentUi {
             gift_pay_upgrade: false,
             gift_premium_by_stars: false,
             pick_search,
+            gift_recipients_open: false,
+            gift_recipient_search,
             pick_scroll: ScrollHandle::new(),
             subs_scroll: ScrollHandle::new(),
             stars_scroll: ScrollHandle::new(),

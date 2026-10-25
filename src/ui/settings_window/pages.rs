@@ -171,13 +171,23 @@ impl QuillApp {
         rows.extend([
             self.nav_row(Nav::MyGifts, tr(keys::GIFT_STARS_TABS_MY), None, cx),
             self.nav_row(Nav::Business, tr(keys::BUSINESS_TITLE), None, cx),
-            self.nav_row(
-                Nav::Subscriptions,
-                tr(keys::Q_NAVIGATION_STAR_SUBSCRIPTIONS),
-                None,
-                cx,
-            ),
         ]);
+        // tdesktop's "Premium Gifting", where Premium can be bought.
+        if self.session().is_some_and(|s| s.premium_possible()) {
+            rows.push(link_row(
+                "settings-row-SendGift",
+                tr(keys::SETTINGS_GIFT_PREMIUM),
+                None,
+                cx.listener(|this, _, window, cx| this.open_gift_recipients(window, cx)),
+                cx,
+            ));
+        }
+        rows.extend([self.nav_row(
+            Nav::Subscriptions,
+            tr(keys::Q_NAVIGATION_STAR_SUBSCRIPTIONS),
+            None,
+            cx,
+        )]);
         rows
     }
 }

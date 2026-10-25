@@ -4,6 +4,7 @@ mod admin_extras;
 mod ai_compose;
 mod ai_tools;
 mod auth_leftovers;
+mod birthday_gift;
 mod boost_box;
 mod boost_level_refresh;
 mod bot_pending;

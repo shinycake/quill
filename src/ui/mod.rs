@@ -307,6 +307,8 @@ mod gift_market_demo;
 mod gift_market_state;
 mod gift_market_ui;
 mod gift_owner_actions;
+mod gift_recipients_demo;
+mod gift_recipients_ui;
 mod gift_resale_buy;
 mod gift_resale_ui;
 mod gift_send_ui;

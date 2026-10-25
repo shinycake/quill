@@ -249,4 +249,20 @@ impl crate::state::Session {
             _ => None,
         }
     }
+
+    /// The same for a user known by id, with or without a chat (a contact
+    /// picked from the gift recipient list).
+    pub fn gift_recipient_user(&self, user_id: i64) -> Option<GiftRecipient> {
+        let user = self.users.get(&user_id)?;
+        let is_self = Some(user_id) == self.my_user_id;
+        if !is_self && user.is_bot {
+            return None;
+        }
+        Some(GiftRecipient {
+            sender: MessageSender::User { user_id },
+            name: user.display_name(),
+            is_self,
+            is_channel: false,
+        })
+    }
 }
