@@ -488,7 +488,7 @@ fn an_empty_chat_shows_the_start_page(cx: &mut TestAppContext) {
                 photo_id: None,
                 blocked: false,
                 extras,
-                ratings: Default::default(),
+                ..Default::default()
             },
         );
     });

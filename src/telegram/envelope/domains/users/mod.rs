@@ -74,6 +74,8 @@ pub enum UsersPayload {
         share_theme: crate::peer_qr::theme::ShareTheme,
         /// `rating`, `pending_rating` and `pending_rating_date`.
         ratings: crate::stars_rating::UserRatings,
+        /// `has_restricted_voice_and_video_note_messages`.
+        voice_notes_restricted: bool,
     },
     /// `updateUserFullInfo` — full info changed (schema 1.8.67, line 10744);
     /// the user id is explicit here.
@@ -92,6 +94,8 @@ pub enum UsersPayload {
         share_theme: crate::peer_qr::theme::ShareTheme,
         /// The ratings, as above.
         ratings: crate::stars_rating::UserRatings,
+        /// `has_restricted_voice_and_video_note_messages`, as above.
+        voice_notes_restricted: bool,
     },
     /// `profileShareThemeBackdrops`: the `getProfileShareThemeBackdrops`
     /// answer.

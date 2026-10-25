@@ -91,6 +91,8 @@
 "lng_report_spam_sure_channel" = "Are you sure you want to report spam in this channel?";
 "lng_report_spam_sure_group" = "Are you sure you want to report this group for spam?";
 "lng_report_thanks" = "Thank you! Your report will be reviewed by our team.";
+"lng_restricted_send_video_messages" = "{user} doesn't accept video messages.";
+"lng_restricted_send_voice_messages" = "{user} doesn't accept voice messages.";
 "lng_rights_chat_add_members" = "Add members";
 "lng_saved_messages" = "Saved Messages";
 "lng_saved_music_added" = "Audio added to your Profile.";

@@ -68,6 +68,27 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(Some(extra))
     }
 
+    /// The open private chat's `getUserFullInfo`, as tdesktop's
+    /// `handlePeerUpdate` requests the full user it does not know yet: it
+    /// says whether the user accepts voice and video messages. Bot chats
+    /// fetch theirs in `maybe_fetch_bot_info`.
+    pub(crate) fn maybe_fetch_open_user_full_info(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Ok(());
+        }
+        let Some(user_id) = self
+            .session
+            .open_chat
+            .and_then(|chat_id| self.session.private_chat_user_id(chat_id))
+        else {
+            return Ok(());
+        };
+        if Some(user_id) == self.session.my_user_id || self.session.is_bot_user(user_id) {
+            return Ok(());
+        }
+        self.fetch_user_full_info(user_id).map(|_| ())
+    }
+
     /// The info panel's media counts for `chat_id`: one
     /// `getChatMessageCount` per `MEDIA_COUNT_FILTERS` entry, once per
     /// chat per session (counts change little while the panel is open).

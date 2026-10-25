@@ -221,11 +221,13 @@ fn user_full_info_bio_parsed() {
             blocked,
             share_theme: _,
             ratings: _,
+            voice_notes_restricted,
         }) => {
             assert_eq!(bio, "CANARY bio text");
             assert!(bot_info.is_none());
             assert!(photo.is_none());
             assert!(!blocked);
+            assert!(!voice_notes_restricted, "absent flag reads false");
         }
         other => panic!("{other:?}"),
     }

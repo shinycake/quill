@@ -159,6 +159,7 @@ impl Session {
                 blocked,
                 share_theme,
                 ratings,
+                voice_notes_restricted,
             } => {
                 // The answer names no user: the request does (as in
                 // `apply_user_full_info`).
@@ -183,6 +184,7 @@ impl Session {
                     user_id.and_then(|id| self.users_state.user_full_infos.get_mut(&id))
                 {
                     info.ratings = ratings;
+                    info.voice_notes_restricted = voice_notes_restricted;
                 }
             }
             UsersPayload::UpdateUserFullInfo {
@@ -195,6 +197,7 @@ impl Session {
                 blocked,
                 share_theme,
                 ratings,
+                voice_notes_restricted,
             } => {
                 self.keep_share_theme(
                     crate::peer_qr::theme::ThemeOwner::User(user_id.0),
@@ -216,6 +219,7 @@ impl Session {
                         blocked,
                         extras,
                         ratings,
+                        voice_notes_restricted,
                     },
                 );
             }

@@ -1,14 +1,29 @@
-//! The viewer's own sending rights in the open group: the sentence that
-//! replaces the composer when nothing can be sent, and the refusals for a
-//! single recording, attachment, sticker, GIF or poll (`quill::send_rights`).
+//! The viewer's own sending rights in the open chat: the sentence that
+//! replaces a group's composer when nothing can be sent, and the refusals
+//! for a single recording, attachment, sticker, GIF or poll
+//! (`quill::send_rights`).
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::composer::AttachmentKind;
 use quill::local_time::{civil_local, full_stamp, now_unix};
 use quill::send_rights::{SendKind, SendRights};
+
+register_demos![
+    // Demo chat A's user accepts no voice or video messages: the record
+    // button is dimmed, and clicking it says why.
+    DemoSpec::chats(
+        "ready-voice-restricted",
+        "screenshot demo — the user accepts no voice messages"
+    )
+    .setup(QuillApp::demo_voice_restricted),
+];
+
+/// The user behind the demo's open private chat ("Demo chat A").
+const DEMO_RESTRICTED_USER: i64 = 11;
 
 /// "{date}, {time}" for the end of a restriction.
 fn until_text(unix: i32) -> String {
@@ -16,7 +31,7 @@ fn until_text(unix: i32) -> String {
 }
 
 impl QuillApp {
-    /// The open chat's rights, `None` outside a group or without a chat.
+    /// The open chat's rights, `None` without a chat.
     fn open_send_rights(&self) -> Option<SendRights> {
         let session = self.session()?;
         let chat = session.chats.get(&session.open_chat?.0)?;
@@ -60,4 +75,20 @@ impl QuillApp {
         cx.notify();
         true
     }
+
+    fn demo_voice_restricted(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+        if let Some(session) = self.demo_session.as_mut() {
+            session
+                .users_state
+                .user_full_infos
+                .entry(DEMO_RESTRICTED_USER)
+                .or_default()
+                .voice_notes_restricted = true;
+        }
+    }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "send_limits_tests.rs"]
+mod tests;
