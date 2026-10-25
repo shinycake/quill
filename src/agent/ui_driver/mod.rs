@@ -16,4 +16,5 @@ pub mod keys;
 pub mod policy;
 pub mod redact;
 pub mod surface;
+pub mod takeover;
 pub mod tree;

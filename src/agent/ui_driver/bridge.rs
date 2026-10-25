@@ -4,8 +4,8 @@
 //! Nothing here blocks the UI thread or the TDLib receive thread.
 //!
 //! Also the driving clock: the tree is forced on only while an agent drove
-//! within [`DRIVE_WINDOW`] ([`wants_forced`]), and the real-input markers
-//! step 2 pauses on ([`note_real_input`], [`paused`]).
+//! within [`DRIVE_WINDOW`] ([`wants_forced`]), and the real-input clock
+//! ([`note_real_input`]); the pause itself is in `super::takeover`.
 
 use super::keys::KeyChord;
 use super::tree::{UiNode, UiTree};
@@ -271,8 +271,6 @@ fn now_ms() -> u64 {
 static LAST_DRIVE_MS: AtomicU64 = AtomicU64::new(0);
 /// When the user last gave the window real input.
 static LAST_REAL_INPUT_MS: AtomicU64 = AtomicU64::new(0);
-/// The driver is paused (step 2 sets it on real input; tools refuse).
-static PAUSED: AtomicBool = AtomicBool::new(false);
 
 /// How long after the last command the tree keeps being built.
 pub const DRIVE_WINDOW: Duration = Duration::from_secs(30);
@@ -308,14 +306,18 @@ pub fn real_input_age_ms() -> Option<u64> {
     (last != 0).then(|| now_ms().saturating_sub(last))
 }
 
-/// Pause or resume the driver. Paused, every driver tool refuses.
+/// Pause or resume the driver. Paused, every driver tool refuses. The
+/// pause lives in the takeover record (`super::takeover`).
 pub fn set_paused(on: bool) {
-    PAUSED.store(on, Ordering::SeqCst);
-    crate::wake::AGENT.poke();
+    if on {
+        super::takeover::pause(super::takeover::PauseReason::Input);
+    } else {
+        super::takeover::let_continue();
+    }
 }
 
 pub fn paused() -> bool {
-    PAUSED.load(Ordering::SeqCst)
+    super::takeover::paused()
 }
 
 #[cfg(test)]
@@ -383,6 +385,7 @@ mod tests {
 
     #[test]
     fn the_drive_clock_and_pause_flag() {
+        let _guard = lock();
         assert!(
             !super::drove_recently()
                 || super::LAST_DRIVE_MS.load(std::sync::atomic::Ordering::Relaxed) != 0

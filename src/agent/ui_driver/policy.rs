@@ -5,8 +5,8 @@
 
 use super::keys::{self, KeyChord};
 
-/// The switches: Agent access, "Let agents drive Quill's window", and the
-/// pause. `None` when the driver may run.
+/// The switches: Agent access, "Let agents drive Quill's window", the
+/// pause and Stop. `None` when the driver may run.
 pub fn switch_refusal() -> Option<String> {
     if !crate::agent::access::enabled() {
         return Some(
@@ -20,13 +20,7 @@ pub fn switch_refusal() -> Option<String> {
                 .into(),
         );
     }
-    if super::bridge::paused() {
-        return Some(
-            "The UI driver is paused because the user is using Quill's window. Wait a moment and retry, or use the chat tools instead."
-                .into(),
-        );
-    }
-    None
+    super::takeover::refusal()
 }
 
 /// Why `chord` is not pressed: it leaves Quill, or it is Enter or Space
