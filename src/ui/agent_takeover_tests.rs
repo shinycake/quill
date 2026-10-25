@@ -206,6 +206,54 @@ fn stop_refuses_what_waits_and_what_comes(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn a_reconnect_lifts_neither_a_pause_nor_stop(cx: &mut TestAppContext) {
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (_app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let presence = turn_on();
+    drive_at(1000);
+    settle(vcx);
+    vcx.simulate_click(point(px(600.), px(400.)), Modifiers::none());
+    settle(vcx);
+    assert!(takeover::paused());
+
+    // The agent kills its `quill mcp` and connects again: still paused,
+    // and the pill is back so the user can let it continue.
+    drop(presence);
+    takeover::pin_clock(Some(2000));
+    settle(vcx);
+    takeover::pin_clock(Some(2000 + ms(FADE_OUT) + 10));
+    settle(vcx);
+    assert!(!pill(vcx));
+    assert!(takeover::paused());
+    let presence = activity::connect("Claude Code");
+    takeover::pin_clock(Some(5000));
+    settle(vcx);
+    takeover::pin_clock(Some(5000 + ms(FADE_IN)));
+    settle(vcx);
+    assert!(matches!(takeover::current(), Phase::Paused { .. }));
+    assert!(shown(vcx, "agent-takeover-continue"));
+
+    // Stop, then a reconnect: still stopped.
+    vcx.update(|window, cx| window.click("agent-takeover-stop", cx));
+    settle(vcx);
+    drop(presence);
+    settle(vcx);
+    let _presence = activity::connect("Claude Code");
+    settle(vcx);
+    assert!(takeover::stopped());
+    assert!(
+        quill::agent::ui_driver::policy::switch_refusal().is_some_and(|text| text.contains("Stop"))
+    );
+    // Only the driving switch off and on lifts it.
+    access::set_ui_driver(false);
+    access::set_ui_driver(true);
+    assert!(!takeover::stopped());
+    assert_eq!(quill::agent::ui_driver::policy::switch_refusal(), None);
+    takeover::reset_for_test();
+}
+
+#[gpui_kit::test]
 fn the_layer_never_takes_a_click_meant_for_what_is_under_it(cx: &mut TestAppContext) {
     let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
     let (app, mut vcx) = new_app(cx);

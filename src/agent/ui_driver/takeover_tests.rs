@@ -1,7 +1,7 @@
 use super::{
     Aim, FADE_IN, FADE_OUT, Facts, GLIDE, HOLD, JITTER_PX, Live, PULSE, PauseReason, Phase,
-    RESUME_GRACE, RealInput, aim, command, ghost_arrival, ghost_point, moving, next_change_ms,
-    observe, pauses_on, phase, press, press_pulse, resume, stop,
+    RESUME_GRACE, RealInput, aim, answered, command, ghost_arrival, ghost_point, moving,
+    next_change_ms, observe, pauses_on, phase, press, press_pulse, resume, stop,
 };
 use std::time::Duration;
 
@@ -132,7 +132,7 @@ fn pointer_moves_pause_only_when_deliberate() {
 }
 
 #[test]
-fn stop_ends_the_session_now_and_holds_until_the_agents_leave() {
+fn stop_ends_the_session_now_and_holds_until_the_switch_goes_off() {
     let mut facts = Facts::default();
     command(&mut facts, "Claude Code", 100);
     stop(&mut facts, 500);
@@ -152,7 +152,77 @@ fn stop_ends_the_session_now_and_holds_until_the_agents_leave() {
         },
         3000,
     );
-    assert!(!facts.stopped, "a new connection may drive");
+    assert!(facts.stopped, "a disconnect does not undo Stop");
+    observe(&mut facts, ON, 4000);
+    assert!(facts.stopped, "nor does a reconnect");
+    assert_eq!(phase(&facts, ON, 4000), Phase::Idle, "and nothing shows");
+    observe(
+        &mut facts,
+        Live {
+            connected: true,
+            allowed: false,
+        },
+        5000,
+    );
+    assert!(!facts.stopped, "the switch going off lifts it");
+}
+
+#[test]
+fn a_pause_outlives_a_reconnect_and_shows_again() {
+    let mut facts = Facts::default();
+    command(&mut facts, "Claude Code", 100);
+    facts.paused = Some(PauseReason::Input);
+    let gone = Live {
+        connected: false,
+        allowed: true,
+    };
+    observe(&mut facts, gone, 300);
+    assert_eq!(facts.paused, Some(PauseReason::Input), "kept");
+    assert!(matches!(
+        phase(&facts, gone, 310),
+        Phase::FadingOut { ended_ms: 300, .. }
+    ));
+    assert_eq!(phase(&facts, gone, 300 + ms(FADE_OUT)), Phase::Idle);
+    // The agent comes back: the pill returns, fading in, still paused.
+    observe(&mut facts, ON, 5000);
+    let back = phase(&facts, ON, 5000);
+    assert!(
+        matches!(back, Phase::Paused { since_ms: 5000, .. }),
+        "{back:?}"
+    );
+    assert!(back.presence(5000) < 0.1, "fades in");
+    resume(&mut facts, 6000);
+    assert!(matches!(phase(&facts, ON, 6000), Phase::Driving { .. }));
+    // The switch going off forgets it.
+    facts.paused = Some(PauseReason::Escape);
+    observe(
+        &mut facts,
+        Live {
+            connected: true,
+            allowed: false,
+        },
+        7000,
+    );
+    assert_eq!(facts.paused, None);
+}
+
+#[test]
+fn answering_a_prompt_gives_the_pointer_the_grace() {
+    let mut facts = Facts::default();
+    command(&mut facts, "Claude Code", 100);
+    facts.last_pointer = Some((10.0, 10.0));
+    let far = RealInput::Move { x: 200.0, y: 10.0 };
+    answered(&mut facts, 150);
+    let shown = phase(&facts, ON, 200);
+    assert!(!pauses_on(&facts, &shown, far, true, 200));
+    let settled = 150 + ms(RESUME_GRACE);
+    assert!(pauses_on(
+        &facts,
+        &phase(&facts, ON, settled),
+        far,
+        true,
+        settled
+    ));
 }
 
 #[test]
@@ -186,7 +256,6 @@ fn a_disconnect_fades_out_from_the_moment_it_is_seen() {
         allowed: true,
     };
     observe(&mut facts, gone, 300);
-    assert_eq!(facts.paused, None, "nobody left to wait");
     assert!(matches!(
         phase(&facts, gone, 310),
         Phase::FadingOut { ended_ms: 300, .. }
