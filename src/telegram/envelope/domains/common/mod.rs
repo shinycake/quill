@@ -42,13 +42,6 @@ pub enum CommonPayload {
     HttpUrl {
         url: String,
     },
-    /// Slice msg-richtext-ai-tools: `fixedText` (TDLib 1.8.67,
-    /// `schema/td_api.tl:157`) — the `fixTextWithAi` answer. `text` is
-    /// the fixed text the composer applies (`diffText` is not parsed —
-    /// nothing renders it; parsing what you never use is slop).
-    FixedText {
-        text: String,
-    },
     /// Slice msg-richtext-ai-tools: bare `formattedText` (TDLib 1.8.67,
     /// `schema/td_api.tl:3046`) — the `composeTextWithAi`,
     /// `translateText` and `translateMessageText` answer. The composer

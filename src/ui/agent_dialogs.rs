@@ -11,6 +11,7 @@ use gpui_kit::component::alert::Alert;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::agent::grants::Scope;
 use quill::agent::prompts::{Ask, Prompt, Risk};
@@ -185,7 +186,9 @@ impl QuillApp {
                 );
             }
             Ask::Write { preview, kind, .. } => {
-                let preview = clip(preview, 600);
+                // A raw request shows whole: what it does may sit in any field.
+                let raw = kind == "td_call";
+                let preview = clip(preview, if raw { 6000 } else { 600 });
                 if !preview.is_empty() {
                     body = body.child(
                         div()
@@ -207,8 +210,13 @@ impl QuillApp {
                                     .rounded(radius)
                                     .bg(quote_bg)
                                     .text_sm()
-                                    .line_clamp(4)
-                                    .child(format!("\"{preview}\"")),
+                                    .when(!raw, |this| this.line_clamp(4))
+                                    .when(raw, |this| this.max_h(px(240.)).overflow_y_scroll())
+                                    .child(if raw {
+                                        preview
+                                    } else {
+                                        format!("\"{preview}\"")
+                                    }),
                             ),
                     );
                 }
@@ -245,8 +253,9 @@ impl QuillApp {
                                 .bg(quote_bg)
                                 .text_xs()
                                 .font_family(super::message_text::MONO_FONT)
-                                .line_clamp(8)
-                                .child(clip(preview, 600)),
+                                .max_h(px(240.))
+                                .overflow_y_scroll()
+                                .child(clip(preview, 6000)),
                         ),
                 );
             }

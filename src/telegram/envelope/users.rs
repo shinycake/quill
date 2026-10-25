@@ -137,6 +137,12 @@ pub struct ParsedUser {
     /// `profile_photo.small.id` (`profilePhoto`, schema 1.8.67 line 754);
     /// 0 = no photo.
     pub photo_small_file_id: i32,
+    /// `profile_photo.id`: the photo whose full `chatPhoto` (from
+    /// `userFullInfo`) holds its clips; 0 = no photo.
+    pub photo_id: i64,
+    /// `profile_photo.has_animation`: the photo is a video (tdesktop
+    /// `userpicHasVideo`).
+    pub photo_has_animation: bool,
     /// `user.accent_color_id` (schema 1.8.67, line 2383): the name color in
     /// chats. 0–6 are the built-in colors (red, orange, violet, green,
     /// cyan, blue, pink); higher ids are server palettes.
@@ -384,6 +390,12 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
             .and_then(|f| f.get("id")),
     ))
     .unwrap_or(0);
+    let profile_photo = value.get("profile_photo").filter(|p| !p.is_null());
+    let photo_id = int64(profile_photo.and_then(|p| p.get("id"))).unwrap_or(0);
+    let photo_has_animation = profile_photo
+        .and_then(|p| p.get("has_animation"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let accent_color_id = value
         .get("accent_color_id")
         .and_then(Value::as_i64)
@@ -460,6 +472,8 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         is_support,
         bot_active_users,
         photo_small_file_id,
+        photo_id,
+        photo_has_animation,
         accent_color_id,
         background_custom_emoji_id,
         profile_accent_color_id,
@@ -516,8 +530,8 @@ pub(crate) fn parse_profile_photo(photo: &Value) -> Option<ParsedProfilePhoto> {
     let (thumb_file_id, full_file_id, width, height) =
         (thumb.file_id, full.file_id, full.width, full.height);
     let mut files = files;
-    let animation = parse_chat_photo_animation(photo).map(|(animation, file)| {
-        files.push(file);
+    let animation = parse_chat_photo_animation(photo).map(|(animation, clips)| {
+        files.extend(clips);
         animation
     });
     Some(ParsedProfilePhoto {

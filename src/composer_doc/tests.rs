@@ -340,3 +340,31 @@ fn markup_survives_ranges_off_a_char_boundary() {
     let (text, _) = parse_format_markup(&markup);
     assert_eq!(text, "a\u{e9} b", "{markup}");
 }
+
+#[test]
+fn slice_clips_spans_and_keeps_whole_emoji() {
+    let mut full = doc("say hello world", &[("hello world", ComposerTag::Bold)]);
+    full.emoji.push(DocEmoji {
+        range: 0..3,
+        custom_emoji_id: 7,
+    });
+    let part = full.slice(4..9);
+    assert_eq!(part.text, "hello");
+    assert_eq!(part.spans, vec![DocSpan::new(0..5, ComposerTag::Bold)]);
+    assert!(part.emoji.is_empty());
+    let head = full.slice(0..5);
+    let emoji = DocEmoji {
+        range: 0..3,
+        custom_emoji_id: 7,
+    };
+    assert_eq!(head.emoji, vec![emoji]);
+    assert_eq!(head.spans, vec![DocSpan::new(4..5, ComposerTag::Bold)]);
+}
+
+#[test]
+fn slice_off_a_char_boundary_is_empty() {
+    assert_eq!(
+        ComposerDoc::plain("a\u{e9}").slice(0..2),
+        ComposerDoc::default()
+    );
+}

@@ -155,3 +155,18 @@ fn auction_card_button_follows_the_dates() {
     assert_eq!(preview.button_label(1500), Some("Join"));
     assert_eq!(preview.button_label(2500), Some("View Results"));
 }
+
+#[test]
+fn style_link_card_says_view_style() {
+    let preview = preview_of(json!({
+        "@type": "linkPreviewTypeTextCompositionStyle",
+        "custom_emoji_id": "5368324170671202286"
+    }));
+    assert_eq!(preview.view_button, Some("View Style"));
+    assert_eq!(
+        preview.kind,
+        super::message_link_preview::LinkPreviewKind::TextCompositionStyle {
+            custom_emoji_id: 5368324170671202286
+        }
+    );
+}

@@ -57,9 +57,7 @@ pub struct StoriesState {
     /// cooldown — the schema exposes no getter, so this only ever
     /// reflects updates TDLib has pushed.
     pub stealth: StoryStealthMode,
-    /// Phase 9.5: last `activateStoryStealthMode` error (e.g. Premium
-    /// required), cleared when a new activation is sent.
-    pub stealth_error: Option<String>,
+    pub stealth_periods: crate::story_stealth::StealthPeriods,
     /// Phase 9.5: chat ids from the last `getChatsToPostStories` answer —
     /// the composer's "post as" picker (channels/supergroups where the
     /// user has the `can_post_stories` admin right).
@@ -139,7 +137,7 @@ impl StoriesState {
             search: None,
             report: None,
             stealth: StoryStealthMode::default(),
-            stealth_error: None,
+            stealth_periods: Default::default(),
             post_as_chats: Vec::new(),
             manage: StoryManageState::default(),
             albums: HashMap::new(),

@@ -43,6 +43,7 @@ impl QuillApp {
                     self.open_info_panel_target(target, window, cx);
                 }
             }
+            StoryMenuAction::ViewAnonymously { .. } => self.setup_story_stealth(Some(id), cx),
             StoryMenuAction::ToggleHidden => {
                 let hide = !self.story_tile_hidden(chat_id);
                 let sent = self
@@ -82,6 +83,26 @@ impl QuillApp {
         })
     }
 
+    fn story_tile_stealth(
+        &self,
+        kind: &ChatKind,
+        chat_id: i64,
+    ) -> Option<quill::story_stealth::StealthEntry> {
+        let session = self.session()?;
+        let tray = session.stories.tray.get(&chat_id)?;
+        let offered = matches!(kind, ChatKind::Private { .. })
+            && session.premium_possible()
+            && tray.has_unread()
+            && !tray.stories.iter().any(|story| story.is_live);
+        offered.then(|| {
+            quill::story_stealth::StealthEntry::of(
+                session.my_is_premium(),
+                session.stories.stealth,
+                now_unix_secs(),
+            )
+        })
+    }
+
     /// The entries the story tile menu shows for this chat.
     pub(super) fn story_menu_entries(&self, chat_id: i64) -> Vec<StoryMenuItem> {
         let kind = self
@@ -96,6 +117,7 @@ impl QuillApp {
             is_self,
             hidden: self.story_tile_hidden(chat_id),
             muted: self.story_tile_muted(chat_id),
+            stealth: self.story_tile_stealth(&kind, chat_id),
         })
     }
 
@@ -113,6 +135,8 @@ impl QuillApp {
                 let icon = match entry.action {
                     StoryMenuAction::Open => IconName::MessageCircle,
                     StoryMenuAction::Profile => IconName::CircleUser,
+                    StoryMenuAction::ViewAnonymously { locked: true } => IconName::Lock,
+                    StoryMenuAction::ViewAnonymously { locked: false } => IconName::HatGlasses,
                     StoryMenuAction::ToggleHidden => IconName::EyeOff,
                     StoryMenuAction::ToggleMute => IconName::BellOff,
                 };

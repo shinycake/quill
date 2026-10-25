@@ -468,11 +468,11 @@ impl Session {
         }
     }
 
-    /// Custom emoji the open chat shows: ids in message text, custom-emoji
-    /// reactions under messages, and those the open reaction picker offers.
-    /// Sorted and deduplicated.
+    /// Custom emoji the open chat shows: ids in message text and style link
+    /// cards, custom-emoji reactions under messages, and those the open
+    /// reaction picker offers. Sorted and deduplicated.
     pub fn open_chat_custom_emoji_ids(&self) -> Vec<i64> {
-        use crate::telegram::envelope::ReactionType;
+        use crate::telegram::envelope::{LinkPreviewKind, ReactionType};
         let mut ids = Vec::new();
         for message in self
             .open_chat
@@ -497,6 +497,12 @@ impl Session {
                     TextEntityKind::CustomEmoji { custom_emoji_id } => Some(custom_emoji_id),
                     _ => None,
                 }));
+                if let Some(LinkPreviewKind::TextCompositionStyle { custom_emoji_id }) =
+                    text.link_preview.as_ref().map(|preview| &preview.kind)
+                    && *custom_emoji_id != 0
+                {
+                    ids.push(*custom_emoji_id);
+                }
             }
             // The custom emoji in the text of a poll's options.
             if let MessageContent::Poll(poll) = &message.content {

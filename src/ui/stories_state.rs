@@ -97,6 +97,9 @@ pub(crate) struct StoryUi {
     pub(super) share_open: bool,
     pub(super) more_search: Entity<TextareaState>,
     pub(super) notice: Option<String>,
+    pub(super) stealth_box: Option<super::story_stealth_ui::StealthBox>,
+    pub(super) stealth_tick: Option<Task<()>>,
+    pub(super) stealth_toast: Option<super::story_stealth_ui::ShownStealthToast>,
 }
 
 impl StoryUi {
@@ -193,6 +196,9 @@ impl StoryUi {
             share_open: false,
             more_search: story_more_search,
             notice: None,
+            stealth_box: None,
+            stealth_tick: None,
+            stealth_toast: None,
             privacy_sent: false,
             viewer: StoryViewer::closed(),
             playback: StoryPlayback::default(),

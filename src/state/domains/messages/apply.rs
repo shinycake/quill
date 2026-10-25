@@ -47,6 +47,7 @@ impl Session {
                 chat_id,
                 is_translatable,
             } => self.set_chat_translatable(chat_id, is_translatable),
+            MessagesPayload::AiCompose(payload) => self.apply_ai_compose_payload(payload, pending),
             // B4: `getPollVoters` answer — a first page (offset 0)
             // replaces the cached list for this (chat, message, option);
             // a later page appends, deduped by sender, keeping server

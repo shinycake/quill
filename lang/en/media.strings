@@ -400,7 +400,6 @@
 "qll_media_emoji_packs" = "Emoji Packs";
 "qll_media_emoji_set" = "Emoji set";
 "qll_media_emoji_stickers_and_gifs" = "Emoji, stickers and GIFs";
-"qll_media_enabling_stealth_mode" = "Enabling stealth mode…";
 "qll_media_enter_2_step_password" = "Enter 2-step password";
 "qll_media_enter_the_links_address" = "enter the link's address";
 "qll_media_expand_fact_check" = "Expand fact check";
@@ -660,11 +659,6 @@
 "qll_media_sound_on" = "Sound on";
 "qll_media_starting_bot" = "starting bot…";
 "qll_media_statistics" = "Statistics";
-"qll_media_stealth" = "Stealth";
-"qll_media_stealth_cooling_down" = "Stealth cooling down";
-"qll_media_stealth_mode_is_active_your" = "Stealth mode is active — your story views are hidden";
-"qll_media_stealth_mode_is_cooling_down" = "Stealth mode is cooling down — try again later";
-"qll_media_stealth_on" = "Stealth on";
 "qll_media_sticker" = "Sticker";
 "qll_media_sticker_2" = "Sticker {emoji}";
 "qll_media_sticker_set" = "Sticker set";

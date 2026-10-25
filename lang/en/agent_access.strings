@@ -100,6 +100,7 @@
 "qll_agent_confirm_react" = "{agent} wants to react in \"{chat}\"";
 "qll_agent_confirm_remove_reaction" = "{agent} wants to remove a reaction in \"{chat}\"";
 "qll_agent_confirm_pin" = "{agent} wants to pin a message in \"{chat}\"";
+"qll_agent_confirm_td_call" = "{agent} wants to run a TDLib request in \"{chat}\"";
 "qll_agent_confirm_unpin" = "{agent} wants to unpin a message in \"{chat}\"";
 "qll_agent_confirm_preview_forward" = "It will forward:";
 "qll_agent_confirm_preview_edit" = "New text:";

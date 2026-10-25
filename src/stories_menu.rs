@@ -17,6 +17,9 @@ pub enum StoryMenuAction {
     Open,
     /// Open the profile or group / channel info.
     Profile,
+    /// The Stealth Mode box, which opens the stories once it is on;
+    /// `locked` marks the entry for an account that cannot turn it on.
+    ViewAnonymously { locked: bool },
     /// Move the poster's stories to the archive list, or back.
     ToggleHidden,
     /// Mute or unmute story notifications of the chat.
@@ -37,6 +40,7 @@ pub struct StoryMenuFacts<'a> {
     pub hidden: bool,
     /// Story notifications of the chat are muted.
     pub muted: bool,
+    pub stealth: Option<crate::story_stealth::StealthEntry>,
 }
 
 pub fn story_menu(facts: &StoryMenuFacts<'_>) -> Vec<StoryMenuItem> {
@@ -55,6 +59,14 @@ pub fn story_menu(facts: &StoryMenuFacts<'_>) -> Vec<StoryMenuItem> {
         return items;
     }
     items.push(item(StoryMenuAction::Profile, profile));
+    if let Some(entry) = facts.stealth {
+        items.push(item(
+            StoryMenuAction::ViewAnonymously {
+                locked: entry.locked,
+            },
+            crate::lang::tr(crate::lang::keys::STORIES_VIEW_ANONYMOUSLY),
+        ));
+    }
     items.push(item(
         StoryMenuAction::ToggleHidden,
         if facts.hidden {
@@ -85,6 +97,7 @@ mod tests {
             is_self,
             hidden,
             muted,
+            stealth: None,
         })
         .iter()
         .map(|i| i.label)
@@ -135,6 +148,33 @@ mod tests {
         assert_eq!(
             labels(basic, false, false, false)[..2],
             ["Open Group", "View group info"]
+        );
+    }
+
+    #[test]
+    fn unread_stories_of_a_user_offer_view_anonymously() {
+        let user = ChatKind::Private { user_id: UserId(5) };
+        let items = story_menu(&StoryMenuFacts {
+            kind: &user,
+            is_self: false,
+            hidden: false,
+            muted: false,
+            stealth: Some(crate::story_stealth::StealthEntry { locked: true }),
+        });
+        let labels: Vec<_> = items.iter().map(|i| i.label).collect();
+        assert_eq!(
+            labels,
+            [
+                "Send Message",
+                "View profile",
+                "View Anonymously",
+                "Hide Stories",
+                "Mute stories"
+            ]
+        );
+        assert_eq!(
+            items.get(2).map(|i| i.action),
+            Some(StoryMenuAction::ViewAnonymously { locked: true })
         );
     }
 

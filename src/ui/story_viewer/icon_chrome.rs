@@ -242,12 +242,18 @@ impl QuillApp {
         if !own {
             add(MenuAct::Hide, hide_label(hidden), IconName::EyeOff, false);
         }
-        add(
-            MenuAct::Stealth,
-            self.story_stealth_label(),
-            IconName::Moon,
-            false,
-        );
+        if let Some(entry) = self.story_stealth_entry(item) {
+            add(
+                MenuAct::Stealth,
+                tr(keys::STEALTH_MODE_MENU_ITEM),
+                if entry.locked {
+                    IconName::Lock
+                } else {
+                    IconName::HatGlasses
+                },
+                false,
+            );
+        }
         if self.viewer_story_search_query().is_some() {
             add(
                 MenuAct::SearchHere,
@@ -314,7 +320,7 @@ impl QuillApp {
             MenuAct::CloseFriends => self.open_close_friends_editor(window, cx),
             MenuAct::Profile => self.toggle_story_profile(cx),
             MenuAct::Hide => self.toggle_hide_story_peer(cx),
-            MenuAct::Stealth => self.toggle_story_stealth(cx),
+            MenuAct::Stealth => self.setup_story_stealth(None, cx),
             MenuAct::SearchHere => {
                 if let Some(query) = self.viewer_story_search_query() {
                     self.search_stories_from_viewer(query, window, cx);

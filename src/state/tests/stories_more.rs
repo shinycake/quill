@@ -135,6 +135,29 @@ fn update_story_stealth_mode_stored() {
 }
 
 #[test]
+fn stealth_periods_follow_the_tdlib_options() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    assert_eq!(session.stories.stealth_periods.past, 300);
+    assert_eq!(session.stories.stealth_periods.future, 1500);
+    for (name, value) in [
+        ("story_stealth_mode_past_period", 600),
+        ("story_stealth_mode_future_period", 3600),
+    ] {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"updateOption","name":"{name}","value":{{"@type":"optionValueInteger","value":"{value}"}}}}"#
+            ),
+        );
+    }
+    assert_eq!(session.stories.stealth_periods.past, 600);
+    assert_eq!(session.stories.stealth_periods.future, 3600);
+}
+
+#[test]
 fn update_story_post_succeeded_upserts_and_queues_tray_refresh() {
     // Phase 9.2: `updateStoryPostSucceeded` (schema 1.8.67 line 10901).
     let (mut session, sink) = session();

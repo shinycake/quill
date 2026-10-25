@@ -277,6 +277,7 @@ pub enum MessagesPurpose {
     /// 1.8.67, :12176). Response is `richMessage`; the parsed blocks
     /// replace the open chat's composer draft as editor markup.
     FixRichMessageWithAi,
+    AiCompose(AiComposePurpose),
 }
 
 flat_purposes!(Messages(MessagesPurpose) {

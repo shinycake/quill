@@ -276,43 +276,98 @@ agent can't see.
 ## Phase 4: raw TDLib calls
 
 `td_call` (`src/agent/tools/td_call.rs`) passes one TDLib request through
-for what the curated tools don't cover. `src/agent/tools/td_policy.rs`
-sorts every method into one class:
+for what the curated tools don't cover.
 
-- **Blocked.** Quill's own plumbing never runs for an agent: `setOption`
-  (so no agent can turn off read receipts, online status or typing),
-  `setTdlibParameters`, `close`, `destroy`, the sign-in flow, logs, push
-  registration and custom requests.
-- **Ask.** The deny list waits for the user's Allow in Quill, once per
-  call, with the agent's reason and the request shown. There are two
-  groups. The account: `deleteAccount`, `logOut`, `terminateSession`,
+**The schema decides, not the method name alone.** The first review showed
+that guessing from names and fields lets a request lie: a decoy `chat_id`
+on a method that has none turned a deny-listed call into a granted one, and
+a chat id sent as a string skipped the grant check. So every request is
+read against `schema/td_api.tl` (the schema Quill is built with, embedded
+and parsed on first use, `td_schema.rs`):
+
+- An unknown method is refused. Fields the method or a nested constructor
+  doesn't have are dropped before anything else looks at the request, so
+  padding and decoy ids are gone (`td_request.rs`).
+- Every chat id (`chat_id`, `*_chat_id`, `*_chat_ids`, and the chats of
+  `supergroup_id`, `basic_group_id`, `secret_chat_id`) is made an integer;
+  anything that isn't one is refused.
+- A change runs under the grants only when the method has a top-level
+  `chat_id: int53`. Every other change asks.
+
+**Classes** (`td_policy.rs`):
+
+- **Blocked.** Quill's plumbing (`setOption`, so no agent can turn off read
+  receipts, online status or typing; `setTdlibParameters`, `close`, the
+  sign-in flow, logs, push, `setDatabaseEncryptionKey`, file generation,
+  terms of service, `openChat`/`closeChat`), any method with a `file_id`,
+  any request with a nested `inputFileId` or `inputFileGenerated`
+  (TDLib runs a `#file_id#` conversion itself, reaching a file by id), and
+  `searchFileDownloads`/`getRemoteFile` (file ids are small integers handed
+  out in order; `download_file` checks the chat a file came from), the TON
+  wallet and its plumbing (TON Center, wallet bot, on-ramp; owner rule),
+  `addLocalMessage`, `getCurrentState` and `getChatFolderChatCount` (they
+  cover chats agents may not see), `getLanguagePackString` (it opens any
+  path), and any request carrying `callbackQueryPayloadDataWithPassword`.
+- **Ask, account.** `deleteAccount`, `logOut`, `terminateSession`,
   `terminateAllOtherSessions`, `setPassword`, `changePhoneNumber`, recovery
-  email, privacy rules, proxies, `transferChatOwnership`, `deleteChat`, and
-  any change that names no chat (the profile, joining by link). Money: any
-  method or nested type named for Stars, TON, payments, gifts, paid
-  content, Premium, giveaways, invoices, subscriptions or stakes, and any
-  request with a nonzero `paid_message_star_count`. Matching is by
-  camel-case word, so `startGroupCall` is not "Star".
-- **Granted.** Everything else runs under the chat grants. Methods that
-  start with `get`, `search`, `check`, `can`, `parse`, `validate` or `is`
-  need `read` on every chat they name. Other changes need `read_write` on
-  the chat they act in (top-level `chat_id`, `chat_ids`, and the chat of a
-  `supergroup_id`, `basic_group_id`, `secret_chat_id`, or for changes a
-  `user_id`), and `read` on any chat nested deeper (a forward's source).
-  Changes take a turn in the paced queue. Sends share it with
-  `send_message`, with the paid-chat check and the new-conversation cap.
+  and login email, privacy rules, proxies, `sharePhoneNumber`,
+  `addContact`, `importContacts`, `transferChatOwnership`, `deleteChat`;
+  reads that act for the user (`getCallbackQueryAnswer` presses a bot
+  button, `getLoginUrl` and `getWebAppUrl` sign in to sites and web apps,
+  passport elements, `validateOrderInfo`, inline queries that send a
+  location, `getUserLink` which can revoke links and waive the paid-message
+  fee); account data (`getActiveSessions`, `getProxies`, saved order info,
+  password state); RTMP stream keys; stories and live stories (TDLib posts
+  them as the user from the Saved Messages chat id, which agents have by
+  default); every method with a `group_call_id` and no `chat_id` (call ids
+  are small local integers that reach any chat's call); and every change
+  without a `chat_id`.
+- **Ask, money.** Any method or nested type named for Stars, TON, Grams,
+  payments, gifts, paid content, Premium, giveaways, invoices,
+  subscriptions, offers, stakes, revenue or withdrawals (whole camel-case
+  words, plurals listed, so `startGroupCall` is not "Star"), named methods
+  that move Stars or boosts without such a word (`boostChat`,
+  `joinChatByInviteLink`, refunds of unpaid-message charges, withdrawal
+  URLs), and any request with a positive `paid_message_star_count` or
+  `star_count` at any depth (`searchPublicPosts` takes its price at the
+  top level).
+- **Granted.** Reads need `read` on every chat they name. Chat-scoped
+  changes need `read_write` on every chat they act in (a forward's or an
+  external reply's source needs `read`), are refused for a bot the user
+  never talked to, wait for "Confirm each send" when it is on, and take a
+  turn in the paced queue. Sends also go through the paid-chat check, the
+  new-conversation cap and the delivery wait.
 
-Answers pass through a redactor. A `chat`, or any typed object with a
-`chat_id`, from a chat the agent may not read is replaced by a stub with
-`"hidden"`; `chat_ids` lists keep only granted chats; `phone_number` fields
-are dropped (agents never see phone numbers); `sponsored*` objects get
-`"sponsored": true` so agents can label ads. The contact-list reads need
-the contacts grant. Every call that isn't a read is logged under
-`td_call` with its method, and declines are logged as such.
+An allowed Ask still needs the grants on every chat it names, and an
+allowed send still goes through the queue. The Allow dialog shows the
+agent's reason and the whole sanitized request, scrollable; a request over
+6000 characters is refused rather than shown in part, since the agent
+controls field order and could push a field out of view.
 
-Why the deny list asks instead of refusing: the plan lets a user tell an
-agent "log out my old laptop session" or "send Ann a gift" and approve it,
-while no agent can do either on its own.
+**Answers** pass through `td_redact.rs`. Anything belonging to a chat the
+agent may not read (`chat`, `supergroup`, `basicGroup`, `secretChat`, any
+object with a `chat_id`) is dropped from lists; elsewhere it becomes a stub
+with no id. An object is judged by its own id only (a story by its poster): its other chat fields
+(`linked_chat_id`, `personal_chat_id`, `supergroup_id`...) read 0 when not
+granted, so a granted channel with an ungranted discussion group still
+shows. Every `…chat_ids` list keeps only granted chats. A list filtered by
+chat, or left empty, always has its `total_count` set to the items
+returned, even when nothing was dropped (otherwise `getChats` on a folder with a granted first
+chat would count the folder). `phone_number` and `vcard` fields are
+dropped. `sponsored*` and `…Advertisement` objects get `"sponsored": true`.
+
+TDLib builds some paging offsets from the last result (`searchMessages`
+packs its date, chat id and message id), so answers carry opaque
+`quill-offset:` tokens that Quill maps back (`td_offset.rs`, last 512
+kept). When redaction drops items from a paged read, Quill follows up to
+ten more pages to fill it, so a short or empty page does not by itself say
+that hidden chats matched. The
+contact-list reads need the contacts grant. Every call that isn't a read is
+logged under `td_call` with its method, and declines are logged as such.
+
+Why the deny list asks instead of refusing: a user can tell an agent "log
+out my old laptop session" or "send Ann a gift" and approve it, while no
+agent can do either on its own.
 
 ## Phase 5: UI driver
 

@@ -178,6 +178,18 @@ impl QuillApp {
         self.go_to_feature_preview(quill::premium_hub::NO_FORWARDS_TITLE, cx);
     }
 
+    /// The AI compose box's Increase Limit (tdesktop
+    /// `ShowPremiumPreviewBox(PremiumFeature::AiCompose)`).
+    pub(in crate::ui) fn show_premium_ai_compose_preview(&mut self, cx: &mut Context<Self>) {
+        self.open_premium(cx);
+        self.go_to_feature_preview(quill::premium_hub::AI_COMPOSE_TITLE, cx);
+    }
+
+    pub(in crate::ui) fn show_premium_stories_preview(&mut self, cx: &mut Context<Self>) {
+        self.open_premium(cx);
+        self.go_to_feature_preview(quill::premium_hub::UPGRADED_STORIES_TITLE, cx);
+    }
+
     /// Page the open Premium dialog to the feature titled `title`: at once
     /// when the feature list is known, else as soon as it arrives.
     fn go_to_feature_preview(&mut self, title: &'static str, cx: &mut Context<Self>) {

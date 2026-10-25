@@ -154,12 +154,11 @@ impl AvatarLink {}
 /// Link for a row's avatar; `None` for spacers (rows continuing a sender
 /// run), outgoing rows and senders TDLib did not name.
 fn avatar_link(
-    sender_avatar: &Option<(String, Option<PathBuf>)>,
+    sender_avatar: &Option<SenderAvatar>,
     message: &HistoryMessage,
     cx: &mut Context<QuillApp>,
 ) -> Option<AvatarLink> {
-    let (name, _) = sender_avatar.as_ref()?;
-    if name.is_empty() {
+    if sender_avatar.as_ref()?.name.is_empty() {
         return None;
     }
     let sender = message.sender?;
@@ -183,7 +182,7 @@ pub(super) fn album_history_row(
     sender: Option<SenderLabel>,
     sender_status: Option<AnyElement>,
     receipt: OutboxReceipt,
-    sender_avatar: Option<(String, Option<PathBuf>)>,
+    sender_avatar: Option<SenderAvatar>,
     // Settings → Appearance: font size + bubble/plain style.
     look: BubbleLook,
     session: Option<&Session>,
