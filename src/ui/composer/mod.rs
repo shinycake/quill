@@ -604,6 +604,12 @@ impl QuillApp {
         if !self.composer.read(cx).focus_handle(cx).is_focused(window) {
             return false;
         }
+        // The pasteboard is read directly below, past the platform's
+        // clipboard guard: refuse here too, and take the paste so the text
+        // paste under it does not run.
+        if quill::agent::ui_driver::guard::refuse_if_injecting("paste the user's clipboard") {
+            return true;
+        }
         // GPUI's macOS clipboard reads only text and image data; files
         // copied in Finder are file URLs, read from the pasteboard here.
         let copied_files = super::clipboard_files::copied_file_paths();

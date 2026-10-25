@@ -143,6 +143,9 @@ fn point_out(p: Point<Pixels>, zoom: f32) -> Point<Pixels> {
 /// Half the height of a macOS traffic-light button frame, in points.
 const TRAFFIC_LIGHT_HALF: f32 = 8.;
 
+/// What a clipboard read would do for the UI driver.
+const CLIPBOARD: &str = "paste the user's clipboard";
+
 /// Where to put the macOS traffic lights so they stay centered on the
 /// zoomed title bar: the buttons themselves don't scale, so the point
 /// that scales is their center, not their corner.
@@ -600,17 +603,30 @@ impl Platform for ZoomPlatform {
     fn should_auto_hide_scrollbars(&self) -> bool {
         self.inner.should_auto_hide_scrollbars()
     }
+    // While the UI driver injects input the clipboard reads as empty: a
+    // paste (chord, Edit menu, an input's context menu, a mini app's
+    // "Paste from clipboard") would put the user's clipboard, whatever is
+    // on it, wherever the focus is. One choke point covers every paste.
     fn read_from_clipboard(&self) -> Option<ClipboardItem> {
+        if guard::refuse_if_injecting(CLIPBOARD) {
+            return None;
+        }
         self.inner.read_from_clipboard()
     }
     fn write_to_clipboard(&self, item: ClipboardItem) {
         self.inner.write_to_clipboard(item)
     }
     fn read_from_clipboard_async(&self) -> Task<Result<Option<ClipboardItem>, ClipboardReadError>> {
+        if guard::refuse_if_injecting(CLIPBOARD) {
+            return Task::ready(Ok(None));
+        }
         self.inner.read_from_clipboard_async()
     }
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
     fn read_from_primary(&self) -> Option<ClipboardItem> {
+        if guard::refuse_if_injecting(CLIPBOARD) {
+            return None;
+        }
         self.inner.read_from_primary()
     }
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]

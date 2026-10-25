@@ -176,8 +176,9 @@ pub fn parse_sequence(text: &str) -> Result<Vec<KeyChord>, String> {
     Ok(chords)
 }
 
-/// Chords that leave Quill, close its window or hide it: never pressed for
-/// an agent. Returns what the chord would do.
+/// Chords that leave Quill, close its window or hide it, or paste the
+/// user's clipboard (whatever is on it, into whatever has the focus):
+/// never pressed for an agent. Returns what the chord would do.
 pub fn forbidden(chord: &KeyChord) -> Option<&'static str> {
     let primary = chord.cmd || chord.ctrl;
     match chord.key.as_str() {
@@ -186,9 +187,15 @@ pub fn forbidden(chord: &KeyChord) -> Option<&'static str> {
         "h" if chord.cmd && !chord.ctrl => Some("hide Quill"),
         "m" if chord.cmd && !chord.ctrl && !chord.shift => Some("minimise the window"),
         "f4" if chord.alt => Some("close the window"),
+        "v" if primary => Some(PASTES),
+        "insert" if chord.shift => Some(PASTES),
         _ => None,
     }
 }
+
+/// What a paste chord would do; the clipboard is the user's, not the
+/// agent's (`type_text` types the agent's own text).
+const PASTES: &str = "paste the user's clipboard into Quill";
 
 /// Whether the chord sends the message in the composer under `mode`
 /// (Telegram Desktop: Enter sends, or Ctrl/Cmd+Enter sends).
@@ -277,6 +284,25 @@ mod tests {
         assert!(forbidden(&parse_chord("cmd-h").unwrap()).is_some());
         assert_eq!(forbidden(&parse_chord("cmd-k").unwrap()), None);
         assert_eq!(forbidden(&parse_chord("q").unwrap()), None);
+    }
+
+    #[test]
+    fn paste_chords_are_forbidden() {
+        for chord in [
+            "cmd-v",
+            "ctrl-v",
+            "cmd-shift-v",
+            "ctrl-shift-v",
+            "shift-insert",
+        ] {
+            assert!(
+                forbidden(&parse_chord(chord).unwrap()).is_some(),
+                "{chord} pastes the user's clipboard"
+            );
+        }
+        assert_eq!(forbidden(&parse_chord("v").unwrap()), None);
+        assert_eq!(forbidden(&parse_chord("insert").unwrap()), None);
+        assert_eq!(forbidden(&parse_chord("cmd-c").unwrap()), None);
     }
 
     #[test]

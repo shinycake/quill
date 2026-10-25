@@ -374,6 +374,12 @@ fn a_key_that_opens_an_ungranted_chat_stops_the_sequence(cx: &mut TestAppContext
     let chords = parse_sequence("cmd-q").unwrap_or_default();
     let reply = drive(&app, vcx, UiCommand::PressKeys { chords });
     assert!(refused(&reply, "quit"), "{reply:?}");
+    // The clipboard is the user's: the paste chord is refused (a paste
+    // dispatched any other way reads an empty clipboard through the
+    // `ZoomPlatform`, which the test platform does not go through).
+    let chords = parse_sequence("cmd-v").unwrap_or_default();
+    let reply = drive(&app, vcx, UiCommand::PressKeys { chords });
+    assert!(refused(&reply, "clipboard"), "{reply:?}");
     let reply = drive(&app, vcx, click(Target::Node("deadbeef".into())));
     assert!(refused(&reply, "not on screen"), "{reply:?}");
     access::set_ui_driver(false);
