@@ -668,6 +668,11 @@ impl QuillApp {
     /// reused, in-flight fetch deduped). Demo: the fixture is already
     /// injected.
     pub(in crate::ui) fn open_websites(&mut self, cx: &mut Context<Self>) {
+        if quill::agent::ui_driver::guard::refuse_hard_if_injecting(
+            quill::agent::ui_driver::guard::HardSurface::Security,
+        ) {
+            return;
+        }
         self.privacy.websites_open = true;
         self.privacy.websites_confirm = None;
         if let Some(live) = self.live.as_mut() {

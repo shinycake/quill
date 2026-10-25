@@ -61,6 +61,11 @@ impl QuillApp {
     /// Slice parity:auth-multi-account: open the Accounts dialog. The
     /// registry reads are local and synchronous — no TDLib round-trip.
     pub(crate) fn open_accounts(&mut self, cx: &mut Context<Self>) {
+        if quill::agent::ui_driver::guard::refuse_hard_if_injecting(
+            quill::agent::ui_driver::guard::HardSurface::Account,
+        ) {
+            return;
+        }
         self.account.accounts.open = true;
         self.account.accounts.remove_confirm = None;
         self.account.accounts.error = None;

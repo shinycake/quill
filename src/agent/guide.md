@@ -220,8 +220,8 @@ typing for an agent.
 
 ## UI driver
 
-For what no chat tool does: Quill's settings, a dialog, a picker, checking
-what the user sees. Reading and sending messages stay with the chat tools,
+For what no chat tool does: a dialog, a picker, a panel, checking what the
+user sees. Settings are not among them: they stay with the user. Reading and sending messages stay with the chat tools,
 which are faster, work with the window hidden and go through Quill's
 grants, pacing and confirmations.
 
@@ -249,11 +249,6 @@ the tree to find and target things; use a screenshot to check layout,
 colours, images or anything the tree does not describe. Divide a point
 in the image by its `scale` to get window pixels for `click_element`.
 
-Open settings and read them:
-
-    press_keys {"keys": "cmd-,"}
-    read_ui_tree {"role": "Button"}
-
 Find the search box and look for a chat:
 
     read_ui_tree {"filter": "search"}
@@ -279,7 +274,10 @@ Rules, all enforced by Quill:
   (including your own), sign-in, the passcode lock, log out, payments,
   Stars, gifts, Premium, passkeys and sessions. `read_ui_tree` then
   answers "Quill is showing <that>; agents can't see or use it. Ask the
-  user." and every input is refused.
+  user." and every input is refused. You cannot open one either: a key
+  (`cmd-,`, the lock chord), a menu item or a click that would open
+  Settings, lock Quill, log out, switch accounts or open a payment, Stars,
+  Premium or a gift opens nothing, and the reply lists the refusal.
 - Enter or Send in the message box of a granted chat sends through the
   same path as `send_message`: grants, pacing, "Confirm each send" and the
   activity log; the reply has `sent` or says why not, and the draft stays
@@ -289,8 +287,9 @@ Rules, all enforced by Quill:
   window you may use, types a line break as the chord that inserts one,
   and refuses a tab character; Enter and Space go only to such a text
   box. `press_keys` never types characters.
-- Keys that quit, close or hide Quill are never pressed, and neither are
-  paste chords: the clipboard is the user's, and a paste reached any other
+- Keys that quit, close, hide or minimise Quill are never pressed (a
+  shortcut the user rebound to one is refused by the action itself), and
+  neither are paste chords: the clipboard is the user's, and a paste reached any other
   way (a menu) reads it as empty. Type your own text with `type_text`.
 - Nothing leaves Quill: a link is not opened in the browser, a file is
   not opened or revealed, mail is not composed, chats and accounts are

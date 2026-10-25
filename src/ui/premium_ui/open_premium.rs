@@ -5,6 +5,11 @@ use crate::ui::status_note::StatusNote;
 
 impl QuillApp {
     pub(in crate::ui) fn open_premium(&mut self, cx: &mut Context<Self>) {
+        if quill::agent::ui_driver::guard::refuse_hard_if_injecting(
+            quill::agent::ui_driver::guard::HardSurface::Payments,
+        ) {
+            return;
+        }
         let sent = self.live.as_mut().map(|live| {
             live.driver.session.payments.hub.premium_open = true;
             live.driver.session.payments.hub.promo_page =

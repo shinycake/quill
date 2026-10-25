@@ -350,6 +350,11 @@ impl QuillApp {
     /// Slice `parity:bots-payment-recurring`: open the Subscriptions
     /// dialog and fetch the list (`getStarSubscriptions`).
     pub(in crate::ui) fn open_subscriptions(&mut self, cx: &mut Context<Self>) {
+        if quill::agent::ui_driver::guard::refuse_hard_if_injecting(
+            quill::agent::ui_driver::guard::HardSurface::Payments,
+        ) {
+            return;
+        }
         let sent = self.live.as_mut().map(|live| {
             live.driver.session.payments.subscriptions_open = true;
             live.driver.maybe_fetch_star_subscriptions()

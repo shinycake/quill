@@ -107,6 +107,11 @@ impl QuillApp {
     // ---- Stars ----------------------------------------------------------
 
     pub(super) fn open_stars(&mut self, cx: &mut Context<Self>) {
+        if quill::agent::ui_driver::guard::refuse_hard_if_injecting(
+            quill::agent::ui_driver::guard::HardSurface::Payments,
+        ) {
+            return;
+        }
         let sent = self.live.as_mut().map(|live| {
             live.driver.session.payments.hub.stars_open = true;
             // "View Statistics" and "Earn Stars from Mini Apps" gates.

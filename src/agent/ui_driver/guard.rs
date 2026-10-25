@@ -161,6 +161,49 @@ pub fn refuse_if_injecting(what: &str) -> bool {
     true
 }
 
+/// The surfaces agents never see or use, in any scope. The UI's surface
+/// check blocks them once they are on screen; this is the other half: the
+/// handler that would open one refuses while injecting, so a chord, a menu
+/// item or a click never leaves one open for the user to close.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HardSurface {
+    /// The settings window, every page and box of it (Agent access, log
+    /// out, sessions, privacy and the shortcuts reference included).
+    Settings,
+    /// Locking Quill behind the local passcode.
+    Lock,
+    /// The local passcode settings.
+    Passcode,
+    /// Two-step verification and the logged-in websites.
+    Security,
+    /// Log out and account deletion, and the accounts switcher.
+    Account,
+    /// A checkout, Stars, Premium and gifts.
+    Payments,
+    /// Quitting Quill, closing, hiding or minimising its window.
+    Window,
+}
+
+impl HardSurface {
+    fn what(self) -> &'static str {
+        match self {
+            HardSurface::Settings => "open Settings",
+            HardSurface::Lock => "lock Quill",
+            HardSurface::Passcode => "open the passcode settings",
+            HardSurface::Security => "open the security settings",
+            HardSurface::Account => "log out or switch accounts",
+            HardSurface::Payments => "open payments, Stars, Premium or gifts",
+            HardSurface::Window => "quit Quill, or close, hide or minimise its window",
+        }
+    }
+}
+
+/// At the entry of a handler that opens a [`HardSurface`]: `true` (and a
+/// refusal recorded) when the driver is injecting.
+pub fn refuse_hard_if_injecting(surface: HardSurface) -> bool {
+    refuse_if_injecting(surface.what())
+}
+
 /// A clipboard read (a paste by chord, menu or mini app) while injecting:
 /// the clipboard is the user's, so it reads as empty.
 pub fn refuse_clipboard_if_injecting() -> bool {

@@ -26,6 +26,7 @@ use gpui_kit::component::input::{Copy as CopyAction, Paste as PasteAction};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::agent::ui_driver::guard::{self, HardSurface};
 use quill::auth::{AuthAction, view_for};
 use quill::composer::ComposerShortcut;
 use quill::ids::ChatId;
@@ -185,6 +186,9 @@ impl Render for QuillApp {
                 this.navigate(super::navigation::NavigationAction::Settings, window, cx);
             }))
             .on_action(cx.listener(|_, _: &QuitApp, window, cx| {
+                if guard::refuse_hard_if_injecting(HardSurface::Window) {
+                    return;
+                }
                 window.remove_window();
                 cx.quit();
             }))
@@ -192,6 +196,9 @@ impl Render for QuillApp {
             // View / Help menus (same dispatch path as the key bindings).
             .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
                 use quill::tray::{CloseOutcome, close_outcome};
+                if guard::refuse_hard_if_injecting(HardSurface::Window) {
+                    return;
+                }
                 match close_outcome(
                     this.appearance.minimize_to_tray,
                     quill::tray::tray_available(),
@@ -215,6 +222,9 @@ impl Render for QuillApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &MinimizeWindow, window, cx| {
+                if guard::refuse_hard_if_injecting(HardSurface::Window) {
+                    return;
+                }
                 #[cfg(target_os = "macos")]
                 if this.appearance.minimize_to_tray && quill::tray::tray_available() {
                     cx.hide();
@@ -235,6 +245,10 @@ impl Render for QuillApp {
                 this.toggle_sidebar(window, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleTheme, _, cx| {
+                // A settings change, written to disk.
+                if guard::refuse_if_injecting("change the theme") {
+                    return;
+                }
                 // Write through the appearance funnel (persist + re-apply)
                 // so the 60s auto-night tick can't silently revert the
                 // flip. Auto-night, when enabled, still overrides the

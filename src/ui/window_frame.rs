@@ -260,7 +260,13 @@ impl RenderOnce for FrameTitleBar {
         };
         TitleBar::new()
             .when_some(on_close, |bar, close| {
-                bar.on_close_window(move |event, window, cx| close(event, window, cx))
+                bar.on_close_window(move |event, window, cx| {
+                    if !quill::agent::ui_driver::guard::refuse_hard_if_injecting(
+                        quill::agent::ui_driver::guard::HardSurface::Window,
+                    ) {
+                        close(event, window, cx);
+                    }
+                })
             })
             .children(lead)
             .children(self.children)

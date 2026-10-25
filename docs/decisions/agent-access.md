@@ -1291,3 +1291,58 @@ executor. The default 1280-px image is smaller and encodes faster.
   whichever input command is open when it fires. The bridge runs one
   command at a time, so this is the command that caused it; two at once
   would credit the newer one.
+
+## Phase 5: fixes from a live test
+
+A fresh agent drove a release build through the MCP tools and found three
+things the window tests had not.
+
+### Hard surfaces never open
+
+`press_keys "cmd-,"` opened Settings in the real window. The surface check
+then refused the next step ("Quill is showing Settings"), but Settings
+stayed open for the user to close. The cause: the surface is checked
+before each step, and the chord itself reached `OpenSettings`
+(`src/ui/app_render/mod.rs`), which opened Settings without asking whether
+the driver was injecting. The chord list (`keys::forbidden`) only knows
+quit, close, hide, minimise and paste, and could never be complete: every
+shortcut can be rebound, and the Help menu's Keyboard Shortcuts, a main
+menu entry or the in-window menu bar on Linux and Windows reach the same
+handlers by click.
+
+So the handlers refuse, whatever the route
+(`guard::refuse_hard_if_injecting(HardSurface::…)`, a thin wrapper over
+`refuse_if_injecting` whose enum is the list of what agents never open):
+
+| Handler | Routes | Surface |
+| --- | --- | --- |
+| `open_settings` | `OpenSettings` (Cmd/Ctrl+,, app menu), `OpenShortcuts` (Help menu), the sidebar and main menu, every settings page opener (appearance, privacy, notifications, language, data, folders, proxy, sessions) | Settings, Agent access and log out included |
+| `lock_by_passcode` | `LockApp` (Cmd/Ctrl+L, app menu), the lock button | the lock screen |
+| `navigate` | every main-menu entry that stays in Settings, and Stars, Premium, subscriptions, gifts, send gift | Settings, passcode, security, account, payments |
+| `open_passcode` | Settings > Privacy, main menu | passcode settings |
+| `open_twofa`, `open_websites` | Settings > Privacy, main menu | two-step verification, logged-in websites |
+| `open_sessions` | Settings > Devices, main menu | active sessions |
+| `open_account_lifecycle`, `open_accounts` | main menu, account switcher | log out, delete account, accounts |
+| `open_stars`, `open_premium`, `open_subscriptions`, `open_send_gift_in`, `start_invoice_checkout` | main menu, profiles, Premium badges, invoice messages and links | payments, Stars, Premium, gifts |
+| `QuitApp`, `CloseWindow`, `MinimizeWindow` | Cmd/Ctrl+Q/W/M, File and Window menus | the window itself (Ctrl+M minimises on Linux and Windows, which `keys::forbidden` did not name) |
+| `ToggleTheme` | View menu | a settings change |
+
+The agent prompts are opened by tool threads, never by input, and stay
+blocked by the surface check. Every other keybinding (chat and folder
+navigation, search, history scrolling, selection, formatting, viewer keys)
+opens nothing on the hard list; a chat it would open goes through
+`agent_may_open`, a write it would send through `screen_request`. The
+drawn title bar on Linux and Windows carries no region tag, so a point on
+it fails `point_allowed` in the granted scope; in the Everything scope its
+close button refuses too (`FrameTitleBar` in `src/ui/window_frame.rs`
+wraps the callback). Its minimise and maximise buttons call the window
+directly inside the kit's `TitleBar` and are not guarded there: a gap in
+the Everything scope (the window is left minimised, and the next command
+says so, below).
+
+Tests: `agent_driver_hard_tests.rs`. An agent presses Cmd+, and Ctrl+,
+(Settings stays closed, the reply carries "open Settings"), Cmd+L and
+Ctrl+L with a passcode set (Quill stays unlocked) and Ctrl+M (refused);
+the user's own Cmd+, still opens Settings. A second test runs the main
+menu entries and the openers under the injecting flag: nothing opens, each
+refusal is recorded, and the same entry opens for the user.

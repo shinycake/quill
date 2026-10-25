@@ -516,3 +516,8 @@ mod open_tests;
 #[cfg(feature = "demo-capture")]
 #[path = "agent_driver_confirm_tests.rs"]
 mod confirm_tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "agent_driver_hard_tests.rs"]
+mod hard_tests;

@@ -6,6 +6,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::agent::ui_driver::guard::{self, HardSurface};
 use quill::lang::{keys, tr};
 use quill::new_chat::NewChatKind;
 use quill::settings_catalog::Page;
@@ -100,6 +101,23 @@ impl NavigationAction {
                 | Self::ArchiveToList
         )
     }
+
+    /// The surface agents never use that the action opens: every settings
+    /// box, and the payment ones a chat opens.
+    fn hard_surface(self) -> Option<HardSurface> {
+        match self {
+            Self::Stars
+            | Self::Premium
+            | Self::Subscriptions
+            | Self::MyGifts
+            | Self::Gift
+            | Self::SendGift => Some(HardSurface::Payments),
+            Self::Passcode => Some(HardSurface::Passcode),
+            Self::TwoFa | Self::Websites => Some(HardSurface::Security),
+            Self::Account | Self::Accounts => Some(HardSurface::Account),
+            other => other.stays_in_settings().then_some(HardSurface::Settings),
+        }
+    }
 }
 
 impl QuillApp {
@@ -109,6 +127,12 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if action
+            .hard_surface()
+            .is_some_and(guard::refuse_hard_if_injecting)
+        {
+            return;
+        }
         if !action.stays_in_settings() {
             self.close_settings();
         }
