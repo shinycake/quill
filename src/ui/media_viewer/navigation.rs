@@ -44,7 +44,7 @@ impl QuillApp {
             self.viewer.state = MediaViewer::open(vec![item], 0);
             self.viewer.open_gen += 1;
             self.mark_timed_media_read(chat_id, message_id);
-            self.viewer_note_activity(false, cx);
+            self.viewer_note_activity(cx);
             self.reset_viewer_item_state(cx);
             cx.notify();
             return;
@@ -80,7 +80,7 @@ impl QuillApp {
         };
         self.viewer.state = MediaViewer::open(items, index);
         self.viewer.open_gen += 1;
-        self.viewer_note_activity(false, cx);
+        self.viewer_note_activity(cx);
         self.reset_viewer_item_state(cx);
         cx.notify();
     }
@@ -94,7 +94,7 @@ impl QuillApp {
     ) {
         self.viewer.state = MediaViewer::open_poll(item);
         self.viewer.open_gen += 1;
-        self.viewer_note_activity(false, cx);
+        self.viewer_note_activity(cx);
         self.reset_viewer_item_state(cx);
         cx.notify();
     }
@@ -145,7 +145,7 @@ impl QuillApp {
         self.viewer.extra.shared_tab = tab;
         self.viewer.extra.shared_seen = loaded;
         self.viewer.open_gen += 1;
-        self.viewer_note_activity(false, cx);
+        self.viewer_note_activity(cx);
         self.reset_viewer_item_state(cx);
         self.sync_shared_media_viewer(cx);
         cx.notify();
@@ -256,6 +256,7 @@ impl QuillApp {
         self.viewer.state.close();
         self.viewer.cancel_reorient();
         self.viewer.hdr.reset();
+        self.viewer.over_controls = false;
         cx.notify();
     }
 
@@ -265,7 +266,7 @@ impl QuillApp {
         } else {
             self.viewer.state.next();
         }
-        self.viewer_note_activity(false, cx);
+        self.viewer_note_activity(cx);
         self.reset_viewer_item_state(cx);
         cx.notify();
     }
@@ -293,7 +294,7 @@ impl QuillApp {
                 WheelSource::Wheel,
             ),
         };
-        self.viewer_note_activity(false, cx);
+        self.viewer_note_activity(cx);
         let at = cx.background_executor().now();
         if self.viewer_swipe(dx, dy, source, event.touch_phase, at, cx) {
             return;
@@ -416,7 +417,7 @@ impl QuillApp {
         origin: (f32, f32),
         cx: &mut Context<Self>,
     ) {
-        self.viewer_note_activity(false, cx);
+        self.viewer_note_activity(cx);
         self.viewer.zoom.zoom_at(
             pinch_zoom_factor(event.delta),
             viewer_anchor(event.position, origin),

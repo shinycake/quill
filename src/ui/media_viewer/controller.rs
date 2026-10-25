@@ -307,7 +307,7 @@ impl QuillApp {
             .release(cx.background_executor().now())
         {
             BoostRelease::TogglePause => {
-                self.viewer_note_activity(false, cx);
+                self.viewer_note_activity(cx);
                 self.toggle_viewer_video(cx);
                 true
             }

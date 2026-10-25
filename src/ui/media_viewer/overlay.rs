@@ -369,7 +369,7 @@ impl QuillApp {
                         let pos = (f32::from(event.position.x), f32::from(event.position.y));
                         if let Some(view) = move_view.upgrade() {
                             view.update(cx, |this, cx| {
-                                this.viewer_note_activity(false, cx);
+                                this.viewer_note_pointer(false, cx);
                                 if let Some((lx, ly)) = this.viewer.drag {
                                     this.viewer_pan_drag(pos.0 - lx, pos.1 - ly, cx);
                                     this.viewer.drag = Some(pos);
@@ -529,7 +529,7 @@ impl QuillApp {
                     .inset_0()
                     .bg(gpui_kit::black())
                     .on_mouse_move(cx.listener(|this, _: &MouseMoveEvent, _, cx| {
-                        this.viewer_note_activity(false, cx);
+                        this.viewer_note_pointer(false, cx);
                     }))
                     .on_scroll_wheel(cx.listener(move |this, event: &ScrollWheelEvent, _, cx| {
                         this.viewer_scroll_wheel(event, geometry.origin, cx);
