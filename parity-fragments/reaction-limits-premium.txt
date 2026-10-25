@@ -1,2 +1,0 @@
-# Reaction limits from the app config with the local trim, and the Premium preview for locked reactions
-parity:premium-reaction-limits
