@@ -1,3 +1,0 @@
-# Premium upsells open their own feature's preview; Business features preview
-parity:premium-preview-targets
-parity:premium-business-preview

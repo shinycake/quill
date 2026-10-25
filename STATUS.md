@@ -944,8 +944,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Animated profile photos play beside messages in groups, as in tdesktop <!-- parity:premium-animated-userpics-history -->
 - [x] Reaction limits: up to 3 reactions per message with Premium (1 without), and locked Premium reactions open the Premium preview <!-- parity:premium-reaction-limits -->
 - [ ] Limit boxes read from TDLib and cover favorite stickers, pinned saved chats, story posting, similar channels and owned bots <!-- parity:premium-limit-boxes-more -->
-- [ ] Every Premium upsell opens the preview of its own feature <!-- parity:premium-preview-targets -->
-- [ ] Business features preview with per-feature animations for free accounts <!-- parity:premium-business-preview -->
+- [x] Every Premium upsell opens the preview of its own feature <!-- parity:premium-preview-targets -->
+- [x] Business features preview with per-feature animations for free accounts <!-- parity:premium-business-preview -->
 - [ ] Hidden read time and last seen: "Show my read time or get Premium" box, the subscribe row and the first-restrict warning in privacy settings <!-- parity:premium-readtime-box -->
 - [ ] Premium locks for wallpapers for both sides and the voice-message privacy subscribe button <!-- parity:premium-privacy-upsells -->
 - [x] Recording voice and video notes is blocked for people who restricted them, with tdesktop's notice <!-- parity:premium-voice-restricted-send -->
