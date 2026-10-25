@@ -115,7 +115,7 @@ pub fn publish_token() {
     };
     let path = token_path(&root);
     let result = if enabled() {
-        write_owner_only(&path, token().as_bytes())
+        std::fs::create_dir_all(&root).and_then(|()| write_owner_only(&path, token().as_bytes()))
     } else {
         match std::fs::remove_file(&path) {
             Err(err) if err.kind() != std::io::ErrorKind::NotFound => Err(err),

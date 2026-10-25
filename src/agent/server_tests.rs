@@ -103,8 +103,17 @@ fn agents_need_the_switch_and_this_launchs_token() {
             .contains("quill_status")
     );
     assert_eq!(by_id(4)["result"]["isError"], true);
-    assert_eq!(by_id(5)["result"], json!({}), "quill://unread can be watched");
-    assert!(by_id(6)["error"]["message"].as_str().unwrap_or_default().contains("wait_for_message"));
+    assert_eq!(
+        by_id(5)["result"],
+        json!({}),
+        "quill://unread can be watched"
+    );
+    assert!(
+        by_id(6)["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("wait_for_message")
+    );
 
     // A request line past the limit ends the connection, whether or not it
     // ever gets a newline.
