@@ -1345,7 +1345,11 @@ Tests: `agent_driver_hard_tests.rs`. An agent presses Cmd+, and Ctrl+,
 Ctrl+L with a passcode set (Quill stays unlocked) and Ctrl+M (refused);
 the user's own Cmd+, still opens Settings. A second test runs the main
 menu entries and the openers under the injecting flag: nothing opens, each
-refusal is recorded, and the same entry opens for the user.
+refusal is recorded, and the same entry opens for the user. In a real
+window, `QUILL_DEMO_SHOT_KEYS="cmd-, cmd-l"` on the `ready-agent-screenshot`
+demo has the agent press both chords in the message box: the reply lists
+"open Settings" and "lock Quill", and the captured window still shows the
+chat with the message box focused.
 
 ### The focused text box is reported
 
