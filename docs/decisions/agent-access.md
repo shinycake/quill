@@ -298,12 +298,15 @@ and parsed on first use, `td_schema.rs`):
 
 - **Blocked.** Quill's plumbing (`setOption`, so no agent can turn off read
   receipts, online status or typing; `setTdlibParameters`, `close`, the
-  sign-in flow, logs, push), any method with a `file_id` and
-  `searchFileDownloads`/`getRemoteFile` (file ids are small integers;
-  `download_file` checks the chat a file came from), the TON wallet
-  (owner rule), `addLocalMessage`, `getCurrentState` and
-  `getChatFolderChatCount` (they cover chats agents may not see), and any
-  request carrying `callbackQueryPayloadDataWithPassword`.
+  sign-in flow, logs, push, `setDatabaseEncryptionKey`, file generation,
+  terms of service, `openChat`/`closeChat`), any method with a `file_id`,
+  any request with a nested `inputFileId`, and
+  `searchFileDownloads`/`getRemoteFile` (file ids are small integers handed
+  out in order; `download_file` checks the chat a file came from), the TON
+  wallet and its plumbing (TON Center, wallet bot, on-ramp; owner rule),
+  `addLocalMessage`, `getCurrentState` and `getChatFolderChatCount` (they
+  cover chats agents may not see), `getLanguagePackString` (it opens any
+  path), and any request carrying `callbackQueryPayloadDataWithPassword`.
 - **Ask, account.** `deleteAccount`, `logOut`, `terminateSession`,
   `terminateAllOtherSessions`, `setPassword`, `changePhoneNumber`, recovery
   and login email, privacy rules, proxies, `sharePhoneNumber`,
@@ -311,7 +314,13 @@ and parsed on first use, `td_schema.rs`):
   reads that act for the user (`getCallbackQueryAnswer` presses a bot
   button, `getLoginUrl` and `getWebAppUrl` sign in to sites and web apps,
   passport elements, `validateOrderInfo`, inline queries that send a
-  location); and every change without a `chat_id`.
+  location, `getUserLink` which can revoke links and waive the paid-message
+  fee); account data (`getActiveSessions`, `getProxies`, saved order info,
+  password state); RTMP stream keys; stories and live stories (TDLib posts
+  them as the user from the Saved Messages chat id, which agents have by
+  default); every method with a `group_call_id` and no `chat_id` (call ids
+  are small local integers that reach any chat's call); and every change
+  without a `chat_id`.
 - **Ask, money.** Any method or nested type named for Stars, TON, Grams,
   payments, gifts, paid content, Premium, giveaways, invoices,
   subscriptions, offers, stakes, revenue or withdrawals (whole camel-case
@@ -319,7 +328,8 @@ and parsed on first use, `td_schema.rs`):
   that move Stars or boosts without such a word (`boostChat`,
   `joinChatByInviteLink`, refunds of unpaid-message charges, withdrawal
   URLs), and any request with a positive `paid_message_star_count` or
-  `star_count`.
+  `star_count` at any depth (`searchPublicPosts` takes its price at the
+  top level).
 - **Granted.** Reads need `read` on every chat they name. Chat-scoped
   changes need `read_write` on every chat they act in (a forward's or an
   external reply's source needs `read`), are refused for a bot the user
@@ -329,14 +339,28 @@ and parsed on first use, `td_schema.rs`):
 
 An allowed Ask still needs the grants on every chat it names, and an
 allowed send still goes through the queue. The Allow dialog shows the
-agent's reason and the whole sanitized request, scrollable.
+agent's reason and the whole sanitized request, scrollable; a request over
+4000 characters is refused rather than shown in part, since the agent
+controls field order and could push a field out of view.
 
 **Answers** pass through `td_redact.rs`. Anything belonging to a chat the
 agent may not read (`chat`, `supergroup`, `basicGroup`, `secretChat`, any
-object with a `…chat_id`) is dropped from lists, and a list's
-`total_count` then counts what is left; elsewhere it becomes a stub with
-no id. Every `…chat_ids` list keeps only granted chats. `phone_number`
-fields are dropped. `sponsored*` objects get `"sponsored": true`. The
+object with a `chat_id`) is dropped from lists; elsewhere it becomes a stub
+with no id. An object is judged by its own id only: its other chat fields
+(`linked_chat_id`, `personal_chat_id`, `supergroup_id`...) read 0 when not
+granted, so a granted channel with an ungranted discussion group still
+shows. Every `…chat_ids` list keeps only granted chats. A list filtered by
+chat always has its `total_count` set to the items returned, even when
+nothing was dropped (otherwise `getChats` on a folder with a granted first
+chat would count the folder). `phone_number` and `vcard` fields are
+dropped. `sponsored*` and `…Advertisement` objects get `"sponsored": true`.
+
+TDLib builds some paging offsets from the last result (`searchMessages`
+packs its date, chat id and message id), so answers carry opaque
+`quill-offset:` tokens that Quill maps back (`td_offset.rs`, last 512
+kept). When redaction drops items from a paged read, Quill follows up to
+ten more pages to fill it, so a short or empty page does not by itself say
+that hidden chats matched. The
 contact-list reads need the contacts grant. Every call that isn't a read is
 logged under `td_call` with its method, and declines are logged as such.
 

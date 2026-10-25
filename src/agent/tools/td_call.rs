@@ -9,13 +9,13 @@
 //! [`td_redact`](super::td_redact).
 
 use super::target::{self, Target};
-use super::td_policy::{self, Class};
-use super::td_redact;
+use super::td_policy::{self, Class, Shape};
 use super::td_request::{chats_named, has_type, local_paths, sanitize, spends};
 use super::td_schema;
 use super::write::common::{self, ANSWER_WAIT, log_in, record, take_write_turn, write_error};
 use super::write::send::in_quill_data;
 use super::{Ctx, Tool, ToolError, ToolOutput, current_agent, still_allowed};
+use super::{td_offset, td_redact};
 use crate::agent::grants::{self, Scope};
 use crate::agent::prompts::{self, Ask, Decision, Risk};
 use crate::agent::{access, td};
@@ -133,12 +133,18 @@ fn method_of(request: &Value) -> Result<String, ToolError> {
         })
 }
 
-fn preview_of(request: &Value) -> String {
-    serde_json::to_string_pretty(request)
-        .unwrap_or_default()
-        .chars()
-        .take(2000)
-        .collect()
+/// The longest request the user is shown; longer ones are refused, so
+/// what the user allows is always the whole request.
+const PREVIEW_CAP: usize = 4000;
+
+fn preview_of(request: &Value) -> Result<String, ToolError> {
+    let preview = serde_json::to_string_pretty(request).unwrap_or_default();
+    if preview.chars().count() > PREVIEW_CAP {
+        return Err(ToolError::new(format!(
+            "This request is too long to show the user in full (over {PREVIEW_CAP} characters). Shorten its text fields and retry."
+        )));
+    }
+    Ok(preview)
 }
 
 /// Wait for the user to allow a deny-listed call.
@@ -157,7 +163,7 @@ fn ask_user(
     let ask = Ask::Raw {
         method: method.to_string(),
         risk,
-        preview: preview_of(request),
+        preview: preview_of(request)?,
     };
     let (id, rx) = prompts::file(ctx.account.clone(), current_agent(), ask, reason.to_string())
         .ok_or_else(|| {
@@ -230,12 +236,21 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
             "TDLib has no method {method} (Quill is built with TDLib 1.8.69). Check the name and case in the TDLib API reference."
         ))
     })?;
-    let chat_scoped = entry.type_of("chat_id") == Some("int53");
-    let takes_file = entry.has("file_id");
+    let shape = Shape {
+        takes_file: entry.has("file_id"),
+        chat_scoped: entry.type_of("chat_id") == Some("int53"),
+        group_call: entry.has("group_call_id"),
+    };
     sanitize(&mut request, schema, true).map_err(ToolError::new)?;
-    let mut class = td_policy::classify(&method, takes_file, chat_scoped);
+    td_offset::reveal(&mut request).map_err(ToolError::new)?;
+    let mut class = td_policy::classify(&method, shape);
     if has_type(&request, "callbackQueryPayloadDataWithPassword") {
         class = Class::Blocked("agents never send the user's password.");
+    }
+    if has_type(&request, "inputFileId") {
+        class = Class::Blocked(
+            "file ids reach files from any chat; upload with inputFileLocal, or forward the message.",
+        );
     }
     if !matches!(class, Class::Blocked(_) | Class::Ask(_)) && spends(&request) {
         class = Class::Ask(Risk::Money);
@@ -273,7 +288,7 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
                 ));
             }
             grants.require(&named, Scope::Read)?;
-            td::call(&ctx.client, request).map_err(ToolError::from)
+            read_page(&ctx, &mut grants, request)
         }
         Class::Granted(Scope::ReadWrite) => {
             grants.require(&named, Scope::ReadWrite)?;
@@ -289,7 +304,9 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
             send(&ctx, &target, &method, request)
         }
     };
-    if !matches!(class, Class::Granted(Scope::Read) | Class::Send) {
+    // Reads are not logged; sends are logged by `common::send`.
+    let sent = td_policy::SENDS.contains(&method.as_str());
+    if !matches!(class, Class::Granted(Scope::Read) | Class::Send) && !sent {
         let title = grants
             .target(first_chat)
             .map(|t| t.title.clone())
@@ -297,16 +314,86 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
         log_in(&ctx, first_chat, &title, "td_call", &method, answer.is_ok());
     }
     let mut result = answer?;
-    td_redact::redact(&mut result, &mut |chat_id| {
-        grants.allows(chat_id, Scope::Read)
-    });
+    if class != Class::Granted(Scope::Read) {
+        redact(&mut grants, &mut result);
+    }
+    td_offset::hide(&mut result);
     Ok(output(method, result))
+}
+
+fn redact(grants: &mut Grants, value: &mut Value) -> bool {
+    td_redact::redact(value, &mut |chat_id| grants.allows(chat_id, Scope::Read))
+}
+
+/// Pages a read follows when redaction leaves one short, so a short or
+/// empty page does not tell that hidden chats matched.
+const FILL_PAGES: usize = 10;
+
+/// Run a read and redact it. When items were dropped from a paged answer,
+/// fetch the next pages until the page holds `limit` items or ends.
+fn read_page(ctx: &Ctx, grants: &mut Grants, mut request: Value) -> Result<Value, ToolError> {
+    let limit = request
+        .get("limit")
+        .and_then(Value::as_u64)
+        .and_then(|limit| usize::try_from(limit).ok())
+        .unwrap_or(0);
+    let mut page = td::call(&ctx.client, request.clone())?;
+    let mut dropped = redact(grants, &mut page);
+    for _ in 0..FILL_PAGES {
+        let next = page
+            .get("next_offset")
+            .and_then(Value::as_str)
+            .filter(|offset| !offset.is_empty())
+            .map(str::to_string);
+        let (Some(next), Some(key)) = (next, list_key(&page)) else {
+            break;
+        };
+        let kept = page.get(&key).and_then(Value::as_array).map_or(0, Vec::len);
+        let pages_by_offset = request.get("offset").is_some_and(Value::is_string);
+        if !dropped || kept >= limit || !pages_by_offset {
+            break;
+        }
+        if let Some(fields) = request.as_object_mut() {
+            fields.insert("offset".into(), Value::String(next));
+        }
+        let mut more = td::call(&ctx.client, request.clone())?;
+        dropped = redact(grants, &mut more);
+        let items = more
+            .get_mut(&key)
+            .and_then(Value::as_array_mut)
+            .map(std::mem::take)
+            .unwrap_or_default();
+        let Some(fields) = page.as_object_mut() else {
+            break;
+        };
+        if let Some(list) = fields.get_mut(&key).and_then(Value::as_array_mut) {
+            list.extend(items);
+        }
+        let total = fields
+            .get(&key)
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len);
+        if fields.contains_key("total_count") {
+            fields.insert("total_count".into(), json!(total));
+        }
+        let next = more.get("next_offset").cloned().unwrap_or_default();
+        fields.insert("next_offset".into(), next);
+    }
+    Ok(page)
+}
+
+/// The list a paged answer holds: its first array field.
+fn list_key(page: &Value) -> Option<String> {
+    page.as_object()?
+        .iter()
+        .find(|(_, value)| value.is_array())
+        .map(|(key, _)| key.clone())
 }
 
 /// "Confirm each send" covers raw writes too.
 fn confirm(ctx: &Ctx, target: &Target, request: &Value) -> Result<(), ToolError> {
     if access::confirm_sends() {
-        common::confirm(ctx, target, "td_call", &preview_of(request))
+        common::confirm(ctx, target, "td_call", &preview_of(request)?)
     } else {
         Ok(())
     }
@@ -333,7 +420,14 @@ fn output(method: String, result: Value) -> ToolOutput {
 
 /// Methods that read the contact list, which has a grant of its own.
 fn is_contacts(method: &str) -> bool {
-    matches!(method, "getContacts" | "searchContacts" | "getCloseFriends")
+    matches!(
+        method,
+        "getContacts"
+            | "searchContacts"
+            | "getCloseFriends"
+            | "searchUserByPhoneNumber"
+            | "getImportedContactCount"
+    )
 }
 
 #[cfg(test)]

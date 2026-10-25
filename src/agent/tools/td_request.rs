@@ -186,11 +186,13 @@ pub fn spends(request: &Value) -> bool {
             _ => false,
         }
     }
-    request.as_object().is_some_and(|fields| {
-        fields
-            .iter()
-            .any(|(key, value)| key != "@type" && inner(value))
-    })
+    // The method's own name is classed elsewhere; its fields count here,
+    // a top-level price (`searchPublicPosts.star_count`) included.
+    let mut fields = request.clone();
+    if let Some(fields) = fields.as_object_mut() {
+        fields.remove("@type");
+    }
+    inner(&fields)
 }
 
 #[cfg(test)]
@@ -246,6 +248,9 @@ mod tests {
         ));
         assert!(!spends(
             &json!({"@type": "getStarTransactions", "limit": 5})
+        ));
+        assert!(spends(
+            &json!({"@type": "searchPublicPosts", "query": "x", "star_count": 50})
         ));
         assert!(!spends(
             &json!({"@type": "sendMessage", "input_message_content": {"@type": "inputMessageText"}})

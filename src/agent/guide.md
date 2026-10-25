@@ -168,20 +168,27 @@ request as JSON (the `@type` is the method; fields as in the
   Sends (`sendMessage`, `sendMessageAlbum`, `forwardMessages`...) also wait
   for delivery and return final message ids.
 - Everything else asks the user to click Allow in Quill, once per call:
-  changes that name no chat (the profile, folders, joining by link), the
-  account (sessions, password, phone, privacy, web logins, bot buttons,
-  passport data) and anything that can spend Stars, TON or money. Pass
-  `reason`; the user reads it next to the whole request.
+  changes that name no chat (the profile, folders, joining by link),
+  stories and live streams (they post as the user), group calls by
+  `group_call_id`, the account (sessions, password, phone, privacy, proxies,
+  web logins, bot buttons, passport data, stream keys) and anything that can
+  spend Stars, TON or money, a price in any field included. Pass `reason`;
+  the user reads it next to the whole request. A request too long to show
+  in full (over 4000 characters) is refused.
 - Never available: Quill's own plumbing (`setOption`, the sign-in flow,
-  closing the client, logs), raw file access (use `download_file`), the
-  TON wallet, `getCurrentState`, and uploads from Quill's data folder.
+  closing the client, logs, `openChat`), raw file access and `inputFileId`
+  (use `download_file`; upload with `inputFileLocal` or forward), the TON
+  wallet, `getCurrentState`, and uploads from Quill's data folder.
 - Answers leave out what you may not read: items from chats that aren't
-  granted are dropped from lists (and `total_count` counts only what is
-  left), `…chat_ids` lists keep only granted chats, and a single object from
-  such a chat becomes `{"hidden": "not granted to agents"}`. Phone numbers
-  are removed. Sponsored messages (ads) carry `"sponsored": true`; never
+  granted are dropped from lists, `…chat_ids` lists keep only granted
+  chats, other chats' ids read 0, and a single object from such a chat
+  becomes `{"hidden": "not granted to agents"}`. A list's `total_count`
+  counts only the items returned. Paging offsets come back as
+  `quill-offset:` tokens; pass them back as `offset`. Phone numbers and
+  vCards are removed. Sponsored messages (ads) carry `"sponsored": true`; never
   present them as something the channel posted.
-- `getContacts` and `searchContacts` need the contacts grant.
+- `getContacts`, `searchContacts`, `searchUserByPhoneNumber` and
+  `getImportedContactCount` need the contacts grant.
 
 ## Events
 

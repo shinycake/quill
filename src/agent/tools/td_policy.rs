@@ -69,6 +69,26 @@ const BLOCKED: &[(&str, &str)] = &[
         "getRemoteFile",
         "Use download_file, which checks the chat a file came from.",
     ),
+    (
+        "setDatabaseEncryptionKey",
+        "Quill would lose its own database.",
+    ),
+    ("finishFileGeneration", "Quill generates its own files."),
+    ("writeGeneratedFilePart", "Quill generates its own files."),
+    (
+        "setFileGenerationProgress",
+        "Quill generates its own files.",
+    ),
+    (
+        "acceptTermsOfService",
+        "The user accepts terms of service in Quill.",
+    ),
+    (
+        "getLanguagePackString",
+        "It opens a database at any path; Quill handles languages.",
+    ),
+    ("openChat", "Quill tracks which chats are open."),
+    ("closeChat", "Quill tracks which chats are open."),
 ];
 
 /// The sign-in flow: Quill's own screens drive it.
@@ -83,7 +103,13 @@ const SIGN_IN_PREFIXES: &[&str] = &[
 ];
 
 /// Words that mark the TON wallet, which Quill never handles.
-const TON_WALLET: &[&str] = &["TonWallet", "TonConnect"];
+const TON_WALLET: &[&str] = &[
+    "TonWallet",
+    "TonConnect",
+    "TonCenter",
+    "WalletBot",
+    "OnRamp",
+];
 
 /// The account itself, and reads that act for the user: sign-out, sessions,
 /// password, phone, email, privacy, web logins, bot buttons, passport data.
@@ -140,6 +166,20 @@ const ACCOUNT: &[&str] = &[
     "getPassportAuthorizationForm",
     "getPassportAuthorizationFormAvailableElements",
     "getInlineQueryResults",
+    "getGuardBotWebAppUrl",
+    "getUserLink",
+    "setPersonalChat",
+    "getVideoChatRtmpUrl",
+    "replaceVideoChatRtmpUrl",
+    "getLiveStoryRtmpUrl",
+    "replaceLiveStoryRtmpUrl",
+    "getSavedOrderInfo",
+    "deleteSavedOrderInfo",
+    "getProxies",
+    "getActiveSessions",
+    "getConnectedWebsites",
+    "getPasswordState",
+    "getRecoveryEmailAddress",
 ];
 
 /// Methods that move Stars or boosts without a money word in their name.
@@ -152,7 +192,12 @@ const MONEY: &[&str] = &[
     "getStarWithdrawalUrl",
     "getGramWithdrawalUrl",
     "getStarAdAccountUrl",
+    "getUpgradedGiftWithdrawalUrl",
 ];
+
+/// Words in a change's name that mean it posts on the user's profile or
+/// streams as them: stories post as the user from Saved Messages.
+const PROFILE_WORDS: &[&str] = &["Story", "Stories", "StoryAlbum", "LiveStory"];
 
 /// Words in a method or type name that mean it can spend Stars, TON or
 /// money. Plurals are listed: a word counts only at a camel-case boundary.
@@ -234,9 +279,19 @@ pub fn names_money(name: &str) -> bool {
     MONEY_WORDS.iter().any(|word| has_word(name, word))
 }
 
-/// The class of `method`. `takes_file` says the schema gives it a
-/// `file_id`; `chat_scoped` that it acts on a top-level `chat_id`.
-pub fn classify(method: &str, takes_file: bool, chat_scoped: bool) -> Class {
+/// What the schema says about a method's top-level fields.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Shape {
+    /// A `file_id`: raw file access.
+    pub takes_file: bool,
+    /// A `chat_id: int53`: the chat it acts in.
+    pub chat_scoped: bool,
+    /// A `group_call_id`: small local ids that reach any chat's call.
+    pub group_call: bool,
+}
+
+/// The class of `method` with the given top-level fields.
+pub fn classify(method: &str, shape: Shape) -> Class {
     if let Some((_, why)) = BLOCKED.iter().find(|(name, _)| *name == method) {
         return Class::Blocked(why);
     }
@@ -246,7 +301,7 @@ pub fn classify(method: &str, takes_file: bool, chat_scoped: bool) -> Class {
     if TON_WALLET.iter().any(|word| method.contains(word)) {
         return Class::Blocked("Quill never handles the TON wallet; use Telegram's official apps.");
     }
-    if takes_file {
+    if shape.takes_file {
         return Class::Blocked("Use download_file, which checks the chat a file came from.");
     }
     if ACCOUNT.contains(&method) {
@@ -255,11 +310,17 @@ pub fn classify(method: &str, takes_file: bool, chat_scoped: bool) -> Class {
     if MONEY.contains(&method) {
         return Class::Ask(Risk::Money);
     }
+    if shape.group_call && !shape.chat_scoped {
+        return Class::Ask(Risk::Account);
+    }
     if is_read(method) {
         return Class::Granted(Scope::Read);
     }
     if names_money(method) {
         return Class::Ask(Risk::Money);
+    }
+    if PROFILE_WORDS.iter().any(|word| has_word(method, word)) {
+        return Class::Ask(Risk::Account);
     }
     if SENDS.contains(&method) {
         return Class::Send;
@@ -267,7 +328,7 @@ pub fn classify(method: &str, takes_file: bool, chat_scoped: bool) -> Class {
     if OPENS.contains(&method) {
         return Class::Granted(Scope::Read);
     }
-    if chat_scoped {
+    if shape.chat_scoped {
         Class::Granted(Scope::ReadWrite)
     } else {
         Class::Ask(Risk::Account)
@@ -276,9 +337,20 @@ pub fn classify(method: &str, takes_file: bool, chat_scoped: bool) -> Class {
 
 #[cfg(test)]
 mod tests {
-    use super::{Class, classify, names_money};
+    use super::{Class, Shape, names_money};
     use crate::agent::grants::Scope;
     use crate::agent::prompts::Risk;
+
+    fn classify(method: &str, takes_file: bool, chat_scoped: bool) -> Class {
+        super::classify(
+            method,
+            Shape {
+                takes_file,
+                chat_scoped,
+                group_call: false,
+            },
+        )
+    }
 
     #[test]
     fn plumbing_files_and_the_wallet_never_run() {
@@ -306,6 +378,17 @@ mod tests {
             classify("getCurrentState", false, false),
             Class::Blocked(_)
         ));
+        for method in [
+            "sendTonCenterApiRequest",
+            "checkWalletBotBalance",
+            "createOnRampPaymentSession",
+            "setDatabaseEncryptionKey",
+        ] {
+            assert!(
+                matches!(classify(method, false, false), Class::Blocked(_)),
+                "{method}"
+            );
+        }
     }
 
     #[test]
@@ -320,6 +403,14 @@ mod tests {
             "getCallbackQueryAnswer",
             "getWebAppUrl",
             "sharePhoneNumber",
+            "postStory",
+            "startLiveStory",
+            "setChatPinnedStories",
+            "deleteStoryAlbum",
+            "getLiveStoryRtmpUrl",
+            "getUserLink",
+            "getActiveSessions",
+            "getProxies",
         ] {
             assert_eq!(
                 classify(method, false, true),
@@ -340,6 +431,7 @@ mod tests {
             "boostChat",
             "getChatRevenueWithdrawalUrl",
             "getGramWithdrawalUrl",
+            "getUpgradedGiftWithdrawalUrl",
         ] {
             assert_eq!(
                 classify(method, false, true),
@@ -365,6 +457,20 @@ mod tests {
             Class::Granted(Scope::Read)
         );
         assert_eq!(classify("setBio", false, false), Class::Ask(Risk::Account));
+        assert_eq!(
+            super::classify(
+                "getGroupCall",
+                Shape {
+                    group_call: true,
+                    ..Shape::default()
+                }
+            ),
+            Class::Ask(Risk::Account)
+        );
+        assert_eq!(
+            classify("getStory", false, true),
+            Class::Granted(Scope::Read)
+        );
         assert_eq!(
             classify("editChatFolder", false, false),
             Class::Ask(Risk::Account)
