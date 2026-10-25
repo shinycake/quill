@@ -296,14 +296,70 @@ fn frames_are_asked_only_while_something_moves(cx: &mut TestAppContext) {
     vcx.update(|window, cx| window.render_frame(cx));
     assert!(clock_running(&app, vcx));
 
-    // Steady (the default edge glow holds still): the clock stops.
+    // Steady with nothing to sweep (Power Saving's interface animations
+    // on): the clock stops.
+    let saving = |on: bool| {
+        use quill::power_saving::{self, Flag, with_flag};
+        power_saving::set(with_flag(power_saving::current(), Flag::Animations, on));
+    };
+    saving(true);
     takeover::pin_clock(Some(1000 + ms(FADE_IN) + 10));
     settle(vcx);
     settle(vcx);
-    assert!(!clock_running(&app, vcx), "steady glow: no frames");
+    assert!(!clock_running(&app, vcx), "still glow: no frames");
     assert!(pill(vcx));
+    saving(false);
     takeover::reset_for_test();
     settle(vcx);
     settle(vcx);
     assert!(!clock_running(&app, vcx));
+}
+
+/// Whether a steady, driving takeover sweeps (keeps the frame clock going)
+/// under each "Takeover effect" and saving signal.
+#[gpui_kit::test]
+fn the_sweep_follows_the_effect_and_the_saving_signals_live(cx: &mut TestAppContext) {
+    use quill::agent::access::TakeoverEffect;
+    use quill::power_saving::{self, Flag, with_flag};
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let _presence = turn_on();
+    drive_at(1000);
+    let steady = 1000 + ms(FADE_IN) + 10;
+    let sweeping = |vcx: &mut VisualTestContext, effect, saving: bool, reduce: bool| {
+        access::set_takeover_effect(effect);
+        power_saving::set(with_flag(power_saving::current(), Flag::Animations, saving));
+        power_saving::set_os_reduce_motion(reduce);
+        takeover::pin_clock(Some(steady));
+        vcx.update(|window, cx| window.render_frame(cx));
+        settle(vcx);
+        settle(vcx);
+        clock_running(&app, vcx)
+    };
+    use TakeoverEffect::*;
+    assert!(sweeping(vcx, Automatic, false, false), "the default sweeps");
+    assert!(
+        !sweeping(vcx, Automatic, true, false),
+        "Power Saving: still"
+    );
+    assert!(sweeping(vcx, Automatic, false, false), "and back, live");
+    assert!(
+        !sweeping(vcx, Automatic, false, true),
+        "reduced motion: still"
+    );
+    assert!(sweeping(vcx, GlowAndSweep, true, false), "always sweeps");
+    assert!(
+        !sweeping(vcx, GlowAndSweep, false, true),
+        "but reduced motion wins"
+    );
+    assert!(!sweeping(vcx, StillGlow, false, false), "never sweeps");
+    // Paused, the light holds still.
+    access::set_takeover_effect(Automatic);
+    power_saving::set_os_reduce_motion(false);
+    takeover::pause(PauseReason::Input);
+    settle(vcx);
+    settle(vcx);
+    assert!(!clock_running(&app, vcx), "paused: no frames");
+    takeover::reset_for_test();
 }
