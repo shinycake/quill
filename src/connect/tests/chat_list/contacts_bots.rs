@@ -748,19 +748,15 @@ fn a_video_userpic_asks_for_the_full_info_once_per_photo() {
             .count()
     };
     ingest(&mut driver, user(700));
-    // A full info is cached already (it names no current photo).
     let extra = driver.fetch_user_full_info(41).unwrap().expect("sent");
     ingest(&mut driver, answer(extra));
     assert_eq!(asked(&recorder), 1);
     let extra = driver.fetch_userpic_full_info(41).unwrap().expect("asked");
     assert_eq!(asked(&recorder), 2);
-    // In flight: nothing more.
     assert_eq!(driver.fetch_userpic_full_info(41).unwrap(), None);
-    // Answered without the photo: never again for it.
     ingest(&mut driver, answer(extra));
     assert_eq!(driver.fetch_userpic_full_info(41).unwrap(), None);
     assert_eq!(asked(&recorder), 2);
-    // A new photo asks once more.
     ingest(&mut driver, user(701));
     assert!(driver.fetch_userpic_full_info(41).unwrap().is_some());
     assert_eq!(asked(&recorder), 3);

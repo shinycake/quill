@@ -460,7 +460,7 @@ pub(in crate::ui) fn avatar_initials(name: &str) -> String {
 pub(super) fn message_chrome(
     sender: Option<super::history_row::SenderLabel>,
     receipt: OutboxReceipt,
-    sender_avatar: Option<(String, Option<PathBuf>)>,
+    sender_avatar: Option<super::history_row::SenderAvatar>,
     date: i32,
     pending: bool,
 ) -> MessageChrome {
@@ -473,11 +473,15 @@ pub(super) fn message_chrome(
         sender: sender.map(|label| SharedString::from(label.name)),
         // An empty name is a spacer: a row inside a sender run keeps the
         // avatar column so bubbles stay aligned.
-        avatar: sender_avatar.map(|(name, photo)| {
-            if name.is_empty() {
+        avatar: sender_avatar.map(|avatar| {
+            if avatar.name.is_empty() {
                 div().size(px(32.)).flex_none().into_any_element()
             } else {
-                kit_avatar_element(&name, photo.as_deref(), px(32.))
+                super::userpic_videos::UserpicFrame::over(
+                    avatar.video.as_ref(),
+                    kit_avatar_element(&avatar.name, avatar.photo.as_deref(), px(32.)),
+                    32.,
+                )
             }
         }),
         footer: message_footer(date, pending, receipt, None),

@@ -107,7 +107,6 @@ mod tests {
         assert_eq!(animation.file_id, FileId(3));
         assert_eq!(animation.start_ms, 1250);
         assert!((animation.start_secs() - 1.25).abs() < 1e-9);
-        // Userpics play the small clip; both files are cached.
         assert_eq!(animation.small_file_id, Some(FileId(4)));
         assert_eq!(animation.userpic_file_id(), FileId(4));
         let ids: Vec<FileId> = clips.iter().map(|file| file.id).collect();

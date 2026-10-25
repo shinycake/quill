@@ -136,6 +136,8 @@ mod twofa_state;
 mod updates;
 mod updates_sync_ui;
 mod user_error;
+mod userpic_video_rows;
+mod userpic_videos;
 mod vanish;
 mod viewer_state;
 mod whats_new;

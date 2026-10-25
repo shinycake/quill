@@ -72,7 +72,6 @@ fn a_premium_users_video_photo_plays_its_small_clip() {
     update_user(&mut session, &seq, &sink, &profile_photo(901, true));
     let user = session.user(USER).expect("known");
     assert_eq!((user.photo_id, user.photo_has_animation), (901, true));
-    // The clips come with the full info: ask for it once.
     assert_eq!(session.userpic_video(USER), UserpicVideo::Unknown);
     assert!(session.take_userpic_full_info_ask(USER));
     assert!(!session.take_userpic_full_info_ask(USER));
@@ -87,7 +86,6 @@ fn a_premium_users_video_photo_plays_its_small_clip() {
     assert!(session.media.files.contains_key(&89));
     assert!(!session.take_userpic_full_info_ask(USER));
 
-    // Without a small clip the large one plays.
     full_info(
         &mut session,
         &seq,
@@ -109,11 +107,9 @@ fn a_new_photo_asks_for_the_full_info_again_once() {
         &format!(r#","photo":{}"#, chat_photo(901, true)),
     );
     assert!(!session.take_userpic_full_info_ask(USER));
-    // The cached full info names the old photo.
     update_user(&mut session, &seq, &sink, &profile_photo(902, true));
     assert_eq!(session.userpic_video(USER), UserpicVideo::Unknown);
     assert!(session.take_userpic_full_info_ask(USER));
-    // An answer without that photo never asks again.
     full_info(&mut session, &seq, &sink, "");
     assert_eq!(session.userpic_video(USER), UserpicVideo::Unknown);
     assert!(!session.take_userpic_full_info_ask(USER));
@@ -123,7 +119,6 @@ fn a_new_photo_asks_for_the_full_info_again_once() {
 fn stills_stay_still() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    // Not Premium: tdesktop plays only Premium users' video photos.
     update_user_premium(&mut session, &seq, &sink, &profile_photo(901, true), false);
     full_info(
         &mut session,
@@ -133,10 +128,8 @@ fn stills_stay_still() {
     );
     assert_eq!(session.userpic_video(USER), UserpicVideo::Still);
     assert!(!session.take_userpic_full_info_ask(USER));
-    // A still photo.
     update_user(&mut session, &seq, &sink, &profile_photo(903, false));
     assert_eq!(session.userpic_video(USER), UserpicVideo::Still);
-    // No photo, or an unknown user.
     update_user(&mut session, &seq, &sink, "null");
     assert_eq!(session.userpic_video(USER), UserpicVideo::Still);
     assert_eq!(session.userpic_video(USER + 1), UserpicVideo::Still);
