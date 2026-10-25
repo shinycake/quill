@@ -5,6 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 mod account;
+mod agent_access;
 mod log_out;
 mod notifications;
 mod pages;
@@ -34,6 +35,8 @@ const PAGE_WIDTH: f32 = 640.;
 pub(super) enum SubPage {
     /// Advanced → Experimental settings.
     Experimental,
+    /// Advanced → Agent access.
+    AgentAccess,
     /// About → Ask a Question.
     AskQuestion,
 }
@@ -41,7 +44,7 @@ pub(super) enum SubPage {
 impl SubPage {
     fn parent(self) -> Page {
         match self {
-            SubPage::Experimental => Page::Advanced,
+            SubPage::Experimental | SubPage::AgentAccess => Page::Advanced,
             SubPage::AskQuestion => Page::About,
         }
     }

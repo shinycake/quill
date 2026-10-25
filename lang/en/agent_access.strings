@@ -1,0 +1,13 @@
+// agent_access: Settings > Advanced > Agent access (src/ui/settings_window/agent_access.rs).
+"qll_agent_access" = "Agent access";
+"qll_agent_access_about" = "Let AI agents on this computer, such as Claude Code, use your Telegram account through Quill. Only apps running under your user account can connect, and Quill itself never sends your messages to an AI service.";
+"qll_agent_access_allow" = "Allow agents";
+"qll_agent_access_scope" = "Agents can read your Saved Messages. They can't read other chats or send anything yet.";
+"qll_agent_access_connect" = "Connect an agent";
+"qll_agent_access_claude_code" = "Claude Code";
+"qll_agent_access_claude_code_hint" = "Run this in a terminal.";
+"qll_agent_access_other_apps" = "Other MCP apps";
+"qll_agent_access_other_apps_hint" = "Add a stdio server that runs this command.";
+"qll_agent_access_copy" = "Copy";
+"qll_agent_access_copied" = "Command copied";
+"qll_agent_access_terms" = "Agents act as you, so Telegram's Terms of Service apply to everything they do. Don't let them use your chats to train AI models.";

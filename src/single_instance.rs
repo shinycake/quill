@@ -13,6 +13,10 @@
 //! in [`ACK_TIMEOUT`] means the owner is hung; the caller refuses to start
 //! a second instance rather than risk the database.
 //!
+//! The header `quill-agent 1` instead opens a long-lived agent connection
+//! (see [`crate::agent::server`]); the rest of this file does not change for
+//! it.
+//!
 //! Stale sockets (the owner crashed): connecting fails with "refused"/"not
 //! found", so the new process unlinks the leftover file and binds a fresh
 //! one. A file lock serializes that check-and-bind sequence so two racing
@@ -33,6 +37,8 @@ const HEADER: &str = "quill-ipc 1";
 pub const ACK_TIMEOUT: Duration = Duration::from_secs(3);
 /// Upper bound on one forwarded message.
 const MAX_MESSAGE_BYTES: u64 = 1024 * 1024;
+/// Upper bound on the header line that picks the protocol.
+const MAX_HEADER_BYTES: usize = 64;
 /// Upper bound on forwarded arguments honored per connection.
 const MAX_ARGS: usize = 256;
 /// How many launches the owner serves at once; further connections are
@@ -251,6 +257,7 @@ fn encode_message(args: &[String]) -> String {
 }
 
 /// Parses one client message; `None` when it is not ours.
+#[cfg(test)]
 fn decode_message(reader: impl Read) -> Option<Vec<String>> {
     let mut reader = BufReader::new(reader.take(MAX_MESSAGE_BYTES));
     let mut line = String::new();
@@ -258,6 +265,13 @@ fn decode_message(reader: impl Read) -> Option<Vec<String>> {
     if line.trim_end() != HEADER {
         return None;
     }
+    decode_args(reader)
+}
+
+/// The forwarded arguments that follow the header line.
+fn decode_args(reader: impl Read) -> Option<Vec<String>> {
+    let mut reader = BufReader::new(reader.take(MAX_MESSAGE_BYTES));
+    let mut line = String::new();
     let mut args = Vec::new();
     loop {
         line.clear();
@@ -271,6 +285,27 @@ fn decode_message(reader: impl Read) -> Option<Vec<String>> {
         args.push(arg.to_string());
     }
     Some(args)
+}
+
+/// The header line, read a byte at a time so the protocol after it is left
+/// unread for whoever handles it.
+fn read_header(stream: &Stream) -> Option<String> {
+    let mut line = Vec::new();
+    let mut byte = [0u8; 1];
+    let mut reader = stream;
+    while line.len() < MAX_HEADER_BYTES {
+        match reader.read(&mut byte) {
+            Ok(1) => {
+                let [b] = byte;
+                if b == b'\n' {
+                    return String::from_utf8(line).ok();
+                }
+                line.push(b);
+            }
+            _ => return None,
+        }
+    }
+    None
 }
 
 /// Counts the client threads in flight.
@@ -299,16 +334,34 @@ impl Drop for ClientSlot {
     }
 }
 
-fn serve(stream: Stream, on_launch: &(dyn Fn(Vec<String>) + Send + Sync)) {
+fn serve(stream: Stream, slot: ClientSlot, on_launch: &(dyn Fn(Vec<String>) + Send + Sync)) {
     // Best effort: Windows named pipes refuse timeouts.
     let _ = stream.set_recv_timeout(Some(CLIENT_READ_TIMEOUT));
-    let Some(args) = decode_message(&stream) else {
+    let Some(header) = read_header(&stream) else {
+        return;
+    };
+    let header = header.trim_end_matches('\r');
+    if header == crate::agent::server::HEADER {
+        // Agent connections stay open; they have a cap of their own.
+        drop(slot);
+        crate::agent::server::serve(stream);
+        return;
+    }
+    if header != HEADER {
+        return;
+    }
+    let Some(args) = decode_args(&stream) else {
         return;
     };
     on_launch(args);
     let mut out = &stream;
     let _ = out.write_all(b"ok\n");
     let _ = out.flush();
+}
+
+/// A connection to the instance listening on `endpoint`, for agent clients.
+pub fn connect(endpoint: &Endpoint) -> io::Result<Stream> {
+    Stream::connect(endpoint.name()?)
 }
 
 /// Becomes the owner of `endpoint`, or forwards `args` to the one that is.
@@ -345,7 +398,14 @@ pub fn acquire(
         Err(e) if e.kind() == io::ErrorKind::NotFound => {}
         Err(e) => return Err(e),
     }
-    let listener = match ListenerOptions::new().name(endpoint.name()?).create_sync() {
+    let options = ListenerOptions::new().name(endpoint.name()?);
+    // Owner-only: other users must not inject links or reach agent access.
+    #[cfg(windows)]
+    let options = {
+        use interprocess::os::windows::local_socket::ListenerOptionsExt;
+        options.security_descriptor(crate::pipe_security::current_user_only()?)
+    };
+    let listener = match options.create_sync() {
         Ok(listener) => listener,
         Err(e) => {
             // Windows race: another launch created the pipe first.
@@ -361,6 +421,8 @@ pub fn acquire(
         // Owner-only: other local users must not be able to inject links.
         let _ = std::fs::set_permissions(&endpoint.path, std::fs::Permissions::from_mode(0o600));
     }
+    // Agents read this launch's token once the socket can take them.
+    crate::agent::access::publish_token();
     let on_launch: Arc<dyn Fn(Vec<String>) + Send + Sync> = Arc::new(on_launch);
     crate::thread_guard::spawn_guarded("quill-single-instance", move || {
         let slots = ClientSlots::default();
@@ -379,8 +441,7 @@ pub fn acquire(
             let on_launch = Arc::clone(&on_launch);
             // A client that connects and stalls must not block others.
             let _ = crate::thread_guard::spawn_guarded("quill-single-instance-client", move || {
-                let _slot = slot;
-                serve(stream, &*on_launch)
+                serve(stream, slot, &*on_launch)
             });
         }
     })?;

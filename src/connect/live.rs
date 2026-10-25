@@ -215,6 +215,7 @@ fn open_prepared_client(
         _ => ConnectBlocker::TdjsonLoad,
     })?;
     let sender = LiveSender::from_live(&live);
+    crate::agent::td::register_client(&prepared.account, &live);
     // Routed before the first request, so no envelope can arrive unrouted.
     let bridge = live.bridge();
     let session = Session::new(prepared.account.clone(), diagnostics.clone());

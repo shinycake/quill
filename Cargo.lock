@@ -7205,6 +7205,7 @@ dependencies = [
  "unicode-segmentation",
  "ureq",
  "webpki-roots",
+ "widestring",
  "windows 0.62.2",
  "windows-sys 0.61.2",
  "x11rb",
