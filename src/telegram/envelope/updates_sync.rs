@@ -34,6 +34,8 @@ pub struct ParsedFileDownload {
     pub name: Option<String>,
     /// Files of the message, so the row can show their size and progress.
     pub files: Vec<ParsedFile>,
+    /// The chat of the message the file is in, when TDLib sent it.
+    pub chat_id: Option<ChatId>,
 }
 
 /// `updateFreezeState` (schema line 11347).
@@ -82,6 +84,7 @@ pub(crate) fn parse_file_download(value: &Value) -> Option<ParsedFileDownload> {
         complete_date: json_i32(download.get("complete_date"), 0),
         is_paused: json_bool(download.get("is_paused"), false),
         name,
+        chat_id: message.as_ref().map(|message| message.chat_id),
         files: message.map(|message| message.files).unwrap_or_default(),
     })
 }
