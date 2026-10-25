@@ -618,6 +618,17 @@ impl QuillApp {
                     .selected(active.is_none())
                     .on_click(cx.listener(|this, _, _, cx| this.filter_saved_tag_ui(None, cx))),
             );
+        // tdesktop `SearchTags`: a free account gets "Unlock" first, and
+        // every tag opens the tags preview instead of filtering.
+        if !premium {
+            row = row.child(
+                Button::new("saved-tag-unlock")
+                    .icon(IconName::Lock)
+                    .label(tr(keys::UNLOCK_TAGS))
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| this.show_saved_tags_preview(cx))),
+            );
+        }
         for (ix, entry) in tags.into_iter().enumerate() {
             row = row.child(self.saved_tag_chip(ix, entry, active.as_ref(), premium, cx));
         }
@@ -638,6 +649,11 @@ impl QuillApp {
                 .child(row)
                 .into_any_element(),
         )
+    }
+
+    /// tdesktop `ShowPremiumPreviewBox(PremiumFeature::TagsForMessages)`.
+    fn show_saved_tags_preview(&mut self, cx: &mut Context<Self>) {
+        self.open_premium_at(quill::premium_hub::PremiumFeature::SavedMessagesTags, cx);
     }
 
     fn saved_tag_chip(
@@ -672,7 +688,11 @@ impl QuillApp {
             .id(("saved-tag-chip", ix))
             .flex_none()
             .child(button.on_click(cx.listener(move |this, _, _, cx| {
-                this.filter_saved_tag_ui(Some(tag.clone()), cx);
+                if premium {
+                    this.filter_saved_tag_ui(Some(tag.clone()), cx);
+                } else {
+                    this.show_saved_tags_preview(cx);
+                }
             })))
             .context_menu(move |menu, _, _| {
                 let filter_owner = owner.clone();

@@ -182,8 +182,7 @@ pub use map_thumbs::{
     MAP_THUMB_HEIGHT, MAP_THUMB_SCALE, MAP_THUMB_WIDTH, MAP_THUMB_ZOOM, MapKey, MapThumbs,
 };
 pub use media_library::{
-    MAX_LIBRARY_LOADS, MediaLibrary, MessageReactionOptions, MessageReactionsState,
-    ReactPremiumFeature, ReactionChoice,
+    MAX_LIBRARY_LOADS, MediaLibrary, MessageReactionOptions, MessageReactionsState, ReactionChoice,
 };
 pub use member_list::*;
 pub use ownership_types::*;

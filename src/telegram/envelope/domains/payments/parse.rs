@@ -108,6 +108,11 @@ pub(crate) fn parse_payments_payload(
         "premiumState" => Ok(EnvelopePayload::Payments(PaymentsPayload::PremiumState(
             crate::premium_hub::parse_premium_state(value),
         ))),
+        "businessFeatures" => Ok(EnvelopePayload::Payments(
+            PaymentsPayload::BusinessFeatures(
+                crate::premium_hub::feature::parse_business_features(value),
+            ),
+        )),
         "bankCardInfo" => Ok(EnvelopePayload::Payments(PaymentsPayload::BankCardInfo(
             BankCardInfoData::parse(value),
         ))),

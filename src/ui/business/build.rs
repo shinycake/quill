@@ -13,61 +13,26 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
+use quill::premium_hub::BusinessFeature;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-/// One hub row: what it opens (`None` is Quick Replies, its own dialog),
-/// icon, title and description, in tdesktop's fallback order.
-const FEATURES: [(Option<View>, IconName, quill::lang::Key, quill::lang::Key); 8] = [
-    (
-        Some(View::Greeting),
-        IconName::Hand,
-        keys::BUSINESS_SUBTITLE_GREETING_MESSAGES,
-        keys::BUSINESS_ABOUT_GREETING_MESSAGES,
-    ),
-    (
-        Some(View::Away),
-        IconName::Moon,
-        keys::BUSINESS_SUBTITLE_AWAY_MESSAGES,
-        keys::BUSINESS_ABOUT_AWAY_MESSAGES,
-    ),
-    (
-        None,
-        IconName::Zap,
-        keys::BUSINESS_SUBTITLE_QUICK_REPLIES,
-        keys::BUSINESS_ABOUT_QUICK_REPLIES,
-    ),
-    (
-        Some(View::Hours),
-        IconName::Clock,
-        keys::BUSINESS_SUBTITLE_OPENING_HOURS,
-        keys::BUSINESS_ABOUT_OPENING_HOURS,
-    ),
-    (
-        Some(View::Location),
-        IconName::MapPin,
-        keys::BUSINESS_SUBTITLE_LOCATION,
-        keys::BUSINESS_ABOUT_LOCATION,
-    ),
-    (
-        Some(View::ChatLinks),
-        IconName::Link,
-        keys::BUSINESS_SUBTITLE_CHAT_LINKS,
-        keys::BUSINESS_ABOUT_CHAT_LINKS,
-    ),
-    (
-        Some(View::StartPage),
-        IconName::MessageSquareHeart,
-        keys::BUSINESS_SUBTITLE_CHAT_INTRO,
-        keys::BUSINESS_ABOUT_CHAT_INTRO,
-    ),
-    (
-        Some(View::Chatbots),
-        IconName::Bot,
-        keys::BUSINESS_SUBTITLE_CHATBOTS,
-        keys::BUSINESS_ABOUT_CHATBOTS,
-    ),
-];
+/// The icon of a hub row.
+fn icon_of(feature: BusinessFeature) -> IconName {
+    match feature {
+        BusinessFeature::GreetingMessage => IconName::Hand,
+        BusinessFeature::AwayMessage => IconName::Moon,
+        BusinessFeature::QuickReplies => IconName::Zap,
+        BusinessFeature::OpeningHours => IconName::Clock,
+        BusinessFeature::Location => IconName::MapPin,
+        BusinessFeature::AccountLinks => IconName::Link,
+        BusinessFeature::StartPage => IconName::MessageSquareHeart,
+        BusinessFeature::Bots => IconName::Bot,
+        BusinessFeature::ChatFolderTags
+        | BusinessFeature::EmojiStatus
+        | BusinessFeature::UpgradedStories => IconName::Tag,
+    }
+}
 
 const ADS_URL: &str = "https://ads.telegram.org";
 
@@ -171,10 +136,16 @@ impl QuillApp {
                 }));
         let hover = cx.theme().secondary;
         let active = cx.theme().secondary_active;
-        for (index, (view, icon, title, about)) in FEATURES.into_iter().enumerate() {
+        // The server's order (`getBusinessFeatures`), else tdesktop's.
+        let features = self
+            .session()
+            .and_then(|s| s.payments.hub.business_features.clone())
+            .unwrap_or_else(|| BusinessFeature::FALLBACK_ORDER.to_vec());
+        for feature in features {
+            let (title, about) = feature.text_keys();
             body = body.child(
                 div()
-                    .id(("business-feature", index as u64))
+                    .id(SharedString::from(feature.td_type()))
                     .flex()
                     .items_center()
                     .gap_3()
@@ -187,7 +158,11 @@ impl QuillApp {
                     .tab_index(0)
                     .hover(move |s| s.bg(hover))
                     .active(move |s| s.bg(active))
-                    .child(Icon::new(icon).size(px(20.)).text_color(cx.theme().primary))
+                    .child(
+                        Icon::new(icon_of(feature))
+                            .size(px(20.))
+                            .text_color(cx.theme().primary),
+                    )
                     .child(
                         div()
                             .flex_1()
@@ -203,7 +178,7 @@ impl QuillApp {
                             .text_color(muted),
                     )
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        this.business_open_feature(view, window, cx);
+                        this.business_open_feature(feature, window, cx);
                     })),
             );
         }

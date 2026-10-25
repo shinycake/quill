@@ -46,13 +46,13 @@ use std::ops::Range;
 /// `**` marks, the bold ranges and the link's range (tdesktop marked text
 /// with one `tr::link`).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct MarkedLink {
-    pub(super) text: String,
-    pub(super) bold: Vec<Range<usize>>,
-    pub(super) link: Option<Range<usize>>,
+pub(in crate::ui) struct MarkedLink {
+    pub(in crate::ui) text: String,
+    pub(in crate::ui) bold: Vec<Range<usize>>,
+    pub(in crate::ui) link: Option<Range<usize>>,
 }
 
-pub(super) fn marked_link(template: &str, tag: &str, link: &str) -> MarkedLink {
+pub(in crate::ui) fn marked_link(template: &str, tag: &str, link: &str) -> MarkedLink {
     let placeholder = format!("{{{tag}}}");
     let (before, after, found) = match template.split_once(&placeholder) {
         Some((before, after)) => (before, after, true),

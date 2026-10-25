@@ -116,7 +116,7 @@ impl QuillApp {
         match bar {
             BottomBar::Unblock { restart } => self.unblock_peer(chat_id, restart, cx),
             BottomBar::Start => self.start_bot_from_bar(chat_id, cx),
-            BottomBar::PremiumRequired => self.open_premium(cx),
+            BottomBar::PremiumRequired => self.open_premium_from("require_premium", cx),
             BottomBar::JoinGroup | BottomBar::ApplyToJoin => {
                 self.join_channel(chat_id, cx);
                 self.connection.set_note(if bar == BottomBar::ApplyToJoin {

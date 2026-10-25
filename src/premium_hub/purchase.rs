@@ -5,7 +5,8 @@
 //! `/start <ref>` that is sent right away; without it, the config key
 //! `premium_invoice_slug` is the invoice link `t.me/$<slug>`, which opens
 //! the in-app payment form. With neither, nothing happens. `ref` is the
-//! `EntryMap` key of the feature the user came from (`LookupPremiumRef`).
+//! `EntryMap` key of the feature the user came from (`LookupPremiumRef`,
+//! `PremiumFeature::start_ref`).
 
 use serde_json::Value;
 
@@ -64,44 +65,9 @@ pub fn purchase_route(purchase: &PremiumPurchase, start_ref: &str) -> PremiumPur
     }
 }
 
-/// tdesktop `EntryMap` key of a feature row (`LookupPremiumRef`), by the
-/// row title `feature_row` gives it. Features without an entry have none.
-pub fn feature_ref(title: &str) -> Option<&'static str> {
-    Some(match title {
-        "Doubled limits" => "double_limits",
-        "Files up to 4 GB" => "more_upload",
-        "Faster download speed" => "faster_download",
-        "Voice-to-text conversion" => "voice_to_text",
-        "No ads" => "no_ads",
-        "Unique reactions" => "infinite_reactions",
-        "Premium stickers" => "premium_stickers",
-        "Animated emoji" => "animated_emoji",
-        "Advanced chat management" => "advanced_chat_management",
-        "Profile badge" => "profile_badge",
-        "Emoji status" => "emoji_status",
-        "Animated profile pictures" => "animated_userpics",
-        "Real-time translation" => "translations",
-        "Upgraded stories" => "stories",
-        "Name and profile colors" => "peer_colors",
-        "Wallpapers for both sides" => "wallpapers",
-        "Tags for Saved Messages" => "saved_tags",
-        "Message privacy" => "message_privacy",
-        "Last seen times" => "last_seen",
-        "Telegram Business" => "business",
-        "Message effects" => "effects",
-        "Checklists" => "todo",
-        "Protect private chat content" => "no_forwards",
-        "AI text tools" => "ai_compose",
-        "Rich messages" => "rich_formatting",
-        _ => return None,
-    })
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        PremiumPurchase, PremiumPurchaseRoute, feature_ref, purchase_from_config, purchase_route,
-    };
+    use super::{PremiumPurchase, PremiumPurchaseRoute, purchase_from_config, purchase_route};
     use serde_json::json;
 
     fn config(bot: &str, slug: &str) -> serde_json::Value {
@@ -138,12 +104,5 @@ mod tests {
             purchase_route(&PremiumPurchase::default(), "x"),
             PremiumPurchaseRoute::Unavailable
         );
-    }
-
-    #[test]
-    fn feature_rows_with_an_entry_have_a_ref() {
-        assert_eq!(feature_ref("Doubled limits"), Some("double_limits"));
-        assert_eq!(feature_ref("Message effects"), Some("effects"));
-        assert_eq!(feature_ref("Topic icons"), None);
     }
 }

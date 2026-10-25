@@ -404,7 +404,10 @@ fn premium_offer(effect_id: i64, cx: &mut Context<QuillApp>) -> AnyElement {
                 .on_click(vec![link], move |_, _, cx| {
                     let _ = owner.update(cx, |this, cx| {
                         this.close_send_menu(cx);
-                        this.show_premium_effects_preview(cx);
+                        this.open_premium_at(
+                            quill::premium_hub::PremiumFeature::MessageEffects,
+                            cx,
+                        );
                     });
                 }),
             ),

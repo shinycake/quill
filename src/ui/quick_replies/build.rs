@@ -63,10 +63,7 @@ impl QuillApp {
             .when(!premium || full, |row| row.opacity(0.5))
             .on_click(cx.listener(move |this, _, window, cx| {
                 if !premium {
-                    this.quick_replies_error_line(
-                        tr(keys::Q_OPS_QUICK_REPLIES_NEED_TELEGRAM_PREMIUM),
-                        cx,
-                    );
+                    this.open_premium_to_buy(quill::premium_hub::BusinessFeature::QuickReplies, cx);
                 } else if full {
                     this.quick_replies_error_line(tr(keys::Q_OPS_YOU_HAVE_REACHED_THE_LIMIT), cx);
                 } else {

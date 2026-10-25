@@ -3,7 +3,8 @@ use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::{AccountKey, ChatId, MessageId};
 use crate::platform::MemorySecretStore;
-use crate::state::{ReactPremiumFeature, ReactionChoice, Session};
+use crate::premium_hub::PremiumFeature;
+use crate::state::{ReactionChoice, Session};
 use crate::telegram::client::copy_and_parse;
 use serde_json::Value;
 use std::sync::Arc;
@@ -203,11 +204,11 @@ fn reactions_tdlib_marks_premium_need_premium_on_a_free_account() {
     );
     assert_eq!(
         session.react_premium_feature(CHAT, MESSAGE, &ReactionChoice::CustomEmoji(77)),
-        Some(ReactPremiumFeature::UniqueReactions)
+        Some(PremiumFeature::UniqueReactions)
     );
     assert_eq!(
         session.react_premium_feature(CHAT, MESSAGE, &ReactionChoice::CustomEmoji(5)),
-        Some(ReactPremiumFeature::UniqueReactions),
+        Some(PremiumFeature::UniqueReactions),
         "any custom emoji outside a channel"
     );
     assert_eq!(
@@ -253,6 +254,6 @@ fn saved_messages_tags_need_premium() {
         h.driver
             .session
             .react_premium_feature(CHAT, MESSAGE, &ReactionChoice::Emoji("👍".into())),
-        Some(ReactPremiumFeature::SavedMessagesTags)
+        Some(PremiumFeature::SavedMessagesTags)
     );
 }

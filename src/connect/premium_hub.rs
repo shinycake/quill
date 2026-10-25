@@ -9,8 +9,8 @@ use crate::state::RequestPurpose;
 use crate::telegram::envelope::MessageSender;
 use crate::telegram::requests_gifts::get_received_gifts_in;
 use crate::telegram::requests_premium::{
-    get_premium_features, get_premium_state, get_premium_sticker_examples, get_star_transactions,
-    sell_gift, toggle_gift_is_saved,
+    get_business_features, get_premium_features, get_premium_state, get_premium_sticker_examples,
+    get_star_transactions, sell_gift, toggle_gift_is_saved,
 };
 
 /// Rows per `getStarTransactions` page.
@@ -288,6 +288,26 @@ impl<S: JsonSender> ConnectDriver<S> {
         let state_extra = self.session.request(RequestPurpose::GetPremiumState, None);
         // The state text is optional decoration; a send failure is ignored.
         let _ = self.send_json_request(state_extra, &get_premium_state(state_extra));
+        Ok(Some(extra))
+    }
+
+    /// Fetch the Business feature list (`getBusinessFeatures`) once.
+    pub fn maybe_fetch_business_features(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let hub = &self.session.payments.hub;
+        if hub.business_features.is_some() || hub.business_features_loading {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetBusinessFeatures, None);
+        self.session.payments.hub.business_features_loading = true;
+        if let Err(err) = self.send_json_request(extra, &get_business_features(extra)) {
+            self.session.payments.hub.business_features_loading = false;
+            return Err(err);
+        }
         Ok(Some(extra))
     }
 }

@@ -47,7 +47,10 @@ impl QuillApp {
             self.disable_private_sharing(chat_id, cx);
         } else {
             self.dismiss_profile_modal();
-            self.show_premium_no_forwards_preview(cx);
+            self.open_premium_at(
+                quill::premium_hub::PremiumFeature::ProtectPrivateChatContent,
+                cx,
+            );
         }
     }
 

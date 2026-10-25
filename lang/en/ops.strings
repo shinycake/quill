@@ -807,7 +807,6 @@
 "qll_ops_purchase_refused_review_the_quote" = "Purchase refused. Review the quote and comment length, then retry.";
 "qll_ops_quick_replies_are_a_telegram" = "Quick replies are a Telegram Premium feature.";
 "qll_ops_quick_replies_need_a_live" = "Quick replies need a live session.";
-"qll_ops_quick_replies_need_telegram_premium" = "Quick replies need Telegram Premium.";
 "qll_ops_quick_reply_message" = "Quick reply message";
 "qll_ops_quill" = "Quill {quill_version_app}";
 "qll_ops_quill_updates" = "Quill updates";

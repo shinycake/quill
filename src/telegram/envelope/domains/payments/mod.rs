@@ -34,6 +34,8 @@ pub enum PaymentsPayload {
     PremiumFeatures(crate::premium_hub::PremiumInfo),
     /// `premiumState` — the `getPremiumState` answer.
     PremiumState(crate::premium_hub::PremiumStateInfo),
+    /// `businessFeatures` — the `getBusinessFeatures` answer.
+    BusinessFeatures(Vec<crate::premium_hub::BusinessFeature>),
     /// `bankCardInfo` — the `getBankCardInfo` answer.
     BankCardInfo(BankCardInfoData),
     /// `collectibleItemInfo` — the `getCollectibleItemInfo` answer.

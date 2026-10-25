@@ -142,7 +142,9 @@ impl QuillApp {
                         .label(tr(keys::MESSAGES_PRIVACY_PREMIUM_BUTTON))
                         .ghost()
                         .small()
-                        .on_click(cx.listener(|this, _, _, cx| this.open_premium(cx))),
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.open_premium_from("noncontact_peers_require_premium", cx);
+                        })),
                 );
         }
         for line in [error, paid_error].into_iter().flatten() {

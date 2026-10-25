@@ -112,25 +112,25 @@ fn replay_sponsored_report_ads_hidden_and_premium_required() {
     let mut session = sponsored_test_session(&sink, &seq);
     let chat_id = quill::ids::ChatId(13);
 
-    for (ctor, message) in [
-        (
-            "reportSponsoredResultAdsHidden",
-            "Sponsored messages hidden",
-        ),
-        (
-            "reportSponsoredResultPremiumRequired",
-            "Hiding sponsored messages needs Telegram Premium",
-        ),
-    ] {
+    let report = |session: &mut quill::state::Session, ctor: &str| {
         assert!(session.begin_sponsored_report(chat_id, 9001).is_some());
         let extra = session.request(RequestPurpose::ReportChatSponsoredMessage, Some(chat_id));
         apply_all_seq(
-            &mut session,
+            session,
             &sink,
             &seq,
             &[&format!(r#"{{"@type":"{}","@extra":"{}"}}"#, ctor, extra.0)],
         );
-        let outcome = session.messages.last_sponsored_report.clone().unwrap();
-        assert_eq!(outcome.user_message(), message);
-    }
+    };
+    report(&mut session, "reportSponsoredResultAdsHidden");
+    let outcome = session.messages.last_sponsored_report.clone().unwrap();
+    assert_eq!(outcome.user_message(), "Sponsored messages hidden");
+    // Premium required opens the No ads preview instead of a banner
+    // (tdesktop `ShowPremiumPreviewBox(PremiumFeature::NoAds)`).
+    report(&mut session, "reportSponsoredResultPremiumRequired");
+    assert!(session.messages.last_sponsored_report.is_none());
+    assert_eq!(
+        session.payments.hub.promo_request,
+        Some(quill::premium_hub::PremiumFeature::DisabledAds.into())
+    );
 }

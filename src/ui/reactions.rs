@@ -319,7 +319,7 @@ impl QuillApp {
             .session()
             .and_then(|s| s.react_premium_feature(chat_id, message_id, &choice))
         {
-            self.show_premium_reaction_preview(feature, cx);
+            self.open_premium_at(feature, cx);
             return;
         }
         // The reaction flies up from the message when it is added.

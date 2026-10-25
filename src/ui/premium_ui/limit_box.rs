@@ -266,9 +266,9 @@ impl QuillApp {
                         Button::new("premium-limit-increase")
                             .label(tr(keys::AI_COMPOSE_INCREASE_LIMIT))
                             .primary()
-                            .on_click(cx.listener(|this, _, window, cx| {
+                            .on_click(cx.listener(move |this, _, window, cx| {
                                 this.dismiss_premium_limit();
-                                this.open_premium(cx);
+                                this.open_premium_from(&kind.premium_ref(), cx);
                                 this.close_kit_dialog_if_done(DialogKind::PremiumLimit, window, cx);
                             })),
                     );

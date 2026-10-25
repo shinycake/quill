@@ -2,7 +2,6 @@
 
 use super::pump_scan::PumpKey;
 use super::*;
-use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with, trn};
 
 impl QuillApp {
@@ -482,13 +481,14 @@ impl QuillApp {
             },
             Switch::new("translate-chats")
                 .checked(prefs.translate_chats && premium)
-                .disabled(!premium)
                 .accessibility_label(tr(keys::TRANSLATE_SETTINGS_CHAT))
                 .on_click(cx.listener(|this, &on, _, cx| {
+                    // tdesktop `ShowPremiumPreviewToBuy(RealTimeTranslation)`.
                     if !this.session().is_some_and(Session::is_premium) {
-                        this.connection
-                            .set_note(StatusNote::info(tr(keys::Q_TRANSLATE_CHATS_PREMIUM)));
-                        cx.notify();
+                        this.open_premium_to_buy(
+                            quill::premium_hub::PremiumFeature::RealTimeChatTranslation,
+                            cx,
+                        );
                         return;
                     }
                     this.set_translate_prefs(cx, |p| p.translate_chats = on);

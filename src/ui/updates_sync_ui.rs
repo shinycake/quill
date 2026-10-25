@@ -5,6 +5,7 @@
 //! `ShowAgeVerification`).
 #![deny(clippy::indexing_slicing)]
 
+use super::ai_compose::marked_link;
 use super::app::QuillApp;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
@@ -14,7 +15,7 @@ use gpui_kit::*;
 use quill::lang::{Key, keys, tr, tr_with};
 use quill::state::{
     age_verification_about, age_verification_bot_url, freeze_deadline_label, live_left_label,
-    live_strip_label, speech_trial_toast,
+    live_strip_label, speech_trial_reset_label, speech_trial_toast,
 };
 use quill::telegram::envelope::SpeechTrialUpdate;
 
@@ -36,7 +37,7 @@ const FROZEN_ROWS: [(Key, Key); 2] = [
 impl QuillApp {
     /// Toast the free transcription quota when a transcription changed it,
     /// as tdesktop does; nothing is shown under the voice rows.
-    pub(super) fn sync_speech_trial_hint(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn sync_speech_trial_hint(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some((trial, premium)) = self
             .session()
             .and_then(|s| Some((s.sync.speech_trial?, s.my_is_premium())))
@@ -48,11 +49,28 @@ impl QuillApp {
             return;
         }
         cx.set_global(SpeechTrialSeen(Some(trial)));
-        if let Some(toast) =
-            speech_trial_toast(previous, trial, premium, quill::local_time::now_unix())
-        {
-            self.connection.set_note(StatusNote::info(toast));
+        let now = quill::local_time::now_unix();
+        let Some(text) = speech_trial_toast(previous, trial, premium, now) else {
+            return;
+        };
+        if trial.left_count > 0 {
+            self.connection.set_note(StatusNote::info(text));
+            return;
         }
+        // tdesktop `ShowTrialTranscribesToast`: "Telegram Premium" opens
+        // the voice-to-text preview.
+        let date = format!("**{}**", speech_trial_reset_label(&trial, now));
+        let marked = marked_link(
+            &tr_with(keys::AUDIO_TRANSCRIBE_TRIALS_OVER, &[("date", &date)]),
+            "link",
+            tr(keys::SETTINGS_PRIVACY_PREMIUM_LINK),
+        );
+        let toast = Self::marked_toast("speech-trial-toast", marked, cx, |this, _, cx| {
+            this.open_premium_at(quill::premium_hub::PremiumFeature::VoiceRecognition, cx);
+        });
+        cx.defer_in(window, move |_, window, cx| {
+            window.push_notification(toast, cx);
+        });
     }
 
     /// "Your account is frozen!" strip above the chat list (tdesktop's

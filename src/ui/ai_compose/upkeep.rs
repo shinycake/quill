@@ -161,12 +161,12 @@ impl QuillApp {
             tr(keys::AI_COMPOSE_FLOOD_LINK),
         );
         Self::marked_toast("ai-compose-flood-toast", marked, cx, |this, _, cx| {
-            this.open_premium(cx);
+            this.open_premium_from("ai_compose", cx);
         })
         .icon(IconName::Star)
     }
 
-    pub(super) fn marked_toast(
+    pub(in crate::ui) fn marked_toast(
         id: &'static str,
         marked: MarkedLink,
         cx: &mut Context<Self>,

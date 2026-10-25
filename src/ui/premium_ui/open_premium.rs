@@ -1,23 +1,76 @@
-//! Methods moved out of `premium_ui.rs` to keep files under 1000 lines.
+//! Opening and closing the Premium dialog: the Premium page, or the
+//! preview of one feature (tdesktop `Settings::ShowPremium`,
+//! `ShowPremiumPreviewBox`, `ShowPremiumPreviewToBuy`).
 
 use super::*;
 use crate::ui::status_note::StatusNote;
+use quill::premium_hub::promo::{PreviewOpen, PromoFeature, PromoPage};
 
 impl QuillApp {
+    /// The Premium page (tdesktop `Settings::ShowPremium` with no ref).
     pub(in crate::ui) fn open_premium(&mut self, cx: &mut Context<Self>) {
+        self.open_premium_from("", cx);
+    }
+
+    /// The Premium page; its subscribe button sends `start_ref` to the
+    /// Premium bot (tdesktop `Settings::ShowPremium(controller, ref)`).
+    pub(in crate::ui) fn open_premium_from(&mut self, start_ref: &str, cx: &mut Context<Self>) {
+        self.open_premium_on(PromoPage::Overview, start_ref, cx);
+    }
+
+    /// The preview of `feature` with one button to the Premium page
+    /// (tdesktop `ShowPremiumPreviewBox`).
+    pub(in crate::ui) fn open_premium_at(
+        &mut self,
+        feature: impl Into<PromoFeature>,
+        cx: &mut Context<Self>,
+    ) {
+        let page = PromoPage::for_feature(feature.into(), PreviewOpen::Box);
+        self.open_premium_on(page, "", cx);
+    }
+
+    /// The preview of `feature` with the plans and Subscribe (tdesktop
+    /// `ShowPremiumPreviewToBuy`).
+    pub(in crate::ui) fn open_premium_to_buy(
+        &mut self,
+        feature: impl Into<PromoFeature>,
+        cx: &mut Context<Self>,
+    ) {
+        let page = PromoPage::for_feature(feature.into(), PreviewOpen::ToBuy);
+        self.open_premium_on(page, "", cx);
+    }
+
+    fn open_premium_on(&mut self, page: PromoPage, start_ref: &str, cx: &mut Context<Self>) {
+        if let Some(hub) = self.hub_mut() {
+            hub.premium_open = true;
+            hub.premium_ref = start_ref.into();
+        }
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.payments.hub.premium_open = true;
-            live.driver.session.payments.hub.promo_page =
-                quill::premium_hub::promo::PromoPage::Overview;
             // The subscribe button needs `premium_bot_username` / `premium_invoice_slug`.
             let _ = live.driver.ensure_earn_app_config();
+            if matches!(
+                page,
+                PromoPage::Preview {
+                    feature: PromoFeature::Business(_),
+                    ..
+                }
+            ) {
+                let _ = live.driver.maybe_fetch_business_features();
+            }
             live.driver.maybe_fetch_premium()
         });
         if let Some(Err(_)) = sent {
             self.connection
                 .set_note(StatusNote::error(tr(keys::Q_NOTES_COULDNT_LOAD_PREMIUM)));
         }
-        cx.notify();
+        self.set_promo_page(page, cx);
+    }
+
+    /// Open the preview the reducer asked for (a refused "Hide ads").
+    pub(in crate::ui) fn pump_promo_request(&mut self, cx: &mut Context<Self>) {
+        if let Some(feature) = self.hub_mut().and_then(|hub| hub.promo_request.take()) {
+            self.open_premium_at(feature, cx);
+        }
     }
 
     pub(in crate::ui) fn close_premium(&mut self, cx: &mut Context<Self>) {

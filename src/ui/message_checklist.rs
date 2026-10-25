@@ -192,8 +192,8 @@ fn checklist_task_row(
             .tab_index(0)
             .cursor_pointer()
             .pressable(cx.theme())
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.toggle_checklist_task(chat_id, message_id, task_id, cx);
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.toggle_checklist_task(chat_id, message_id, task_id, window, cx);
             }));
     }
     row.test_support().into_any_element()

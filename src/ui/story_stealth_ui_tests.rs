@@ -6,6 +6,8 @@ use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, px, size};
 use quill::ids::ChatId;
+use quill::premium_hub::PremiumFeature;
+use quill::premium_hub::promo::{PreviewOpen, PromoPage};
 use quill::state::StoryStealthMode;
 use quill::stories_menu::StoryMenuAction;
 
@@ -174,12 +176,16 @@ fn a_free_account_unlocks_through_the_premium_preview(cx: &mut TestAppContext) {
     assert_eq!(button_label(&app, vcx), "Unlock Stealth Mode");
     click(vcx, "story-stealth-button");
     assert!(box_open(&app, vcx), "Unlock keeps the box");
-    app.update(vcx, |app, cx| {
-        if let Some(session) = app.demo_session.as_mut() {
-            session.payments.hub.premium_open = true;
-        }
-        cx.notify();
+    let page = app.read_with(vcx, |app, _| {
+        app.session().map(|session| session.payments.hub.promo_page)
     });
+    assert_eq!(
+        page,
+        Some(PromoPage::Preview {
+            feature: PremiumFeature::UpgradedStories.into(),
+            opened: PreviewOpen::Box,
+        })
+    );
     frames(vcx);
     assert_eq!(dialog(&shell, vcx), Some(DialogKind::PremiumFeatures));
     app.update(vcx, |app, cx| app.close_premium(cx));

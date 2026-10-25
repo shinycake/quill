@@ -102,10 +102,7 @@ impl QuillApp {
                 .label(tr(keys::EMOJI_PREMIUM_RESTORE))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.close_media_panel(cx);
-                    this.show_premium_reaction_preview(
-                        quill::state::ReactPremiumFeature::UniqueReactions,
-                        cx,
-                    );
+                    this.open_premium_at(quill::premium_hub::PremiumFeature::UniqueReactions, cx);
                 })),
             )
             .into_any_element()
