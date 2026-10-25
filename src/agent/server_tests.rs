@@ -46,6 +46,7 @@ fn agents_need_the_switch_and_this_launchs_token() {
     );
     let app_root = crate::settings::safe_app_root().unwrap_or_default();
 
+    let _guard = crate::locks::lock_or_recover(&access::TEST_LOCK);
     assert!(!access::enabled(), "off by default");
     assert_eq!(access::read_published_token(&app_root), None);
     let answers = session(&endpoint, &[auth("x")]);
@@ -82,6 +83,8 @@ fn agents_need_the_switch_and_this_launchs_token() {
             json!({"jsonrpc": "2.0", "id": 2, "method": "ping"}).to_string(),
             json!({"jsonrpc": "2.0", "id": 3, "method": "resources/read", "params": {"uri": "quill://guide"}}).to_string(),
             json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "nope"}}).to_string(),
+            json!({"jsonrpc": "2.0", "id": 5, "method": "resources/subscribe", "params": {"uri": "quill://unread"}}).to_string(),
+            json!({"jsonrpc": "2.0", "id": 6, "method": "resources/subscribe", "params": {"uri": "quill://guide"}}).to_string(),
         ],
     );
     assert_eq!(answers[0]["id"], "a");
@@ -101,6 +104,17 @@ fn agents_need_the_switch_and_this_launchs_token() {
             .contains("quill_status")
     );
     assert_eq!(by_id(4)["result"]["isError"], true);
+    assert_eq!(
+        by_id(5)["result"],
+        json!({}),
+        "quill://unread can be watched"
+    );
+    assert!(
+        by_id(6)["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("wait_for_message")
+    );
 
     // A request line past the limit ends the connection, whether or not it
     // ever gets a newline.

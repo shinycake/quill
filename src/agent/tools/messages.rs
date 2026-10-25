@@ -155,6 +155,9 @@ fn content_text(content: &Value) -> String {
     {
         return text.to_string();
     }
+    if content.get("@type").and_then(Value::as_str) == Some("messageRichMessage") {
+        return rich_text(content.get("message").unwrap_or(&Value::Null));
+    }
     let pick = |path: &[&str]| -> Option<String> {
         let mut node = content;
         for key in path {
@@ -173,6 +176,22 @@ fn content_text(content: &Value) -> String {
         .or_else(|| pick(&["animated_emoji", "emoji"]))
         .or_else(|| pick(&["emoji"]))
         .unwrap_or_default()
+}
+
+/// The text of a rich message's blocks, one block per line.
+fn rich_text(message: &Value) -> String {
+    let (blocks, _) = crate::rich::parse_rich_message(message);
+    let mut lines = Vec::new();
+    for block in &blocks {
+        match block {
+            crate::rich::RichBlock::List { items, .. } => {
+                lines.extend(items.iter().map(|item| item.text.as_str()));
+            }
+            other => lines.extend(other.preview_text()),
+        }
+    }
+    lines.retain(|line| !line.is_empty());
+    lines.join("\n")
 }
 
 /// The file a message carries: name, MIME type, size and TDLib file id.
@@ -277,6 +296,21 @@ pub fn iso_time(unix: i64) -> String {
         secs % 3600 / 60,
         secs % 60
     )
+}
+
+/// A one-line preview of a TDLib message: its text, or its kind.
+pub fn preview(message: &Value) -> String {
+    let content = message.get("content").cloned().unwrap_or(Value::Null);
+    let text = content_text(&content);
+    if text.is_empty() {
+        let kind = content
+            .get("@type")
+            .and_then(Value::as_str)
+            .unwrap_or("message");
+        format!("[{}]", kind_of(kind))
+    } else {
+        truncate(&text.replace('\n', " "), 80)
+    }
 }
 
 fn truncate(text: &str, max: usize) -> String {
@@ -417,6 +451,15 @@ mod tests {
         assert_eq!(iso_time(0), "1970-01-01T00:00:00Z");
         assert_eq!(iso_time(1_792_902_812), "2026-10-25T04:33:32Z");
         assert_eq!(iso_time(951_782_400), "2000-02-29T00:00:00Z");
+    }
+
+    #[test]
+    fn rich_messages_read_as_their_blocks() {
+        let content = json!({"@type": "messageRichMessage", "message": {"@type": "richMessage", "blocks": [
+            {"@type": "pageBlockTitle", "title": {"@type": "richTextPlain", "text": "Notes"}},
+            {"@type": "pageBlockParagraph", "text": {"@type": "richTextPlain", "text": "Buy milk"}},
+        ]}});
+        assert_eq!(super::content_text(&content), "Notes\nBuy milk");
     }
 
     #[test]

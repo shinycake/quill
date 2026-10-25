@@ -1,74 +1,18 @@
-//! The message read tools. Agents may read Saved Messages only for now; the
-//! `chat` argument already takes any chat so later grants change no tool.
+//! The message read tools, for any chat the agent was granted.
 
 use super::messages::{self, Detail, Names};
+use super::target::{Target, chat_schema, require};
 use super::{Ctx, ToolError, ToolOutput, int_arg};
+use crate::agent::grants::{ChatClass, Scope};
 use serde_json::{Value, json};
-use std::collections::{HashMap, HashSet};
-use std::sync::Mutex;
+use std::collections::HashSet;
 
 /// TDLib returns at most this many messages per history request.
 const TD_PAGE: i64 = 100;
+/// Pages of cross-chat search looked through to fill one answer.
+const SEARCH_PAGES: usize = 5;
 /// Extra history requests made to fill a page TDLib answered short.
 const FILL_ROUNDS: usize = 5;
-
-const SAVED_NAMES: [&str; 5] = ["saved", "saved messages", "me", "self", "myself"];
-
-/// A chat a call may read.
-struct Target {
-    chat_id: i64,
-    title: String,
-    me: i64,
-}
-
-/// The signed-in user's id per client, asked once.
-static ME: Mutex<Option<HashMap<i32, i64>>> = Mutex::new(None);
-
-fn my_user_id(ctx: &Ctx) -> Result<i64, ToolError> {
-    if let Some(id) = crate::locks::lock_or_recover(&ME)
-        .as_ref()
-        .and_then(|known| known.get(&ctx.client.id()).copied())
-    {
-        return Ok(id);
-    }
-    let me = ctx.call(json!({"@type": "getMe"}))?;
-    let id = me.get("id").and_then(Value::as_i64).ok_or_else(|| {
-        ToolError::new("Quill could not read the signed-in account. Retry in a moment.")
-    })?;
-    crate::locks::lock_or_recover(&ME)
-        .get_or_insert_with(HashMap::new)
-        .insert(ctx.client.id(), id);
-    Ok(id)
-}
-
-fn resolve(ctx: &Ctx, args: &Value) -> Result<Target, ToolError> {
-    let me = my_user_id(ctx)?;
-    let wanted = match args.get("chat") {
-        None | Some(Value::Null) => None,
-        Some(Value::String(name)) => Some(name.trim().to_lowercase()),
-        Some(Value::Number(id)) => Some(id.to_string()),
-        Some(_) => {
-            return Err(ToolError::new(
-                "chat must be a chat name or a numeric chat id, e.g. \"saved\".",
-            ));
-        }
-    };
-    let is_saved = wanted
-        .as_deref()
-        .is_none_or(|name| SAVED_NAMES.contains(&name) || name == me.to_string());
-    if !is_saved {
-        return Err(ToolError::new(
-            "Chat not granted. This version of Quill lets agents read Saved Messages only: pass \"chat\": \"saved\".",
-        ));
-    }
-    // Saved Messages is the private chat with yourself; make sure TDLib has it loaded.
-    let chat = ctx.call(json!({"@type": "createPrivateChat", "user_id": me, "force": false}))?;
-    Ok(Target {
-        chat_id: chat.get("id").and_then(Value::as_i64).unwrap_or(me),
-        title: "Saved Messages".to_string(),
-        me,
-    })
-}
 
 fn id_of(message: &Value) -> i64 {
     message.get("id").and_then(Value::as_i64).unwrap_or(0)
@@ -145,14 +89,6 @@ fn page_text(title: &str, shaped: &[Value], footer: Option<String>) -> String {
     text
 }
 
-fn chat_schema() -> Value {
-    json!({
-        "type": "string",
-        "description": "The chat: \"saved\" for Saved Messages (the default), or a chat id.",
-        "default": "saved",
-    })
-}
-
 pub fn list_schema() -> Value {
     json!({
         "type": "object",
@@ -166,18 +102,21 @@ pub fn list_schema() -> Value {
 
 pub fn list_messages(args: &Value) -> Result<ToolOutput, ToolError> {
     let ctx = Ctx::active()?;
-    let target = resolve(&ctx, args)?;
+    let target = require(&ctx, args, Scope::Read)?;
     let limit = int_arg(args, "limit", 20, 1, 100)?;
     let page = older(&ctx, target.chat_id, 0, limit)?;
     let shaped = shaped_page(&ctx, &target, page, Detail::Summary);
     let older_cursor = shaped.first().and_then(|m| m.get("id")).cloned();
     let footer = older_cursor.as_ref().map(|id| {
-        format!("Older: read_history {{\"chat\": \"saved\", \"before_message_id\": {id}}}")
+        format!(
+            "Older: read_history {{\"chat\": {}, \"before_message_id\": {id}}}",
+            target.chat_ref()
+        )
     });
     Ok(ToolOutput {
         text: page_text(&target.title, &shaped, footer),
         data: json!({
-            "chat": {"id": target.chat_id, "title": target.title},
+            "chat": target.summary(),
             "messages": shaped,
             "older_cursor": older_cursor,
         }),
@@ -206,7 +145,7 @@ pub fn read_history(args: &Value) -> Result<ToolOutput, ToolError> {
         ));
     }
     let ctx = Ctx::active()?;
-    let target = resolve(&ctx, args)?;
+    let target = require(&ctx, args, Scope::Read)?;
     let limit = int_arg(args, "limit", 50, 1, 99)?;
     let page = if after != 0 {
         newer(&ctx, target.chat_id, after, limit)?
@@ -238,7 +177,7 @@ pub fn read_history(args: &Value) -> Result<ToolOutput, ToolError> {
     Ok(ToolOutput {
         text: page_text(&target.title, &shaped, Some(footer.join(" · "))),
         data: json!({
-            "chat": {"id": target.chat_id, "title": target.title},
+            "chat": target.summary(),
             "messages": shaped,
             "older_cursor": older_cursor,
             "newer_cursor": newer_cursor,
@@ -252,7 +191,8 @@ pub fn search_schema() -> Value {
         "properties": {
             "chat": chat_schema(),
             "query": {"type": "string", "minLength": 1},
-            "before_message_id": {"type": "integer", "description": "The next_cursor of a previous search."},
+            "before_message_id": {"type": "integer", "description": "In one chat: the next_cursor of a previous search."},
+            "cursor": {"type": "string", "description": "Across chats: the next_cursor of a previous search."},
             "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20},
         },
         "required": ["query"],
@@ -270,18 +210,35 @@ pub fn search_messages(args: &Value) -> Result<ToolOutput, ToolError> {
             ToolError::new("query is required, e.g. {\"chat\": \"saved\", \"query\": \"invoice\"}.")
         })?;
     let ctx = Ctx::active()?;
-    let target = resolve(&ctx, args)?;
     let limit = int_arg(args, "limit", 20, 1, 100)?;
+    if args.get("chat").is_none_or(Value::is_null) {
+        return search_everywhere(&ctx, query, args, limit);
+    }
+    let target = require(&ctx, args, Scope::Read)?;
     let from = int_arg(args, "before_message_id", 0, 0, i64::MAX)?;
-    let answer = ctx.call(json!({
-        "@type": "searchSavedMessages",
-        "saved_messages_topic_id": 0,
-        "tag": null,
-        "query": query,
-        "from_message_id": from,
-        "offset": 0,
-        "limit": limit,
-    }))?;
+    let answer = if target.class == ChatClass::Saved {
+        ctx.call(json!({
+            "@type": "searchSavedMessages",
+            "saved_messages_topic_id": 0,
+            "tag": null,
+            "query": query,
+            "from_message_id": from,
+            "offset": 0,
+            "limit": limit,
+        }))?
+    } else {
+        ctx.call(json!({
+            "@type": "searchChatMessages",
+            "chat_id": target.chat_id,
+            "topic_id": null,
+            "query": query,
+            "sender_id": null,
+            "from_message_id": from,
+            "offset": 0,
+            "limit": limit,
+            "filter": null,
+        }))?
+    };
     let total = answer
         .get("total_count")
         .and_then(Value::as_i64)
@@ -314,8 +271,123 @@ pub fn search_messages(args: &Value) -> Result<ToolOutput, ToolError> {
     Ok(ToolOutput {
         text,
         data: json!({
-            "chat": {"id": target.chat_id, "title": target.title},
+            "chat": target.summary(),
             "total_count": total,
+            "messages": shaped,
+            "next_cursor": next,
+        }),
+    })
+}
+
+/// The `searchMessages` offset that continues after `message`:
+/// "date,chat_id,server_message_id". TDLib message ids are server ids
+/// shifted left by 20; a message not yet on the server has no place in it.
+fn cursor_after(message: &Value, chat_id: i64) -> Option<String> {
+    let id = message.get("id").and_then(Value::as_i64)?;
+    if id & 0xF_FFFF != 0 {
+        return None;
+    }
+    let date = message.get("date").and_then(Value::as_i64).unwrap_or(0);
+    Some(format!("{date},{chat_id},{}", id >> 20))
+}
+
+/// Search every chat, keeping only matches in granted chats.
+fn search_everywhere(
+    ctx: &Ctx,
+    query: &str,
+    args: &Value,
+    limit: i64,
+) -> Result<ToolOutput, ToolError> {
+    let me = super::target::my_user_id(ctx)?;
+    let mut offset = args
+        .get("cursor")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let mut chats: std::collections::HashMap<i64, Option<Target>> = Default::default();
+    let mut names = Names::new(ctx);
+    let mut shaped = Vec::new();
+    let mut next = None;
+    let mut last_kept = None;
+    // Matches in chats that are not granted are dropped, so keep paging
+    // until the page is full, rather than hand back an empty page.
+    for _ in 0..SEARCH_PAGES {
+        let answer = ctx.call(json!({
+            "@type": "searchMessages",
+            "chat_list": null,
+            "query": query,
+            "offset": offset,
+            "limit": TD_PAGE,
+            "filter": null,
+            "chat_type_filter": null,
+            "min_date": 0,
+            "max_date": 0,
+        }))?;
+        let found = messages::messages_of(&answer);
+        let page_len = found.len();
+        let mut taken = 0usize;
+        for message in found {
+            taken += 1;
+            let chat_id = message.get("chat_id").and_then(Value::as_i64).unwrap_or(0);
+            if let std::collections::hash_map::Entry::Vacant(slot) = chats.entry(chat_id) {
+                slot.insert(super::target::granted(ctx, chat_id, me)?);
+            }
+            let Some(Some(target)) = chats.get(&chat_id) else {
+                continue;
+            };
+            let mut one = messages::shape(&message, me, Detail::Summary, &mut names);
+            if let Some(fields) = one.as_object_mut() {
+                fields.insert("chat".into(), target.summary());
+            }
+            shaped.push(one);
+            if let Some(cursor) = cursor_after(&message, chat_id) {
+                last_kept = Some(cursor);
+            }
+            if shaped.len() as i64 >= limit {
+                break;
+            }
+        }
+        next = answer
+            .get("next_offset")
+            .and_then(Value::as_str)
+            .filter(|next| !next.is_empty())
+            .map(str::to_string);
+        if shaped.len() as i64 >= limit {
+            // Stopped inside the page: the rest of it would be skipped by
+            // TDLib's cursor, so continue from the last message kept.
+            if taken < page_len {
+                next = last_kept.clone();
+            }
+            break;
+        }
+        match &next {
+            Some(cursor) => offset = cursor.clone(),
+            None => break,
+        }
+    }
+    let mut text = format!(
+        "{} match(es) for \"{query}\" in granted chats, newest first.\n",
+        shaped.len()
+    );
+    for message in &shaped {
+        let title = message
+            .get("chat")
+            .and_then(|c| c.get("title"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        text.push_str(&format!("{title} · {}\n", messages::line(message)));
+    }
+    match &next {
+        Some(cursor) if shaped.is_empty() => text.push_str(&format!(
+            "No matches in granted chats among the newest results. Older messages may still match: pass \"cursor\": \"{cursor}\" to look further back."
+        )),
+        Some(cursor) => text.push_str(&format!("More: pass \"cursor\": \"{cursor}\"")),
+        None if shaped.is_empty() => text.push_str("Nothing found in granted chats. Try fewer or different words."),
+        None => text.push_str("That is every match in granted chats."),
+    }
+    Ok(ToolOutput {
+        text,
+        data: json!({
             "messages": shaped,
             "next_cursor": next,
         }),
@@ -342,7 +414,7 @@ pub fn get_message(args: &Value) -> Result<ToolOutput, ToolError> {
         ));
     }
     let ctx = Ctx::active()?;
-    let target = resolve(&ctx, args)?;
+    let target = require(&ctx, args, Scope::Read)?;
     let message = ctx
         .call(json!({"@type": "getMessage", "chat_id": target.chat_id, "message_id": message_id}))
         .map_err(|error| match error {
@@ -358,4 +430,17 @@ pub fn get_message(args: &Value) -> Result<ToolOutput, ToolError> {
         text: messages::line(&shaped),
         data: shaped,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn search_cursors_carry_server_message_ids() {
+        let message = serde_json::json!({"id": 5i64 << 20, "date": 1_700_000_000});
+        assert_eq!(
+            super::cursor_after(&message, -100),
+            Some("1700000000,-100,5".to_string())
+        );
+        assert_eq!(super::cursor_after(&serde_json::json!({"id": 7}), 1), None);
+    }
 }

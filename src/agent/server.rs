@@ -11,7 +11,7 @@ use super::access;
 use interprocess::local_socket::{Stream, prelude::*};
 use serde_json::{Value, json};
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -42,23 +42,31 @@ pub mod code {
     pub const NO_METHOD: i64 = -32601;
 }
 
+/// Authenticated agent connections.
 static CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
+/// Connections still waiting to authenticate. A Windows pipe has no read
+/// timeout, so without a cap a client could park any number of threads.
+static UNAUTHENTICATED: AtomicUsize = AtomicUsize::new(0);
+const MAX_UNAUTHENTICATED: usize = 8;
+/// The `auth` line is short; anything longer is not one.
+const MAX_AUTH_LINE: usize = 4096;
 
-struct ConnectionSlot;
+/// One place in a bounded count, given back on drop.
+struct Slot(&'static AtomicUsize);
 
-impl ConnectionSlot {
-    fn take() -> Option<Self> {
-        if CONNECTIONS.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
-            CONNECTIONS.fetch_sub(1, Ordering::SeqCst);
+impl Slot {
+    fn take(count: &'static AtomicUsize, max: usize) -> Option<Self> {
+        if count.fetch_add(1, Ordering::SeqCst) >= max {
+            count.fetch_sub(1, Ordering::SeqCst);
             return None;
         }
-        Some(Self)
+        Some(Self(count))
     }
 }
 
-impl Drop for ConnectionSlot {
+impl Drop for Slot {
     fn drop(&mut self) {
-        CONNECTIONS.fetch_sub(1, Ordering::SeqCst);
+        self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -94,18 +102,24 @@ pub(super) fn same_user(stream: &Stream) -> bool {
         .is_some_and(|uid| uid == me)
 }
 
+/// The other end of the pipe runs as this user (Windows). Quill's own pipe
+/// admits only this user already (`pipe_security`); the bridge needs the
+/// check because another user could have created the pipe name first.
 #[cfg(windows)]
-pub(super) fn same_user(_stream: &Stream) -> bool {
-    // The pipe's DACL admits only this user (`pipe_security`).
-    true
+pub(super) fn same_user(stream: &Stream) -> bool {
+    stream
+        .peer_creds()
+        .ok()
+        .and_then(|creds| creds.pid())
+        .is_some_and(crate::pipe_security::is_current_user_process)
 }
 
 /// Read one line, unbuffered, so nothing past it is consumed.
-pub(super) fn read_line_raw(stream: &Stream) -> Option<String> {
+pub(super) fn read_line_raw(stream: &Stream, max: usize) -> Option<String> {
     let mut line = Vec::new();
     let mut byte = [0u8; 1];
     let mut reader = stream;
-    while line.len() < MAX_LINE_BYTES {
+    while line.len() < max {
         match reader.read(&mut byte) {
             Ok(1) => {
                 let [b] = byte;
@@ -120,8 +134,13 @@ pub(super) fn read_line_raw(stream: &Stream) -> Option<String> {
     None
 }
 
-fn authenticate(stream: &Stream) -> Result<Value, (Value, i64, &'static str)> {
-    let line = read_line_raw(stream).ok_or((Value::Null, code::UNAUTHORIZED, "Expected auth."))?;
+/// Check the `auth` request; returns its id and the agent's name.
+fn authenticate(stream: &Stream) -> Result<(Value, String), (Value, i64, &'static str)> {
+    let line = read_line_raw(stream, MAX_AUTH_LINE).ok_or((
+        Value::Null,
+        code::UNAUTHORIZED,
+        "Expected auth.",
+    ))?;
     let request: Value =
         serde_json::from_str(&line).map_err(|_| (Value::Null, code::PARSE, "Expected auth."))?;
     let id = request.get("id").cloned().unwrap_or(Value::Null);
@@ -139,7 +158,19 @@ fn authenticate(stream: &Stream) -> Result<Value, (Value, i64, &'static str)> {
             "Wrong or stale token. Quill makes a new one on every launch; reconnect to read it again.",
         ));
     }
-    Ok(id)
+    let agent = request
+        .get("params")
+        .and_then(|p| p.get("client"))
+        .and_then(Value::as_str)
+        .map(|name| {
+            name.chars()
+                .filter(|c| !c.is_control())
+                .take(60)
+                .collect::<String>()
+        })
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| "An agent".to_string());
+    Ok((id, agent))
 }
 
 /// Serve one agent connection whose header line was already read.
@@ -155,10 +186,13 @@ pub fn serve(stream: Stream) {
     if !same_user(&stream) {
         return;
     }
+    let Some(waiting) = Slot::take(&UNAUTHENTICATED, MAX_UNAUTHENTICATED) else {
+        return;
+    };
     let generation = access::generation();
     let _ = stream.set_recv_timeout(Some(AUTH_TIMEOUT));
-    let auth_id = match authenticate(&stream) {
-        Ok(id) => id,
+    let (auth_id, agent) = match authenticate(&stream) {
+        Ok(found) => found,
         Err((id, code, message)) => {
             let _ = write_line(&mut out, &error_line(&id, code, message));
             return;
@@ -166,7 +200,8 @@ pub fn serve(stream: Stream) {
     };
     // Taken after auth, so a client that never authenticates (a Windows pipe
     // has no read timeout) cannot hold a slot.
-    let Some(_slot) = ConnectionSlot::take() else {
+    drop(waiting);
+    let Some(_slot) = Slot::take(&CONNECTIONS, MAX_CONNECTIONS) else {
         let _ = write_line(
             &mut out,
             &error_line(
@@ -189,6 +224,9 @@ pub fn serve(stream: Stream) {
     let (recv, send) = stream.split();
     let send = Arc::new(Mutex::new(send));
     let in_flight = Arc::new(AtomicUsize::new(0));
+    let watching = Arc::new(AtomicU64::new(0));
+    // A subscription's watcher stops with its connection.
+    let _stop_watching = StopOnDrop(watching.clone());
     let mut reader = BufReader::new(recv);
     let mut line = Vec::new();
     loop {
@@ -230,9 +268,94 @@ pub fn serve(stream: Stream) {
             );
             return;
         }
-        dispatch(text, &send, &in_flight, generation);
+        dispatch(text, &send, &in_flight, &watching, generation, &agent);
     }
 }
+
+/// The connection's current watcher (0 = none). A watcher runs only while
+/// this holds its own number, so an unsubscribe followed by a subscribe
+/// retires the old one instead of running two.
+struct StopOnDrop(Arc<AtomicU64>);
+
+impl Drop for StopOnDrop {
+    fn drop(&mut self) {
+        self.0.store(0, Ordering::SeqCst);
+    }
+}
+
+static NEXT_WATCHER: AtomicU64 = AtomicU64::new(0);
+
+/// `resources/subscribe` and `resources/unsubscribe`: only `quill://unread`
+/// can be watched. While subscribed, a watcher thread sends
+/// `notifications/resources/updated` whenever a message arrives in a granted
+/// chat.
+fn subscription<W: Write + Send + 'static>(
+    request: &Value,
+    id: &Value,
+    send: &Arc<Mutex<W>>,
+    watching: &Arc<AtomicU64>,
+    generation: u64,
+) -> String {
+    let uri = request
+        .get("params")
+        .and_then(|p| p.get("uri"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if uri != super::guide::UNREAD_URI {
+        return error_line(
+            id,
+            code::INVALID,
+            "Only quill://unread can be subscribed to. For one chat, call wait_for_message.",
+        );
+    }
+    let subscribe = request.get("method").and_then(Value::as_str) == Some("resources/subscribe");
+    if !subscribe {
+        watching.store(0, Ordering::SeqCst);
+        return result_line(id, json!({}));
+    }
+    let mine = NEXT_WATCHER
+        .fetch_add(1, Ordering::SeqCst)
+        .wrapping_add(1)
+        .max(1);
+    if watching
+        .compare_exchange(0, mine, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+    {
+        let send = send.clone();
+        let flag = watching.clone();
+        let started = crate::thread_guard::spawn_guarded("quill-agent-watch", move || {
+            let note = json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/resources/updated",
+                "params": {"uri": super::guide::UNREAD_URI},
+            })
+            .to_string();
+            let mut since = super::events::latest_seq();
+            while flag.load(Ordering::SeqCst) == mine && still_on(generation) {
+                match super::tools::granted_message_arrived(&mut since, WATCH_WAIT) {
+                    Ok(true) => {
+                        let mut out = crate::locks::lock_or_recover(&send);
+                        if write_line(&mut *out, &note).is_err() {
+                            break;
+                        }
+                    }
+                    Ok(false) => {}
+                    // Signed out or not connected yet: look again later.
+                    Err(_) => std::thread::sleep(WATCH_WAIT),
+                }
+            }
+            let _ = flag.compare_exchange(mine, 0, Ordering::SeqCst, Ordering::SeqCst);
+        });
+        if started.is_err() {
+            watching.store(0, Ordering::SeqCst);
+            return error_line(id, code::INTERNAL, "Quill could not start watching. Retry.");
+        }
+    }
+    result_line(id, json!({}))
+}
+
+/// How long a watcher waits before it checks the switch again.
+const WATCH_WAIT: Duration = Duration::from_secs(10);
 
 /// Agent access is on and has not been turned off since `generation`.
 fn still_on(generation: u64) -> bool {
@@ -275,7 +398,9 @@ fn dispatch<W: Write + Send + 'static>(
     text: String,
     send: &Arc<Mutex<W>>,
     in_flight: &Arc<AtomicUsize>,
+    watching: &Arc<AtomicU64>,
     generation: u64,
+    agent: &str,
 ) {
     let request: Value = match serde_json::from_str(&text) {
         Ok(request) => request,
@@ -291,6 +416,15 @@ fn dispatch<W: Write + Send + 'static>(
     let id = request.get("id").cloned().unwrap_or(Value::Null);
     // A notification gets no answer.
     if request.get("id").is_none() {
+        return;
+    }
+    if matches!(
+        request.get("method").and_then(Value::as_str),
+        Some("resources/subscribe" | "resources/unsubscribe")
+    ) {
+        let line = subscription(&request, &id, send, watching, generation);
+        let mut out = crate::locks::lock_or_recover(send);
+        let _ = write_line(&mut *out, &line);
         return;
     }
     if in_flight.fetch_add(1, Ordering::SeqCst) >= MAX_IN_FLIGHT {
@@ -313,13 +447,14 @@ fn dispatch<W: Write + Send + 'static>(
         generation,
         line: None,
     };
+    let agent = agent.to_string();
     // A failed spawn drops the closure, and with it `reply`, which answers.
     let _ = crate::thread_guard::spawn_guarded("quill-agent-request", move || {
-        let _ = reply.line.insert(answer(&request, &reply.id));
+        let _ = reply.line.insert(answer(&request, &reply.id, &agent));
     });
 }
 
-fn answer(request: &Value, id: &Value) -> String {
+fn answer(request: &Value, id: &Value, agent: &str) -> String {
     let params = request.get("params").cloned().unwrap_or(Value::Null);
     match request.get("method").and_then(Value::as_str) {
         Some("ping") => result_line(id, json!({})),
@@ -331,13 +466,21 @@ fn answer(request: &Value, id: &Value) -> String {
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
-            result_line(id, super::tools::call(name, &arguments))
+            result_line(id, super::tools::call(name, &arguments, agent))
         }
         Some("resources/read") => {
             let uri = params
                 .get("uri")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
+            if uri == super::guide::UNREAD_URI {
+                return match super::tools::unread_resource() {
+                    Ok(result) => result_line(id, result),
+                    Err(super::tools::ToolError(message)) => {
+                        error_line(id, code::INTERNAL, &message)
+                    }
+                };
+            }
             match super::guide::read_resource(uri) {
                 Some(result) => result_line(id, result),
                 None => error_line(id, code::INVALID, "Unknown resource. Call resources/list."),

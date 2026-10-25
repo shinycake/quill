@@ -76,7 +76,16 @@ pub fn client_for(account: &AccountKey) -> Option<Client> {
 }
 
 /// Send `request` to `client` and wait for its answer.
-pub fn call(client: &Client, mut request: Value) -> Result<Value, TdError> {
+pub fn call(client: &Client, request: Value) -> Result<Value, TdError> {
+    call_waiting(client, request, CALL_TIMEOUT)
+}
+
+/// [`call`] with a timeout of its own, for slow requests (downloads).
+pub fn call_waiting(
+    client: &Client,
+    mut request: Value,
+    timeout: Duration,
+) -> Result<Value, TdError> {
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
     let Some(object) = request.as_object_mut() else {
         return Err(TdError::Send);
@@ -97,7 +106,7 @@ pub fn call(client: &Client, mut request: Value) -> Result<Value, TdError> {
         forget(id);
         return Err(TdError::Send);
     }
-    let answer = rx.recv_timeout(CALL_TIMEOUT);
+    let answer = rx.recv_timeout(timeout);
     forget(id);
     let answer = answer.map_err(|_| TdError::Timeout)?;
     if answer.get("@type").and_then(Value::as_str) == Some("error") {

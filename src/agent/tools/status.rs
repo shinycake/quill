@@ -16,16 +16,20 @@ pub fn run(_args: &Value) -> Result<ToolOutput, ToolError> {
         .and_then(Value::as_str)
         .map(str::to_string);
     let tools = super::names();
-    let grants = json!([{"chat": "Saved Messages", "chat_ref": "saved", "scope": "read"}]);
+    let grants = crate::agent::grants::for_account(&ctx.account);
     let mut text = format!("Quill {} is signed in as {name}", crate::version::APP);
     if let Some(username) = &username {
         text.push_str(&format!(" (@{username})"));
     }
     text.push_str(&format!(" [account {}].\n", ctx.account.0));
-    text.push_str("Granted chats: Saved Messages (read). Other chats are not available to agents in this version.\n");
+    text.push_str("Grants (read_write also allows sending, once write tools ship):\n");
+    for line in grants.summary_lines() {
+        text.push_str(&format!("  {line}\n"));
+    }
+    text.push_str("A chat that is not granted can be asked for with request_access.\n");
     text.push_str(&format!("Tools: {}.\n", tools.join(", ")));
     text.push_str("UI driver: not available in this version.\n");
-    text.push_str("Next: list_messages {\"chat\": \"saved\"} shows the latest Saved Messages.");
+    text.push_str("Next: list_unread to catch up, or list_chats to find a chat.");
     Ok(ToolOutput {
         text,
         data: json!({
@@ -36,7 +40,7 @@ pub fn run(_args: &Value) -> Result<ToolOutput, ToolError> {
                 "username": username,
                 "user_id": me.get("id"),
             },
-            "grants": grants,
+            "grants": grants.describe(),
             "tools": tools,
             "ui_driver": {"available": false, "active": false},
         }),
