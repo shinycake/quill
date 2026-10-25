@@ -14,11 +14,13 @@ mod box_state;
 mod diff;
 mod limit;
 pub mod prefs;
+mod preview;
 mod style;
 
 pub use box_state::*;
 pub use diff::*;
 pub use limit::*;
+pub use preview::*;
 pub use style::*;
 
 use std::sync::atomic::{AtomicU64, Ordering};
