@@ -70,6 +70,13 @@ pub(crate) fn set_visible(window: &Window, visible: bool) -> bool {
     platform::set_visible(window, visible)
 }
 
+/// Whether the window is minimised (iconified). Windows, macOS and X11
+/// read it from the window; Wayland has no such state for a client to read,
+/// so there it is always `false`.
+pub(crate) fn is_minimised(window: &Window) -> bool {
+    platform::is_minimised(window)
+}
+
 /// Keep the window above every other window, or stop.
 pub(crate) fn set_always_on_top(window: &Window, on: bool) -> bool {
     platform::set_always_on_top(window, on)
@@ -160,6 +167,11 @@ mod platform {
         }
     }
 
+    pub(super) fn is_minimised(window: &Window) -> bool {
+        // SAFETY: as in `set_visible`; a read of the window's state.
+        hwnd(window).is_some_and(|hwnd| unsafe { IsIconic(hwnd) != 0 })
+    }
+
     pub(super) fn set_skip_taskbar(window: &Window, skip: bool) -> bool {
         use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
         use windows::Win32::UI::Shell::{ITaskbarList, TaskbarList};
@@ -230,6 +242,23 @@ mod platform {
             .ok()
             .and_then(|cookie| cookie.reply().ok())
             .is_some_and(|attributes| attributes.map_state == MapState::VIEWABLE)
+    }
+
+    /// ICCCM `WM_STATE` is `IconicState` (3) once the window manager
+    /// iconified the window. Wayland has no window id here: `false`.
+    pub(super) fn is_minimised(window: &Window) -> bool {
+        const ICONIC_STATE: u32 = 3;
+        let (Some(x_window), Some((conn, _))) = (x_window(window), connect()) else {
+            return false;
+        };
+        let Some(wm_state) = atom(&conn, "WM_STATE") else {
+            return false;
+        };
+        conn.get_property(false, x_window, wm_state, wm_state, 0, 1)
+            .ok()
+            .and_then(|cookie| cookie.reply().ok())
+            .and_then(|reply| reply.value32().and_then(|mut values| values.next()))
+            == Some(ICONIC_STATE)
     }
 
     pub(super) fn set_visible(window: &Window, visible: bool) -> bool {
@@ -363,6 +392,12 @@ mod platform {
         })
     }
 
+    pub(super) fn is_minimised(window: &Window) -> bool {
+        let mut minimised = false;
+        with_window(window, |native| minimised = native.isMiniaturized());
+        minimised
+    }
+
     pub(super) fn set_always_on_top(window: &Window, on: bool) -> bool {
         with_window(window, |native| {
             native.setLevel(if on {
@@ -394,6 +429,9 @@ mod platform {
     use super::*;
 
     pub(super) fn set_visible(_window: &Window, _visible: bool) -> bool {
+        false
+    }
+    pub(super) fn is_minimised(_window: &Window) -> bool {
         false
     }
     pub(super) fn set_always_on_top(_window: &Window, _on: bool) -> bool {

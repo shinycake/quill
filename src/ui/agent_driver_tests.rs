@@ -761,3 +761,42 @@ fn a_link_resolved_after_the_step_opens_a_granted_chat_only(cx: &mut TestAppCont
             .update(cx, |input, cx| input.set_value("", window, cx));
     });
 }
+
+#[gpui_kit::test]
+fn a_hidden_window_says_so_in_its_state_and_its_missing_frame(cx: &mut TestAppContext) {
+    use gpui_kit::WindowVisibility;
+    use quill::agent::ui_driver::bridge::WindowState;
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    turn_on();
+    grant(11, Scope::ReadWrite);
+    let _presence = activity::connect("Test agent");
+    settle(vcx);
+    let state = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| match drive(
+        app,
+        vcx,
+        UiCommand::State,
+    ) {
+        Ok(UiReply::State(state)) => state.window,
+        other => panic!("expected a state, got {other:?}"),
+    };
+    assert_eq!(state(&app, vcx), WindowState::Visible);
+
+    // Behind other windows: the platform stops asking for frames.
+    vcx.simulate_visibility_change(WindowVisibility::Hidden);
+    assert_eq!(state(&app, vcx), WindowState::Hidden);
+
+    // A read or a click would wait for a frame that never comes: each
+    // says at once that the window is hidden, and nothing is injected.
+    let reply = drive(&app, vcx, UiCommand::ReadTree);
+    assert!(refused(&reply, "is hidden"), "{reply:?}");
+    let reply = drive(&app, vcx, click(Target::Point { x: 600.0, y: 400.0 }));
+    assert!(refused(&reply, "is hidden"), "{reply:?}");
+    assert!(activity::recent(&AccountKey::primary()).is_empty());
+
+    // Shown again, the driver reads the window.
+    vcx.simulate_visibility_change(WindowVisibility::Visible);
+    assert_eq!(state(&app, vcx), WindowState::Visible);
+    read_tree(&app, vcx);
+}

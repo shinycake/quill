@@ -110,6 +110,35 @@ pub struct UiRequest {
     pub shot: Option<ShotOptions>,
 }
 
+/// Whether Quill's main window can draw the frames the driver waits for, as
+/// the UI reads it from the window (`QuillApp::driver_window_state`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WindowState {
+    /// At least part of it is on screen.
+    #[default]
+    Visible,
+    /// Shown but not presented: covered by other windows, on another
+    /// desktop or Space, or on a sleeping display (as far as the platform
+    /// tells; see GPUI's `WindowVisibility`).
+    Hidden,
+    /// Minimised to the Dock or taskbar.
+    Minimised,
+    /// No main window answers.
+    NotOpen,
+}
+
+impl WindowState {
+    /// The value `quill_status` reports.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WindowState::Visible => "visible",
+            WindowState::Hidden => "hidden",
+            WindowState::Minimised => "minimised",
+            WindowState::NotOpen => "not open",
+        }
+    }
+}
+
 /// What `UiCommand::State` answers.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct UiState {
@@ -117,6 +146,7 @@ pub struct UiState {
     pub window_active: bool,
     /// The tree is being built every frame right now.
     pub forced: bool,
+    pub window: WindowState,
 }
 
 /// A message the composer was told to send while an agent drove: the UI
@@ -355,7 +385,7 @@ pub fn paused() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{BridgeError, UiCommand, UiReply, UiState, post, send, take, waiting};
+    use super::{BridgeError, UiCommand, UiReply, UiState, WindowState, post, send, take, waiting};
     use std::time::Duration;
 
     /// The queue is process-wide and turning the switch off drains it, so
@@ -382,6 +412,7 @@ mod tests {
             open_chat: Some(7),
             window_active: true,
             forced: false,
+            window: WindowState::Hidden,
         }));
         let reply = agent.join().unwrap_or_else(|_| panic!("agent thread"));
         assert_eq!(
@@ -390,6 +421,7 @@ mod tests {
                 open_chat: Some(7),
                 window_active: true,
                 forced: false,
+                window: WindowState::Hidden,
             }))
         );
         assert_eq!(waiting(), 0);

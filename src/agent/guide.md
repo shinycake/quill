@@ -227,10 +227,16 @@ grants, pacing and confirmations.
 
 The user turns it on separately: "Let agents drive Quill's window" in
 Settings > Advanced > Agent access (off by default). `quill_status` shows
-`ui_driver {available, active, paused, stopped, resumes_when}`: `active`
-while you are driving, `paused` while the user has taken control,
+`ui_driver {available, active, paused, stopped, resumes_when, window}`:
+`active` while you are driving, `paused` while the user has taken control,
 `stopped` after the user pressed Stop, and `resumes_when` says what lifts
-a pause or a Stop.
+a pause or a Stop. `window` is `visible`, `hidden` (behind other windows,
+on another desktop, on a sleeping display), `minimised` or `not open`
+(null while the driver is off, paused or stopped). Quill's window draws
+nothing unless it is `visible`, so every UI tool then answers at once that
+it is hidden, minimised or not open: ask the user to bring it back, and use
+the chat tools meanwhile. Windows and some Linux desktops keep drawing a
+covered window and report it `visible`.
 
 | Tool | Use it to |
 | --- | --- |

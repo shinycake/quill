@@ -200,7 +200,8 @@ fn capture_frame(
             if !now.same_as(&before) {
                 return Err(surface::changed_refusal(&before, &now));
             }
-            let tree = tree.ok_or_else(policy::no_frame)?;
+            let tree =
+                tree.ok_or_else(|| policy::no_frame(super::agent_driver::window_state(window)))?;
             if pixels_read {
                 app.log_screenshot(agent, &now, options);
             }

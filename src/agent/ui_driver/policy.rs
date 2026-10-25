@@ -3,6 +3,7 @@
 //! `super::surface` (computed by the UI from its own state), the action
 //! guard in `super::guard`.
 
+use super::bridge::WindowState;
 use super::keys::{self, KeyChord};
 
 /// The switches: Agent access, "Let agents drive Quill's window", the
@@ -52,9 +53,25 @@ pub fn tab_in_text() -> String {
     "text has a tab character; Tab moves the focus, so it is not typed. Use spaces, or press_keys {\"keys\": \"tab\"} to move the focus.".into()
 }
 
-/// The window drew no new frame in time.
-pub fn no_frame() -> String {
-    "Quill's window did not redraw in time. Make sure it is open and visible, then retry.".into()
+/// The window drew no new frame in time, worded for the state the window
+/// is in (`quill_status` reports the same value as `ui_driver.window`).
+pub fn no_frame(window: WindowState) -> String {
+    const CHAT_TOOLS: &str =
+        "The chat tools (list_chats, read_history, send_message...) work meanwhile.";
+    match window {
+        WindowState::Visible => {
+            "Quill's window did not redraw in time. Retry; if it keeps happening, ask the user to bring Quill's window to the front.".into()
+        }
+        WindowState::Hidden => format!(
+            "Quill's window is hidden (behind other windows, on another desktop or on a sleeping display), so it draws no frames and agents can't drive it. Ask the user to bring it to the front, then retry. {CHAT_TOOLS}"
+        ),
+        WindowState::Minimised => format!(
+            "Quill's window is minimised, so it draws no frames and agents can't drive it. Ask the user to restore it, then retry. {CHAT_TOOLS}"
+        ),
+        WindowState::NotOpen => format!(
+            "Quill's window is not open, so there is nothing to drive. Ask the user to open it, then retry. {CHAT_TOOLS}"
+        ),
+    }
 }
 
 /// The window closed before the command ran.
@@ -118,7 +135,8 @@ pub fn grants_changed() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::chord_refusal;
+    use super::{chord_refusal, no_frame};
+    use crate::agent::ui_driver::bridge::WindowState;
     use crate::agent::ui_driver::keys::parse_chord;
 
     #[test]
@@ -133,5 +151,13 @@ mod tests {
         assert_eq!(chord_refusal(&space, true), None);
         assert_eq!(chord_refusal(&parse_chord("tab").unwrap(), false), None);
         assert_eq!(chord_refusal(&parse_chord("cmd-k").unwrap(), false), None);
+    }
+
+    #[test]
+    fn a_missing_frame_says_what_the_window_is_doing() {
+        assert!(no_frame(WindowState::Hidden).contains("is hidden"));
+        assert!(no_frame(WindowState::Minimised).contains("is minimised"));
+        assert!(no_frame(WindowState::NotOpen).contains("is not open"));
+        assert!(no_frame(WindowState::Visible).contains("did not redraw"));
     }
 }

@@ -696,7 +696,7 @@ while the element stays on screen. Input tools answer with the focused
 node, the nodes that appeared, `refusals` and, for a routed send, `sent`.
 `press_keys` presses chords and never types characters.
 `quill_status` reports `ui_driver {available, active, paused, stopped}`
-(`stopped` came with step 2's Stop).
+(`stopped` came with step 2's Stop, `window` with the live-test fixes).
 
 ### Cross-platform
 
@@ -705,8 +705,9 @@ input handler work the same on macOS, Linux and Windows; nothing here is
 platform code. Out of reach everywhere: native menus and the macOS menu
 bar (those need `cx.dispatch_action`, a later tool), file and folder
 pickers, the IME, and system dialogs. A window that draws no frames
-(hidden, minimised, on some platforms occluded) answers "did not redraw"
-after 1.5 seconds.
+(hidden, minimised, on some platforms occluded) answered "did not redraw"
+after 1.5 seconds; since the live-test fixes it answers at once with the
+window's state (below).
 
 ### Tests
 
@@ -1371,3 +1372,46 @@ Test: `the_clicked_message_box_is_the_focused_node`
 click's reply, the reply after `type_text` and a fresh `read_ui_tree` all
 name it as `focus` with the `focused` state, and that blurring the window
 drops it. It fails without the `gpui-pre` change (`focus` is `None`).
+
+### The window's state is reported
+
+With Quill's window behind other windows, every UI call answered "Quill's
+window did not redraw in time. Make sure it is open and visible", while
+`quill_status` gave no hint. On macOS an occluded window gets no frames
+(the display link stops; GPUI's `WindowVisibility` is `Hidden`), so the
+driver's wait for a frame (`wait_for_tree`, 90 polls of 16 ms) always ran
+out, and nothing told the agent why.
+
+One reading, `agent_driver::window_state` (`src/ui/agent_driver.rs`),
+decides the state from the window itself: `minimised` when
+`window_control::is_minimised` says so (`IsIconic` on Windows,
+`isMiniaturized` on macOS, ICCCM `WM_STATE` = `IconicState` on X11, never
+on Wayland, where a client cannot read it), otherwise `visible` or
+`hidden` from `Window::is_visible`. Each platform reports visibility as far
+as it can (GPUI's own notes: Windows and compositing X11 window managers
+keep a covered window visible, and draw it). It feeds three places:
+
+- `UiCommand::State` carries it as `UiState::window`, and `quill_status`
+  asks for it (1.5 s; no answer means no window: `not open`) and reports
+  `ui_driver.window` as `visible`, `hidden`, `minimised` or `not open`,
+  with a line in the text when it is not visible. It is null while the UI
+  answers no driver command (the driver off, paused or stopped), so the
+  status never reveals more than a command would.
+- Every other command answers at once when the window is not visible,
+  before any frame is waited for or input injected
+  (`policy::no_frame(state)`: "Quill's window is hidden (behind other
+  windows, on another desktop or on a sleeping display), so it draws no
+  frames and agents can't drive it. Ask the user to bring it to the front,
+  then retry."), since GPUI documents that the platform requests no frames
+  for a hidden window.
+- A frame that still does not come (the window is visible but stuck, or
+  went away mid-command) answers with the state read at that moment; a
+  window that is gone is `not open`.
+
+Tests: `a_hidden_window_says_so_in_its_state_and_its_missing_frame`
+(`agent_driver_tests.rs`) hides the test window
+(`simulate_visibility_change`): `State` says `hidden`, a read and a click
+are refused with "is hidden" and nothing is logged, and shown again the
+state is `visible` and the tree reads. `policy` tests the wording for each
+state. The minimised readings are platform calls the test platform does
+not have; none of them ran, and only the macOS one was compiled here.

@@ -2,8 +2,28 @@
 
 use super::messages::user_name;
 use super::{Ctx, ToolError, ToolOutput};
-use crate::agent::ui_driver::takeover;
+use crate::agent::ui_driver::bridge::{self, BridgeError, UiCommand, UiReply, WindowState};
+use crate::agent::ui_driver::{policy, takeover};
 use serde_json::{Value, json};
+use std::time::Duration;
+
+/// How long `quill_status` waits for the window to say what state it is in.
+const WINDOW_WAIT: Duration = Duration::from_millis(1500);
+
+/// The main window's state as the UI reads it (`UiCommand::State`, the
+/// same reading the driver's missing-frame answer uses). `None` while the
+/// UI answers no driver command (Agent access or the driver off, a pause,
+/// Stop) or the queue is full; a UI that does not answer has no window.
+fn window_state() -> Option<WindowState> {
+    if policy::switch_refusal().is_some() {
+        return None;
+    }
+    match bridge::send(&super::current_agent(), UiCommand::State, WINDOW_WAIT) {
+        Ok(UiReply::State(state)) => Some(state.window),
+        Err(BridgeError::Timeout) => Some(WindowState::NotOpen),
+        Ok(_) | Err(BridgeError::Busy) => None,
+    }
+}
 
 pub fn run(_args: &Value) -> Result<ToolOutput, ToolError> {
     let ctx = Ctx::active()?;
@@ -43,6 +63,13 @@ pub fn run(_args: &Value) -> Result<ToolOutput, ToolError> {
         "UI driver: on (read_ui_tree, take_screenshot, click_element, type_text, press_keys, scroll_view, hover_element, open_menu). \
 Screenshots: one a second and 20 a minute, cut to your grants like the tree.\n"
     });
+    let window = window_state();
+    if let Some(state) = window.filter(|state| *state != WindowState::Visible) {
+        text.push_str(&format!(
+            "Quill's window is {}: it draws no frames, so the UI tools answer that it did not redraw until the user brings it back.\n",
+            state.as_str()
+        ));
+    }
     text.push_str("Next: list_unread to catch up, or list_chats to find a chat.");
     Ok(ToolOutput {
         text,
@@ -61,6 +88,9 @@ Screenshots: one a second and 20 a minute, cut to your grants like the tree.\n"
                 "active": driving,
                 "paused": paused,
                 "stopped": stopped,
+                // "visible", "hidden", "minimised" or "not open"; null while
+                // the driver is off, paused or stopped.
+                "window": window.map(WindowState::as_str),
                 // What lifts the hold; neither clears when the agent reconnects.
                 "resumes_when": if stopped {
                     Value::from("the user turns \"Let agents drive Quill's window\" off and on, or restarts Quill")

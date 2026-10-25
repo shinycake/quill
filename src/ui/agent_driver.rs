@@ -20,7 +20,9 @@ use super::app::QuillApp;
 use gpui_kit::*;
 use quill::agent::activity::{self, Action};
 use quill::agent::grants;
-use quill::agent::ui_driver::bridge::{self, Pending, Target, UiCommand, UiReply, UiSend, UiState};
+use quill::agent::ui_driver::bridge::{
+    self, Pending, Target, UiCommand, UiReply, UiSend, UiState, WindowState,
+};
 use quill::agent::ui_driver::guard;
 use quill::agent::ui_driver::policy;
 use quill::agent::ui_driver::surface::{self, Surface};
@@ -35,6 +37,33 @@ const FRAME_TRIES: u32 = 90;
 /// The agent task wakes this often while the tree is forced, to turn it
 /// off once the agent stops driving (`bridge::DRIVE_WINDOW`).
 pub(super) const FORCED_WAKE: Duration = Duration::from_secs(5);
+
+/// Whether the main window can draw the frames the driver waits for: the
+/// one reading behind `quill_status`'s `ui_driver.window` (through
+/// `UiCommand::State`) and the driver's missing-frame answer. Minimised is
+/// read from the window (`window_control::is_minimised`; never on Wayland,
+/// where a minimised window reads as hidden); hidden is GPUI's
+/// `WindowVisibility`, which each platform reports as far as it can (a
+/// covered window stays visible on Windows and under a compositing X11
+/// window manager, and draws there anyway).
+pub(super) fn window_state(window: &Window) -> WindowState {
+    if super::window_control::is_minimised(window) {
+        WindowState::Minimised
+    } else if window.is_visible() {
+        WindowState::Visible
+    } else {
+        WindowState::Hidden
+    }
+}
+
+/// The missing-frame answer for the window behind `app`; a window that is
+/// gone is not open.
+fn no_frame_in(app: &super::chat_window::ScopedApp, cx: &mut AsyncWindowContext) -> String {
+    policy::no_frame(
+        app.update_in(cx, |_, window, _| window_state(window))
+            .unwrap_or(WindowState::NotOpen),
+    )
+}
 
 impl QuillApp {
     /// Keeps the tree forced while an agent drives and starts every waiting
@@ -75,6 +104,7 @@ impl QuillApp {
                 open_chat: self.open_chat_id().map(|chat| chat.0),
                 window_active: window.is_window_active(),
                 forced: window.is_a11y_forced(),
+                window: window_state(window),
             }));
             return;
         }
@@ -82,6 +112,14 @@ impl QuillApp {
         // answers at once.
         if window.is_a11y_system_active() {
             pending.answer(UiReply::Refused(surface::screen_reader_active()));
+            return;
+        }
+        // A window the platform does not present gets no frames until it
+        // is shown again (GPUI's `WindowVisibility`): say so now instead of
+        // after the wait for a frame.
+        let state = window_state(window);
+        if state != WindowState::Visible {
+            pending.answer(UiReply::Refused(policy::no_frame(state)));
             return;
         }
         let surface = self.driver_surface();
@@ -459,7 +497,7 @@ async fn wait_for_frame(
         }
         cx.background_executor().timer(FRAME_WAIT).await;
     }
-    Err(policy::no_frame())
+    Err(no_frame_in(app, cx))
 }
 
 /// The surface and the first tree from a frame later than `after`, asking
@@ -489,7 +527,7 @@ async fn wait_for_tree(
         }
         cx.background_executor().timer(FRAME_WAIT).await;
     }
-    Err(policy::no_frame())
+    Err(no_frame_in(app, cx))
 }
 
 #[cfg(test)]
