@@ -383,6 +383,9 @@ a role and an id (Quill has about 375 roles and 850 labels today), with its
 AccessKit id, role, name, value, states, supported actions, children and
 bounds in window logical pixels. It is the tree a screen reader gets, so
 work that helps one helps the other, and no screenshot goes to a model.
+(Step 3 changed the last part: an agent can ask for a screenshot, cut by
+the same rules as the tree. The tree stays the way to find and target
+things.)
 
 GPUI builds that tree only while assistive technology is connected
 (`window.a11y.is_active()`). The vendored `gpui-pre` gains
@@ -929,3 +932,139 @@ from the window.
 - The typing badge needs the focused input to report selected bounds; an
   input that does not shows no badge (typing still works).
 - The connected strip still says "connected", not "driving".
+
+## Phase 5 step 3: screenshots
+
+Owner ask: after each step the agent gets back a screenshot and the
+updated tree, on all three platforms, and Quill's own threads can use it
+for visual verification. `take_screenshot {full_resolution?}` answers with
+the tree of the frame and a PNG; every input tool takes
+`"screenshot": true` (and `full_resolution`) and adds a PNG of the frame
+after the input to its usual answer. The image goes back as an MCP image
+block (`{"type":"image","data":<base64>,"mimeType":"image/png"}`) after the
+text block, and the data carries `screenshot {width, height, scale,
+scope}`, where `scope` is `granted` or `all_chats` and `scale` is image
+pixels per window pixel (a point in the image divided by it is a point
+`click_element` takes). The long side is shrunk to 1280 unless
+`full_resolution`.
+
+### Capture: the window renders its own frame
+
+Each platform's renderer already had, or could get, an offscreen path:
+GPUI's `render_to_image` exists for tests on Metal and Direct3D 11.
+Quill builds it in every configuration and adds
+`PlatformWindow::capture_image(&Scene)`, which renders the last drawn scene
+to an offscreen texture with the window's own renderer and reads it back:
+
+| Platform | Path | Fallback |
+| --- | --- | --- |
+| macOS | `MetalRenderer::capture_scene`: `render_scene_to_image` at the layer's drawable size. No drawable is taken from the layer and nothing is presented. | A window without a layer answers "the window has no layer to capture". |
+| Windows | `DirectXRenderer::render_to_image` (offscreen texture, staging copy). | An HDR (scRGB) swap chain refuses readback; the agent gets "Quill could not capture its window (...)". |
+| Linux X11 and Wayland | `WgpuRenderer::capture_scene`: an offscreen texture in the surface format, copied to a mapped buffer, 5 s timeouts. | A surface format other than BGRA8 or RGBA8 answers with an error. |
+| Others, and builds without the UI | `capture_image`'s default body: "this platform's renderer cannot capture the window". | `quill_status` reports `ui_driver.screenshots.available` false. |
+
+Rejected: ScreenCaptureKit, `CGWindowListCreateImage`, `PrintWindow` /
+`Windows.Graphics.Capture`, the XDG screenshot portal and X11 `GetImage`.
+They read the screen, so they need a screen-recording permission (macOS
+asks for it, the portal asks every time), they capture whatever covers the
+window, and they can only blank a region after the fact, from rectangles,
+with no way to hide something Quill drew over it. Rendering the scene
+again needs no permission, never shows another app, and runs only when an
+agent asks: nothing is built, allocated or scheduled until then. It costs
+the frames no time either: the paint filter is one `Option` check per
+tagged element while unset.
+
+`interface_zoom.rs`'s `ZoomWindow` forwards the new method (its
+`forwards_every_trait_method` test caught the gap).
+
+### Privacy: the paint filter
+
+A screenshot must never show what the tree hides. Rectangles from the
+tree would miss painted things that have no role (a chat's background
+rows, a badge) and anything drawn over a hidden area by another element.
+So the frame is cut where it is painted, by the rule that cuts clicks:
+
+- GPUI gains `Window::set_paint_filter(Option<PaintFilter>)`. While set,
+  each tagged element's paint asks the filter, with the stack of
+  `a11y_tag`s above it (regions, parts, lists, `chat=<id>` rows), whether
+  it reaches the scene; the scene drops what is refused. An element's tag
+  now spans its own background and border, so a refused row loses its
+  background too.
+- Quill's filter is `redact::point_allowed`, the function that decides a
+  click, with the grants and chat classes read once per screenshot. In the
+  granted scope the window starts covered in a neutral grey (`#8a8a8a`),
+  the allowed parts (the open granted chat, the search box and folders, a
+  granted chat's row) are drawn on the theme's background, and an
+  ungranted chat's row is grey. With "All other chats" on, everything is
+  drawn except secret chats without their own grant, which are covered.
+- It fails closed. Cached paint is not replayed under a filter (it was
+  never filtered), so every view renders again; an element that carries a
+  tag but does not push it is drawn as its parent decides; a deferred draw
+  (tooltip, toast, popover) carries only its own tags, so in the granted
+  scope an untagged one is left out.
+- The surface check is the tree's: a blocked surface (Settings, a request
+  to the user, sign-in, payments...) gets the same note as `read_ui_tree`
+  and no frame is drawn. The tree in the reply is read right after the
+  filtered frame and must name the same surface.
+- The takeover overlay is left out (`takeover_layer` returns nothing while
+  the screenshot's frame is drawn). A normal frame is drawn again before
+  anything is presented, so the user never sees the filtered one.
+
+Each screenshot is one line in the activity log (`ui_screenshot`,
+"Took a screenshot of the window", the open chat). Screenshots are limited
+to one a second and 20 a minute across agents
+(`quill::agent::ui_driver::shot::Limiter`); over the limit,
+`take_screenshot` answers with how long to wait and an input tool runs
+without the image and says why. The guide says screenshots are for
+operating Quill, not for archiving chats.
+
+### Cost
+
+Before: nothing (no screenshots). Unasked, a frame pays one `Option`
+check per tagged element. Asked, measured with the `ready-agent-screenshot`
+demo (2400x1480 device pixels, full resolution, this Mac, 2026-10-25, two
+runs each of the granted and All chats scopes; the timing lines were
+temporary and are not in the code):
+
+| Build | Draw + readback (UI thread) | PNG encode (background) | Answer |
+| --- | --- | --- | --- |
+| Debug | 206 ms | 640 to 740 ms | 880 to 980 ms |
+| Release (LTO off, 16 codegen units) | 22 to 27 ms | 8 to 10 ms | 44 to 56 ms |
+
+The UI-thread part is two extra frames (the filtered one and the normal
+one after it) plus the readback; the encode runs on the background
+executor. The default 1280-px image is smaller and encodes faster.
+
+### Tests
+
+- `agent_driver_shot_tests.rs` (window tests; the test platform has no
+  GPU, so its "readback" paints the frame's solid quads on the CPU):
+  ungranted rows hidden and the granted row drawn, with All chats on
+  nothing covered, the default size and scale, three log lines; a blocked
+  surface gets no screenshot and no log line; an input with a screenshot
+  answers with the frame after it; the takeover pill is in the window and
+  not in the screenshot; a refused row under a drawn container is covered
+  and none of its paint is drawn.
+- `shot.rs`: the 1280-px shrink, one a second, 20 a minute.
+- `tools::ui_shot`: the schema options, the image block, the refusal with
+  the driver off.
+- Visual check with the demo: `QUILL_DEMO_SHOT_SCOPE=granted|everything
+  QUILL_DEMO_SHOT_OUT=<file> quill --screenshot-demo
+  ready-agent-screenshot <dir>`.
+
+### Gaps
+
+- Checked on macOS only. Windows (Direct3D) and Linux (wgpu) are
+  type-checked from macOS; the readback has not run on either. The
+  `quill-run` cloud skill can run the demo on Linux with lavapipe.
+- A part the filter shows inside a refused one sits on the theme's
+  background, not its real one (the chat list's tint is lost around a
+  granted row).
+- Text and images are drawn by the renderer like everything else, so the
+  screenshot matches the screen. Video surfaces and webviews were not
+  checked.
+- A context menu the user opened over an ungranted row is a deferred
+  draw tagged as a menu, so it is drawn; its items name actions, not the
+  chat, but it is a case to watch.
+- The limit is per process, not per agent; one busy agent can use the
+  minute's budget for all.
