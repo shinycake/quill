@@ -27,10 +27,14 @@ pub struct Action {
     pub tool: String,
     pub chat_id: i64,
     pub chat_title: String,
-    /// One line on what happened ("Sent \"See you at 6\"").
+    /// What the action carried, in the agent's own words or ids
+    /// (`"See you at 6"`); the verb comes from `tool`, worded by the UI.
     pub summary: String,
     /// False when Telegram or the user refused it.
     pub ok: bool,
+    /// The user declined it in Quill.
+    #[serde(default)]
+    pub declined: bool,
 }
 
 /// An agent connected now.
@@ -67,12 +71,25 @@ fn with_log<R>(f: impl FnOnce(&mut VecDeque<Action>) -> R) -> R {
     f(log)
 }
 
-fn persist(log: &VecDeque<Action>) {
+/// The newest log snapshot written, so a slow writer never puts back an
+/// older one.
+static WRITTEN: Mutex<u64> = Mutex::new(0);
+static NEXT_SNAPSHOT: AtomicU64 = AtomicU64::new(0);
+
+/// Write a snapshot of the log taken under its lock; runs without the lock,
+/// so the Settings page never waits on the disk. Owner-only: the log holds
+/// chat titles and short quotes.
+fn persist(snapshot: u64, bytes: &[u8]) {
     if !crate::fast_buttons::persistence_enabled() {
         return;
     }
+    let mut written = crate::locks::lock_or_recover(&WRITTEN);
+    if snapshot <= *written {
+        return;
+    }
+    *written = snapshot;
     if let Some(path) = log_path()
-        && let Err(err) = crate::settings::write_json_atomic(&path, log)
+        && let Err(err) = super::access::write_owner_only(&path, bytes)
     {
         eprintln!("quill: could not save {LOG_FILE}: {err}");
     }
@@ -86,13 +103,15 @@ pub fn record(mut action: Action) {
 
 /// Add `action` to the log with the time it already carries.
 pub fn record_at(action: Action) {
-    with_log(|log| {
+    let (snapshot, bytes) = with_log(|log| {
         log.push_back(action);
         while log.len() > KEEP {
             log.pop_front();
         }
-        persist(log);
+        let snapshot = NEXT_SNAPSHOT.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
+        (snapshot, serde_json::to_vec(log).unwrap_or_default())
     });
+    persist(snapshot, &bytes);
     crate::wake::AGENT.poke();
 }
 
@@ -109,10 +128,11 @@ pub fn recent(account: &AccountKey) -> Vec<Action> {
 
 /// Empty the log for every account.
 pub fn clear() {
-    with_log(|log| {
+    let snapshot = with_log(|log| {
         log.clear();
-        persist(log);
+        NEXT_SNAPSHOT.fetch_add(1, Ordering::SeqCst).wrapping_add(1)
     });
+    persist(snapshot, b"[]");
     crate::wake::AGENT.poke();
 }
 
@@ -170,6 +190,7 @@ mod tests {
                 chat_title: "Saved Messages".into(),
                 summary: summary.into(),
                 ok: true,
+                declined: false,
             });
         }
         let log = recent(&account);

@@ -157,7 +157,7 @@ pub fn publish_token() {
 /// Write `bytes` to `path` through a temp file that is owner-only from the
 /// moment it exists. On Windows the per-user app data folder already keeps
 /// other users out.
-fn write_owner_only(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_owner_only(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     let mut temp = path.as_os_str().to_owned();
     temp.push(".tmp");

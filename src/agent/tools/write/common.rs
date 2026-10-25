@@ -3,7 +3,7 @@
 //! the action log.
 
 use super::super::target::Target;
-use super::super::{Ctx, ToolError, current_agent};
+use super::super::{Ctx, ToolError, current_agent, still_allowed};
 use crate::agent::activity::{self, Action};
 use crate::agent::events::{self, Sent};
 use crate::agent::pacing::{self, Refusal};
@@ -249,20 +249,15 @@ pub fn parse_time(text: &str) -> Option<i64> {
 }
 
 /// While "Confirm each send" is on, wait for the user to allow this write.
-pub fn confirm(
-    ctx: &Ctx,
-    target: &Target,
-    tool: &str,
-    action: &str,
-    preview: &str,
-) -> Result<(), ToolError> {
+/// `kind` names the write as the log does.
+pub fn confirm(ctx: &Ctx, target: &Target, kind: &str, preview: &str) -> Result<(), ToolError> {
     if !access::confirm_sends() {
         return Ok(());
     }
     let ask = Ask::Write {
         chat_id: target.chat_id,
         title: target.title.clone(),
-        action: action.to_string(),
+        kind: kind.to_string(),
         preview: preview.chars().take(1000).collect(),
     };
     let (id, rx) = prompts::file(ctx.account.clone(), current_agent(), ask, String::new())
@@ -272,7 +267,7 @@ pub fn confirm(
     match prompts::wait(id, &rx, ANSWER_WAIT) {
         Some(Decision::Allowed) => Ok(()),
         Some(Decision::Denied) => {
-            log(ctx, target, tool, &format!("Declined: {action}"), false);
+            record(ctx, target, kind, preview, false, true);
             Err(ToolError::new(
                 "The user declined this in Quill. Do not retry it; ask the user what they want instead.",
             ))
@@ -286,6 +281,10 @@ pub fn confirm(
 
 /// Add a line to the action log the user sees in Settings.
 pub fn log(ctx: &Ctx, target: &Target, tool: &str, summary: &str, ok: bool) {
+    record(ctx, target, tool, summary, ok, false);
+}
+
+fn record(ctx: &Ctx, target: &Target, tool: &str, summary: &str, ok: bool, declined: bool) {
     activity::record(Action {
         time: 0,
         account: ctx.account.clone(),
@@ -295,10 +294,12 @@ pub fn log(ctx: &Ctx, target: &Target, tool: &str, summary: &str, ok: bool) {
         chat_title: target.title.clone(),
         summary: summary.chars().take(200).collect(),
         ok,
+        declined,
     });
 }
 
-/// Run a write that is not a send, logging how it went.
+/// Run a write that is not a send, logging how it went. It takes a turn in
+/// the paced queue like a send, so a flood wait stops it too.
 pub fn change(
     ctx: &Ctx,
     target: &Target,
@@ -306,6 +307,8 @@ pub fn change(
     summary: &str,
     request: Value,
 ) -> Result<Value, ToolError> {
+    pacing::take_turn(ctx.client.id(), target.chat_id, 1, false).map_err(refusal_error)?;
+    still_allowed()?;
     let result = td::call(&ctx.client, request).map_err(write_error);
     log(ctx, target, tool, summary, result.is_ok());
     result
@@ -344,7 +347,9 @@ pub fn write_error(error: TdError) -> ToolError {
 
 fn is_paid_error(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
-    lower.contains("payment") || lower.contains("paid_message") || lower.contains("star")
+    ["payment_required", "paid_message", "paid message", "stars_"]
+        .iter()
+        .any(|needle| lower.contains(needle))
 }
 
 fn paid_refusal() -> ToolError {
@@ -421,6 +426,32 @@ fn is_new_peer(ctx: &Ctx, target: &Target) -> bool {
     })
 }
 
+/// Let `count` messages to `target` go out: refuses paid chats, waits for
+/// a turn in the paced queue every agent write shares, then checks that
+/// Agent access is still on.
+pub fn admit(ctx: &Ctx, target: &Target, count: u32) -> Result<(), ToolError> {
+    if stars_per_message(ctx, target.chat_id)? > 0 {
+        return Err(paid_refusal());
+    }
+    let new_peer = is_new_peer(ctx, target);
+    pacing::take_turn(ctx.client.id(), target.chat_id, count, new_peer).map_err(refusal_error)?;
+    still_allowed()
+}
+
+fn refusal_error(refusal: Refusal) -> ToolError {
+    match refusal {
+        Refusal::Flood(seconds) => ToolError::new(format!(
+            "Telegram asked Quill to slow down. Agent sends are paused for {seconds} more seconds; retry after that."
+        )),
+        Refusal::NewPeers => ToolError::new(
+            "Agents may start at most 5 new conversations a day (first messages to people who never wrote to the user). Ask the user to send this one from Quill.",
+        ),
+        Refusal::Busy => {
+            ToolError::new("Too many agent messages are waiting to go out. Retry in a minute.")
+        }
+    }
+}
+
 /// Send messages to `target` through the paced queue and wait until
 /// Telegram delivers them. Returns the messages with their final ids.
 pub fn send(
@@ -442,19 +473,7 @@ fn send_inner(
     request: Value,
     count: u32,
 ) -> Result<Vec<Value>, ToolError> {
-    if stars_per_message(ctx, target.chat_id)? > 0 {
-        return Err(paid_refusal());
-    }
-    let new_peer = is_new_peer(ctx, target);
-    pacing::take_turn(ctx.client.id(), target.chat_id, count, new_peer).map_err(|refusal| match refusal {
-        Refusal::Flood(seconds) => ToolError::new(format!(
-            "Telegram asked Quill to slow down. Agent sends are paused for {seconds} more seconds; retry after that."
-        )),
-        Refusal::NewPeers => ToolError::new(
-            "Agents may start at most 5 new conversations a day (first messages to people who never wrote to the user). Ask the user to send this one from Quill.",
-        ),
-        Refusal::Busy => ToolError::new("Too many agent messages are waiting to go out. Retry in a minute."),
-    })?;
+    admit(ctx, target, count)?;
     let answer = td::call(&ctx.client, request).map_err(write_error)?;
     let pending: Vec<Value> = match answer.get("messages").and_then(Value::as_array) {
         Some(list) => list.clone(),

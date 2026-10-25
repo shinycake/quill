@@ -55,11 +55,19 @@ pub fn set_draft(args: &Value) -> Result<ToolOutput, ToolError> {
     } else {
         "Set the draft".to_string()
     };
+    let (kind, detail) = if cleared {
+        ("clear_draft", String::new())
+    } else {
+        (
+            "set_draft",
+            format!("\"{}\"", text.chars().take(60).collect::<String>()),
+        )
+    };
     change(
         &ctx,
         &target,
-        "set_draft",
-        &summary,
+        kind,
+        &detail,
         json!({"@type": "setChatDraftMessage", "chat_id": target.chat_id, "topic_id": Value::Null, "draft_message": draft}),
     )?;
     Ok(done(
@@ -93,7 +101,7 @@ pub fn mark_read(args: &Value) -> Result<ToolOutput, ToolError> {
             &ctx,
             &target,
             "mark_read",
-            "Marked as read",
+            "",
             json!({
                 "@type": "viewMessages",
                 "chat_id": target.chat_id,
@@ -157,11 +165,17 @@ pub fn mute_chat(args: &Value) -> Result<ToolOutput, ToolError> {
         Some(m) => format!("Muted for {m} minutes"),
         None => "Muted".to_string(),
     };
+    let (kind, detail) = match minutes {
+        Some(0) => ("unmute_chat", String::new()),
+        Some(m) if m % 60 == 0 => ("mute_chat", format!("{} h", m / 60)),
+        Some(m) => ("mute_chat", format!("{m} min")),
+        None => ("mute_chat", "∞".to_string()),
+    };
     change(
         &ctx,
         &target,
-        "mute_chat",
-        &summary,
+        kind,
+        &detail,
         json!({"@type": "setChatNotificationSettings", "chat_id": target.chat_id, "notification_settings": settings}),
     )?;
     Ok(done(
@@ -195,8 +209,12 @@ pub fn archive_chat(args: &Value) -> Result<ToolOutput, ToolError> {
     change(
         &ctx,
         &target,
-        "archive_chat",
-        summary,
+        if archive {
+            "archive_chat"
+        } else {
+            "unarchive_chat"
+        },
+        "",
         json!({"@type": "addChatToList", "chat_id": target.chat_id, "chat_list": {"@type": list}}),
     )?;
     Ok(done(
@@ -267,8 +285,12 @@ pub fn set_chat_folder(args: &Value) -> Result<ToolOutput, ToolError> {
     change(
         &ctx,
         &target,
-        "set_chat_folder",
-        &summary,
+        if remove {
+            "remove_from_folder"
+        } else {
+            "set_chat_folder"
+        },
+        &format!("\"{name}\""),
         json!({"@type": "editChatFolder", "chat_folder_id": id, "folder": folder}),
     )
     .map_err(|error| {

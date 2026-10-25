@@ -268,6 +268,8 @@ pub(crate) struct Found {
     pub title: String,
     pub class: ChatClass,
     pub me: i64,
+    /// Nothing was ever said in the chat.
+    pub empty: bool,
 }
 
 /// The chat `args.chat` names.
@@ -287,6 +289,7 @@ pub(crate) fn lookup(ctx: &Ctx, args: &Value, reach: Reach) -> Result<Found, Too
         title: chat_title(&chat, class),
         class,
         me,
+        empty: chat.get("last_message").is_none_or(Value::is_null),
     })
 }
 
@@ -297,8 +300,22 @@ pub(crate) fn require(ctx: &Ctx, args: &Value, needed: Scope) -> Result<Target, 
         title,
         class,
         me,
+        empty,
     } = lookup(ctx, args, Reach::Granted)?;
-    let scope = grants::for_account(&ctx.account).scope_for(chat_id, class);
+    let grants = grants::for_account(&ctx.account);
+    let scope = grants.scope_for(chat_id, class);
+    // The bots default covers bots the user already talks to: a bot found
+    // by @username alone belongs to a stranger, who would read whatever
+    // an agent sends it.
+    if needed == Scope::ReadWrite
+        && class == ChatClass::Bot
+        && empty
+        && !grants.chats.contains_key(&chat_id)
+    {
+        return Err(ToolError::new(format!(
+            "\"{title}\" is a bot the user has never talked to, so the bots default does not cover writing to it. Call request_access {{\"chat\": {chat_id}, \"scope\": \"read_write\", \"reason\": \"<why>\"}} to ask the user."
+        )));
+    }
     match scope {
         Some(scope) if scope.allows(needed) => Ok(Target {
             chat_id,

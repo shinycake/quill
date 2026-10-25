@@ -28,6 +28,12 @@ pub(super) fn tool_label(tool: &str) -> String {
         "mute_chat" => tr(keys::Q_AGENT_TOOL_MUTE_CHAT).to_string(),
         "archive_chat" => tr(keys::Q_AGENT_TOOL_ARCHIVE_CHAT).to_string(),
         "set_chat_folder" => tr(keys::Q_AGENT_TOOL_SET_CHAT_FOLDER).to_string(),
+        "remove_reaction" => tr(keys::Q_AGENT_TOOL_REMOVE_REACTION).to_string(),
+        "unpin_message" => tr(keys::Q_AGENT_TOOL_UNPIN_MESSAGE).to_string(),
+        "clear_draft" => tr(keys::Q_AGENT_TOOL_CLEAR_DRAFT).to_string(),
+        "unmute_chat" => tr(keys::Q_AGENT_TOOL_UNMUTE_CHAT).to_string(),
+        "unarchive_chat" => tr(keys::Q_AGENT_TOOL_UNARCHIVE_CHAT).to_string(),
+        "remove_from_folder" => tr(keys::Q_AGENT_TOOL_REMOVE_FROM_FOLDER).to_string(),
         other => {
             let spaced = other.replace('_', " ");
             let mut chars = spaced.chars();
@@ -35,6 +41,36 @@ pub(super) fn tool_label(tool: &str) -> String {
                 first.to_uppercase().chain(chars).collect()
             })
         }
+    }
+}
+
+/// The title of the confirmation for a write of `kind`:
+/// `{agent} wants to send a message in "{chat}"`.
+pub(super) fn confirm_title_key(kind: &str) -> &'static str {
+    match kind {
+        "send_file" => keys::Q_AGENT_CONFIRM_SEND_FILE,
+        "send_poll" => keys::Q_AGENT_CONFIRM_SEND_POLL,
+        "send_sticker" => keys::Q_AGENT_CONFIRM_SEND_STICKER,
+        "forward_messages" => keys::Q_AGENT_CONFIRM_FORWARD,
+        "edit_message" => keys::Q_AGENT_CONFIRM_EDIT,
+        "delete_messages" => keys::Q_AGENT_CONFIRM_DELETE,
+        "react" => keys::Q_AGENT_CONFIRM_REACT,
+        "remove_reaction" => keys::Q_AGENT_CONFIRM_REMOVE_REACTION,
+        "pin_message" => keys::Q_AGENT_CONFIRM_PIN,
+        "unpin_message" => keys::Q_AGENT_CONFIRM_UNPIN,
+        _ => keys::Q_AGENT_CONFIRM_SEND_MESSAGE,
+    }
+}
+
+/// The label over a confirmation's preview: what the preview is.
+pub(super) fn confirm_preview_key(kind: &str) -> &'static str {
+    match kind {
+        "forward_messages" => keys::Q_AGENT_CONFIRM_PREVIEW_FORWARD,
+        "edit_message" => keys::Q_AGENT_CONFIRM_PREVIEW_EDIT,
+        "delete_messages" => keys::Q_AGENT_CONFIRM_PREVIEW_DELETE,
+        "react" | "remove_reaction" => keys::Q_AGENT_CONFIRM_PREVIEW_REACTION,
+        "pin_message" | "unpin_message" => keys::Q_AGENT_CONFIRM_PREVIEW_MESSAGE,
+        _ => keys::Q_AGENT_REQUEST_WRITE_PREVIEW,
     }
 }
 

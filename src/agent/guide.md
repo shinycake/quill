@@ -139,7 +139,13 @@ agent send for the seconds it names, and at most five conversations a day may
 start with someone who never wrote to the user. Agents cannot spend Stars:
 chats that charge for messages refuse agent sends. Every write shows in the
 user's activity log in Quill, and if the user turned on "Confirm each send"
-each send, edit, delete, reaction and pin waits for their click.
+each send, edit, delete, reaction and pin waits for their click. Edits,
+reactions, pins and the other changes are spaced out like sends.
+
+The bots default covers bots the user already talks to. A bot you just found
+by @username needs `request_access` with `read_write` before you write to it.
+`send_file` never sends files from Quill's own data folder. If the user turns
+Agent access off while a write waits its turn, nothing goes out.
 
 ## Events
 

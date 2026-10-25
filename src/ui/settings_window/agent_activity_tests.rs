@@ -64,6 +64,7 @@ fn record(summary: &str, ok: bool) {
         chat_title: "Ann Lee".into(),
         summary: summary.into(),
         ok,
+        declined: false,
     });
 }
 
