@@ -67,6 +67,9 @@ impl ScreenBackend for MacScreen {
     }
 
     fn open_privacy_settings(&self) {
+        if crate::agent::ui_driver::guard::refuse_outside_if_injecting("open System Settings") {
+            return;
+        }
         // Asking first adds Quill to the Screen Recording list, so the
         // switch is there when the settings open.
         let _ = CGRequestScreenCaptureAccess();

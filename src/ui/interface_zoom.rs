@@ -630,7 +630,7 @@ impl Platform for ZoomPlatform {
     }
     #[cfg(target_os = "macos")]
     fn read_from_find_pasteboard(&self) -> Option<ClipboardItem> {
-        self.inner.read_from_find_pasteboard()
+        (!guard::refuse_clipboard_if_injecting()).then(|| self.inner.read_from_find_pasteboard())?
     }
     #[cfg(target_os = "macos")]
     fn write_to_find_pasteboard(&self, item: ClipboardItem) {
