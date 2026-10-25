@@ -7,10 +7,10 @@
 //! the window itself keeps showing the takeover layer the screenshot
 //! leaves out. `QUILL_DEMO_SHOT_MENU=<chat id>` leaves that chat's context
 //! menu open and `QUILL_DEMO_SHOT_PEEK=<chat id>` its peek preview, to see
-//! them cut with the chat's row. `QUILL_DEMO_SHOT_KEYS=<chords>` (like
-//! `cmd-,`) has the agent press them in the message box of chat 11 (then
-//! granted read_write) before the screenshot, and prints the reply's
-//! refusals and whether Settings opened.
+//! them cut with the chat's row. In a `demo-capture` build only,
+//! `QUILL_DEMO_SHOT_KEYS=<chords>` (like `cmd-,`) has the agent press them
+//! in the message box of chat 11 (then granted read_write) before the
+//! screenshot, and prints the reply's refusals and whether Settings opened.
 #![deny(clippy::indexing_slicing)]
 
 use super::agent_state::active_account;
@@ -20,7 +20,7 @@ use super::menu_states::ChatMenuState;
 use gpui_kit::*;
 use quill::agent::grants::{self, ChatGrant, Scope};
 use quill::agent::ui_driver::bridge::{self, UiCommand, UiReply};
-use quill::agent::ui_driver::keys::parse_sequence;
+use quill::agent::ui_driver::keys::KeyChord;
 use quill::agent::ui_driver::shot::ShotOptions;
 use quill::agent::{access, activity};
 use quill::ids::ChatId;
@@ -29,6 +29,54 @@ use std::time::Duration;
 /// The chat id an environment variable names, if any.
 fn env_chat(name: &str) -> Option<ChatId> {
     std::env::var(name).ok()?.parse().ok().map(ChatId)
+}
+
+/// `QUILL_DEMO_SHOT_KEYS`: chords the agent presses before the screenshot.
+/// Read only in a `demo-capture` build; a release build presses none.
+#[cfg(feature = "demo-capture")]
+fn demo_keys() -> Option<Vec<KeyChord>> {
+    std::env::var("QUILL_DEMO_SHOT_KEYS")
+        .ok()
+        .and_then(|keys| quill::agent::ui_driver::keys::parse_sequence(&keys).ok())
+}
+
+#[cfg(not(feature = "demo-capture"))]
+fn demo_keys() -> Option<Vec<KeyChord>> {
+    None
+}
+
+/// Has the agent press `chords` through the bridge and prints the reply.
+#[cfg(feature = "demo-capture")]
+async fn press_demo_keys(
+    app: &super::chat_window::ScopedApp,
+    cx: &mut AsyncWindowContext,
+    chords: Vec<KeyChord>,
+) {
+    let Ok(ticket) = bridge::post("Claude Code", UiCommand::PressKeys { chords }) else {
+        return;
+    };
+    for _ in 0..500 {
+        let _ = app.update_in(cx, |app, window, cx| {
+            app.agent_driver_tick(window, cx);
+        });
+        cx.background_executor()
+            .timer(Duration::from_millis(10))
+            .await;
+        let Some(reply) = ticket.poll() else {
+            continue;
+        };
+        let refusals = match reply {
+            UiReply::Done { refusals, .. } => refusals,
+            other => vec![format!("{other:?}")],
+        };
+        let settings_open = app
+            .update_in(cx, |app, _, _| app.settings.open)
+            .unwrap_or(false);
+        eprintln!(
+            "quill screenshot demo: keys answered, settings open {settings_open}, refusals {refusals:?}"
+        );
+        return;
+    }
 }
 
 fn demo_screenshot(app: &mut QuillApp, window: &mut Window, cx: &mut Context<QuillApp>) {
@@ -47,9 +95,7 @@ fn demo_screenshot(app: &mut QuillApp, window: &mut Window, cx: &mut Context<Qui
     let account = active_account();
     let everything =
         std::env::var("QUILL_DEMO_SHOT_SCOPE").is_ok_and(|scope| scope == "everything");
-    let keys = std::env::var("QUILL_DEMO_SHOT_KEYS")
-        .ok()
-        .and_then(|keys| parse_sequence(&keys).ok());
+    let keys = demo_keys();
     grants::update(&account, |g| {
         if everything {
             g.all_chats = Some(Scope::Read);
@@ -83,31 +129,9 @@ fn demo_screenshot(app: &mut QuillApp, window: &mut Window, cx: &mut Context<Qui
         cx.background_executor()
             .timer(Duration::from_millis(800))
             .await;
-        if let Some(chords) = keys
-            && let Ok(ticket) = bridge::post("Claude Code", UiCommand::PressKeys { chords })
-        {
-            for _ in 0..500 {
-                let _ = app.update_in(cx, |app, window, cx| {
-                    app.agent_driver_tick(window, cx);
-                });
-                cx.background_executor()
-                    .timer(Duration::from_millis(10))
-                    .await;
-                let Some(reply) = ticket.poll() else {
-                    continue;
-                };
-                let refusals = match reply {
-                    UiReply::Done { refusals, .. } => refusals,
-                    other => vec![format!("{other:?}")],
-                };
-                let settings_open = app
-                    .update_in(cx, |app, _, _| app.settings.open)
-                    .unwrap_or(false);
-                eprintln!(
-                    "quill screenshot demo: keys answered, settings open {settings_open}, refusals {refusals:?}"
-                );
-                break;
-            }
+        #[cfg(feature = "demo-capture")]
+        if let Some(chords) = keys {
+            press_demo_keys(&app, cx, chords).await;
         }
         let options = ShotOptions {
             full_resolution: true,
