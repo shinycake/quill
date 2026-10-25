@@ -95,11 +95,12 @@ pub fn file(
 /// Wait for the user's answer to prompt `id`; on timeout the prompt is
 /// withdrawn and `None` returned.
 pub fn wait(id: u64, rx: &Receiver<Decision>, timeout: Duration) -> Option<Decision> {
-    let decision = rx.recv_timeout(timeout).ok();
-    if decision.is_none() {
-        withdraw(id);
+    if let Ok(decision) = rx.recv_timeout(timeout) {
+        return Some(decision);
     }
-    decision
+    withdraw(id);
+    // An answer given just before the withdrawal is already in the channel.
+    rx.try_recv().ok()
 }
 
 /// Take prompt `id` off the screen without an answer.
@@ -112,6 +113,14 @@ pub fn withdraw(id: u64) {
 pub fn current() -> Option<Prompt> {
     crate::locks::lock_or_recover(&QUEUE)
         .front()
+        .map(|pending| pending.prompt.clone())
+}
+
+/// The oldest prompt for `account`.
+pub fn current_for(account: &AccountKey) -> Option<Prompt> {
+    crate::locks::lock_or_recover(&QUEUE)
+        .iter()
+        .find(|pending| pending.prompt.account == *account)
         .map(|pending| pending.prompt.clone())
 }
 

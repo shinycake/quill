@@ -45,10 +45,12 @@ Write tools need `read_write` on the chat.
 
 `chat` takes a chat id (`-1001234567890`), `"saved"` for Saved Messages, an
 `@username` or t.me link, or the chat's title (`"Ann Lee"`). When a title
-matches several chats the error lists them with their ids. Leave `chat` out
-of `search_messages` to search every granted chat. "No chat is called…"
-means the chat does not exist at all; a chat that exists but is not granted
-answers "Chat not granted". `list_chats` shows only granted chats.
+matches several granted chats the error lists them with their ids. Leave
+`chat` out of `search_messages` to search every granted chat. Names only
+ever match granted chats: "No granted chat is called…" means there may be
+such a chat, but you can't see it until the user grants it (ask with
+`request_access`, which takes the same name); "No chat is called…" means
+there is none at all. `list_chats` shows only granted chats.
 
 ## Tools
 
@@ -65,7 +67,7 @@ answers "Chat not granted". `list_chats` shows only granted chats.
 | `get_chat_info` | Learn about a chat: kind, username, bio or description, members, link. |
 | `list_members` | See or find the members of a group or channel. |
 | `list_contacts` | Find a person among the contacts (needs the contacts grant). |
-| `download_file` | Save the file a message carries to disk. |
+| `download_file` | Save the file a message carries to disk (never overwrites; a taken name gets " (2)"). |
 | `wait_for_message` | Wait for the next message in a granted chat, e.g. a bot's reply. |
 | `request_access` | Ask the user for a chat, all chats or the contacts. |
 | `send_message` | Send text (plain, MarkdownV2 or HTML), as a reply or scheduled. |

@@ -147,6 +147,12 @@ own channel, secret, other) comes from TDLib (`getChat`, then `getUser` or
 Tools take a chat id, `"saved"`, an `@username` or t.me link
 (`searchPublicChat`), or a title (`searchChats`, exact match first, then a
 single result; several matches answer with the candidates and their ids).
+Titles only ever match granted chats, and no error names an ungranted chat:
+otherwise an agent could list the people the user talks to by trying names,
+around the contacts grant. "Chat not granted" gives only the id it was
+passed. `request_access` alone resolves a name among all chats; the user
+sees the match in the dialog, and the agent learns its title and id only
+once the user allows it.
 
 ### Tools
 
@@ -157,6 +163,12 @@ granted chats ever appear: a search across chats drops matches in other
 chats without saying how many there were. `list_unread` reads history with
 `getChatHistory`, which does not mark anything read. `download_file` copies
 from TDLib's cache to a path the agent names, or returns the cache path.
+The sender picks the file name, so it is cut to its last path component
+(no folders, `..`, drive letters or control characters), and the copy
+never overwrites: a taken name in a folder gets " (2)", an existing file
+path is refused. The cross-chat search cursor is TDLib's own offset format,
+"date,chat_id,server_message_id", where the server id is the TDLib message
+id shifted right by 20.
 
 ### `request_access`
 

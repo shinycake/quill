@@ -225,13 +225,14 @@ pub fn latest_seq() -> u64 {
 }
 
 /// Messages of `client_id` after `since` that `keep` accepts, waiting up to
-/// `timeout` for the first one. Returns as soon as any arrive.
+/// `timeout` for the first one. Returns as soon as any arrive, with the
+/// sequence number checked up to, which the next wait should start from.
 pub fn wait_for(
     client_id: i32,
     since: u64,
     timeout: Duration,
     mut keep: impl FnMut(&NewMessage) -> bool,
-) -> Vec<NewMessage> {
+) -> (Vec<NewMessage>, u64) {
     let deadline = Instant::now() + timeout;
     let mut checked = since;
     let mut guard = crate::locks::lock_or_recover(&MESSAGES);
@@ -254,11 +255,11 @@ pub fn wait_for(
         drop(guard);
         let kept: Vec<NewMessage> = fresh.into_iter().filter(|m| keep(m)).collect();
         if !kept.is_empty() {
-            return kept;
+            return (kept, checked);
         }
         let now = Instant::now();
         if now >= deadline {
-            return Vec::new();
+            return (Vec::new(), checked);
         }
         guard = crate::locks::lock_or_recover(&MESSAGES);
         let latest = guard.as_ref().map_or(0, |state| state.next_seq);
@@ -317,9 +318,12 @@ mod tests {
         record_message(
             r#"{"@type":"updateNewMessage","message":{"id":2,"chat_id":5},"@client_id":91}"#,
         );
-        let got = waiter.join().unwrap_or_default();
+        let (got, _) = waiter.join().unwrap_or_default();
         assert_eq!(got.len(), 1);
         assert_eq!(got.first().map(|m| m.chat_id), Some(5));
-        assert!(wait_for(91, super::latest_seq(), Duration::from_millis(20), |_| true).is_empty());
+        let latest = super::latest_seq();
+        let (none, checked) = wait_for(91, latest, Duration::from_millis(20), |_| true);
+        assert!(none.is_empty());
+        assert_eq!(checked, latest);
     }
 }
