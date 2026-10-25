@@ -221,3 +221,28 @@ fn a_write_request_shows_the_text_and_answers_allow_or_deny(cx: &mut TestAppCont
     assert_eq!(answer_of(id, &rx), Some(Decision::Denied));
     assert_eq!(open_kind(&shell, vcx), None);
 }
+
+#[gpui_kit::test]
+fn a_raw_call_shows_the_risk_and_the_request(cx: &mut TestAppContext) {
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (_app, shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    reset_for_test(&AccountKey::primary());
+    settle(vcx);
+
+    let (id, rx) = file(Ask::Raw {
+        method: "sendGift".into(),
+        risk: quill::agent::prompts::Risk::Money,
+        preview: "{\"@type\": \"sendGift\"}".into(),
+    });
+    settle(vcx);
+    assert_eq!(open_kind(&shell, vcx), Some(DialogKind::AgentRequest));
+    assert!(vcx.debug_bounds("agent-request-raw").is_some());
+    vcx.update(|window, cx| window.click("agent-request-allow", cx));
+    settle(vcx);
+    assert_eq!(answer_of(id, &rx), Some(Decision::Allowed));
+    assert!(
+        grants::for_account(&AccountKey::primary()).chats.is_empty(),
+        "an allowed raw call grants nothing"
+    );
+}
