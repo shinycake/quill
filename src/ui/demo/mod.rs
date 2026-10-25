@@ -2,7 +2,6 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::message_text::interaction_info_update_json;
 use super::notifications::notification_settings_json;
 use gpui_kit::*;
 use quill::composer::{
@@ -16,7 +15,6 @@ use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
     ChatFolderInfo, ChatFolderSpec, ChatNotificationSettings, ConnectionState, MessageContent,
     ParsedSession, ParsedWebsite, StickerFormat, StickerItem, StorageFileTypeStats, StorageStats,
-    toggle_chosen_emoji_reaction,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;

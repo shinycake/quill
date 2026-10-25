@@ -174,7 +174,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             add_message_reaction(extra, chat_id, message_id, emoji, false, true)
         };
         match self.sender.send_json(&json) {
-            Ok(()) => Ok(extra),
+            Ok(()) => {
+                self.session.set_own_reaction(
+                    chat_id,
+                    message_id,
+                    &crate::telegram::envelope::ReactionType::emoji(emoji),
+                    !remove,
+                );
+                Ok(extra)
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)

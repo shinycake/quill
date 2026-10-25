@@ -315,19 +315,11 @@ impl QuillApp {
         choice: ReactionChoice,
         cx: &mut Context<Self>,
     ) {
-        if let ReactionChoice::CustomEmoji(_) = choice
-            && !self.session().is_some_and(|s| s.my_is_premium())
-            && !self.session().is_some_and(|s| {
-                s.histories
-                    .get(&chat_id.0)
-                    .and_then(|h| h.messages.get(&message_id.0))
-                    .is_some_and(|m| m.chosen_reaction(&choice) || has_reaction(m, &choice))
-            })
+        if let Some(feature) = self
+            .session()
+            .and_then(|s| s.react_premium_feature(chat_id, message_id, &choice))
         {
-            self.connection.set_note(StatusNote::info(tr(
-                keys::Q_MISC_CUSTOM_EMOJI_REACTIONS_NEED_TELEGRAM,
-            )));
-            cx.notify();
+            self.show_premium_reaction_preview(feature, cx);
             return;
         }
         // The reaction flies up from the message when it is added.
@@ -492,6 +484,7 @@ impl QuillApp {
                 this.message_ui.menu = None;
                 this.toggle_reaction(chat_id, message_id, choice.clone(), cx);
             }))
+            .test_support()
             .into_any_element()
     }
 
@@ -558,7 +551,8 @@ impl QuillApp {
             }
             row = row.children(self.paid_picker_cell(chat_id, message_id, cx));
             let more = options.all().len() > options.top.len().min(7)
-                || (options.allow_custom_emoji && session.is_some_and(|s| s.my_is_premium()));
+                || (options.allow_custom_emoji
+                    && session.is_some_and(|s| s.premium_badges_shown()));
             if more {
                 row = row.child(
                     div()
@@ -640,15 +634,6 @@ impl QuillApp {
         container = container.child(grid);
         Some(container.into_any_element())
     }
-}
-
-/// Whether `choice` is already among a message's reactions (anyone may
-/// add one more of an existing custom-emoji reaction).
-fn has_reaction(message: &HistoryMessage, choice: &ReactionChoice) -> bool {
-    message
-        .reaction_chips()
-        .iter()
-        .any(|chip| ReactionChoice::from_type(&chip.reaction_type).as_ref() == Some(choice))
 }
 
 /// TDLib names some reactions without the emoji variation selector ("❤");

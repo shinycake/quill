@@ -108,7 +108,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Ask which reactions `message_id` may get (the picker's strip and
-    /// full list). Drops the options of any other message.
+    /// full list). Drops the options of any other message. The app config,
+    /// with the per-user reaction limit, is asked for once too.
     pub fn fetch_message_reactions(
         &mut self,
         chat_id: ChatId,
@@ -117,6 +118,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        let _ = self.ensure_earn_app_config();
         if self
             .session
             .stickers
@@ -284,7 +286,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         match self.sender.send_json(&set_message_reaction(
             extra, chat_id, message_id, value, !chosen,
         )) {
-            Ok(()) => Ok(extra),
+            Ok(()) => {
+                self.session.set_own_reaction(
+                    chat_id,
+                    message_id,
+                    &choice.reaction_type(),
+                    !chosen,
+                );
+                Ok(extra)
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)
