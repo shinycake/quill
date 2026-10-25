@@ -946,8 +946,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Limit boxes read from TDLib and cover favorite stickers, pinned saved chats, story posting, similar channels and owned bots <!-- parity:premium-limit-boxes-more -->
 - [x] Every Premium upsell opens the preview of its own feature <!-- parity:premium-preview-targets -->
 - [x] Business features preview with per-feature animations for free accounts <!-- parity:premium-business-preview -->
-- [ ] Hidden read time and last seen: "Show my read time or get Premium" box, the subscribe row and the first-restrict warning in privacy settings <!-- parity:premium-readtime-box -->
-- [ ] Premium locks for wallpapers for both sides and the voice-message privacy subscribe button <!-- parity:premium-privacy-upsells -->
+- [x] Hidden read time and last seen: "Show my read time or get Premium" box, the subscribe row and the first-restrict warning in privacy settings <!-- parity:premium-readtime-box -->
+- [x] Premium locks for wallpapers for both sides and the voice-message privacy subscribe button <!-- parity:premium-privacy-upsells -->
 - [x] Recording voice and video notes is blocked for people who restricted them, with tdesktop's notice <!-- parity:premium-voice-restricted-send -->
 - [x] "Gift Premium" from birthday suggestions <!-- parity:premium-birthday-gift -->
 - [x] Suggestion box to archive and mute new chats from non-contacts <!-- parity:premium-archive-mute-suggestion -->
