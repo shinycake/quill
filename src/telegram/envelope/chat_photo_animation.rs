@@ -15,39 +15,64 @@ pub struct ChatPhotoAnimation {
     /// `main_frame_timestamp`: where playback starts, in milliseconds
     /// (tdesktop `videoStartPosition`).
     pub start_ms: u32,
+    /// `small_animation` (160 px), when the photo has one: what a userpic
+    /// beside a message or in the chat list plays.
+    pub small_file_id: Option<FileId>,
 }
 
 impl ChatPhotoAnimation {
     pub fn start_secs(self) -> f64 {
         f64::from(self.start_ms) / 1000.0
     }
+
+    /// The clip a small userpic plays: tdesktop's `VideoUserpic` asks for
+    /// `PhotoSize::Small` and falls back to the large one.
+    pub fn userpic_file_id(self) -> FileId {
+        self.small_file_id.unwrap_or(self.file_id)
+    }
 }
 
-/// The clip of a `chatPhoto` with its file: `animation` (up to 1280 px),
-/// else `small_animation` (160 px). `None` for a still photo. A photo made
-/// from a sticker (`chatPhoto.sticker`) plays only through these, as in
-/// tdesktop, which ignores the emoji markup of a photo.
+/// The clips of a `chatPhoto` with their files: `animation` (up to
+/// 1280 px), else `small_animation` (160 px), and the small one beside it.
+/// `None` for a still photo. A photo made from a sticker
+/// (`chatPhoto.sticker`) plays only through these, as in tdesktop, which
+/// ignores the emoji markup of a photo.
 pub(crate) fn parse_chat_photo_animation(
     photo: &Value,
-) -> Option<(ChatPhotoAnimation, ParsedFile)> {
-    ["animation", "small_animation"]
-        .into_iter()
-        .filter_map(|key| photo.get(key).filter(|value| !value.is_null()))
-        .find_map(|animated| {
-            let file = parse_file(animated.get("file")).ok()?;
-            let start = animated
-                .get("main_frame_timestamp")
-                .and_then(Value::as_f64)
-                .filter(|secs| secs.is_finite() && *secs > 0.0)
-                .map_or(0, |secs| (secs * 1000.0).min(f64::from(u32::MAX)) as u32);
-            Some((
-                ChatPhotoAnimation {
-                    file_id: file.id,
-                    start_ms: start,
-                },
-                file,
-            ))
-        })
+) -> Option<(ChatPhotoAnimation, Vec<ParsedFile>)> {
+    let clip = |key: &str| {
+        let animated = photo.get(key).filter(|value| !value.is_null())?;
+        let file = parse_file(animated.get("file")).ok()?;
+        let start = animated
+            .get("main_frame_timestamp")
+            .and_then(Value::as_f64)
+            .filter(|secs| secs.is_finite() && *secs > 0.0)
+            .map_or(0, |secs| (secs * 1000.0).min(f64::from(u32::MAX)) as u32);
+        Some((file, start))
+    };
+    let small = clip("small_animation");
+    let small_file_id = small.as_ref().map(|(file, _)| file.id);
+    match (clip("animation"), small) {
+        (Some((large, start_ms)), small) => Some((
+            ChatPhotoAnimation {
+                file_id: large.id,
+                start_ms,
+                small_file_id,
+            },
+            std::iter::once(large)
+                .chain(small.map(|(file, _)| file))
+                .collect(),
+        )),
+        (None, Some((small, start_ms))) => Some((
+            ChatPhotoAnimation {
+                file_id: small.id,
+                start_ms,
+                small_file_id,
+            },
+            vec![small],
+        )),
+        (None, None) => None,
+    }
 }
 
 #[cfg(test)]
@@ -78,11 +103,27 @@ mod tests {
             file(3),
             file(4)
         ));
-        let (animation, clip) = parse_chat_photo_animation(&value).unwrap();
+        let (animation, clips) = parse_chat_photo_animation(&value).unwrap();
         assert_eq!(animation.file_id, FileId(3));
-        assert_eq!(clip.id, FileId(3));
         assert_eq!(animation.start_ms, 1250);
         assert!((animation.start_secs() - 1.25).abs() < 1e-9);
+        // Userpics play the small clip; both files are cached.
+        assert_eq!(animation.small_file_id, Some(FileId(4)));
+        assert_eq!(animation.userpic_file_id(), FileId(4));
+        let ids: Vec<FileId> = clips.iter().map(|file| file.id).collect();
+        assert_eq!(ids, vec![FileId(3), FileId(4)]);
+    }
+
+    #[test]
+    fn a_userpic_without_a_small_clip_plays_the_large_one() {
+        let value = photo(&format!(
+            r#","animation":{{"@type":"animatedChatPhoto","length":800,"file":{},"main_frame_timestamp":0}}"#,
+            file(3)
+        ));
+        let (animation, clips) = parse_chat_photo_animation(&value).unwrap();
+        assert_eq!(animation.small_file_id, None);
+        assert_eq!(animation.userpic_file_id(), FileId(3));
+        assert_eq!(clips.len(), 1);
     }
 
     #[test]
@@ -91,9 +132,11 @@ mod tests {
             r#","animation":null,"small_animation":{{"@type":"animatedChatPhoto","length":160,"file":{},"main_frame_timestamp":-3}}"#,
             file(4)
         ));
-        let (animation, _) = parse_chat_photo_animation(&value).unwrap();
+        let (animation, clips) = parse_chat_photo_animation(&value).unwrap();
         assert_eq!(animation.file_id, FileId(4));
+        assert_eq!(animation.userpic_file_id(), FileId(4));
         assert_eq!(animation.start_ms, 0);
+        assert_eq!(clips.len(), 1);
     }
 
     #[test]
@@ -117,7 +160,8 @@ mod tests {
             parsed.animation,
             Some(ChatPhotoAnimation {
                 file_id: FileId(9),
-                start_ms: 500
+                start_ms: 500,
+                small_file_id: None,
             })
         );
         assert_eq!(parsed.full_file_id, FileId(2));
