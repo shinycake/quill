@@ -18,6 +18,13 @@ use quill::lang::{keys, tr, tr_with};
 use std::cell::RefCell;
 use std::rc::Rc;
 
+/// A warning with readable text: the kit's amber text on its pale amber
+/// fill misses WCAG AA in the light theme, so the text takes the
+/// foreground color and the fill and border keep the warning tint.
+fn warning(id: &'static str, text: &'static str, cx: &App) -> Alert {
+    Alert::warning(id, text).text_color(cx.theme().foreground)
+}
+
 /// Agent-supplied text is shown, never trusted: cap what a title or a
 /// quote can take.
 fn clip(text: &str, max: usize) -> String {
@@ -74,7 +81,7 @@ fn dialog_with(
     let body = Rc::new(RefCell::new(Some(body)));
     dialog
         .overlay(true)
-        .title(super::shell::dialog_title(title))
+        .title(div().pr_6().child(super::shell::dialog_title(title)))
         .content(super::shell::scrollable_dialog_content(
             move |content, _, _| {
                 let body = body
@@ -148,15 +155,17 @@ impl QuillApp {
             Ask::Chat {
                 chat_id, secret, ..
             } if *secret || is_secret_chat_id(*chat_id) => {
-                body = body.child(Alert::warning(
+                body = body.child(warning(
                     "agent-request-secret",
                     tr(keys::Q_AGENT_REQUEST_SECRET),
+                    cx,
                 ));
             }
             Ask::AllChats { .. } => {
-                body = body.child(Alert::warning(
+                body = body.child(warning(
                     "agent-request-all",
                     tr(keys::Q_AGENT_REQUEST_ALL_CHATS),
+                    cx,
                 ));
             }
             Ask::Contacts => {
@@ -234,9 +243,10 @@ impl QuillApp {
             .flex_col()
             .gap_3()
             .child(div().text_sm().child(tr(what)))
-            .child(Alert::warning(
+            .child(warning(
                 "agent-consent-terms",
                 tr(keys::Q_AGENT_CONSENT_TERMS),
+                cx,
             ))
             .child(
                 div()
@@ -291,54 +301,6 @@ crate::ui::shell::register_dialogs! {
         QuillApp::build_agent_consent_dialog,
     ),
 }
-
-/// `QUILL_DEMO_AGENT` picks the request: `chat` (default), `write`,
-/// `secret`, `all`, `all-write` or `contacts`.
-fn demo_request(_: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) {
-    quill::fast_buttons::set_persistence(false);
-    quill::agent::access::set_enabled(true);
-    let mode = std::env::var("QUILL_DEMO_AGENT").unwrap_or_default();
-    let chat = |chat_id: i64, title: &str, secret: bool, scope: Scope| Ask::Chat {
-        chat_id,
-        title: title.to_string(),
-        secret,
-        scope,
-    };
-    let ask = match mode.as_str() {
-        "write" => chat(7, "Ann Lee", false, Scope::ReadWrite),
-        "secret" => chat(-1_999_000_000_000, "Ann Lee", true, Scope::Read),
-        "all" => Ask::AllChats { scope: Scope::Read },
-        "all-write" => Ask::AllChats {
-            scope: Scope::ReadWrite,
-        },
-        "contacts" => Ask::Contacts,
-        _ => chat(7, "Ann Lee", false, Scope::Read),
-    };
-    let _ = quill::agent::prompts::file(
-        super::agent_state::active_account(),
-        "Claude Code".into(),
-        ask,
-        "You asked me to summarize last week's trip planning with Ann.".into(),
-    );
-}
-
-/// The consent for "All other chats" over the Agent access page.
-fn demo_consent(app: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) {
-    quill::fast_buttons::set_persistence(false);
-    quill::agent::access::set_enabled(true);
-    app.open_settings(None);
-    app.settings.page = Some(quill::settings_catalog::Page::Advanced);
-    app.settings.sub = Some(super::settings_window::SubPage::AgentAccess);
-    app.agent_ui.consent = Some(AllChatsConsent {
-        account: super::agent_state::active_account(),
-        scope: Scope::Read,
-    });
-}
-
-crate::ui::screenshot_demo::register_demos![
-    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-agent-request").setup(demo_request),
-    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-agent-consent").setup(demo_consent),
-];
 
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]

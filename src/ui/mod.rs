@@ -15,6 +15,7 @@ mod admin_state;
 mod advanced_state;
 mod advanced_ui;
 mod agent_dialogs;
+mod agent_dialogs_demo;
 mod agent_state;
 mod anim_layer;
 mod app_slice;

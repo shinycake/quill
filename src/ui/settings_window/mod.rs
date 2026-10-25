@@ -7,6 +7,7 @@
 mod account;
 mod agent_access;
 mod agent_grants;
+mod agent_grants_demo;
 mod log_out;
 mod notifications;
 mod pages;
