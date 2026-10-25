@@ -190,3 +190,85 @@ their own threads, never on the receive thread. `wait_for_message` waits on
 the buffer; `quill://unread` can be subscribed to, and a watcher thread per
 connection sends `notifications/resources/updated` when a message from
 someone else arrives in a granted chat.
+
+## Phase 3: writes, pacing, the activity log and the connected strip
+
+### Write tools
+
+`send_message`, `send_file` (2 to 10 files go as an album), `send_poll`,
+`send_sticker`, `forward_messages`, `edit_message`, `delete_messages`,
+`react`, `pin_message`, `set_draft`, `mark_read`, `mute_chat`,
+`archive_chat` and `set_chat_folder` (`src/agent/tools/write/`). Each one
+needs `read_write` on its chat. `forward_messages` needs only `read` on the
+source chat. Edits and deletes accept only the user's own messages
+(`is_outgoing` plus TDLib's `getMessageProperties`), so an agent never
+removes what someone else wrote. In a channel Telegram marks every post as
+outgoing, so there "own" means any post the user may edit as an admin;
+channels are never granted for writing by default. Text is plain by default. `markdown`
+(MarkdownV2) and `html` go through TDLib's `parseTextEntities`, and a parse
+error says how to fix it. `mark_read` is the only path that marks anything
+read, and an agent calls it only when asked.
+
+The bots default (`read_write`) covers bots the user already talks to. A
+bot with an empty chat, typically one an agent just found by @username,
+needs its own grant before an agent writes to it, because a stranger runs
+it. `send_file` refuses paths inside Quill's data folder (sign-in keys, the
+agent token, the cache), links resolved first.
+
+### Sends
+
+Every message an agent sends goes through `src/agent/pacing.rs`, and every
+other write takes a turn in the same queue (one message's worth), so a
+flood wait stops edits, reactions and pins too:
+
+- A send to one chat starts at least 1.5 s after the previous one, and any
+  send at least 0.4 s after the previous one (times the number of messages
+  in an album or forward).
+- A turn more than 30 s away is refused rather than queued.
+- A flood wait from Telegram pauses every agent send for the seconds it
+  names. Nothing is retried for the agent; it gets the wait in the error.
+- At most five first messages a day may go to people who never wrote to the
+  user: a private chat with a non-contact and nothing incoming in the last
+  50 messages.
+
+Agents never set `paid_message_star_count`. Before a send, Quill checks the
+chat's price (`userFullInfo.outgoing_paid_message_star_count` or
+`supergroup.paid_message_star_count`) and refuses a chat that charges, so
+agents cannot spend Stars. TDLib answers a send with a pending message; the
+tool waits up to 30 s for `updateMessageSendSucceeded` or
+`updateMessageSendFailed` (recorded by `events::observe` while an agent is
+connected) and returns the final message id, or the error.
+
+Each call remembers the switch's generation when it began. Right after its
+turn in the queue and before it reaches TDLib, a write checks that Agent
+access is still on in that generation, so Revoke or the switch stops a
+write that was waiting in the queue; the agent hears that nothing went out.
+
+### What the user sees
+
+- **Activity log.** Every write that reaches Telegram or the user is
+  logged, with refusals of someone else's messages and the user's declines,
+  in `agent_actions.json` (newest 500, all accounts, owner-only) with its
+  time, agent, kind (`send_message`, `unpin_message`), chat, whether it
+  worked, and what it carried (a short quote or ids). The UI words the kind
+  in the user's language; the file is written outside the log's lock.
+  Refusals by the grants are not logged: they change nothing and name no
+  chat the agent may see. Settings > Advanced > Agent access
+  lists the active account's log, 50 rows at a time, with Clear. Reads are
+  not logged.
+- **Connected strip.** While an agent is connected, a quiet row at the
+  bottom of the chat list names it ("Claude Code connected", or "2 agents
+  connected"), with a tooltip and Revoke. Revoke turns Agent access off,
+  which ends every connection and deletes the token. Presence is held by
+  the server for the life of each authenticated connection.
+- **Confirm each send** (off by default, beside the switch). When on,
+  sends, forwards, edits, deletes, reactions and pins wait for the user's
+  Allow in a dialog titled by the kind of write ("Claude Code wants to
+  delete your messages in "Ann"") that shows what it carries. Drafts, read state,
+  mute, archive and folders don't ask.
+
+### Name lookups
+
+A title that matches no granted chat gets the same answer whether or not an
+ungranted chat matched, so trying names reveals nothing about chats the
+agent can't see.

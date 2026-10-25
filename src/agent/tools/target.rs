@@ -204,12 +204,10 @@ fn by_title(ctx: &Ctx, title: &str, me: i64, reach: Reach) -> Result<i64, ToolEr
         .unwrap_or_default();
     let grants = grants::for_account(&ctx.account);
     let mut candidates = Vec::new();
-    let mut hidden = 0usize;
     for id in ids {
         let chat = ctx.call(json!({"@type": "getChat", "chat_id": id}))?;
         let class = classify(ctx, &chat, me)?;
         if reach == Reach::Granted && grants.scope_for(id, class).is_none() {
-            hidden += 1;
             continue;
         }
         candidates.push((id, chat_title(&chat, class)));
@@ -220,11 +218,10 @@ fn by_title(ctx: &Ctx, title: &str, me: i64, reach: Reach) -> Result<i64, ToolEr
         .collect();
     match (exact.as_slice(), candidates.as_slice()) {
         ([(id, _)], _) | ([], [(id, _)]) => Ok(*id),
-        ([], []) if hidden > 0 => Err(ToolError::new(format!(
-            "No granted chat is called \"{title}\". If you need a chat by that name, call request_access {{\"chat\": \"{title}\", \"scope\": \"read\", \"reason\": \"<why>\"}}; Quill shows the user the match and asks."
-        ))),
+        // One answer whether or not an ungranted chat matched, so trying
+        // names tells an agent nothing about chats it can't see.
         ([], []) => Err(ToolError::new(format!(
-            "No chat is called \"{title}\". Check the name, or call list_chats for the chats you can use."
+            "No granted chat is called \"{title}\". Call list_chats for the chats you can use. If the user wants you to use a chat by that name, call request_access {{\"chat\": \"{title}\", \"scope\": \"read\", \"reason\": \"<why>\"}}; Quill shows the user the match and asks."
         ))),
         _ if reach == Reach::Any => Err(ToolError::new(format!(
             "Several chats match \"{title}\". Ask with the chat's exact title or @username, or with its id if you have it."
@@ -271,6 +268,8 @@ pub(crate) struct Found {
     pub title: String,
     pub class: ChatClass,
     pub me: i64,
+    /// Nothing was ever said in the chat.
+    pub empty: bool,
 }
 
 /// The chat `args.chat` names.
@@ -290,6 +289,7 @@ pub(crate) fn lookup(ctx: &Ctx, args: &Value, reach: Reach) -> Result<Found, Too
         title: chat_title(&chat, class),
         class,
         me,
+        empty: chat.get("last_message").is_none_or(Value::is_null),
     })
 }
 
@@ -300,8 +300,22 @@ pub(crate) fn require(ctx: &Ctx, args: &Value, needed: Scope) -> Result<Target, 
         title,
         class,
         me,
+        empty,
     } = lookup(ctx, args, Reach::Granted)?;
-    let scope = grants::for_account(&ctx.account).scope_for(chat_id, class);
+    let grants = grants::for_account(&ctx.account);
+    let scope = grants.scope_for(chat_id, class);
+    // The bots default covers bots the user already talks to: a bot found
+    // by @username alone belongs to a stranger, who would read whatever
+    // an agent sends it.
+    if needed == Scope::ReadWrite
+        && class == ChatClass::Bot
+        && empty
+        && !grants.chats.contains_key(&chat_id)
+    {
+        return Err(ToolError::new(format!(
+            "\"{title}\" is a bot the user has never talked to, so the bots default does not cover writing to it. Call request_access {{\"chat\": {chat_id}, \"scope\": \"read_write\", \"reason\": \"<why>\"}} to ask the user."
+        )));
+    }
     match scope {
         Some(scope) if scope.allows(needed) => Ok(Target {
             chat_id,

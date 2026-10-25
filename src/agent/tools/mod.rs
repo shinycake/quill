@@ -11,6 +11,7 @@ mod messages;
 mod people;
 mod status;
 mod target;
+mod write;
 
 use crate::agent::td::{self, Client, TdError};
 use crate::ids::AccountKey;
@@ -79,6 +80,11 @@ impl Ctx {
     }
 }
 
+/// Every tool: the read tools, then the write tools.
+fn all_tools() -> impl Iterator<Item = &'static Tool> {
+    READ_TOOLS.iter().chain(write::TOOLS)
+}
+
 struct Tool {
     name: &'static str,
     title: &'static str,
@@ -88,7 +94,7 @@ struct Tool {
     read_only: bool,
 }
 
-const TOOLS: &[Tool] = &[
+const READ_TOOLS: &[Tool] = &[
     Tool {
         name: "quill_status",
         title: "Quill status",
@@ -236,6 +242,23 @@ or {\"contacts\": true, \"reason\": \"To find Ann's chat.\"}. Output: {granted, 
 thread_local! {
     /// The agent whose request this thread runs, for prompts.
     static AGENT: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    /// The switch's generation when the current call began.
+    static GENERATION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Refuses once Agent access went off (or Revoke was clicked) after the
+/// current call began: a write that waited in the queue must not go out.
+pub(crate) fn still_allowed() -> Result<(), ToolError> {
+    let began = GENERATION
+        .try_with(std::cell::Cell::get)
+        .unwrap_or(u64::MAX);
+    if crate::agent::access::enabled() && crate::agent::access::generation() == began {
+        Ok(())
+    } else {
+        Err(ToolError::new(
+            "Agent access was turned off in Quill, so nothing was sent or changed. Ask the user to turn it back on.",
+        ))
+    }
 }
 
 /// The name of the agent making the current call.
@@ -253,8 +276,7 @@ fn no_arguments() -> Value {
 
 /// The `tools` array of a `tools/list` answer.
 pub fn catalog() -> Vec<Value> {
-    TOOLS
-        .iter()
+    all_tools()
         .map(|tool| {
             json!({
                 "name": tool.name,
@@ -304,13 +326,14 @@ pub fn granted_message_arrived(
 
 /// The names of every tool, for `quill_status`.
 pub(crate) fn names() -> Vec<&'static str> {
-    TOOLS.iter().map(|tool| tool.name).collect()
+    all_tools().map(|tool| tool.name).collect()
 }
 
 /// Run tool `name` for `agent` and shape the MCP `tools/call` result.
 pub fn call(name: &str, arguments: &Value, agent: &str) -> Value {
     let _ = AGENT.try_with(|current| current.replace(agent.to_string()));
-    let result = match TOOLS.iter().find(|tool| tool.name == name) {
+    let _ = GENERATION.try_with(|current| current.set(crate::agent::access::generation()));
+    let result = match all_tools().find(|tool| tool.name == name) {
         Some(tool) => (tool.run)(arguments),
         None => Err(ToolError::new(format!(
             "There is no tool named {name}. Call tools/list, or quill_status, to see the tools."
@@ -353,11 +376,11 @@ pub(crate) fn int_arg(
 
 #[cfg(test)]
 mod tests {
-    use super::{TOOLS, call, catalog};
+    use super::{all_tools, call, catalog};
 
     #[test]
     fn every_tool_is_described_with_an_example_and_output() {
-        for tool in TOOLS {
+        for tool in all_tools() {
             assert!(tool.description.contains("Example input"), "{}", tool.name);
             assert!(tool.description.contains("Output"), "{}", tool.name);
             assert!(
@@ -366,7 +389,7 @@ mod tests {
                     .all(|c| c.is_ascii_lowercase() || c == '_')
             );
         }
-        assert_eq!(catalog().len(), TOOLS.len());
+        assert_eq!(catalog().len(), all_tools().count());
     }
 
     #[test]

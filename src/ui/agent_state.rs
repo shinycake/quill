@@ -7,6 +7,7 @@
 
 use super::app::QuillApp;
 use gpui_kit::*;
+use quill::agent::activity;
 use quill::agent::grants::{self, AccountGrants, ChatGrant, Scope};
 use quill::agent::prompts::{self, Ask, Prompt};
 use quill::ids::AccountKey;
@@ -34,7 +35,12 @@ pub(crate) struct AgentUi {
     pub(super) picked: Option<AccountKey>,
     /// Set while the consent dialog for "All other chats" is open.
     pub(super) consent: Option<AllChatsConsent>,
+    /// How many activity rows Settings shows.
+    pub(super) activity_shown: usize,
 }
+
+/// Activity rows shown at first, and added by each "Show more".
+pub(super) const ACTIVITY_PAGE: usize = 50;
 
 impl AgentUi {
     /// Starts the task that wakes the UI when agent state changes and
@@ -75,6 +81,7 @@ impl AgentUi {
         Self {
             picked: None,
             consent: None,
+            activity_shown: ACTIVITY_PAGE,
         }
     }
 }
@@ -134,6 +141,8 @@ pub(super) fn apply_ask(grants: &mut AccountGrants, ask: &Ask) {
         }
         Ask::AllChats { scope } => grants.all_chats = Some(*scope),
         Ask::Contacts => grants.contacts = true,
+        // A confirmation changes no grant: it covers this one write.
+        Ask::Write { .. } => {}
     }
 }
 
@@ -272,13 +281,34 @@ fn sees_prompts() -> bool {
     true
 }
 
-/// Back to a known state: access on, default grants, no waiting requests.
+/// The agents connected now.
+pub(super) fn visible_connected() -> Vec<activity::Connected> {
+    if sees_prompts() {
+        activity::connected()
+    } else {
+        Vec::new()
+    }
+}
+
+/// What agents did for `account`, newest first.
+pub(super) fn visible_activity(account: &AccountKey) -> Vec<activity::Action> {
+    if sees_prompts() {
+        activity::recent(account)
+    } else {
+        Vec::new()
+    }
+}
+
+/// Back to a known state: access on, confirmation off, default grants, no
+/// waiting requests, an empty activity log.
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 pub(super) fn reset_for_test(account: &AccountKey) {
     SEES_PROMPTS.with(|sees| sees.set(true));
     quill::fast_buttons::set_persistence(false);
     prompts::deny_all();
+    activity::clear();
+    quill::agent::access::set_confirm_sends(false);
     grants::update(account, |g| *g = AccountGrants::default());
     quill::agent::access::set_enabled(true);
 }

@@ -74,6 +74,8 @@ impl QuillApp {
                 )],
             ));
         if on {
+            page = page.child(self.agent_confirm_section(cx));
+            page = page.children(self.agent_connected_section(cx));
             page = page.children(self.agent_grants_section(cx));
             let command = mcp_command();
             page = page.child(group(
@@ -96,14 +98,15 @@ impl QuillApp {
                 ],
             ));
         }
-        page.child(
-            div()
-                .id("agent-access-terms")
-                .text_xs()
-                .text_color(muted)
-                .child(tr(keys::Q_AGENT_ACCESS_TERMS)),
-        )
-        .into_any_element()
+        page.child(self.agent_activity_section(cx))
+            .child(
+                div()
+                    .id("agent-access-terms")
+                    .text_xs()
+                    .text_color(muted)
+                    .child(tr(keys::Q_AGENT_ACCESS_TERMS)),
+            )
+            .into_any_element()
     }
 
     /// A titled command in a monospace well, with Copy.

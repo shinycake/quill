@@ -38,6 +38,25 @@ fn demo_request(_: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) {
     );
 }
 
+/// `ready-agent-write-request`: an agent asks to send a message.
+fn demo_write_request(_: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) {
+    quill::fast_buttons::set_persistence(false);
+    quill::agent::access::set_enabled(true);
+    quill::agent::access::set_confirm_sends(true);
+    let _ = quill::agent::prompts::file(
+        super::agent_state::active_account(),
+        "Claude Code".into(),
+        Ask::Write {
+            chat_id: 7,
+            title: "Ann Lee".into(),
+            kind: "send_message".into(),
+            preview: "Hi Ann, the trip plan is ready. Flights are booked for the 14th, and I put the hotel and the train times in the shared doc. Tell me if the Friday dinner still works for you.".into(),
+        },
+        // Write confirmations carry no reason: the preview is the point.
+        String::new(),
+    );
+}
+
 /// The consent for "All other chats" over the Agent access page.
 fn demo_consent(app: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) {
     quill::fast_buttons::set_persistence(false);
@@ -53,5 +72,7 @@ fn demo_consent(app: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) {
 
 crate::ui::screenshot_demo::register_demos![
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-agent-request").setup(demo_request),
+    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-agent-write-request")
+        .setup(demo_write_request),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-agent-consent").setup(demo_consent),
 ];

@@ -13,10 +13,12 @@ with what scope, and the tools that work right now.
 
 ## What you can do
 
-Quill exposes four layers. This version ships two of them, read only:
+Quill exposes four layers. This version ships two of them:
 
-1. Curated tools: chats, folders, unread, history, search, chat details,
-   members, contacts, files.
+1. Curated tools. Reading: chats, folders, unread, history, search, chat
+   details, members, contacts, files. Writing: send text, files, albums,
+   voice notes, polls and stickers; forward; edit and delete the user's own
+   messages; react; pin; drafts; mark read; mute; archive; folders.
 2. Events: `wait_for_message`, and the `quill://unread` resource, which you
    can subscribe to.
 3. Raw TDLib calls (`td_call`): coming later.
@@ -37,7 +39,7 @@ A chat that is not granted answers "Chat not granted". Then call
 `request_access` with the chat, the scope you need and one sentence on why:
 Quill shows the user a prompt and the call waits up to two minutes for the
 answer. Ask for one thing per call, and do not ask again after a "no".
-`read_write` lets later versions send as the user; today every tool reads.
+Write tools need `read_write` on the chat.
 
 ## Naming chats
 
@@ -45,10 +47,10 @@ answer. Ask for one thing per call, and do not ask again after a "no".
 `@username` or t.me link, or the chat's title (`"Ann Lee"`). When a title
 matches several granted chats the error lists them with their ids. Leave
 `chat` out of `search_messages` to search every granted chat. Names only
-ever match granted chats: "No granted chat is called…" means there may be
-such a chat, but you can't see it until the user grants it (ask with
-`request_access`, which takes the same name); "No chat is called…" means
-there is none at all. `list_chats` shows only granted chats.
+ever match granted chats, so "No granted chat is called…" does not say
+whether such a chat exists; if the user wants you to use it, ask with
+`request_access`, which takes the same name and shows the user the match.
+`list_chats` shows only granted chats.
 
 ## Tools
 
@@ -68,6 +70,20 @@ there is none at all. `list_chats` shows only granted chats.
 | `download_file` | Save the file a message carries to disk (never overwrites; a taken name gets " (2)"). |
 | `wait_for_message` | Wait for the next message in a granted chat, e.g. a bot's reply. |
 | `request_access` | Ask the user for a chat, all chats or the contacts. |
+| `send_message` | Send text (plain, MarkdownV2 or HTML), as a reply or scheduled. |
+| `send_file` | Send files from this computer; 2 to 10 go as an album. |
+| `send_poll` | Start a poll or quiz. |
+| `send_sticker` | Send one of the user's stickers for an emoji. |
+| `forward_messages` | Forward messages from a readable chat to a writable one. |
+| `edit_message` | Change the text or caption of the user's own message. |
+| `delete_messages` | Delete the user's own messages. |
+| `react` | Add or remove an emoji reaction. |
+| `pin_message` | Pin or unpin a message. |
+| `set_draft` | Leave text in the message box for the user to send. |
+| `mark_read` | Mark a chat read (reading never does this by itself). |
+| `mute_chat` | Mute or unmute a chat. |
+| `archive_chat` | Archive or unarchive a chat. |
+| `set_chat_folder` | Add a chat to a folder or take it out. |
 
 Messages come back as text lines like
 
@@ -76,7 +92,8 @@ Messages come back as text lines like
 and as JSON in `structuredContent`: `id`, `date` (UTC), `from`, `kind`
 (`text`, `photo`, `document`, `voice_note`...), `text` (the text or caption),
 `file` when there is one, and in full reads `reply_to`, `forwarded_from`,
-`links`, `edited`. Results that span chats add `chat` to each message.
+`links`, `styles` (formatted spans, like `{"style": "bold", "text": "agent"}`),
+`edited`. Results that span chats add `chat` to each message.
 
 ## Recipes
 
@@ -104,6 +121,32 @@ Something you need is not granted. Ask for one of these per call:
     request_access {"all_chats": true, "scope": "read", "reason": "To find every message about the trip."}
     request_access {"contacts": true, "reason": "To find Ann's chat."}
 
+Send a message and wait for the bot's answer:
+
+    send_message {"chat": "@some_bot", "text": "/start"}
+    wait_for_message {"chat": "@some_bot", "timeout_seconds": 60}
+
+Leave a reply for the user to check and send:
+
+    set_draft {"chat": "Ann Lee", "text": "Sounds good, see you at 6"}
+
+## Sending
+
+Everything you send goes out as the user, in their name. Sends wait until
+Telegram delivers them and return the final message id. Quill paces them:
+messages to one chat are spaced out, a flood wait from Telegram pauses every
+agent send for the seconds it names, and at most five conversations a day may
+start with someone who never wrote to the user. Agents cannot spend Stars:
+chats that charge for messages refuse agent sends. Every write shows in the
+user's activity log in Quill, and if the user turned on "Confirm each send"
+each send, edit, delete, reaction and pin waits for their click. Edits,
+reactions, pins and the other changes are spaced out like sends.
+
+The bots default covers bots the user already talks to. A bot you just found
+by @username needs `request_access` with `read_write` before you write to it.
+`send_file` never sends files from Quill's own data folder. If the user turns
+Agent access off while a write waits its turn, nothing goes out.
+
 ## Events
 
 `wait_for_message` returns as soon as a message arrives (or the time runs
@@ -120,7 +163,9 @@ Every error says what to do next. The common ones:
 - "Quill is not signed in": ask the user to sign in to Quill.
 - "Chat not granted": call `request_access`.
 - "Several chats match": pass the chat id from the list.
-- "rate limiting": wait the seconds Telegram names, then retry.
+- "rate limiting" or "slow down": wait the seconds named, then retry.
+- "granted for reading only": call `request_access` with `read_write`.
+- "declined this in Quill": the user said no; do not retry.
 
 ## Rules
 

@@ -1,5 +1,5 @@
 //! Requests from agents that only the user can answer, shown as a dialog in
-//! Quill (`request_access` now; confirmations later).
+//! Quill: `request_access`, and each write while "Confirm each send" is on.
 //!
 //! An agent thread files a [`Prompt`] and waits; the UI reads [`current`]
 //! on every render and answers with [`answer`]. Nothing here touches the
@@ -26,6 +26,15 @@ pub enum Ask {
     AllChats { scope: super::grants::Scope },
     /// The contact list.
     Contacts,
+    /// One write in `chat_id`, while "Confirm each send" is on. `kind` names
+    /// it as the action log does (`send_message`, `unpin_message`), so the
+    /// UI words it in the user's language; `preview` is what it carries.
+    Write {
+        chat_id: i64,
+        title: String,
+        kind: String,
+        preview: String,
+    },
 }
 
 #[derive(Debug, Clone)]

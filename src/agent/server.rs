@@ -220,6 +220,7 @@ pub fn serve(stream: Stream) {
     {
         return;
     }
+    let _presence = super::activity::connect(&agent);
     let _ = stream.set_recv_timeout(Some(IDLE_CHECK));
     let (recv, send) = stream.split();
     let send = Arc::new(Mutex::new(send));
