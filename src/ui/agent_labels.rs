@@ -2,7 +2,7 @@
 //! access page and the connected strip.
 #![deny(clippy::indexing_slicing)]
 
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{Key, keys, tr, tr_with};
 use quill::local_time::{civil_local, hhmm};
 
 pub(super) fn now_unix() -> i64 {
@@ -46,7 +46,7 @@ pub(super) fn tool_label(tool: &str) -> String {
 
 /// The title of the confirmation for a write of `kind`:
 /// `{agent} wants to send a message in "{chat}"`.
-pub(super) fn confirm_title_key(kind: &str) -> &'static str {
+pub(super) fn confirm_title_key(kind: &str) -> Key {
     match kind {
         "send_file" => keys::Q_AGENT_CONFIRM_SEND_FILE,
         "send_poll" => keys::Q_AGENT_CONFIRM_SEND_POLL,
@@ -63,7 +63,7 @@ pub(super) fn confirm_title_key(kind: &str) -> &'static str {
 }
 
 /// The label over a confirmation's preview: what the preview is.
-pub(super) fn confirm_preview_key(kind: &str) -> &'static str {
+pub(super) fn confirm_preview_key(kind: &str) -> Key {
     match kind {
         "forward_messages" => keys::Q_AGENT_CONFIRM_PREVIEW_FORWARD,
         "edit_message" => keys::Q_AGENT_CONFIRM_PREVIEW_EDIT,

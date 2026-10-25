@@ -112,7 +112,13 @@ pub fn mark_read(args: &Value) -> Result<ToolOutput, ToolError> {
         )?;
     }
     if chat.get("is_marked_as_unread").and_then(Value::as_bool) == Some(true) {
-        ctx.call(json!({"@type": "toggleChatIsMarkedAsUnread", "chat_id": target.chat_id, "is_marked_as_unread": false}))?;
+        change(
+            &ctx,
+            &target,
+            "mark_read",
+            "",
+            json!({"@type": "toggleChatIsMarkedAsUnread", "chat_id": target.chat_id, "is_marked_as_unread": false}),
+        )?;
     }
     Ok(done(
         format!("Marked \"{}\" as read.", target.title),
