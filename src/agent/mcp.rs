@@ -182,8 +182,17 @@ fn connect(endpoint: &Endpoint) -> Option<Stream> {
 /// Start Quill detached from this process: no shared stdio (it would corrupt
 /// the MCP stream) and its own process group, so it outlives the bridge.
 fn launch_quill() -> Result<(), String> {
-    let exe =
-        std::env::current_exe().map_err(|e| format!("Could not find Quill to start it ({e})."))?;
+    // An AppImage runs from a mount that goes away with this process.
+    let appimage = cfg!(target_os = "linux")
+        .then(|| std::env::var_os("APPIMAGE"))
+        .flatten()
+        .filter(|path| !path.is_empty())
+        .map(std::path::PathBuf::from);
+    let exe = match appimage {
+        Some(path) => path,
+        None => std::env::current_exe()
+            .map_err(|e| format!("Could not find Quill to start it ({e})."))?,
+    };
     let mut command = std::process::Command::new(exe);
     command
         .stdin(std::process::Stdio::null())

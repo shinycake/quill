@@ -66,6 +66,11 @@ not hold up the rest.
   connection.
 - `quill mcp` checks the socket's owner too (peer uid on Unix), and does not
   start Quill while the switch is off.
+- Known gap: on Windows the bridge does not yet check who owns the pipe it
+  connects to, so another local user who created the pipe name first could
+  receive the token. Phase 2 adds that check (the pipe server's process
+  token user must match ours) and caps connections that have not
+  authenticated yet.
 - Turning the switch off bumps a generation counter; open connections close
   within a second on Unix (they wake on a receive timeout to check), and at
   their next request on Windows, where named pipes have no read timeout. Answers
