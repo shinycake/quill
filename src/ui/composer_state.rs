@@ -107,6 +107,9 @@ pub(crate) struct ComposerUi {
     /// `inputMessageRichMessage`. Opened via the ⛶ button (visible after
     /// 3+ lines, per the anniversary post).
     pub(super) rich_editor_open: bool,
+    /// A rich draft's discard and Premium boxes and the rich paste notice
+    /// (`rich_draft`).
+    pub(super) rich_draft: super::rich_draft::RichDraftUi,
     /// Same-chat reply draft (tdesktop `FieldHeader::replyToMessage`).
     /// Private on purpose: a sender must take the reply through
     /// `QuillApp::reply_for_send` so a reply to a deleted message is dropped.
@@ -216,6 +219,7 @@ impl ComposerUi {
             scheduled_dialog_open: false,
             scheduled_selected: Vec::new(),
             rich_editor_open: false,
+            rich_draft: Default::default(),
             pending_reply: None,
             clear_draft_on_success: None,
             draft_restore_pending: false,

@@ -442,10 +442,15 @@ impl QuillApp {
         // user and we never want to fake a successful send.
         let premium = session.my_is_premium();
         if !premium {
-            self.connection.set_note(StatusNote::info(tr(
-                keys::Q_CHAT_RICH_MESSAGES_REQUIRE_TELEGRAM_PREMIUM,
-            )));
-            cx.notify();
+            match quill::rich::RichDraft::from_markup(&text) {
+                Some(rich) => self.refuse_rich_send(&rich, window, cx),
+                None => {
+                    self.connection.set_note(StatusNote::info(tr(
+                        keys::Q_CHAT_RICH_MESSAGES_REQUIRE_TELEGRAM_PREMIUM,
+                    )));
+                    cx.notify();
+                }
+            }
             return;
         }
         let Some(chat_id) = open_chat else {

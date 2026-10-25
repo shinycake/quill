@@ -441,11 +441,8 @@ pub fn set_suggested_draft_message(
                 .iter()
                 .map(super::messages::format_entity_json)
                 .collect();
-            json!({
-                "@type": "draftMessage",
-                "reply_to": send_reply_value(reply_to),
-                "date": 0,
-                "content": {
+            draft_message_value(
+                json!({
                     "@type": "draftMessageContentText",
                     "text": {
                         "@type": "formattedText",
@@ -453,13 +450,58 @@ pub fn set_suggested_draft_message(
                         "entities": entities
                     },
                     "link_preview_options": Value::Null
-                },
-                "effect_id": "0",
-                "suggested_post_info": suggested
-                    .map_or(Value::Null, |terms| terms.to_input_json())
-            })
+                }),
+                reply_to,
+                suggested,
+            )
         }
     };
+    set_draft_request(extra, chat_id, topic, draft_message)
+}
+
+/// `setChatDraftMessage` with `draftMessageContentInputRichMessage`
+/// (schema `td_api.tl`): `message` is the draft's `inputRichMessage`.
+pub fn set_rich_draft_message(
+    extra: RequestId,
+    chat_id: ChatId,
+    topic: DraftTopic,
+    message: Value,
+    reply_to: Option<&SendReply>,
+    suggested: Option<crate::suggested_posts::SuggestTerms>,
+) -> String {
+    let content = json!({
+        "@type": "draftMessageContentInputRichMessage",
+        "message": message,
+    });
+    set_draft_request(
+        extra,
+        chat_id,
+        topic,
+        draft_message_value(content, reply_to, suggested),
+    )
+}
+
+fn draft_message_value(
+    content: Value,
+    reply_to: Option<&SendReply>,
+    suggested: Option<crate::suggested_posts::SuggestTerms>,
+) -> Value {
+    json!({
+        "@type": "draftMessage",
+        "reply_to": send_reply_value(reply_to),
+        "date": 0,
+        "content": content,
+        "effect_id": "0",
+        "suggested_post_info": suggested.map_or(Value::Null, |terms| terms.to_input_json())
+    })
+}
+
+fn set_draft_request(
+    extra: RequestId,
+    chat_id: ChatId,
+    topic: DraftTopic,
+    draft_message: Value,
+) -> String {
     json!({
         "@type": "setChatDraftMessage",
         "@extra": extra.as_extra(),
@@ -694,3 +736,7 @@ pub fn send_chat_action_kind(extra: RequestId, chat_id: ChatId, action: &str) ->
     })
     .to_string()
 }
+
+#[cfg(test)]
+#[path = "tests_rich_drafts.rs"]
+mod tests_rich_drafts;

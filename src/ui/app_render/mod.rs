@@ -274,6 +274,8 @@ impl Render for QuillApp {
             .capture_action(cx.listener(|this, _: &PasteAction, window, cx| {
                 if this.paste_image_from_clipboard(window, cx) {
                     cx.stop_propagation();
+                } else {
+                    this.offer_rich_paste(window, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &FocusSidebar, window, cx| {

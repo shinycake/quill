@@ -1,0 +1,17 @@
+"lng_iv_editor_discard_draft_sure" = "Are you sure you want to discard this message? This action cannot be undone.";
+"lng_record_lock_discard" = "Discard";
+"lng_cancel" = "Cancel";
+"lng_article_premium_required" = "Subscribe to {link} to be able to send rich articles.";
+"lng_article_premium_required_link" = "Telegram Premium";
+"lng_article_premium_choice_title" = "Remove Formatting";
+"lng_article_premium_choice_about" = "This message uses rich formatting, which requires {link}.";
+"lng_article_premium_choice_about_link" = "Telegram Premium";
+"lng_article_premium_choice_plain" = "Send Without Formatting";
+"lng_posts_subscribe" = "Subscribe to Premium";
+"lng_rich_paste_toast" = "Pasted as plain text";
+"lng_rich_paste_toast_editor_markdown" = "Apply Markdown formatting in editor";
+"lng_rich_paste_toast_premium" = "{link} to preserve formatting when pasting.";
+"lng_rich_paste_toast_premium_link" = "Subscribe to Premium";
+"lng_rich_paste_toast_open" = "Open";
+"lng_archive_hint_button" = "Got it";
+"qll_rich_draft_uneditable" = "Quill can't edit or send the media in this draft yet.";

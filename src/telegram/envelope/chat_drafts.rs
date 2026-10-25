@@ -2,11 +2,16 @@ use super::*;
 use crate::ids::MessageId;
 use serde_json::Value;
 
-/// `draftMessage` text this slice restores. Voice/video/rich drafts are ignored.
-/// `reply_to` is same-chat `inputMessageReplyToMessage` only.
+/// `draftMessage` text or rich message this slice restores. Voice and
+/// video note drafts are ignored. `reply_to` is same-chat
+/// `inputMessageReplyToMessage` only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatDraft {
+    /// Composer markup; empty for a rich draft.
     pub text: String,
+    /// `draftMessageContentRichMessage`: tdesktop shows it in place of the
+    /// message field (`RichDraftPreview`).
+    pub rich: Option<crate::rich::RichDraft>,
     pub reply_to_message_id: Option<MessageId>,
     /// Slice G1: partial-message quote carried by the draft's `reply_to`
     /// (`inputTextQuote`, schema 1.8.67 line 3056): text, formatting and
@@ -55,28 +60,48 @@ pub enum ChatAction {
     Other,
 }
 
-/// `draftMessage` / `draftMessageContentText`. Other content constructors are
-/// not restored into the text field (Unigram only fills the field from text).
+impl ChatDraft {
+    /// The draft's text for a chat list row, one line per block of a rich
+    /// draft (tdesktop `richMessageSummary`).
+    pub fn preview_text(&self) -> String {
+        match &self.rich {
+            Some(rich) => rich.summary(),
+            None => crate::composer::parse_format_markup(&self.text).0,
+        }
+    }
+}
+
+/// `draftMessage` with `draftMessageContentText` or
+/// `draftMessageContentRichMessage`. Voice and video note drafts are not
+/// restored (Unigram only fills the field from text).
 pub(crate) fn parse_chat_draft(value: Option<&Value>) -> Option<ChatDraft> {
     let value = value.filter(|v| !v.is_null())?;
     if value.get("@type").and_then(Value::as_str) != Some("draftMessage") {
         return None;
     }
     let content = value.get("content")?;
-    if content.get("@type").and_then(Value::as_str) != Some("draftMessageContentText") {
-        return None;
-    }
-    // Formatting comes back as composer markup, so a draft synced from
-    // another client (or echoed after our own save) keeps it.
-    let formatted = content.get("text");
-    let plain = formatted
-        .and_then(|formatted| formatted.get("text"))
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    let text = crate::composer::entities_to_markup(
-        plain,
-        &super::message_content::parse_text_entities(plain, formatted),
-    );
+    let (text, rich) = match content.get("@type").and_then(Value::as_str) {
+        Some("draftMessageContentText") => {
+            // Formatting comes back as composer markup, so a draft synced
+            // from another client (or echoed after our own save) keeps it.
+            let formatted = content.get("text");
+            let plain = formatted
+                .and_then(|formatted| formatted.get("text"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let text = crate::composer::entities_to_markup(
+                plain,
+                &super::message_content::parse_text_entities(plain, formatted),
+            );
+            (text, None)
+        }
+        Some("draftMessageContentRichMessage") => {
+            let (blocks, _) =
+                crate::rich::parse_rich_message(content.get("message").unwrap_or(&Value::Null));
+            (String::new(), crate::rich::RichDraft::from_message(&blocks))
+        }
+        _ => return None,
+    };
     let (reply_to_message_id, quote, item) = match value.get("reply_to") {
         Some(reply)
             if reply.get("@type").and_then(Value::as_str) == Some("inputMessageReplyToMessage") =>
@@ -142,11 +167,16 @@ pub(crate) fn parse_chat_draft(value: Option<&Value>) -> Option<ChatDraft> {
     };
     let suggested_post =
         crate::suggested_posts::SuggestTerms::parse_input(value.get("suggested_post_info"));
-    if text.trim().is_empty() && reply_to_message_id.is_none() && suggested_post.is_none() {
+    if text.trim().is_empty()
+        && rich.is_none()
+        && reply_to_message_id.is_none()
+        && suggested_post.is_none()
+    {
         return None;
     }
     Some(ChatDraft {
         text,
+        rich,
         reply_to_message_id,
         quote,
         item,
@@ -190,6 +220,29 @@ mod tests {
             }
         });
         parse_chat_draft(Some(&value))
+    }
+
+    #[test]
+    fn a_rich_draft_parses_into_its_blocks_and_summary() {
+        let value = serde_json::json!({
+            "@type": "draftMessage",
+            "reply_to": {"@type": "inputMessageReplyToMessage", "message_id": 7},
+            "date": 1,
+            "content": {"@type": "draftMessageContentRichMessage", "message": {
+                "@type": "richMessage", "is_rtl": false, "is_full": true, "blocks": [
+                    {"@type": "pageBlockSectionHeading", "size": 1, "text": {"@type": "richTextPlain", "text": "Plan"}},
+                    {"@type": "pageBlockParagraph", "text": {"@type": "richTextPlain", "text": "ship it"}}
+                ]
+            }}
+        });
+        let draft = parse_chat_draft(Some(&value)).expect("a rich draft");
+        assert_eq!(draft.text, "");
+        assert_eq!(draft.reply_to_message_id, Some(crate::ids::MessageId(7)));
+        assert_eq!(
+            draft.rich.as_ref().map(|rich| rich.markup()).as_deref(),
+            Some("# Plan\n\nship it")
+        );
+        assert_eq!(draft.preview_text(), "Plan\nship it");
     }
 
     #[test]

@@ -350,8 +350,8 @@ impl QuillApp {
             self.composer_ui.saved_edit_reply = None;
             return;
         }
-        let text = self.composer_markup(cx);
+        let (content, _) = self.composer_draft_parts(chat_id, cx);
         let topic = self.open_draft_topic(chat_id);
-        self.save_chat_draft(chat_id, topic, &text, None, false, cx);
+        self.save_chat_draft(chat_id, topic, content, None, false, cx);
     }
 }

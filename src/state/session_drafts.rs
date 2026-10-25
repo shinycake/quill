@@ -186,11 +186,7 @@ impl ForumTopic {
         if self.unread_count > 0 {
             return None;
         }
-        let text = crate::composer::parse_format_markup(&draft.text)
-            .0
-            .replace('\n', " ")
-            .trim()
-            .to_string();
+        let text = draft.preview_text().replace('\n', " ").trim().to_string();
         let reply = draft.reply_to_message_id.is_some();
         (!text.is_empty() || reply).then_some(DraftPreview { text, reply })
     }

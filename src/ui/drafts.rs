@@ -6,11 +6,13 @@
 use super::app::QuillApp;
 use super::draft_timer::DraftTimerStep;
 use gpui_kit::*;
-use quill::composer::{ComposerReplyTo, DraftTopic, draft_text_to_store};
+use quill::composer::{ComposerReplyTo, DraftContent, DraftTopic, draft_text_to_store};
 use quill::connect::DraftSaveOutcome;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
+use quill::rich::RichDraft;
 use quill::state::Session;
+use quill::telegram::SendReply;
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::ChatDraft;
 use std::sync::Arc;
@@ -51,31 +53,59 @@ impl QuillApp {
             return;
         };
         let topic = self.open_draft_topic(chat_id);
-        let text = self.composer_markup(cx);
+        let (content, reply) = self.composer_draft_parts(chat_id, cx);
+        self.save_chat_draft(chat_id, topic, content, reply, delayed, cx);
+    }
+
+    /// The stored rich draft of the open slot, if its draft is one.
+    pub(super) fn stored_rich_draft(&self) -> Option<&RichDraft> {
+        let chat_id = self.open_chat_id()?;
+        let session = self.session()?;
+        let topic = session.open_draft_topic(chat_id);
+        session.draft_for(chat_id, topic)?.rich.as_ref()
+    }
+
+    /// What the composer saves for the open slot, and the reply it keeps:
+    /// the rich editor's blocks, a stored rich draft (shown in place of
+    /// the field, or kept aside while a message is edited), or the field.
+    pub(super) fn composer_draft_parts(
+        &self,
+        chat_id: ChatId,
+        cx: &App,
+    ) -> (DraftContent, Option<SendReply>) {
+        if self.composer_ui.pending_edit.is_some() {
+            let reply = self.draft_reply(self.composer_ui.saved_edit_reply.as_ref(), chat_id);
+            let content = match self.stored_rich_draft() {
+                Some(rich) => DraftContent::Rich(rich.clone()),
+                None => DraftContent::Text(self.composer_ui.saved_edit_draft.clone()),
+            };
+            return (content, reply);
+        }
         let reply = self.draft_reply(self.composer_ui.reply(), chat_id);
-        self.save_chat_draft(chat_id, topic, &text, reply, delayed, cx);
+        let markup = self.composer_markup(cx);
+        let content = if self.composer_ui.rich_editor_open {
+            RichDraft::from_markup(&markup).map_or(DraftContent::Text(markup), DraftContent::Rich)
+        } else if let Some(rich) = self.stored_rich_draft() {
+            DraftContent::Rich(rich.clone())
+        } else {
+            DraftContent::Text(markup)
+        };
+        (content, reply)
     }
 
     pub(super) fn leaving_draft_parts(
         &self,
         cx: &Context<Self>,
-    ) -> (String, Option<quill::telegram::SendReply>, u64) {
+    ) -> (DraftContent, Option<SendReply>, u64) {
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
         let Some(chat_id) = self.open_chat_id() else {
-            return (String::new(), None, now_ms);
+            return (DraftContent::Text(String::new()), None, now_ms);
         };
-        if self.composer_ui.pending_edit.is_some() {
-            let reply = self.draft_reply(self.composer_ui.saved_edit_reply.as_ref(), chat_id);
-            return (self.composer_ui.saved_edit_draft.clone(), reply, now_ms);
-        }
-        (
-            self.composer_markup(cx),
-            self.draft_reply(self.composer_ui.reply(), chat_id),
-            now_ms,
-        )
+        let (content, reply) = self.composer_draft_parts(chat_id, cx);
+        (content, reply, now_ms)
     }
 
     /// Close what was open for another chat before `chat_id` shows: menus,
@@ -138,16 +168,8 @@ impl QuillApp {
             return;
         };
         let topic = self.open_draft_topic(chat_id);
-        let (text, reply) = if self.composer_ui.pending_edit.is_some() {
-            let reply = self.draft_reply(self.composer_ui.saved_edit_reply.as_ref(), chat_id);
-            (self.composer_ui.saved_edit_draft.clone(), reply)
-        } else {
-            (
-                self.composer_markup(cx),
-                self.draft_reply(self.composer_ui.reply(), chat_id),
-            )
-        };
-        self.save_chat_draft(chat_id, topic, &text, reply, false, cx);
+        let (content, reply) = self.composer_draft_parts(chat_id, cx);
+        self.save_chat_draft(chat_id, topic, content, reply, false, cx);
     }
 
     /// Ask for the open slot's draft to be put in the composer on the next
@@ -186,6 +208,8 @@ impl QuillApp {
             let draft = session.draft_for(chat_id, topic).cloned();
             let held = session.draft_is_dirty(chat_id, topic)
                 || !session.accepts_composer_draft(chat_id, topic);
+            // The rich editor holds what the user is writing.
+            let held = held || self.composer_ui.rich_editor_open;
             (topic, draft, held)
         }) else {
             return;
@@ -215,7 +239,9 @@ impl QuillApp {
         if !take {
             return;
         }
-        if draft.as_ref().map(|draft| draft.text.as_str()) != shown
+        // A rich draft shows in place of the field, which it empties.
+        if draft.as_ref().is_some_and(|draft| draft.rich.is_some())
+            || draft.as_ref().map(|draft| draft.text.as_str()) != shown
             || draft.and_then(|draft| draft.reply_to_message_id) != shown.and(reply)
         {
             self.restore_open_draft(window, cx);
@@ -226,8 +252,8 @@ impl QuillApp {
         &mut self,
         chat_id: ChatId,
         topic: DraftTopic,
-        text: &str,
-        reply_to: Option<quill::telegram::SendReply>,
+        content: DraftContent,
+        reply_to: Option<SendReply>,
         delayed: bool,
         cx: &mut Context<Self>,
     ) {
@@ -238,7 +264,7 @@ impl QuillApp {
         if self.live.is_some() {
             let outcome = self.live.as_mut().and_then(|live| {
                 live.driver
-                    .note_composer_draft_in(chat_id, topic, text, reply_to, now_ms, delayed)
+                    .note_composer_content_in(chat_id, topic, content, reply_to, now_ms, delayed)
                     .ok()
             });
             if let Some(DraftSaveOutcome::Debounced { token, delay }) = outcome {
@@ -252,19 +278,7 @@ impl QuillApp {
         if !session.accepts_composer_draft(chat_id, topic) {
             return;
         }
-        let stored = draft_text_to_store(text, reply_to.is_some()).map(str::to_string);
-        let reply_to = stored.as_ref().and(reply_to);
-        let draft = stored.map(|text| ChatDraft {
-            text,
-            reply_to_message_id: reply_to.as_ref().map(|reply| reply.message_id),
-            item: reply_to
-                .as_ref()
-                .map(|reply| reply.item.clone())
-                .unwrap_or_default(),
-            quote: reply_to.and_then(|reply| reply.quote),
-            suggested_post: None,
-        });
-        session.store_composer_draft(chat_id, topic, draft);
+        session.store_composer_draft(chat_id, topic, demo_draft(content, reply_to));
     }
 
     pub(super) fn schedule_draft_commit(
@@ -362,6 +376,9 @@ impl QuillApp {
             .to_item(item)
         });
         self.composer_ui.set_reply(restored_reply);
+        if draft.as_ref().is_some_and(|draft| draft.rich.is_some()) {
+            self.composer_ui.rich_editor_open = false;
+        }
         self.set_composer_markup(&text, window, cx);
         // `set_value` emits no Change: re-check the restored draft.
         let text = self.composer.read(cx).value().to_string();
@@ -381,4 +398,21 @@ impl QuillApp {
             .unwrap_or(0);
         let _ = live.driver.sync_outgoing_typing(text, editing, now_ms);
     }
+}
+
+/// The draft the demo session stores for `content` (the live driver's
+/// `send_draft` stores the same after `setChatDraftMessage`).
+pub(super) fn demo_draft(content: DraftContent, reply_to: Option<SendReply>) -> Option<ChatDraft> {
+    let content = content.to_store(reply_to.is_some())?;
+    Some(ChatDraft {
+        text: content.text().to_string(),
+        rich: content.rich().cloned(),
+        reply_to_message_id: reply_to.as_ref().map(|reply| reply.message_id),
+        item: reply_to
+            .as_ref()
+            .map(|reply| reply.item.clone())
+            .unwrap_or_default(),
+        quote: reply_to.and_then(|reply| reply.quote),
+        suggested_post: None,
+    })
 }

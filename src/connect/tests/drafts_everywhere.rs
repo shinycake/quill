@@ -121,6 +121,7 @@ impl Drop for Fixture {
 fn text_draft(text: &str) -> ChatDraft {
     ChatDraft {
         text: text.into(),
+        rich: None,
         item: Default::default(),
         reply_to_message_id: None,
         quote: None,
