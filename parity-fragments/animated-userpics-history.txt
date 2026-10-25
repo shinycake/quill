@@ -1,2 +1,0 @@
-# Premium users' video userpics play beside messages and in chat-list rows (tdesktop validateVideoUserpic)
-parity:premium-animated-userpics-history
