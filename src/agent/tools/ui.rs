@@ -292,9 +292,9 @@ fn finish_ui_send(send: UiSend) -> Result<String, ToolError> {
             target.title
         )));
     }
-    common::confirm(&ctx, &target, "ui_send", &send.text).map_err(|e| keep_draft(e))?;
-    let sent = common::send(&ctx, &target, "ui_send", &send.text, send.request, 1)
-        .map_err(|e| keep_draft(e))?;
+    common::confirm(&ctx, &target, "ui_send", &send.text).map_err(keep_draft)?;
+    let sent =
+        common::send(&ctx, &target, "ui_send", &send.text, send.request, 1).map_err(keep_draft)?;
     let _ = bridge::post(
         &current_agent(),
         UiCommand::ComposerSent {

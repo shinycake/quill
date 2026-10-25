@@ -56,6 +56,7 @@ fn read(window: &Window) -> Option<UiTree> {
 
 /// The uncut tree, for tests and the frame-cost measurement.
 #[cfg(test)]
+#[cfg(feature = "demo-capture")]
 pub(super) fn raw_tree(window: &Window) -> Option<UiTree> {
     read(window)
 }

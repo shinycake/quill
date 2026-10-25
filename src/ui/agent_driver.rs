@@ -132,12 +132,12 @@ impl QuillApp {
                         check_step(&pending, generation, &surface, app, window)
                     })
                     .map_err(|_| ())
-                    .and_then(|checked| match checked {
+                    .map(|checked| match checked {
                         Ok(now) => {
                             surface = now;
-                            Ok(perform_step(&app, cx, step, &tree, send_key_mode))
+                            perform_step(&app, cx, step, &tree, send_key_mode)
                         }
-                        Err(refusal) => Ok(Err(refusal)),
+                        Err(refusal) => Err(refusal),
                     });
                 refusals.extend(guard::take_refusals());
                 let send = app.update(cx, |app, _| app.agent_ui.ui_send.take());
