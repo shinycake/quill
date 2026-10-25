@@ -207,6 +207,13 @@ node that registered a focus handle this frame (`set_focusable`) instead,
 unless a node already holds the focus; `set_focus` falls back to it for a
 focused element with no node. `src/elements/div.rs`: a focused element
 with no id falls back the same way before logging that it has no node.
+The fallback is marked (`A11yNodeBuilder::focus_is_fallback`): a node
+painted later in the same frame that owns the focused handle replaces it
+(`clear_fallback_focus`, then `set_focus`) instead of tripping the debug
+assertion "set_focus called more than once in a single frame". Only a
+second real focus still asserts.
 The crate's own tests do not build in Quill's tree (missing dev
 dependencies and example assets), so Quill's window test
-`the_clicked_message_box_is_the_focused_node` covers it.
+`the_clicked_message_box_is_the_focused_node` covers it;
+`a_node_that_owns_the_focus_replaces_the_fallback` in `src/window/a11y.rs`
+documents the takeover for when they do.

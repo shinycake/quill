@@ -71,6 +71,9 @@ pub fn no_frame(window: WindowState) -> String {
         WindowState::NotOpen => format!(
             "Quill's window is not open, so there is nothing to drive. Ask the user to open it, then retry. {CHAT_TOOLS}"
         ),
+        WindowState::NotAnswering => format!(
+            "Quill's window is not answering (it may be busy), so agents can't drive it now. Wait a moment and retry; if it keeps happening, ask the user to check Quill. {CHAT_TOOLS}"
+        ),
     }
 }
 
@@ -158,6 +161,7 @@ mod tests {
         assert!(no_frame(WindowState::Hidden).contains("is hidden"));
         assert!(no_frame(WindowState::Minimised).contains("is minimised"));
         assert!(no_frame(WindowState::NotOpen).contains("is not open"));
+        assert!(no_frame(WindowState::NotAnswering).contains("is not answering"));
         assert!(no_frame(WindowState::Visible).contains("did not redraw"));
     }
 }

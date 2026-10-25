@@ -13,14 +13,15 @@ const WINDOW_WAIT: Duration = Duration::from_millis(1500);
 /// The main window's state as the UI reads it (`UiCommand::State`, the
 /// same reading the driver's missing-frame answer uses). `None` while the
 /// UI answers no driver command (Agent access or the driver off, a pause,
-/// Stop) or the queue is full; a UI that does not answer has no window.
+/// Stop) or the queue is full. A UI that does not answer in time is `not
+/// answering`: the window may be there with its thread busy.
 fn window_state() -> Option<WindowState> {
     if policy::switch_refusal().is_some() {
         return None;
     }
     match bridge::send(&super::current_agent(), UiCommand::State, WINDOW_WAIT) {
         Ok(UiReply::State(state)) => Some(state.window),
-        Err(BridgeError::Timeout) => Some(WindowState::NotOpen),
+        Err(BridgeError::Timeout) => Some(WindowState::NotAnswering),
         Ok(_) | Err(BridgeError::Busy) => None,
     }
 }
@@ -64,11 +65,15 @@ pub fn run(_args: &Value) -> Result<ToolOutput, ToolError> {
 Screenshots: one a second and 20 a minute, cut to your grants like the tree.\n"
     });
     let window = window_state();
-    if let Some(state) = window.filter(|state| *state != WindowState::Visible) {
-        text.push_str(&format!(
+    match window {
+        Some(WindowState::Visible) | None => {}
+        Some(WindowState::NotAnswering) => text.push_str(
+            "Quill's window is not answering (it may be busy): the UI tools may time out; retry in a moment.\n",
+        ),
+        Some(state) => text.push_str(&format!(
             "Quill's window is {}: it draws no frames, so the UI tools answer that it did not redraw until the user brings it back.\n",
             state.as_str()
-        ));
+        )),
     }
     text.push_str("Next: list_unread to catch up, or list_chats to find a chat.");
     Ok(ToolOutput {
@@ -88,7 +93,8 @@ Screenshots: one a second and 20 a minute, cut to your grants like the tree.\n"
                 "active": driving,
                 "paused": paused,
                 "stopped": stopped,
-                // "visible", "hidden", "minimised" or "not open"; null while
+                // "visible", "hidden", "minimised", "not open" or "not
+                // answering"; null while
                 // the driver is off, paused or stopped.
                 "window": window.map(WindowState::as_str),
                 // What lifts the hold; neither clears when the agent reconnects.

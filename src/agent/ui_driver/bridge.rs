@@ -125,6 +125,9 @@ pub enum WindowState {
     Minimised,
     /// No main window answers.
     NotOpen,
+    /// The UI did not answer in time (its thread is busy or stuck); there
+    /// may still be a window.
+    NotAnswering,
 }
 
 impl WindowState {
@@ -135,6 +138,7 @@ impl WindowState {
             WindowState::Hidden => "hidden",
             WindowState::Minimised => "minimised",
             WindowState::NotOpen => "not open",
+            WindowState::NotAnswering => "not answering",
         }
     }
 }

@@ -170,6 +170,9 @@ pub enum HardSurface {
     /// The settings window, every page and box of it (Agent access, log
     /// out, sessions, privacy and the shortcuts reference included).
     Settings,
+    /// A setting changed in place (a main-menu toggle such as Night mode
+    /// or the archive's place), written to disk like one in Settings.
+    Setting,
     /// Locking Quill behind the local passcode.
     Lock,
     /// The local passcode settings.
@@ -189,6 +192,7 @@ impl HardSurface {
     fn what(self) -> &'static str {
         match self {
             HardSurface::Settings => "open Settings",
+            HardSurface::Setting => "change a setting",
             HardSurface::Lock => "lock Quill",
             HardSurface::Passcode => "open the passcode settings",
             HardSurface::Security => "open the security settings",

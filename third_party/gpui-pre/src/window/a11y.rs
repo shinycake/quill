@@ -280,6 +280,9 @@ impl A11y {
             // The focused element is properly exposed; reset the dedup so a
             // later focus on a node-less element logs again.
             self.last_focus_without_node = None;
+            // A node that owns the focused handle takes over from a frame
+            // reported in its place (`focus_nearest_focusable_ancestor`).
+            self.nodes.clear_fallback_focus();
             self.nodes.set_focus(node_id);
         } else if !self.focus_nearest_focusable_ancestor() {
             // The element registered a focus handle and an id, but never got a
@@ -311,7 +314,7 @@ impl A11y {
         match ancestor {
             Some(id) => {
                 self.last_focus_without_node = None;
-                self.nodes.set_focus(id);
+                self.nodes.set_fallback_focus(id);
                 true
             }
             None => false,
@@ -565,6 +568,9 @@ pub(crate) struct A11yNodeBuilder {
     /// The node that GPUI considers focused. Note that this may be different to
     /// what is reported to accesskit - see [`Self::active_descendant`]
     focus: Option<NodeId>,
+    /// Whether [`Self::focus`] is a frame reported for a focused element
+    /// with no node of its own, which a node that owns the focus replaces.
+    focus_is_fallback: bool,
     /// If a node calls `.aria_active_descendant()`, AND an ancestor is focused,
     /// override it as the focused node. This supports the "active descendant"
     /// pattern, which allows a focused container to act as if a descendant is
@@ -582,6 +588,7 @@ impl A11yNodeBuilder {
             all_nodes: Vec::new(),
             seen_ids: FxHashSet::default(),
             focus: None,
+            focus_is_fallback: false,
             active_descendant: None,
             #[cfg(debug_assertions)]
             node_info: FxHashMap::default(),
@@ -673,6 +680,7 @@ impl A11yNodeBuilder {
         self.ids_stack.push(ROOT_NODE_ID);
         self.nodes_stack.push(root_node);
         self.focus = None;
+        self.focus_is_fallback = false;
         self.active_descendant = None;
     }
 
@@ -714,6 +722,22 @@ impl A11yNodeBuilder {
         self.active_descendant = Some(id);
     }
 
+    /// Report `id`, an enclosing frame, for a focused element that has no
+    /// node; a later [`Self::set_focus`] replaces it without counting as a
+    /// second focus.
+    pub(crate) fn set_fallback_focus(&mut self, id: NodeId) {
+        self.set_focus(id);
+        self.focus_is_fallback = true;
+    }
+
+    /// Drop a fallback focus so the node that owns the focus can report it.
+    pub(crate) fn clear_fallback_focus(&mut self) {
+        if self.focus_is_fallback {
+            self.focus = None;
+            self.focus_is_fallback = false;
+        }
+    }
+
     pub(crate) fn set_focus(&mut self, id: NodeId) {
         if self.focus.is_some() {
             if cfg!(debug_assertions) {
@@ -726,6 +750,7 @@ impl A11yNodeBuilder {
             }
         }
         self.focus = Some(id);
+        self.focus_is_fallback = false;
     }
 
     fn finalize(&mut self) -> TreeUpdate {
@@ -1064,6 +1089,29 @@ mod tests {
         a11y.nodes.pop(); // second
 
         a11y.nodes.pop(); // container
+    }
+
+    // A focused element with no node reports its focusable frame; a node
+    // painted later that owns the focused handle takes over without the
+    // "set_focus called more than once" assertion.
+    #[test]
+    fn a_node_that_owns_the_focus_replaces_the_fallback() {
+        let mut a11y = new_a11y();
+        let frame = NodeId(1);
+        let owner = NodeId(2);
+
+        assert!(a11y.nodes.push(frame, test_node()));
+        a11y.set_focusable(frame, FocusId::default());
+        assert!(a11y.focus_nearest_focusable_ancestor());
+        a11y.nodes.pop(); // frame
+
+        assert!(a11y.nodes.push(owner, test_node()));
+        a11y.set_focusable(owner, FocusId::default());
+        a11y.set_focus(owner);
+        a11y.nodes.pop(); // owner
+
+        let update = a11y.end_frame(Default::default());
+        assert_eq!(update.focus, owner);
     }
 
     // Node A is focused; node C (a child of the unfocused node B) claims the

@@ -115,6 +115,8 @@ impl NavigationAction {
             Self::Passcode => Some(HardSurface::Passcode),
             Self::TwoFa | Self::Websites => Some(HardSurface::Security),
             Self::Account | Self::Accounts => Some(HardSurface::Account),
+            // Toggles that write a setting without opening Settings.
+            Self::NightMode | Self::ArchiveToList => Some(HardSurface::Setting),
             other => other.stays_in_settings().then_some(HardSurface::Settings),
         }
     }
