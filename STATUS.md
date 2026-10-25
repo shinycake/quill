@@ -951,7 +951,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Recording voice and video notes is blocked for people who restricted them, with tdesktop's notice <!-- parity:premium-voice-restricted-send -->
 - [x] "Gift Premium" from birthday suggestions <!-- parity:premium-birthday-gift -->
 - [x] Suggestion box to archive and mute new chats from non-contacts <!-- parity:premium-archive-mute-suggestion -->
-- [ ] Message effects play when a message with an effect arrives or is tapped <!-- parity:premium-message-effects-play -->
+- [x] Message effects play when a message with an effect arrives or is tapped <!-- parity:premium-message-effects-play -->
 
 ### TON wallet (low priority)
 
