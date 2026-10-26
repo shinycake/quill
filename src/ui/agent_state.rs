@@ -40,6 +40,8 @@ pub(crate) struct AgentUi {
     /// A send the composer handed to the agent path while the UI driver
     /// injected input (`agent_driver_send`), until the task picks it up.
     pub(super) ui_send: Option<quill::agent::ui_driver::bridge::UiSend>,
+    /// The Agent access page's scroll, focus chat, filters and picker.
+    pub(super) page: super::settings_window::AgentPageUi,
 }
 
 /// Activity rows shown at first, and added by each "Show more".
@@ -99,6 +101,7 @@ impl AgentUi {
             consent: None,
             activity_shown: ACTIVITY_PAGE,
             ui_send: None,
+            page: super::settings_window::AgentPageUi::new(),
         }
     }
 }
@@ -346,6 +349,17 @@ pub(super) fn visible_activity(account: &AccountKey) -> Vec<activity::Action> {
     }
 }
 
+/// What agents can reach for `account`, as the Agent access page shows it.
+pub(super) fn visible_summary(account: &AccountKey) -> quill::agent::summary::AccessSummary {
+    let mut inputs = quill::agent::summary::live_inputs(account);
+    if !sees_prompts() {
+        inputs.connected.clear();
+        inputs.refused.clear();
+        inputs.log.clear();
+    }
+    quill::agent::summary::summarize(&inputs)
+}
+
 /// Back to a known state: access on, confirmation off, default grants, no
 /// waiting requests, an empty activity log.
 #[cfg(test)]
@@ -356,6 +370,7 @@ pub(super) fn reset_for_test(account: &AccountKey) {
     prompts::deny_all();
     activity::clear();
     quill::agent::access::set_confirm_sends(false);
+    quill::agent::access::set_raw_calls(true);
     grants::update(account, |g| *g = AccountGrants::default());
     quill::agent::access::set_enabled(true);
 }

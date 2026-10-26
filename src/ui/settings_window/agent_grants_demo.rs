@@ -36,9 +36,7 @@ fn demo_grants(app: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) {
         add(-1_001_234_567_890, "Family", None);
         add(-1_999_000_000_000, "Ben Ortiz", Some(Scope::Read));
     });
-    app.open_settings(None);
-    app.settings.page = Some(quill::settings_catalog::Page::Advanced);
-    app.settings.sub = Some(super::SubPage::AgentAccess);
+    app.open_settings(Some(quill::settings_catalog::Page::AgentAccess));
 }
 
 crate::ui::screenshot_demo::register_demos![

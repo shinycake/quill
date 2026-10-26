@@ -39,6 +39,8 @@ pub enum HeaderEntry {
     /// `lng_wallet_profile_send_money`: opens the shared wallet notice.
     SendMoney,
     NewWindow,
+    /// Quill: the Agent access page at this chat, while Agent access is on.
+    AgentAccess,
     CloseSecretChat,
 }
 
@@ -75,6 +77,8 @@ pub struct HeaderFacts<'a> {
     /// (tdesktop `CanOfferSendMoney`; never for bots).
     pub can_send_money: bool,
     pub new_window: bool,
+    /// Agent access is on.
+    pub agent_access: bool,
 }
 
 /// tdesktop `canCreatePolls`: users only for oneself and bots, secret chats
@@ -155,6 +159,9 @@ pub fn header_entries(facts: &HeaderFacts<'_>) -> Vec<HeaderEntry> {
     if facts.new_window {
         out.push(HeaderEntry::NewWindow);
     }
+    if facts.agent_access {
+        out.push(HeaderEntry::AgentAccess);
+    }
     if matches!(facts.kind, ChatKind::Secret { .. }) {
         out.push(HeaderEntry::CloseSecretChat);
     }
@@ -190,6 +197,7 @@ mod tests {
             gifts_ok: false,
             can_send_money: false,
             new_window: false,
+            agent_access: false,
         }
     }
 
@@ -345,5 +353,20 @@ mod tests {
         assert!(!entries.contains(&E::SharedMedia));
         f.can_be_reported = true;
         assert!(header_entries(&f).contains(&E::Report));
+    }
+
+    #[test]
+    fn agent_access_shows_only_while_it_is_on_and_before_closing_a_secret_chat() {
+        let kind = ChatKind::Secret {
+            secret_chat_id: 3,
+            user_id: UserId(5),
+        };
+        let mut f = facts(&kind);
+        assert!(!header_entries(&f).contains(&E::AgentAccess));
+        f.agent_access = true;
+        let entries = header_entries(&f);
+        let at = entries.iter().position(|e| *e == E::AgentAccess);
+        let close = entries.iter().position(|e| *e == E::CloseSecretChat);
+        assert!(at.is_some() && at < close, "{entries:?}");
     }
 }

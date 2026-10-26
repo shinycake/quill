@@ -616,7 +616,7 @@ impl QuillApp {
         });
     }
 
-    fn delete_selection(
+    pub(super) fn delete_selection(
         &mut self,
         chat_id: ChatId,
         ids: &[MessageId],

@@ -5,7 +5,6 @@ use crate::ui::agent_state::{TEST_LOCK, reset_for_test};
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
-use crate::ui::settings_window::SubPage;
 use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
@@ -55,8 +54,7 @@ fn open_page(cx: &mut TestAppContext) -> (Entity<QuillApp>, Entity<QuillShell>, 
     let (app, shell, mut vcx) = new_app(cx);
     reset_for_test(&AccountKey::primary());
     app.update(&mut vcx, |app, cx| {
-        app.open_settings(Some(Page::Advanced));
-        app.settings.sub = Some(SubPage::AgentAccess);
+        app.open_settings(Some(Page::AgentAccess));
         cx.notify();
     });
     settle(&mut vcx);

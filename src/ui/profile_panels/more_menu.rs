@@ -141,6 +141,9 @@ impl QuillApp {
             }),
             can_report: chat.is_some_and(|chat| chat.can_be_reported),
             joined,
+            agent_access: chat.is_some()
+                && crate::ui::agent_state::sees_agents()
+                && quill::agent::access::enabled(),
         }
     }
 
@@ -257,6 +260,12 @@ impl QuillApp {
                 }
             }
             E::AddToFolder => {}
+            E::AgentAccess => {
+                if let Some(id) = chat {
+                    self.dismiss_profile_modal();
+                    self.open_agent_access_for_chat(id.0, cx);
+                }
+            }
             E::Block { bot, blocked } => {
                 if let Some(id) = user {
                     if bot {
@@ -407,6 +416,7 @@ fn entry_label(entry: ProfileMenuEntry) -> (&'static str, IconName) {
         E::ToggleSharing { disabled: false } => (tr(keys::DISABLE_SHARING), IconName::EyeOff),
         E::ToggleSharing { disabled: true } => (tr(keys::ENABLE_SHARING), IconName::Share2),
         E::AddToFolder => (tr(keys::FILTERS_MENU_ADD), IconName::Folder),
+        E::AgentAccess => (tr(keys::Q_AGENT_ACCESS), IconName::Bot),
         E::Block { bot, blocked } => block_label(bot, blocked),
         E::Report => (tr(keys::PROFILE_REPORT), IconName::Flag),
         E::Leave { channel: true } => (tr(keys::PROFILE_LEAVE_CHANNEL), IconName::LogOut),

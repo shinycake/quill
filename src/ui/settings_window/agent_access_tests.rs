@@ -1,10 +1,8 @@
-//! Settings > Advanced > Agent access in a real window: the row opens the
-//! page, the switch turns access on and off, and Copy puts the setup
+//! Settings > Agent access in a real window: the page opens, the switch turns access on and off, and Copy puts the setup
 //! command on the clipboard. The app data root is a temp directory.
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
-use crate::ui::settings_window::SubPage;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
@@ -47,6 +45,9 @@ fn settle(vcx: &mut VisualTestContext) {
         vcx.executor()
             .advance_clock(std::time::Duration::from_millis(300));
         vcx.update(|window, cx| window.render_frame(cx));
+        // Tests have no frame loop: deliver the next frame, which runs a
+        // scroll the page asked for.
+        vcx.update(|window, cx| window.simulate_next_frame(cx));
     }
 }
 
@@ -59,18 +60,34 @@ fn the_agent_access_page_turns_access_on_and_offers_the_setup_command(cx: &mut T
     let vcx = &mut vcx;
     app.update(vcx, |_, cx| cx.notify());
     settle(vcx);
-    vcx.update(|window, cx| window.click("settings-agent-access", cx));
-    settle(vcx);
-    app.read_with(vcx, |app, _| {
-        assert_eq!(app.settings.page, Some(Page::Advanced));
-        assert_eq!(app.settings.sub, Some(SubPage::AgentAccess));
+    app.update(vcx, |app, cx| {
+        app.open_settings(Some(Page::AgentAccess));
+        cx.notify();
     });
+    settle(vcx);
+    assert!(
+        vcx.debug_bounds("agent-summary").is_some(),
+        "the summary card shows"
+    );
+    assert!(
+        vcx.debug_bounds("agent-section-chats").is_none(),
+        "with access off only the switch, the log and the setup lines show"
+    );
     assert!(!access::enabled(), "off by default");
 
     vcx.update(|window, cx| window.click("agent-access-switch", cx));
     settle(vcx);
     assert!(access::enabled());
 
+    // The setup lines sit at the bottom of a long page: scroll there the
+    // way a search result does.
+    app.update(vcx, |app, cx| {
+        app.agent_ui.page.scroll_to = Some(crate::ui::settings_window::Spot::Section(
+            quill::agent::summary::Section::Connect,
+        ));
+        cx.notify();
+    });
+    settle(vcx);
     vcx.update(|window, cx| window.click("agent-copy-claude-code", cx));
     settle(vcx);
     let copied = vcx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()));
@@ -78,6 +95,14 @@ fn the_agent_access_page_turns_access_on_and_offers_the_setup_command(cx: &mut T
     assert!(copied.starts_with("claude mcp add quill -- "), "{copied}");
     assert!(copied.ends_with(" mcp"), "{copied}");
 
+    // Back up to the switch.
+    app.update(vcx, |app, cx| {
+        app.agent_ui.page.scroll_to = Some(crate::ui::settings_window::Spot::Section(
+            quill::agent::summary::Section::Connection,
+        ));
+        cx.notify();
+    });
+    settle(vcx);
     vcx.update(|window, cx| window.click("agent-access-switch", cx));
     settle(vcx);
     assert!(!access::enabled());

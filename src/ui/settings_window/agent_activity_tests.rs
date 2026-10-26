@@ -4,7 +4,6 @@ use crate::ui::agent_state::{TEST_LOCK, reset_for_test};
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
-use crate::ui::settings_window::SubPage;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
@@ -22,7 +21,7 @@ fn open_page(cx: &mut TestAppContext) -> VisualTestContext {
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
-    let handle = cx.open_window(size(px(1100.), px(6000.)), move |window, cx| {
+    let handle = cx.open_window(size(px(1100.), px(12000.)), move |window, cx| {
         let view = cx.new(|cx| {
             QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named("ready-chats")))
         });
@@ -37,8 +36,7 @@ fn open_page(cx: &mut TestAppContext) -> VisualTestContext {
         .clone()
         .unwrap_or_else(|| panic!("window opened"));
     app.update(&mut vcx, |app, cx| {
-        app.open_settings(Some(Page::Advanced));
-        app.settings.sub = Some(SubPage::AgentAccess);
+        app.open_settings(Some(Page::AgentAccess));
         cx.notify();
     });
     settle(&mut vcx);

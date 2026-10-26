@@ -554,6 +554,11 @@ pub fn summarize(inputs: &Inputs) -> AccessSummary {
 
 /// The summary for `account` as Quill stands now.
 pub fn live(account: &AccountKey) -> AccessSummary {
+    summarize(&live_inputs(account))
+}
+
+/// The inputs [`live`] reads, for a caller that adjusts them first.
+pub fn live_inputs(account: &AccountKey) -> Inputs {
     use super::ui_driver::takeover;
     let takeover = if takeover::stopped() {
         Takeover::Stopped
@@ -565,7 +570,7 @@ pub fn live(account: &AccountKey) -> AccessSummary {
             _ => Takeover::Idle,
         }
     };
-    summarize(&Inputs {
+    Inputs {
         enabled: super::access::enabled(),
         confirm_sends: super::access::confirm_sends(),
         ui_driver: super::access::ui_driver(),
@@ -580,7 +585,7 @@ pub fn live(account: &AccountKey) -> AccessSummary {
         refused: super::activity::refused_agents(),
         tools: super::tools::registry(),
         log: super::activity::recent(account),
-    })
+    }
 }
 
 fn word(scope: Option<Scope>) -> &'static str {

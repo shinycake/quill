@@ -61,9 +61,7 @@ fn demo_write_request(_: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp
 fn demo_consent(app: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) {
     quill::fast_buttons::set_persistence(false);
     quill::agent::access::set_enabled(true);
-    app.open_settings(None);
-    app.settings.page = Some(quill::settings_catalog::Page::Advanced);
-    app.settings.sub = Some(super::settings_window::SubPage::AgentAccess);
+    app.open_settings(Some(quill::settings_catalog::Page::AgentAccess));
     app.agent_ui.consent = Some(AllChatsConsent {
         account: super::agent_state::active_account(),
         scope: Scope::Read,

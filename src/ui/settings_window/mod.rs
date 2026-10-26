@@ -10,6 +10,9 @@ mod agent_activity;
 mod agent_activity_demo;
 mod agent_grants;
 mod agent_grants_demo;
+mod agent_page;
+mod agent_tools;
+mod agent_window;
 mod log_out;
 mod notifications;
 mod pages;
@@ -18,6 +21,7 @@ mod rows;
 mod search;
 mod sidebar;
 
+pub(in crate::ui) use agent_page::{AgentPageUi, Spot};
 pub(in crate::ui) use search::SettingsSearch;
 
 use super::actions::{CancelSearch, OpenChatSearch, OpenSearch};
@@ -39,8 +43,6 @@ const PAGE_WIDTH: f32 = 640.;
 pub(super) enum SubPage {
     /// Advanced → Experimental settings.
     Experimental,
-    /// Advanced → Agent access.
-    AgentAccess,
     /// About → Ask a Question.
     AskQuestion,
 }
@@ -48,7 +50,7 @@ pub(super) enum SubPage {
 impl SubPage {
     fn parent(self) -> Page {
         match self {
-            SubPage::Experimental | SubPage::AgentAccess => Page::Advanced,
+            SubPage::Experimental => Page::Advanced,
             SubPage::AskQuestion => Page::About,
         }
     }
@@ -115,6 +117,7 @@ impl QuillApp {
             Page::Language => self.leave_language_settings(),
             Page::Devices => self.leave_devices(),
             Page::DataStorage => self.leave_data_storage(),
+            Page::AgentAccess => self.leave_agent_page(),
             _ => {}
         }
     }
@@ -163,6 +166,9 @@ impl QuillApp {
         }
         if self.settings.page == Some(Page::Language) {
             self.ensure_language_box(window, cx);
+        }
+        if self.settings.page == Some(Page::AgentAccess) {
+            self.ensure_agent_page(window, cx);
         }
         let searching = self.settings_searching(window, cx);
         // A narrow window shows the results in the list's place.
@@ -247,6 +253,9 @@ impl QuillApp {
             div()
                 .id(SharedString::from(format!("settings-page-{}", page.id())))
                 .debug_selector(move || format!("settings-page-{}", page.id()))
+                .when(page == Page::AgentAccess && sub.is_none(), |this| {
+                    this.track_scroll(&self.agent_ui.page.scroll)
+                })
                 .size_full()
                 .overflow_y_scroll()
                 .child(

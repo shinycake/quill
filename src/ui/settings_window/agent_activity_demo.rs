@@ -82,9 +82,7 @@ fn demo_activity(app: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) 
             });
         }
     }
-    app.open_settings(None);
-    app.settings.page = Some(quill::settings_catalog::Page::Advanced);
-    app.settings.sub = Some(super::SubPage::AgentAccess);
+    app.open_settings(Some(quill::settings_catalog::Page::AgentAccess));
 }
 
 crate::ui::screenshot_demo::register_demos![

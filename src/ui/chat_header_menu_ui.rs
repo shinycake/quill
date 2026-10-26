@@ -115,6 +115,8 @@ impl QuillApp {
                         session.is_some_and(|s| s.ton_wallet.profile_address(user).is_some())
                     }),
                     new_window: self.can_open_chat_window(c),
+                    agent_access: crate::ui::agent_state::sees_agents()
+                        && quill::agent::access::enabled(),
                 })
             })
             .unwrap_or_default();
@@ -189,6 +191,7 @@ impl QuillApp {
             HeaderEntry::Translate => self.set_translate_bar_hidden(chat_id, false, cx),
             HeaderEntry::SendMoney => self.show_wallet_notice(WalletSurface::SendMoney, cx),
             HeaderEntry::CloseSecretChat => self.open_close_secret_chat_confirm(chat_id, cx),
+            HeaderEntry::AgentAccess => self.open_agent_access_for_chat(chat_id.0, cx),
             _ => {}
         }
         cx.notify();
@@ -244,6 +247,7 @@ fn entry_label(
         HeaderEntry::Gift => (tr(keys::Q_CHAT_SEND_A_GIFT), Some(N::SendGift)),
         HeaderEntry::SendMoney => (tr(keys::WALLET_PROFILE_SEND_MONEY), None),
         HeaderEntry::NewWindow => (tr(keys::CONTEXT_NEW_WINDOW), Some(N::NewWindow)),
+        HeaderEntry::AgentAccess => (tr(keys::Q_AGENT_ACCESS), None),
         HeaderEntry::CloseSecretChat => (tr(keys::Q_CHAT_CLOSE_SECRET_CHAT), None),
     }
 }

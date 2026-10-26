@@ -246,6 +246,17 @@ fn group_member_can_report_and_leave_but_basic_groups_leave_elsewhere() {
 }
 
 #[test]
+fn agent_access_sits_after_add_to_folder() {
+    let entries = profile_menu_entries(&MenuFacts {
+        can_add_to_folder: true,
+        agent_access: true,
+        ..menu(K::BasicGroup)
+    });
+    assert_eq!(entries, [M::AddToFolder, M::AgentAccess]);
+    assert!(!profile_menu_entries(&menu(K::BasicGroup)).contains(&M::AgentAccess));
+}
+
+#[test]
 fn quill_call_entries_sit_after_the_contact_entries() {
     let entries = profile_menu_entries(&MenuFacts {
         is_contact: true,

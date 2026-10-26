@@ -19,6 +19,7 @@ fn page_icon(page: Page) -> IconName {
         Page::Notifications => IconName::Bell,
         Page::Privacy => IconName::Lock,
         Page::Devices => IconName::Monitor,
+        Page::AgentAccess => IconName::Bot,
         Page::Chats => IconName::MessageCircle,
         Page::Appearance => IconName::Palette,
         Page::Folders => IconName::Folder,
