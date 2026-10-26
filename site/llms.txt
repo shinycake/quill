@@ -14,6 +14,18 @@ Key facts:
 - Privacy: data stays on the computer, encrypted with a key in the macOS keychain, Windows DPAPI or a private file on Linux. No analytics in the app. Besides Telegram, the app only contacts GitHub to check for updates, which can be switched off.
 - Status: early, experimental software with no warranty. Users should keep an official Telegram app installed.
 
+## Agent access
+
+- What it is: AI agents on the user's own computer (Claude Code, Claude Desktop, Cursor or any MCP client) use the user's Telegram account through the Quill that is already running.
+- Off by default. The user turns it on in Quill: Settings > Advanced > Agent access.
+- MCP: `quill mcp` is a stdio MCP server, a mode of the Quill executable. Claude Code: `claude mcp add quill -- <path to quill> mcp`. `quill agent connect claude-desktop|cursor --yes` merges the entry into that app's config after a backup.
+- Command line: `quill agent <command>` reaches the same tools without MCP (`status`, `chats`, `read`, `send`, `search`, `call <tool> --json '{…}'`). `quill agent describe` prints every tool's schema, example and output as JSON; exit codes name each failure (3 Quill not running, 4 access off, 5 token, 6 window control off).
+- Skill: `quill agent install-skill` writes a Claude Code Agent Skill to `~/.claude/skills/quill`.
+- What agents can do: read, search and send in the chats the user grants (by default Saved Messages, bots and the user's own channels), edit, react, pin, drafts, folders, raw TDLib calls under the same grants, and, with a second switch, click and type in Quill's window. Quill asks the user before anything outside the grants. Sends are paced and logged, and can wait for the user's click.
+- Guardrails: Quill never sends data to any AI service itself. There is no network listener, only a local socket with a per-launch token. Read receipts, online status and typing are never suppressed. No bulk export. Telegram's terms do not allow training AI models on the data.
+- [Agent guide](https://github.com/shinycake/quill/blob/main/src/agent/guide.md): tools, grants, recipes and errors.
+- [Agents section](https://shinycake.github.io/quill/#agents)
+
 ## Pages
 
 - [Product page](https://shinycake.github.io/quill/): features, screenshots, measurements and install steps
