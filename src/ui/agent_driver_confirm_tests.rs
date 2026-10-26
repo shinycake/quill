@@ -210,6 +210,9 @@ fn a_prompt_hidden_behind_another_dialog_neither_lets_it_drive_nor_eats_a_pause(
     grants::update(&AccountKey::primary(), |g| {
         g.all_chats = Some(Scope::ReadWrite)
     });
+    // A slow runner must not let the session's hold run out before the
+    // press: the takeover's clock stands still for the whole test.
+    takeover::pin_clock(Some(1000));
     settle(vcx);
     let tree = read_tree(&app, vcx);
     let reply = drive(&app, vcx, click(Target::Node(message_box(&tree))));
