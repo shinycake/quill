@@ -578,5 +578,6 @@ crate::ui::shell::register_dialogs! {
         3968,
         |app| app.suggested_posts.price.is_some(),
         QuillApp::build_suggest_price_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_suggest_price(cx)),
 }

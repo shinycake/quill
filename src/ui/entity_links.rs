@@ -36,6 +36,10 @@ use std::rc::Rc;
 pub(super) struct PendingLink {
     link: LinkTarget,
     msg_key: (i64, u64),
+    /// Queued by a step the UI driver injected: it runs at render as part
+    /// of that step (`guard::with_injecting`), so what agents may not do
+    /// (open a chat they are not granted, leave Quill) stays refused.
+    from_agent: bool,
 }
 
 /// The "Open this link?" box.
@@ -74,15 +78,34 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.message_ui.link_tooltip = None;
-        self.message_ui.pending_link = Some(PendingLink { link, msg_key });
+        self.message_ui.pending_link = Some(PendingLink {
+            link,
+            msg_key,
+            from_agent: quill::agent::ui_driver::guard::injecting(),
+        });
         cx.notify();
     }
 
     /// Render-time half of [`Self::queue_link`].
     pub(super) fn run_pending_link(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(PendingLink { link, msg_key }) = self.message_ui.pending_link.take() else {
+        let Some(PendingLink {
+            link,
+            msg_key,
+            from_agent,
+        }) = self.message_ui.pending_link.take()
+        else {
             return;
         };
+        self.agent_step(from_agent, |this| this.run_link(link, msg_key, window, cx));
+    }
+
+    fn run_link(
+        &mut self,
+        link: LinkTarget,
+        msg_key: (i64, u64),
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let chat_id = ChatId(msg_key.0);
         let message_id = MessageId(msg_key.1 as i64);
         match link {
@@ -108,7 +131,7 @@ impl QuillApp {
             LinkTarget::Mention(name) => {
                 let username = name.trim_start_matches('@');
                 if self.live.is_some() {
-                    self.pending_deep_link = Some(format!("https://t.me/{username}"));
+                    self.queue_deep_link(format!("https://t.me/{username}"));
                     self.connection.set_note(StatusNote::silent(tr_with(
                         keys::Q_OPS_OPENING,
                         &[("username", username)],

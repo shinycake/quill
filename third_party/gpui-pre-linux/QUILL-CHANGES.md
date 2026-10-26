@@ -65,3 +65,13 @@ no longer crashes the app (step 7 of `docs/decisions/no-crash-audit.md`):
 
 Type-checked with `cargo check --target x86_64-unknown-linux-gnu` on macOS;
 not built or run on Linux. See `docs/decisions/gpui-fork-panics.md`.
+
+The Quill project also changed it in 2026 for Agent access's screenshots
+(`docs/decisions/agent-access.md`, phase 5 step 3):
+
+- `src/linux/x11/window.rs`, `src/linux/wayland/window.rs`:
+  `capture_image` renders the scene through `WgpuRenderer::capture_scene`,
+  and answers with an error while the window state is borrowed. Adds the
+  `image` dependency (no default features). Type-checked with
+  `cargo check --target x86_64-unknown-linux-gnu` on macOS; not run on
+  Linux by the author.

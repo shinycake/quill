@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::RwLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 const GRANTS_FILE: &str = "agent_grants.json";
 
@@ -190,8 +191,22 @@ pub fn for_account(account: &AccountKey) -> AccountGrants {
     grants
 }
 
-/// Change the grants of `account` and save them.
+/// Counts every change to any account's grants, so a check made before a
+/// slow step can tell whether the grants it read still hold.
+static GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// The grants' generation; it moves on every [`update`].
+pub fn generation() -> u64 {
+    GENERATION.load(Ordering::SeqCst)
+}
+
+/// Change the grants of `account` and save them. Refused while the UI
+/// driver injects an agent's input: an agent never widens its own grants.
 pub fn update(account: &AccountKey, change: impl FnOnce(&mut AccountGrants)) {
+    if super::ui_driver::guard::refuse_if_injecting("change which chats agents may use") {
+        return;
+    }
+    GENERATION.fetch_add(1, Ordering::SeqCst);
     let mut all = match CACHE.read() {
         Ok(guard) => guard.clone().unwrap_or_else(load),
         Err(_) => load(),

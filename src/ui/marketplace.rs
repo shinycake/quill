@@ -232,5 +232,6 @@ crate::ui::shell::register_dialogs! {
         4100,
         |app| app.payments.marketplace_open,
         QuillApp::build_marketplace_dialog,
-    ),
+    )
+    .closes(|app, _, cx| { app.payments.marketplace_open = false; cx.notify(); }),
 }

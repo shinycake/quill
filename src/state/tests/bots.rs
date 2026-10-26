@@ -102,6 +102,7 @@ fn b1_login_url_info_error_degrades_to_url() {
         message_id: MessageId(301),
         button_id: 11,
         raw_url: "https://example.com/login".to_string(),
+        from_agent: false,
     };
     for purpose in [RequestPurpose::GetLoginUrlInfo, RequestPurpose::GetLoginUrl] {
         session.bots.login_url_request = Some(login_request.clone());

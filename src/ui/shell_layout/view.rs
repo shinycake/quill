@@ -142,12 +142,23 @@ impl QuillApp {
             PanelPane::Column(width) => Some(
                 div()
                     .id("side-panels")
+                    .role(gpui_kit::Role::Group)
+                    .a11y_tag(quill::agent::ui_driver::redact::REGION_PANELS)
                     .flex()
                     .flex_none()
                     .w(px(width))
                     .h_full(),
             ),
-            PanelPane::Fill => Some(div().id("side-panels").flex().flex_1().min_w_0().h_full()),
+            PanelPane::Fill => Some(
+                div()
+                    .id("side-panels")
+                    .role(gpui_kit::Role::Group)
+                    .a11y_tag(quill::agent::ui_driver::redact::REGION_PANELS)
+                    .flex()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full(),
+            ),
         }
         .map(|row| row.children(panels));
         let forum = match layout.forum {

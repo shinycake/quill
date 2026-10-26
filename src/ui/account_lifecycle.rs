@@ -102,6 +102,11 @@ impl QuillApp {
     /// reused, in-flight fetches deduped by the drivers). Demo: the
     /// fixtures are already injected.
     pub(crate) fn open_account_lifecycle(&mut self, cx: &mut Context<Self>) {
+        if quill::agent::ui_driver::guard::refuse_hard_if_injecting(
+            quill::agent::ui_driver::guard::HardSurface::Account,
+        ) {
+            return;
+        }
         self.account.lifecycle.open = true;
         self.account.lifecycle.confirm_delete = false;
         self.account.lifecycle.confirm_logout = false;
@@ -674,7 +679,8 @@ crate::ui::shell::register_dialogs! {
         6700,
         |app| app.account.lifecycle.open,
         QuillApp::build_account_lifecycle_dialog,
-    ),
+    )
+    .closes(|app, window, cx| app.close_account_lifecycle(window, cx)),
 }
 
 #[cfg(test)]

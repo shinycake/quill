@@ -22,7 +22,8 @@ Quill exposes four layers. This version ships three of them:
 2. Events: `wait_for_message`, and the `quill://unread` resource, which you
    can subscribe to.
 3. Raw TDLib calls (`td_call`): any TDLib request, under the same grants.
-4. UI driver (click, type and look at Quill's window): coming later.
+4. UI driver (click, type and look at Quill's window), under the same
+   grants, when the user turns it on.
 
 ## Grants
 
@@ -216,3 +217,135 @@ Agents act as the user, under Telegram's Terms of Service. Do not use what
 you read to train or improve AI models, and do not export or index whole
 chats. Quill never marks messages read, hides online status or suppresses
 typing for an agent.
+
+## UI driver
+
+For what no chat tool does: a dialog, a picker, a panel, checking what the
+user sees. Settings are not among them: they stay with the user. Reading and sending messages stay with the chat tools,
+which are faster, work with the window hidden and go through Quill's
+grants, pacing and confirmations.
+
+The user turns it on separately: "Let agents drive Quill's window" in
+Settings > Advanced > Agent access (off by default). `quill_status` shows
+`ui_driver {available, active, paused, stopped, resumes_when, window}`:
+`active` while you are driving, `paused` while the user has taken control,
+`stopped` after the user pressed Stop, and `resumes_when` says what lifts
+a pause or a Stop. `window` is `visible`, `hidden` (behind other windows,
+on another desktop, on a sleeping display), `minimised`, `not open`, or
+`not answering` (Quill did not answer in time, usually because it is busy;
+retry in a moment) and null while the driver is off, paused or stopped.
+Quill's window draws nothing unless it is `visible`, so every UI tool then
+answers at once that it is hidden, minimised or not open: ask the user to
+bring it back, and use the chat tools meanwhile. Windows and some Linux desktops keep drawing a
+covered window and report it `visible`.
+
+| Tool | Use it to |
+| --- | --- |
+| `read_ui_tree` | See the window: nodes with `id`, `role`, `name`, `value`, `bounds` `[x, y, w, h]` in window pixels, `states`, `actions`, `children`. `filter` and `role` narrow it. |
+| `click_element` | Click a node by id, or a point; `button` right or middle, `count` 2 for a double click. |
+| `type_text` | Type into the focused box (click it first). |
+| `press_keys` | Press chords like `cmd-k`, `escape`, `ctrl-shift-a`, several separated by spaces. |
+| `scroll_view` | Scroll what is under a node or point; `dy` > 0 scrolls down. |
+| `hover_element` | Move the pointer over a node, for a tooltip or hover controls. |
+| `open_menu` | Right-click a node and get the menu's items. |
+| `take_screenshot` | See the window as a PNG, with the tree of the same frame. `full_resolution` keeps every device pixel; otherwise the long side is at most 1280. |
+
+Every input tool also takes `"screenshot": true` (and `full_resolution`)
+to get a PNG of the window after the input, next to the usual answer. Use
+the tree to find and target things; use a screenshot to check layout,
+colours, images or anything the tree does not describe. Divide a point
+in the image by its `scale` to get window pixels for `click_element`.
+
+Find the search box and look for a chat:
+
+    read_ui_tree {"filter": "search"}
+    click_element {"target": {"node": "<id of the search box>"}}
+    type_text {"text": "design"}
+    read_ui_tree {"role": "ListItem"}
+
+Every input tool answers with the focused node and the nodes that appeared
+after it (a dialog, a menu), so you usually do not need another
+`read_ui_tree` to see what happened. Ids stay the same while an element
+stays on screen; after the window changes a lot, read it again.
+
+Rules, all enforced by Quill:
+
+- The window follows your chat grants. The tree has the chat list's rows
+  for chats you may read, and the open chat when it is granted: `read` to
+  read the window, `read_write` for any click, key or scroll. With "All
+  other chats" on you see most of the window; secret chats still need
+  their own grant. An ungranted chat is not in the tree, and a key or
+  click that would open one is refused, so a sequence stops there; the
+  tool names the chat for `request_access`.
+- Some screens are never yours: Settings, Quill's requests to the user
+  (including your own), sign-in, the passcode lock, log out, payments,
+  Stars, gifts, Premium, passkeys and sessions. `read_ui_tree` then
+  answers "Quill is showing <that>; agents can't see or use it. Ask the
+  user." and every input is refused. You cannot open one either: a key
+  (`cmd-,`, the lock chord), a menu item or a click that would open
+  Settings, lock Quill, log out, switch accounts, answer a call or open a
+  payment, Stars, Premium or a gift opens nothing, and the reply lists the
+  refusal. Any other dialog of that kind your input opens is closed before
+  it shows, and the reply says "Quill closed a dialog".
+- Enter or Send in the message box of a granted chat sends through the
+  same path as `send_message`: grants, pacing, "Confirm each send" and the
+  activity log; the reply has `sent` or says why not, and the draft stays
+  in the box. Other sends, deletes, reactions, votes, bot buttons,
+  payments and settings changes are refused and listed under `refusals`.
+- `type_text` goes only into a focused text box inside a part of the
+  window you may use, types a line break as the chord that inserts one,
+  and refuses a tab character; Enter and Space go only to such a text
+  box. `press_keys` never types characters.
+- Keys that quit, close, hide, minimise, maximise or full-screen Quill
+  are never pressed (a shortcut the user rebound to one is refused by the
+  action itself), the drawn title bar's buttons and drag area take no
+  click, and
+  neither are paste chords: the clipboard is the user's, and a paste reached any other
+  way (a menu) reads it as empty. Type your own text with `type_text`.
+- Nothing leaves Quill: a link is not opened in the browser, a file is
+  not opened or revealed, mail is not composed, chats and accounts are
+  not exported, and nothing that spends Stars or money runs (a paid
+  search included). Give the user the link or the file name instead.
+- A link you click that resolves later (a username, a t.me link) opens
+  only a chat you are granted; links to settings, proxies, folders or
+  sticker sets are refused.
+- The window acts for real: opening or scrolling a chat marks it read,
+  typing in the message box saves a draft and shows the other side that
+  you are typing. Every command is in the user's activity log.
+- A screenshot shows what the tree shows and nothing more. Rows and parts
+  of the window you may not see are a flat grey block; with "All other
+  chats" on, only secret chats without their own grant are grey. A screen
+  that is never yours gets no screenshot, just the same note as
+  `read_ui_tree`. Quill's own takeover glow and pill are not in it.
+- Screenshots are for operating Quill, not for archiving chats: at most
+  one a second and 20 a minute, each one is in the user's activity log,
+  and over the limit the tool answers with how long to wait (an input
+  tool still runs, without the image). Read messages with the chat
+  tools.
+- While you drive, Quill shows it: a glow around the window, a ghost
+  cursor where you are about to click or type, and a pill at the top
+  saying you are driving, with Stop. Each click glides the ghost there
+  first, so a pointer step takes about a quarter of a second longer.
+- The user takes control by pressing Esc, clicking, scrolling, typing or
+  moving the mouse in the window. The driver is then paused: every UI
+  tool answers "The user took control of Quill..." until the user picks
+  "Let it continue". Wait, call `quill_status`, and drive again when
+  `ui_driver.paused` is false. Do not retry in a loop; the chat tools
+  still work meanwhile. Reconnecting does not lift the pause. Answering
+  your own confirm or request in Quill does not pause you.
+- Stop in the pill refuses the command running and every one waiting,
+  and the UI tools stay refused (`ui_driver.stopped` is true) until the
+  user turns "Let agents drive Quill's window" off and on or restarts
+  Quill; reconnecting does not lift it. Tell the user; do not drive
+  again. Agent access itself stays on, so the chat tools still work.
+
+What it cannot reach: native menus (the macOS menu bar), file and folder
+pickers, the input method editor, and system dialogs. Quill's window must
+be open and visible so it draws frames; a hidden or minimised window
+answers "did not redraw". Bounds are in window pixels, not screen pixels.
+`focus` is reported only when the focused element itself carries a role.
+A screenshot is Quill's own rendering of its window, so it never shows
+other apps; text and images are drawn as on screen, but a renderer that
+cannot read its frame back (a Windows HDR display, for one) answers with
+an error instead of an image. `quill_status` says whether screenshots are
+available (`ui_driver.screenshots.available`).

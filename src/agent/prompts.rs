@@ -142,8 +142,12 @@ pub fn current_for(account: &AccountKey) -> Option<Prompt> {
         .map(|pending| pending.prompt.clone())
 }
 
-/// Answer prompt `id` and take it off the screen.
+/// Answer prompt `id` and take it off the screen. Refused while the UI
+/// driver injects an agent's input: an agent never answers its own prompt.
 pub fn answer(id: u64, decision: Decision) {
+    if super::ui_driver::guard::refuse_if_injecting("answer a request to the user") {
+        return;
+    }
     let mut queue = crate::locks::lock_or_recover(&QUEUE);
     if let Some(index) = queue.iter().position(|p| p.prompt.id == id)
         && let Some(pending) = queue.remove(index)

@@ -161,8 +161,14 @@ impl QuillApp {
                     .child(tr(keys::Q_CHAT_NO_MESSAGES_YET_2)),
             );
         }
+        // The peek shows the chat's messages: the UI driver cuts it
+        // wherever it cuts that chat's row (a secret chat with All chats
+        // on included).
         let panel = div()
             .id("chat-preview-panel")
+            .debug_selector(|| "chat-preview-panel".into())
+            .role(gpui_kit::Role::Group)
+            .a11y_tag(quill::agent::ui_driver::redact::chat_tag(chat_id.0))
             .flex()
             .flex_col()
             .w(px(320.))
@@ -619,6 +625,7 @@ impl QuillApp {
         }
         rows.sort_by_key(|(order, _)| *order);
         self.chat_menu_shell(
+            chat_id,
             menu.position,
             rows.into_iter().map(|(_, row)| row).collect(),
             cx,
@@ -629,7 +636,9 @@ impl QuillApp {
     /// when the card offers it, fall back to the browser on 404 /
     /// unsupported). Drains `Session::instant_view_fallback_url` into
     /// the browser and renders `Session::instant_view` page blocks via
-    /// `message_rich_block`. A refusal is never rendered as a reader.
+    /// `message_rich_block`. A refusal is never rendered as a reader. A
+    /// fallback for a link an agent's step clicked opens as part of that
+    /// step (`guard::with_injecting`): the browser stays closed.
     pub(in crate::ui) fn instant_view_overlay(
         &mut self,
         cx: &mut Context<Self>,
@@ -642,7 +651,9 @@ impl QuillApp {
                 .instant_view_fallback_url
                 .take()
         {
-            self.open_message_url(&url, cx);
+            let messages = &mut live.driver.session.messages;
+            let from_agent = std::mem::take(&mut messages.instant_view_fallback_from_agent);
+            self.agent_step(from_agent, |this| this.open_message_url(&url, cx));
         }
         self.session()?.messages.instant_view.as_ref()?;
         self.instant_view_overlay_body(cx)

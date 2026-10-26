@@ -272,7 +272,8 @@ impl QuillApp {
                         photo,
                         cx,
                         move |this, window, cx| this.select_search_chat(id, window, cx),
-                    );
+                    )
+                    .a11y_tag(quill::agent::ui_driver::redact::chat_tag(id.0));
                     let row = self.chat_search_nav_row(row, SearchRow::Chat(id), cx);
                     block = block.child(if recents {
                         // tdesktop: "Remove from Recent" on each entry.
@@ -333,7 +334,8 @@ impl QuillApp {
                         photo,
                         cx,
                         move |this, window, cx| this.select_search_chat(id, window, cx),
-                    );
+                    )
+                    .a11y_tag(quill::agent::ui_driver::redact::chat_tag(id.0));
                     block =
                         block.child(self.chat_search_nav_row(row, SearchRow::PublicChat(id), cx));
                 }
@@ -367,7 +369,8 @@ impl QuillApp {
                         move |this, window, cx| {
                             this.select_search_message(chat_id, message_id, window, cx);
                         },
-                    );
+                    )
+                    .a11y_tag(quill::agent::ui_driver::redact::chat_tag(chat_id.0));
                     block = block.child(self.chat_search_nav_row(
                         row,
                         SearchRow::Message(chat_id, message_id),
@@ -381,6 +384,8 @@ impl QuillApp {
             });
         div()
             .id("search-results")
+            .role(gpui_kit::Role::Group)
+            .a11y_tag(quill::agent::ui_driver::redact::PART_RESULTS)
             .relative()
             .flex()
             .flex_col()

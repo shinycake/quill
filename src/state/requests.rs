@@ -327,6 +327,9 @@ pub struct LoginUrlRequest {
     pub button_id: i64,
     /// The button's raw URL — the plain-URL fallback.
     pub raw_url: String,
+    /// Pressed by a step the agent UI driver injected: what the answer
+    /// opens runs as part of that step (`guard::with_injecting`).
+    pub from_agent: bool,
 }
 
 /// Slice P1: context of an in-flight payment request (`getPaymentForm`,

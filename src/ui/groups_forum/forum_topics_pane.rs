@@ -250,6 +250,8 @@ impl QuillApp {
             .unwrap_or(0);
         div()
             .id("forum-column")
+            .role(gpui_kit::Role::Group)
+            .a11y_tag(quill::agent::ui_driver::redact::REGION_FORUM)
             .flex()
             .flex_col()
             .map(|this| {

@@ -76,6 +76,12 @@ impl QuillApp {
                 cx.notify();
             }
             PaneMode::Ready => {
+                // An agent driving the window never sends from here: the
+                // message goes through the agent write path.
+                if quill::agent::ui_driver::guard::injecting() {
+                    self.agent_route_send(text, cx);
+                    return;
+                }
                 if self.session().is_some_and(|s| s.is_frozen()) {
                     self.connection.set_note(StatusNote::error(tr(
                         keys::Q_CHAT_YOUR_ACCOUNT_IS_FROZEN_AND,
@@ -602,6 +608,12 @@ impl QuillApp {
     ) -> bool {
         if !self.composer.read(cx).focus_handle(cx).is_focused(window) {
             return false;
+        }
+        // The pasteboard is read directly below, past the platform's
+        // clipboard guard: refuse here too, and take the paste so the text
+        // paste under it does not run.
+        if quill::agent::ui_driver::guard::refuse_clipboard_if_injecting() {
+            return true;
         }
         // GPUI's macOS clipboard reads only text and image data; files
         // copied in Finder are file URLs, read from the pasteboard here.

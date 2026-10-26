@@ -7,10 +7,12 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, FileId};
 use quill::lang::{keys, tr, tr_with};
 use std::path::PathBuf;
+
 impl QuillApp {
     pub(super) fn request_media_download(
         &mut self,
@@ -481,8 +483,17 @@ impl QuillApp {
         } else {
             None
         };
+        // The row names a file from a chat: tagged with the chat noted when
+        // the download started, so the UI driver prunes it with the chat's
+        // grant, and left to the list's default-deny otherwise.
+        let chat_tag = session
+            .as_ref()
+            .and_then(|s| s.media.downloads.chat_of(file_id))
+            .map(|chat| quill::agent::ui_driver::redact::chat_tag(chat.0));
         div()
             .id(("download-row", file_id as u64))
+            .role(gpui_kit::Role::Group)
+            .when_some(chat_tag, |this, tag| this.a11y_tag(tag))
             .mx_1()
             .px_2()
             .py_1p5()

@@ -17,6 +17,7 @@ use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::agent::ui_driver::redact;
 use quill::composer::{ComposerReplyTo, QuoteSelection};
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
@@ -41,6 +42,7 @@ fn reply_dest_row(
         .py_1()
         .rounded_md()
         .role(gpui_kit::Role::Button)
+        .a11y_tag(redact::chat_tag(id.0))
         .aria_label(tr_with(
             keys::FORUM_REPLY_IN,
             &[("topic", &title.to_string())],
@@ -385,9 +387,14 @@ impl QuillApp {
                 list = list.child(reply_dest_row(id, title, photo, cx));
             }
         }
+        // The chooser lists chats, so it is a list to the UI driver: only
+        // the tagged rows of granted chats and these controls survive the
+        // granted scope (`redact::LIST`, `redact::CONTROLS`).
         Some(
             div()
                 .id("reply-elsewhere")
+                .role(gpui_kit::Role::Group)
+                .a11y_tag(redact::LIST)
                 .flex()
                 .flex_col()
                 .gap_2()
@@ -399,29 +406,38 @@ impl QuillApp {
                 .bg(bg_canvas())
                 .child(
                     div()
+                        .id("reply-elsewhere-controls")
+                        .role(gpui_kit::Role::Group)
+                        .a11y_tag(redact::CONTROLS)
                         .flex()
-                        .items_center()
-                        .justify_between()
+                        .flex_col()
+                        .gap_2()
                         .child(
                             div()
-                                .text_sm()
-                                .font_semibold()
-                                .text_color(accent())
-                                .child(tr(keys::REPLY_IN_ANOTHER_TITLE)),
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .font_semibold()
+                                        .text_color(accent())
+                                        .child(tr(keys::REPLY_IN_ANOTHER_TITLE)),
+                                )
+                                .child(
+                                    Button::new("reply-elsewhere-cancel")
+                                        .label(tr(keys::CANCEL))
+                                        .ghost()
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.close_reply_panels(window, cx);
+                                        })),
+                                ),
                         )
                         .child(
-                            Button::new("reply-elsewhere-cancel")
-                                .label(tr(keys::CANCEL))
-                                .ghost()
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.close_reply_panels(window, cx);
-                                })),
+                            Textarea::new(&self.share.search_input)
+                                .aria_label(tr(keys::Q_OPS_SEARCH_CHATS))
+                                .h(px(36.)),
                         ),
-                )
-                .child(
-                    Textarea::new(&self.share.search_input)
-                        .aria_label(tr(keys::Q_OPS_SEARCH_CHATS))
-                        .h(px(36.)),
                 )
                 .when_some(author, |this, (id, title, photo)| {
                     this.child(section_label(tr(keys::REPLY_IN_AUTHOR), cx))

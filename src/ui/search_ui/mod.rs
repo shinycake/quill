@@ -446,7 +446,14 @@ impl QuillApp {
         match confirm {
             Some(SearchConfirm::ClearRecents) => self.clear_search_recents(cx),
             Some(SearchConfirm::DisableTopChats) => self.set_top_chats_disabled(true, cx),
-            Some(SearchConfirm::PaidPostSearch) => self.search_public_posts_paid_ui(cx),
+            Some(SearchConfirm::PaidPostSearch) => {
+                if quill::agent::ui_driver::guard::refuse_if_injecting(
+                    "pay for a public post search",
+                ) {
+                    return;
+                }
+                self.search_public_posts_paid_ui(cx);
+            }
             None => {}
         }
     }

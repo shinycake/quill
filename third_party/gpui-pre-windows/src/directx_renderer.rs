@@ -466,7 +466,9 @@ impl DirectXRenderer {
     /// goes through MetalRenderer; this is the Windows analogue). Draws into
     /// the existing render target, copies it into a `D3D11_USAGE_STAGING`
     /// texture, maps it, and converts BGRA to RGBA.
-    #[cfg(any(test, feature = "test-support"))]
+    ///
+    /// Quill: built in every configuration; it backs `Window::capture_frame`
+    /// (the next frame draws the render target again before presenting).
     pub(crate) fn render_to_image(
         &mut self,
         scene: &Scene,
@@ -498,6 +500,16 @@ impl DirectXRenderer {
         // A CPU-readable copy of the render target.
         let mut desc = D3D11_TEXTURE2D_DESC::default();
         unsafe { render_target.GetDesc(&mut desc) };
+        // Quill: `CopyResource` into the single-sample staging texture needs
+        // a single-sample source. The render target is buffer 0 of the
+        // flip-model swap chain, created with one sample (flip model allows
+        // no other); only path rasterization uses MSAA, in its own texture.
+        // Refuse rather than copy if that ever changes.
+        anyhow::ensure!(
+            desc.SampleDesc.Count == 1,
+            "render_to_image needs a single-sample render target, not {} samples",
+            desc.SampleDesc.Count
+        );
         let width = desc.Width;
         let height = desc.Height;
         let staging_desc = D3D11_TEXTURE2D_DESC {

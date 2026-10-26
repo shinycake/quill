@@ -41,6 +41,11 @@ impl QuillApp {
     }
 
     fn open_premium_on(&mut self, page: PromoPage, start_ref: &str, cx: &mut Context<Self>) {
+        if quill::agent::ui_driver::guard::refuse_hard_if_injecting(
+            quill::agent::ui_driver::guard::HardSurface::Payments,
+        ) {
+            return;
+        }
         if let Some(hub) = self.hub_mut() {
             hub.premium_open = true;
             hub.premium_ref = start_ref.into();

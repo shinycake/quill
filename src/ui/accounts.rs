@@ -61,6 +61,11 @@ impl QuillApp {
     /// Slice parity:auth-multi-account: open the Accounts dialog. The
     /// registry reads are local and synchronous — no TDLib round-trip.
     pub(crate) fn open_accounts(&mut self, cx: &mut Context<Self>) {
+        if quill::agent::ui_driver::guard::refuse_hard_if_injecting(
+            quill::agent::ui_driver::guard::HardSurface::Account,
+        ) {
+            return;
+        }
         self.account.accounts.open = true;
         self.account.accounts.remove_confirm = None;
         self.account.accounts.error = None;
@@ -103,6 +108,12 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Every route (the switcher, the main menu, the tray, a ringing
+        // call's Answer, a notification) ends here.
+        use quill::agent::ui_driver::guard::{self, HardSurface};
+        if guard::refuse_hard_if_injecting(HardSurface::Account) {
+            return;
+        }
         // The lock-screen log out is deleting every account's data; the
         // connection starts once it is gone.
         if self.background.wiping {
@@ -488,5 +499,6 @@ crate::ui::shell::register_dialogs! {
         7000,
         |app| app.account.accounts.open,
         QuillApp::build_accounts_dialog,
-    ),
+    )
+    .closes(|app, window, cx| app.close_accounts(window, cx)),
 }

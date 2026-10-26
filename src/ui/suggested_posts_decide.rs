@@ -587,7 +587,8 @@ crate::ui::shell::register_dialogs! {
         3962,
         |app| app.suggested_posts.grams_needed.is_some(),
         QuillApp::build_grams_needed_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_grams_needed(cx)),
     /// "Accept Terms" of a suggested post.
     SuggestAccept => DialogSpec::new(
         3964,

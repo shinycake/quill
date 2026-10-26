@@ -25,12 +25,11 @@ impl QuillApp {
     fn open_cocoon_link(&mut self, link: CocoonLink, cx: &mut Context<Self>) {
         match link {
             CocoonLink::Mention => {
-                self.pending_deep_link = Some("https://t.me/cocoon".into());
+                self.queue_deep_link("https://t.me/cocoon".into());
                 self.close_ai_compose(cx);
             }
             CocoonLink::Direct => {
-                self.pending_deep_link =
-                    Some(format!("https://{}", tr(keys::TRANSLATE_COCOON_TEXT_LINK)));
+                self.queue_deep_link(format!("https://{}", tr(keys::TRANSLATE_COCOON_TEXT_LINK)));
                 self.close_ai_compose(cx);
             }
             CocoonLink::Domain => {

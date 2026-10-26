@@ -26,6 +26,7 @@ use gpui_kit::component::input::{Copy as CopyAction, Paste as PasteAction};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::agent::ui_driver::guard::{self, HardSurface};
 use quill::auth::{AuthAction, view_for};
 use quill::composer::ComposerShortcut;
 use quill::ids::ChatId;
@@ -42,7 +43,7 @@ impl Render for QuillApp {
         let outer_scope = self.windows.scope;
         self.set_window_scope(None);
         self.windows.main = Some(window.window_handle());
-        self.slices.a11y_active.set(self.screen_reader_on(window));
+        self.slices.a11y_active.set(self.a11y_tree_wanted(window));
         self.release_viewer_key_probe(window, cx);
         // Bounded image memory: retired images and path images nothing can
         // show any more leave the atlas (`image_budget`).
@@ -185,6 +186,9 @@ impl Render for QuillApp {
                 this.navigate(super::navigation::NavigationAction::Settings, window, cx);
             }))
             .on_action(cx.listener(|_, _: &QuitApp, window, cx| {
+                if guard::refuse_hard_if_injecting(HardSurface::Window) {
+                    return;
+                }
                 window.remove_window();
                 cx.quit();
             }))
@@ -192,6 +196,9 @@ impl Render for QuillApp {
             // View / Help menus (same dispatch path as the key bindings).
             .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
                 use quill::tray::{CloseOutcome, close_outcome};
+                if guard::refuse_hard_if_injecting(HardSurface::Window) {
+                    return;
+                }
                 match close_outcome(
                     this.appearance.minimize_to_tray,
                     quill::tray::tray_available(),
@@ -215,6 +222,9 @@ impl Render for QuillApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &MinimizeWindow, window, cx| {
+                if guard::refuse_hard_if_injecting(HardSurface::Window) {
+                    return;
+                }
                 #[cfg(target_os = "macos")]
                 if this.appearance.minimize_to_tray && quill::tray::tray_available() {
                     cx.hide();
@@ -225,16 +235,26 @@ impl Render for QuillApp {
             }))
             .on_action(cx.listener(|this, _: &ZoomWindow, window, _| {
                 let _ = this;
+                if guard::refuse_hard_if_injecting(HardSurface::Window) {
+                    return;
+                }
                 window.zoom_window();
             }))
             .on_action(cx.listener(|this, _: &ToggleFullscreen, window, _| {
                 let _ = this;
+                if guard::refuse_hard_if_injecting(HardSurface::Window) {
+                    return;
+                }
                 window.toggle_fullscreen();
             }))
             .on_action(cx.listener(|this, _: &ToggleSidebar, window, cx| {
                 this.toggle_sidebar(window, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleTheme, _, cx| {
+                // A settings change, written to disk.
+                if guard::refuse_if_injecting("change the theme") {
+                    return;
+                }
                 // Write through the appearance funnel (persist + re-apply)
                 // so the 60s auto-night tick can't silently revert the
                 // flip. Auto-night, when enabled, still overrides the
@@ -863,6 +883,9 @@ impl Render for QuillApp {
         let root = root.when(self.account.passcode.locked, |this| {
             this.child(self.lock_overlay(cx))
         });
+        // An agent driving the window: the glow, the ghost cursor and the
+        // pill, deferred above everything (`agent_takeover`).
+        let root = root.children(self.takeover_layer(window, cx));
         let root = match image_cache {
             Some(cache) => super::image_budget::CacheScope::new(cache, root).into_any_element(),
             None => root.into_any_element(),

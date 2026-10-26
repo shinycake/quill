@@ -67,6 +67,8 @@ pub struct QuillApp {
     pub(super) ai_compose: super::ai_compose_state::AiComposeUi,
     /// Agent access: the account Settings edits and the all-chats consent (`ui/agent_state.rs`).
     pub(super) agent_ui: super::agent_state::AgentUi,
+    /// The agent takeover's wake-up and Esc (`ui/agent_takeover_state.rs`).
+    pub(super) takeover: super::agent_takeover_state::TakeoverUi,
     pub(super) focus_sidebar: FocusHandle,
     /// Connection status, the status line and presence sync (`ui/connection_state.rs`).
     pub(super) connection: super::connection_state::ConnectionUi,

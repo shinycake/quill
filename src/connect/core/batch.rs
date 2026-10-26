@@ -21,6 +21,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.begin_update_batch();
     }
 
+    /// Ingest the sender's answers to requests the agent UI driver refused
+    /// (`AgentScreen`, TDLib's error shape) like TDLib's own. Whether there
+    /// were any.
+    pub fn ingest_refused_answers(&mut self) -> bool {
+        let answers = self.sender.take_refused_answers();
+        for answer in &answers {
+            if let Ok(envelope) = crate::telegram::envelope::parse_envelope(answer) {
+                let _ = self.ingest(crate::telegram::client::OwnedEnvelope {
+                    seq: crate::telegram::client::LOCAL_ANSWER_SEQ,
+                    client_id: envelope.client_id,
+                    envelope,
+                });
+            }
+        }
+        !answers.is_empty()
+    }
+
     /// Finish the batch started by `begin_batch`.
     pub fn end_batch(&mut self) -> Result<(), ConnectSendError> {
         self.batch.open = false;

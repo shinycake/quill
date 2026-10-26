@@ -453,11 +453,13 @@ crate::ui::shell::register_dialogs! {
         3855,
         |app| app.paid_confirm_view().is_some(),
         QuillApp::build_paid_confirm_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.cancel_paid_confirm(cx)),
     /// Allow a user to write for free, optionally refunding what they paid.
     RemoveFee => DialogSpec::new(
         3857,
         |app| app.paid_messages.remove_fee.is_some(),
         QuillApp::build_remove_fee_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_remove_fee(cx)),
 }

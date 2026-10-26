@@ -37,6 +37,9 @@ pub(crate) struct AgentUi {
     pub(super) consent: Option<AllChatsConsent>,
     /// How many activity rows Settings shows.
     pub(super) activity_shown: usize,
+    /// A send the composer handed to the agent path while the UI driver
+    /// injected input (`agent_driver_send`), until the task picks it up.
+    pub(super) ui_send: Option<quill::agent::ui_driver::bridge::UiSend>,
 }
 
 /// Activity rows shown at first, and added by each "Show more".
@@ -49,17 +52,22 @@ impl AgentUi {
         QuillApp::spawn_main_in(window, cx, async move |app, cx| {
             let mut announced = 0u64;
             let mut seen = quill::wake::AGENT.epoch();
+            // Shorter while the UI driver forces the element tree, so it
+            // is released once the agent stops driving.
+            let mut timeout = Duration::from_secs(300);
             loop {
                 super::wake_wait::sleep_or_wake(
                     cx.background_executor(),
                     &quill::wake::AGENT,
                     seen,
-                    Duration::from_secs(300),
+                    timeout,
                 )
                 .await;
+                // Woken by a change, or only by the driver's timer?
+                let woke = quill::wake::AGENT.epoch() != seen;
                 seen = quill::wake::AGENT.epoch();
                 let alive = app
-                    .update_in(cx, |_, window, cx| {
+                    .update_in(cx, |app, window, cx| {
                         // The user is usually in another app: a request
                         // they have not seen yet brings Quill forward.
                         let fresh = prompts::current_for(&active_account())
@@ -69,7 +77,15 @@ impl AgentUi {
                             announced = id;
                             super::link_inbox::raise_main_window(window, cx);
                         }
-                        cx.notify();
+                        timeout = if app.agent_driver_tick(window, cx) {
+                            super::agent_driver::FORCED_WAKE
+                        } else {
+                            Duration::from_secs(300)
+                        };
+                        // The forced tick alone changes nothing to draw.
+                        if woke || fresh.is_some() {
+                            cx.notify();
+                        }
                     })
                     .is_ok();
                 if !alive {
@@ -82,7 +98,22 @@ impl AgentUi {
             picked: None,
             consent: None,
             activity_shown: ACTIVITY_PAGE,
+            ui_send: None,
         }
+    }
+}
+
+impl QuillApp {
+    /// Whether `chat_id` may open now: always for the user, and for an
+    /// agent driving the window only when the chat is granted. A refusal
+    /// is recorded for the agent's reply.
+    pub(super) fn agent_may_open(&self, chat_id: quill::ids::ChatId) -> bool {
+        use quill::agent::ui_driver::{guard, surface};
+        if !guard::injecting() || self.driver_may_open_chat(chat_id.0) {
+            return true;
+        }
+        guard::refuse(surface::ungranted_chat(chat_id.0));
+        false
     }
 }
 
@@ -209,14 +240,19 @@ impl QuillApp {
 
     /// The user said yes in the consent dialog.
     pub(super) fn confirm_all_chats(&mut self, cx: &mut Context<Self>) {
+        if quill::agent::ui_driver::guard::refuse_if_injecting("allow agents in all chats") {
+            return;
+        }
         if let Some(consent) = self.agent_ui.consent.take() {
             grants::update(&consent.account, |g| g.all_chats = Some(consent.scope));
         }
+        note_prompt_answered();
         cx.notify();
     }
 
     pub(super) fn cancel_all_chats(&mut self, cx: &mut Context<Self>) {
         self.agent_ui.consent = None;
+        note_prompt_answered();
         cx.notify();
     }
 
@@ -254,7 +290,16 @@ impl QuillApp {
             prompts::Decision::Denied
         };
         prompts::answer(prompt.id, decision);
+        note_prompt_answered();
         cx.notify();
+    }
+}
+
+/// The user answered one of the agent's prompts: the pointer leaving the
+/// button does not pause an agent that is driving (`takeover::answered`).
+fn note_prompt_answered() {
+    if !quill::agent::ui_driver::guard::injecting() {
+        quill::agent::ui_driver::takeover::note_answered();
     }
 }
 
@@ -279,6 +324,12 @@ fn sees_prompts() -> bool {
 #[cfg(not(test))]
 fn sees_prompts() -> bool {
     true
+}
+
+/// Whether this window shows agent state: always, except in UI tests that
+/// did not set agent state up.
+pub(super) fn sees_agents() -> bool {
+    sees_prompts()
 }
 
 /// The agents connected now.

@@ -50,6 +50,7 @@ use gpui_kit::{
     WindowButtonLayout, WindowControlArea, WindowControls, WindowDecorations, WindowInsets,
     WindowParams, WindowVisibility, WindowingRequest, px,
 };
+use quill::agent::ui_driver::guard;
 use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle,
 };
@@ -454,7 +455,15 @@ impl Platform for ZoomPlatform {
     fn button_layout(&self) -> Option<WindowButtonLayout> {
         self.inner.button_layout()
     }
+    // Every `cx.open_url`, `cx.reveal_path` and `cx.open_with_system` in
+    // the app passes through here: while the agent UI driver injects
+    // input, nothing leaves Quill for the OS (`ui_driver::guard`), whatever
+    // element the agent clicked (a message link, a bot button, a link
+    // preview, a custom scheme).
     fn open_url(&self, url: &str) {
+        if guard::refuse_outside_if_injecting("open a link in the browser") {
+            return;
+        }
         self.inner.open_url(url)
     }
     fn on_open_urls(&self, callback: Box<dyn FnMut(Vec<String>)>) {
@@ -480,9 +489,15 @@ impl Platform for ZoomPlatform {
         self.inner.can_select_mixed_files_and_dirs()
     }
     fn reveal_path(&self, path: &Path) {
+        if guard::refuse_outside_if_injecting("reveal a file in its folder") {
+            return;
+        }
         self.inner.reveal_path(path)
     }
     fn open_with_system(&self, path: &Path) {
+        if guard::refuse_outside_if_injecting("open a file with its app") {
+            return;
+        }
         self.inner.open_with_system(path)
     }
     fn on_quit(&self, callback: Box<dyn FnMut() -> bool>) {
@@ -585,17 +600,28 @@ impl Platform for ZoomPlatform {
     fn should_auto_hide_scrollbars(&self) -> bool {
         self.inner.should_auto_hide_scrollbars()
     }
+    // While the UI driver injects input the clipboard reads as empty: one
+    // choke point for every paste (chord, menu, mini app) of the user's data.
     fn read_from_clipboard(&self) -> Option<ClipboardItem> {
+        if guard::refuse_clipboard_if_injecting() {
+            return None;
+        }
         self.inner.read_from_clipboard()
     }
     fn write_to_clipboard(&self, item: ClipboardItem) {
         self.inner.write_to_clipboard(item)
     }
     fn read_from_clipboard_async(&self) -> Task<Result<Option<ClipboardItem>, ClipboardReadError>> {
+        if guard::refuse_clipboard_if_injecting() {
+            return Task::ready(Ok(None));
+        }
         self.inner.read_from_clipboard_async()
     }
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
     fn read_from_primary(&self) -> Option<ClipboardItem> {
+        if guard::refuse_clipboard_if_injecting() {
+            return None;
+        }
         self.inner.read_from_primary()
     }
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
@@ -604,7 +630,7 @@ impl Platform for ZoomPlatform {
     }
     #[cfg(target_os = "macos")]
     fn read_from_find_pasteboard(&self) -> Option<ClipboardItem> {
-        self.inner.read_from_find_pasteboard()
+        (!guard::refuse_clipboard_if_injecting()).then(|| self.inner.read_from_find_pasteboard())?
     }
     #[cfg(target_os = "macos")]
     fn write_to_find_pasteboard(&self, item: ClipboardItem) {
@@ -653,8 +679,7 @@ impl PlatformWindow for ZoomWindow {
         self.inner.prepare_frame()
     }
     fn resize(&mut self, size: Size<Pixels>) {
-        let zoom = self.zoom();
-        self.inner.resize(size_out(size, zoom))
+        self.inner.resize(size_out(size, self.zoom()))
     }
     fn scale_factor(&self) -> f32 {
         self.inner.scale_factor() * self.zoom()
@@ -968,6 +993,9 @@ impl PlatformWindow for ZoomWindow {
     #[cfg(feature = "demo-capture")]
     fn render_to_image(&self, scene: &Scene) -> AnyResult<image::RgbaImage> {
         self.inner.render_to_image(scene)
+    }
+    fn capture_image(&self, scene: &Scene) -> AnyResult<image::RgbaImage> {
+        self.inner.capture_image(scene)
     }
 }
 

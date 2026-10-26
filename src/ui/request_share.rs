@@ -100,6 +100,11 @@ impl QuillApp {
             self.set_status_note(StatusNote::info(tr(keys::Q_LOCATION_REQUEST_BOT_ONLY)), cx);
             return;
         }
+        // The device location is the user's to share: refused before the
+        // box opens, or it would wait on a lookup that never starts.
+        if quill::agent::ui_driver::guard::refuse_if_injecting("look up the device location") {
+            return;
+        }
         self.open_request_share(
             chat_id,
             message_id,
@@ -110,6 +115,10 @@ impl QuillApp {
 
     /// (Re)start the location lookup of the open request.
     fn locate_for_request(&mut self, cx: &mut Context<Self>) {
+        // The device location is the user's to share, never an agent's.
+        if quill::agent::ui_driver::guard::refuse_if_injecting("look up the device location") {
+            return;
+        }
         if let Some(share) = self.message_ui.request_share.as_mut() {
             share.locate = None;
         }

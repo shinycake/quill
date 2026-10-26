@@ -109,3 +109,11 @@ the physics are untouched. Background:
 while `max_stretch` still bounds a finger's pull. Quill's chat list lets a
 finger pull the top 96 px (to open the stories strip) but a fling throws it
 no farther than a normal bounce.
+
+## Element wrappers forward the accessibility tag
+
+Added in 2026 for Agent access's UI driver. GPUI's `Element::a11y_tag`
+(a Quill addition to `gpui-pre`, see its `QUILL-CHANGES.md`) is forwarded
+by the wrappers that forward `a11y_role`: `test_support.rs`,
+`focus_trap.rs` and `a11y_disabled.rs`. Without it a tagged `div` that
+passes through `.test_support()` or a focus trap lost its tag.

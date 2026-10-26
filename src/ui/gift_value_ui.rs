@@ -481,5 +481,6 @@ crate::ui::shell::register_dialogs! {
             })
         },
         QuillApp::build_gift_value_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_gift_value(cx)),
 }

@@ -1,5 +1,6 @@
 // Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
-// `SurfaceFrame` (RGBA16F and NV12, `YuvColor`) and the non-Apple `PaintSurface::frame`.
+// `SurfaceFrame` (RGBA16F and NV12, `YuvColor`) and the non-Apple `PaintSurface::frame`;
+// primitives a window's paint filter refuses never enter the scene.
 // See third_party/gpui-pre/QUILL-CHANGES.md.
 // todo("windows"): remove
 #![cfg_attr(windows, allow(dead_code))]
@@ -53,6 +54,13 @@ pub struct Scene {
     pub subpixel_sprites: Vec<SubpixelSprite>,
     pub polychrome_sprites: Vec<PolychromeSprite>,
     pub surfaces: Vec<PaintSurface>,
+    /// Quill: the window's paint filter refuses the tags being painted
+    /// now, so primitives inserted meanwhile are dropped
+    /// (`Window::set_paint_filter`).
+    pub(crate) suppressed: bool,
+    /// Quill: this scene is drawn under a paint filter, so cached
+    /// primitives are not replayed (they were never filtered).
+    pub(crate) filtered: bool,
 }
 
 #[expect(missing_docs)]
@@ -69,6 +77,8 @@ impl Scene {
         self.subpixel_sprites.clear();
         self.polychrome_sprites.clear();
         self.surfaces.clear();
+        self.suppressed = false;
+        self.filtered = false;
     }
 
     pub fn len(&self) -> usize {
@@ -88,6 +98,9 @@ impl Scene {
     }
 
     pub fn insert_primitive(&mut self, primitive: impl Into<Primitive>) {
+        if self.suppressed {
+            return;
+        }
         let mut primitive = primitive.into();
         let clipped_bounds = primitive
             .bounds()
@@ -142,6 +155,9 @@ impl Scene {
     }
 
     pub fn replay(&mut self, range: Range<usize>, prev_scene: &Scene) {
+        if self.filtered {
+            return;
+        }
         for operation in &prev_scene.paint_operations[range] {
             match operation {
                 PaintOperation::Primitive(primitive) => self.insert_primitive(primitive.clone()),

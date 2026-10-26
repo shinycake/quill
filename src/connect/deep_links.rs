@@ -237,10 +237,22 @@ pub fn detect_deep_link_arg(args: &[String]) -> Option<String> {
 impl<S: JsonSender> ConnectDriver<S> {
     /// `parity:platform-deep-links`: `getDeepLinkInfo` for a launch link.
     /// Generation-guarded like `resolve_inline_bot`; a flow already in
-    /// progress wins (one launch link at a time).
+    /// progress wins (one launch link at a time). The flow is the running
+    /// handler's: an agent's step while the UI driver injects, else the
+    /// user's.
     pub fn request_deep_link_info(
         &mut self,
         link: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.request_deep_link_info_from(link, crate::agent::ui_driver::guard::injecting())
+    }
+
+    /// [`Self::request_deep_link_info`] for a link queued earlier, with the
+    /// origin it was queued with (`from_agent`).
+    pub fn request_deep_link_info_from(
+        &mut self,
+        link: &str,
+        from_agent: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -248,6 +260,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.chats_state.deep_link.is_some() {
             return Ok(None);
         }
+        self.session.chats_state.deep_link_from_agent = from_agent;
         // Like tdesktop's `openLocalUrl`, route the link by its shape
         // locally. `getDeepLinkInfo` only knows server-side deep links
         // (it answers 404 for `resolve?domain=` and `t.me/<user>`).
@@ -257,7 +270,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !crate::deep_link_types::needs_internal_resolution(link)
             && let Some(action) = parse_deep_link_url(link)
         {
-            return self.resolve_deep_link(action);
+            return self.continue_deep_link(action);
         }
         self.send_deep_link_lookup(link, true)
     }
@@ -331,6 +344,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if slot != generation {
             return Ok(None);
         }
+        self.session.chats_state.deep_link_from_agent = crate::agent::ui_driver::guard::injecting();
         let extra = self.session.request(
             RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { generation }),
             None,
@@ -356,8 +370,22 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// story author's), `createPrivateChat` for `openmessage` / `user`,
     /// `getChat` for `privatepost`, `checkChatInviteLink` for an invite
     /// hash. The answer becomes `DeepLinkState::ChatReady` in
-    /// `Session::apply`.
+    /// `Session::apply`. Starts a new flow (replacing one in progress),
+    /// owned by the running handler like [`Self::request_deep_link_info`].
     pub fn resolve_deep_link(
+        &mut self,
+        action: DeepLinkAction,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if self.chats_path_active() {
+            self.session.chats_state.deep_link_from_agent =
+                crate::agent::ui_driver::guard::injecting();
+        }
+        self.continue_deep_link(action)
+    }
+
+    /// The follow-up request of the flow in progress (an `Info` answer's
+    /// action): like [`Self::resolve_deep_link`], keeping the flow's origin.
+    pub fn continue_deep_link(
         &mut self,
         action: DeepLinkAction,
     ) -> Result<Option<RequestId>, ConnectSendError> {

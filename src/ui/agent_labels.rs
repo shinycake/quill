@@ -35,6 +35,14 @@ pub(super) fn tool_label(tool: &str) -> String {
         "unarchive_chat" => tr(keys::Q_AGENT_TOOL_UNARCHIVE_CHAT).to_string(),
         "remove_from_folder" => tr(keys::Q_AGENT_TOOL_REMOVE_FROM_FOLDER).to_string(),
         "td_call" => tr(keys::Q_AGENT_TOOL_TD_CALL).to_string(),
+        "ui_click" => tr(keys::Q_AGENT_TOOL_UI_CLICK).to_string(),
+        "ui_menu" => tr(keys::Q_AGENT_TOOL_UI_MENU).to_string(),
+        "ui_hover" => tr(keys::Q_AGENT_TOOL_UI_HOVER).to_string(),
+        "ui_scroll" => tr(keys::Q_AGENT_TOOL_UI_SCROLL).to_string(),
+        "ui_type" => tr(keys::Q_AGENT_TOOL_UI_TYPE).to_string(),
+        "ui_keys" => tr(keys::Q_AGENT_TOOL_UI_KEYS).to_string(),
+        "ui_send" => tr(keys::Q_AGENT_TOOL_UI_SEND).to_string(),
+        "ui_screenshot" => tr(keys::Q_AGENT_TOOL_UI_SCREENSHOT).to_string(),
         other => {
             let spaced = other.replace('_', " ");
             let mut chars = spaced.chars();

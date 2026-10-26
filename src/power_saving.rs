@@ -234,6 +234,12 @@ pub fn set_os_reduce_motion(prefers: bool) {
     slot_set(OS_REDUCE_MOTION, prefers.into());
 }
 
+/// The OS reduce-motion preference (or `QUILL_REDUCED_MOTION`) alone,
+/// without Quill's own Power Saving.
+pub fn os_reduce_motion() -> bool {
+    slot_get(OS_REDUCE_MOTION) != 0
+}
+
 /// What `App::set_reduce_motion` should be right now.
 pub fn reduce_motion_now() -> bool {
     reduce_motion(slot_get(OS_REDUCE_MOTION) != 0, current(), forced())

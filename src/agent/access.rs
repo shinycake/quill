@@ -23,6 +23,52 @@ struct Stored {
     enabled: bool,
     /// Every write waits for the user's click in Quill.
     confirm_sends: bool,
+    /// Agents may read Quill's window and click, type and scroll in it
+    /// ("Let agents drive Quill's window", `super::ui_driver`).
+    ui_driver: bool,
+    /// How the glow moves while an agent drives ("Takeover effect").
+    takeover_effect: TakeoverEffect,
+}
+
+/// "Takeover effect": whether the light sweeps round the glow while an
+/// agent drives the window. Reduced motion always keeps it still.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TakeoverEffect {
+    /// Sweeps unless Quill's Power Saving or the system's low-power mode
+    /// says to save.
+    #[default]
+    Automatic,
+    /// Always sweeps.
+    GlowAndSweep,
+    /// Never sweeps: the still glow only.
+    StillGlow,
+}
+
+impl TakeoverEffect {
+    /// Whether the light sweeps, given reduced motion (the system's, or
+    /// `QUILL_REDUCED_MOTION`) and whether power is being saved (Quill's
+    /// Power Saving for interface animations, which a battery saver or
+    /// heat forces, or the system's low-power mode).
+    pub const fn sweeps(self, reduce_motion: bool, saving_power: bool) -> bool {
+        match self {
+            Self::Automatic => !reduce_motion && !saving_power,
+            Self::GlowAndSweep => !reduce_motion,
+            Self::StillGlow => false,
+        }
+    }
+}
+
+/// The "Takeover effect" preference.
+pub fn takeover_effect() -> TakeoverEffect {
+    stored().takeover_effect
+}
+
+pub fn set_takeover_effect(effect: TakeoverEffect) {
+    if super::ui_driver::guard::refuse_if_injecting("change the Agent access settings") {
+        return;
+    }
+    save(|stored| stored.takeover_effect = effect);
 }
 
 static STORED: RwLock<Option<Stored>> = RwLock::new(None);
@@ -81,10 +127,17 @@ pub fn enabled() -> bool {
 /// Turn agent access on or off. Off deletes the token and ends every open
 /// agent connection.
 pub fn set_enabled(on: bool) {
+    if super::ui_driver::guard::refuse_if_injecting("change the Agent access settings") {
+        return;
+    }
     save(|stored| stored.enabled = on);
     if !on {
         GENERATION.fetch_add(1, Ordering::SeqCst);
+        super::ui_driver::takeover::forget_hold();
         super::prompts::deny_all();
+        super::ui_driver::bridge::refuse_all(
+            "Agent access was turned off in Quill, so nothing was sent to its window.",
+        );
     }
     crate::wake::AGENT.poke();
     publish_token();
@@ -96,7 +149,28 @@ pub fn confirm_sends() -> bool {
 }
 
 pub fn set_confirm_sends(on: bool) {
+    if super::ui_driver::guard::refuse_if_injecting("change the Agent access settings") {
+        return;
+    }
     save(|stored| stored.confirm_sends = on);
+    crate::wake::AGENT.poke();
+}
+
+/// Whether agents may drive Quill's window (read its element tree, click,
+/// type and scroll). Off by default; needs the main switch too.
+pub fn ui_driver() -> bool {
+    stored().ui_driver
+}
+
+pub fn set_ui_driver(on: bool) {
+    if super::ui_driver::guard::refuse_if_injecting("change the Agent access settings") {
+        return;
+    }
+    save(|stored| stored.ui_driver = on);
+    if !on {
+        // Off and on again is how the user lifts a Stop or a pause.
+        super::ui_driver::takeover::forget_hold();
+    }
     crate::wake::AGENT.poke();
 }
 
@@ -188,4 +262,35 @@ pub fn read_published_token(root: &Path) -> Option<String> {
     let text = std::fs::read_to_string(token_path(root)).ok()?;
     let text = text.trim();
     (!text.is_empty()).then(|| text.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Stored, TakeoverEffect};
+
+    #[test]
+    fn the_takeover_effect_sweeps_per_mode_and_reduced_motion_wins() {
+        use TakeoverEffect::*;
+        // (reduce motion, saving power): Automatic, Glow and sweep, Still glow.
+        let table = [
+            ((false, false), [true, true, false]),
+            ((false, true), [false, true, false]),
+            ((true, false), [false, false, false]),
+            ((true, true), [false, false, false]),
+        ];
+        for ((reduce, saving), want) in table {
+            let got = [Automatic, GlowAndSweep, StillGlow].map(|e| e.sweeps(reduce, saving));
+            assert_eq!(got, want, "reduce {reduce}, saving {saving}");
+        }
+    }
+
+    #[test]
+    fn the_takeover_effect_defaults_to_automatic_in_old_settings() {
+        let old: Stored = serde_json::from_str(r#"{"enabled":true,"ui_driver":true}"#)
+            .unwrap_or_else(|_| panic!("parses"));
+        assert_eq!(old.takeover_effect, TakeoverEffect::Automatic);
+        let still: Stored = serde_json::from_str(r#"{"takeover_effect":"still_glow"}"#)
+            .unwrap_or_else(|_| panic!("parses"));
+        assert_eq!(still.takeover_effect, TakeoverEffect::StillGlow);
+    }
 }

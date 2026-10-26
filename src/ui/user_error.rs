@@ -31,6 +31,7 @@ impl UserError for ConnectSendError {
                 keys::Q_NOTES_TEXT_TOO_LONG,
                 &[("limit", &limit.to_string())],
             ),
+            Self::AgentDriving => tr(keys::Q_NOTES_AGENT_DRIVING).to_string(),
         }
     }
 

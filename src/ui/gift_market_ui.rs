@@ -558,5 +558,6 @@ crate::ui::shell::register_dialogs! {
                 && !app.session().is_some_and(|s| s.payments.hub.premium_open)
         },
         QuillApp::build_gift_market_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.market_back(cx)),
 }

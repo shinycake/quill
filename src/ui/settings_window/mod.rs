@@ -57,6 +57,11 @@ impl SubPage {
 impl QuillApp {
     /// Open the settings window, on `page` when given (else where it was).
     pub(super) fn open_settings(&mut self, page: Option<Page>) {
+        if quill::agent::ui_driver::guard::refuse_hard_if_injecting(
+            quill::agent::ui_driver::guard::HardSurface::Settings,
+        ) {
+            return;
+        }
         self.settings.open = true;
         self.settings.sub = None;
         if let Some(page) = page {

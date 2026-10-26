@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-pre-apple 0.3.9 (Apache-2.0):
+// window capture renders the scene offscreen and reads it back. See third_party/gpui-pre-apple/QUILL-CHANGES.md.
 use crate::metal_atlas::MetalAtlas;
 use anyhow::{Context as _, Result};
 use block2::RcBlock;
@@ -6,7 +8,6 @@ use gpui::{
     AtlasTextureId, Background, Bounds, ContentMask, DevicePixels, PaintSurface, Path, Point,
     PrimitiveBatch, ScaledPixels, Scene, Size, point, size,
 };
-#[cfg(any(test, feature = "bench-support", feature = "test-support"))]
 use image::RgbaImage;
 use objc2::runtime::AnyObject;
 
@@ -651,11 +652,29 @@ impl MetalRenderer {
         read_texture_to_image(drawable.texture())
     }
 
+    /// QUILL: a window's frame, rendered offscreen at the layer's drawable
+    /// size and read back; nothing is presented and the screen is not
+    /// read. Backs `Window::capture_frame` on macOS.
+    pub fn capture_scene(&mut self, scene: &Scene) -> Result<RgbaImage> {
+        let layer = self
+            .layer
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("the window has no layer to capture"))?;
+        let drawable = layer.drawable_size();
+        let viewport_size: Size<DevicePixels> = size(
+            (drawable.width.ceil() as i32).into(),
+            (drawable.height.ceil() as i32).into(),
+        );
+        self.render_scene_to_image(scene, viewport_size)
+    }
+
     /// Renders a scene to an image without requiring a window or CAMetalLayer.
     ///
     /// This is the primary method for headless rendering. It creates an offscreen
     /// texture, renders the scene to it, and returns the pixel data as an RGBA image.
-    #[cfg(any(test, feature = "bench-support", feature = "test-support"))]
+    ///
+    /// QUILL: built in every configuration; a window renders its own scene
+    /// through it for in-process captures ([`Self::capture_scene`]).
     pub fn render_scene_to_image(
         &mut self,
         scene: &Scene,
@@ -668,8 +687,15 @@ impl MetalRenderer {
         // Headless callers do not have a Cocoa event-loop pool to release
         // autoreleased command buffers and render-pass descriptors.
         objc2::rc::autoreleasepool(|_| {
-            // Update path intermediate textures for this size
-            self.update_path_intermediate_textures(size);
+            // Update path intermediate textures for this size. QUILL: only
+            // when it changed, so a window's capture at its drawable size
+            // keeps the textures its frames use.
+            let same_size = self.path_intermediate_texture.as_ref().is_some_and(|texture| {
+                texture.width() == size.width.0 as u64 && texture.height() == size.height.0 as u64
+            });
+            if !same_size {
+                self.update_path_intermediate_textures(size);
+            }
 
             // Create an offscreen texture as render target
             let texture_descriptor = metal::TextureDescriptor::new();
@@ -1521,7 +1547,6 @@ fn new_command_encoder_for_texture<'a>(
     command_encoder
 }
 
-#[cfg(any(test, feature = "bench-support", feature = "test-support"))]
 fn read_texture_to_image(texture: &metal::TextureRef) -> Result<RgbaImage> {
     let width = texture.width() as u32;
     let height = texture.height() as u32;
@@ -1558,7 +1583,6 @@ fn read_texture_to_image(texture: &metal::TextureRef) -> Result<RgbaImage> {
 
 /// QUILL: reads an RGBA16Float texture in extended sRGB (gamma-encoded)
 /// and clamps it to 8-bit sRGB.
-#[cfg(any(test, feature = "bench-support", feature = "test-support"))]
 fn read_float_texture_to_image(
     texture: &metal::TextureRef,
     width: u32,
@@ -1587,7 +1611,6 @@ fn read_float_texture_to_image(
     RgbaImage::from_raw(width, height, pixels).context("failed to create RgbaImage from pixel data")
 }
 
-#[cfg(any(test, feature = "bench-support", feature = "test-support"))]
 fn half_to_f32(bits: u16) -> f32 {
     let exponent = (bits >> 10) & 0x1f;
     let mantissa = f32::from(bits & 0x3ff);

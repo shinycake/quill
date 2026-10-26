@@ -427,6 +427,9 @@ impl QuillApp {
                 .children(pull_gap),
         );
         div()
+            .id("chat-rows")
+            .role(gpui_kit::Role::Group)
+            .a11y_tag(quill::agent::ui_driver::redact::PART_ROWS)
             .relative()
             .flex()
             .flex_col()

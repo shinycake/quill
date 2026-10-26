@@ -428,6 +428,8 @@ impl QuillApp {
         }
         let panel = div()
             .id("playlist-menu-panel")
+            .role(gpui_kit::Role::Group)
+            .a11y_tag(quill::agent::ui_driver::redact::REGION_MENU)
             .occlude()
             .flex()
             .flex_col()

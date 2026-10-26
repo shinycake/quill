@@ -146,6 +146,12 @@ package = "gpui-pre-wgpu"
 version = "=0.3.9"
 package = "gpui-pre-http-client"
 
+# Quill: `Window::capture_frame` hands the X11 and Wayland windows'
+# readback over as an `image::RgbaImage` (already in the tree through gpui).
+[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.image]
+version = "0.25.1"
+default-features = false
+
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.libc]
 version = "0.2"
 

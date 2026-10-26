@@ -4,7 +4,8 @@ use super::*;
 impl Session {
     pub fn apply(&mut self, owned: OwnedEnvelope) {
         self.revision = self.revision.wrapping_add(1);
-        if owned.seq <= self.last_seq && self.last_seq != 0 {
+        let local = owned.seq == crate::telegram::client::LOCAL_ANSWER_SEQ;
+        if !local && owned.seq <= self.last_seq && self.last_seq != 0 {
             self.diagnostics.record(Diagnostic {
                 category: "reducer",
                 type_name: Some(owned.envelope.type_name.clone()),
@@ -15,7 +16,9 @@ impl Session {
             return;
         }
         self.expire_pending_bot_messages(unix_ms_now());
-        self.last_seq = owned.seq;
+        if !local {
+            self.last_seq = owned.seq;
+        }
         let extra = owned.envelope.extra;
         let pending = extra.and_then(|id| self.requests.take(id));
         if let Some(pending) = pending.as_ref()

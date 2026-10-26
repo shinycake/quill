@@ -541,3 +541,55 @@ fn bot_links_resolve_the_bot_with_search_public_chat() {
     );
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// The origin of a deep-link flow stays with that flow: a link the user
+/// sends while an agent's link is resolving neither starts nor relabels
+/// the flow, so the agent's chat open is still checked when it lands; a
+/// fresh `resolve_deep_link` is the running handler's.
+#[test]
+fn a_flow_keeps_its_origin_when_another_link_arrives() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+
+    let extra = driver
+        .request_deep_link_info_from("https://t.me/agentpick", true)
+        .unwrap()
+        .unwrap();
+    assert!(driver.session.chats_state.deep_link_from_agent);
+    // The user's link waits: the flow in progress wins and keeps its origin.
+    assert_eq!(
+        driver
+            .request_deep_link_info_from("https://t.me/userpick", false)
+            .unwrap(),
+        None
+    );
+    assert!(driver.session.chats_state.deep_link_from_agent);
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type": "chat", "@extra": extra.as_extra(), "id": 77, "title": "Agent pick",
+            "type": {"@type": "chatTypePrivate", "user_id": 77}, "unread_count": 0}),
+    );
+    assert!(matches!(
+        driver.session.chats_state.deep_link,
+        Some(DeepLinkState::ChatReady { chat_id, .. }) if chat_id.0 == 77
+    ));
+    assert!(driver.session.chats_state.deep_link_from_agent);
+
+    // A fresh flow started outside an injected step is the user's.
+    driver.session.chats_state.deep_link = None;
+    driver
+        .resolve_deep_link(DeepLinkAction::OpenUsername {
+            domain: "userpick".into(),
+            start_param: None,
+            post: None,
+            story_id: None,
+        })
+        .unwrap();
+    assert!(!driver.session.chats_state.deep_link_from_agent);
+    std::fs::remove_dir_all(dir).unwrap();
+}

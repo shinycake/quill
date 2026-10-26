@@ -322,6 +322,7 @@ impl QuillApp {
             start_files: super::start_files_state::StartFilesUi::new(window, cx),
             ai_compose: super::ai_compose_state::AiComposeUi::new(window, cx),
             agent_ui: super::agent_state::AgentUi::new(window, cx),
+            takeover: super::agent_takeover_state::TakeoverUi::new(window, cx),
             focus_sidebar: cx.focus_handle(),
             connection: super::connection_state::ConnectionUi::new(connect_status, status_note),
             live,

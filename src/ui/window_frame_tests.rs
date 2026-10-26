@@ -107,6 +107,42 @@ fn system_frame_puts_the_menu_beside_the_actions(cx: &mut TestAppContext) {
     assert!(action.origin.x > px(300.));
 }
 
+/// The tags an agent's pointer meets at `at` (`redact::point_allowed`).
+fn tags_at(vcx: &mut VisualTestContext, at: gpui_kit::Point<gpui_kit::Pixels>) -> Vec<String> {
+    vcx.simulate_mouse_move(at, None, gpui_kit::Modifiers::none());
+    vcx.update(|window, cx| window.render_frame(cx));
+    vcx.update(|window, _| {
+        window
+            .hovered_a11y_tags()
+            .into_iter()
+            .map(|tag| tag.to_string())
+            .collect()
+    })
+}
+
+#[gpui_kit::test]
+fn own_frame_keeps_agents_off_the_bar_but_not_off_its_actions(cx: &mut TestAppContext) {
+    use quill::agent::ui_driver::redact::{WINDOW_CHROME, WINDOW_CHROME_CONTENT, on_window_chrome};
+    let mut vcx = bar_with(cx, false, true);
+    let (Some(action), Some(menu), Some(drag_point)) = (
+        vcx.debug_bounds("action"),
+        vcx.debug_bounds("menu"),
+        // The drag area between the menu and the actions.
+        vcx.debug_bounds("action")
+            .map(|action| gpui_kit::point(action.origin.x - px(40.), action.center().y)),
+    ) else {
+        panic!("bar drawn");
+    };
+    let drag = tags_at(&mut vcx, drag_point);
+    assert_eq!(drag, [WINDOW_CHROME], "the drag area");
+    assert!(on_window_chrome(&drag));
+    for (name, at) in [("action", action.center()), ("menu", menu.center())] {
+        let tags = tags_at(&mut vcx, at);
+        assert_eq!(tags, [WINDOW_CHROME_CONTENT, WINDOW_CHROME], "{name}");
+        assert!(!on_window_chrome(&tags), "{name}");
+    }
+}
+
 #[gpui_kit::test]
 fn the_switch_is_offered_only_where_the_platform_allows_it(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);

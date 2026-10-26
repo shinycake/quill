@@ -1,5 +1,5 @@
 // Modified by the Quill project (2026) from gpui-pre-macos 0.3.9 (Apache-2.0):
-// the display link stops while the window is idle. See third_party/gpui-pre-macos/QUILL-CHANGES.md.
+// the display link stops while the window is idle; `capture_image`. See third_party/gpui-pre-macos/QUILL-CHANGES.md.
 use crate::{
     BoolExt, MacDisplay, NSRange, NSStringExt, TISCopyCurrentKeyboardInputSource,
     TISGetInputSourceProperty, WindowFrameSource, events::platform_input_from_native,
@@ -2439,6 +2439,12 @@ impl PlatformWindow for MacWindow {
     fn render_to_image(&self, scene: &gpui::Scene) -> Result<RgbaImage> {
         let mut this = self.0.lock();
         this.renderer.render_to_image(scene)
+    }
+
+    // Quill: `Window::capture_frame`, offscreen with this window's renderer.
+    fn capture_image(&self, scene: &gpui::Scene) -> anyhow::Result<image::RgbaImage> {
+        let mut this = self.0.lock();
+        this.renderer.capture_scene(scene)
     }
 
     fn a11y_init(&self, callbacks: gpui::A11yCallbacks) {

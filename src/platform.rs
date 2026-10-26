@@ -487,7 +487,10 @@ pub fn open_external_url(url: &str) -> bool {
     if !crate::text::openable_http_url(url) {
         return false;
     }
-    os_open(std::ffi::OsStr::new(url.trim()))
+    os_open(
+        std::ffi::OsStr::new(url.trim()),
+        "open a link in the browser",
+    )
 }
 
 /// The `mailto:` URL for an email-address entity, or `None` when the text
@@ -507,28 +510,40 @@ pub fn mailto_url(address: &str) -> Option<String> {
 
 /// Open the mail client on a new message to `address`.
 pub fn open_mailto(address: &str) -> bool {
-    mailto_url(address).is_some_and(|url| os_open(std::ffi::OsStr::new(&url)))
+    mailto_url(address)
+        .is_some_and(|url| os_open(std::ffi::OsStr::new(&url), "open the mail client"))
 }
 
-/// Hand a URL or path to the OS default handler. macOS `open`, Linux
-/// `xdg-open` (argv, no shell). Windows calls `ShellExecuteW` directly:
-/// `cmd /C start` would re-parse `&`, `|` and `^` inside a link or file
-/// name and run whatever follows as a second command.
+/// Hand a URL or path to the OS default handler: the one door every helper
+/// here goes through. Never while the agent UI driver injects input
+/// (`ui_driver::guard::refuse_outside_if_injecting`): what leaves Quill
+/// for the OS stays with the user, whichever link, button or file the
+/// agent reached. `what` is the verb phrase the refusal names.
+fn os_open(target: &std::ffi::OsStr, what: &str) -> bool {
+    if crate::agent::ui_driver::guard::refuse_outside_if_injecting(what) {
+        return false;
+    }
+    os_open_now(target)
+}
+
+/// macOS `open`, Linux `xdg-open` (argv, no shell).
 #[cfg(not(windows))]
-fn os_open(target: &std::ffi::OsStr) -> bool {
+fn os_open_now(target: &std::ffi::OsStr) -> bool {
     let program = if cfg!(target_os = "macos") {
         "open"
     } else {
         "xdg-open"
     };
-    std::process::Command::new(program)
-        .arg(target)
-        .spawn()
-        .is_ok()
+    let mut command = std::process::Command::new(program);
+    command.arg(target);
+    os_spawn(command)
 }
 
-#[cfg(windows)]
-fn os_open(target: &std::ffi::OsStr) -> bool {
+/// Windows calls `ShellExecuteW` directly: `cmd /C start` would re-parse
+/// `&`, `|` and `^` inside a link or file name and run whatever follows as
+/// a second command.
+#[cfg(all(windows, not(any(test, feature = "test-support"))))]
+fn os_open_now(target: &std::ffi::OsStr) -> bool {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
@@ -551,20 +566,70 @@ fn os_open(target: &std::ffi::OsStr) -> bool {
     result as isize > 32
 }
 
+#[cfg(all(windows, any(test, feature = "test-support")))]
+fn os_open_now(_target: &std::ffi::OsStr) -> bool {
+    test_launches::note();
+    true
+}
+
+/// Start a helper program (`open`, `xdg-open`, `explorer`) without a shell.
+#[cfg(not(any(test, feature = "test-support")))]
+fn os_spawn(mut command: std::process::Command) -> bool {
+    command.spawn().is_ok()
+}
+
+/// Test builds launch nothing: they count the attempt instead, so a test
+/// can prove that nothing reached the OS ([`os_launch_attempts`]).
+#[cfg(any(test, feature = "test-support"))]
+fn os_spawn(_command: std::process::Command) -> bool {
+    test_launches::note();
+    true
+}
+
+#[cfg(any(test, feature = "test-support"))]
+mod test_launches {
+    use std::cell::Cell;
+
+    thread_local! {
+        static LAUNCHES: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub(super) fn note() {
+        LAUNCHES.with(|count| count.set(count.get().saturating_add(1)));
+    }
+
+    pub(super) fn count() -> usize {
+        LAUNCHES.with(Cell::get)
+    }
+}
+
+/// Test builds only: how many times a helper here reached the OS on this
+/// thread (a browser, a file's app, the file manager). Nothing is launched
+/// in test builds.
+#[cfg(any(test, feature = "test-support"))]
+pub fn os_launch_attempts() -> usize {
+    test_launches::count()
+}
+
 /// MED3: open a downloaded file with the system viewer (`xdg-open` /
 /// `open`). Reuses the same OS-open mechanism as URLs, without the
 /// http-scheme gate (a local path is the point here). No shell involved.
 pub fn open_local_file(path: &std::path::Path) -> bool {
-    os_open(path.as_os_str())
+    os_open(path.as_os_str(), "open a file with its app")
 }
 
 /// MED3: reveal a file in the file manager — macOS `open -R` (selects the
 /// file in Finder), Windows `explorer /select,`, Linux opens the parent
-/// directory with `xdg-open` (no portable select-file equivalent).
+/// directory with `xdg-open` (no portable select-file equivalent). Never
+/// while the agent UI driver injects input, like [`os_open`].
 pub fn reveal_in_file_manager(path: &std::path::Path) -> bool {
+    if crate::agent::ui_driver::guard::refuse_outside_if_injecting("reveal a file in its folder") {
+        return false;
+    }
     if cfg!(target_os = "macos") {
         let mut command = std::process::Command::new("open");
-        return command.args(["-R"]).arg(path).spawn().is_ok();
+        command.args(["-R"]).arg(path);
+        return os_spawn(command);
     }
     #[cfg(windows)]
     {
@@ -574,17 +639,17 @@ pub fn reveal_in_file_manager(path: &std::path::Path) -> bool {
         let mut select = std::ffi::OsString::from("/select,\"");
         select.push(path.as_os_str());
         select.push("\"");
-        std::process::Command::new("explorer")
-            .raw_arg(select)
-            .spawn()
-            .is_ok()
+        let mut command = std::process::Command::new("explorer");
+        command.raw_arg(select);
+        os_spawn(command)
     }
     #[cfg(not(windows))]
     match path.parent() {
-        Some(dir) if !dir.as_os_str().is_empty() => std::process::Command::new("xdg-open")
-            .arg(dir)
-            .spawn()
-            .is_ok(),
+        Some(dir) if !dir.as_os_str().is_empty() => {
+            let mut command = std::process::Command::new("xdg-open");
+            command.arg(dir);
+            os_spawn(command)
+        }
         _ => open_local_file(path),
     }
 }

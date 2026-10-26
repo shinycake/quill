@@ -646,6 +646,11 @@ impl QuillApp {
     /// fetch of the authoritative `passwordState` (cached state reused,
     /// in-flight fetch deduped). Demo: the fixture is already injected.
     pub(super) fn open_twofa(&mut self, cx: &mut Context<Self>) {
+        if quill::agent::ui_driver::guard::refuse_hard_if_injecting(
+            quill::agent::ui_driver::guard::HardSurface::Security,
+        ) {
+            return;
+        }
         self.twofa.open = true;
         self.goto_twofa_view(TwofaView::Status);
         if let Some(live) = self.live.as_mut() {
@@ -658,6 +663,11 @@ impl QuillApp {
     /// the authoritative `getActiveSessions` answer (cached state reused,
     /// in-flight fetch deduped). Demo: the fixture is already injected.
     pub(super) fn open_sessions(&mut self, cx: &mut Context<Self>) {
+        if quill::agent::ui_driver::guard::refuse_hard_if_injecting(
+            quill::agent::ui_driver::guard::HardSurface::Settings,
+        ) {
+            return;
+        }
         self.open_settings(Some(quill::settings_catalog::Page::Devices));
         self.fetch_sessions();
         cx.notify();
@@ -930,13 +940,16 @@ crate::ui::shell::register_dialogs! {
         600,
         |app| app.privacy.websites_open,
         QuillApp::build_websites_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_websites(cx)),
 
     TwoFa => DialogSpec::new(
         800,
         |app| app.twofa.open,
         QuillApp::build_twofa_dialog,
-    ),
+    )
+
+    .closes(|app, window, cx| app.close_twofa(window, cx)),
 }
 
 mod passkey_ceremony;

@@ -217,6 +217,11 @@ impl QuillApp {
     }
 
     pub(crate) fn open_passcode(&mut self, cx: &mut Context<Self>) {
+        if quill::agent::ui_driver::guard::refuse_hard_if_injecting(
+            quill::agent::ui_driver::guard::HardSurface::Passcode,
+        ) {
+            return;
+        }
         self.account.passcode.open = true;
         self.account.passcode.view = PasscodeView::Status;
         self.account.passcode.error = None;
@@ -487,6 +492,11 @@ impl QuillApp {
 
     /// Lock now (lock button, Cmd/Ctrl+L, tray, auto-lock).
     pub(crate) fn lock_by_passcode(&mut self, cx: &mut Context<Self>) {
+        if quill::agent::ui_driver::guard::refuse_hard_if_injecting(
+            quill::agent::ui_driver::guard::HardSurface::Lock,
+        ) {
+            return;
+        }
         if !self.account.passcode.enabled || self.account.passcode.locked {
             return;
         }
@@ -933,7 +943,8 @@ crate::ui::shell::register_dialogs! {
         200,
         |app| app.account.passcode.open,
         QuillApp::build_passcode_dialog,
-    ),
+    )
+    .closes(|app, window, cx| app.close_passcode(window, cx)),
 }
 
 mod build_passcode_dialog;

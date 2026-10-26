@@ -206,7 +206,9 @@ pub(super) fn leave_stream_full(window: &mut Window) {
 pub(super) fn toggle_stream_full(window: &mut Window) {
     if window.is_fullscreen() || window.is_maximized() {
         leave_stream_full(window);
-    } else {
+    } else if !quill::agent::ui_driver::guard::refuse_hard_if_injecting(
+        quill::agent::ui_driver::guard::HardSurface::Window,
+    ) {
         window.toggle_fullscreen();
     }
 }

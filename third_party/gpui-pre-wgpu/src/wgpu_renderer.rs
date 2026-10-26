@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-pre-wgpu 0.3.9 (Apache-2.0):
+// `WgpuRenderer::capture_scene` renders a scene offscreen and reads it back. See third_party/gpui-pre-wgpu/QUILL-CHANGES.md.
 use crate::{CompositorGpuHint, DeviceErrorState, WgpuAtlas, WgpuContext};
 use anyhow::{Context as _, Result};
 use bytemuck::{Pod, Zeroable};
@@ -1209,6 +1211,138 @@ impl WgpuRenderer {
 
         frame.present();
         true
+    }
+
+    /// Quill: `scene` rendered offscreen at the surface's size with this
+    /// renderer's device, pipelines and atlas, and read back as RGBA rows
+    /// (width, height, pixels). Nothing is presented and the screen is not
+    /// read. Backs `Window::capture_frame` on Linux.
+    #[cfg(not(target_family = "wasm"))]
+    pub fn capture_scene(&mut self, scene: &Scene) -> anyhow::Result<(u32, u32, Vec<u8>)> {
+        let width = self.surface_config.width;
+        let height = self.surface_config.height;
+        // The pipelines blend for the surface's alpha mode, so the capture
+        // renders in that same mode, as `draw` does. Either way the target
+        // ends premultiplied: straight-alpha blending onto the transparent
+        // clear premultiplies, and the premultiplied mode already is.
+        let premultiplied_alpha =
+            self.surface_config.alpha_mode == wgpu::CompositeAlphaMode::PreMultiplied;
+        let core = self
+            .core_mut()
+            .ok_or_else(|| anyhow::anyhow!("the renderer was released"))?;
+        let format = core.target_format;
+        let swap_red_blue = match format {
+            wgpu::TextureFormat::Bgra8Unorm => true,
+            wgpu::TextureFormat::Rgba8Unorm => false,
+            other => anyhow::bail!("cannot read back a {other:?} surface"),
+        };
+        let device = Arc::clone(&core.resources.device);
+        let queue = Arc::clone(&core.resources.queue);
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("capture_target"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let size = Size {
+            width: DevicePixels(i32::try_from(width).unwrap_or(i32::MAX)),
+            height: DevicePixels(i32::try_from(height).unwrap_or(i32::MAX)),
+        };
+        core.render_frame(
+            scene,
+            &view,
+            size,
+            premultiplied_alpha,
+            wgpu::Color::TRANSPARENT,
+        )?;
+
+        let bytes_per_row = width
+            .checked_mul(4)
+            .ok_or_else(|| anyhow::anyhow!("capture row size overflowed"))?;
+        let padded_bytes_per_row = bytes_per_row
+            .checked_next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
+            .ok_or_else(|| anyhow::anyhow!("capture padded row size overflowed"))?;
+        let buffer_size = u64::from(padded_bytes_per_row)
+            .checked_mul(u64::from(height))
+            .ok_or_else(|| anyhow::anyhow!("capture buffer size overflowed"))?;
+        anyhow::ensure!(
+            buffer_size <= device.limits().max_buffer_size,
+            "capture buffer size {buffer_size} exceeds the device's maximum"
+        );
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("capture_readback"),
+            size: buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("capture_readback_encoder"),
+        });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        let submission = queue.submit(std::iter::once(encoder.finish()));
+        let (sender, receiver) = std::sync::mpsc::channel();
+        readback
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                let _ = sender.send(result);
+            });
+        device
+            .poll(wgpu::PollType::Wait {
+                submission_index: Some(submission),
+                timeout: Some(std::time::Duration::from_secs(5)),
+            })
+            .map_err(|error| anyhow::anyhow!("waiting for the capture failed: {error}"))?;
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .map_err(|error| anyhow::anyhow!("the capture was never mapped: {error}"))?
+            .map_err(|error| anyhow::anyhow!("mapping the capture failed: {error}"))?;
+
+        let row = usize::try_from(bytes_per_row)?;
+        let padded_row = usize::try_from(padded_bytes_per_row)?;
+        let rows = usize::try_from(height)?;
+        let mut pixels = Vec::with_capacity(row.saturating_mul(rows));
+        {
+            let mapped = readback.slice(..).get_mapped_range();
+            for chunk in mapped.chunks_exact(padded_row).take(rows) {
+                pixels.extend_from_slice(chunk.get(..row).unwrap_or_default());
+            }
+        }
+        readback.unmap();
+        if swap_red_blue {
+            for pixel in pixels.chunks_exact_mut(4) {
+                pixel.swap(0, 2);
+            }
+        }
+        Ok((width, height, pixels))
     }
 }
 

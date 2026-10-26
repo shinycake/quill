@@ -15,6 +15,7 @@
 use gpui_kit::component::{ActiveTheme, TITLE_BAR_HEIGHT, TitleBar};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::agent::ui_driver::redact::{WINDOW_CHROME, WINDOW_CHROME_CONTENT};
 use smallvec::SmallVec;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -231,7 +232,12 @@ impl RenderOnce for FrameTitleBar {
                 .min_w_0()
                 .flex()
                 .items_center()
-                .child(menu)
+                .child(
+                    div()
+                        .id("window-chrome-menu")
+                        .a11y_tag(WINDOW_CHROME_CONTENT)
+                        .child(menu),
+                )
         });
         if self.native.unwrap_or_else(use_native) {
             if self.children.is_empty() && menu.is_none() {
@@ -258,12 +264,39 @@ impl RenderOnce for FrameTitleBar {
             Some(menu) => Some(menu.into_any_element()),
             None => self.caption,
         };
-        TitleBar::new()
-            .when_some(on_close, |bar, close| {
-                bar.on_close_window(move |event, window, cx| close(event, window, cx))
-            })
-            .children(lead)
-            .children(self.children)
+        // The kit draws minimise and maximise (and the drag area's double
+        // click and window menu) without a callback to wrap: the bar's tag
+        // keeps agents' points off all of it, and the app's own parts of it
+        // carry the content tag (`redact::point_allowed`).
+        let actions = (!self.children.is_empty()).then(|| {
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .id("window-chrome-actions")
+                .a11y_tag(WINDOW_CHROME_CONTENT)
+                .children(self.children)
+        });
+        div()
+            .flex_shrink_0()
+            .flex()
+            .flex_col()
+            .id("window-chrome")
+            .a11y_tag(WINDOW_CHROME)
+            .child(
+                TitleBar::new()
+                    .when_some(on_close, |bar, close| {
+                        bar.on_close_window(move |event, window, cx| {
+                            if !quill::agent::ui_driver::guard::refuse_hard_if_injecting(
+                                quill::agent::ui_driver::guard::HardSurface::Window,
+                            ) {
+                                close(event, window, cx);
+                            }
+                        })
+                    })
+                    .children(lead)
+                    .children(actions),
+            )
             .into_any_element()
     }
 }

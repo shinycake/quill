@@ -314,7 +314,11 @@ impl QuillApp {
     /// Show the pinned stream across the whole window (the tile's
     /// full-screen button).
     pub(super) fn enter_group_call_stage(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !window.is_fullscreen() {
+        if !window.is_fullscreen()
+            && !quill::agent::ui_driver::guard::refuse_hard_if_injecting(
+                quill::agent::ui_driver::guard::HardSurface::Window,
+            )
+        {
             window.toggle_fullscreen();
         }
         cx.notify();

@@ -495,7 +495,9 @@ impl QuillApp {
     /// paste, images and copied files never become attachments, and
     /// Windows line endings are normalized.
     pub(super) fn paste_plain_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.composer_focused(window, cx) {
+        if !self.composer_focused(window, cx)
+            || quill::agent::ui_driver::guard::refuse_clipboard_if_injecting()
+        {
             return;
         }
         let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {

@@ -332,6 +332,12 @@ impl QuillApp {
         let budget_start = std::time::Instant::now();
         let mut budget_hit = false;
         live.driver.begin_batch();
+        // Requests the agent UI driver refused are answered like TDLib's
+        // errors, so what they set loading clears.
+        if live.driver.ingest_refused_answers() {
+            need = RedrawNeed::Now;
+            progressed = true;
+        }
         while let Some(owned) = live.bridge.next_timeout(Duration::from_millis(0)) {
             if super::frame_clock::trace_notify() {
                 let payload = format!("{:?}", owned.envelope.payload);

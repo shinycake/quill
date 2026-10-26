@@ -1,5 +1,6 @@
 //! Settings > Advanced > Agent access, the parts about what agents do:
-//! "Confirm each send", who is connected now, and the activity log
+//! "Confirm each send", driving the window and its "Takeover effect", who
+//! is connected now, and the activity log
 //! (`quill::agent::activity`). Every section reads the process-wide state on
 //! each render and keeps no copy of it.
 #![deny(clippy::indexing_slicing)]
@@ -13,7 +14,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::agent::access;
+use quill::agent::access::{self, TakeoverEffect};
 use quill::agent::activity::{self, Action};
 use quill::lang::{keys, tr};
 use quill::local_time::{CivilTime, chat_list_stamp, civil_local};
@@ -23,17 +24,31 @@ impl QuillApp {
     pub(super) fn agent_confirm_section(&self, cx: &mut Context<Self>) -> AnyElement {
         group(
             None,
-            [switch_row(
-                "agent-confirm-switch",
-                tr(keys::Q_AGENT_CONFIRM_SENDS),
-                Some(tr(keys::Q_AGENT_CONFIRM_SENDS_HINT)),
-                access::confirm_sends(),
-                cx.listener(|_, &next: &bool, _, cx| {
-                    access::set_confirm_sends(next);
-                    cx.notify();
-                }),
-                cx,
-            )],
+            [
+                switch_row(
+                    "agent-confirm-switch",
+                    tr(keys::Q_AGENT_CONFIRM_SENDS),
+                    Some(tr(keys::Q_AGENT_CONFIRM_SENDS_HINT)),
+                    access::confirm_sends(),
+                    cx.listener(|_, &next: &bool, _, cx| {
+                        access::set_confirm_sends(next);
+                        cx.notify();
+                    }),
+                    cx,
+                ),
+                switch_row(
+                    "agent-ui-driver-switch",
+                    tr(keys::Q_AGENT_UI_DRIVER),
+                    Some(tr(keys::Q_AGENT_UI_DRIVER_HINT)),
+                    access::ui_driver(),
+                    cx.listener(|_, &next: &bool, _, cx| {
+                        access::set_ui_driver(next);
+                        cx.notify();
+                    }),
+                    cx,
+                ),
+                takeover_effect_row(cx),
+            ],
         )
         .into_any_element()
     }
@@ -151,6 +166,85 @@ impl QuillApp {
         );
         group(Some(tr(keys::Q_AGENT_ACTIVITY_TITLE)), rows).into_any_element()
     }
+}
+
+/// The "Takeover effect" choices, in order.
+const EFFECTS: [(TakeoverEffect, &str); 3] = [
+    (TakeoverEffect::Automatic, "auto"),
+    (TakeoverEffect::GlowAndSweep, "sweep"),
+    (TakeoverEffect::StillGlow, "still"),
+];
+
+fn effect_label(effect: TakeoverEffect) -> &'static str {
+    tr(match effect {
+        TakeoverEffect::Automatic => keys::Q_AGENT_TAKEOVER_EFFECT_AUTO,
+        TakeoverEffect::GlowAndSweep => keys::Q_AGENT_TAKEOVER_EFFECT_SWEEP,
+        TakeoverEffect::StillGlow => keys::Q_AGENT_TAKEOVER_EFFECT_STILL,
+    })
+}
+
+fn effect_hint(effect: TakeoverEffect) -> &'static str {
+    tr(match effect {
+        TakeoverEffect::Automatic => keys::Q_AGENT_TAKEOVER_EFFECT_AUTO_HINT,
+        TakeoverEffect::GlowAndSweep => keys::Q_AGENT_TAKEOVER_EFFECT_SWEEP_HINT,
+        TakeoverEffect::StillGlow => keys::Q_AGENT_TAKEOVER_EFFECT_STILL_HINT,
+    })
+}
+
+/// "Takeover effect": how the glow moves while an agent drives, as one
+/// segmented control, with what the chosen one does under it. The setter
+/// refuses the driver's own clicks (`guard::refuse_if_injecting`).
+fn takeover_effect_row(cx: &mut Context<QuillApp>) -> AnyElement {
+    let current = access::takeover_effect();
+    let segments = EFFECTS.iter().map(|&(effect, name)| {
+        Button::new(SharedString::from(format!("agent-takeover-effect-{name}")))
+            .label(effect_label(effect))
+            .selected(current == effect)
+            .when(current == effect, |button| button.primary())
+    });
+    let control = ButtonGroup::new("agent-takeover-effect")
+        .small()
+        .children(segments)
+        .on_click(cx.listener(|_, picked: &Vec<usize>, _, cx| {
+            let effect = picked
+                .first()
+                .and_then(|&index| EFFECTS.get(index))
+                .map(|&(effect, _)| effect);
+            if let Some(effect) = effect {
+                access::set_takeover_effect(effect);
+                cx.notify();
+            }
+        }));
+    div()
+        .id("agent-takeover-effect-row")
+        .debug_selector(|| "agent-takeover-effect-row".to_string())
+        .flex()
+        .flex_col()
+        .gap_2()
+        .w_full()
+        .px_3()
+        .py_2()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_sm()
+                        .child(tr(keys::Q_AGENT_TAKEOVER_EFFECT)),
+                )
+                .child(control),
+        )
+        .child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(effect_hint(current)),
+        )
+        .into_any_element()
 }
 
 /// One action: what it was and where, who did it and what happened, with

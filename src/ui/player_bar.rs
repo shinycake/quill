@@ -482,6 +482,13 @@ impl QuillApp {
                 )
             });
 
+        // The bar names the track's chat: tagged with it, so the UI driver
+        // prunes it for a chat without a grant.
+        let chat_tag = self
+            .playback
+            .player
+            .chat
+            .map(|chat| quill::agent::ui_driver::redact::chat_tag(chat.0));
         Some(
             div()
                 .id("player-bar")
@@ -495,6 +502,7 @@ impl QuillApp {
                 .border_color(cx.theme().border)
                 .bg(bg_canvas())
                 .role(Role::Group)
+                .when_some(chat_tag, |this, tag| this.a11y_tag(tag))
                 .aria_label(tr(keys::Q_AV_NOW_PLAYING))
                 .when(music, |this| {
                     this.child(

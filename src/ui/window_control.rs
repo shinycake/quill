@@ -9,9 +9,10 @@
 //!
 //! - Windows: `ShowWindow`, `SetWindowPos(HWND_TOPMOST)`, `ITaskbarList`.
 //! - X11: unmap/map plus the ICCCM withdraw notice, `_NET_WM_STATE` with
-//!   `_NET_WM_STATE_ABOVE` and `_NET_WM_STATE_SKIP_TASKBAR`, through a
-//!   short-lived `x11rb` connection of its own (requests on another
-//!   client's window are ordinary X; the window manager acts on them).
+//!   `_NET_WM_STATE_ABOVE` and `_NET_WM_STATE_SKIP_TASKBAR`, through an
+//!   `x11rb` connection of its own, opened on the first call for an X11
+//!   window and kept (requests on another client's window are ordinary X;
+//!   the window manager acts on them). A Wayland window never connects.
 //! - Wayland: nothing. xdg-shell has no hide, no stacking order and no
 //!   taskbar flag for a toplevel; only the compositor decides those.
 //!   [`hide_supported`] says so and the close-to-tray setting minimizes
@@ -68,6 +69,13 @@ pub(crate) fn taskbar_toggle_supported(window: &Window) -> bool {
 /// again, restored and in front. Returns whether the backend could.
 pub(crate) fn set_visible(window: &Window, visible: bool) -> bool {
     platform::set_visible(window, visible)
+}
+
+/// Whether the window is minimised (iconified). Windows, macOS and X11
+/// read it from the window; Wayland has no such state for a client to read,
+/// so there it is always `false`.
+pub(crate) fn is_minimised(window: &Window) -> bool {
+    platform::is_minimised(window)
 }
 
 /// Keep the window above every other window, or stop.
@@ -160,6 +168,11 @@ mod platform {
         }
     }
 
+    pub(super) fn is_minimised(window: &Window) -> bool {
+        // SAFETY: as in `set_visible`; a read of the window's state.
+        hwnd(window).is_some_and(|hwnd| unsafe { IsIconic(hwnd) != 0 })
+    }
+
     pub(super) fn set_skip_taskbar(window: &Window, skip: bool) -> bool {
         use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
         use windows::Win32::UI::Shell::{ITaskbarList, TaskbarList};
@@ -208,11 +221,40 @@ mod platform {
     }
 
     /// A connection of our own: GPUI's lives inside its client and the
-    /// window manager answers requests from any client alike.
-    fn connect() -> Option<(RustConnection, u32)> {
+    /// window manager answers requests from any client alike. Opened on the
+    /// first call for an X11 window and kept for the UI thread, so a
+    /// minimised check (each driver command makes one) is one round trip.
+    struct XConnection {
+        conn: RustConnection,
+        root: u32,
+        wm_state: std::cell::Cell<Option<u32>>,
+    }
+
+    thread_local! {
+        static CONNECTION: std::cell::RefCell<Option<std::rc::Rc<XConnection>>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    fn connection() -> Option<std::rc::Rc<XConnection>> {
+        if let Some(shared) = CONNECTION.with(|slot| slot.borrow().clone()) {
+            return Some(shared);
+        }
         let (conn, screen) = x11rb::connect(None).ok()?;
         let root = conn.setup().roots.get(screen)?.root;
-        Some((conn, root))
+        let shared = std::rc::Rc::new(XConnection {
+            conn,
+            root,
+            wm_state: std::cell::Cell::new(None),
+        });
+        CONNECTION.with(|slot| *slot.borrow_mut() = Some(shared.clone()));
+        Some(shared)
+    }
+
+    /// The X window behind `window` and the connection. Nothing connects
+    /// for a window that is not an X11 one (Wayland).
+    fn x11(window: &Window) -> Option<(u32, std::rc::Rc<XConnection>)> {
+        let x_window = x_window(window)?;
+        Some((x_window, connection()?))
     }
 
     fn atom(conn: &RustConnection, name: &str) -> Option<u32> {
@@ -232,15 +274,41 @@ mod platform {
             .is_some_and(|attributes| attributes.map_state == MapState::VIEWABLE)
     }
 
-    pub(super) fn set_visible(window: &Window, visible: bool) -> bool {
-        let (Some(x_window), Some((conn, root))) = (x_window(window), connect()) else {
+    /// ICCCM `WM_STATE` is `IconicState` (3) once the window manager
+    /// iconified the window. Wayland has no window id here: `false`.
+    pub(super) fn is_minimised(window: &Window) -> bool {
+        const ICONIC_STATE: u32 = 3;
+        let Some((x_window, shared)) = x11(window) else {
             return false;
         };
+        let conn = &shared.conn;
+        let wm_state = match shared.wm_state.get() {
+            Some(atom) => atom,
+            None => {
+                let Some(found) = atom(conn, "WM_STATE") else {
+                    return false;
+                };
+                shared.wm_state.set(Some(found));
+                found
+            }
+        };
+        conn.get_property(false, x_window, wm_state, wm_state, 0, 1)
+            .ok()
+            .and_then(|cookie| cookie.reply().ok())
+            .and_then(|reply| reply.value32().and_then(|mut values| values.next()))
+            == Some(ICONIC_STATE)
+    }
+
+    pub(super) fn set_visible(window: &Window, visible: bool) -> bool {
+        let Some((x_window, shared)) = x11(window) else {
+            return false;
+        };
+        let (conn, root) = (&shared.conn, shared.root);
         let ok = if visible {
             let mapped = conn.map_window(x_window).is_ok();
             // `_NET_ACTIVE_WINDOW` asks the window manager to raise and
             // focus it (source 1: a normal application).
-            if let Some(active) = atom(&conn, "_NET_ACTIVE_WINDOW") {
+            if let Some(active) = atom(conn, "_NET_ACTIVE_WINDOW") {
                 let message = ClientMessageEvent::new(32, x_window, active, [1, 0, 0, 0, 0]);
                 let _ = conn.send_event(
                     false,
@@ -275,13 +343,14 @@ mod platform {
     }
 
     fn set_net_wm_state(window: &Window, on: bool, name: &str) -> bool {
-        let (Some(x_window), Some((conn, root))) = (x_window(window), connect()) else {
+        let Some((x_window, shared)) = x11(window) else {
             return false;
         };
-        let (Some(state), Some(value)) = (atom(&conn, "_NET_WM_STATE"), atom(&conn, name)) else {
+        let (conn, root) = (&shared.conn, shared.root);
+        let (Some(state), Some(value)) = (atom(conn, "_NET_WM_STATE"), atom(conn, name)) else {
             return false;
         };
-        let ok = if is_mapped(&conn, x_window) {
+        let ok = if is_mapped(conn, x_window) {
             let message =
                 ClientMessageEvent::new(32, x_window, state, net_wm_state_data(on, value));
             conn.send_event(
@@ -363,6 +432,12 @@ mod platform {
         })
     }
 
+    pub(super) fn is_minimised(window: &Window) -> bool {
+        let mut minimised = false;
+        with_window(window, |native| minimised = native.isMiniaturized());
+        minimised
+    }
+
     pub(super) fn set_always_on_top(window: &Window, on: bool) -> bool {
         with_window(window, |native| {
             native.setLevel(if on {
@@ -394,6 +469,9 @@ mod platform {
     use super::*;
 
     pub(super) fn set_visible(_window: &Window, _visible: bool) -> bool {
+        false
+    }
+    pub(super) fn is_minimised(_window: &Window) -> bool {
         false
     }
     pub(super) fn set_always_on_top(_window: &Window, _on: bool) -> bool {

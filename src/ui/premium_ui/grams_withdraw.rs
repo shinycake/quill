@@ -35,7 +35,8 @@ crate::ui::shell::register_dialogs! {
             })
         },
         QuillApp::build_grams_withdraw_dialog,
-    ),
+    )
+    .closes(|app, window, cx| app.cancel_grams_withdraw(window, cx)),
 }
 
 /// The Collect button under the available amount (tdesktop

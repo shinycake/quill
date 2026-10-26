@@ -510,13 +510,21 @@ impl QuillApp {
     /// `loginUrlInfoRequestConfirmation` shows the TDLib-reported domain
     /// for consent, then fetches the authorized URL via `getLoginUrl`
     /// (schema 1.8.67, line 12993); a failed resolution opens the button's
-    /// raw URL (schema:12993 doc).
+    /// raw URL (schema:12993 doc). An answer to a press an agent's step
+    /// made is refused as part of that step: no site, no consent box.
     pub(super) fn present_login_url_info(
         &mut self,
         info: LoginUrlInfo,
         request: Option<LoginUrlRequest>,
         cx: &mut Context<Self>,
     ) {
+        use quill::agent::ui_driver::guard;
+        let from_agent = request.as_ref().is_some_and(|request| request.from_agent);
+        if guard::with_injecting(from_agent, || {
+            guard::refuse_if_injecting("sign in to sites with a bot's login button")
+        }) {
+            return;
+        }
         match info {
             LoginUrlInfo::Open { url } => self.open_message_url(&url, cx),
             LoginUrlInfo::RequestConfirmation {
@@ -747,13 +755,16 @@ crate::ui::shell::register_dialogs! {
         3500,
         |app| app.payment_dialog_visible(),
         QuillApp::build_payment_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_payment_dialog(cx)),
 
     PaymentReceipt => DialogSpec::new(
         3600,
         |app| app.session().is_some_and(|s| s.payments.receipt_open),
         QuillApp::build_payment_receipt_dialog,
-    ),
+    )
+
+    .closes(|app, _, cx| app.close_payment_receipt(cx)),
 
     // Slice `parity:bots-payment-recurring`: the `starSubscriptions`
     // management dialog.
@@ -761,7 +772,8 @@ crate::ui::shell::register_dialogs! {
         3700,
         |app| app.session().is_some_and(|s| s.payments.subscriptions_open),
         QuillApp::build_subscriptions_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_subscriptions(cx)),
 }
 
 mod build_payment_dialog;

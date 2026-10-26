@@ -316,6 +316,13 @@ impl QuillApp {
     /// The comment or reaction stays for another try once the balance is
     /// up.
     fn live_top_up(&mut self, stars: i64, cx: &mut Context<Self>) {
+        // The Stars box is a payment surface: refused for an agent's input
+        // (`open_stars` would say the same), and nothing opens behind it.
+        if quill::agent::ui_driver::guard::refuse_hard_if_injecting(
+            quill::agent::ui_driver::guard::HardSurface::Payments,
+        ) {
+            return;
+        }
         let have = self
             .session()
             .and_then(Session::live_spendable_stars)

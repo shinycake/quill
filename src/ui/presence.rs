@@ -11,6 +11,7 @@
 
 use super::app::QuillApp;
 use gpui_kit::*;
+use quill::agent::ui_driver::takeover::RealInput;
 use quill::presence::should_be_online;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -39,6 +40,18 @@ pub(super) fn idle_ms() -> u64 {
     now_ms().saturating_sub(LAST_INPUT_MS.load(Ordering::Relaxed))
 }
 
+/// Input from the user. Input the agent UI driver injects is not the user
+/// (it neither keeps them online nor counts as their activity); the user's
+/// own input pauses an agent driving the window (`agent_takeover`).
+fn note_real_input(input: RealInput, window: &Window) {
+    if quill::agent::ui_driver::guard::injecting() {
+        return;
+    }
+    note_input();
+    quill::agent::ui_driver::bridge::note_real_input();
+    super::agent_takeover::note_real_input(input, window);
+}
+
 /// An invisible element that notes every mouse move, press, scroll and
 /// key press in the window. Capture phase, so nothing that handles an
 /// event can hide it.
@@ -46,10 +59,27 @@ pub(super) fn input_probe() -> impl IntoElement {
     canvas(
         |_, _, _| (),
         |_, _, window, _| {
-            window.on_mouse_event(|_: &MouseMoveEvent, _, _, _| note_input());
-            window.on_mouse_event(|_: &MouseDownEvent, _, _, _| note_input());
-            window.on_mouse_event(|_: &ScrollWheelEvent, _, _, _| note_input());
-            window.on_key_event(|_: &KeyDownEvent, _, _, _| note_input());
+            window.on_mouse_event(|event: &MouseMoveEvent, phase, window, _| {
+                if phase == DispatchPhase::Capture {
+                    let (x, y) = (event.position.x.as_f32(), event.position.y.as_f32());
+                    note_real_input(RealInput::Move { x, y }, window);
+                }
+            });
+            window.on_mouse_event(|_: &MouseDownEvent, phase, window, _| {
+                if phase == DispatchPhase::Capture {
+                    note_real_input(RealInput::Press, window);
+                }
+            });
+            window.on_mouse_event(|_: &ScrollWheelEvent, phase, window, _| {
+                if phase == DispatchPhase::Capture {
+                    note_real_input(RealInput::Scroll, window);
+                }
+            });
+            window.on_key_event(|_: &KeyDownEvent, phase, window, _| {
+                if phase == DispatchPhase::Capture {
+                    note_real_input(RealInput::Key, window);
+                }
+            });
         },
     )
     .absolute()

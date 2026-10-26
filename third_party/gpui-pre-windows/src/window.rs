@@ -1,5 +1,5 @@
 // Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
-// windows stop receiving vsync frames while idle. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
+// windows stop receiving vsync frames while idle; `capture_image`. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 #![deny(unsafe_op_in_unsafe_fn)]
 
 use std::{
@@ -1134,6 +1134,15 @@ impl PlatformWindow for WindowsWindow {
         self.state
             .renderer
             .borrow_mut()
+            .render_to_image(scene, self.state.background_appearance.get())
+    }
+
+    // Quill: `Window::capture_frame`, offscreen with this window's renderer.
+    fn capture_image(&self, scene: &Scene) -> anyhow::Result<image::RgbaImage> {
+        self.state
+            .renderer
+            .try_borrow_mut()
+            .map_err(|_| anyhow::anyhow!("the renderer is busy drawing"))?
             .render_to_image(scene, self.state.background_appearance.get())
     }
 

@@ -314,6 +314,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.session.request_download(file_id);
         let request = if let Some((chat_id, message_id)) = origin {
             self.session.begin_user_download(file_id);
+            self.session.media.downloads.note_chat(file_id.0, chat_id);
             add_file_to_downloads_request(
                 extra,
                 file_id,

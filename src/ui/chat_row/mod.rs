@@ -503,6 +503,7 @@ pub(super) fn session_chat_row(
     let tags = chat_row_tags(chat, folders, show_tags, viewing_folder);
     div()
         .id(("chat-row", id.0 as u64))
+        .a11y_tag(quill::agent::ui_driver::redact::chat_tag(id.0))
         .w_full()
         .px_2()
         .role(Role::Button)

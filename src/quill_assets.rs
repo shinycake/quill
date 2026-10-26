@@ -105,6 +105,7 @@ gpui_kit::assets::icon_assets!(
         NotebookPen,
         Contact,
         Keyboard,
+        MousePointer2,
         KeyboardOff,
         Cat,
         Book,

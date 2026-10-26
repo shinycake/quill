@@ -545,9 +545,14 @@ impl QuillApp {
                 .child(footer)
                 .into_any_element()
         };
+        // The panel occludes what is under it, the chat's region tag too,
+        // so it carries the tag itself: the UI driver treats it as part of
+        // the chat it opens over (the surface check already allowed that
+        // chat; sticker and GIF sends are refused while an agent drives).
         div()
             .id("media-panel")
             .occlude()
+            .a11y_tag(quill::agent::ui_driver::redact::REGION_CHAT)
             .w(px(PANEL_WIDTH))
             .h(px(PANEL_HEIGHT))
             .flex()

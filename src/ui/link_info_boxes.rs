@@ -480,7 +480,8 @@ crate::ui::shell::register_dialogs! {
         2910,
         |app| app.session().is_some_and(|s| s.payments.gift_code.is_some()),
         QuillApp::build_gift_code_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_gift_code_box(cx)),
 
     /// `setlanguage` link: the pack's details and Apply Language.
     LanguageLink => DialogSpec::new(
