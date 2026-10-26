@@ -382,7 +382,7 @@ fn a_refused_row_under_a_drawn_container_is_covered(cx: &mut TestAppContext) {
         quads
     });
     let is = |q: &Quad, hex: u32| {
-        let want = Rgba::from(rgb(hex));
+        let want = rgb(hex);
         q.background.as_solid().map(Rgba::from).is_some_and(|c| {
             (c.r - want.r).abs() < 0.01
                 && (c.g - want.g).abs() < 0.01
@@ -676,7 +676,7 @@ fn a_tooltip_is_filtered_with_its_owner(cx: &mut TestAppContext) {
     let handle = cx.open_window(size(px(200.), px(100.)), |_, _| TipRows);
     let mut vcx = VisualTestContext::from_window(handle.into(), cx);
     let is_tip = |q: &Quad| {
-        let want = Rgba::from(rgb(0xab_cdef));
+        let want = rgb(0xab_cdef);
         q.background.as_solid().map(Rgba::from).is_some_and(|c| {
             (c.r - want.r).abs() < 0.01
                 && (c.g - want.g).abs() < 0.01
