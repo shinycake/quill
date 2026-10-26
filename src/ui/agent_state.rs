@@ -126,11 +126,7 @@ pub(super) fn active_account() -> AccountKey {
 
 /// Whether TDLib's chat id layout puts `chat_id` in the secret chats' range.
 pub(super) fn is_secret_chat_id(chat_id: i64) -> bool {
-    // TDLib: secret chat ids are -2_000_000_000_000 plus the 32-bit secret
-    // chat id (td/telegram/DialogId.h).
-    const MIN: i64 = -2_000_000_000_000 + i32::MIN as i64 + 1;
-    const MAX: i64 = -2_000_000_000_000 + i32::MAX as i64;
-    (MIN..=MAX).contains(&chat_id)
+    quill::agent::grants::is_secret_chat_id(chat_id)
 }
 
 /// Moving to `next` gives agents more than `current` does.

@@ -19,6 +19,7 @@ pub mod mcp;
 pub mod pacing;
 pub mod prompts;
 pub mod server;
+pub mod summary;
 pub mod td;
 pub mod tools;
 pub mod ui_driver;

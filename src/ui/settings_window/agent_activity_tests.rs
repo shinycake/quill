@@ -65,6 +65,9 @@ fn record(summary: &str, ok: bool) {
         summary: summary.into(),
         ok,
         declined: false,
+        id: 0,
+        message_ids: Vec::new(),
+        undone: false,
     });
 }
 

@@ -76,6 +76,9 @@ fn demo_activity(app: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) 
                 summary: summary.into(),
                 ok,
                 declined: false,
+                id: 0,
+                message_ids: Vec::new(),
+                undone: false,
             });
         }
     }

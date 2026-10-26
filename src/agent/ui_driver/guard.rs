@@ -129,6 +129,9 @@ fn log_deferred(refusals: Vec<String>) {
             summary,
             ok: false,
             declined: true,
+            id: 0,
+            message_ids: Vec::new(),
+            undone: false,
         });
     }
 }
