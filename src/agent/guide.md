@@ -11,6 +11,30 @@ except the Telegram traffic Quill would make anyway.
 Call `quill_status`. It names the signed-in account, what you may use and
 with what scope, and the tools that work right now.
 
+## Without MCP: the command line
+
+The same tools work from a terminal or a script through `quill agent`,
+which talks to the same running Quill under the same grants:
+
+    quill agent status
+    quill agent read --chat saved --limit 20
+    quill agent send --chat @some_bot --text /start
+    quill agent call search_messages --json '{"query": "invoice"}'
+
+Every tool is a command under its own name (`quill agent list_chats`),
+with flags named after its arguments. `--json` prints the structured
+result, `quill agent help <command>` explains one, `quill agent guide`
+prints this guide, and `quill agent describe` prints every tool's
+schema, example and output shape as JSON.
+The exit code says what went wrong: 1 a tool error, 3 Quill not running
+(`--start` starts it), 4 Agent access off, 5 token refused, 6 window
+control off. `quill agent --help` lists them all.
+
+`quill agent install-skill` installs a Claude Code skill for Quill in
+`~/.claude/skills/quill`, with this guide. `quill agent connect
+claude-code`, `claude-desktop` or `cursor` sets up an MCP app with
+Quill's real path.
+
 ## What you can do
 
 Quill exposes four layers. This version ships three of them:

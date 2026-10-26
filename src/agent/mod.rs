@@ -4,7 +4,8 @@
 //! Off by default (Settings > Advanced > Agent access). Agents reach Quill
 //! over its existing local socket ([`crate::single_instance`]) with the
 //! `quill-agent 1` header and a per-launch token ([`access`]); `quill mcp`
-//! ([`mcp`]) is the stdio MCP server that bridges to it. Requests reach
+//! ([`mcp`]) is the stdio MCP server that bridges to it, and `quill agent`
+//! ([`cli`]) the command line for scripts. Requests reach
 //! TDLib with an `@extra` range of their own ([`td`]). There is no network
 //! listener. Design and the Telegram terms it answers:
 //! `docs/decisions/agent-access.md`.
@@ -12,6 +13,7 @@
 
 pub mod access;
 pub mod activity;
+pub mod cli;
 pub mod events;
 pub mod grants;
 pub mod guide;

@@ -10,13 +10,15 @@ Capability comes in four layers: curated tools, raw TDLib calls, a UI driver and
 curated read and write tools, events (wait_for_message) and td_call for anything else TDLib can do. You act as the user: sends go out in their name and \
 show in their activity log in Quill. The user grants chats in Quill: by default Saved Messages and bots (read and \
 write) and the user's own channels (read); anything else answers \"Chat not granted\", and request_access asks the user. \
-Chats can be named by id, title, @username or \"saved\". Errors say what to do next. Read quill://guide for recipes.";
+Chats can be named by id, title, @username or \"saved\". Errors say what to do next. Read quill://guide for recipes. \
+Scripts and agents without MCP reach the same tools with the `quill agent` command line (quill agent --help), \
+and `quill agent install-skill` installs a Claude Code skill for Quill.";
 
 pub const GUIDE_URI: &str = "quill://guide";
 pub const GRANTS_URI: &str = "quill://grants";
 /// Unread messages in granted chats; subscribable.
 pub const UNREAD_URI: &str = "quill://unread";
-const GUIDE: &str = include_str!("guide.md");
+pub const GUIDE: &str = include_str!("guide.md");
 
 /// The `resources` array of a `resources/list` answer.
 pub fn resources() -> Vec<Value> {
