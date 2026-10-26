@@ -1517,3 +1517,139 @@ closes. The X11 code was type-checked against x11rb 0.13.2 in a scratch
 crate (the Linux target does not build here: no cross C toolchain); it did
 not run on a Linux desktop, nor did the Windows and macOS minimised
 readings change.
+
+## Phase 6: CLI and docs
+
+Phase 6 part A gives agents without MCP a way in, ships an Agent Skill,
+and documents Agent access for people. Part B (the settings page, the
+shared access summary and the chat-menu entries) is a separate change.
+
+### `quill agent`
+
+A mode of the same executable, dispatched from `dev_cli` like `quill mcp`.
+It is a thin client: every tool command sends one `tools/call` to the
+running Quill and prints the answer. Connecting moved out of `mcp.rs` into
+`link.rs` (connect, start Quill on request, the token handshake), which
+both use. Refusals are typed (`Refused`: not running, off, no token, stale
+token, another user's socket), so the bridge keeps its wording and the CLI
+maps each one to an exit code.
+
+Nothing about the tools is written twice. The commands, flags, help,
+examples and `describe` all come from `tools::catalog()`:
+
+- Every tool is a command under its own name (`list_chats` or
+  `list-chats`), plus short aliases for the common ones (`status`, `chats`,
+  `unread`, `read`, `messages`, `search`, `send`, `wait`...).
+- Flags are the schema's top-level properties, typed by the schema: an
+  integer, a number, a boolean (`--silent`, `--no-link-preview`), an array
+  (`1,2,3` or JSON), or a union like the chat's string-or-integer (a
+  number when it parses as one). `--args '{…}'` or `--json '{…}'` passes
+  every argument at once and later flags override fields; `call <tool>
+  --json '{…}'` reaches any tool. Required properties are checked before
+  connecting.
+- The example and output shape come from each description's `Example
+  input:` and `Output:` parts. A test round-trips every tool's example
+  through its generated flags, so a description whose example the CLI
+  cannot express fails the tests.
+- `describe` prints tools (name, title, description, input schema,
+  example, output, CLI form), the resources, the exit codes and the
+  common errors. It needs no running Quill. `guide` prints `quill://guide`.
+
+Output is the tool's readable text by default. `--json` prints its
+`structuredContent`, and a failure as `{"error": {"kind", "exit_code",
+"message"}}` on stdout. Without `--json` failures go to stderr. Images
+(`take_screenshot`) are saved with `--images DIR`. The client presents
+itself to Quill as "Command line" unless `--client NAME` says otherwise,
+and that is the name in prompts and the activity log.
+
+The CLI does not start Quill unless `--start` is passed: a script that
+asks for status should not open a window. `quill mcp` still starts it,
+since an MCP client has no other way to.
+
+Exit codes:
+
+| Code | Kind | Meaning |
+| --- | --- | --- |
+| 0 | ok | Done. |
+| 1 | tool_error | The tool answered with an error (not granted, declined...). |
+| 2 | usage | Unknown command, flag or bad value. |
+| 3 | not_running | Nothing listens on the socket and the switch is on. |
+| 4 | access_off | The switch is off (on disk, or Quill said so). |
+| 5 | token | Quill runs but has no token on disk, or refused it after one retry. |
+| 6 | window_control_off | A UI tool answered `policy::DRIVER_OFF`. |
+| 7 | connection | Quill closed the connection or did not answer. |
+| 8 | local_file | install-skill or connect could not write, or found user edits. |
+
+### `install-skill` and the skill
+
+`src/agent/skill/SKILL.md` follows Claude Code's Agent Skill format (YAML
+frontmatter with `name` and `description`). It covers when to use Quill,
+setup, grants, the tools, `td_call`, the UI driver, etiquette, recipes and
+the exit codes. The details stay in one place: install-skill writes
+`guide.md` (the same `include_str!` as `quill://guide`) next to SKILL.md,
+and SKILL.md links to it. A test checks that SKILL.md's exit-code table
+matches `Exit`.
+
+install-skill writes to `~/.claude/skills/quill` or `--dir`. It records
+the SHA-256 of what it wrote in `.quill-skill.json`. On a later run a file
+still matching that hash is updated, a file equal to the bundled one is
+left alone, and any other file counts as the user's edit: nothing is
+written, the diff is printed and the exit code is 8. `--force` replaces
+it and saves the user's copy as `<file>.bak`.
+
+### `connect`
+
+`connect claude-code` prints `claude mcp add quill -- <exe> mcp`, the same
+line as the settings page. `claude-desktop` and `cursor` print the
+`mcpServers.quill` entry and the config file's path. `--yes` writes it:
+the file is parsed, only `mcpServers.quill` is set, a timestamped
+`.quill-backup-<secs>` copy is kept, and the new file goes through a temp
+file and a rename. A file that is not a JSON object, or whose
+`mcpServers` is not an object, is left alone (exit 8). An identical entry
+writes nothing. serde_json here sorts keys, so a rewritten config comes
+back with its keys in sorted order.
+
+The executable is `current_exe()`, or `$APPIMAGE` on Linux, since an
+AppImage's mount goes away with its process. Config paths:
+
+| App | macOS | Windows | Linux |
+| --- | --- | --- | --- |
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` | `%APPDATA%\Claude\claude_desktop_config.json` | `~/.config/Claude/claude_desktop_config.json` (no official build) |
+| Cursor | `~/.cursor/mcp.json` | `%USERPROFILE%\.cursor\mcp.json` | `~/.cursor/mcp.json` |
+
+Both come from `directories::BaseDirs` (`config_dir`, `home_dir`). A
+Claude Desktop installed from the Microsoft Store may keep its config in
+a virtualized `%LOCALAPPDATA%\Packages\…` folder instead; that case is
+not handled.
+
+### Docs
+
+The README has a "Use Quill with an AI agent" section, the product site
+an Agents section (`#agents`, linked from the nav), and `llms.txt` an
+Agent access block. The MCP instructions and the guide mention the CLI
+and install-skill.
+
+### Tests
+
+`cli/tests.rs`: every tool is a command and every alias names a tool; no
+tool property uses a global flag's name; every example round-trips
+through the flags; flags are typed by the schema (negative chat ids,
+`--no-`, `--json` merge, unknown and missing flags); global options come
+out wherever they are; help lists every tool and exit code; describe
+covers every tool, resource and exit code; tool errors map to exit codes;
+SKILL.md's frontmatter and exit table; install-skill writes, leaves
+alone, updates an old copy, keeps an edit with a diff and replaces it
+with `--force`; connect creates, merges with a backup, refuses broken
+JSON and prints the setup.
+
+`cli/socket_tests.rs`, on a real socket like `server_tests.rs`: off is
+`access_off`, a socket nobody listens on is `not_running`, a tool call
+and `resources/read` go through, a wrong token and a missing token are
+`token`. Both socket tests now take the switch lock before listening,
+because listening publishes the token and one test could overwrite the
+other's.
+
+The binary was run for `--help`, `help <tool>`, `describe`, usage errors,
+install-skill (fresh, again, after an edit, `--force`) and connect without
+`--yes`. No command ran against a live Quill or a Telegram account. The
+Windows and Linux config paths were not checked on those systems.
