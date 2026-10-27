@@ -372,12 +372,12 @@ impl QuillApp {
         let muted = cx.theme().muted_foreground;
         let (tag, line, fix) = match tool.state {
             ToolState::Available => (
-                Tag::success().child(tr(keys::Q_AGENT_PAGE_STATE_AVAILABLE)),
+                Tag::color(ColorName::Green).child(tr(keys::Q_AGENT_PAGE_STATE_AVAILABLE)),
                 None,
                 None,
             ),
             ToolState::AsksFirst(asks) => (
-                Tag::warning().child(tr(keys::Q_AGENT_PAGE_STATE_ASKS)),
+                Tag::color(ColorName::Amber).child(tr(keys::Q_AGENT_PAGE_STATE_ASKS)),
                 Some(asks_line(asks)),
                 None,
             ),
@@ -476,7 +476,7 @@ impl QuillApp {
                 action_row(
                     title,
                     Some(caption),
-                    Tag::warning()
+                    Tag::color(ColorName::Amber)
                         .small()
                         .child(tr(keys::Q_AGENT_PAGE_STATE_ASKS)),
                     cx,

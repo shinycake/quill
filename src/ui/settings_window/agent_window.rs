@@ -103,18 +103,18 @@ impl QuillApp {
                 None,
             ),
             WindowState::Ready => (
-                Tag::success().child(tr(keys::Q_AGENT_PAGE_WINDOW_READY)),
+                Tag::color(ColorName::Green).child(tr(keys::Q_AGENT_PAGE_WINDOW_READY)),
                 None,
             ),
             WindowState::Driving { agent } => (
-                Tag::info().child(tr_with(
+                Tag::color(ColorName::Blue).child(tr_with(
                     keys::Q_AGENT_TAKEOVER_DRIVING,
                     &[("agent", &agent_label(agent))],
                 )),
                 None,
             ),
             WindowState::Paused => (
-                Tag::warning().child(tr(keys::Q_AGENT_TAKEOVER_PAUSED)),
+                Tag::color(ColorName::Amber).child(tr(keys::Q_AGENT_TAKEOVER_PAUSED)),
                 Some(Fix::LetContinue),
             ),
             WindowState::Stopped => (
