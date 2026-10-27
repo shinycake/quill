@@ -1,7 +1,8 @@
 //! Which raw TDLib requests `td_call` passes through, and on what terms.
 //!
-//! Every method falls in one class. Quill's own plumbing, raw file access
-//! and the TON wallet never run for an agent. Requests that touch the
+//! Every method falls in one class. Quill's own plumbing, raw file access,
+//! signing out, deleting the account and the TON wallet never run for an
+//! agent. Requests that touch the
 //! account or can spend Stars, TON or money run only after the user clicks
 //! Allow in Quill, once per call. Reads run under the chat grants. A change
 //! runs under the grants only when the schema says it acts on one chat (a
@@ -89,6 +90,11 @@ const BLOCKED: &[(&str, &str)] = &[
     ),
     ("openChat", "Quill tracks which chats are open."),
     ("closeChat", "Quill tracks which chats are open."),
+    ("logOut", "Only the user signs out, in Quill's Settings."),
+    (
+        "deleteAccount",
+        "Only the user deletes their account, in Quill's Settings.",
+    ),
 ];
 
 /// The sign-in flow: Quill's own screens drive it.
@@ -111,12 +117,10 @@ const TON_WALLET: &[&str] = &[
     "OnRamp",
 ];
 
-/// The account itself, and reads that act for the user: sign-out, sessions,
+/// The account itself, and reads that act for the user: other sessions,
 /// password, phone, email, privacy, web logins, bot buttons, passport data.
 /// Checked before the read prefixes, so `get…` names here still ask.
 const ACCOUNT: &[&str] = &[
-    "deleteAccount",
-    "logOut",
     "terminateSession",
     "terminateAllOtherSessions",
     "setPassword",
@@ -393,10 +397,20 @@ mod tests {
     }
 
     #[test]
+    fn signing_out_and_deleting_the_account_never_run() {
+        for method in ["logOut", "deleteAccount"] {
+            for chat_scoped in [false, true] {
+                assert!(
+                    matches!(classify(method, false, chat_scoped), Class::Blocked(_)),
+                    "{method}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn the_deny_list_asks_the_user() {
         for method in [
-            "deleteAccount",
-            "logOut",
             "terminateSession",
             "terminateAllOtherSessions",
             "setPassword",

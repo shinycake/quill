@@ -13,7 +13,8 @@ with what scope, and the tools that work right now.
 
 Its `access` field is the same picture the user sees in Settings > Agent
 access: `chats` (Saved Messages, bots, channels they own, all other chats,
-contacts, and each added chat with its scope), `confirm_each_send`,
+contacts, and each added chat with its scope; bots and channels they own
+read as what you get there, All chats counted), `confirm_each_send`,
 `raw_tdlib_calls`, `window_control`, `tools` (each with `state`
 `available`, `asks_first` or `off`, plus `asks` or `reason`) and `never`.
 The `quill://grants` resource carries the same `access` object. When a
@@ -209,13 +210,15 @@ request as JSON (the `@type` is the method; fields as in the
 - Everything else asks the user to click Allow in Quill, once per call:
   changes that name no chat (the profile, folders, joining by link),
   stories and live streams (they post as the user), group calls by
-  `group_call_id`, the account (sessions, password, phone, privacy, proxies,
-  web logins, bot buttons, passport data, stream keys) and anything that can
+  `group_call_id`, the account (ending other sessions, password, phone,
+  privacy, proxies, web logins, bot buttons, passport data, stream keys) and
+  anything that can
   spend Stars, TON or money, a price in any field included. Pass `reason`;
   the user reads it next to the whole request. A request too long to show
   in full (over 6000 characters) is refused.
 - Never available: Quill's own plumbing (`setOption`, the sign-in flow,
-  closing the client, logs, `openChat`), raw file access, `inputFileId` and `inputFileGenerated`
+  closing the client, logs, `openChat`), signing out (`logOut`) and
+  deleting the account (`deleteAccount`), raw file access, `inputFileId` and `inputFileGenerated`
   (use `download_file`; upload with `inputFileLocal` or forward), the TON
   wallet, `getCurrentState`, and uploads from Quill's data folder.
 - Answers leave out what you may not read: items from chats that aren't

@@ -80,7 +80,8 @@ Ask for one thing at a time, and don't ask again after a no.
   `set_chat_folder`. They need `read_write` on the chat.
 - `td_call`: any TDLib request, under the same grants. Use it only when no
   tool above does the job. Requests that name no chat, touch the account or
-  could spend money wait for the user to click Allow.
+  could spend money wait for the user to click Allow. Signing out and
+  deleting the account are never available.
 - UI driver: `read_ui_tree`, `click_element`, `type_text`, `press_keys`,
   `scroll_view`, `hover_element`, `open_menu`, `take_screenshot`. For
   dialogs, pickers and panels no chat tool covers. It needs a second
