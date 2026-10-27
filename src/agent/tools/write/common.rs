@@ -306,7 +306,46 @@ pub fn record(
     ok: bool,
     declined: bool,
 ) {
+    record_on(
+        ctx,
+        chat_id,
+        chat_title,
+        tool,
+        summary,
+        ok,
+        declined,
+        Vec::new(),
+    );
+}
+
+/// [`log`] that names the messages the write made or acted on, so the log
+/// can open them (and undo a send or a reaction).
+pub fn log_on(ctx: &Ctx, target: &Target, tool: &str, summary: &str, ok: bool, ids: Vec<i64>) {
+    record_on(
+        ctx,
+        target.chat_id,
+        &target.title,
+        tool,
+        summary,
+        ok,
+        false,
+        ids,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn record_on(
+    ctx: &Ctx,
+    chat_id: i64,
+    chat_title: &str,
+    tool: &str,
+    summary: &str,
+    ok: bool,
+    declined: bool,
+    message_ids: Vec<i64>,
+) {
     activity::record(Action {
+        id: 0,
         time: 0,
         account: ctx.account.clone(),
         agent: current_agent(),
@@ -316,7 +355,19 @@ pub fn record(
         summary: summary.chars().take(200).collect(),
         ok,
         declined,
+        message_ids,
+        undone: false,
     });
+}
+
+/// The ids of delivered messages that are in the chat now (not scheduled
+/// for later), for the log.
+fn sent_ids(messages: &[Value]) -> Vec<i64> {
+    messages
+        .iter()
+        .filter(|m| m.get("scheduling_state").is_none_or(Value::is_null))
+        .filter_map(|m| m.get("id").and_then(Value::as_i64))
+        .collect()
 }
 
 /// Run a write that is not a send, logging how it went. It takes a turn in
@@ -335,9 +386,21 @@ pub fn change(
     summary: &str,
     request: Value,
 ) -> Result<Value, ToolError> {
+    change_on(ctx, target, tool, summary, request, Vec::new())
+}
+
+/// [`change`] on messages `ids`, which the log names.
+pub fn change_on(
+    ctx: &Ctx,
+    target: &Target,
+    tool: &str,
+    summary: &str,
+    request: Value,
+    ids: Vec<i64>,
+) -> Result<Value, ToolError> {
     take_write_turn(ctx, target.chat_id)?;
     let result = td::call(&ctx.client, request).map_err(write_error);
-    log(ctx, target, tool, summary, result.is_ok());
+    log_on(ctx, target, tool, summary, result.is_ok(), ids);
     result
 }
 
@@ -490,7 +553,8 @@ pub fn send(
     count: u32,
 ) -> Result<Vec<Value>, ToolError> {
     let result = send_inner(ctx, target, request, count);
-    log(ctx, target, tool, summary, result.is_ok());
+    let ids = result.as_deref().map(sent_ids).unwrap_or_default();
+    log_on(ctx, target, tool, summary, result.is_ok(), ids);
     result
 }
 

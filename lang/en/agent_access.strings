@@ -1,8 +1,7 @@
-// agent_access: Settings > Advanced > Agent access (src/ui/settings_window/agent_access.rs, agent_grants.rs) and the agent request dialogs (src/ui/agent_dialogs.rs).
+// agent_access: Settings > Agent access (src/ui/settings_window/agent_access.rs, agent_grants.rs; the rest of the page is in agent_page.strings) and the agent request dialogs (src/ui/agent_dialogs.rs).
 "qll_agent_access" = "Agent access";
 "qll_agent_access_about" = "Let AI agents on this computer, such as Claude Code, use your Telegram account through Quill. Only apps running under your user account can connect, and Quill itself never sends your messages to an AI service.";
 "qll_agent_access_allow" = "Allow agents";
-"qll_agent_access_scope" = "Agents can use the chats you allow below.";
 "qll_agent_access_connect" = "Connect an agent";
 "qll_agent_access_claude_code" = "Claude Code";
 "qll_agent_access_claude_code_hint" = "Run this in a terminal.";
@@ -26,7 +25,7 @@
 "qll_agent_contacts_hint" = "Agents can read names and usernames, never phone numbers.";
 "qll_agent_chats_title" = "Chats you added";
 "qll_agent_chats_hint" = "Off blocks a chat even when a setting above would allow it.";
-"qll_agent_chats_empty" = "Agents ask for a chat with request_access, and it appears here once you allow it.";
+"qll_agent_chats_empty" = "Chats you add here, or allow when an agent asks, show up in this list.";
 "qll_agent_chat_secret" = "Secret chat";
 "qll_agent_chat_remove" = "Remove";
 "qll_agent_consent_title" = "Allow agents in all chats?";
@@ -45,11 +44,11 @@
 "qll_agent_request_secret" = "This is a secret chat. Allowing it lets the agent read messages that are not stored on Telegram's servers.";
 "qll_agent_request_all_chats" = "This covers every chat except secret chats, including your private conversations with other people. Telegram's terms forbid using chat data to train AI models.";
 "qll_agent_request_contacts_hint" = "The agent sees names and usernames, never phone numbers.";
-"qll_agent_request_later" = "You can change this in Settings under Advanced and Agent access.";
+"qll_agent_request_later" = "You can change this in Settings under Agent access.";
 "qll_agent_request_deny" = "Don't allow";
 "qll_agent_request_allow" = "Allow";
 "qll_agent_request_write_preview" = "It will send:";
-"qll_agent_request_write_later" = "Quill asks because Confirm each send is on. You can turn it off in Settings under Advanced and Agent access.";
+"qll_agent_request_write_later" = "Quill asks because Confirm each send is on. You can turn it off in Settings under Agent access.";
 "qll_agent_request_raw" = "{agent} wants to run {method}";
 "qll_agent_request_raw_account" = "This changes your Telegram account, your profile or how you sign in. Allow it only if you asked for it.";
 "qll_agent_request_raw_money" = "This can spend Stars, TON or money from your account. Allow it only if you asked for it.";

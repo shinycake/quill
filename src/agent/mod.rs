@@ -1,7 +1,7 @@
 //! Agent access: local AI agents (Claude Code, Claude Desktop, Cursor and
 //! any other MCP client) use the user's account through the running Quill.
 //!
-//! Off by default (Settings > Advanced > Agent access). Agents reach Quill
+//! Off by default (Settings > Agent access). Agents reach Quill
 //! over its existing local socket ([`crate::single_instance`]) with the
 //! `quill-agent 1` header and a per-launch token ([`access`]); `quill mcp`
 //! ([`mcp`]) is the stdio MCP server that bridges to it, and `quill agent`
@@ -15,7 +15,7 @@
 /// macro, so `concat!` can build constant messages from it.
 macro_rules! settings_place {
     () => {
-        "Settings > Advanced > Agent access"
+        "Settings > Agent access"
     };
 }
 
@@ -33,6 +33,7 @@ pub mod mcp;
 pub mod pacing;
 pub mod prompts;
 pub mod server;
+pub mod summary;
 pub mod td;
 pub mod tools;
 pub mod ui_driver;

@@ -2,8 +2,9 @@
 
 use super::messages::user_name;
 use super::{Ctx, ToolError, ToolOutput};
+use crate::agent::summary::WindowState as WindowStatus;
 use crate::agent::ui_driver::bridge::{self, BridgeError, UiCommand, UiReply, WindowState};
-use crate::agent::ui_driver::{policy, takeover};
+use crate::agent::ui_driver::policy;
 use serde_json::{Value, json};
 use std::time::Duration;
 
@@ -39,21 +40,22 @@ pub fn run(_args: &Value) -> Result<ToolOutput, ToolError> {
         .map(str::to_string);
     let tools = super::names();
     let grants = crate::agent::grants::for_account(&ctx.account);
+    let access = crate::agent::summary::live(&ctx.account);
     let mut text = format!("Quill {} is signed in as {name}", crate::version::APP);
     if let Some(username) = &username {
         text.push_str(&format!(" (@{username})"));
     }
     text.push_str(&format!(" [account {}].\n", ctx.account.0));
-    text.push_str("Grants (read_write also allows sending, once write tools ship):\n");
-    for line in grants.summary_lines() {
+    text.push_str("Access (read_write also allows sending):\n");
+    for line in access.text_lines() {
         text.push_str(&format!("  {line}\n"));
     }
     text.push_str("A chat that is not granted can be asked for with request_access.\n");
     text.push_str(&format!("Tools: {}.\n", tools.join(", ")));
-    let ui_driver = crate::agent::access::ui_driver();
-    let driving = matches!(takeover::current(), takeover::Phase::Driving { .. });
-    let paused = takeover::paused();
-    let stopped = takeover::stopped();
+    let ui_driver = access.window.switch;
+    let driving = matches!(access.window.state, WindowStatus::Driving { .. });
+    let paused = access.window.state == WindowStatus::Paused;
+    let stopped = access.window.state == WindowStatus::Stopped;
     text.push_str(if !ui_driver {
         concat!(
             "UI driver: off. The user can turn on \"Let agents drive Quill's window\" in ",
@@ -92,6 +94,9 @@ Screenshots: one a second and 20 a minute, cut to your grants like the tree.\n"
             },
             "grants": grants.describe(),
             "tools": tools,
+            // Everything the Agent access page shows: chats, switches,
+            // each tool's state and why.
+            "access": access.describe(),
             "ui_driver": {
                 "available": ui_driver && !stopped,
                 "active": driving,
@@ -110,7 +115,7 @@ Screenshots: one a second and 20 a minute, cut to your grants like the tree.\n"
                     Value::Null
                 },
                 "screenshots": {
-                    "available": ui_driver && !stopped && crate::agent::ui_driver::shot::CAPTURE_BUILT,
+                    "available": ui_driver && !stopped && access.window.screenshots,
                     "per_minute": crate::agent::ui_driver::shot::PER_MINUTE,
                     "min_interval_ms": crate::agent::ui_driver::shot::MIN_INTERVAL.as_millis() as u64,
                     "max_long_side": crate::agent::ui_driver::shot::MAX_LONG_SIDE,

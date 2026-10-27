@@ -345,6 +345,9 @@ impl QuillApp {
             summary: command_summary(command, tree),
             ok,
             declined: false,
+            id: 0,
+            message_ids: Vec::new(),
+            undone: false,
         });
     }
 }

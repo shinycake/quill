@@ -3,6 +3,7 @@
 mod about;
 mod account;
 mod advanced;
+mod agent_access;
 mod appearance;
 mod calls;
 mod chats;
@@ -26,6 +27,7 @@ pub(super) fn of(page: Page) -> &'static [Entry] {
         Page::Notifications => notifications::ENTRIES,
         Page::Privacy => privacy::ENTRIES,
         Page::Devices => devices::ENTRIES,
+        Page::AgentAccess => agent_access::ENTRIES,
         Page::Chats => chats::ENTRIES,
         Page::Appearance => appearance::ENTRIES,
         Page::Folders => folders::ENTRIES,

@@ -52,7 +52,11 @@ fn grants() -> Value {
     let account = crate::settings::safe_app_root()
         .map(|root| crate::settings::active_account(&root))
         .unwrap_or_else(crate::ids::AccountKey::primary);
-    json!({"account": account.0, "grants": crate::agent::grants::for_account(&account).describe()})
+    json!({
+        "account": account.0,
+        "grants": crate::agent::grants::for_account(&account).describe(),
+        "access": crate::agent::summary::live(&account).describe(),
+    })
 }
 
 /// A `resources/read` result, or `None` for an unknown URI.

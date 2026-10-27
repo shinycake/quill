@@ -168,6 +168,9 @@ impl QuillApp {
         }
         self.settings.search.pending_clear = true;
         self.show_settings_page(target.page(), cx);
+        if let Some(section) = super::agent_page::section_for_entry(target.id()) {
+            self.agent_ui.page.scroll_to = Some(super::agent_page::Spot::Section(section));
+        }
     }
 
     /// Esc in the field: clear it and give the page back.

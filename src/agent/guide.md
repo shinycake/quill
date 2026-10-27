@@ -1,7 +1,7 @@
 # Using Quill as an agent
 
 Quill is a desktop Telegram client. With Agent access turned on (Quill:
-Settings > Advanced > Agent access), an agent on the same computer can use
+Settings > Agent access), an agent on the same computer can use
 the user's Telegram account through the Quill that is already running. Quill
 talks to Telegram; the agent talks to Quill. Nothing leaves the computer
 except the Telegram traffic Quill would make anyway.
@@ -10,6 +10,14 @@ except the Telegram traffic Quill would make anyway.
 
 Call `quill_status`. It names the signed-in account, what you may use and
 with what scope, and the tools that work right now.
+
+Its `access` field is the same picture the user sees in Settings > Agent
+access: `chats` (Saved Messages, bots, channels they own, all other chats,
+contacts, and each added chat with its scope), `confirm_each_send`,
+`raw_tdlib_calls`, `window_control`, `tools` (each with `state`
+`available`, `asks_first` or `off`, plus `asks` or `reason`) and `never`.
+The `quill://grants` resource carries the same `access` object. When a
+tool is `off`, tell the user its `reason` instead of retrying.
 
 ## Without MCP: the command line
 
@@ -256,7 +264,7 @@ which are faster, work with the window hidden and go through Quill's
 grants, pacing and confirmations.
 
 The user turns it on separately: "Let agents drive Quill's window" in
-Settings > Advanced > Agent access (off by default). `quill_status` shows
+Settings > Agent access (off by default). `quill_status` shows
 `ui_driver {available, active, paused, stopped, resumes_when, window}`:
 `active` while you are driving, `paused` while the user has taken control,
 `stopped` after the user pressed Stop, and `resumes_when` says what lifts

@@ -16,6 +16,41 @@ mod skill;
 use serde_json::{Value, json};
 use std::io::Write;
 
+/// The setup lines the Agent access page shows, built like the ones
+/// `quill agent connect` prints. Each is `(shell label, line)`; the label is
+/// empty unless PowerShell and Command Prompt need different lines.
+pub struct SetupLines {
+    pub claude_code: Vec<(&'static str, String)>,
+    pub claude_desktop: Vec<(&'static str, String)>,
+    pub cursor: Vec<(&'static str, String)>,
+    pub mcp: Vec<(&'static str, String)>,
+}
+
+/// [`SetupLines`] for this Quill. On Windows the `quill agent` lines run the
+/// console helper next to `quill.exe`, which waits and passes the exit code
+/// on.
+pub fn setup_lines() -> SetupLines {
+    let windows = cfg!(windows);
+    let exe = super::link::executable();
+    let gui = exe
+        .as_ref()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "quill".into());
+    let cli = match &exe {
+        Some(path) if windows => path.with_file_name("quill-cli.exe").to_string_lossy().into_owned(),
+        _ => gui.clone(),
+    };
+    let lines = |exe: &str, rest: &'static str| {
+        connect::shell_lines(exe, windows, |quoted| format!("{quoted} {rest}"))
+    };
+    SetupLines {
+        claude_code: connect::claude_code_commands(&gui, windows),
+        claude_desktop: lines(&cli, "agent connect claude-desktop --yes"),
+        cursor: lines(&cli, "agent connect cursor --yes"),
+        mcp: lines(&gui, "mcp"),
+    }
+}
+
 /// How `quill agent` ended. The numbers are part of its interface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Exit {

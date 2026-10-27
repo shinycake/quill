@@ -1,6 +1,6 @@
 //! Which chats agents may use, per account, and with what scope.
 //!
-//! The user sets this in Settings > Advanced > Agent access. Three classes
+//! The user sets this in Settings > Agent access. Three classes
 //! of chat have a default of their own (Saved Messages, bots, channels the
 //! user owns); "All chats" covers every other chat except secret chats;
 //! a per-chat entry overrides all of these, and is the only way to grant a
@@ -50,6 +50,15 @@ impl Scope {
     pub fn allows(self, needed: Scope) -> bool {
         self >= needed
     }
+}
+
+/// Whether TDLib's chat id layout puts `chat_id` in the secret chats' range.
+pub fn is_secret_chat_id(chat_id: i64) -> bool {
+    // TDLib: secret chat ids are -2_000_000_000_000 plus the 32-bit secret
+    // chat id (td/telegram/DialogId.h).
+    const MIN: i64 = -2_000_000_000_000 + i32::MIN as i64 + 1;
+    const MAX: i64 = -2_000_000_000_000 + i32::MAX as i64;
+    (MIN..=MAX).contains(&chat_id)
 }
 
 /// The kind of chat, which picks the default that applies to it.

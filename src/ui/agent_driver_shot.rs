@@ -125,6 +125,9 @@ impl QuillApp {
             },
             ok: true,
             declined: false,
+            id: 0,
+            message_ids: Vec::new(),
+            undone: false,
         });
     }
 }

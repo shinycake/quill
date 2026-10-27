@@ -186,10 +186,13 @@ pub fn windows_quote(word: &str) -> (String, Option<String>) {
     }
 }
 
-/// The `claude mcp add` line for `exe`, with a label per shell when the
-/// shells need different lines.
-pub fn claude_code_commands(exe: &str, windows: bool) -> Vec<(&'static str, String)> {
-    let line = |quoted: &str| format!("claude mcp add quill -- {quoted} mcp");
+/// `line` around `exe` quoted for the shell, with a label per shell when
+/// the shells need different lines.
+pub fn shell_lines(
+    exe: &str,
+    windows: bool,
+    line: impl Fn(&str) -> String,
+) -> Vec<(&'static str, String)> {
     if !windows {
         return vec![("", line(&posix_quote(exe)))];
     }
@@ -200,6 +203,13 @@ pub fn claude_code_commands(exe: &str, windows: bool) -> Vec<(&'static str, Stri
             ("Command Prompt", line(&cmd)),
         ],
     }
+}
+
+/// The `claude mcp add` line for `exe`.
+pub fn claude_code_commands(exe: &str, windows: bool) -> Vec<(&'static str, String)> {
+    shell_lines(exe, windows, |quoted| {
+        format!("claude mcp add quill -- {quoted} mcp")
+    })
 }
 
 /// The server entry MCP apps take under `mcpServers`.

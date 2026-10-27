@@ -90,12 +90,68 @@ impl Ctx {
 
 /// Every tool: the read tools, the write tools, `td_call`, then the UI driver.
 fn all_tools() -> impl Iterator<Item = &'static Tool> {
-    READ_TOOLS
-        .iter()
-        .chain(write::TOOLS)
-        .chain(td_call::TOOLS)
-        .chain(ui::TOOLS)
-        .chain(ui_shot::TOOLS)
+    grouped().map(|(_, tool)| tool)
+}
+
+/// Every tool with the group the Agent access page shows it in.
+fn grouped() -> impl Iterator<Item = (ToolGroup, &'static Tool)> {
+    let group = |group: ToolGroup, tools: &'static [Tool]| tools.iter().map(move |t| (group, t));
+    group(ToolGroup::Read, READ_TOOLS)
+        .chain(group(ToolGroup::Write, write::TOOLS))
+        .chain(group(ToolGroup::Raw, td_call::TOOLS))
+        .chain(group(ToolGroup::Window, ui::TOOLS))
+        .chain(group(ToolGroup::Window, ui_shot::TOOLS))
+}
+
+/// How the Agent access page groups the tools.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ToolGroup {
+    /// Reading chats, people and files, and asking for access.
+    Read,
+    /// Sending and changing messages and chats.
+    Write,
+    /// `td_call`.
+    Raw,
+    /// Driving Quill's window.
+    Window,
+}
+
+impl ToolGroup {
+    pub const ALL: [ToolGroup; 4] = [
+        ToolGroup::Read,
+        ToolGroup::Write,
+        ToolGroup::Raw,
+        ToolGroup::Window,
+    ];
+
+    /// The word agents read (`quill_status`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ToolGroup::Read => "read",
+            ToolGroup::Write => "write",
+            ToolGroup::Raw => "raw_tdlib",
+            ToolGroup::Window => "window_control",
+        }
+    }
+}
+
+/// One tool as the access summary sees it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ToolInfo {
+    pub name: &'static str,
+    pub title: &'static str,
+    pub group: ToolGroup,
+}
+
+/// Every tool agents can call, in catalog order, with its group.
+pub fn registry() -> Vec<ToolInfo> {
+    grouped()
+        .map(|(group, tool)| ToolInfo {
+            name: tool.name,
+            title: tool.title,
+            group,
+        })
+        .collect()
 }
 
 struct Tool {
@@ -257,14 +313,22 @@ thread_local! {
     static AGENT: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     /// The switch's generation when the current call began.
     static GENERATION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// The connection the current call came on (0 when none).
+    static CONN: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-/// Refuses once Agent access went off (or Revoke was clicked) after the
-/// current call began: a write that waited in the queue must not go out.
+/// Refuses once Agent access went off (or the strip's Revoke was clicked,
+/// or the token was reset) after the current call began, or the user
+/// revoked this agent's connection: a write that waited in the queue must
+/// not go out.
 pub(crate) fn still_allowed() -> Result<(), ToolError> {
     let began = GENERATION
         .try_with(std::cell::Cell::get)
         .unwrap_or(u64::MAX);
+    let conn = CONN.try_with(std::cell::Cell::get).unwrap_or(0);
+    if conn != 0 && crate::agent::activity::is_revoked(conn) {
+        return Err(ToolError::new(crate::agent::server::REVOKED_MESSAGE));
+    }
     if crate::agent::access::enabled() && crate::agent::access::generation() == began {
         Ok(())
     } else {
@@ -344,11 +408,21 @@ pub(crate) fn names() -> Vec<&'static str> {
 
 /// Run tool `name` for `agent` and shape the MCP `tools/call` result.
 pub fn call(name: &str, arguments: &Value, agent: &str) -> Value {
+    call_on(0, name, arguments, agent)
+}
+
+/// [`call`] for a request on connection `conn`, which then lists the tool
+/// among those it used ([`crate::agent::activity::note_tool`]).
+pub fn call_on(conn: u64, name: &str, arguments: &Value, agent: &str) -> Value {
     let _ = AGENT.try_with(|current| current.replace(agent.to_string()));
     let _ = GENERATION.try_with(|current| current.set(crate::agent::access::generation()));
+    let _ = CONN.try_with(|current| current.set(conn));
     let _ = ui_shot::take_attached();
     let result = match all_tools().find(|tool| tool.name == name) {
-        Some(tool) => (tool.run)(arguments),
+        Some(tool) => {
+            crate::agent::activity::note_tool(conn, tool.name);
+            (tool.run)(arguments)
+        }
         None => Err(ToolError::new(format!(
             "There is no tool named {name}. Call tools/list, or quill_status, to see the tools."
         ))),

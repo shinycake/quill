@@ -24,6 +24,7 @@ pub enum Page {
     Notifications,
     Privacy,
     Devices,
+    AgentAccess,
     Chats,
     Appearance,
     Folders,
@@ -40,11 +41,12 @@ pub enum Page {
 }
 
 impl Page {
-    pub const ALL: [Page; 17] = [
+    pub const ALL: [Page; 18] = [
         Page::Account,
         Page::Notifications,
         Page::Privacy,
         Page::Devices,
+        Page::AgentAccess,
         Page::Chats,
         Page::Appearance,
         Page::Folders,
@@ -67,6 +69,7 @@ impl Page {
             Page::Notifications => "notifications",
             Page::Privacy => "privacy",
             Page::Devices => "devices",
+            Page::AgentAccess => "agent_access",
             Page::Chats => "chats",
             Page::Appearance => "appearance",
             Page::Folders => "folders",
@@ -94,6 +97,7 @@ impl Page {
             Page::Notifications => keys::SETTINGS_SECTION_NOTIFY,
             Page::Privacy => keys::SETTINGS_SECTION_PRIVACY,
             Page::Devices => keys::Q_SETTINGS_PAGE_DEVICES,
+            Page::AgentAccess => keys::Q_AGENT_ACCESS,
             Page::Chats => keys::Q_SETTINGS_PAGE_CHATS,
             Page::Appearance => keys::Q_SETTINGS_PAGE_APPEARANCE,
             Page::Folders => keys::Q_SETTINGS_PAGE_FOLDERS,

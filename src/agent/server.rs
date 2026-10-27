@@ -34,6 +34,12 @@ pub const OFF_MESSAGE: &str = concat!(
     settings_place!(),
     "."
 );
+/// The answer to an agent the user disconnected with Revoke.
+pub const REVOKED_MESSAGE: &str = concat!(
+    "The user disconnected this agent in Quill. Don't reconnect; ask the user to press Allow again for it in Quill: ",
+    settings_place!(),
+    "."
+);
 
 /// JSON-RPC error codes past the reserved range.
 pub mod code {
@@ -205,6 +211,13 @@ pub fn serve(stream: Stream) {
     // Taken after auth, so a client that never authenticates (a Windows pipe
     // has no read timeout) cannot hold a slot.
     drop(waiting);
+    if super::activity::refused(&agent) {
+        let _ = write_line(
+            &mut out,
+            &error_line(&auth_id, code::ACCESS_OFF, REVOKED_MESSAGE),
+        );
+        return;
+    }
     let Some(_slot) = Slot::take(&CONNECTIONS, MAX_CONNECTIONS) else {
         let _ = write_line(
             &mut out,
@@ -224,7 +237,11 @@ pub fn serve(stream: Stream) {
     {
         return;
     }
-    let _presence = super::activity::connect(&agent);
+    let presence = super::activity::connect(&agent);
+    let conn = Conn {
+        generation,
+        id: presence.id(),
+    };
     let _ = stream.set_recv_timeout(Some(IDLE_CHECK));
     let (recv, send) = stream.split();
     let send = Arc::new(Mutex::new(send));
@@ -235,7 +252,7 @@ pub fn serve(stream: Stream) {
     let mut reader = BufReader::new(recv);
     let mut line = Vec::new();
     loop {
-        let on = still_on(generation);
+        let on = conn.ended().is_none();
         // Every read is bounded, so a line past the limit ends the
         // connection however its bytes arrive.
         let room = (MAX_LINE_BYTES + 1).saturating_sub(line.len()) as u64;
@@ -265,15 +282,37 @@ pub fn serve(stream: Stream) {
         if text.is_empty() {
             continue;
         }
-        if !still_on(generation) {
+        if let Some(message) = conn.ended() {
             let mut out = crate::locks::lock_or_recover(&send);
             let _ = write_line(
                 &mut *out,
-                &error_line(&Value::Null, code::ACCESS_OFF, OFF_MESSAGE),
+                &error_line(&Value::Null, code::ACCESS_OFF, message),
             );
             return;
         }
-        dispatch(text, &send, &in_flight, &watching, generation, &agent);
+        dispatch(text, &send, &in_flight, &watching, conn, &agent);
+    }
+}
+
+/// One authenticated connection: the switch's generation it opened under
+/// and its presence id.
+#[derive(Debug, Clone, Copy)]
+struct Conn {
+    generation: u64,
+    id: u64,
+}
+
+impl Conn {
+    /// Why the connection must end: Agent access went off (or the token
+    /// was reset) since it opened, or the user revoked it.
+    fn ended(self) -> Option<&'static str> {
+        if !still_on(self.generation) {
+            Some(OFF_MESSAGE)
+        } else if super::activity::is_revoked(self.id) {
+            Some(REVOKED_MESSAGE)
+        } else {
+            None
+        }
     }
 }
 
@@ -299,7 +338,7 @@ fn subscription<W: Write + Send + 'static>(
     id: &Value,
     send: &Arc<Mutex<W>>,
     watching: &Arc<AtomicU64>,
-    generation: u64,
+    conn: Conn,
 ) -> String {
     let uri = request
         .get("params")
@@ -336,7 +375,7 @@ fn subscription<W: Write + Send + 'static>(
             })
             .to_string();
             let mut since = super::events::latest_seq();
-            while flag.load(Ordering::SeqCst) == mine && still_on(generation) {
+            while flag.load(Ordering::SeqCst) == mine && conn.ended().is_none() {
                 match super::tools::granted_message_arrived(&mut since, WATCH_WAIT) {
                     Ok(true) => {
                         let mut out = crate::locks::lock_or_recover(&send);
@@ -374,15 +413,15 @@ struct Reply<W: Write> {
     send: Arc<Mutex<W>>,
     in_flight: Arc<AtomicUsize>,
     id: Value,
-    generation: u64,
+    conn: Conn,
     line: Option<String>,
 }
 
 impl<W: Write> Drop for Reply<W> {
     fn drop(&mut self) {
         self.in_flight.fetch_sub(1, Ordering::SeqCst);
-        let line = if !still_on(self.generation) {
-            error_line(&self.id, code::ACCESS_OFF, OFF_MESSAGE)
+        let line = if let Some(message) = self.conn.ended() {
+            error_line(&self.id, code::ACCESS_OFF, message)
         } else {
             self.line.take().unwrap_or_else(|| {
                 error_line(
@@ -404,7 +443,7 @@ fn dispatch<W: Write + Send + 'static>(
     send: &Arc<Mutex<W>>,
     in_flight: &Arc<AtomicUsize>,
     watching: &Arc<AtomicU64>,
-    generation: u64,
+    conn: Conn,
     agent: &str,
 ) {
     let request: Value = match serde_json::from_str(&text) {
@@ -427,7 +466,7 @@ fn dispatch<W: Write + Send + 'static>(
         request.get("method").and_then(Value::as_str),
         Some("resources/subscribe" | "resources/unsubscribe")
     ) {
-        let line = subscription(&request, &id, send, watching, generation);
+        let line = subscription(&request, &id, send, watching, conn);
         let mut out = crate::locks::lock_or_recover(send);
         let _ = write_line(&mut *out, &line);
         return;
@@ -449,17 +488,19 @@ fn dispatch<W: Write + Send + 'static>(
         send: send.clone(),
         in_flight: in_flight.clone(),
         id,
-        generation,
+        conn,
         line: None,
     };
     let agent = agent.to_string();
     // A failed spawn drops the closure, and with it `reply`, which answers.
     let _ = crate::thread_guard::spawn_guarded("quill-agent-request", move || {
-        let _ = reply.line.insert(answer(&request, &reply.id, &agent));
+        let _ = reply
+            .line
+            .insert(answer(&request, &reply.id, &agent, reply.conn.id));
     });
 }
 
-fn answer(request: &Value, id: &Value, agent: &str) -> String {
+fn answer(request: &Value, id: &Value, agent: &str, conn: u64) -> String {
     let params = request.get("params").cloned().unwrap_or(Value::Null);
     match request.get("method").and_then(Value::as_str) {
         Some("ping") => result_line(id, json!({})),
@@ -471,7 +512,7 @@ fn answer(request: &Value, id: &Value, agent: &str) -> String {
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
-            result_line(id, super::tools::call(name, &arguments, agent))
+            result_line(id, super::tools::call_on(conn, name, &arguments, agent))
         }
         Some("resources/read") => {
             let uri = params
