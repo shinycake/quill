@@ -31,158 +31,200 @@ fn tool_hint(tool: &str) -> &'static str {
     tool_words(tool).map_or("", |(_, hint)| tr(hint))
 }
 
+/// Each tool's plain name and one line, by registry name.
+const TOOL_WORDS: [(&str, Key, Key); 37] = [
+    (
+        "quill_status",
+        keys::Q_AGENT_PAGE_TOOL_QUILL_STATUS,
+        keys::Q_AGENT_PAGE_TOOL_QUILL_STATUS_HINT,
+    ),
+    (
+        "list_chats",
+        keys::Q_AGENT_PAGE_TOOL_LIST_CHATS,
+        keys::Q_AGENT_PAGE_TOOL_LIST_CHATS_HINT,
+    ),
+    (
+        "list_folders",
+        keys::Q_AGENT_PAGE_TOOL_LIST_FOLDERS,
+        keys::Q_AGENT_PAGE_TOOL_LIST_FOLDERS_HINT,
+    ),
+    (
+        "list_unread",
+        keys::Q_AGENT_PAGE_TOOL_LIST_UNREAD,
+        keys::Q_AGENT_PAGE_TOOL_LIST_UNREAD_HINT,
+    ),
+    (
+        "list_messages",
+        keys::Q_AGENT_PAGE_TOOL_LIST_MESSAGES,
+        keys::Q_AGENT_PAGE_TOOL_LIST_MESSAGES_HINT,
+    ),
+    (
+        "read_history",
+        keys::Q_AGENT_PAGE_TOOL_READ_HISTORY,
+        keys::Q_AGENT_PAGE_TOOL_READ_HISTORY_HINT,
+    ),
+    (
+        "search_messages",
+        keys::Q_AGENT_PAGE_TOOL_SEARCH_MESSAGES,
+        keys::Q_AGENT_PAGE_TOOL_SEARCH_MESSAGES_HINT,
+    ),
+    (
+        "get_message",
+        keys::Q_AGENT_PAGE_TOOL_GET_MESSAGE,
+        keys::Q_AGENT_PAGE_TOOL_GET_MESSAGE_HINT,
+    ),
+    (
+        "get_chat_info",
+        keys::Q_AGENT_PAGE_TOOL_GET_CHAT_INFO,
+        keys::Q_AGENT_PAGE_TOOL_GET_CHAT_INFO_HINT,
+    ),
+    (
+        "list_members",
+        keys::Q_AGENT_PAGE_TOOL_LIST_MEMBERS,
+        keys::Q_AGENT_PAGE_TOOL_LIST_MEMBERS_HINT,
+    ),
+    (
+        "list_contacts",
+        keys::Q_AGENT_PAGE_TOOL_LIST_CONTACTS,
+        keys::Q_AGENT_PAGE_TOOL_LIST_CONTACTS_HINT,
+    ),
+    (
+        "download_file",
+        keys::Q_AGENT_PAGE_TOOL_DOWNLOAD_FILE,
+        keys::Q_AGENT_PAGE_TOOL_DOWNLOAD_FILE_HINT,
+    ),
+    (
+        "wait_for_message",
+        keys::Q_AGENT_PAGE_TOOL_WAIT_FOR_MESSAGE,
+        keys::Q_AGENT_PAGE_TOOL_WAIT_FOR_MESSAGE_HINT,
+    ),
+    (
+        "request_access",
+        keys::Q_AGENT_PAGE_TOOL_REQUEST_ACCESS,
+        keys::Q_AGENT_PAGE_TOOL_REQUEST_ACCESS_HINT,
+    ),
+    (
+        "send_message",
+        keys::Q_AGENT_PAGE_TOOL_SEND_MESSAGE,
+        keys::Q_AGENT_PAGE_TOOL_SEND_MESSAGE_HINT,
+    ),
+    (
+        "send_file",
+        keys::Q_AGENT_PAGE_TOOL_SEND_FILE,
+        keys::Q_AGENT_PAGE_TOOL_SEND_FILE_HINT,
+    ),
+    (
+        "send_poll",
+        keys::Q_AGENT_PAGE_TOOL_SEND_POLL,
+        keys::Q_AGENT_PAGE_TOOL_SEND_POLL_HINT,
+    ),
+    (
+        "send_sticker",
+        keys::Q_AGENT_PAGE_TOOL_SEND_STICKER,
+        keys::Q_AGENT_PAGE_TOOL_SEND_STICKER_HINT,
+    ),
+    (
+        "forward_messages",
+        keys::Q_AGENT_PAGE_TOOL_FORWARD_MESSAGES,
+        keys::Q_AGENT_PAGE_TOOL_FORWARD_MESSAGES_HINT,
+    ),
+    (
+        "edit_message",
+        keys::Q_AGENT_PAGE_TOOL_EDIT_MESSAGE,
+        keys::Q_AGENT_PAGE_TOOL_EDIT_MESSAGE_HINT,
+    ),
+    (
+        "delete_messages",
+        keys::Q_AGENT_PAGE_TOOL_DELETE_MESSAGES,
+        keys::Q_AGENT_PAGE_TOOL_DELETE_MESSAGES_HINT,
+    ),
+    (
+        "react",
+        keys::Q_AGENT_PAGE_TOOL_REACT,
+        keys::Q_AGENT_PAGE_TOOL_REACT_HINT,
+    ),
+    (
+        "pin_message",
+        keys::Q_AGENT_PAGE_TOOL_PIN_MESSAGE,
+        keys::Q_AGENT_PAGE_TOOL_PIN_MESSAGE_HINT,
+    ),
+    (
+        "set_draft",
+        keys::Q_AGENT_PAGE_TOOL_SET_DRAFT,
+        keys::Q_AGENT_PAGE_TOOL_SET_DRAFT_HINT,
+    ),
+    (
+        "mark_read",
+        keys::Q_AGENT_PAGE_TOOL_MARK_READ,
+        keys::Q_AGENT_PAGE_TOOL_MARK_READ_HINT,
+    ),
+    (
+        "mute_chat",
+        keys::Q_AGENT_PAGE_TOOL_MUTE_CHAT,
+        keys::Q_AGENT_PAGE_TOOL_MUTE_CHAT_HINT,
+    ),
+    (
+        "archive_chat",
+        keys::Q_AGENT_PAGE_TOOL_ARCHIVE_CHAT,
+        keys::Q_AGENT_PAGE_TOOL_ARCHIVE_CHAT_HINT,
+    ),
+    (
+        "set_chat_folder",
+        keys::Q_AGENT_PAGE_TOOL_SET_CHAT_FOLDER,
+        keys::Q_AGENT_PAGE_TOOL_SET_CHAT_FOLDER_HINT,
+    ),
+    (
+        "td_call",
+        keys::Q_AGENT_PAGE_TOOL_TD_CALL,
+        keys::Q_AGENT_PAGE_TOOL_TD_CALL_HINT,
+    ),
+    (
+        "read_ui_tree",
+        keys::Q_AGENT_PAGE_TOOL_READ_UI_TREE,
+        keys::Q_AGENT_PAGE_TOOL_READ_UI_TREE_HINT,
+    ),
+    (
+        "take_screenshot",
+        keys::Q_AGENT_PAGE_TOOL_TAKE_SCREENSHOT,
+        keys::Q_AGENT_PAGE_TOOL_TAKE_SCREENSHOT_HINT,
+    ),
+    (
+        "click_element",
+        keys::Q_AGENT_PAGE_TOOL_CLICK_ELEMENT,
+        keys::Q_AGENT_PAGE_TOOL_CLICK_ELEMENT_HINT,
+    ),
+    (
+        "type_text",
+        keys::Q_AGENT_PAGE_TOOL_TYPE_TEXT,
+        keys::Q_AGENT_PAGE_TOOL_TYPE_TEXT_HINT,
+    ),
+    (
+        "press_keys",
+        keys::Q_AGENT_PAGE_TOOL_PRESS_KEYS,
+        keys::Q_AGENT_PAGE_TOOL_PRESS_KEYS_HINT,
+    ),
+    (
+        "scroll_view",
+        keys::Q_AGENT_PAGE_TOOL_SCROLL_VIEW,
+        keys::Q_AGENT_PAGE_TOOL_SCROLL_VIEW_HINT,
+    ),
+    (
+        "hover_element",
+        keys::Q_AGENT_PAGE_TOOL_HOVER_ELEMENT,
+        keys::Q_AGENT_PAGE_TOOL_HOVER_ELEMENT_HINT,
+    ),
+    (
+        "open_menu",
+        keys::Q_AGENT_PAGE_TOOL_OPEN_MENU,
+        keys::Q_AGENT_PAGE_TOOL_OPEN_MENU_HINT,
+    ),
+];
+
 fn tool_words(tool: &str) -> Option<(Key, Key)> {
-    Some(match tool {
-        "quill_status" => (
-            keys::Q_AGENT_PAGE_TOOL_QUILL_STATUS,
-            keys::Q_AGENT_PAGE_TOOL_QUILL_STATUS_HINT,
-        ),
-        "list_chats" => (
-            keys::Q_AGENT_PAGE_TOOL_LIST_CHATS,
-            keys::Q_AGENT_PAGE_TOOL_LIST_CHATS_HINT,
-        ),
-        "list_folders" => (
-            keys::Q_AGENT_PAGE_TOOL_LIST_FOLDERS,
-            keys::Q_AGENT_PAGE_TOOL_LIST_FOLDERS_HINT,
-        ),
-        "list_unread" => (
-            keys::Q_AGENT_PAGE_TOOL_LIST_UNREAD,
-            keys::Q_AGENT_PAGE_TOOL_LIST_UNREAD_HINT,
-        ),
-        "list_messages" => (
-            keys::Q_AGENT_PAGE_TOOL_LIST_MESSAGES,
-            keys::Q_AGENT_PAGE_TOOL_LIST_MESSAGES_HINT,
-        ),
-        "read_history" => (
-            keys::Q_AGENT_PAGE_TOOL_READ_HISTORY,
-            keys::Q_AGENT_PAGE_TOOL_READ_HISTORY_HINT,
-        ),
-        "search_messages" => (
-            keys::Q_AGENT_PAGE_TOOL_SEARCH_MESSAGES,
-            keys::Q_AGENT_PAGE_TOOL_SEARCH_MESSAGES_HINT,
-        ),
-        "get_message" => (
-            keys::Q_AGENT_PAGE_TOOL_GET_MESSAGE,
-            keys::Q_AGENT_PAGE_TOOL_GET_MESSAGE_HINT,
-        ),
-        "get_chat_info" => (
-            keys::Q_AGENT_PAGE_TOOL_GET_CHAT_INFO,
-            keys::Q_AGENT_PAGE_TOOL_GET_CHAT_INFO_HINT,
-        ),
-        "list_members" => (
-            keys::Q_AGENT_PAGE_TOOL_LIST_MEMBERS,
-            keys::Q_AGENT_PAGE_TOOL_LIST_MEMBERS_HINT,
-        ),
-        "list_contacts" => (
-            keys::Q_AGENT_PAGE_TOOL_LIST_CONTACTS,
-            keys::Q_AGENT_PAGE_TOOL_LIST_CONTACTS_HINT,
-        ),
-        "download_file" => (
-            keys::Q_AGENT_PAGE_TOOL_DOWNLOAD_FILE,
-            keys::Q_AGENT_PAGE_TOOL_DOWNLOAD_FILE_HINT,
-        ),
-        "wait_for_message" => (
-            keys::Q_AGENT_PAGE_TOOL_WAIT_FOR_MESSAGE,
-            keys::Q_AGENT_PAGE_TOOL_WAIT_FOR_MESSAGE_HINT,
-        ),
-        "request_access" => (
-            keys::Q_AGENT_PAGE_TOOL_REQUEST_ACCESS,
-            keys::Q_AGENT_PAGE_TOOL_REQUEST_ACCESS_HINT,
-        ),
-        "send_message" => (
-            keys::Q_AGENT_PAGE_TOOL_SEND_MESSAGE,
-            keys::Q_AGENT_PAGE_TOOL_SEND_MESSAGE_HINT,
-        ),
-        "send_file" => (
-            keys::Q_AGENT_PAGE_TOOL_SEND_FILE,
-            keys::Q_AGENT_PAGE_TOOL_SEND_FILE_HINT,
-        ),
-        "send_poll" => (
-            keys::Q_AGENT_PAGE_TOOL_SEND_POLL,
-            keys::Q_AGENT_PAGE_TOOL_SEND_POLL_HINT,
-        ),
-        "send_sticker" => (
-            keys::Q_AGENT_PAGE_TOOL_SEND_STICKER,
-            keys::Q_AGENT_PAGE_TOOL_SEND_STICKER_HINT,
-        ),
-        "forward_messages" => (
-            keys::Q_AGENT_PAGE_TOOL_FORWARD_MESSAGES,
-            keys::Q_AGENT_PAGE_TOOL_FORWARD_MESSAGES_HINT,
-        ),
-        "edit_message" => (
-            keys::Q_AGENT_PAGE_TOOL_EDIT_MESSAGE,
-            keys::Q_AGENT_PAGE_TOOL_EDIT_MESSAGE_HINT,
-        ),
-        "delete_messages" => (
-            keys::Q_AGENT_PAGE_TOOL_DELETE_MESSAGES,
-            keys::Q_AGENT_PAGE_TOOL_DELETE_MESSAGES_HINT,
-        ),
-        "react" => (
-            keys::Q_AGENT_PAGE_TOOL_REACT,
-            keys::Q_AGENT_PAGE_TOOL_REACT_HINT,
-        ),
-        "pin_message" => (
-            keys::Q_AGENT_PAGE_TOOL_PIN_MESSAGE,
-            keys::Q_AGENT_PAGE_TOOL_PIN_MESSAGE_HINT,
-        ),
-        "set_draft" => (
-            keys::Q_AGENT_PAGE_TOOL_SET_DRAFT,
-            keys::Q_AGENT_PAGE_TOOL_SET_DRAFT_HINT,
-        ),
-        "mark_read" => (
-            keys::Q_AGENT_PAGE_TOOL_MARK_READ,
-            keys::Q_AGENT_PAGE_TOOL_MARK_READ_HINT,
-        ),
-        "mute_chat" => (
-            keys::Q_AGENT_PAGE_TOOL_MUTE_CHAT,
-            keys::Q_AGENT_PAGE_TOOL_MUTE_CHAT_HINT,
-        ),
-        "archive_chat" => (
-            keys::Q_AGENT_PAGE_TOOL_ARCHIVE_CHAT,
-            keys::Q_AGENT_PAGE_TOOL_ARCHIVE_CHAT_HINT,
-        ),
-        "set_chat_folder" => (
-            keys::Q_AGENT_PAGE_TOOL_SET_CHAT_FOLDER,
-            keys::Q_AGENT_PAGE_TOOL_SET_CHAT_FOLDER_HINT,
-        ),
-        "td_call" => (
-            keys::Q_AGENT_PAGE_TOOL_TD_CALL,
-            keys::Q_AGENT_PAGE_TOOL_TD_CALL_HINT,
-        ),
-        "read_ui_tree" => (
-            keys::Q_AGENT_PAGE_TOOL_READ_UI_TREE,
-            keys::Q_AGENT_PAGE_TOOL_READ_UI_TREE_HINT,
-        ),
-        "take_screenshot" => (
-            keys::Q_AGENT_PAGE_TOOL_TAKE_SCREENSHOT,
-            keys::Q_AGENT_PAGE_TOOL_TAKE_SCREENSHOT_HINT,
-        ),
-        "click_element" => (
-            keys::Q_AGENT_PAGE_TOOL_CLICK_ELEMENT,
-            keys::Q_AGENT_PAGE_TOOL_CLICK_ELEMENT_HINT,
-        ),
-        "type_text" => (
-            keys::Q_AGENT_PAGE_TOOL_TYPE_TEXT,
-            keys::Q_AGENT_PAGE_TOOL_TYPE_TEXT_HINT,
-        ),
-        "press_keys" => (
-            keys::Q_AGENT_PAGE_TOOL_PRESS_KEYS,
-            keys::Q_AGENT_PAGE_TOOL_PRESS_KEYS_HINT,
-        ),
-        "scroll_view" => (
-            keys::Q_AGENT_PAGE_TOOL_SCROLL_VIEW,
-            keys::Q_AGENT_PAGE_TOOL_SCROLL_VIEW_HINT,
-        ),
-        "hover_element" => (
-            keys::Q_AGENT_PAGE_TOOL_HOVER_ELEMENT,
-            keys::Q_AGENT_PAGE_TOOL_HOVER_ELEMENT_HINT,
-        ),
-        "open_menu" => (
-            keys::Q_AGENT_PAGE_TOOL_OPEN_MENU,
-            keys::Q_AGENT_PAGE_TOOL_OPEN_MENU_HINT,
-        ),
-        _ => return None,
-    })
+    TOOL_WORDS
+        .iter()
+        .find(|(name, _, _)| *name == tool)
+        .map(|&(_, title, hint)| (title, hint))
 }
 
 fn group_words(group: ToolGroup) -> (&'static str, &'static str) {

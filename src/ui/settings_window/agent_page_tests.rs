@@ -273,3 +273,14 @@ fn every_search_entry_opens_a_section() {
     }
     assert_eq!(section_for_entry("privacy.last_seen"), None);
 }
+
+#[test]
+fn every_tool_has_a_plain_name() {
+    for tool in quill::agent::tools::registry() {
+        assert!(
+            !super::super::agent_tools::tool_name(tool.name).is_empty(),
+            "{} has no name on the page",
+            tool.name
+        );
+    }
+}
