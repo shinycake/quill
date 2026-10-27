@@ -60,7 +60,50 @@ pub struct Connected {
     pub tools: Vec<String>,
 }
 
-static LOG: Mutex<Option<VecDeque<Action>>> = Mutex::new(None);
+/// The log as saved: the entries and the last id handed out, kept apart so
+/// an id is never handed out twice, not even after Clear.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct Stored {
+    #[serde(default)]
+    last_id: u64,
+    #[serde(default)]
+    actions: VecDeque<Action>,
+}
+
+/// The file as earlier versions wrote it, too: a bare list of entries.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum OnDisk {
+    Now(Stored),
+    Before(VecDeque<Action>),
+}
+
+impl Stored {
+    fn parse(bytes: &[u8]) -> Option<Self> {
+        let mut stored = match serde_json::from_slice(bytes).ok()? {
+            OnDisk::Now(stored) => stored,
+            OnDisk::Before(actions) => Stored {
+                last_id: 0,
+                actions,
+            },
+        };
+        let newest = stored.actions.iter().map(|a| a.id).max().unwrap_or(0);
+        stored.last_id = stored.last_id.max(newest);
+        Some(stored)
+    }
+
+    /// Adds `action` with the next id, dropping the oldest past [`KEEP`].
+    fn push(&mut self, mut action: Action) {
+        self.last_id = self.last_id.saturating_add(1);
+        action.id = self.last_id;
+        self.actions.push_back(action);
+        while self.actions.len() > KEEP {
+            self.actions.pop_front();
+        }
+    }
+}
+
+static LOG: Mutex<Option<Stored>> = Mutex::new(None);
 static CONNECTED: Mutex<Vec<Connected>> = Mutex::new(Vec::new());
 /// Connections the user ended with Revoke that have not closed yet.
 static REVOKED: Mutex<Vec<u64>> = Mutex::new(Vec::new());
@@ -79,15 +122,19 @@ fn log_path() -> Option<PathBuf> {
     crate::settings::safe_app_root().map(|root| root.join(LOG_FILE))
 }
 
-fn with_log<R>(f: impl FnOnce(&mut VecDeque<Action>) -> R) -> R {
+fn with_store<R>(f: impl FnOnce(&mut Stored) -> R) -> R {
     let mut guard = crate::locks::lock_or_recover(&LOG);
-    let log = guard.get_or_insert_with(|| {
+    let store = guard.get_or_insert_with(|| {
         log_path()
             .and_then(|path| std::fs::read(path).ok())
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .and_then(|bytes| Stored::parse(&bytes))
             .unwrap_or_default()
     });
-    f(log)
+    f(store)
+}
+
+fn with_log<R>(f: impl FnOnce(&mut VecDeque<Action>) -> R) -> R {
+    with_store(|store| f(&mut store.actions))
 }
 
 /// The newest log snapshot written, so a slow writer never puts back an
@@ -115,11 +162,11 @@ fn persist(snapshot: u64, bytes: &[u8]) {
 }
 
 /// Change the log under its lock, then save it and wake the UI.
-fn change_log(f: impl FnOnce(&mut VecDeque<Action>)) {
-    let (snapshot, bytes) = with_log(|log| {
-        f(log);
+fn change_log(f: impl FnOnce(&mut Stored)) {
+    let (snapshot, bytes) = with_store(|store| {
+        f(store);
         let snapshot = NEXT_SNAPSHOT.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
-        (snapshot, serde_json::to_vec(log).unwrap_or_default())
+        (snapshot, serde_json::to_vec(store).unwrap_or_default())
     });
     persist(snapshot, &bytes);
     crate::wake::AGENT.poke();
@@ -132,20 +179,9 @@ pub fn record(mut action: Action) {
 }
 
 /// Add `action` to the log with the time it already carries. It gets the
-/// next id.
-pub fn record_at(mut action: Action) {
-    change_log(|log| {
-        action.id = log
-            .iter()
-            .map(|a| a.id)
-            .max()
-            .unwrap_or(0)
-            .saturating_add(1);
-        log.push_back(action);
-        while log.len() > KEEP {
-            log.pop_front();
-        }
-    });
+/// next id, one no entry has had before.
+pub fn record_at(action: Action) {
+    change_log(|store| store.push(action));
 }
 
 /// The log for `account`, newest first.
@@ -164,8 +200,8 @@ pub fn mark_undone(account: &AccountKey, id: u64) {
     if id == 0 {
         return;
     }
-    change_log(|log| {
-        for action in log.iter_mut() {
+    change_log(|store| {
+        for action in store.actions.iter_mut() {
             if action.id == id && action.account == *account {
                 action.undone = true;
             }
@@ -173,9 +209,10 @@ pub fn mark_undone(account: &AccountKey, id: u64) {
     });
 }
 
-/// Empty the log for every account.
+/// Empty the log for every account. Ids go on from where they were, so an
+/// Undo the page still holds can't land on a new entry.
 pub fn clear() {
-    change_log(VecDeque::clear);
+    change_log(|store| store.actions.clear());
 }
 
 /// Marks an agent as connected until dropped.
@@ -284,8 +321,8 @@ pub(crate) fn allow_all_again() {
 #[cfg(test)]
 mod tests {
     use super::{
-        Action, allow_again, connect, connected, is_revoked, mark_undone, note_tool, recent,
-        record, refused, revoke,
+        Action, Stored, allow_again, connect, connected, is_revoked, mark_undone, note_tool,
+        recent, record, refused, revoke,
     };
     use crate::ids::AccountKey;
 
@@ -354,6 +391,37 @@ mod tests {
         assert_eq!(action.id, 0);
         assert!(action.message_ids.is_empty());
         assert!(!action.undone && !action.declined);
+    }
+
+    #[test]
+    fn ids_never_repeat_not_even_after_clear_or_a_restart() {
+        let account = AccountKey("activity-ids-test".into());
+        let mut store = Stored::default();
+        store.push(action(&account, "one"));
+        store.push(action(&account, "two"));
+        // Clear empties the entries but keeps the count.
+        store.actions.clear();
+        store.push(action(&account, "after clear"));
+        let ids: Vec<u64> = store.actions.iter().map(|a| a.id).collect();
+        assert_eq!(ids, [3]);
+        // Saved and read back, the next id goes on from there.
+        let bytes = serde_json::to_vec(&store).unwrap_or_default();
+        let mut read = Stored::parse(&bytes).unwrap_or_default();
+        read.actions.clear();
+        read.push(action(&account, "after restart"));
+        assert_eq!(read.actions.front().map(|a| a.id), Some(4));
+    }
+
+    #[test]
+    fn a_log_saved_as_a_bare_list_reads_and_counts_on() {
+        let account = AccountKey("activity-old-file-test".into());
+        let mut old = action(&account, "old");
+        old.id = 9;
+        let bytes = serde_json::to_vec(&vec![old]).unwrap_or_default();
+        let mut store = Stored::parse(&bytes).unwrap_or_default();
+        assert_eq!(store.actions.len(), 1);
+        store.push(action(&account, "new"));
+        assert_eq!(store.actions.back().map(|a| a.id), Some(10));
     }
 
     #[test]
