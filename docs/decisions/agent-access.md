@@ -1517,3 +1517,107 @@ closes. The X11 code was type-checked against x11rb 0.13.2 in a scratch
 crate (the Linux target does not build here: no cross C toolchain); it did
 not run on a Linux desktop, nor did the Windows and macOS minimised
 readings change.
+
+## Phase 6: the Agent access page
+
+Agent access moved out of Settings > Advanced into its own top-level
+entry, Settings > Agent access (`Page::AgentAccess`, the Bot icon, after
+Devices). The page has to answer one question at a glance: what can an
+agent do to my account right now, and how do I change that.
+
+### One model, three readers
+
+`quill::agent::summary` builds an `AccessSummary` from plain `Inputs`
+(the switches, the grants, the takeover state, who is connected and
+refused, the tool registry and the activity log). `summarize` is a pure
+function, so every state is a unit test; `live(account)` reads the real
+inputs. Three readers render it and nothing else:
+
+- the page (`settings_window/agent_page.rs` and its section files);
+- `quill_status`, which keeps its old `grants` and `tools` fields and adds
+  `access` (`AccessSummary::describe`), with its text lines from
+  `text_lines`;
+- `quill://grants`, which now returns `{account, grants, access}`.
+
+The summary carries the section each claim comes from, the state of every
+tool (`Available`, `AsksFirst(why)`, `Off(reason)`) and the one change that
+turns an off tool on (`OffReason::fix`). A tool whose reason has no fix
+(`NoCapture`: a build without screenshots) shows Off with the reason and
+no button. An agent and the user therefore read the same sentence about
+the same state.
+
+### Sections
+
+In order: a "Right now" card of second-person claims (each a button that
+scrolls to its section), Connection (Allow agents, Reset token behind a
+confirm, the connected agents with since and tools used, Revoke, and
+Allow again for the ones you disconnected), Chats (the class rows, an
+optional "This chat" card, contacts, chats you added with last used and
+an "Add a chat" picker, the secret chat note), What agents can do (the
+registry in Read, Write, Raw TDLib calls and Window control groups),
+Always asks you (plus Never allowed), Window control (the switch, what
+agents see, the state now with its one fix, Takeover effect, what is
+never reachable), Confirmations, Activity, and Connect an agent. With
+access off only Connection, Activity and Connect show.
+
+Group switches exist only where a real switch exists: raw calls
+(`access::raw_calls`, new in this phase, refused by `td_call` with a
+message that names the page) and window control. Under an off group
+switch the rows show Off and nothing else; nine "Turn on" buttons under
+the switch that turns them on was noise.
+
+Search entries cover every section (`entries/agent_access.rs`);
+`section_for_entry` maps each to its anchor and a test fails if one is
+missing. Scrolling uses `ScrollAnchor`s on one `ScrollHandle`; the scroll
+runs before the frame and asks for a refresh on the next.
+
+### The chat menus
+
+The chat header menu and the profile menu have "Agent access" while
+access is on. It opens the page at a "This chat" card: the chat's scope
+and where it comes from, with Off / Read / Read and write that set it for
+that chat alone. The entry and `open_agent_access_for_chat` refuse while
+the driver injects (`refuse_hard_if_injecting(Settings)`), as
+`open_settings` already did, so Settings stays out of an agent's reach.
+The reset confirm is a registered dialog (`AgentResetToken`) in
+`HARD_DIALOGS` with a close.
+
+### Revoke, reset, undo
+
+Revoke ends one connection now (the next tool call gets
+`REVOKED_MESSAGE`) and refuses that agent's name until Allow again or a
+restart. Reset token renews the token, bumps the generation (every open
+connection ends) and republishes it; access stays on. Agents set up with
+`quill mcp` read the new token on reconnect.
+
+Undo shows only where it is real: a send whose messages are still there
+(deleted for everyone through the normal delete path, and only the ids
+the log recorded from the agent's own send) and a reaction still chosen.
+Edits, deletes and failures have no Undo. An undone row says so.
+
+### Copy and states
+
+State tags use the kit's tinted `Tag::color` (green, amber, blue) rather
+than the solid variants: a page with forty "Available" tags read as a wall
+of green, and the solid warning tag was hard to read in the dark theme.
+"TDLib" appears only inside the Raw TDLib group.
+
+### Tests
+
+`summary_tests.rs` (13): every claim, each tool state and fix, added
+chats and connected agents, and `describe` matching the page. Window
+tests: `agent_page_tests.rs` (a
+summary line scrolls to its section; the raw switch turns `td_call` off
+and back on; a row button shares contacts; Reset asks first and Cancel
+keeps the token; Revoke then Allow again; the chat menu entry opens the
+page at the chat, is refused while injecting, and Read adds the chat;
+every search entry has a section), plus the updated access, grants and
+activity tests. `chat_header_menu` and `profile_actions` test where the
+entry sits.
+
+### Gaps
+
+The Driving and Paused window states were not captured (no agent drives
+the demo window). The Claude Desktop and Cursor lines call
+`quill agent connect`, which comes from part A. The Window control switch
+shows twice (its group and its section); both are the same setting.
