@@ -13,6 +13,7 @@ use super::agent_access::empty_line;
 use super::rows::group;
 use crate::ui::agent_labels::{agent_label, now_unix, tool_label};
 use crate::ui::agent_state::{ACTIVITY_PAGE, active_account, visible_activity};
+use quill::ids::AccountKey;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
@@ -324,6 +325,7 @@ impl QuillApp {
         // Open goes to a chat of the open account.
         let can_open = action.chat_id != 0 && self.agent_settings_on_open_account();
         let entry = action.id;
+        let shown = action.account.clone();
         let chat = action.chat_id;
         let message = action.message_ids.first().copied();
         let agent = agent_label(&action.agent);
@@ -406,6 +408,7 @@ impl QuillApp {
                         .small()
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.undo_agent_action(
+                                &shown,
                                 entry,
                                 chat,
                                 &undo,
@@ -459,6 +462,7 @@ impl QuillApp {
     #[allow(clippy::too_many_arguments)]
     fn undo_agent_action(
         &mut self,
+        shown: &AccountKey,
         entry: u64,
         chat_id: i64,
         undo: &Undo,
@@ -470,10 +474,12 @@ impl QuillApp {
         if quill::agent::ui_driver::guard::refuse_if_injecting("undo what an agent did") {
             return;
         }
-        if !self.agent_settings_on_open_account() {
+        // The entry's own account, not the page's: a click on a frame
+        // drawn before an account switch must not act on the new account.
+        if *shown != active_account() {
             return;
         }
-        let account = self.agent_settings_account();
+        let account = shown.clone();
         match undo {
             Undo::Unreact { message_id, emoji } => {
                 self.toggle_reaction(

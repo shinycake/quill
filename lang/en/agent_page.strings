@@ -45,9 +45,9 @@
 "qll_agent_page_connected_none" = "No agent is connected right now.";
 "qll_agent_page_agent_tools" = "Used {tools}";
 "qll_agent_page_agent_tools_none" = "Hasn't used any tools yet";
-"qll_agent_page_revoke_hint" = "Disconnect this agent and turn away connections under its name. Reset token cuts off every agent.";
+"qll_agent_page_revoke_hint" = "Disconnect this agent and turn away connections under its name. To keep every agent out, turn off Allow agents.";
 "qll_agent_page_refused_title" = "Disconnected by you";
-"qll_agent_page_refused_hint" = "Quill turns away connections under this name until you allow it again or restart Quill. An app can still connect under another name; reset the token to cut off every agent.";
+"qll_agent_page_refused_hint" = "Quill turns away connections under this name until you allow it again or restart Quill. An app can still connect under another name; to keep every agent out, turn off Allow agents.";
 "qll_agent_page_allow_again" = "Allow again";
 "qll_agent_page_last_used" = "Last used {time}";
 "qll_agent_page_not_used" = "Not used yet";

@@ -1847,10 +1847,18 @@ The reset confirm is a registered dialog (`AgentResetToken`) in
 Revoke ends one connection now (the next tool call gets
 `REVOKED_MESSAGE`) and refuses that agent's name until Allow again or a
 restart. The name is the client's own `clientInfo`, so an app can come
-back under another one; the copy says that and points to Reset token for
-a hard cut. Reset token renews the token, bumps the generation (every
-open connection ends) and republishes it; access stays on. Agents set up
-with `quill mcp` read the new token on reconnect.
+back under another one; the copy says that and points to turning off
+Allow agents to keep every agent out. Reset token is not a hard cut: it
+renews the token, bumps the generation (every open connection ends) and
+republishes it; access stays on, and agents set up with `quill mcp` read
+the new token on reconnect. It only locks out something that saved the
+old token. Undo checks the logged entry's own account against the open
+one at click time, so a click on a frame drawn before an account switch
+does nothing.
+
+The activity log is now saved as `{last_id, actions}`. A Quill from
+before phase 6 can't read that shape and starts with an empty log after
+a downgrade; for a log of what agents did, that is acceptable.
 
 Undo shows only where it is real: a send whose messages are still there
 (deleted for everyone through the normal delete path, and only the ids
