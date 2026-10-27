@@ -33,14 +33,6 @@ impl QuillApp {
                 },
             ))
             .child(super::nav_row::nav_row(
-                "settings-agent-access",
-                tr(keys::Q_AGENT_ACCESS),
-                cx,
-                |this, _, cx| {
-                    this.show_settings_sub(super::settings_window::SubPage::AgentAccess, cx);
-                },
-            ))
-            .child(super::nav_row::nav_row(
                 "settings-replay-intro",
                 tr(keys::Q_FIRST_RUN_REPLAY),
                 cx,

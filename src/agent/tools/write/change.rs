@@ -96,12 +96,13 @@ pub fn edit_message(args: &Value) -> Result<ToolOutput, ToolError> {
     };
     confirm(&ctx, &target, "edit_message", &text)?;
     let clipped: String = text.chars().take(60).collect();
-    change(
+    common::change_on(
         &ctx,
         &target,
         "edit_message",
         &format!("\"{clipped}\""),
         request,
+        vec![id],
     )?;
     let edited = get_message(&ctx, &target, id)?;
     let shaped = messages::shape(&edited, target.me, Detail::Full, &mut Names::new(&ctx));
@@ -223,7 +224,7 @@ pub fn react(args: &Value) -> Result<ToolOutput, ToolError> {
         ("react", format!("Reacted {} to message {id}", emoji.trim()))
     };
     confirm(&ctx, &target, kind, emoji.trim())?;
-    change(&ctx, &target, kind, emoji.trim(), request).map_err(|error| {
+    common::change_on(&ctx, &target, kind, emoji.trim(), request, vec![id]).map_err(|error| {
         if error.0.contains("REACTION_INVALID") || error.0.contains("Invalid reaction") {
             ToolError::new(format!("{} is not an allowed reaction in this chat. get_chat_info does not list them; try 👍 or ❤️.", emoji.trim()))
         } else {
@@ -268,7 +269,7 @@ pub fn pin_message(args: &Value) -> Result<ToolOutput, ToolError> {
         ("Pinned", "pin_message")
     };
     confirm(&ctx, &target, kind, &id.to_string())?;
-    change(&ctx, &target, kind, &id.to_string(), request)?;
+    common::change_on(&ctx, &target, kind, &id.to_string(), request, vec![id])?;
     Ok(done(
         format!("{verb} message {id} in \"{}\".", target.title),
         json!({"chat": target.summary(), "message_id": id, "pinned": !unpin}),

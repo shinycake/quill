@@ -360,6 +360,7 @@ html { scrollbar-color: color-mix(in srgb, var(--accent) 35%, var(--surface)) va
 .report td { color: var(--accent); font-weight: 650; }
 .method { margin: 16px 0 0; max-width: 820px; font-size: 13.5px; color: var(--faint); }
 .method code { font-family: var(--mono); font-size: .92em; }
+.agents .cmd { max-width: 820px; margin-top: 28px; }
 @media (max-width: 600px) { .report th, .report td { padding: 12px 12px; font-size: 14.5px; } }
 
 /* Feature cards: the icon sits beside the title, the text runs full width under both. */

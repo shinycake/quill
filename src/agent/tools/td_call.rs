@@ -37,6 +37,7 @@ Example input: {\"request\": {\"@type\": \"getChatPinnedMessage\", \"chat_id\": 
     schema,
     run,
     read_only: false,
+    confirms_sends: true,
 }];
 
 /// Text answers longer than this are cut; `structuredContent` keeps all.
@@ -220,7 +221,13 @@ fn check_uploads(request: &Value) -> Result<(), ToolError> {
     }
 }
 
+/// What `td_call` answers while the user has turned raw TDLib calls off.
+pub const RAW_OFF_MESSAGE: &str = "The user turned off raw TDLib calls in Quill (Settings > Agent access > What agents can do). Use the other tools, or ask the user to turn raw calls back on.";
+
 fn run(args: &Value) -> Result<ToolOutput, ToolError> {
+    if !crate::agent::access::raw_calls() {
+        return Err(ToolError::new(RAW_OFF_MESSAGE));
+    }
     let mut request = args
         .get("request")
         .filter(|r| r.is_object())

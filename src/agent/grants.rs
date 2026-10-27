@@ -1,6 +1,6 @@
 //! Which chats agents may use, per account, and with what scope.
 //!
-//! The user sets this in Settings > Advanced > Agent access. Three classes
+//! The user sets this in Settings > Agent access. Three classes
 //! of chat have a default of their own (Saved Messages, bots, channels the
 //! user owns); "All chats" covers every other chat except secret chats;
 //! a per-chat entry overrides all of these, and is the only way to grant a
@@ -50,6 +50,15 @@ impl Scope {
     pub fn allows(self, needed: Scope) -> bool {
         self >= needed
     }
+}
+
+/// Whether TDLib's chat id layout puts `chat_id` in the secret chats' range.
+pub fn is_secret_chat_id(chat_id: i64) -> bool {
+    // TDLib: secret chat ids are -2_000_000_000_000 plus the 32-bit secret
+    // chat id (td/telegram/DialogId.h).
+    const MIN: i64 = -2_000_000_000_000 + i32::MIN as i64 + 1;
+    const MAX: i64 = -2_000_000_000_000 + i32::MAX as i64;
+    (MIN..=MAX).contains(&chat_id)
 }
 
 /// The kind of chat, which picks the default that applies to it.
@@ -108,17 +117,24 @@ impl AccountGrants {
         if let Some(grant) = self.chats.get(&chat_id) {
             return grant.scope;
         }
-        let default = match class {
-            ChatClass::Saved => return self.saved,
-            ChatClass::Secret => return None,
-            ChatClass::Bot => self.bots,
-            ChatClass::OwnChannel => self.own_channels,
-            ChatClass::Other => None,
-        };
-        default.max(self.all_chats)
+        self.class_scope(class)
     }
 
-    /// The grants as agents read them (`quill_status`, `quill://grants`).
+    /// The scope agents have in a chat of class `class` that was not added
+    /// by name: the class's own default, raised by All chats for every
+    /// class but Saved Messages and secret chats.
+    pub fn class_scope(&self, class: ChatClass) -> Option<Scope> {
+        match class {
+            ChatClass::Saved => self.saved,
+            ChatClass::Secret => None,
+            ChatClass::Bot => self.bots.max(self.all_chats),
+            ChatClass::OwnChannel => self.own_channels.max(self.all_chats),
+            ChatClass::Other => self.all_chats,
+        }
+    }
+
+    /// The grants as agents read them (`quill_status`, `quill://grants`):
+    /// each class with All chats counted, as calls are checked.
     pub fn describe(&self) -> serde_json::Value {
         let word = |scope: Option<Scope>| scope.map_or("off", Scope::as_str);
         let chats: Vec<serde_json::Value> = self
@@ -130,8 +146,8 @@ impl AccountGrants {
             .collect();
         serde_json::json!({
             "saved_messages": word(self.saved),
-            "bots": word(self.bots),
-            "own_channels": word(self.own_channels),
+            "bots": word(self.class_scope(ChatClass::Bot)),
+            "own_channels": word(self.class_scope(ChatClass::OwnChannel)),
             "all_chats": word(self.all_chats),
             "secret_chats": "only those listed in chats",
             "contacts": self.contacts,
@@ -144,8 +160,11 @@ impl AccountGrants {
         let word = |scope: Option<Scope>| scope.map_or("off", Scope::as_str);
         let mut lines = vec![
             format!("Saved Messages: {}", word(self.saved)),
-            format!("Bots: {}", word(self.bots)),
-            format!("Channels you own: {}", word(self.own_channels)),
+            format!("Bots: {}", word(self.class_scope(ChatClass::Bot))),
+            format!(
+                "Channels you own: {}",
+                word(self.class_scope(ChatClass::OwnChannel))
+            ),
             format!("All other chats: {}", word(self.all_chats)),
             format!("Contacts: {}", if self.contacts { "read" } else { "off" }),
         ];
@@ -174,6 +193,20 @@ fn load() -> BTreeMap<String, AccountGrants> {
         .and_then(|bytes| serde_json::from_slice::<Stored>(&bytes).ok())
         .map(|stored| stored.accounts)
         .unwrap_or_default()
+}
+
+/// The account Quill has open: the one agents' tools and the window driver
+/// act on.
+pub fn open_account() -> AccountKey {
+    crate::settings::safe_app_root()
+        .map(|root| crate::settings::active_account(&root))
+        .unwrap_or_else(AccountKey::primary)
+}
+
+/// Whether the window driver shows agents the whole window: All chats is
+/// on for the open account, whatever account Settings is editing.
+pub fn window_shows_everything() -> bool {
+    for_account(&open_account()).all_chats.is_some()
 }
 
 /// The grants of `account` (the defaults until the user changes them).

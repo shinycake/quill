@@ -164,6 +164,8 @@ pub enum ProfileMenuEntry {
         disabled: bool,
     },
     AddToFolder,
+    /// Quill: the Agent access page at this chat.
+    AgentAccess,
     Block {
         bot: bool,
         blocked: bool,
@@ -205,6 +207,8 @@ pub struct MenuFacts {
     pub blocked: Option<bool>,
     pub can_report: bool,
     pub joined: bool,
+    /// Agent access is on and the profile has a chat to open it at.
+    pub agent_access: bool,
 }
 
 pub fn profile_menu_entries(facts: &MenuFacts) -> Vec<ProfileMenuEntry> {
@@ -258,6 +262,7 @@ pub fn profile_menu_entries(facts: &MenuFacts) -> Vec<ProfileMenuEntry> {
         push(true, ToggleSharing { disabled });
     }
     push(facts.can_add_to_folder, AddToFolder);
+    push(facts.agent_access, AgentAccess);
     if let Some(blocked) = facts.blocked.filter(|_| user) {
         push(
             true,

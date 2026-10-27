@@ -87,6 +87,22 @@ Windows and Linux haven't been measured yet.
 
 Quill runs on your computer and keeps its data there. The local database is encrypted with a key held in the macOS keychain, Windows DPAPI, or a private file on Linux. Quill has no server of its own and no analytics. Besides Telegram, it only contacts GitHub to check for updates, and you can turn that off in Settings.
 
+## Use Quill with an AI agent
+
+Agent access lets an AI agent on your computer, such as Claude Code, Claude Desktop or Cursor, use your Telegram account through the Quill that is already running. It's off by default. Turn it on in Settings > Agent access, then connect an agent:
+
+```sh
+claude mcp add quill -- /Applications/Quill.app/Contents/MacOS/quill mcp   # Claude Code
+quill agent connect claude-desktop --yes   # or cursor: adds Quill to the app's config, after a backup
+quill agent install-skill                  # the Quill skill for Claude Code
+```
+
+`quill` is Quill's own executable (on Windows `%LOCALAPPDATA%\Programs\Quill\quill.exe`, on Linux `~/.local/bin/quill`). Scripts and agents that don't speak MCP use the same tools from the command line: `quill agent status`, `quill agent read --chat saved`, `quill agent send --chat @some_bot --text /start`, or `quill agent call <tool> --json '{…}'` for any tool. `quill agent --help` lists every command and exit code. On Windows, run these commands with `quill-cli.exe` from the same folder (`quill-cli agent status`): `quill.exe` is a windowed program, so a terminal doesn't wait for it or get its exit code, and `quill-cli.exe` does both.
+
+Agents can read the chats you grant (by default Saved Messages, bots and your own channels), search them, send and edit messages, react, and manage drafts and folders. They can also make raw TDLib calls under the same grants and, if you turn on a second switch, click and type in Quill's window. Quill asks you before an agent goes outside its grants. Every send shows in an activity log, can wait for your click, and is paced to stay inside Telegram's limits.
+
+Some limits hold whatever the agent asks. Quill never sends your data to an AI service itself; the agent you run asks Quill for it. There's no network listener, only a local socket with a per-launch token. Read receipts, online status and typing are never hidden, there's no bulk export, and Telegram's terms don't allow training AI models on your chats. The [agent guide](src/agent/guide.md) has the tools, recipes and errors.
+
 ## Build from source
 
 [docs/build.md](docs/build.md) covers each platform and the packaging scripts. The short version:

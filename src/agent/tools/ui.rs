@@ -48,6 +48,7 @@ Output: window {width, height, scale}, focus (node id), nodes [{id, role, name, 
         schema: read_schema,
         run: read_ui_tree,
         read_only: true,
+        confirms_sends: false,
     },
     Tool {
         name: "click_element",
@@ -63,6 +64,7 @@ Output: {clicked {id, role, name}, focus {id, role, name}, added [nodes that app
         schema: click_schema,
         run: click_element,
         read_only: false,
+        confirms_sends: true,
     },
     Tool {
         name: "type_text",
@@ -75,6 +77,7 @@ Example input: {\"text\": \"hello\"}. Output: {typed (characters), focus {id, ro
         schema: type_schema,
         run: type_text,
         read_only: false,
+        confirms_sends: false,
     },
     Tool {
         name: "press_keys",
@@ -89,6 +92,7 @@ Output: {pressed [chords], focus {id, role, name}, added [nodes that appeared], 
         schema: keys_schema,
         run: press_keys,
         read_only: false,
+        confirms_sends: true,
     },
     Tool {
         name: "scroll_view",
@@ -101,6 +105,7 @@ Output: {scrolled {dx, dy}, focus, added, refusals, screenshot}, plus a PNG imag
         schema: scroll_schema,
         run: scroll_view,
         read_only: false,
+        confirms_sends: false,
     },
     Tool {
         name: "hover_element",
@@ -111,6 +116,7 @@ Example input: {\"target\": {\"node\": \"3f2a\"}}. Output: {hovered {id, role, n
         schema: target_only_schema,
         run: hover_element,
         read_only: false,
+        confirms_sends: false,
     },
     Tool {
         name: "open_menu",
@@ -122,6 +128,7 @@ Example input: {\"target\": {\"node\": \"3f2a\"}}. Output: {menu [{id, role, nam
         schema: target_only_schema,
         run: open_menu,
         read_only: false,
+        confirms_sends: false,
     },
 ];
 

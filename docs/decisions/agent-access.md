@@ -3,7 +3,7 @@
 Agent access lets AI agents on the user's own computer (Claude Code, Claude
 Desktop, Cursor, any MCP client) use their Telegram account through the
 Quill that is already running. It ships in six phases behind one switch,
-Settings > Advanced > Agent access, which is off by default. This record
+Settings > Agent access, which is off by default. This record
 covers phase 1, the channel and the bridge. Later phases add sections here.
 
 ## Why through the running Quill
@@ -307,8 +307,11 @@ and parsed on first use, `td_schema.rs`):
   wallet and its plumbing (TON Center, wallet bot, on-ramp; owner rule),
   `addLocalMessage`, `getCurrentState` and `getChatFolderChatCount` (they
   cover chats agents may not see), `getLanguagePackString` (it opens any
-  path), and any request carrying `callbackQueryPayloadDataWithPassword`.
-- **Ask, account.** `deleteAccount`, `logOut`, `terminateSession`,
+  path), `logOut` and `deleteAccount` (phase 6: the Agent access page
+  promises agents never sign the user out or delete the account, so asking
+  was not enough), and any request carrying
+  `callbackQueryPayloadDataWithPassword`.
+- **Ask, account.** `terminateSession`,
   `terminateAllOtherSessions`, `setPassword`, `changePhoneNumber`, recovery
   and login email, privacy rules, proxies, `sharePhoneNumber`,
   `addContact`, `importContacts`, `transferChatOwnership`, `deleteChat`;
@@ -1517,3 +1520,400 @@ closes. The X11 code was type-checked against x11rb 0.13.2 in a scratch
 crate (the Linux target does not build here: no cross C toolchain); it did
 not run on a Linux desktop, nor did the Windows and macOS minimised
 readings change.
+
+## Phase 6: CLI and docs
+
+Phase 6 part A gives agents without MCP a way in, ships an Agent Skill,
+and documents Agent access for people. Part B (the settings page, the
+shared access summary and the chat-menu entries) is a separate change.
+
+### `quill agent`
+
+A mode of the same executable, dispatched from `dev_cli` like `quill mcp`.
+It is a thin client: every tool command sends one `tools/call` to the
+running Quill and prints the answer. Connecting moved out of `mcp.rs` into
+`link.rs` (connect, start Quill on request, the token handshake), which
+both use. Refusals are typed (`Refused`: not running, off, no token, stale
+token, another user's socket), so the bridge keeps its wording and the CLI
+maps each one to an exit code.
+
+Nothing about the tools is written twice. The commands, flags, help,
+examples and `describe` all come from `tools::catalog()`:
+
+- Every tool is a command under its own name (`list_chats` or
+  `list-chats`), plus short aliases for the common ones (`status`, `chats`,
+  `unread`, `read`, `messages`, `search`, `send`, `wait`...).
+- Flags are the schema's top-level properties, typed by the schema: an
+  integer, a number, a boolean (`--silent`, `--no-link-preview`), an array
+  (`1,2,3` or JSON), or a union like the chat's string-or-integer (a
+  number when it parses as one). `--args '{…}'` or `--json '{…}'` passes
+  every argument at once and later flags override fields; `call <tool>
+  --json '{…}'` reaches any tool. Required properties are checked before
+  connecting. `--no-x` works only for a boolean property and takes no
+  value. A repeated array flag adds to the list, but an array flag given
+  after `--args` replaces that field.
+- Global options (`--json`, `--start`, `-h`, `--images`, `--client`) are
+  recognised only in flag position. The word after a flag that takes a
+  value always belongs to that flag, so `send --text -h` sends "-h". Which
+  flags take a value comes from the command: a tool's non-boolean
+  properties, or install-skill's `--dir`. `--json={…}` is the same as
+  `--json {…}`: tool arguments that also ask for JSON output. A malformed
+  global option still answers in JSON when `--json` came before it.
+- The example and output shape come from each description's `Example
+  input:` and `Output:` parts. A test round-trips every tool's example
+  through its generated flags, so a description whose example the CLI
+  cannot express fails the tests.
+- `describe` prints tools (name, title, description, input schema,
+  example, output, CLI form), the resources, the exit codes and the
+  common errors. It needs no running Quill. `guide` prints `quill://guide`.
+
+Output is the tool's readable text by default. `--json` prints its
+`structuredContent`, and a failure as `{"error": {"kind", "exit_code",
+"message"}}` on stdout. Without `--json` failures go to stderr. Images
+(`take_screenshot`) are saved with `--images DIR`. The client presents
+itself to Quill as "Command line" unless `--client NAME` says otherwise,
+and that is the name in prompts and the activity log.
+
+The CLI does not start Quill unless `--start` is passed: a script that
+asks for status should not open a window. `quill mcp` still starts it,
+since an MCP client has no other way to.
+
+Exit codes:
+
+| Code | Kind | Meaning |
+| --- | --- | --- |
+| 0 | ok | Done. |
+| 1 | tool_error | The tool answered with an error (not granted, declined...). |
+| 2 | usage | Unknown command, flag or bad value. |
+| 3 | not_running | Nothing listens on the socket and the switch is on. |
+| 4 | access_off | The switch is off (on disk, or Quill said so). |
+| 5 | token | This client could not authenticate: no token on disk, a token refused after one retry, no data folder, or another user's Quill. Each has its own message. |
+| 6 | window_control_off | A UI tool answered `policy::DRIVER_OFF`. |
+| 7 | connection | Quill closed the connection or did not answer. |
+| 8 | local_file | install-skill or connect could not write, or found user edits. |
+
+### `install-skill` and the skill
+
+`src/agent/skill/SKILL.md` follows Claude Code's Agent Skill format (YAML
+frontmatter with `name` and `description`). It covers when to use Quill,
+setup, grants, the tools, `td_call`, the UI driver, etiquette, recipes and
+the exit codes. The details stay in one place: install-skill writes
+`guide.md` (the same `include_str!` as `quill://guide`) next to SKILL.md,
+and SKILL.md links to it. A test checks that SKILL.md's exit-code table
+matches `Exit`.
+
+install-skill writes to `~/.claude/skills/quill` or `--dir`. It records
+the SHA-256 of what it wrote in `.quill-skill.json`. On a later run a file
+still matching that hash is updated, a file equal to the bundled one is
+left alone, and any other file counts as the user's edit: nothing is
+written, the diff is printed and the exit code is 8. `--force` replaces
+it and saves the user's copy as `<file>.bak`, or `<file>.2.bak` and up
+when an earlier backup is there, so a second `--force` never loses the
+first. Every file, the manifest included, goes through a temp file and a
+rename.
+
+### `connect`
+
+`connect claude-code` prints `claude mcp add quill -- <exe> mcp`, the same
+line as the settings page. The path is quoted for the shell it is pasted
+into: single quotes for POSIX shells; on Windows, double quotes, which
+PowerShell and cmd both accept, unless the path holds `$` or a backtick.
+PowerShell expands those inside double quotes, so then connect prints one
+line for PowerShell (single quotes) and one for cmd. `claude-desktop` and
+`cursor` print the `mcpServers.quill` entry and the config file's path.
+
+`--yes` writes it. The file is parsed and only `mcpServers.quill` is set.
+serde_json is built with `preserve_order` (declared in Quill's own
+Cargo.toml, so core builds have it too, not only through GPUI), so the
+rest of the file keeps its key order; a test checks this. A symlinked
+config is followed to the file it points to: the temp file, the rename
+and the backup all happen beside that file, so the link stays a link.
+The timestamped `.quill-backup-<secs>` copy (`-2` and up when one with
+that name exists) and the new file get the old file's permissions. On
+Unix both are created with that mode, so they are never readable by
+others in between, and a new config is created 0600. A file that is not
+a JSON object, or whose `mcpServers` is not an object, is left alone
+(exit 8). An identical entry writes nothing, and a different Quill entry
+is reported as "Replaced your Quill entry", with the backup's name.
+
+connect refuses when Quill runs from a path containing
+`/AppTranslocation/`. That is the randomized read-only copy macOS runs
+when an app is opened from Downloads or a disk image. The path changes on
+every launch, so a config naming it would break; the message asks the
+user to move Quill to /Applications first.
+
+The executable is `current_exe()`. On Linux it is `$APPIMAGE` instead,
+since an AppImage's mount goes away with its process, but only when
+`current_exe()` is inside `$APPDIR`, that AppImage's mount. Cursor on
+Linux is itself an AppImage and passes both variables to the processes it
+starts. A Quill started from Cursor's terminal would otherwise name
+Cursor in `connect`, `describe`, `--start` and `quill mcp`.
+
+Config paths:
+
+| App | macOS | Windows | Linux |
+| --- | --- | --- | --- |
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` | `%APPDATA%\Claude\claude_desktop_config.json` | `~/.config/Claude/claude_desktop_config.json` (no official build) |
+| Claude Desktop, Microsoft Store | | `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\claude_desktop_config.json` | |
+| Cursor | `~/.cursor/mcp.json` | `%USERPROFILE%\.cursor\mcp.json` | `~/.cursor/mcp.json` |
+
+They come from `directories::BaseDirs` (`config_dir`, `data_local_dir`,
+`home_dir`). Claude Desktop from the Microsoft Store (MSIX) reads its
+config from its package folder. On Windows, connect looks for a
+`Claude_*` folder under `%LOCALAPPDATA%\Packages` (preferring one whose
+`LocalCache\Roaming\Claude` exists) and writes there. When the
+`%APPDATA%` file exists too, it leaves that one alone and says which file
+it wrote and why. `help connect` lists both paths.
+
+### Windows: `quill-cli.exe`
+
+Release builds of `quill.exe` use the GUI subsystem, so opening Quill
+shows no console window. At an interactive cmd or PowerShell prompt that
+means the shell does not wait: the output lands after the next prompt
+and `%ERRORLEVEL%` / `$LASTEXITCODE` never hold `quill agent`'s 0-8.
+Piped callers (MCP apps, scripts that capture output) are fine.
+
+The fix is a second binary from the same crate, `quill-cli`
+(`src/cli_shim.rs`), built for the console subsystem. It uses only std and
+does not link the app. It runs the `quill.exe` beside it with the same
+arguments, inherits stdin, copies stdout and stderr through pipes (which a
+GUI process writes to normally), waits and exits with the child's code.
+If `quill.exe` can't be started it exits 8. It ships in the Windows zip
+next to `quill.exe` (`scripts/windows-package.ps1`, the package workflow's
+artifact and `check-bundle-pe.ps1`'s required list). The package job
+calls it straight from pwsh and from `cmd /c`, with no redirection
+helper, and checks the output and exit codes (0 for `describe`, 2 for a
+usage error). The help, SKILL.md, the guide, the README and the site tell
+Windows users to run `quill-cli agent …`, and connect's hints name
+`quill-cli` on Windows. MCP configs keep naming `quill.exe mcp`: MCP apps
+talk over pipes, and an extra process in between buys nothing.
+`default-run = "quill"` keeps `cargo run` meaning the app.
+
+The other option was documenting `start /wait` or piping the output.
+That would leave the plain command broken for every Windows user who
+types it. The shim is small and uses only std, and CI runs it the way
+people do.
+
+### Docs
+
+The README has a "Use Quill with an AI agent" section, the product site
+an Agents section (`#agents`, linked from the nav), and `llms.txt` an
+Agent access block. The MCP instructions and the guide mention the CLI
+and install-skill.
+
+### Tests
+
+`cli/tests.rs`: every tool is a command and every alias names a tool; no
+tool property uses a global flag's name; every example round-trips
+through the flags; flags are typed by the schema (negative chat ids,
+`--no-`, `--json` merge, unknown and missing flags); global options come
+out wherever they are; help lists every tool and exit code; describe
+covers every tool, resource and exit code; tool errors map to exit codes;
+SKILL.md's frontmatter and exit table; install-skill writes, leaves
+alone, updates an old copy, keeps an edit with a diff and replaces it
+with `--force`; connect creates, merges with a backup, refuses broken
+JSON and prints the setup.
+
+`cli/flags_tests.rs`: a flag's value is never taken for a global option
+(`--text -h`, `--text --start`, through `call`, install-skill's `--dir`);
+`--json={…}` equals `--json {…}`; `--no-` only before a boolean, never
+with a value; an array flag after `--args` replaces the field; a broken
+global option still answers in JSON; `call <tool> --help` is the tool's
+help; no `--images` folder without images.
+
+`cli/files_tests.rs`: key order survives a merge; a replaced entry is
+reported, and two changes in one second get two backups; a symlinked
+config stays a link with the backup beside its target; a 0600 config and
+its backup stay 0600, a 0644 one stays 0644, and a new one is 0600; the
+Microsoft Store package is chosen with and without an `%APPDATA%` copy; a
+translocated path is refused; quoting for paths with spaces, single
+quotes, `$` and backticks in POSIX shells, PowerShell and cmd; a second
+install-skill `--force` keeps the first backup and leaves no temp file.
+
+`link_tests.rs`: `$APPIMAGE` only from inside `$APPDIR`, Cursor's
+variables ignored, both variables required. `quill-cli` has a unit test
+for finding `quill.exe`.
+
+`cli/socket_tests.rs`, on a real socket like `server_tests.rs`: off is
+`access_off`, a socket nobody listens on is `not_running`, a tool call
+and `resources/read` go through, a wrong token and a missing token are
+`token`. Both socket tests now take the switch lock before listening,
+because listening publishes the token and one test could overwrite the
+other's.
+
+The binary was run for `--help`, `help <tool>`, `describe`, usage errors,
+install-skill (fresh, again, after an edit, `--force`) and connect without
+`--yes`. No command ran against a live Quill or a Telegram account. The
+Windows and Linux config paths were not checked on those systems.
+
+After the review fixes, on macOS: `quill-cli agent no-such` exited 2
+with the message on stderr, `quill-cli agent --json --images` printed the
+JSON error and exited 2, `call read_history --help` printed read_history's
+help, and `help connect` lists the Store path. quill-cli on Windows, the
+Store folder detection on a real Windows install and the AppImage check
+inside Cursor on Linux are covered by tests and the package job only.
+
+## Phase 6: the Agent access page
+
+Agent access moved out of Settings > Advanced into its own top-level
+entry, Settings > Agent access (`Page::AgentAccess`, the Bot icon, after
+Devices). The page has to answer one question at a glance: what can an
+agent do to my account right now, and how do I change that.
+
+### One model, three readers
+
+`quill::agent::summary` builds an `AccessSummary` from plain `Inputs`
+(the switches, the grants, the takeover state, who is connected and
+refused, the tool registry and the activity log). `summarize` is a pure
+function, so every state is a unit test; `live(account)` reads the real
+inputs. Three readers render it and nothing else:
+
+- the page (`settings_window/agent_page.rs` and its section files);
+- `quill_status`, which keeps its old `grants` and `tools` fields and adds
+  `access` (`AccessSummary::describe`), with its text lines from
+  `text_lines`;
+- `quill://grants`, which now returns `{account, grants, access}`.
+
+The summary carries the section each claim comes from, the state of every
+tool (`Available`, `AsksFirst(why)`, `Off(reason)`) and the one change that
+turns an off tool on (`OffReason::fix`). A tool whose reason has no fix
+(`NoCapture`: a build without screenshots) shows Off with the reason and
+no button. An agent and the user therefore read the same sentence about
+the same state.
+
+Each claim is derived from what enforcement reads, not from a list beside
+it:
+
+- Chat scopes come from `AccountGrants::class_scope`, the function
+  `scope_for` uses, so All chats raises bots and channels you own in the
+  claims, `describe` and `text_lines` exactly as it does for calls
+  (`Chats::effective`). The class rows keep showing the user's own
+  setting and say when All other chats raises it.
+- Which tools "Confirm each send" puts behind a click is a field on each
+  tool (`Tool::confirms_sends`, carried in `ToolInfo`): the sending write
+  tools, `td_call`, and `click_element` and `press_keys`, whose Send in
+  the message box reaches `common::confirm` through `finish_ui_send`.
+  `type_text` never sends.
+- An "Always asks you" row that can't come up carries the `OffReason` of
+  the tools behind it, so "Each send" with nothing writable says so
+  instead of blaming raw requests.
+- "What agents see" reads `grants::window_shows_everything`, the test the
+  window driver's `driver_scope` uses: the open account's All chats, not
+  that of the account the page is showing.
+- Never allowed, Settings and signing out: `td_call` blocks `logOut` and
+  `deleteAccount` outright (they asked before), and the driver refuses
+  Settings. Ending another session (`terminateSession`,
+  `terminateAllOtherSessions`) still asks and is listed under Always asks
+  you as "ending your other sessions".
+
+### Sections
+
+In order: a "Right now" card of second-person claims (each a button that
+scrolls to its section), Connection (Allow agents, Reset token behind a
+confirm, the connected agents with since and tools used, Revoke, and
+Allow again for the ones you disconnected), Chats (the class rows, an
+optional "This chat" card, contacts, chats you added with last used and
+an "Add a chat" picker, the secret chat note), What agents can do (the
+registry in Read, Write, Raw TDLib calls and Window control groups),
+Always asks you (plus Never allowed), Window control (the switch, what
+agents see, the state now with its one fix, Takeover effect, what is
+never reachable), Confirmations, Activity, and Connect an agent. With
+access off only Connection, Activity and Connect show.
+
+Group switches exist only where a real switch exists: raw calls
+(`access::raw_calls`, new in this phase, refused by `td_call` with a
+message that names the page) and window control. Under an off group
+switch the rows show Off and nothing else; nine "Turn on" buttons under
+the switch that turns them on was noise.
+
+Search entries cover every section (`entries/agent_access.rs`);
+`section_for_entry` maps each to its anchor and a test fails if one is
+missing. Scrolling uses `ScrollAnchor`s on one `ScrollHandle`; the scroll
+runs before the frame and asks for a refresh on the next.
+
+### The chat menus
+
+The chat header menu and the profile menu have "Agent access" while
+access is on. It opens the page at a "This chat" card: the chat's scope
+and where it comes from, with Off / Read / Read and write that set it for
+that chat alone. The entry and `open_agent_access_for_chat` refuse while
+the driver injects (`refuse_hard_if_injecting(Settings)`), as
+`open_settings` already did, so Settings stays out of an agent's reach.
+The reset confirm is a registered dialog (`AgentResetToken`) in
+`HARD_DIALOGS` with a close.
+
+### Revoke, reset, undo
+
+Revoke ends one connection now (the next tool call gets
+`REVOKED_MESSAGE`) and refuses that agent's name until Allow again or a
+restart. The name is the client's own `clientInfo`, so an app can come
+back under another one; the copy says that and points to turning off
+Allow agents to keep every agent out. Reset token is not a hard cut: it
+renews the token, bumps the generation (every open connection ends) and
+republishes it; access stays on, and agents set up with `quill mcp` read
+the new token on reconnect. It only locks out something that saved the
+old token. Undo checks the logged entry's own account against the open
+one at click time, so a click on a frame drawn before an account switch
+does nothing.
+
+The activity log is now saved as `{last_id, actions}`. A Quill from
+before phase 6 can't read that shape and starts with an empty log after
+a downgrade; for a log of what agents did, that is acceptable.
+
+Undo shows only where it is real: a send whose messages are still there
+(deleted for everyone through the normal delete path, and only the ids
+the log recorded from the agent's own send) and a reaction still chosen.
+Edits, deletes and failures have no Undo. An undone row says so. Undo,
+Open and Add a chat act through the open account's session, so they show
+only while the page's account picker is on the open account
+(`agent_settings_on_open_account`); another account's grants and log can
+be read and its grants changed, but its rows have no Undo or Open and
+there is no picker. The delete box checks the open account again on OK.
+
+Log ids come from a counter saved with the log (`last_id` in
+`agent_actions.json`; a bare list from before reads as before and counts
+on from its highest id), so Clear never lets an id come back.
+
+### Connect lines on Windows
+
+The Claude Desktop and Cursor lines run `quill-cli.exe` as the command.
+A quoted path as the first word is a string to PowerShell, so a path with
+a space gets two labelled lines (`connect::command_lines`): `& "path" …`
+for PowerShell (`& 'path' …` when it holds `$` or a backtick) and
+`"path" …` for Command Prompt. The Claude Code line passes the path as an
+argument to `claude`, so it keeps `shell_lines`, as does the MCP line,
+which goes into an app's server settings rather than a shell.
+
+### Copy and states
+
+State tags use the kit's tinted `Tag::color` (green, amber, blue) rather
+than the solid variants: a page with forty "Available" tags read as a wall
+of green, and the solid warning tag was hard to read in the dark theme.
+"TDLib" appears only inside the Raw TDLib group.
+
+### Tests
+
+`summary_tests.rs` (19): every claim, each tool state and fix, added
+chats and connected agents, `describe` matching the page, All chats
+raising bots and own channels (never Saved Messages) as `scope_for`
+does, the window view following the open account, the Each send ask's
+own reason, and the Never row holding against `td_policy`. Window
+tests: `agent_page_tests.rs` (a
+summary line scrolls to its section; the raw switch turns `td_call` off
+and back on; a row button shares contacts; Reset asks first and Cancel
+keeps the token; Revoke then Allow again; the chat menu entry opens the
+page at the chat, is refused while injecting, and Read adds the chat;
+every search entry has a section; an unreachable ask names its own
+reason), `agent_activity_tests.rs` (another account's log has no Undo,
+Open or Add a chat, and adding by hand writes nothing), plus the updated
+access, grants and activity tests. `activity.rs` tests ids across Clear,
+a restart and an old bare-list file; `files_tests.rs` the Windows
+command lines with a space and with `$`/backtick. `chat_header_menu` and
+`profile_actions` test where the entry sits.
+
+### Gaps
+
+The Driving and Paused window states were not captured (no agent drives
+the demo window). The Claude Desktop and Cursor lines call
+`quill agent connect`, which comes from part A. The Window control switch
+shows twice (its group and its section); both are the same setting.

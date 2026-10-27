@@ -1,23 +1,22 @@
-//! The Agent access switch (Settings > Advanced > Agent access) and the
-//! token agents authenticate with.
+//! The Agent access switches (Settings > Agent access) and the token agents
+//! authenticate with.
 //!
 //! Off by default. While it is on, a fresh random token sits in
 //! `agent-token` in the app data directory, readable by the owner only; it
-//! changes on every launch of Quill and is deleted when the switch goes off.
-//! `quill mcp` reads it and presents it on the socket, so only a process
-//! running as this user can connect.
+//! changes on every launch of Quill (and on "Reset token") and is deleted
+//! when the switch goes off. `quill mcp` reads it and presents it on the
+//! socket, so only a process running as this user can connect.
 
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::sync::RwLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 const SETTINGS_FILE: &str = "agent_access.json";
 const TOKEN_FILE: &str = "agent-token";
 
-#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 struct Stored {
     enabled: bool,
@@ -28,6 +27,21 @@ struct Stored {
     ui_driver: bool,
     /// How the glow moves while an agent drives ("Takeover effect").
     takeover_effect: TakeoverEffect,
+    /// Agents may send raw TDLib requests (`td_call`). On by default, as
+    /// before the switch existed, so an old settings file reads as on.
+    raw_calls: bool,
+}
+
+impl Default for Stored {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            confirm_sends: false,
+            ui_driver: false,
+            takeover_effect: TakeoverEffect::default(),
+            raw_calls: true,
+        }
+    }
 }
 
 /// "Takeover effect": whether the light sweeps round the glow while an
@@ -76,7 +90,8 @@ static STORED: RwLock<Option<Stored>> = RwLock::new(None);
 /// wait on prompts hold this, so they don't run into each other.
 #[cfg(test)]
 pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-/// Bumped whenever the switch goes off, so open connections notice.
+/// Bumped whenever the switch goes off or the token is reset, so open
+/// connections notice.
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 
 fn root() -> Option<PathBuf> {
@@ -135,6 +150,7 @@ pub fn set_enabled(on: bool) {
         GENERATION.fetch_add(1, Ordering::SeqCst);
         super::ui_driver::takeover::forget_hold();
         super::prompts::deny_all();
+        super::activity::allow_all_again();
         super::ui_driver::bridge::refuse_all(
             "Agent access was turned off in Quill, so nothing was sent to its window.",
         );
@@ -174,27 +190,78 @@ pub fn set_ui_driver(on: bool) {
     crate::wake::AGENT.poke();
 }
 
+/// Whether agents may send raw TDLib requests (`td_call`, "Raw TDLib
+/// calls" on the Agent access page). No other tool depends on it.
+pub fn raw_calls() -> bool {
+    stored().raw_calls
+}
+
+pub fn set_raw_calls(on: bool) {
+    if super::ui_driver::guard::refuse_if_injecting("change the Agent access settings") {
+        return;
+    }
+    save(|stored| stored.raw_calls = on);
+    crate::wake::AGENT.poke();
+}
+
+/// "Reset token": a new token, and every open agent connection ends as it
+/// does when the switch goes off, while Agent access stays on. An agent
+/// set up with `quill mcp` reads the new token when it reconnects;
+/// anything that kept a copy of the old one can't connect again.
+pub fn reset_token() {
+    if super::ui_driver::guard::refuse_if_injecting("change the Agent access settings") {
+        return;
+    }
+    renew_token();
+    GENERATION.fetch_add(1, Ordering::SeqCst);
+    super::prompts::deny_all();
+    super::ui_driver::bridge::refuse_all(
+        "The user reset the agent token in Quill, so nothing was sent to its window. Reconnect, then retry.",
+    );
+    crate::wake::AGENT.poke();
+    publish_token();
+}
+
 /// The switch's generation; a connection opened under one generation ends
 /// once it changes.
 pub fn generation() -> u64 {
     GENERATION.load(Ordering::SeqCst)
 }
 
-/// This launch's token, made on first use.
-fn token() -> &'static str {
-    static TOKEN: OnceLock<String> = OnceLock::new();
-    TOKEN.get_or_init(|| {
-        let mut bytes = [0u8; 32];
-        rand::rng().fill_bytes(&mut bytes);
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    })
+static TOKEN: RwLock<Option<String>> = RwLock::new(None);
+
+fn fresh_token() -> String {
+    let mut bytes = [0u8; 32];
+    rand::rng().fill_bytes(&mut bytes);
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// This launch's token, made on first use and replaced by [`reset_token`].
+/// Empty only when its lock is poisoned, and then nothing matches it.
+fn token() -> String {
+    if let Ok(guard) = TOKEN.read()
+        && let Some(token) = guard.as_ref()
+    {
+        return token.clone();
+    }
+    match TOKEN.write() {
+        Ok(mut guard) => guard.get_or_insert_with(fresh_token).clone(),
+        Err(_) => String::new(),
+    }
+}
+
+fn renew_token() {
+    if let Ok(mut guard) = TOKEN.write() {
+        *guard = Some(fresh_token());
+    }
 }
 
 /// Whether `presented` is this launch's token, compared in constant time.
 pub fn token_matches(presented: &str) -> bool {
-    let expected = token().as_bytes();
+    let expected = token();
+    let expected = expected.as_bytes();
     let presented = presented.as_bytes();
-    if presented.len() != expected.len() {
+    if expected.is_empty() || presented.len() != expected.len() {
         return false;
     }
     presented
@@ -292,5 +359,36 @@ mod tests {
         let still: Stored = serde_json::from_str(r#"{"takeover_effect":"still_glow"}"#)
             .unwrap_or_else(|_| panic!("parses"));
         assert_eq!(still.takeover_effect, TakeoverEffect::StillGlow);
+    }
+
+    #[test]
+    fn raw_calls_stay_on_for_old_settings_and_save_off() {
+        let old: Stored =
+            serde_json::from_str(r#"{"enabled":true}"#).unwrap_or_else(|_| panic!("parses"));
+        assert!(old.raw_calls, "a file from before the switch keeps td_call");
+        assert!(Stored::default().raw_calls);
+        let off = Stored {
+            raw_calls: false,
+            ..Stored::default()
+        };
+        let json = serde_json::to_string(&off).unwrap_or_default();
+        let back: Stored = serde_json::from_str(&json).unwrap_or_default();
+        assert_eq!(back, off);
+    }
+
+    #[test]
+    fn a_reset_token_replaces_the_old_one_and_ends_connections() {
+        let _guard = crate::locks::lock_or_recover(&super::TEST_LOCK);
+        let before = super::token();
+        let generation = super::generation();
+        assert!(super::token_matches(&before));
+        super::renew_token();
+        super::GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let after = super::token();
+        assert_ne!(before, after);
+        assert!(!super::token_matches(&before), "the old token is refused");
+        assert!(super::token_matches(&after));
+        assert!(super::generation() > generation, "open connections end");
+        assert!(!super::token_matches(""));
     }
 }

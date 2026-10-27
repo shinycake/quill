@@ -1,7 +1,7 @@
 # Using Quill as an agent
 
 Quill is a desktop Telegram client. With Agent access turned on (Quill:
-Settings > Advanced > Agent access), an agent on the same computer can use
+Settings > Agent access), an agent on the same computer can use
 the user's Telegram account through the Quill that is already running. Quill
 talks to Telegram; the agent talks to Quill. Nothing leaves the computer
 except the Telegram traffic Quill would make anyway.
@@ -10,6 +10,45 @@ except the Telegram traffic Quill would make anyway.
 
 Call `quill_status`. It names the signed-in account, what you may use and
 with what scope, and the tools that work right now.
+
+Its `access` field is the same picture the user sees in Settings > Agent
+access: `chats` (Saved Messages, bots, channels they own, all other chats,
+contacts, and each added chat with its scope; bots and channels they own
+read as what you get there, All chats counted), `confirm_each_send`,
+`raw_tdlib_calls`, `window_control`, `tools` (each with `state`
+`available`, `asks_first` or `off`, plus `asks` or `reason`) and `never`.
+The `quill://grants` resource carries the same `access` object. When a
+tool is `off`, tell the user its `reason` instead of retrying.
+
+## Without MCP: the command line
+
+The same tools work from a terminal or a script through `quill agent`,
+which talks to the same running Quill under the same grants:
+
+    quill agent status
+    quill agent read --chat saved --limit 20
+    quill agent send --chat @some_bot --text /start
+    quill agent call search_messages --json '{"query": "invoice"}'
+
+Every tool is a command under its own name (`quill agent list_chats`),
+with flags named after its arguments. `--json` prints the structured
+result, `quill agent help <command>` explains one, `quill agent guide`
+prints this guide, and `quill agent describe` prints every tool's
+schema, example and output shape as JSON.
+The exit code says what went wrong: 1 a tool error, 3 Quill not running
+(`--start` starts it), 4 Agent access off, 5 no usable token, 6 window
+control off. `quill agent --help` lists them all.
+
+On Windows, use `quill-cli` (`quill-cli.exe`, next to `quill.exe`) for
+these commands: `quill-cli agent status`. `quill.exe` is a windowed
+program, so a terminal doesn't wait for it and doesn't get its exit code.
+`quill-cli.exe` waits, prints the output in order and exits with the same
+code.
+
+`quill agent install-skill` installs a Claude Code skill for Quill in
+`~/.claude/skills/quill`, with this guide. `quill agent connect
+claude-code`, `claude-desktop` or `cursor` sets up an MCP app with
+Quill's real path.
 
 ## What you can do
 
@@ -171,13 +210,15 @@ request as JSON (the `@type` is the method; fields as in the
 - Everything else asks the user to click Allow in Quill, once per call:
   changes that name no chat (the profile, folders, joining by link),
   stories and live streams (they post as the user), group calls by
-  `group_call_id`, the account (sessions, password, phone, privacy, proxies,
-  web logins, bot buttons, passport data, stream keys) and anything that can
+  `group_call_id`, the account (ending other sessions, password, phone,
+  privacy, proxies, web logins, bot buttons, passport data, stream keys) and
+  anything that can
   spend Stars, TON or money, a price in any field included. Pass `reason`;
   the user reads it next to the whole request. A request too long to show
   in full (over 6000 characters) is refused.
 - Never available: Quill's own plumbing (`setOption`, the sign-in flow,
-  closing the client, logs, `openChat`), raw file access, `inputFileId` and `inputFileGenerated`
+  closing the client, logs, `openChat`), signing out (`logOut`) and
+  deleting the account (`deleteAccount`), raw file access, `inputFileId` and `inputFileGenerated`
   (use `download_file`; upload with `inputFileLocal` or forward), the TON
   wallet, `getCurrentState`, and uploads from Quill's data folder.
 - Answers leave out what you may not read: items from chats that aren't
@@ -226,7 +267,7 @@ which are faster, work with the window hidden and go through Quill's
 grants, pacing and confirmations.
 
 The user turns it on separately: "Let agents drive Quill's window" in
-Settings > Advanced > Agent access (off by default). `quill_status` shows
+Settings > Agent access (off by default). `quill_status` shows
 `ui_driver {available, active, paused, stopped, resumes_when, window}`:
 `active` while you are driving, `paused` while the user has taken control,
 `stopped` after the user pressed Stop, and `resumes_when` says what lifts

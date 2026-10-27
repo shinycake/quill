@@ -624,8 +624,7 @@ fn the_forced_tree_builds_on_every_screen(cx: &mut TestAppContext) {
     tree_on(vcx, "Settings");
     vcx.update(|_, cx| {
         app.update(cx, |app, _| {
-            app.settings.page = Some(quill::settings_catalog::Page::Advanced);
-            app.settings.sub = Some(crate::ui::settings_window::SubPage::AgentAccess);
+            app.settings.page = Some(quill::settings_catalog::Page::AgentAccess);
         })
     });
     tree_on(vcx, "Settings > Agent access");

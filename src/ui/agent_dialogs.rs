@@ -1,7 +1,8 @@
-//! The two dialogs of Agent access: the request an agent files with
-//! `request_access`, and the consent for "All other chats" in Settings.
-//! The request is derived from `quill::agent::prompts::current`, the consent
-//! from `AgentUi::consent`; neither keeps a flag of its own.
+//! The dialogs of Agent access: the request an agent files with
+//! `request_access`, the consent for "All other chats" in Settings, and
+//! "Reset the agent token?". The request is derived from
+//! `quill::agent::prompts::current`, the consent from `AgentUi::consent`,
+//! the reset from `AgentPageUi::reset_confirm`.
 #![deny(clippy::indexing_slicing)]
 
 use super::agent_state::{AllChatsConsent, is_secret_chat_id};
@@ -367,6 +368,53 @@ impl QuillApp {
         )
         .on_close(on_close)
     }
+
+    pub(super) fn build_agent_reset_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::AgentResetToken, |this, _, cx| {
+                this.agent_ui.page.reset_confirm = false;
+                cx.notify();
+            });
+        let body = div()
+            .id("agent-reset-dialog")
+            .text_sm()
+            .child(tr(keys::Q_AGENT_PAGE_RESET_BODY))
+            .into_any_element();
+        let footer = app.update(cx, |_, cx| {
+            footer_row()
+                .child(
+                    Button::new("agent-reset-cancel")
+                        .label(tr(keys::CANCEL))
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.agent_ui.page.reset_confirm = false;
+                            this.close_kit_dialog_if_done(DialogKind::AgentResetToken, window, cx);
+                            cx.notify();
+                        })),
+                )
+                .child(
+                    Button::new("agent-reset-confirm")
+                        .label(tr(keys::Q_AGENT_PAGE_RESET))
+                        .danger()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.confirm_agent_token_reset(cx);
+                            this.close_kit_dialog_if_done(DialogKind::AgentResetToken, window, cx);
+                        })),
+                )
+        });
+        dialog_with(
+            dialog,
+            tr(keys::Q_AGENT_PAGE_RESET_TITLE).to_string(),
+            body,
+            footer,
+        )
+        .on_close(on_close)
+    }
 }
 
 crate::ui::shell::register_dialogs! {
@@ -383,6 +431,17 @@ crate::ui::shell::register_dialogs! {
         |app| app.agent_consent_open(),
         QuillApp::build_agent_consent_dialog,
     ),
+
+    /// Settings: "Reset token" asks first.
+    AgentResetToken => DialogSpec::new(
+        1057,
+        |app| app.agent_ui.page.reset_confirm,
+        QuillApp::build_agent_reset_dialog,
+    )
+    .closes(|app, _, cx| {
+        app.agent_ui.page.reset_confirm = false;
+        cx.notify();
+    }),
 }
 
 #[cfg(test)]

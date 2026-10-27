@@ -33,7 +33,6 @@ pub(super) fn cards(sections: impl IntoIterator<Item = AnyElement>) -> Option<An
 pub(super) fn sub_title(sub: SubPage) -> &'static str {
     tr(match sub {
         SubPage::Experimental => keys::SETTINGS_EXPERIMENTAL,
-        SubPage::AgentAccess => keys::Q_AGENT_ACCESS,
         SubPage::AskQuestion => keys::SETTINGS_ASK_QUESTION,
     })
 }
@@ -63,6 +62,7 @@ impl QuillApp {
             Page::Notifications => column.child(self.notifications_page(cx)),
             Page::Privacy => column.child(self.privacy_page(cx)),
             Page::Devices => column.child(self.sessions_page(cx)),
+            Page::AgentAccess => column.child(self.agent_access_page(cx)),
             Page::Chats => column
                 .children(cards([self.media_settings_section(cx).into_any_element()]))
                 .children(cards([
@@ -139,7 +139,6 @@ impl QuillApp {
     pub(super) fn settings_sub_body(&mut self, sub: SubPage, cx: &mut Context<Self>) -> AnyElement {
         match sub {
             SubPage::Experimental => self.experimental_settings_page(cx),
-            SubPage::AgentAccess => self.agent_access_page(cx),
             SubPage::AskQuestion => self.ask_question_page(cx),
         }
     }

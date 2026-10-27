@@ -40,6 +40,8 @@ pub(crate) struct AgentUi {
     /// A send the composer handed to the agent path while the UI driver
     /// injected input (`agent_driver_send`), until the task picks it up.
     pub(super) ui_send: Option<quill::agent::ui_driver::bridge::UiSend>,
+    /// The Agent access page's scroll, focus chat, filters and picker.
+    pub(super) page: super::settings_window::AgentPageUi,
 }
 
 /// Activity rows shown at first, and added by each "Show more".
@@ -99,6 +101,7 @@ impl AgentUi {
             consent: None,
             activity_shown: ACTIVITY_PAGE,
             ui_send: None,
+            page: super::settings_window::AgentPageUi::new(),
         }
     }
 }
@@ -119,18 +122,12 @@ impl QuillApp {
 
 /// The account agents act on.
 pub(super) fn active_account() -> AccountKey {
-    quill::settings::safe_app_root()
-        .map(|root| quill::settings::active_account(&root))
-        .unwrap_or_else(AccountKey::primary)
+    grants::open_account()
 }
 
 /// Whether TDLib's chat id layout puts `chat_id` in the secret chats' range.
 pub(super) fn is_secret_chat_id(chat_id: i64) -> bool {
-    // TDLib: secret chat ids are -2_000_000_000_000 plus the 32-bit secret
-    // chat id (td/telegram/DialogId.h).
-    const MIN: i64 = -2_000_000_000_000 + i32::MIN as i64 + 1;
-    const MAX: i64 = -2_000_000_000_000 + i32::MAX as i64;
-    (MIN..=MAX).contains(&chat_id)
+    quill::agent::grants::is_secret_chat_id(chat_id)
 }
 
 /// Moving to `next` gives agents more than `current` does.
@@ -177,8 +174,9 @@ pub(super) fn apply_ask(grants: &mut AccountGrants, ask: &Ask) {
     }
 }
 
-/// The scope a grant row shows.
-pub(super) fn scope_of(grants: &AccountGrants, target: GrantTarget) -> Option<Scope> {
+/// The scope a grant row sets (the page reads it from the access summary).
+#[cfg(test)]
+fn scope_of(grants: &AccountGrants, target: GrantTarget) -> Option<Scope> {
     match target {
         GrantTarget::Saved => grants.saved,
         GrantTarget::Bots => grants.bots,
@@ -198,6 +196,13 @@ impl QuillApp {
             .clone()
             .filter(|picked| accounts.iter().any(|record| &record.key == picked))
             .unwrap_or_else(active_account)
+    }
+
+    /// Whether Settings edits the account Quill has open. Undo, Open and
+    /// Add a chat act through the open session, so they show only then;
+    /// another account's grants and log are shown but not acted on.
+    pub(super) fn agent_settings_on_open_account(&self) -> bool {
+        self.agent_settings_account() == active_account()
     }
 
     /// The signed-in accounts, in the registry's order.
@@ -350,6 +355,17 @@ pub(super) fn visible_activity(account: &AccountKey) -> Vec<activity::Action> {
     }
 }
 
+/// What agents can reach for `account`, as the Agent access page shows it.
+pub(super) fn visible_summary(account: &AccountKey) -> quill::agent::summary::AccessSummary {
+    let mut inputs = quill::agent::summary::live_inputs(account);
+    if !sees_prompts() {
+        inputs.connected.clear();
+        inputs.refused.clear();
+        inputs.log.clear();
+    }
+    quill::agent::summary::summarize(&inputs)
+}
+
 /// Back to a known state: access on, confirmation off, default grants, no
 /// waiting requests, an empty activity log.
 #[cfg(test)]
@@ -360,6 +376,7 @@ pub(super) fn reset_for_test(account: &AccountKey) {
     prompts::deny_all();
     activity::clear();
     quill::agent::access::set_confirm_sends(false);
+    quill::agent::access::set_raw_calls(true);
     grants::update(account, |g| *g = AccountGrants::default());
     quill::agent::access::set_enabled(true);
 }

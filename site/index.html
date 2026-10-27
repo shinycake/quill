@@ -101,6 +101,7 @@
       <nav aria-label="Sections">
         <a href="#features">Features</a>
         <a href="#screens">Screenshots</a>
+        <a href="#agents">Agents</a>
         <a href="#download">Install</a>
         <a href="#faq">Questions</a>
       </nav>
@@ -252,6 +253,31 @@
           <img id="gallery-img" src="img/shot-chat-dark.webp" width="2000" height="1286" loading="lazy" alt="A group chat in the dark theme with a link preview, a reply and the chat list">
         </figure>
       </div>
+    </section>
+
+    <section class="built agents wrap" id="agents" aria-labelledby="agents-title">
+      <h2 class="section-title" id="agents-title">Use Quill with an AI agent</h2>
+      <p class="section-lede">Agent access lets an AI agent on your computer, such as Claude Code, Claude Desktop or Cursor, read and send your Telegram messages through the Quill that is already running. It's off until you turn it on in Settings → Agent access.</p>
+      <div class="cmd">
+        <code id="agent-cmd">claude mcp add quill -- /Applications/Quill.app/Contents/MacOS/quill mcp</code>
+        <button type="button" class="copy" aria-describedby="agent-cmd">Copy</button>
+      </div>
+      <p class="method">That line adds Quill to Claude Code on a Mac. <code>quill agent connect claude-desktop</code> or <code>cursor</code> sets up the other apps on any system, <code>quill agent install-skill</code> installs the Quill skill for Claude Code, and scripts that don't speak MCP can call the same tools with <code>quill agent status</code>, <code>quill agent read</code> or <code>quill agent send</code>. On Windows, run those with <code>quill-cli.exe</code> from Quill's folder so the terminal waits for the answer.</p>
+      <div class="built-grid">
+        <div>
+          <h3>You pick the chats</h3>
+          <p>By default agents see Saved Messages, your bots and the channels you own. Anything else needs your grant, and Quill asks you when an agent wants more. A second switch lets an agent click and type in Quill's window, under the same grants.</p>
+        </div>
+        <div>
+          <h3>Every send shows</h3>
+          <p>Messages go out in your name and appear in an activity log in Quill. You can make each one wait for your click. Quill paces sends to stay inside Telegram's limits.</p>
+        </div>
+        <div>
+          <h3>Limits that always hold</h3>
+          <p>Quill never sends your data to an AI service itself, and it opens no network port. Read receipts, online status and typing are never hidden, there's no bulk export, and Telegram's terms don't allow training AI models on your chats.</p>
+        </div>
+      </div>
+      <p class="method">The <a href="https://github.com/shinycake/quill/blob/main/src/agent/guide.md">agent guide</a> lists every tool, with recipes and errors.</p>
     </section>
 
     <section class="built wrap" aria-labelledby="built-title">

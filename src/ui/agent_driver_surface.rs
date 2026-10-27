@@ -29,6 +29,7 @@ use quill::telegram::envelope::{ChannelMemberStatus, ChatKind};
 pub(super) const HARD_DIALOGS: &[&str] = &[
     "AgentRequest",
     "AgentConsent",
+    "AgentResetToken",
     // Answering switches to the ringing account and takes the call.
     "BackgroundCall",
     "LogOut",
@@ -231,7 +232,8 @@ fn layer_name(layer: &str) -> String {
 impl QuillApp {
     /// How far the driver reaches: everything once "All other chats" is on.
     pub(super) fn driver_scope(&self) -> DriverScope {
-        if grants::for_account(&active_account()).all_chats.is_some() {
+        // The same test the Agent access page's "What agents see" reads.
+        if grants::window_shows_everything() {
             DriverScope::Everything
         } else {
             DriverScope::Granted
