@@ -307,8 +307,11 @@ and parsed on first use, `td_schema.rs`):
   wallet and its plumbing (TON Center, wallet bot, on-ramp; owner rule),
   `addLocalMessage`, `getCurrentState` and `getChatFolderChatCount` (they
   cover chats agents may not see), `getLanguagePackString` (it opens any
-  path), and any request carrying `callbackQueryPayloadDataWithPassword`.
-- **Ask, account.** `deleteAccount`, `logOut`, `terminateSession`,
+  path), `logOut` and `deleteAccount` (phase 6: the Agent access page
+  promises agents never sign the user out or delete the account, so asking
+  was not enough), and any request carrying
+  `callbackQueryPayloadDataWithPassword`.
+- **Ask, account.** `terminateSession`,
   `terminateAllOtherSessions`, `setPassword`, `changePhoneNumber`, recovery
   and login email, privacy rules, proxies, `sharePhoneNumber`,
   `addContact`, `importContacts`, `transferChatOwnership`, `deleteChat`;
@@ -1778,6 +1781,31 @@ turns an off tool on (`OffReason::fix`). A tool whose reason has no fix
 no button. An agent and the user therefore read the same sentence about
 the same state.
 
+Each claim is derived from what enforcement reads, not from a list beside
+it:
+
+- Chat scopes come from `AccountGrants::class_scope`, the function
+  `scope_for` uses, so All chats raises bots and channels you own in the
+  claims, `describe` and `text_lines` exactly as it does for calls
+  (`Chats::effective`). The class rows keep showing the user's own
+  setting and say when All other chats raises it.
+- Which tools "Confirm each send" puts behind a click is a field on each
+  tool (`Tool::confirms_sends`, carried in `ToolInfo`): the sending write
+  tools, `td_call`, and `click_element` and `press_keys`, whose Send in
+  the message box reaches `common::confirm` through `finish_ui_send`.
+  `type_text` never sends.
+- An "Always asks you" row that can't come up carries the `OffReason` of
+  the tools behind it, so "Each send" with nothing writable says so
+  instead of blaming raw requests.
+- "What agents see" reads `grants::window_shows_everything`, the test the
+  window driver's `driver_scope` uses: the open account's All chats, not
+  that of the account the page is showing.
+- Never allowed, Settings and signing out: `td_call` blocks `logOut` and
+  `deleteAccount` outright (they asked before), and the driver refuses
+  Settings. Ending another session (`terminateSession`,
+  `terminateAllOtherSessions`) still asks and is listed under Always asks
+  you as "ending your other sessions".
+
 ### Sections
 
 In order: a "Right now" card of second-person claims (each a button that
@@ -1818,14 +1846,35 @@ The reset confirm is a registered dialog (`AgentResetToken`) in
 
 Revoke ends one connection now (the next tool call gets
 `REVOKED_MESSAGE`) and refuses that agent's name until Allow again or a
-restart. Reset token renews the token, bumps the generation (every open
-connection ends) and republishes it; access stays on. Agents set up with
-`quill mcp` read the new token on reconnect.
+restart. The name is the client's own `clientInfo`, so an app can come
+back under another one; the copy says that and points to Reset token for
+a hard cut. Reset token renews the token, bumps the generation (every
+open connection ends) and republishes it; access stays on. Agents set up
+with `quill mcp` read the new token on reconnect.
 
 Undo shows only where it is real: a send whose messages are still there
 (deleted for everyone through the normal delete path, and only the ids
 the log recorded from the agent's own send) and a reaction still chosen.
-Edits, deletes and failures have no Undo. An undone row says so.
+Edits, deletes and failures have no Undo. An undone row says so. Undo,
+Open and Add a chat act through the open account's session, so they show
+only while the page's account picker is on the open account
+(`agent_settings_on_open_account`); another account's grants and log can
+be read and its grants changed, but its rows have no Undo or Open and
+there is no picker. The delete box checks the open account again on OK.
+
+Log ids come from a counter saved with the log (`last_id` in
+`agent_actions.json`; a bare list from before reads as before and counts
+on from its highest id), so Clear never lets an id come back.
+
+### Connect lines on Windows
+
+The Claude Desktop and Cursor lines run `quill-cli.exe` as the command.
+A quoted path as the first word is a string to PowerShell, so a path with
+a space gets two labelled lines (`connect::command_lines`): `& "path" …`
+for PowerShell (`& 'path' …` when it holds `$` or a backtick) and
+`"path" …` for Command Prompt. The Claude Code line passes the path as an
+argument to `claude`, so it keeps `shell_lines`, as does the MCP line,
+which goes into an app's server settings rather than a shell.
 
 ### Copy and states
 
@@ -1836,16 +1885,23 @@ of green, and the solid warning tag was hard to read in the dark theme.
 
 ### Tests
 
-`summary_tests.rs` (13): every claim, each tool state and fix, added
-chats and connected agents, and `describe` matching the page. Window
+`summary_tests.rs` (19): every claim, each tool state and fix, added
+chats and connected agents, `describe` matching the page, All chats
+raising bots and own channels (never Saved Messages) as `scope_for`
+does, the window view following the open account, the Each send ask's
+own reason, and the Never row holding against `td_policy`. Window
 tests: `agent_page_tests.rs` (a
 summary line scrolls to its section; the raw switch turns `td_call` off
 and back on; a row button shares contacts; Reset asks first and Cancel
 keeps the token; Revoke then Allow again; the chat menu entry opens the
 page at the chat, is refused while injecting, and Read adds the chat;
-every search entry has a section), plus the updated access, grants and
-activity tests. `chat_header_menu` and `profile_actions` test where the
-entry sits.
+every search entry has a section; an unreachable ask names its own
+reason), `agent_activity_tests.rs` (another account's log has no Undo,
+Open or Add a chat, and adding by hand writes nothing), plus the updated
+access, grants and activity tests. `activity.rs` tests ids across Clear,
+a restart and an old bare-list file; `files_tests.rs` the Windows
+command lines with a space and with `$`/backtick. `chat_header_menu` and
+`profile_actions` test where the entry sits.
 
 ### Gaps
 
