@@ -43,14 +43,13 @@ pub fn setup_lines() -> SetupLines {
             .into_owned(),
         _ => gui.clone(),
     };
-    let lines = |exe: &str, rest: &'static str| {
-        connect::shell_lines(exe, windows, |quoted| format!("{quoted} {rest}"))
-    };
     SetupLines {
         claude_code: connect::claude_code_commands(&gui, windows),
-        claude_desktop: lines(&cli, "agent connect claude-desktop --yes"),
-        cursor: lines(&cli, "agent connect cursor --yes"),
-        mcp: lines(&gui, "mcp"),
+        // Typed into a terminal: the path is the command.
+        claude_desktop: connect::command_lines(&cli, windows, "agent connect claude-desktop --yes"),
+        cursor: connect::command_lines(&cli, windows, "agent connect cursor --yes"),
+        // Pasted into an app's server settings, not run by a shell.
+        mcp: connect::shell_lines(&gui, windows, |quoted| format!("{quoted} mcp")),
     }
 }
 

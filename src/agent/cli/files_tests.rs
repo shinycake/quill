@@ -234,6 +234,57 @@ fn paths_are_quoted_for_the_shell_they_are_pasted_into() {
 }
 
 #[test]
+fn a_quoted_path_run_as_the_command_gets_the_call_operator_in_powershell() {
+    let args = "agent connect cursor --yes";
+    let run = |exe: &str, windows: bool| connect::command_lines(exe, windows, args);
+    let one = |line: &str| vec![("", line.to_string())];
+    assert_eq!(
+        run("/usr/bin/quill", false),
+        one("/usr/bin/quill agent connect cursor --yes")
+    );
+    assert_eq!(
+        run("/home/a b/quill", false),
+        one("'/home/a b/quill' agent connect cursor --yes")
+    );
+    // No quotes: the same line runs in both shells.
+    assert_eq!(
+        run(r"C:\Quill\quill-cli.exe", true),
+        one(r"C:\Quill\quill-cli.exe agent connect cursor --yes")
+    );
+    // A space: PowerShell would read "…" as a string and fail to parse
+    // the words after it.
+    assert_eq!(
+        run(r"C:\Users\John Smith\Quill\quill-cli.exe", true),
+        vec![
+            (
+                "PowerShell",
+                r#"& "C:\Users\John Smith\Quill\quill-cli.exe" agent connect cursor --yes"#
+                    .to_string()
+            ),
+            (
+                "Command Prompt",
+                r#""C:\Users\John Smith\Quill\quill-cli.exe" agent connect cursor --yes"#
+                    .to_string()
+            ),
+        ]
+    );
+    // $ and ` stay literal in single quotes; cmd takes double quotes.
+    assert_eq!(
+        run(r"C:\Users\$ann\it's `x`\quill-cli.exe", true),
+        vec![
+            (
+                "PowerShell",
+                r"& 'C:\Users\$ann\it''s `x`\quill-cli.exe' agent connect cursor --yes".to_string()
+            ),
+            (
+                "Command Prompt",
+                r#""C:\Users\$ann\it's `x`\quill-cli.exe" agent connect cursor --yes"#.to_string()
+            ),
+        ]
+    );
+}
+
+#[test]
 fn a_second_force_keeps_the_first_backup() {
     let dir = fresh("quill-skill-backups").join("quill");
     assert!(skill::install(&dir, false).is_ok());

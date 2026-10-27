@@ -186,8 +186,29 @@ pub fn windows_quote(word: &str) -> (String, Option<String>) {
     }
 }
 
+/// `exe` run as the command, `args` after it. A quoted path as the first
+/// word is a string to PowerShell, not a command, so there it needs the
+/// call operator `&`; Command Prompt runs the quoted path as it is. A path
+/// that needs no quotes is one line for both.
+pub fn command_lines(exe: &str, windows: bool, args: &str) -> Vec<(&'static str, String)> {
+    if !windows {
+        return vec![("", format!("{} {args}", posix_quote(exe)))];
+    }
+    match windows_quote(exe) {
+        (plain, None) if plain == exe => vec![("", format!("{plain} {args}"))],
+        (powershell, cmd) => {
+            let cmd = cmd.unwrap_or_else(|| powershell.clone());
+            vec![
+                ("PowerShell", format!("& {powershell} {args}")),
+                ("Command Prompt", format!("{cmd} {args}")),
+            ]
+        }
+    }
+}
+
 /// `line` around `exe` quoted for the shell, with a label per shell when
-/// the shells need different lines.
+/// the shells need different lines. For a line where `exe` is an argument;
+/// [`command_lines`] runs it.
 pub fn shell_lines(
     exe: &str,
     windows: bool,
