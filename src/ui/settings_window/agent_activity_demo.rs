@@ -19,6 +19,14 @@ fn demo_activity(app: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) 
             .into_iter()
             .map(activity::connect)
             .collect();
+        for (guard, tools) in guards.iter().zip([
+            &["quill_status", "list_unread", "read_history", "send_message"][..],
+            &["quill_status", "read_ui_tree", "click_element"][..],
+        ]) {
+            for tool in tools {
+                activity::note_tool(guard.id(), tool);
+            }
+        }
         // The demo window lives until the process ends.
         std::mem::forget(guards);
         let now = crate::ui::agent_labels::now_unix();
@@ -77,12 +85,19 @@ fn demo_activity(app: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) 
                 ok,
                 declined: false,
                 id: 0,
-                message_ids: Vec::new(),
-                undone: false,
+                // Sends name the messages they made, so Undo can offer to
+                // delete them; the oldest one was undone already.
+                message_ids: if ok && tool == "send_message" {
+                    vec![1_000 + ago]
+                } else {
+                    Vec::new()
+                },
+                undone: chat == "Family",
             });
         }
     }
     app.open_settings(Some(quill::settings_catalog::Page::AgentAccess));
+    super::agent_page::demo_scroll_from_env(app);
 }
 
 crate::ui::screenshot_demo::register_demos![

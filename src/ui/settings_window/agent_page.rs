@@ -480,7 +480,74 @@ impl QuillApp {
     }
 }
 
+/// Screenshot demos: `QUILL_DEMO_AGENT_SECTION=<section id>|focus` scrolls
+/// the page there; `QUILL_DEMO_AGENT_RAW=off` turns raw calls off.
+pub(super) fn demo_scroll_from_env(app: &mut QuillApp) {
+    if std::env::var("QUILL_DEMO_AGENT_RAW").is_ok_and(|raw| raw == "off") {
+        quill::agent::access::set_raw_calls(false);
+    }
+    let Ok(name) = std::env::var("QUILL_DEMO_AGENT_SECTION") else {
+        return;
+    };
+    app.agent_ui.page.scroll_to = if name == "focus" {
+        Some(Spot::FocusChat)
+    } else {
+        Section::ALL
+            .into_iter()
+            .find(|section| section_id(*section) == name)
+            .map(Spot::Section)
+    };
+}
+
+impl QuillApp {
+    /// Screenshot demos: a private chat with a person in the fixture.
+    fn demo_agent_chat(&self) -> Option<i64> {
+        let session = self.session()?;
+        let mut ids: Vec<i64> = session
+            .chats
+            .values()
+            .filter(|chat| {
+                matches!(chat.kind, quill::telegram::envelope::ChatKind::Private { .. })
+                    && !chat.title.trim().is_empty()
+            })
+            .map(|chat| chat.id.0)
+            .collect();
+        ids.sort_unstable();
+        ids.into_iter()
+            .find(|id| self.driver_chat_class(*id) == quill::agent::grants::ChatClass::Other)
+    }
+}
+
 crate::ui::screenshot_demo::register_demos![
-    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-agent-access")
-        .setup(|app, _, _| app.open_settings(Some(Page::AgentAccess))),
+    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-agent-access").setup(
+        |app, _, _| {
+            app.open_settings(Some(Page::AgentAccess));
+            demo_scroll_from_env(app);
+        }
+    ),
+    // The page as a chat's menu opens it: the "This chat" card on top of
+    // Chats. `QUILL_DEMO_AGENT=granted` adds the chat at Read first.
+    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-agent-chat").setup(
+        |app, _, cx| {
+            quill::fast_buttons::set_persistence(false);
+            quill::agent::access::set_enabled(true);
+            let Some(chat_id) = app.demo_agent_chat() else {
+                return;
+            };
+            if std::env::var("QUILL_DEMO_AGENT").is_ok_and(|mode| mode == "granted") {
+                app.add_agent_chat(chat_id, cx);
+            }
+            app.open_agent_access_for_chat(chat_id, cx);
+        }
+    ),
+    // A chat open with Agent access on, for its header menu's entry.
+    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-agent-chat-menu").setup(
+        |app, window, cx| {
+            quill::fast_buttons::set_persistence(false);
+            quill::agent::access::set_enabled(true);
+            if let Some(chat_id) = app.demo_agent_chat() {
+                app.select_listed_chat(quill::ids::ChatId(chat_id), window, cx);
+            }
+        }
+    ),
 ];

@@ -176,8 +176,9 @@ pub(super) fn apply_ask(grants: &mut AccountGrants, ask: &Ask) {
     }
 }
 
-/// The scope a grant row shows.
-pub(super) fn scope_of(grants: &AccountGrants, target: GrantTarget) -> Option<Scope> {
+/// The scope a grant row sets (the page reads it from the access summary).
+#[cfg(test)]
+fn scope_of(grants: &AccountGrants, target: GrantTarget) -> Option<Scope> {
     match target {
         GrantTarget::Saved => grants.saved,
         GrantTarget::Bots => grants.bots,

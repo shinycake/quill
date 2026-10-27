@@ -37,6 +37,7 @@ fn demo_grants(app: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) {
         add(-1_999_000_000_000, "Ben Ortiz", Some(Scope::Read));
     });
     app.open_settings(Some(quill::settings_catalog::Page::AgentAccess));
+    super::agent_page::demo_scroll_from_env(app);
 }
 
 crate::ui::screenshot_demo::register_demos![

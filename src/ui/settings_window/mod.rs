@@ -21,7 +21,7 @@ mod rows;
 mod search;
 mod sidebar;
 
-pub(in crate::ui) use agent_page::{AgentPageUi, Spot};
+pub(in crate::ui) use agent_page::AgentPageUi;
 pub(in crate::ui) use search::SettingsSearch;
 
 use super::actions::{CancelSearch, OpenChatSearch, OpenSearch};

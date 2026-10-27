@@ -82,7 +82,7 @@ fn the_agent_access_page_turns_access_on_and_offers_the_setup_command(cx: &mut T
     // The setup lines sit at the bottom of a long page: scroll there the
     // way a search result does.
     app.update(vcx, |app, cx| {
-        app.agent_ui.page.scroll_to = Some(crate::ui::settings_window::Spot::Section(
+        app.agent_ui.page.scroll_to = Some(crate::ui::settings_window::agent_page::Spot::Section(
             quill::agent::summary::Section::Connect,
         ));
         cx.notify();
@@ -97,7 +97,7 @@ fn the_agent_access_page_turns_access_on_and_offers_the_setup_command(cx: &mut T
 
     // Back up to the switch.
     app.update(vcx, |app, cx| {
-        app.agent_ui.page.scroll_to = Some(crate::ui::settings_window::Spot::Section(
+        app.agent_ui.page.scroll_to = Some(crate::ui::settings_window::agent_page::Spot::Section(
             quill::agent::summary::Section::Connection,
         ));
         cx.notify();
