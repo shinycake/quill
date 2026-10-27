@@ -611,22 +611,22 @@ impl AccessSummary {
             .tools
             .iter()
             .map(|tool| {
-                let mut entry = json!({
-                    "name": tool.name,
-                    "group": tool.group.as_str(),
-                    "state": tool.state.as_str(),
-                });
+                let mut entry = serde_json::Map::new();
+                entry.insert("name".into(), Value::from(tool.name));
+                entry.insert("group".into(), Value::from(tool.group.as_str()));
+                entry.insert("state".into(), Value::from(tool.state.as_str()));
                 if let ToolState::Off(reason) = tool.state {
-                    entry["reason"] = Value::from(reason.as_str());
+                    entry.insert("reason".into(), Value::from(reason.as_str()));
                 }
                 if let ToolState::AsksFirst(asks) = tool.state {
-                    entry["asks"] = Value::from(match asks {
+                    let why = match asks {
                         Asks::EachSend => "each call (Confirm each send is on)",
                         Asks::Always => "each call",
                         Asks::RiskyCalls => "account changes, money, and changes beyond one chat",
-                    });
+                    };
+                    entry.insert("asks".into(), Value::from(why));
                 }
-                entry
+                Value::Object(entry)
             })
             .collect();
         let chats: Vec<Value> = self

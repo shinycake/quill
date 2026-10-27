@@ -117,7 +117,10 @@ fn tool_words(tool: &str) -> Option<(Key, Key)> {
             keys::Q_AGENT_PAGE_TOOL_DELETE_MESSAGES,
             keys::Q_AGENT_PAGE_TOOL_DELETE_MESSAGES_HINT,
         ),
-        "react" => (keys::Q_AGENT_PAGE_TOOL_REACT, keys::Q_AGENT_PAGE_TOOL_REACT_HINT),
+        "react" => (
+            keys::Q_AGENT_PAGE_TOOL_REACT,
+            keys::Q_AGENT_PAGE_TOOL_REACT_HINT,
+        ),
         "pin_message" => (
             keys::Q_AGENT_PAGE_TOOL_PIN_MESSAGE,
             keys::Q_AGENT_PAGE_TOOL_PIN_MESSAGE_HINT,
@@ -142,7 +145,10 @@ fn tool_words(tool: &str) -> Option<(Key, Key)> {
             keys::Q_AGENT_PAGE_TOOL_SET_CHAT_FOLDER,
             keys::Q_AGENT_PAGE_TOOL_SET_CHAT_FOLDER_HINT,
         ),
-        "td_call" => (keys::Q_AGENT_PAGE_TOOL_TD_CALL, keys::Q_AGENT_PAGE_TOOL_TD_CALL_HINT),
+        "td_call" => (
+            keys::Q_AGENT_PAGE_TOOL_TD_CALL,
+            keys::Q_AGENT_PAGE_TOOL_TD_CALL_HINT,
+        ),
         "read_ui_tree" => (
             keys::Q_AGENT_PAGE_TOOL_READ_UI_TREE,
             keys::Q_AGENT_PAGE_TOOL_READ_UI_TREE_HINT,
