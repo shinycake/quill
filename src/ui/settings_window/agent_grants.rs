@@ -85,6 +85,16 @@ impl QuillApp {
         if let Some(card) = self.agent_focus_card(&account, cx) {
             section = section.child(card);
         }
+        // A class All other chats raises says so, since the control shows
+        // only the class's own setting.
+        let raised = |set: Option<Scope>, effective: Option<Scope>| {
+            (effective != set).then(|| {
+                tr_with(
+                    keys::Q_AGENT_GRANTS_RAISED,
+                    &[("scope", scope_label(effective))],
+                )
+            })
+        };
         let rows = [
             (
                 "saved",
@@ -98,21 +108,21 @@ impl QuillApp {
                 GrantTarget::Bots,
                 chats.bots,
                 keys::Q_AGENT_GRANTS_BOTS,
-                None,
+                raised(chats.bots, chats.effective.bots),
             ),
             (
                 "own-channels",
                 GrantTarget::OwnChannels,
                 chats.own_channels,
                 keys::Q_AGENT_GRANTS_OWN_CHANNELS,
-                None,
+                raised(chats.own_channels, chats.effective.own_channels),
             ),
             (
                 "all-chats",
                 GrantTarget::AllChats,
                 chats.all_chats,
                 keys::Q_AGENT_GRANTS_ALL_CHATS,
-                Some(keys::Q_AGENT_GRANTS_ALL_CHATS_HINT),
+                Some(tr(keys::Q_AGENT_GRANTS_ALL_CHATS_HINT).to_string()),
             ),
         ];
         let rows: Vec<AnyElement> = rows
@@ -128,7 +138,7 @@ impl QuillApp {
                 );
                 grant_row(
                     tr(title).into(),
-                    hint.map(|hint| tr(hint).into()),
+                    hint.map(Into::into),
                     control,
                     None,
                     muted,

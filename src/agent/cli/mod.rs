@@ -37,7 +37,10 @@ pub fn setup_lines() -> SetupLines {
         .map(|path| path.to_string_lossy().into_owned())
         .unwrap_or_else(|| "quill".into());
     let cli = match &exe {
-        Some(path) if windows => path.with_file_name("quill-cli.exe").to_string_lossy().into_owned(),
+        Some(path) if windows => path
+            .with_file_name("quill-cli.exe")
+            .to_string_lossy()
+            .into_owned(),
         _ => gui.clone(),
     };
     let lines = |exe: &str, rest: &'static str| {

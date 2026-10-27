@@ -7,7 +7,7 @@
 //! registry.
 
 use super::activity::{Action, Connected};
-use super::grants::{AccountGrants, Scope, is_secret_chat_id};
+use super::grants::{AccountGrants, ChatClass, Scope, is_secret_chat_id};
 use super::tools::{ToolGroup, ToolInfo};
 use crate::ids::AccountKey;
 use serde_json::{Value, json};
@@ -53,13 +53,37 @@ pub struct AddedChat {
     pub last_used: Option<i64>,
 }
 
+/// The scope each class of chat has for a chat not added by name, with All
+/// chats counted: what [`AccountGrants::scope_for`] enforces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClassScopes {
+    pub saved: Option<Scope>,
+    pub bots: Option<Scope>,
+    pub own_channels: Option<Scope>,
+    pub other_chats: Option<Scope>,
+}
+
+impl ClassScopes {
+    fn of(grants: &AccountGrants) -> Self {
+        Self {
+            saved: grants.class_scope(ChatClass::Saved),
+            bots: grants.class_scope(ChatClass::Bot),
+            own_channels: grants.class_scope(ChatClass::OwnChannel),
+            other_chats: grants.class_scope(ChatClass::Other),
+        }
+    }
+}
+
 /// The chat grants.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Chats {
+    /// The switches as the user set them, for the page's controls.
     pub saved: Option<Scope>,
     pub bots: Option<Scope>,
     pub own_channels: Option<Scope>,
     pub all_chats: Option<Scope>,
+    /// What those switches add up to; every claim reads these.
+    pub effective: ClassScopes,
     pub contacts: bool,
     pub added: Vec<AddedChat>,
 }
@@ -391,11 +415,12 @@ fn tool_state(tool: &ToolInfo, inputs: &Inputs, chats: &Chats, window: &Window) 
 }
 
 fn places(chats: &Chats, scope: Scope) -> Vec<Place> {
+    let effective = chats.effective;
     let mut places: Vec<Place> = [
-        (chats.saved, Place::SavedMessages),
-        (chats.bots, Place::Bots),
-        (chats.own_channels, Place::OwnChannels),
-        (chats.all_chats, Place::AllOtherChats),
+        (effective.saved, Place::SavedMessages),
+        (effective.bots, Place::Bots),
+        (effective.own_channels, Place::OwnChannels),
+        (effective.other_chats, Place::AllOtherChats),
     ]
     .into_iter()
     .filter(|(granted, _)| *granted == Some(scope))
@@ -460,6 +485,7 @@ pub fn summarize(inputs: &Inputs) -> AccessSummary {
         bots: grants.bots,
         own_channels: grants.own_channels,
         all_chats: grants.all_chats,
+        effective: ClassScopes::of(grants),
         contacts: grants.contacts,
         added: grants
             .chats
@@ -645,10 +671,10 @@ impl AccessSummary {
         json!({
             "enabled": self.enabled,
             "chats": {
-                "saved_messages": word(self.chats.saved),
-                "bots": word(self.chats.bots),
-                "own_channels": word(self.chats.own_channels),
-                "all_chats": word(self.chats.all_chats),
+                "saved_messages": word(self.chats.effective.saved),
+                "bots": word(self.chats.effective.bots),
+                "own_channels": word(self.chats.effective.own_channels),
+                "all_chats": word(self.chats.effective.other_chats),
                 "secret_chats": "only those listed in chats",
                 "contacts": self.chats.contacts,
                 "chats": chats,
@@ -681,10 +707,13 @@ impl AccessSummary {
             return vec!["Agent access is off.".into()];
         }
         let mut lines = vec![
-            format!("Saved Messages: {}", word(self.chats.saved)),
-            format!("Bots: {}", word(self.chats.bots)),
-            format!("Channels you own: {}", word(self.chats.own_channels)),
-            format!("All other chats: {}", word(self.chats.all_chats)),
+            format!("Saved Messages: {}", word(self.chats.effective.saved)),
+            format!("Bots: {}", word(self.chats.effective.bots)),
+            format!(
+                "Channels you own: {}",
+                word(self.chats.effective.own_channels)
+            ),
+            format!("All other chats: {}", word(self.chats.effective.other_chats)),
             format!(
                 "Contacts: {}",
                 if self.chats.contacts { "read" } else { "off" }

@@ -17,6 +17,7 @@
 "qll_agent_grants_own_channels" = "Channels you own";
 "qll_agent_grants_all_chats" = "All other chats";
 "qll_agent_grants_all_chats_hint" = "Every chat except secret chats.";
+"qll_agent_grants_raised" = "{scope} through All other chats.";
 "qll_agent_scope_off" = "Off";
 "qll_agent_scope_read" = "Read";
 "qll_agent_scope_read_write" = "Read and write";

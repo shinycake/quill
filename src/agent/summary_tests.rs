@@ -426,3 +426,67 @@ fn the_registry_covers_every_group() {
     }
     assert!(registry.iter().any(|tool| tool.name == "take_screenshot"));
 }
+
+#[test]
+fn all_chats_raises_bots_and_own_channels_as_the_grants_do() {
+    let mut raised = inputs();
+    raised.grants.bots = Some(Scope::Read);
+    raised.grants.own_channels = None;
+    raised.grants.all_chats = Some(Scope::ReadWrite);
+    let summary = summarize(&raised);
+    // What the page claims is what a call to a bot or an own channel gets.
+    for class in [ChatClass::Bot, ChatClass::OwnChannel, ChatClass::Other] {
+        assert_eq!(
+            raised.grants.scope_for(7, class),
+            Some(Scope::ReadWrite),
+            "{class:?}"
+        );
+    }
+    assert_eq!(summary.chats.effective.bots, Some(Scope::ReadWrite));
+    assert_eq!(summary.chats.effective.own_channels, Some(Scope::ReadWrite));
+    // The controls still show what the user set.
+    assert_eq!(summary.chats.bots, Some(Scope::Read));
+    assert_eq!(
+        summary.claims.first(),
+        Some(&Claim::ReadWrite(vec![
+            Place::SavedMessages,
+            Place::Bots,
+            Place::OwnChannels,
+            Place::AllOtherChats,
+        ]))
+    );
+    assert!(
+        !summary
+            .claims
+            .iter()
+            .any(|claim| matches!(claim, Claim::ReadOnly(_)))
+    );
+    let described = summary.describe();
+    assert_eq!(described["chats"]["bots"], "read_write");
+    assert_eq!(described["chats"]["own_channels"], "read_write");
+    assert_eq!(raised.grants.describe()["bots"], "read_write");
+    assert!(summary.text_lines().iter().any(|l| l == "Bots: read_write"));
+}
+
+#[test]
+fn all_chats_never_raises_saved_messages() {
+    let grants = AccountGrants {
+        saved: None,
+        bots: None,
+        all_chats: Some(Scope::ReadWrite),
+        ..AccountGrants::default()
+    };
+    let summary = summarize(&Inputs {
+        grants: grants.clone(),
+        ..inputs()
+    });
+    assert_eq!(grants.scope_for(1, ChatClass::Saved), None);
+    assert_eq!(summary.chats.effective.saved, None);
+    assert_eq!(summary.describe()["chats"]["saved_messages"], "off");
+    assert!(summary.claims.iter().all(|claim| match claim {
+        Claim::ReadWrite(places) | Claim::ReadOnly(places) => {
+            !places.contains(&Place::SavedMessages)
+        }
+        _ => true,
+    }));
+}
