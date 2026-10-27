@@ -141,6 +141,8 @@ pub struct ToolInfo {
     pub name: &'static str,
     pub title: &'static str,
     pub group: ToolGroup,
+    /// "Confirm each send" can put this tool's call behind a click.
+    pub confirms_sends: bool,
 }
 
 /// Every tool agents can call, in catalog order, with its group.
@@ -150,6 +152,7 @@ pub fn registry() -> Vec<ToolInfo> {
             name: tool.name,
             title: tool.title,
             group,
+            confirms_sends: tool.confirms_sends,
         })
         .collect()
 }
@@ -161,6 +164,10 @@ struct Tool {
     schema: fn() -> Value,
     run: fn(&Value) -> Result<ToolOutput, ToolError>,
     read_only: bool,
+    /// Its run reaches `write::common::confirm` (directly, or for a window
+    /// tool through a send the message box handed over), so "Confirm each
+    /// send" asks the user first.
+    confirms_sends: bool,
 }
 
 const READ_TOOLS: &[Tool] = &[
@@ -173,6 +180,7 @@ Example input: {}. Output: account (name, username, user_id), grants (defaults, 
         schema: no_arguments,
         run: status::run,
         read_only: true,
+        confirms_sends: false,
     },
     Tool {
         name: "list_chats",
@@ -184,6 +192,7 @@ Output: list, chats [{id, chat_ref, title, kind, scope, unread, mentions, last_m
         schema: chats::list_chats_schema,
         run: chats::list_chats,
         read_only: true,
+        confirms_sends: false,
     },
     Tool {
         name: "list_folders",
@@ -193,6 +202,7 @@ Example input: {}. Output: folders [{id, name}].",
         schema: no_arguments,
         run: chats::list_folders,
         read_only: true,
+        confirms_sends: false,
     },
     Tool {
         name: "list_unread",
@@ -203,6 +213,7 @@ Example input: {\"chats\": 10, \"per_chat\": 3}. Output: chats [{chat {id, title
         schema: chats::unread_schema,
         run: chats::list_unread,
         read_only: true,
+        confirms_sends: false,
     },
     Tool {
         name: "list_messages",
@@ -214,6 +225,7 @@ Example input: {\"chat\": \"Ann Lee\", \"limit\": 20}. Output: chat, messages [{
         schema: history::list_schema,
         run: history::list_messages,
         read_only: true,
+        confirms_sends: false,
     },
     Tool {
         name: "read_history",
@@ -226,6 +238,7 @@ oldest first, older_cursor and newer_cursor for the next page (null when there i
         schema: history::history_schema,
         run: history::read_history,
         read_only: true,
+        confirms_sends: false,
     },
     Tool {
         name: "search_messages",
@@ -237,6 +250,7 @@ Example input: {\"query\": \"invoice\"}, or {\"chat\": \"saved\", \"query\": \"i
         schema: history::search_schema,
         run: history::search_messages,
         read_only: true,
+        confirms_sends: false,
     },
     Tool {
         name: "get_message",
@@ -247,6 +261,7 @@ reply_to, forwarded_from, file, links}.",
         schema: history::get_schema,
         run: history::get_message,
         read_only: true,
+        confirms_sends: false,
     },
     Tool {
         name: "get_chat_info",
@@ -257,6 +272,7 @@ invite_link, user_id, is_contact} (fields that do not apply are left out).",
         schema: chats::chat_schema_only,
         run: chats::get_chat_info,
         read_only: true,
+        confirms_sends: false,
     },
     Tool {
         name: "list_members",
@@ -266,6 +282,7 @@ Example input: {\"chat\": \"Project team\", \"query\": \"ann\"}. Output: chat, m
         schema: chats::members_schema,
         run: chats::list_members,
         read_only: true,
+        confirms_sends: false,
     },
     Tool {
         name: "list_contacts",
@@ -275,6 +292,7 @@ Example input: {\"query\": \"ann\"}. Output: contacts [{user_id, name, username}
         schema: people::contacts_schema,
         run: people::list_contacts,
         read_only: true,
+        confirms_sends: false,
     },
     Tool {
         name: "download_file",
@@ -284,6 +302,7 @@ Example input: {\"chat\": \"saved\", \"message_id\": 4194304, \"to\": \"/Users/m
         schema: people::download_schema,
         run: people::download_file,
         read_only: false,
+        confirms_sends: false,
     },
     Tool {
         name: "wait_for_message",
@@ -294,6 +313,7 @@ Example input: {\"chat\": \"@some_bot\", \"timeout_seconds\": 60}. Output: messa
         schema: people::wait_schema,
         run: people::wait_for_message,
         read_only: true,
+        confirms_sends: false,
     },
     Tool {
         name: "request_access",
@@ -305,6 +325,7 @@ or {\"contacts\": true, \"reason\": \"To find Ann's chat.\"}. Output: {granted, 
         schema: ask::schema,
         run: ask::run,
         read_only: false,
+        confirms_sends: false,
     },
 ];
 

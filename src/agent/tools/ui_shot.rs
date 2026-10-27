@@ -29,6 +29,7 @@ pixel: divide image coordinates by it for click_element), scope (granted or all_
     schema: screenshot_schema,
     run: take_screenshot,
     read_only: true,
+    confirms_sends: false,
 }];
 
 const COMMAND_WAIT: std::time::Duration = std::time::Duration::from_secs(15);

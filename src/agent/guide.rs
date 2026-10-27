@@ -49,9 +49,7 @@ pub fn resources() -> Vec<Value> {
 
 /// The grants of the account agents act on.
 fn grants() -> Value {
-    let account = crate::settings::safe_app_root()
-        .map(|root| crate::settings::active_account(&root))
-        .unwrap_or_else(crate::ids::AccountKey::primary);
+    let account = crate::agent::grants::open_account();
     json!({
         "account": account.0,
         "grants": crate::agent::grants::for_account(&account).describe(),

@@ -1,14 +1,6 @@
 use super::*;
 use crate::agent::grants::ChatGrant;
 
-fn tool(name: &'static str, group: ToolGroup) -> ToolInfo {
-    ToolInfo {
-        name,
-        title: name,
-        group,
-    }
-}
-
 fn inputs() -> Inputs {
     Inputs {
         enabled: true,
@@ -18,19 +10,11 @@ fn inputs() -> Inputs {
         takeover: Takeover::Idle,
         screenshots_built: true,
         grants: AccountGrants::default(),
+        window_shows_everything: false,
         connected: Vec::new(),
         refused: Vec::new(),
-        tools: vec![
-            tool("list_chats", ToolGroup::Read),
-            tool("list_contacts", ToolGroup::Read),
-            tool("request_access", ToolGroup::Read),
-            tool("send_message", ToolGroup::Write),
-            tool("mark_read", ToolGroup::Write),
-            tool("td_call", ToolGroup::Raw),
-            tool("read_ui_tree", ToolGroup::Window),
-            tool("type_text", ToolGroup::Window),
-            tool("take_screenshot", ToolGroup::Window),
-        ],
+        // The real table, so the states below are the ones the page shows.
+        tools: crate::agent::tools::registry(),
         log: Vec::new(),
     }
 }
@@ -129,7 +113,7 @@ fn write_tools_need_a_writable_chat_and_ask_with_confirm_each_send() {
         confirming
             .always_asks
             .iter()
-            .any(|ask| ask.kind == AskKind::EachSend && ask.reachable)
+            .any(|ask| ask.kind == AskKind::EachSend && ask.reachable())
     );
     assert!(
         !summary
@@ -170,7 +154,7 @@ fn raw_calls_ask_for_risky_ones_and_turn_off_with_their_switch() {
         state(&summary, "td_call"),
         Some(ToolState::AsksFirst(Asks::RiskyCalls))
     );
-    assert!(summary.always_asks.iter().all(|ask| ask.reachable));
+    assert!(summary.always_asks.iter().all(|ask| ask.reachable()));
     let off = summarize(&Inputs {
         raw_calls: false,
         ..inputs()
@@ -180,18 +164,19 @@ fn raw_calls_ask_for_risky_ones_and_turn_off_with_their_switch() {
         Some(ToolState::Off(OffReason::RawCallsOff))
     );
     assert_eq!(OffReason::RawCallsOff.fix(), Some(Fix::TurnOnRawCalls));
-    let unreachable: Vec<AskKind> = off
+    let unreachable: Vec<(AskKind, Option<OffReason>)> = off
         .always_asks
         .iter()
-        .filter(|ask| !ask.reachable)
-        .map(|ask| ask.kind)
+        .filter(|ask| !ask.reachable())
+        .map(|ask| (ask.kind, ask.unreachable))
         .collect();
+    let raw_off = Some(OffReason::RawCallsOff);
     assert_eq!(
         unreachable,
         vec![
-            AskKind::BeyondOneChat,
-            AskKind::AccountAndSessions,
-            AskKind::MoneyStarsGifts
+            (AskKind::BeyondOneChat, raw_off),
+            (AskKind::AccountAndSessions, raw_off),
+            (AskKind::MoneyStarsGifts, raw_off)
         ]
     );
     assert!(off.claims.contains(&Claim::RawCalls(false)));
@@ -253,14 +238,22 @@ fn window_tools_follow_the_switch_pause_stop_and_capture() {
         confirm_sends: true,
         ..on.clone()
     });
-    assert_eq!(
-        state(&confirming, "type_text"),
-        Some(ToolState::AsksFirst(Asks::EachSend))
-    );
-    assert_eq!(
-        state(&confirming, "read_ui_tree"),
-        Some(ToolState::Available)
-    );
+    // Send in the message box (a click or Enter) goes through the confirm;
+    // typing only fills the box.
+    for name in ["click_element", "press_keys"] {
+        assert_eq!(
+            state(&confirming, name),
+            Some(ToolState::AsksFirst(Asks::EachSend)),
+            "{name}"
+        );
+    }
+    for name in ["type_text", "read_ui_tree", "scroll_view", "hover_element"] {
+        assert_eq!(
+            state(&confirming, name),
+            Some(ToolState::Available),
+            "{name}"
+        );
+    }
 
     let driving = summarize(&Inputs {
         takeover: Takeover::Driving {
@@ -283,6 +276,7 @@ fn all_chats_shows_the_whole_window_and_hides_only_secret_chats() {
         ..inputs()
     };
     on.grants.all_chats = Some(Scope::Read);
+    on.window_shows_everything = true;
     let summary = summarize(&on);
     assert_eq!(summary.window.view, WindowView::WholeWindow);
     assert!(summary.claims.contains(&Claim::SecretChatsHidden));
@@ -291,6 +285,25 @@ fn all_chats_shows_the_whole_window_and_hides_only_secret_chats() {
         Place::OwnChannels,
         Place::AllOtherChats
     ])));
+}
+
+#[test]
+fn the_window_view_follows_the_open_account_not_the_one_shown() {
+    // Settings shows an account with All chats on while the open account,
+    // whose window the driver shows, has it off.
+    let mut other = Inputs {
+        ui_driver: true,
+        ..inputs()
+    };
+    other.grants.all_chats = Some(Scope::ReadWrite);
+    assert_eq!(summarize(&other).window.view, WindowView::GrantedChats);
+    // And the other way round.
+    let open_all = Inputs {
+        ui_driver: true,
+        window_shows_everything: true,
+        ..inputs()
+    };
+    assert_eq!(summarize(&open_all).window.view, WindowView::WholeWindow);
 }
 
 #[test]
@@ -466,6 +479,50 @@ fn all_chats_raises_bots_and_own_channels_as_the_grants_do() {
     assert_eq!(described["chats"]["own_channels"], "read_write");
     assert_eq!(raised.grants.describe()["bots"], "read_write");
     assert!(summary.text_lines().iter().any(|l| l == "Bots: read_write"));
+}
+
+#[test]
+fn each_send_says_nothing_is_writable_not_that_raw_calls_are_off() {
+    let mut read_only = Inputs {
+        confirm_sends: true,
+        ..inputs()
+    };
+    read_only.grants.saved = Some(Scope::Read);
+    read_only.grants.bots = None;
+    let summary = summarize(&read_only);
+    let each_send = summary
+        .always_asks
+        .iter()
+        .find(|ask| ask.kind == AskKind::EachSend)
+        .map(|ask| ask.unreachable);
+    assert_eq!(each_send, Some(Some(OffReason::NothingWritable)));
+    // Raw calls are on, so the raw asks stay reachable.
+    assert!(
+        summary
+            .always_asks
+            .iter()
+            .filter(|ask| ask.kind != AskKind::EachSend)
+            .all(|ask| ask.reachable())
+    );
+}
+
+#[test]
+fn the_never_row_holds_against_td_call() {
+    use crate::agent::tools::td_policy::{Class, Shape, classify};
+    assert!(NEVER.contains(&Never::SettingsAndLogout));
+    for method in ["logOut", "deleteAccount"] {
+        assert!(
+            matches!(classify(method, Shape::default()), Class::Blocked(_)),
+            "{method}"
+        );
+    }
+    // Ending another session still asks; it is in Always asks, not Never.
+    assert!(matches!(
+        classify("terminateAllOtherSessions", Shape::default()),
+        Class::Ask(_)
+    ));
+    let never = summarize(&inputs()).describe()["never"].to_string();
+    assert!(never.contains("delete the account"), "{never}");
 }
 
 #[test]

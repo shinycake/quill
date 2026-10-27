@@ -261,6 +261,15 @@ fn off_reason(reason: OffReason) -> &'static str {
     })
 }
 
+/// Why an "Always asks you" row can't come up now.
+pub(super) fn ask_unreachable(reason: OffReason) -> &'static str {
+    match reason {
+        OffReason::RawCallsOff => tr(keys::Q_AGENT_PAGE_ASK_UNREACHABLE_RAW),
+        OffReason::NothingWritable => tr(keys::Q_AGENT_PAGE_ASK_UNREACHABLE_WRITABLE),
+        other => off_reason(other),
+    }
+}
+
 fn asks_line(asks: Asks) -> &'static str {
     tr(match asks {
         Asks::EachSend => keys::Q_AGENT_PAGE_ASKS_EACH_SEND,
@@ -509,16 +518,14 @@ impl QuillApp {
         summary: &AccessSummary,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let muted = cx.theme().muted_foreground;
         let asks: Vec<AnyElement> = summary
             .always_asks
             .iter()
             .map(|ask| {
                 let (title, hint) = ask_words(ask.kind);
-                let caption: SharedString = if ask.reachable {
-                    hint.into()
-                } else {
-                    format!("{hint} {}", tr(keys::Q_AGENT_PAGE_ASK_UNREACHABLE_RAW)).into()
+                let caption: SharedString = match ask.unreachable {
+                    None => hint.into(),
+                    Some(reason) => format!("{hint} {}", ask_unreachable(reason)).into(),
                 };
                 action_row(
                     title,
@@ -541,7 +548,6 @@ impl QuillApp {
                 cx,
             )
         });
-        let _ = muted;
         div()
             .flex()
             .flex_col()

@@ -32,6 +32,10 @@ pub struct Inputs {
     /// Whether this build can take screenshots.
     pub screenshots_built: bool,
     pub grants: AccountGrants,
+    /// Whether the window driver shows the whole window
+    /// ([`super::grants::window_shows_everything`]): it follows the open
+    /// account's All chats, which need not be `grants`' account.
+    pub window_shows_everything: bool,
     /// Connected agents, revoked connections already left out.
     pub connected: Vec<Connected>,
     /// Agent names the user disconnected.
@@ -245,7 +249,7 @@ pub enum AskKind {
     NewAccess,
     /// Raw calls that change more than one chat.
     BeyondOneChat,
-    /// Profile, password, phone number, sessions, signing out.
+    /// Profile, password, phone number, privacy, ending other sessions.
     AccountAndSessions,
     /// Anything that spends money, Stars or buys gifts.
     MoneyStarsGifts,
@@ -256,8 +260,14 @@ pub enum AskKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AlwaysAsk {
     pub kind: AskKind,
-    /// False when agents can't even ask (raw calls off, Agent access off).
-    pub reachable: bool,
+    /// Why agents can't even get to the ask now; `None` when they can.
+    pub unreachable: Option<OffReason>,
+}
+
+impl AlwaysAsk {
+    pub fn reachable(self) -> bool {
+        self.unreachable.is_none()
+    }
 }
 
 /// What no agent can do, whatever the user grants.
@@ -267,7 +277,8 @@ pub enum Never {
     HiddenStatus,
     /// Export a whole account or chat in one go.
     BulkExport,
-    /// Open Settings or sign out.
+    /// Open Settings, sign out or delete the account: `td_call` blocks
+    /// `logOut` and `deleteAccount`, the window driver refuses Settings.
     SettingsAndLogout,
     /// Pay for messages in chats that charge Stars.
     PaidMessages,
@@ -369,25 +380,11 @@ pub struct AccessSummary {
     pub claims: Vec<Claim>,
 }
 
-/// Tools that "Confirm each send" puts behind a click.
-const CONFIRMED: &[&str] = &[
-    "send_message",
-    "send_file",
-    "send_poll",
-    "send_sticker",
-    "forward_messages",
-    "edit_message",
-    "delete_messages",
-    "react",
-    "pin_message",
-    "type_text",
-];
-
 fn tool_state(tool: &ToolInfo, inputs: &Inputs, chats: &Chats, window: &Window) -> ToolState {
     if !inputs.enabled {
         return ToolState::Off(OffReason::AccessOff);
     }
-    let each_send = inputs.confirm_sends && CONFIRMED.contains(&tool.name);
+    let each_send = inputs.confirm_sends && tool.confirms_sends;
     match tool.group {
         ToolGroup::Read => match tool.name {
             "list_contacts" if !chats.contacts => ToolState::Off(OffReason::ContactsOff),
@@ -502,7 +499,7 @@ pub fn summarize(inputs: &Inputs) -> AccessSummary {
     let on = inputs.enabled && inputs.ui_driver;
     let window = Window {
         switch: inputs.ui_driver,
-        view: match (on, grants.all_chats.is_some()) {
+        view: match (on, inputs.window_shows_everything) {
             (false, _) => WindowView::Nothing,
             (true, false) => WindowView::GrantedChats,
             (true, true) => WindowView::WholeWindow,
@@ -528,30 +525,21 @@ pub fn summarize(inputs: &Inputs) -> AccessSummary {
             state: tool_state(tool, inputs, &chats, &window),
         })
         .collect();
-    let raw = inputs.enabled && inputs.raw_calls;
+    // The same reasons, in the same order, that turn the tools behind each
+    // ask off in `tool_state`.
+    let access_off = (!inputs.enabled).then_some(OffReason::AccessOff);
+    let raw_off = access_off.or((!inputs.raw_calls).then_some(OffReason::RawCallsOff));
+    let send_off =
+        access_off.or((!chats.writable_anywhere()).then_some(OffReason::NothingWritable));
+    let ask = |kind, unreachable| AlwaysAsk { kind, unreachable };
     let mut always_asks = vec![
-        AlwaysAsk {
-            kind: AskKind::NewAccess,
-            reachable: inputs.enabled,
-        },
-        AlwaysAsk {
-            kind: AskKind::BeyondOneChat,
-            reachable: raw,
-        },
-        AlwaysAsk {
-            kind: AskKind::AccountAndSessions,
-            reachable: raw,
-        },
-        AlwaysAsk {
-            kind: AskKind::MoneyStarsGifts,
-            reachable: raw,
-        },
+        ask(AskKind::NewAccess, access_off),
+        ask(AskKind::BeyondOneChat, raw_off),
+        ask(AskKind::AccountAndSessions, raw_off),
+        ask(AskKind::MoneyStarsGifts, raw_off),
     ];
     if inputs.confirm_sends {
-        always_asks.push(AlwaysAsk {
-            kind: AskKind::EachSend,
-            reachable: inputs.enabled && chats.writable_anywhere(),
-        });
+        always_asks.push(ask(AskKind::EachSend, send_off));
     }
     let mut summary = AccessSummary {
         enabled: inputs.enabled,
@@ -604,6 +592,7 @@ pub fn live_inputs(account: &AccountKey) -> Inputs {
         takeover,
         screenshots_built: super::ui_driver::shot::CAPTURE_BUILT,
         grants: super::grants::for_account(account),
+        window_shows_everything: super::grants::window_shows_everything(),
         connected: super::activity::connected()
             .into_iter()
             .filter(|c| !super::activity::is_revoked(c.id))
@@ -695,7 +684,7 @@ impl AccessSummary {
             "never": [
                 "hide reading, online status or typing",
                 "bulk export",
-                "open Settings or sign out",
+                "open Settings, sign out or delete the account",
                 "pay for messages",
             ],
         })
@@ -713,7 +702,10 @@ impl AccessSummary {
                 "Channels you own: {}",
                 word(self.chats.effective.own_channels)
             ),
-            format!("All other chats: {}", word(self.chats.effective.other_chats)),
+            format!(
+                "All other chats: {}",
+                word(self.chats.effective.other_chats)
+            ),
             format!(
                 "Contacts: {}",
                 if self.chats.contacts { "read" } else { "off" }

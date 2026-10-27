@@ -284,3 +284,23 @@ fn every_tool_has_a_plain_name() {
         );
     }
 }
+
+#[test]
+fn an_ask_that_cant_come_up_says_why_in_its_own_words() {
+    use super::super::agent_tools::ask_unreachable;
+    use quill::agent::summary::OffReason;
+    use quill::lang::{keys, tr};
+    // "Each send" with nothing writable must not blame raw requests.
+    assert_eq!(
+        ask_unreachable(OffReason::NothingWritable),
+        tr(keys::Q_AGENT_PAGE_ASK_UNREACHABLE_WRITABLE)
+    );
+    assert_eq!(
+        ask_unreachable(OffReason::RawCallsOff),
+        tr(keys::Q_AGENT_PAGE_ASK_UNREACHABLE_RAW)
+    );
+    assert_ne!(
+        ask_unreachable(OffReason::NothingWritable),
+        ask_unreachable(OffReason::RawCallsOff)
+    );
+}

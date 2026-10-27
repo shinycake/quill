@@ -195,6 +195,20 @@ fn load() -> BTreeMap<String, AccountGrants> {
         .unwrap_or_default()
 }
 
+/// The account Quill has open: the one agents' tools and the window driver
+/// act on.
+pub fn open_account() -> AccountKey {
+    crate::settings::safe_app_root()
+        .map(|root| crate::settings::active_account(&root))
+        .unwrap_or_else(AccountKey::primary)
+}
+
+/// Whether the window driver shows agents the whole window: All chats is
+/// on for the open account, whatever account Settings is editing.
+pub fn window_shows_everything() -> bool {
+    for_account(&open_account()).all_chats.is_some()
+}
+
 /// The grants of `account` (the defaults until the user changes them).
 pub fn for_account(account: &AccountKey) -> AccountGrants {
     if let Ok(guard) = CACHE.read()

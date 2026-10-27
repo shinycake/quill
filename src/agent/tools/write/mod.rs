@@ -21,6 +21,7 @@ Output: chat, messages [{id, date, from, kind, text, styles}] with the final mes
         schema: send::send_message_schema,
         run: send::send_message,
         read_only: false,
+        confirms_sends: true,
     },
     Tool {
         name: "send_file",
@@ -31,6 +32,7 @@ Output: chat, messages [{id, kind, file}].",
         schema: send::send_file_schema,
         run: send::send_file,
         read_only: false,
+        confirms_sends: true,
     },
     Tool {
         name: "send_poll",
@@ -41,6 +43,7 @@ Output: chat, messages [{id, kind: poll}].",
         schema: send::send_poll_schema,
         run: send::send_poll,
         read_only: false,
+        confirms_sends: true,
     },
     Tool {
         name: "send_sticker",
@@ -50,6 +53,7 @@ Example input: {\"chat\": \"Ann Lee\", \"emoji\": \"👍\"}. Output: chat, messa
         schema: send::send_sticker_schema,
         run: send::send_sticker,
         read_only: false,
+        confirms_sends: true,
     },
     Tool {
         name: "forward_messages",
@@ -60,6 +64,7 @@ Output: chat (the destination), messages [{id, forwarded_from}].",
         schema: send::forward_schema,
         run: send::forward_messages,
         read_only: false,
+        confirms_sends: true,
     },
     Tool {
         name: "edit_message",
@@ -69,6 +74,7 @@ Example input: {\"chat\": \"saved\", \"message_id\": 4194304, \"text\": \"Fixed 
         schema: change::edit_schema,
         run: change::edit_message,
         read_only: false,
+        confirms_sends: true,
     },
     Tool {
         name: "delete_messages",
@@ -78,6 +84,7 @@ Example input: {\"chat\": \"saved\", \"message_ids\": [4194304]}. Output: chat, 
         schema: change::delete_schema,
         run: change::delete_messages,
         read_only: false,
+        confirms_sends: true,
     },
     Tool {
         name: "react",
@@ -87,6 +94,7 @@ Example input: {\"chat\": -1001234567890, \"message_id\": 4194304, \"emoji\": \"
         schema: change::react_schema,
         run: change::react,
         read_only: false,
+        confirms_sends: true,
     },
     Tool {
         name: "pin_message",
@@ -96,6 +104,7 @@ Example input: {\"chat\": \"saved\", \"message_id\": 4194304}. Output: chat, mes
         schema: change::pin_schema,
         run: change::pin_message,
         read_only: false,
+        confirms_sends: true,
     },
     Tool {
         name: "set_draft",
@@ -105,6 +114,7 @@ Example input: {\"chat\": \"Ann Lee\", \"text\": \"Sounds good, see you at 6\"}.
         schema: manage::draft_schema,
         run: manage::set_draft,
         read_only: false,
+        confirms_sends: false,
     },
     Tool {
         name: "mark_read",
@@ -114,6 +124,7 @@ Example input: {\"chat\": \"@some_bot\"}. Output: chat, read.",
         schema: manage::mark_read_schema,
         run: manage::mark_read,
         read_only: false,
+        confirms_sends: false,
     },
     Tool {
         name: "mute_chat",
@@ -123,6 +134,7 @@ Example input: {\"chat\": -1001234567890, \"minutes\": 480}. Output: chat, mute_
         schema: manage::mute_schema,
         run: manage::mute_chat,
         read_only: false,
+        confirms_sends: false,
     },
     Tool {
         name: "archive_chat",
@@ -132,6 +144,7 @@ Example input: {\"chat\": \"@some_bot\"}. Output: chat, archived.",
         schema: manage::archive_schema,
         run: manage::archive_chat,
         read_only: false,
+        confirms_sends: false,
     },
     Tool {
         name: "set_chat_folder",
@@ -141,5 +154,6 @@ Example input: {\"chat\": \"Ann Lee\", \"folder\": \"Work\"}. Output: chat, fold
         schema: manage::folder_schema,
         run: manage::set_chat_folder,
         read_only: false,
+        confirms_sends: false,
     },
 ];

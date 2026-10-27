@@ -37,6 +37,7 @@ Example input: {\"request\": {\"@type\": \"getChatPinnedMessage\", \"chat_id\": 
     schema,
     run,
     read_only: false,
+    confirms_sends: true,
 }];
 
 /// Text answers longer than this are cut; `structuredContent` keeps all.
