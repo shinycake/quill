@@ -3,14 +3,16 @@
 //! action. Each row opens the chat or message it touched, and offers Undo
 //! where that is honest: deleting messages an agent sent (only those; the
 //! log holds the ids of the messages its own sends made) and taking back a
-//! reaction it added. Both go through the normal delete and reaction paths.
+//! reaction it added. Both go through the normal delete and reaction paths,
+//! which act on the open account, so another account's log shows neither
+//! Open nor Undo.
 #![deny(clippy::indexing_slicing)]
 
 use super::QuillApp;
 use super::agent_access::empty_line;
 use super::rows::group;
 use crate::ui::agent_labels::{agent_label, now_unix, tool_label};
-use crate::ui::agent_state::{ACTIVITY_PAGE, visible_activity};
+use crate::ui::agent_state::{ACTIVITY_PAGE, active_account, visible_activity};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
@@ -65,9 +67,11 @@ fn distinct<T: PartialEq + Clone>(log: &[Action], field: impl Fn(&Action) -> T) 
 
 impl QuillApp {
     /// What Undo would do for `action`, from what Quill knows now: the
-    /// messages still exist, or the reaction is still the user's.
+    /// messages still exist, or the reaction is still the user's. Only for
+    /// the open account: Undo acts through its session.
     fn agent_undo_for(&self, action: &Action) -> Option<Undo> {
-        if !action.ok || action.declined || action.undone {
+        if !action.ok || action.declined || action.undone || !self.agent_settings_on_open_account()
+        {
             return None;
         }
         let session = self.session()?;
@@ -317,6 +321,8 @@ impl QuillApp {
             format!("{}: {what}", agent_label(&action.agent))
         };
         let undo = self.agent_undo_for(action);
+        // Open goes to a chat of the open account.
+        let can_open = action.chat_id != 0 && self.agent_settings_on_open_account();
         let entry = action.id;
         let chat = action.chat_id;
         let message = action.message_ids.first().copied();
@@ -411,7 +417,7 @@ impl QuillApp {
                         })),
                 )
             })
-            .when(chat != 0, |this| {
+            .when(can_open, |this| {
                 this.child(
                     Button::new(SharedString::from(format!("agent-activity-{index}-open")))
                         .icon(IconName::ArrowUpRight)
@@ -436,6 +442,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.agent_settings_on_open_account() {
+            return;
+        }
         self.close_settings();
         match message_id {
             Some(id) => self.go_to_message_in(ChatId(chat_id), MessageId(id), window, cx),
@@ -459,6 +468,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if quill::agent::ui_driver::guard::refuse_if_injecting("undo what an agent did") {
+            return;
+        }
+        if !self.agent_settings_on_open_account() {
             return;
         }
         let account = self.agent_settings_account();
@@ -490,6 +502,11 @@ impl QuillApp {
                             let ids = ids.clone();
                             let account = account.clone();
                             let _ = app.update(cx, |this, cx| {
+                                // The open account may have changed while
+                                // the box was up.
+                                if active_account() != account {
+                                    return;
+                                }
                                 this.delete_selection(ChatId(chat_id), &ids, true, cx);
                                 activity::mark_undone(&account, entry);
                                 cx.notify();

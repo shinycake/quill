@@ -20,6 +20,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::agent::summary::{AccessSummary, Claim, Place, Section, WindowState, WindowView};
+use quill::ids::AccountKey;
 use quill::lang::{keys, tr, tr_with, trn};
 use quill::settings_catalog::Page;
 
@@ -90,9 +91,9 @@ pub(in crate::ui) struct AgentPageUi {
     pub(in crate::ui) focus_chat: Option<i64>,
     pub(in crate::ui) filter: ActivityFilter,
     pub(in crate::ui) picker: Option<ChatPicker>,
-    /// The chats the picker was built from (their count and the ids it
-    /// leaves out), so it is rebuilt only when they change.
-    picker_key: Option<(usize, Vec<i64>)>,
+    /// The chats the picker was built from (the account, their count and
+    /// the ids it leaves out), so it is rebuilt only when they change.
+    picker_key: Option<(AccountKey, usize, Vec<i64>)>,
     /// The "Reset the agent token?" dialog is open.
     pub(in crate::ui) reset_confirm: bool,
 }
@@ -398,7 +399,14 @@ impl QuillApp {
         }
     }
 
+    /// "Add a chat" lists the open account's chats, so it exists only while
+    /// the page edits that account.
     fn ensure_agent_chat_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.agent_settings_on_open_account() {
+            self.agent_ui.page.picker = None;
+            self.agent_ui.page.picker_key = None;
+            return;
+        }
         let account = self.agent_settings_account();
         let added: Vec<i64> = quill::agent::grants::for_account(&account)
             .chats
@@ -406,7 +414,7 @@ impl QuillApp {
             .copied()
             .collect();
         let count = self.session().map_or(0, |s| s.chats.len());
-        let key = (count, added.clone());
+        let key = (account, count, added.clone());
         if self.agent_ui.page.picker_key.as_ref() == Some(&key)
             && self.agent_ui.page.picker.is_some()
         {

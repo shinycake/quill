@@ -7,13 +7,17 @@ use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
-use gpui_kit::{AppContext, TestAppContext, VisualTestContext, px, size};
+use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::agent::access;
 use quill::agent::activity::{self, Action};
 use quill::ids::AccountKey;
 use quill::settings_catalog::Page;
 
 fn open_page(cx: &mut TestAppContext) -> VisualTestContext {
+    open_page_app(cx).1
+}
+
+fn open_page_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     let root = quill::scratch::process_dir("quill-agent-activity-ui");
     let _ = std::fs::create_dir_all(&root);
     quill::settings::use_isolated_app_root(root);
@@ -40,7 +44,7 @@ fn open_page(cx: &mut TestAppContext) -> VisualTestContext {
         cx.notify();
     });
     settle(&mut vcx);
-    vcx
+    (app, vcx)
 }
 
 fn settle(vcx: &mut VisualTestContext) {
@@ -139,4 +143,79 @@ fn connected_agents_are_listed_while_they_are_connected(cx: &mut TestAppContext)
     drop(agent);
     settle(vcx);
     assert!(vcx.debug_bounds("agent-connected-row-0").is_none());
+}
+
+/// Whether the last frame drew element `id`.
+fn shown(vcx: &mut VisualTestContext, id: &str) -> bool {
+    let id = gpui_kit::SharedString::from(id.to_string());
+    vcx.update(|window, _| window.try_find(id).is_some())
+}
+
+/// A send logged for `account`, with a message that still exists.
+fn record_send(account: &AccountKey) {
+    activity::record(Action {
+        time: 0,
+        account: account.clone(),
+        agent: "Claude Code".into(),
+        tool: "send_message".into(),
+        chat_id: 7,
+        chat_title: "Ann Lee".into(),
+        summary: "hi".into(),
+        ok: true,
+        declined: false,
+        id: 0,
+        message_ids: vec![42],
+        undone: false,
+    });
+}
+
+#[gpui_kit::test]
+fn another_accounts_log_offers_no_undo_open_or_add_a_chat(cx: &mut TestAppContext) {
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx) = open_page_app(cx);
+    let vcx = &mut vcx;
+    let Some(root) = quill::settings::safe_app_root() else {
+        panic!("an app root");
+    };
+    let other = quill::settings::add_account(&root, "Other")
+        .unwrap_or_else(|err| panic!("a second account: {err}"));
+    record_send(&AccountKey::primary());
+    record_send(&other);
+    settle(vcx);
+    // The open account: its send can be undone and opened, and chats can
+    // be added.
+    assert!(shown(vcx, "agent-activity-0-undo"));
+    assert!(shown(vcx, "agent-activity-0-open"));
+    assert!(vcx.debug_bounds("agent-add-chat").is_some());
+
+    // Another account: Undo and Open would act on the open account's
+    // chats, and the picker lists them, so none of them shows.
+    app.update(vcx, |app, cx| {
+        app.agent_ui.picked = Some(other.clone());
+        cx.notify();
+    });
+    settle(vcx);
+    assert!(vcx.debug_bounds("agent-activity-0").is_some(), "its log");
+    assert!(!shown(vcx, "agent-activity-0-undo"));
+    assert!(!shown(vcx, "agent-activity-0-open"));
+    assert!(vcx.debug_bounds("agent-add-chat").is_none());
+    // Adding a chat by hand goes nowhere either.
+    app.update(vcx, |app, cx| app.add_agent_chat(7, cx));
+    assert!(
+        !quill::agent::grants::for_account(&other)
+            .chats
+            .contains_key(&7)
+    );
+    assert!(
+        !quill::agent::grants::for_account(&AccountKey::primary())
+            .chats
+            .contains_key(&7)
+    );
+
+    app.update(vcx, |app, cx| {
+        app.agent_ui.picked = None;
+        cx.notify();
+    });
+    let _ = quill::settings::remove_account(&root, &other);
+    activity::clear();
 }

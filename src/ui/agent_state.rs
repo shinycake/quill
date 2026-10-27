@@ -122,9 +122,7 @@ impl QuillApp {
 
 /// The account agents act on.
 pub(super) fn active_account() -> AccountKey {
-    quill::settings::safe_app_root()
-        .map(|root| quill::settings::active_account(&root))
-        .unwrap_or_else(AccountKey::primary)
+    grants::open_account()
 }
 
 /// Whether TDLib's chat id layout puts `chat_id` in the secret chats' range.
@@ -198,6 +196,13 @@ impl QuillApp {
             .clone()
             .filter(|picked| accounts.iter().any(|record| &record.key == picked))
             .unwrap_or_else(active_account)
+    }
+
+    /// Whether Settings edits the account Quill has open. Undo, Open and
+    /// Add a chat act through the open session, so they show only then;
+    /// another account's grants and log are shown but not acted on.
+    pub(super) fn agent_settings_on_open_account(&self) -> bool {
+        self.agent_settings_account() == active_account()
     }
 
     /// The signed-in accounts, in the registry's order.

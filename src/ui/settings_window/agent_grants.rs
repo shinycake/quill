@@ -136,13 +136,7 @@ impl QuillApp {
                     },
                     cx,
                 );
-                grant_row(
-                    tr(title).into(),
-                    hint.map(Into::into),
-                    control,
-                    None,
-                    muted,
-                )
+                grant_row(tr(title).into(), hint.map(Into::into), control, None, muted)
             })
             .collect();
         section = section
@@ -281,14 +275,18 @@ impl QuillApp {
             rows.push(action_row(
                 tr(keys::Q_AGENT_PAGE_ADD_CHAT),
                 Some(tr(keys::Q_AGENT_PAGE_ADD_CHAT_HINT).into()),
-                div().id("agent-add-chat").w(px(240.)).child(
-                    Select::new(picker)
-                        .placeholder(tr(keys::Q_AGENT_PAGE_ADD_CHAT))
-                        .search_placeholder(tr(keys::Q_AGENT_PAGE_ADD_CHAT_SEARCH))
-                        .accessibility_label(tr(keys::Q_AGENT_PAGE_ADD_CHAT))
-                        .menu_max_h(px(320.))
-                        .small(),
-                ),
+                div()
+                    .id("agent-add-chat")
+                    .debug_selector(|| "agent-add-chat".to_string())
+                    .w(px(240.))
+                    .child(
+                        Select::new(picker)
+                            .placeholder(tr(keys::Q_AGENT_PAGE_ADD_CHAT))
+                            .search_placeholder(tr(keys::Q_AGENT_PAGE_ADD_CHAT_SEARCH))
+                            .accessibility_label(tr(keys::Q_AGENT_PAGE_ADD_CHAT))
+                            .menu_max_h(px(320.))
+                            .small(),
+                    ),
                 cx,
             ));
         }
@@ -303,9 +301,11 @@ impl QuillApp {
         ]
     }
 
-    /// A chat's title as Quill knows it now, else as it was granted.
+    /// A chat's title as the open account knows it now, else as it was
+    /// granted.
     fn agent_chat_title(&self, chat_id: i64) -> String {
         self.session()
+            .filter(|_| self.agent_settings_on_open_account())
             .and_then(|s| s.chats.get(&chat_id))
             .map(|chat| chat.title.clone())
             .filter(|title| !title.trim().is_empty())
@@ -318,8 +318,12 @@ impl QuillApp {
             .unwrap_or_default()
     }
 
-    /// "Add a chat": the picked chat at Read, the narrowest scope.
+    /// "Add a chat": the picked chat at Read, the narrowest scope. The
+    /// chat comes from the open account, so it goes to that account only.
     pub(super) fn add_agent_chat(&mut self, chat_id: i64, cx: &mut Context<Self>) {
+        if !self.agent_settings_on_open_account() {
+            return;
+        }
         let account = self.agent_settings_account();
         let title = self.agent_chat_title(chat_id);
         grants::update(&account, |g| {
