@@ -127,7 +127,7 @@ fn a_summary_line_scrolls_to_its_section(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn tool_rows_follow_the_raw_switch_and_their_buttons_turn_things_on(cx: &mut TestAppContext) {
+fn tool_rows_follow_the_raw_switch_and_a_row_button_shares_contacts(cx: &mut TestAppContext) {
     let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
     let (app, _shell, mut vcx) = open_page(cx);
     let vcx = &mut vcx;
@@ -142,10 +142,14 @@ fn tool_rows_follow_the_raw_switch_and_their_buttons_turn_things_on(cx: &mut Tes
     vcx.update(|window, cx| window.click("agent-raw-calls-switch", cx));
     settle(vcx);
     assert!(!access::raw_calls(), "the group switch turns raw calls off");
-    bring_into_view(&app, vcx, "agent-tool-td_call-fix-raw");
-    vcx.update(|window, cx| window.click("agent-tool-td_call-fix-raw", cx));
+    assert!(
+        !shown(vcx, "agent-tool-td_call-fix-raw"),
+        "the switch right above is the way back, not a button on each row"
+    );
+    bring_into_view(&app, vcx, "agent-raw-calls-switch");
+    vcx.update(|window, cx| window.click("agent-raw-calls-switch", cx));
     settle(vcx);
-    assert!(access::raw_calls(), "the row's button turns them back on");
+    assert!(access::raw_calls());
 
     // Contacts start off: the row says so and offers to share them.
     let account = AccountKey::primary();

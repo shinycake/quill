@@ -234,6 +234,15 @@ fn fix_label(fix: Fix) -> &'static str {
     })
 }
 
+/// What a group's switch turns on, for the groups that have one.
+fn group_switch(group: ToolGroup) -> Option<Fix> {
+    match group {
+        ToolGroup::Raw => Some(Fix::TurnOnRawCalls),
+        ToolGroup::Window => Some(Fix::TurnOnWindowControl),
+        ToolGroup::Read | ToolGroup::Write => None,
+    }
+}
+
 fn fix_name(fix: Fix) -> &'static str {
     match fix {
         Fix::TurnOnAccess => "access",
@@ -372,6 +381,16 @@ impl QuillApp {
                 Some(asks_line(asks)),
                 None,
             ),
+            // The group's own switch sits right above and says why.
+            ToolState::Off(reason)
+                if reason.fix().is_some() && reason.fix() == group_switch(tool.group) =>
+            {
+                (
+                    Tag::secondary().child(tr(keys::Q_AGENT_PAGE_STATE_OFF)),
+                    None,
+                    None,
+                )
+            }
             ToolState::Off(reason) => (
                 Tag::secondary().child(tr(keys::Q_AGENT_PAGE_STATE_OFF)),
                 Some(off_reason(reason)),

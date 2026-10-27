@@ -171,7 +171,7 @@
 "qll_agent_page_ask_money_hint" = "Anything that spends money or Stars, or buys or sends a gift.";
 "qll_agent_page_ask_each_send" = "Each send";
 "qll_agent_page_ask_each_send_hint" = "Every message, edit, delete, reaction and pin, because Confirm each send is on.";
-"qll_agent_page_ask_unreachable_raw" = "Raw TDLib calls are off, so agents can't ask for this.";
+"qll_agent_page_ask_unreachable_raw" = "You turned raw requests off, so agents can't ask for this.";
 "qll_agent_page_never_title" = "Never allowed";
 "qll_agent_page_never_hidden" = "Hiding that you read, are online or are typing";
 "qll_agent_page_never_hidden_hint" = "Agents can't change read receipts, your online status or typing.";
