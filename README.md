@@ -97,7 +97,7 @@ quill agent connect claude-desktop --yes   # or cursor: adds Quill to the app's 
 quill agent install-skill                  # the Quill skill for Claude Code
 ```
 
-`quill` is Quill's own executable (on Windows `%LOCALAPPDATA%\Programs\Quill\quill.exe`, on Linux `~/.local/bin/quill`). Scripts and agents that don't speak MCP use the same tools from the command line: `quill agent status`, `quill agent read --chat saved`, `quill agent send --chat @some_bot --text /start`, or `quill agent call <tool> --json '{…}'` for any tool. `quill agent --help` lists every command and exit code.
+`quill` is Quill's own executable (on Windows `%LOCALAPPDATA%\Programs\Quill\quill.exe`, on Linux `~/.local/bin/quill`). Scripts and agents that don't speak MCP use the same tools from the command line: `quill agent status`, `quill agent read --chat saved`, `quill agent send --chat @some_bot --text /start`, or `quill agent call <tool> --json '{…}'` for any tool. `quill agent --help` lists every command and exit code. On Windows, run these commands with `quill-cli.exe` from the same folder (`quill-cli agent status`): `quill.exe` is a windowed program, so a terminal doesn't wait for it or get its exit code, and `quill-cli.exe` does both.
 
 Agents can read the chats you grant (by default Saved Messages, bots and your own channels), search them, send and edit messages, react, and manage drafts and folders. They can also make raw TDLib calls under the same grants and, if you turn on a second switch, click and type in Quill's window. Quill asks you before an agent goes outside its grants. Every send shows in an activity log, can wait for your click, and is paced to stay inside Telegram's limits.
 
