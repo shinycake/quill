@@ -381,7 +381,7 @@ impl QuillApp {
                 cx.notify();
             });
         let body = div()
-            .id("agent-reset-token")
+            .id("agent-reset-dialog")
             .text_sm()
             .child(tr(keys::Q_AGENT_PAGE_RESET_BODY))
             .into_any_element();

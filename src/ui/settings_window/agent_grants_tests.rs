@@ -1,4 +1,4 @@
-//! The grants section of Settings > Advanced > Agent access: segmented
+//! The grants section of Settings > Agent access: segmented
 //! controls change the grant, "All other chats" asks first, contacts and
 //! the chats the user added.
 use crate::ui::agent_state::{TEST_LOCK, reset_for_test};

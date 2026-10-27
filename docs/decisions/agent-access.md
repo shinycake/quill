@@ -3,7 +3,7 @@
 Agent access lets AI agents on the user's own computer (Claude Code, Claude
 Desktop, Cursor, any MCP client) use their Telegram account through the
 Quill that is already running. It ships in six phases behind one switch,
-Settings > Advanced > Agent access, which is off by default. This record
+Settings > Agent access, which is off by default. This record
 covers phase 1, the channel and the bridge. Later phases add sections here.
 
 ## Why through the running Quill

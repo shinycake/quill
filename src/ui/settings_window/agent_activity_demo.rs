@@ -20,7 +20,12 @@ fn demo_activity(app: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) 
             .map(activity::connect)
             .collect();
         for (guard, tools) in guards.iter().zip([
-            &["quill_status", "list_unread", "read_history", "send_message"][..],
+            &[
+                "quill_status",
+                "list_unread",
+                "read_history",
+                "send_message",
+            ][..],
             &["quill_status", "read_ui_tree", "click_element"][..],
         ]) {
             for tool in tools {

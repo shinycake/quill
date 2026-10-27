@@ -507,8 +507,10 @@ impl QuillApp {
             .chats
             .values()
             .filter(|chat| {
-                matches!(chat.kind, quill::telegram::envelope::ChatKind::Private { .. })
-                    && !chat.title.trim().is_empty()
+                matches!(
+                    chat.kind,
+                    quill::telegram::envelope::ChatKind::Private { .. }
+                ) && !chat.title.trim().is_empty()
             })
             .map(|chat| chat.id.0)
             .collect();
@@ -551,3 +553,8 @@ crate::ui::screenshot_demo::register_demos![
         }
     ),
 ];
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "agent_page_tests.rs"]
+mod tests;
