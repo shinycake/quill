@@ -124,39 +124,105 @@ pub fn find_tool(command: &str) -> Option<ToolSpec> {
     tools().into_iter().find(|tool| tool.name == name)
 }
 
-/// Pull the global options out of the arguments, wherever they are.
-pub fn split_global(args: &[String]) -> Result<(Global, Vec<String>), Failure> {
+/// The command the words so far name, as far as flags go: which of its
+/// flags take a value.
+enum Command {
+    /// Not named yet (only global options so far), or `call` before its tool.
+    Pending {
+        call: bool,
+    },
+    Tool(ToolSpec),
+    /// A built-in command, with the flags of it that take a value.
+    Builtin(&'static [&'static str]),
+}
+
+impl Command {
+    fn named(word: &str, call: bool) -> Self {
+        if !call && word == "call" {
+            return Self::Pending { call: true };
+        }
+        if !call {
+            match word {
+                "install-skill" => return Self::Builtin(&["dir"]),
+                "connect" | "describe" | "guide" | "help" => return Self::Builtin(&[]),
+                _ => {}
+            }
+        }
+        find_tool(word).map_or(Self::Builtin(&[]), Self::Tool)
+    }
+
+    /// Whether `--flag` (no `=value`) takes the next word as its value.
+    fn takes_value(&self, flag: &str) -> bool {
+        match self {
+            Self::Pending { .. } => false,
+            Self::Builtin(flags) => flags.contains(&flag),
+            Self::Tool(tool) => {
+                let key = flag.replace('-', "_");
+                key == "args"
+                    || tool
+                        .properties()
+                        .iter()
+                        .any(|(k, schema)| **k == key && !is_boolean(schema))
+            }
+        }
+    }
+}
+
+/// Pull the global options out of the arguments, wherever they are, but only
+/// in flag position: the word after a flag that takes a value is that
+/// flag's, so `--text -h` sends "-h". An error comes with the options read
+/// so far, so a failure still honours --json.
+pub fn split_global(args: &[String]) -> Result<(Global, Vec<String>), (Global, Failure)> {
     let mut global = Global::default();
     let mut rest = Vec::new();
+    let mut command = Command::Pending { call: false };
     let mut iter = args.iter().peekable();
     while let Some(arg) = iter.next() {
-        match arg.as_str() {
-            "--help" | "-h" => global.help = true,
-            "--start" => global.start = true,
-            // `--json '{…}'` is the arguments of a tool; plain `--json` is output.
-            "--json"
+        let (name, inline) = match arg.split_once('=') {
+            Some((name, value)) if name.starts_with("--") => (name, Some(value)),
+            _ => (arg.as_str(), None),
+        };
+        match (name, inline) {
+            ("--help" | "-h", None) => global.help = true,
+            ("--start", None) => global.start = true,
+            // `--json '{…}'` (or `--json={…}`) is the arguments of a tool, and
+            // asks for JSON output too; plain `--json` is output only.
+            ("--json", Some(_)) => {
+                global.json = true;
+                rest.push(arg.clone());
+            }
+            ("--json", None)
                 if iter
                     .peek()
                     .is_some_and(|next| next.trim_start().starts_with('{')) =>
             {
                 global.json = true;
                 rest.push(arg.clone());
-                if let Some(next) = iter.next() {
-                    rest.push(next.clone());
-                }
+                rest.extend(iter.next().cloned());
             }
-            "--json" => global.json = true,
-            "--images" | "--client" => {
-                let value = iter
-                    .next()
-                    .ok_or_else(|| Failure::usage(format!("{arg} needs a value.")))?;
-                if arg == "--images" {
-                    global.images = Some(value.clone());
+            ("--json", None) => global.json = true,
+            ("--images" | "--client", _) => {
+                let Some(value) = inline.map(str::to_string).or_else(|| iter.next().cloned())
+                else {
+                    let failure = Failure::usage(format!("{name} needs a value."));
+                    return Err((global, failure));
+                };
+                if name == "--images" {
+                    global.images = Some(value);
                 } else {
-                    global.client = Some(value.clone());
+                    global.client = Some(value);
                 }
             }
-            _ => rest.push(arg.clone()),
+            _ => {
+                rest.push(arg.clone());
+                if let Some(flag) = name.strip_prefix("--") {
+                    if inline.is_none() && command.takes_value(flag) {
+                        rest.extend(iter.next().cloned());
+                    }
+                } else if let Command::Pending { call } = command {
+                    command = Command::named(arg, call);
+                }
+            }
         }
     }
     Ok((global, rest))
@@ -168,6 +234,9 @@ pub fn split_global(args: &[String]) -> Result<(Global, Vec<String>), Failure> {
 pub fn parse_tool_args(tool: &ToolSpec, args: &[String]) -> Result<Value, Failure> {
     let properties = tool.properties();
     let mut arguments = Map::new();
+    // Array fields set by a flag, which a repeat of the flag adds to; a
+    // field from --args is replaced instead.
+    let mut from_flags: Vec<String> = Vec::new();
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         let Some(flag) = arg.strip_prefix("--") else {
@@ -189,6 +258,7 @@ pub fn parse_tool_args(tool: &ToolSpec, args: &[String]) -> Result<Value, Failur
                     "--{flag} takes a JSON object, like --{flag} '{{\"chat\": \"saved\"}}'."
                 )));
             };
+            from_flags.retain(|key| !object.contains_key(key));
             arguments.extend(object);
             continue;
         }
@@ -204,6 +274,18 @@ pub fn parse_tool_args(tool: &ToolSpec, args: &[String]) -> Result<Value, Failur
                 flag_list(tool)
             )));
         };
+        if negated && !is_boolean(schema) {
+            return Err(Failure::usage(format!(
+                "--{flag}: --no- only goes before an on/off flag, and --{} is not one.",
+                key.replace('_', "-")
+            )));
+        }
+        if negated && inline.is_some() {
+            return Err(Failure::usage(format!(
+                "--{flag} takes no value. Use --{flag} alone, or --{}=true|false.",
+                key.replace('_', "-")
+            )));
+        }
         let value = if is_boolean(schema) && inline.is_none() {
             Value::Bool(!negated)
         } else {
@@ -214,12 +296,16 @@ pub fn parse_tool_args(tool: &ToolSpec, args: &[String]) -> Result<Value, Failur
                 Failure::usage(format!("--{flag}: {text} is not {}.", type_hint(schema)))
             })?
         };
+        let repeated = from_flags.contains(name);
         match (arguments.get_mut(name.as_str()), value) {
             // A repeated array flag adds to the list.
-            (Some(Value::Array(list)), Value::Array(more)) => list.extend(more),
+            (Some(Value::Array(list)), Value::Array(more)) if repeated => list.extend(more),
             (_, value) => {
                 arguments.insert((*name).clone(), value);
             }
+        }
+        if !repeated {
+            from_flags.push((*name).clone());
         }
     }
     let missing: Vec<&str> = tool
@@ -484,19 +570,29 @@ pub fn tool_help(tool: &ToolSpec) -> String {
     out
 }
 
+/// Why Windows has `quill-cli.exe`, for the help.
+pub const WINDOWS_NOTE: &str =
+    "On Windows, run quill-cli.exe, next to quill.exe, in place of quill.exe:
+quill-cli agent status. quill.exe is a windowed program, so a terminal does
+not wait for it and %ERRORLEVEL% does not get its exit code; quill-cli.exe
+waits, prints the output in order and passes the exit code on.
+";
+
 /// `quill agent --help`.
 pub fn main_help() -> String {
-    let mut out = String::from(
+    let mut out = format!(
         "quill agent: use your Telegram account from scripts and agents, through the Quill running on this computer.
 
 Usage: quill agent <command> [flags] [--json] [--start]
 
-Agent access must be on in Quill (Settings > Advanced > Agent access). Each
+Agent access must be on in Quill ({}). Each
 command is one call to a tool in Quill, under the same grants, pacing and
 confirmations as MCP agents. MCP apps use `quill mcp` instead.
 
+{WINDOWS_NOTE}
 Commands:
 ",
+        crate::agent::SETTINGS_PLACE
     );
     for (alias, tool) in ALIASES {
         let title = find_tool(tool).map(|t| t.title).unwrap_or_default();
@@ -571,7 +667,8 @@ same registry Quill serves, and works when Quill is not running.
 Writes the Quill Agent Skill (SKILL.md and guide.md) to ~/.claude/skills/quill,
 or to DIR. Running it again updates files you haven't changed. If you edited
 one, it shows the difference and keeps your version; --force replaces it
-and saves yours as <file>.bak. --print writes SKILL.md to the terminal.
+and saves yours as <file>.bak, or <file>.2.bak and up when an older backup
+is there. --print writes SKILL.md to the terminal.
 "
         }
         "connect" => {
@@ -582,13 +679,22 @@ Shows how to add Quill to an MCP app, with this Quill's real path.
   claude-desktop  shows the entry for claude_desktop_config.json
   cursor          shows the entry for ~/.cursor/mcp.json
 --yes writes the entry into the app's config file. It merges with what is
-there and saves a backup first. --print prints only the command or JSON.
+there and saves a backup first, with the same permissions; a symlinked
+config stays a link. --print prints only the command or JSON.
 
 Config files:
   Claude Desktop  macOS: ~/Library/Application Support/Claude/claude_desktop_config.json
                   Windows: %APPDATA%\\Claude\\claude_desktop_config.json
+                  Windows, Microsoft Store: %LOCALAPPDATA%\\Packages\\Claude_*\\LocalCache\\Roaming\\Claude\\claude_desktop_config.json
                   Linux (unofficial builds): ~/.config/Claude/claude_desktop_config.json
   Cursor          ~/.cursor/mcp.json (Windows: %USERPROFILE%\\.cursor\\mcp.json)
+
+Claude Desktop from the Microsoft Store reads only the file in its package
+folder. When that folder exists, connect uses it, and says so when the
+%APPDATA% file exists too (that one is left alone).
+
+On macOS, connect refuses while Quill runs from a temporary copy (opened
+from Downloads or a disk image). Move Quill to /Applications first.
 "
         }
         _ => return None,

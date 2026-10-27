@@ -29,7 +29,11 @@ const AUTH_TIMEOUT: Duration = Duration::from_secs(5);
 /// sockets only; a Windows pipe notices at its next request).
 const IDLE_CHECK: Duration = Duration::from_secs(1);
 
-pub const OFF_MESSAGE: &str = "Agent access is off in Quill. Ask the user to turn it on in Quill: Settings > Advanced > Agent access.";
+pub const OFF_MESSAGE: &str = concat!(
+    "Agent access is off in Quill. Ask the user to turn it on in Quill: ",
+    settings_place!(),
+    "."
+);
 
 /// JSON-RPC error codes past the reserved range.
 pub mod code {

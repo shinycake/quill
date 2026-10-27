@@ -8,15 +8,23 @@ use super::keys::{self, KeyChord};
 
 /// The refusal while "Let agents drive Quill's window" is off; `quill agent`
 /// maps it to its own exit code.
-pub const DRIVER_OFF: &str = "Driving Quill's window is off. Ask the user to turn on \"Let agents drive Quill's window\" (Quill: Settings > Advanced > Agent access), then retry. The chat tools (list_chats, read_history, send_message...) work without it.";
+pub const DRIVER_OFF: &str = concat!(
+    "Driving Quill's window is off. Ask the user to turn on \"Let agents drive Quill's window\" (Quill: ",
+    settings_place!(),
+    "), then retry. The chat tools (list_chats, read_history, send_message...) work without it."
+);
 
 /// The switches: Agent access, "Let agents drive Quill's window", the
 /// pause and Stop. `None` when the driver may run.
 pub fn switch_refusal() -> Option<String> {
     if !crate::agent::access::enabled() {
         return Some(
-            "Agent access is off in Quill. Ask the user to turn it on (Quill: Settings > Advanced > Agent access), then retry."
-                .into(),
+            concat!(
+                "Agent access is off in Quill. Ask the user to turn it on (Quill: ",
+                settings_place!(),
+                "), then retry."
+            )
+            .into(),
         );
     }
     if !crate::agent::access::ui_driver() {

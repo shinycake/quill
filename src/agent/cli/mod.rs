@@ -9,6 +9,7 @@
 mod client;
 mod connect;
 mod describe;
+mod files;
 mod flags;
 mod skill;
 
@@ -27,7 +28,8 @@ pub enum Exit {
     NotRunning,
     /// Agent access is off in Quill.
     AccessOff,
-    /// Quill runs but has no agent token on disk, or refused it.
+    /// This client could not authenticate: no token on disk, a refused
+    /// token, no data folder, or another user's Quill.
     Token,
     /// "Let agents drive Quill's window" is off (UI tools only).
     WindowControlOff,
@@ -90,10 +92,14 @@ impl Exit {
             Exit::Usage => "The command or its flags are wrong. See quill agent help <command>.",
             Exit::NotRunning => "Quill is not running. Open Quill, or pass --start to start it.",
             Exit::AccessOff => {
-                "Agent access is off. The user turns it on in Quill: Settings > Advanced > Agent access."
+                concat!(
+                    "Agent access is off. The user turns it on in Quill: ",
+                    settings_place!(),
+                    "."
+                )
             }
             Exit::Token => {
-                "Quill is running but has no agent token on disk, or refused it. Retry; if it keeps failing, restart Quill."
+                "This client could not authenticate: Quill has no agent token on disk yet or refused it, Quill's data folder was not found, or the Quill answering is another user's Quill. Retry; if it keeps failing, restart Quill."
             }
             Exit::WindowControlOff => {
                 "\"Let agents drive Quill's window\" is off, so the UI tools refuse. The chat tools still work."
@@ -151,7 +157,8 @@ pub(crate) enum Output {
 pub fn run(args: &[String]) -> i32 {
     let (global, rest) = match flags::split_global(args) {
         Ok(split) => split,
-        Err(failure) => return report(&Global::default(), &failure),
+        // The options read before the error still count: --json gets JSON.
+        Err((global, failure)) => return report(&global, &failure),
     };
     match dispatch(&global, &rest) {
         Ok(output) => {
@@ -174,6 +181,7 @@ fn dispatch(global: &Global, rest: &[String]) -> Result<Output, Failure> {
             Some(topic) => help_for(topic).map(Output::Text),
             None => Ok(Output::Text(flags::main_help())),
         },
+        "call" if global.help => help_for(tail.first().unwrap_or(command)).map(Output::Text),
         _ if global.help => help_for(command).map(Output::Text),
         "describe" => Ok(Output::Json(describe::describe())),
         "guide" => Ok(Output::Text(crate::agent::guide::GUIDE.to_string())),
@@ -235,7 +243,7 @@ fn save_images(global: &Global, result: &Value) -> Result<Vec<String>, Failure> 
                 .collect()
         })
         .unwrap_or_default();
-    let Some(dir) = global.images.as_deref() else {
+    let Some(dir) = global.images.as_deref().filter(|_| !blocks.is_empty()) else {
         return Ok(Vec::new());
     };
     let dir = std::path::Path::new(dir);
@@ -370,3 +378,11 @@ mod tests;
 #[cfg(test)]
 #[path = "socket_tests.rs"]
 mod socket_tests;
+
+#[cfg(test)]
+#[path = "flags_tests.rs"]
+mod flags_tests;
+
+#[cfg(test)]
+#[path = "files_tests.rs"]
+mod files_tests;

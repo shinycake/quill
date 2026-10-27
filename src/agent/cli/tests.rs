@@ -113,13 +113,13 @@ fn global_options_come_out_wherever_they_are() {
     let (global, rest) = flags::split_global(&words(&[
         "send", "--chat", "saved", "--json", "--start", "--text", "hi",
     ]))
-    .unwrap_or_else(|f| panic!("{}", f.message));
+    .unwrap_or_else(|(_, f)| panic!("{}", f.message));
     assert!(global.json && global.start);
     assert_eq!(rest, words(&["send", "--chat", "saved", "--text", "hi"]));
 
     let (global, rest) =
         flags::split_global(&words(&["call", "read_history", "--json", "{\"chat\": 1}"]))
-            .unwrap_or_else(|f| panic!("{}", f.message));
+            .unwrap_or_else(|(_, f)| panic!("{}", f.message));
     assert!(global.json, "--json '{{…}}' also asks for JSON output");
     assert_eq!(
         rest,
@@ -256,7 +256,10 @@ fn install_skill_is_idempotent_and_keeps_edits_unless_forced() {
         Some(edited.clone())
     );
     let forced = skill::install(&dir, true).unwrap_or_else(|f| panic!("{}", f.message));
-    assert_eq!(forced.replaced, words(&["SKILL.md"]));
+    assert_eq!(
+        forced.replaced,
+        vec![("SKILL.md".to_string(), "SKILL.md.bak".to_string())]
+    );
     assert_eq!(
         std::fs::read_to_string(dir.join("SKILL.md.bak")).ok(),
         Some(edited)
@@ -286,7 +289,10 @@ fn connect_merges_into_the_config_and_keeps_a_backup() {
 
     assert_eq!(
         connect::merge_into(&path, &entry).ok(),
-        Some(connect::Merge::Written { backup: None })
+        Some(connect::Merge::Written {
+            backup: None,
+            replaced: false
+        })
     );
     let written: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_default())
         .unwrap_or_default();
@@ -301,9 +307,10 @@ fn connect_merges_into_the_config_and_keeps_a_backup() {
     let merged = connect::merge_into(&path, &entry).unwrap_or_else(|f| panic!("{}", f.message));
     let connect::Merge::Written {
         backup: Some(backup),
+        replaced: true,
     } = merged
     else {
-        panic!("backed up");
+        panic!("backed up and replaced: {merged:?}");
     };
     let backed_up: Value =
         serde_json::from_str(&std::fs::read_to_string(&backup).unwrap_or_default())
@@ -328,10 +335,13 @@ fn connect_merges_into_the_config_and_keeps_a_backup() {
 
 #[test]
 fn connect_prints_the_setup_with_this_executable() {
-    let line = connect::claude_code_command("/Applications/Quill.app/Contents/MacOS/quill");
+    let line = connect::claude_code_commands("/Applications/Quill.app/Contents/MacOS/quill", false);
     assert_eq!(
         line,
-        "claude mcp add quill -- /Applications/Quill.app/Contents/MacOS/quill mcp"
+        vec![(
+            "",
+            "claude mcp add quill -- /Applications/Quill.app/Contents/MacOS/quill mcp".to_string()
+        )]
     );
     let global = Global::default();
     let out = connect::run(&global, &words(&["cursor", "--print"]));
@@ -342,6 +352,6 @@ fn connect_prints_the_setup_with_this_executable() {
     assert_eq!(snippet["mcpServers"]["quill"]["args"], json!(["mcp"]));
     assert!(connect::run(&global, &words(&["vim"])).is_err());
     for app in [connect::App::ClaudeDesktop, connect::App::Cursor] {
-        assert!(app.config_path().is_some(), "{app:?}");
+        assert!(app.config_file().is_some(), "{app:?}");
     }
 }

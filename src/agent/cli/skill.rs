@@ -2,7 +2,7 @@
 //! a file still as Quill last wrote it is updated, a file the user edited
 //! is kept unless `--force` (which saves theirs as `<file>.bak`).
 
-use super::{Exit, Failure, Global, Output};
+use super::{Exit, Failure, Global, Output, files};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -81,18 +81,24 @@ pub struct Report {
     pub unchanged: Vec<String>,
     /// Files the user edited, kept, with the diff to the bundled version.
     pub kept: Vec<(String, String)>,
-    /// Edited files replaced by --force; the user's copy is `<file>.bak`.
-    pub replaced: Vec<String>,
+    /// Edited files replaced by --force, each with the backup file name
+    /// that holds the user's copy.
+    pub replaced: Vec<(String, String)>,
 }
 
 impl Report {
     fn to_json(&self, dir: &Path) -> Value {
+        let replaced: Vec<Value> = self
+            .replaced
+            .iter()
+            .map(|(file, backup)| json!({"file": file, "backup": backup}))
+            .collect();
         json!({
             "dir": dir.display().to_string(),
             "written": self.written,
             "updated": self.updated,
             "unchanged": self.unchanged,
-            "replaced": self.replaced,
+            "replaced": replaced,
         })
     }
 
@@ -102,11 +108,13 @@ impl Report {
             ("Wrote", &self.written),
             ("Updated", &self.updated),
             ("Already up to date", &self.unchanged),
-            ("Replaced (your version is in <file>.bak)", &self.replaced),
         ] {
             if !files.is_empty() {
                 lines.push(format!("{label}: {}", files.join(", ")));
             }
+        }
+        for (file, backup) in &self.replaced {
+            lines.push(format!("Replaced {file}; your version is in {backup}"));
         }
         lines.push("Claude Code picks it up in its next session.".into());
         lines.join("\n")
@@ -151,10 +159,15 @@ pub fn install(dir: &Path, force: bool) -> Result<Report, Failure> {
                 report.updated.push(name.to_string());
             }
             Ok(current) if force => {
-                let backup = dir.join(format!("{name}.bak"));
-                std::fs::write(&backup, current).map_err(|e| io_failure(&backup, e))?;
+                let like = files::permissions_of(&path);
+                let backup = files::back_up(&current, like.as_ref(), |n| backup_path(dir, name, n))
+                    .map_err(|e| io_failure(&backup_path(dir, name, 1), e))?;
+                let backup = backup
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default();
                 plan.push((path, bundled));
-                report.replaced.push(name.to_string());
+                report.replaced.push((name.to_string(), backup));
             }
             Ok(current) => report
                 .kept
@@ -167,21 +180,38 @@ pub fn install(dir: &Path, force: bool) -> Result<Report, Failure> {
             message.push_str(&format!("\n{name} (- yours, + Quill's):\n{diff}\n"));
         }
         message.push_str(
-            "\nRun again with --force to replace them; your versions are saved as <file>.bak.",
+            "\nRun again with --force to replace them; your versions are saved as <file>.bak (or <file>.2.bak and up, so older backups stay).",
         );
         return Err(Failure::new(Exit::LocalFile, message));
     }
     for (path, text) in &plan {
-        std::fs::write(path, text).map_err(|e| io_failure(path, e))?;
+        write_file(path, text).map_err(|e| io_failure(path, e))?;
     }
-    let files: Map<String, Value> = FILES
+    let hashes: Map<String, Value> = FILES
         .iter()
         .map(|(name, text)| ((*name).to_string(), Value::from(sha(text))))
         .collect();
-    let manifest = json!({"version": crate::version::APP, "files": files});
-    std::fs::write(&manifest_path, format!("{manifest:#}\n"))
+    let manifest = json!({"version": crate::version::APP, "files": hashes});
+    write_file(&manifest_path, &format!("{manifest:#}\n"))
         .map_err(|e| io_failure(&manifest_path, e))?;
     Ok(report)
+}
+
+/// `<name>.bak` for the first backup, then `<name>.2.bak`, `<name>.3.bak`…
+fn backup_path(dir: &Path, name: &str, n: u32) -> PathBuf {
+    if n <= 1 {
+        dir.join(format!("{name}.bak"))
+    } else {
+        dir.join(format!("{name}.{n}.bak"))
+    }
+}
+
+/// Write `text` to `path` (following a symlink) through a temp file and a
+/// rename, keeping the file's permissions.
+fn write_file(path: &Path, text: &str) -> std::io::Result<()> {
+    let target = files::resolve_links(path);
+    let like = files::permissions_of(&target);
+    files::write_atomic(&target, text, like.as_ref())
 }
 
 /// The lines that differ between `old` and `new`, with two lines of context

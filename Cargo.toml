@@ -27,6 +27,8 @@ license = "MIT"
 description = "Quill, an independent, unofficial Telegram desktop client built on GPUI and TDLib"
 repository = "https://github.com/shinycake/quill"
 publish = false
+# quill-cli is a small helper; `cargo run` means the app.
+default-run = "quill"
 
 [lints]
 workspace = true
@@ -107,7 +109,9 @@ rand = "0.10"
 # Window handles: macOS sharing type, Windows display affinity (capture blocking).
 raw-window-handle = { version = "0.6.2", optional = true }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# preserve_order: `quill agent connect --yes` rewrites the user's MCP config
+# with its keys in their order. GPUI turns it on too, but core builds need it.
+serde_json = { version = "1", features = ["preserve_order"] }
 semver = "1"
 # In-process audio: call tones, notification sounds, voice/audio playback
 # (CoreAudio / WASAPI / ALSA via cpal; MP3/AAC/FLAC/Vorbis/WAV via symphonia).
@@ -273,6 +277,13 @@ quill = { path = ".", default-features = false, features = ["test-support"] }
 [[bin]]
 name = "quill"
 path = "src/main.rs"
+
+# The console-subsystem front for `quill agent` on Windows: quill.exe is a GUI
+# program there, so a terminal neither waits for it nor gets its exit code.
+# Uses only std; see src/cli_shim.rs.
+[[bin]]
+name = "quill-cli"
+path = "src/cli_shim.rs"
 
 [profile.release]
 lto = "thin"

@@ -33,7 +33,7 @@ pub fn describe() -> Value {
     json!({
         "name": "quill",
         "version": crate::version::APP,
-        "about": "Quill is a desktop Telegram client. With Agent access on (Quill: Settings > Advanced > Agent access), agents on this computer use the user's Telegram account through the running Quill, under the user's grants.",
+        "about": concat!("Quill is a desktop Telegram client. With Agent access on (Quill: ", settings_place!(), "), agents on this computer use the user's Telegram account through the running Quill, under the user's grants."),
         "transport": {
             "cli": "quill agent <command> [flags] [--json]; quill agent call <tool> --json '{…}' reaches every tool.",
             "mcp": mcp,

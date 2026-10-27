@@ -56,13 +56,14 @@ jobs:
         run: cargo build --release --locked -p quill-webview
       - name: tests (core + replay)
         run: cargo test --no-default-features --locked -- --nocapture
-      # Both executables ship: the package step reads quill-webview.exe
-      # next to quill.exe (scripts/windows-package.ps1).
+      # The executables ship together: the package step reads quill-cli.exe
+      # and quill-webview.exe next to quill.exe (scripts/windows-package.ps1).
       - uses: actions/upload-artifact@v7
         with:
           name: quill-windows-exe
           path: |
             target/release/quill.exe
+            target/release/quill-cli.exe
             target/release/quill-webview.exe
           retention-days: 3
           if-no-files-found: error
@@ -289,6 +290,22 @@ jobs:
             Write-Host $probe
             if ($probe -notmatch 'frames=10') { throw "video probe failed for ${clip}: $probe" }
           }
+      # quill-cli.exe (src/cli_shim.rs) called the way people do at a prompt,
+      # with no redirection helper: the shell must wait, get the output and
+      # see quill agent's exit code (2 is a usage error).
+      - name: quill-cli waits and passes the exit code on
+        shell: pwsh
+        run: |
+          $cli = Join-Path $env:RUNNER_TEMP 'extract/quill-windows-x86_64/quill-cli.exe'
+          $describe = (& $cli agent describe) -join "`n"
+          if ($LASTEXITCODE -ne 0) { throw "quill-cli agent describe exited with $LASTEXITCODE" }
+          if (($describe | ConvertFrom-Json).name -ne 'quill') { throw "unexpected describe output: $describe" }
+          & $cli agent no-such-command 2>$null
+          if ($LASTEXITCODE -ne 2) { throw "usage error: want exit 2, got $LASTEXITCODE" }
+          # RUNNER_TEMP has no spaces, so the path needs no quotes inside cmd.
+          cmd /c "$cli agent no-such-command 2>nul"
+          if ($LASTEXITCODE -ne 2) { throw "cmd: want exit 2, got $LASTEXITCODE" }
+          $global:LASTEXITCODE = 0
       # The ffmpeg.exe/ffprobe.exe Quill runs (src/media_tools.rs finds them
       # next to quill.exe): from the extracted zip, started with nothing but
       # the DLLs beside them. A missing tool or DLL fails the build.

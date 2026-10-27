@@ -6,8 +6,9 @@ use super::server::{self, HEADER, code};
 use crate::single_instance::Endpoint;
 use interprocess::local_socket::{Stream, prelude::*};
 use serde_json::{Value, json};
+use std::ffi::OsStr;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 /// How long to wait for a Quill this process started to open its socket.
@@ -41,7 +42,7 @@ impl Refused {
             Self::Off => server::OFF_MESSAGE.into(),
             Self::NoToken => "Quill is running but has not published its agent token. Wait a moment and retry; if it keeps failing, ask the user to restart Quill.".into(),
             Self::StaleToken => "Quill refused this client's token. Retry; if it keeps failing, ask the user to restart Quill.".into(),
-            Self::OtherUser => "The Quill socket on this computer belongs to another user. Ask the user to check Quill.".into(),
+            Self::OtherUser => "The Quill answering here is another user's Quill, so this client did not connect. Ask the user to open their own Quill, then retry.".into(),
             Self::Other(message) => message.clone(),
         }
     }
@@ -49,13 +50,33 @@ impl Refused {
 
 /// The executable to start or to name in a setup command. An AppImage runs
 /// from a mount that goes away with its process, so it is the AppImage file.
-pub fn executable() -> Option<std::path::PathBuf> {
-    cfg!(target_os = "linux")
-        .then(|| std::env::var_os("APPIMAGE"))
-        .flatten()
-        .filter(|path| !path.is_empty())
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::current_exe().ok())
+pub fn executable() -> Option<PathBuf> {
+    let current = std::env::current_exe().ok();
+    let appimage = cfg!(target_os = "linux")
+        .then(|| {
+            appimage_file(
+                current.as_deref()?,
+                std::env::var_os("APPIMAGE").as_deref(),
+                std::env::var_os("APPDIR").as_deref(),
+            )
+        })
+        .flatten();
+    appimage.or(current)
+}
+
+/// `$APPIMAGE`, but only when `exe` runs from inside `$APPDIR`, the mount of
+/// that AppImage. Other AppImages (Cursor is one) pass both variables on to
+/// the programs they start, where they name that app, not Quill.
+pub fn appimage_file(
+    exe: &Path,
+    appimage: Option<&OsStr>,
+    appdir: Option<&OsStr>,
+) -> Option<PathBuf> {
+    let appimage = appimage.filter(|path| !path.is_empty())?;
+    let appdir = PathBuf::from(appdir.filter(|path| !path.is_empty())?);
+    // current_exe() is resolved; APPDIR may not be.
+    let appdir = std::fs::canonicalize(&appdir).unwrap_or(appdir);
+    exe.starts_with(&appdir).then(|| PathBuf::from(appimage))
 }
 
 /// Start Quill detached from this process: no shared stdio (it would corrupt
@@ -191,3 +212,7 @@ pub fn open(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "link_tests.rs"]
+mod tests;

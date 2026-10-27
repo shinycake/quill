@@ -27,8 +27,14 @@ result, `quill agent help <command>` explains one, `quill agent guide`
 prints this guide, and `quill agent describe` prints every tool's
 schema, example and output shape as JSON.
 The exit code says what went wrong: 1 a tool error, 3 Quill not running
-(`--start` starts it), 4 Agent access off, 5 token refused, 6 window
+(`--start` starts it), 4 Agent access off, 5 no usable token, 6 window
 control off. `quill agent --help` lists them all.
+
+On Windows, use `quill-cli` (`quill-cli.exe`, next to `quill.exe`) for
+these commands: `quill-cli agent status`. `quill.exe` is a windowed
+program, so a terminal doesn't wait for it and doesn't get its exit code.
+`quill-cli.exe` waits, prints the output in order and exits with the same
+code.
 
 `quill agent install-skill` installs a Claude Code skill for Quill in
 `~/.claude/skills/quill`, with this guide. `quill agent connect

@@ -55,7 +55,11 @@ pub fn run(_args: &Value) -> Result<ToolOutput, ToolError> {
     let paused = takeover::paused();
     let stopped = takeover::stopped();
     text.push_str(if !ui_driver {
-        "UI driver: off. The user can turn on \"Let agents drive Quill's window\" in Settings > Advanced > Agent access.\n"
+        concat!(
+            "UI driver: off. The user can turn on \"Let agents drive Quill's window\" in ",
+            settings_place!(),
+            ".\n"
+        )
     } else if stopped {
         "UI driver: stopped. The user pressed Stop in Quill; don't drive its window again. Reconnecting does not undo it; only the user can, in Quill's settings.\n"
     } else if paused {

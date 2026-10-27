@@ -3,6 +3,7 @@
 #
 #   quill-windows-<arch>/
 #     quill.exe
+#     quill-cli.exe              console front for `quill agent` (waits, passes the exit code on)
 #     quill-webview.exe          mini apps (WebView2; the Evergreen runtime ships with Windows 10/11)
 #     tdjson.dll                         TDLib, OpenSSL and zlib linked in statically
 #     ntgcalls.dll rlottie.dll
@@ -12,7 +13,7 @@
 #     README.txt LICENSE THIRD_PARTY.md THIRD_PARTY_LICENSES.md
 #     licenses/                          native-library license texts and notices
 #
-# Env (all optional): QUILL_BIN, QUILL_TDJSON_DIR, QUILL_NTGCALLS_DLL, QUILL_RLOTTIE_DLL, QUILL_FFMPEG_PREFIX, OUT.
+# Env (all optional): QUILL_BIN, QUILL_CLI_BIN, QUILL_TDJSON_DIR, QUILL_NTGCALLS_DLL, QUILL_RLOTTIE_DLL, QUILL_FFMPEG_PREFIX, OUT.
 # Needs an MSVC developer environment (dumpbin.exe). No VC++ runtime DLLs are
 # shipped: quill.exe, tdjson.dll and rlottie.dll link the C runtime statically
 # (/MT), ntgcalls.dll already does, and the MinGW-built FFmpeg DLLs use the
@@ -22,6 +23,7 @@ $root = (Resolve-Path "$PSScriptRoot/..").Path
 Set-Location $root
 function Pick($value, $default) { if ($value) { $value } else { $default } }
 $bin = Pick $env:QUILL_BIN 'target/release/quill.exe'
+$cli = Pick $env:QUILL_CLI_BIN 'target/release/quill-cli.exe'
 $webview = Pick $env:QUILL_WEBVIEW_BIN 'target/release/quill-webview.exe'
 $tdDir = Pick $env:QUILL_TDJSON_DIR 'native/prefix/bin'
 $ntg = Pick $env:QUILL_NTGCALLS_DLL 'vendor/ntgcalls/lib/Release/ntgcalls.dll'
@@ -35,7 +37,7 @@ if ($videoDlls.Count -ne 8) { throw "expected quillvideo.dll and 7 FFmpeg DLLs i
 foreach ($exe in 'ffmpeg.exe', 'ffprobe.exe') {
     if (-not (Test-Path (Join-Path $ffmpeg "bin/$exe"))) { throw "missing $ffmpeg/bin/$exe" }
 }
-foreach ($f in @($bin, $webview, $ntg, $rlottie, (Join-Path $tdDir 'tdjson.dll'))) {
+foreach ($f in @($bin, $cli, $webview, $ntg, $rlottie, (Join-Path $tdDir 'tdjson.dll'))) {
     if (-not (Test-Path $f)) { throw "missing input $f" }
 }
 
@@ -47,6 +49,7 @@ Remove-Item -Recurse -Force $pkg, $zip, "$zip.sha256" -ErrorAction SilentlyConti
 New-Item -ItemType Directory -Force $pkg | Out-Null
 
 Copy-Item $bin (Join-Path $pkg 'quill.exe')
+Copy-Item $cli (Join-Path $pkg 'quill-cli.exe')
 Copy-Item $webview (Join-Path $pkg 'quill-webview.exe')
 Copy-Item (Join-Path $tdDir 'tdjson.dll') $pkg
 Copy-Item $ntg (Join-Path $pkg 'ntgcalls.dll')

@@ -33,6 +33,11 @@ same running Quill:
 - Windows: `%LOCALAPPDATA%\Programs\Quill\quill.exe`
 - Linux: `~/.local/bin/quill`
 
+On Windows, run the command line through `quill-cli.exe` in the same
+folder (`quill-cli agent status`). It waits for the answer and passes the
+exit code on. `quill.exe` is a windowed program, so a terminal doesn't
+wait for it and `%ERRORLEVEL%` never gets its code.
+
 `quill agent connect claude-code --print` prints the path of the copy you
 ran. To add Quill as an MCP server instead, the user runs:
 
@@ -147,7 +152,7 @@ tells scripts what went wrong (`--json` prints `{"error": {"kind",
 | 2 | usage | Fix the command; `quill agent help <command>`. |
 | 3 | not_running | Ask the user to open Quill, or pass `--start`. |
 | 4 | access_off | Ask the user to turn on Agent access in Quill. |
-| 5 | token | Retry; if it keeps failing, ask the user to restart Quill. |
+| 5 | token | Quill has no token yet or refused it, its data folder wasn't found, or it's another user's Quill. Retry; if it keeps failing, ask the user to restart Quill. |
 | 6 | window_control_off | The UI tools need "Let agents drive Quill's window". The chat tools still work. |
 | 7 | connection | Quill quit or closed the connection. Retry. |
 | 8 | local_file | A local file couldn't be written, or holds edits `--force` would replace. |

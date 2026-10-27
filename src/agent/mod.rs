@@ -11,6 +11,17 @@
 //! `docs/decisions/agent-access.md`.
 #![deny(clippy::indexing_slicing)]
 
+/// Where Agent access lives in Quill's settings, for messages and help. A
+/// macro, so `concat!` can build constant messages from it.
+macro_rules! settings_place {
+    () => {
+        "Settings > Advanced > Agent access"
+    };
+}
+
+/// [`settings_place!`] as a constant, for `format!`.
+pub const SETTINGS_PLACE: &str = settings_place!();
+
 pub mod access;
 pub mod activity;
 pub mod cli;

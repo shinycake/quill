@@ -15,8 +15,8 @@ impl From<Refused> for Failure {
         let exit = match &refused {
             Refused::NotRunning => Exit::NotRunning,
             Refused::Off => Exit::AccessOff,
-            Refused::NoToken | Refused::StaleToken => Exit::Token,
-            Refused::OtherUser | Refused::Other(_) => Exit::Connection,
+            Refused::NoToken | Refused::StaleToken | Refused::OtherUser => Exit::Token,
+            Refused::Other(_) => Exit::Connection,
         };
         let mut message = refused.message();
         if exit == Exit::NotRunning {
@@ -34,12 +34,7 @@ pub fn call_tool(
     start: bool,
     client: &str,
 ) -> Result<Value, Failure> {
-    let root = crate::settings::safe_app_root().ok_or_else(|| {
-        Failure::new(
-            Exit::Connection,
-            "Quill's data folder is unavailable on this computer.",
-        )
-    })?;
+    let root = crate::settings::safe_app_root().ok_or_else(no_data_folder)?;
     let endpoint = Endpoint::for_root(&root);
     request_at(
         &root,
@@ -48,6 +43,14 @@ pub fn call_tool(
         client,
         "tools/call",
         json!({"name": name, "arguments": arguments}),
+    )
+}
+
+/// Without a data folder there is no token to read.
+pub(super) fn no_data_folder() -> Failure {
+    Failure::new(
+        Exit::Token,
+        "Quill's data folder was not found, so there is no agent token to read. Open Quill once, then retry.",
     )
 }
 
