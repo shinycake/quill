@@ -32,6 +32,7 @@ mod drafts_everywhere;
 mod drafts_polls;
 mod earn;
 mod email_login;
+mod emoji_autoplay;
 mod emoji_interaction;
 mod emoji_sets;
 mod find_in_history;

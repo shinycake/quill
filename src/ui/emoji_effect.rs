@@ -156,6 +156,22 @@ pub(super) fn message_effect_playing(key: Key) -> bool {
     })
 }
 
+/// The emoji effects playing or waiting over message `key`: each one's
+/// effect, and whether it started.
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+pub(crate) fn emoji_effects_on(key: Key) -> Vec<(EmojiEffect, bool)> {
+    ACTIVE.with(|active| {
+        active
+            .borrow()
+            .iter()
+            .filter(|a| !a.premium && a.message.is_none())
+            .filter(|a| (a.effect.chat_id.0, a.effect.message_id.0) == key)
+            .map(|a| (a.effect.clone(), a.view.is_some()))
+            .collect()
+    })
+}
+
 /// Queue the effect of a Premium sticker. Dropped when too many wait.
 pub(super) fn push_premium(effect: EmojiEffect, outgoing: bool, now: Instant) {
     ACTIVE.with(|active| {

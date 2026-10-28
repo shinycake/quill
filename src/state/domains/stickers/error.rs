@@ -12,6 +12,7 @@ impl Session {
         _seq: u64,
     ) {
         match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::EmojiAnimations) => self.stickers.animations.failed(),
             Some(RequestPurpose::Stickers(StickersPurpose::GetMessageEffect { effect_id })) => {
                 self.stickers.effects.fail(effect_id)
             }

@@ -13,6 +13,9 @@ pub enum StickersPurpose {
         chat_id: i64,
         message_id: i64,
     },
+    /// `searchStickerSet` "EmojiAnimations": the interaction effects an
+    /// incoming lone emoji plays when read (`emoji_animations`).
+    EmojiAnimations,
     /// `getMessageEffect`: the answer describes one effect for the badge
     /// on a message or the send menu's picker.
     GetMessageEffect {
@@ -180,6 +183,7 @@ pub enum StickersPurpose {
 
 flat_purposes!(Stickers(StickersPurpose) {
     ViewTrendingEmojiSets,
+    EmojiAnimations,
     GetInstalledStickerSets,
     GetArchivedStickerSets,
     GetStickerSet,

@@ -196,10 +196,14 @@ impl Session {
                 is_installed,
                 is_owned,
                 is_custom_emoji,
-                ..
+                emojis,
             } => {
-                if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve { generation })) =
-                    pending.map(|p| p.purpose)
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::EmojiAnimations) {
+                    self.remember_files(&files);
+                    self.accept_emoji_animations(&stickers, &emojis);
+                } else if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve {
+                    generation,
+                })) = pending.map(|p| p.purpose)
                     && matches!(
                         &self.chats_state.deep_link,
                         Some(DeepLinkState::ResolvingChat {

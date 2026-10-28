@@ -255,7 +255,14 @@ fn sticker_sets_and_sticker_set_parse_1_8_67() {
         ))
         .unwrap();
     match set.payload {
-        EnvelopePayload::Stickers(StickersPayload::StickerSet { id, stickers, .. }) => {
+        EnvelopePayload::Stickers(StickersPayload::StickerSet {
+            id,
+            stickers,
+            emojis,
+            ..
+        }) => {
+            // `emojis` is empty here: each sticker still gets its own list.
+            assert_eq!(emojis, vec![Vec::<String>::new()]);
             assert_eq!(id, 77);
             assert_eq!(stickers[0].format, StickerFormat::Tgs);
             assert_eq!(stickers[0].file_id, FileId(41));
@@ -706,5 +713,33 @@ fn service_messages_parse_to_structured_actions() {
             serde_json::json!({"@type":kind,"title":"New title","text":"Welcome","message_id":7});
         let (content, _) = parse_content(Some(&value));
         assert_eq!(content, MessageContent::Action(Box::new(expected)));
+    }
+}
+
+#[test]
+fn sticker_set_emojis_stay_with_their_stickers() {
+    // `stickerSet.emojis` (td_api.tl `stickerSet ... emojis:vector<emojis>`)
+    // lists each sticker's emoticons; an entry that is not a sticker is
+    // skipped together with its list.
+    let sticker = |file: i32, emoji: &str| {
+        let file_json = local_file_json(file, "/tmp/e.tgs", true, true);
+        format!(
+            r#"{{"@type":"sticker","id":"{file}","set_id":"77","width":512,"height":512,"emoji":"{emoji}","format":{{"@type":"stickerFormatTgs"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":null,"sticker":{file_json}}}"#
+        )
+    };
+    let json = format!(
+        r#"{{"@type":"stickerSet","id":"77","title":"Animated Emoji Interactions","name":"EmojiAnimations","thumbnail":null,"thumbnail_outline":null,"is_owned":false,"is_installed":false,"is_archived":false,"is_official":true,"sticker_type":{{"@type":"stickerTypeRegular"}},"needs_repainting":false,"is_allowed_as_chat_emoji_status":false,"is_viewed":true,"stickers":[{},{{"@type":"photo"}},{}],"emojis":[{{"@type":"emojis","emojis":["👍","1⃣"]}},{{"@type":"emojis","emojis":["x"]}},{{"@type":"emojis","emojis":["❤","2⃣"]}}]}}"#,
+        sticker(51, "👍"),
+        sticker(53, "❤"),
+    );
+    match parse_envelope(&json).unwrap().payload {
+        EnvelopePayload::Stickers(StickersPayload::StickerSet {
+            stickers, emojis, ..
+        }) => {
+            assert_eq!(stickers.len(), 2);
+            assert_eq!(stickers[1].file_id, FileId(53));
+            assert_eq!(emojis, vec![vec!["👍", "1⃣"], vec!["❤", "2⃣"]]);
+        }
+        other => panic!("{other:?}"),
     }
 }

@@ -285,12 +285,15 @@ pub(crate) fn parse_sticker_sets(value: &Value) -> EnvelopePayload {
 
 pub(crate) fn parse_sticker_set(value: &Value) -> EnvelopePayload {
     let mut stickers = Vec::new();
+    let mut emojis = Vec::new();
     let mut files = Vec::new();
+    let lists = value.get("emojis").and_then(Value::as_array);
     if let Some(entries) = value.get("stickers").and_then(Value::as_array) {
-        for entry in entries {
+        for (index, entry) in entries.iter().enumerate() {
             let (item, item_files) = parse_sticker_value(Some(entry));
             if let Some(item) = item {
                 stickers.push(item);
+                emojis.push(sticker_emojis(lists.and_then(|lists| lists.get(index))));
             }
             files.extend(item_files);
         }
@@ -318,8 +321,21 @@ pub(crate) fn parse_sticker_set(value: &Value) -> EnvelopePayload {
         is_custom_emoji: value.pointer("/sticker_type/@type").and_then(Value::as_str)
             == Some("stickerTypeCustomEmoji"),
         stickers,
+        emojis,
         files,
     })
+}
+
+/// One `emojis` entry of a `stickerSet`: the sticker's emoticons.
+fn sticker_emojis(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(|list| list.get("emojis"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect()
 }
 
 /// Slice S8: `trendingStickerSets` — same `stickerSetInfo` rows as
@@ -346,12 +362,15 @@ pub(crate) fn parse_trending_sticker_sets(value: &Value) -> EnvelopePayload {
 /// recent). Same per-entry parse as `stickerSet.stickers.stickers`.
 pub(crate) fn parse_stickers(value: &Value) -> EnvelopePayload {
     let mut stickers = Vec::new();
+    let mut emojis = Vec::new();
     let mut files = Vec::new();
+    let lists = value.get("emojis").and_then(Value::as_array);
     if let Some(entries) = value.get("stickers").and_then(Value::as_array) {
-        for entry in entries {
+        for (index, entry) in entries.iter().enumerate() {
             let (item, item_files) = parse_sticker_value(Some(entry));
             if let Some(item) = item {
                 stickers.push(item);
+                emojis.push(sticker_emojis(lists.and_then(|lists| lists.get(index))));
             }
             files.extend(item_files);
         }

@@ -41,6 +41,8 @@ pub struct StickersState {
     pub active_emoji_reactions: Vec<String>,
     /// Animated emoji effects waiting for the window to play them.
     pub interactions: crate::emoji_interaction::EmojiInteractions,
+    /// The interaction effects pack, and which read emoji played one.
+    pub animations: crate::emoji_animations::EmojiAnimations,
     /// Message effects: the available list and the ones looked up.
     pub effects: crate::message_effects::MessageEffects,
 }
@@ -65,6 +67,7 @@ impl StickersState {
             gifs: GifPanel::default(),
             active_emoji_reactions: Vec::new(),
             interactions: Default::default(),
+            animations: Default::default(),
             effects: Default::default(),
         }
     }
