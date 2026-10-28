@@ -58,6 +58,9 @@ pub(crate) struct PlaybackUi {
     /// Animated stickers, dice and custom emoji everywhere (one player,
     /// shared by every view: `sticker_player`).
     pub(super) stickers: std::rc::Rc<super::sticker_player::Player>,
+    /// The lone animated emoji played in the open chat and the replays
+    /// taps asked for (`animated_emoji`); cleared with the sticker heads.
+    pub(super) emoji_plays: std::cell::RefCell<quill::animated_emoji::EmojiPlays>,
     /// History row whose `image/gif` file is looping (`inline_playback`).
     pub(super) playing_animation: Option<MessageId>,
     pub(super) autoplayed_gifs: std::collections::HashSet<MessageId>,
@@ -140,6 +143,7 @@ impl PlaybackUi {
             tick: false,
             positions: HashMap::new(),
             stickers: std::rc::Rc::new(super::sticker_player::Player::new()),
+            emoji_plays: std::cell::RefCell::default(),
             playing_animation: None,
             autoplayed_gifs: Default::default(),
             gif: None,

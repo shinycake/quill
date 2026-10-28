@@ -507,6 +507,33 @@ impl Player {
         super::image_budget::retire_all(retired);
     }
 
+    /// Whether `head` of `file` is known: `Some(started)` while its view is
+    /// drawn (and for a while after), `None` once forgotten.
+    pub(super) fn head_known(&self, head: HeadId, file: i32) -> Option<bool> {
+        let inner = self.inner.try_borrow().ok()?;
+        inner
+            .heads
+            .get(&(head, file))
+            .map(|(state, _)| state.started())
+    }
+
+    /// How far `head` of `file` played and the clip's length, once its
+    /// first frame showed.
+    pub(super) fn head_progress(&self, head: HeadId, file: i32) -> Option<(Duration, Duration)> {
+        let inner = self.inner.try_borrow().ok()?;
+        let (state, _) = inner.heads.get(&(head, file))?;
+        if !state.started() {
+            return None;
+        }
+        let total = inner
+            .clips
+            .iter()
+            .filter(|(key, _)| key.file == file)
+            .find_map(|(_, clip)| clip.timeline)?
+            .duration();
+        Some((state.pos(), total))
+    }
+
     /// Play `head` of `file` again from its first frame.
     pub(super) fn restart(&self, head: HeadId, file: i32) {
         if let Ok(mut inner) = self.inner.try_borrow_mut()

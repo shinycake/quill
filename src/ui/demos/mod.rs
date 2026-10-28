@@ -4,6 +4,7 @@
 //! docs/decisions/codex-refactor-1.md).
 #![deny(clippy::indexing_slicing)]
 
+mod animated_emoji;
 mod bots_profile;
 mod chat_list;
 mod code_highlight;

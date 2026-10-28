@@ -33,6 +33,7 @@ mod agent_takeover_glow;
 mod agent_takeover_state;
 mod ai_compose_state;
 mod anim_layer;
+mod animated_emoji;
 mod app_slice;
 mod app_theme;
 mod appearance;
