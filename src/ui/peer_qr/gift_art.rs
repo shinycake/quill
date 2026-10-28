@@ -89,7 +89,8 @@ fn still_source(sticker: &StickerContent) -> Option<(FileId, StickerFormat)> {
     }
 }
 
-/// Premultiplied BGRA `edge × edge` pixels of the sticker's first frame.
+/// Straight-alpha BGRA `edge × edge` pixels of the sticker's first frame
+/// (GPUI's RenderImage layout).
 fn sticker_bgra(path: &PathBuf, format: StickerFormat, edge: usize) -> Option<image::RgbaImage> {
     let side = u32::try_from(edge).ok()?;
     match format {
@@ -109,10 +110,6 @@ fn sticker_bgra(path: &PathBuf, format: StickerFormat, edge: usize) -> Option<im
             let mut pixels = image.into_raw();
             for pixel in pixels.as_chunks_mut::<4>().0 {
                 pixel.swap(0, 2);
-                let alpha = u16::from(pixel[3]);
-                for channel in pixel.iter_mut().take(3) {
-                    *channel = (u16::from(*channel) * alpha / 255) as u8;
-                }
             }
             image::RgbaImage::from_raw(width, height, pixels)
         }
@@ -123,11 +120,9 @@ fn sticker_bgra(path: &PathBuf, format: StickerFormat, edge: usize) -> Option<im
 /// backdrop's pattern color, as tdesktop paints it with `textColor`).
 fn fill(image: &mut image::RgbaImage, color: Rgb) {
     let hex = color.to_hex();
-    let [r, g, b] = [(hex >> 16) & 0xFF, (hex >> 8) & 0xFF, hex & 0xFF].map(|c| c as u16);
+    let [r, g, b] = [(hex >> 16) & 0xFF, (hex >> 8) & 0xFF, hex & 0xFF].map(|c| c as u8);
     for pixel in image.as_chunks_mut::<4>().0 {
-        let alpha = u16::from(pixel[3]);
-        let mul = |channel: u16| (channel * alpha / 255) as u8;
-        *pixel = [mul(b), mul(g), mul(r), pixel[3]];
+        *pixel = [b, g, r, pixel[3]];
     }
 }
 
@@ -315,7 +310,7 @@ mod tests {
         let mut image =
             image::RgbaImage::from_raw(2, 1, vec![10, 20, 30, 255, 0, 0, 0, 128]).expect("pixels");
         fill(&mut image, Rgb::hex(0xFF_8000));
-        assert_eq!(image.as_raw(), &vec![0, 128, 255, 255, 0, 64, 128, 128]);
+        assert_eq!(image.as_raw(), &vec![0, 128, 255, 255, 0, 128, 255, 128]);
     }
 
     #[test]

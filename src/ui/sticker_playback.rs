@@ -392,19 +392,8 @@ fn decode_frames(
                 .frames
                 .into_iter()
                 .map(|bytes| {
-                    let mut rgba = image::RgbaImage::from_raw(edge, edge, bytes)
-                        .ok_or_else(|| tr(keys::Q_AV_INVALID_STICKER_FRAME).to_string())?;
-                    // rlottie is premultiplied; GPUI expects straight BGRA.
-                    for pixel in rgba.as_chunks_mut::<4>().0 {
-                        let alpha = u16::from(pixel[3]);
-                        #[allow(clippy::manual_checked_ops)]
-                        if alpha > 0 {
-                            for channel in &mut pixel[..3] {
-                                *channel = (u16::from(*channel) * 255 / alpha).min(255) as u8;
-                            }
-                        }
-                    }
-                    Ok::<_, String>(rgba)
+                    image::RgbaImage::from_raw(edge, edge, bytes)
+                        .ok_or_else(|| tr(keys::Q_AV_INVALID_STICKER_FRAME).to_string())
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             Ok((frames, decoded.fps))
