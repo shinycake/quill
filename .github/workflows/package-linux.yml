@@ -62,7 +62,7 @@ jobs:
             libfreetype-dev libasound2-dev libpulse-dev libvulkan-dev libdbus-1-dev libclang-dev nasm
       - name: restore TDLib build
         id: tdlib-cache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: native/prefix
           key: tdlib-linux-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib.sh', 'native/patches/*') }}
@@ -73,7 +73,7 @@ jobs:
         run: bash scripts/build-tdlib.sh
       - name: save TDLib build
         if: steps.tdlib-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: native/prefix
           key: tdlib-linux-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib.sh', 'native/patches/*') }}
@@ -81,7 +81,7 @@ jobs:
       # FFmpeg (LGPL, shared) with the ffmpeg/ffprobe programs + the quillvideo shim.
       - name: restore FFmpeg build
         id: ffmpeg-cache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: vendor/ffmpeg/prefix
           key: ffmpeg-linux-${{ runner.arch }}-${{ hashFiles('scripts/build-ffmpeg.sh', 'native/quillvideo/*') }}
@@ -90,7 +90,7 @@ jobs:
         run: bash scripts/build-ffmpeg.sh
       - name: save FFmpeg build
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: vendor/ffmpeg/prefix
           key: ffmpeg-linux-${{ runner.arch }}-${{ hashFiles('scripts/build-ffmpeg.sh', 'native/quillvideo/*') }}

@@ -130,7 +130,7 @@ nnnoiseless = { version = "0.5.2", default-features = false }
 rusty-opus = { version = "1", optional = true }
 # Wallpaper patterns: Telegram ships them as (gzipped) SVG. Already in the
 # lockfile through GPUI; no text or raster-image features are needed.
-resvg = { version = "0.48", default-features = false, features = ["svgz"], optional = true }
+resvg = { version = "0.49", default-features = false, features = ["svgz"], optional = true }
 ureq = { version = "3.4", default-features = false, features = ["rustls"], optional = true }
 sha2 = "0.11"
 # Emoji set packs (docs/decisions/emoji-set-style.md): stored (uncompressed)
