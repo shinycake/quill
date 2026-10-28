@@ -202,6 +202,21 @@ impl DownloadIntents {
         }
     }
 
+    /// The user cancelled a transfer TDLib runs with no request of ours
+    /// (another device, a resume): the row stops showing progress at once,
+    /// and TDLib's idle update clears it (`confirm_cancel`).
+    pub fn cancel_untracked(&mut self, file_id: i32) {
+        let origin = self.get(file_id).map_or(DownloadOrigin::Auto, |i| i.origin);
+        self.put(
+            file_id,
+            Some(Intent {
+                origin,
+                paused: false,
+                phase: Phase::Cancelled,
+            }),
+        );
+    }
+
     /// An explicit request after a stall: let the automatic path try again.
     pub fn clear_stalled(&mut self, file_id: i32) {
         if self.is_stalled_auto(file_id) {

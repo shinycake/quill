@@ -331,3 +331,49 @@ fn failed_automatic_downloads_are_not_retried_on_every_ingest() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_transfer_tdlib_runs_on_its_own_can_be_cancelled() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        let owned = copy_and_parse(json, &seq, &dyn_sink).expect("parses");
+        driver.ingest(owned).expect("ingests");
+    };
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+    );
+    let file = |active: bool| {
+        format!(
+            r#"{{"@type":"updateFile","file":{{"@type":"file","id":9,"size":100,"expected_size":100,"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":{active},"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":40,"downloaded_size":40}},"remote":{{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":100}}}}}}"#
+        )
+    };
+    // Another device's download, resumed by TDLib: none of ours.
+    ingest(&mut driver, &file(true));
+    let downloads = |driver: &ConnectDriver<Arc<RecordingSender>>| {
+        driver
+            .session
+            .media
+            .downloads
+            .is_downloading(9, &driver.session.media.files)
+    };
+    assert!(downloads(&driver), "the row shows the transfer");
+    assert_eq!(driver.cancel_download(FileId(9)), Ok(true));
+    let sent = recorder.snapshot();
+    let cancel: Value = serde_json::from_str(sent.last().expect("a request")).unwrap();
+    assert_eq!(cancel["@type"], "cancelDownloadFile");
+    assert_eq!(cancel["file_id"], 9);
+    assert!(!downloads(&driver), "the row stops at once");
+    // TDLib confirms: the file is idle and nothing is left behind.
+    ingest(&mut driver, &file(false));
+    assert!(!downloads(&driver));
+    assert_eq!(driver.cancel_download(FileId(9)), Ok(false), "nothing left");
+    let _ = std::fs::remove_dir_all(&dir);
+}
