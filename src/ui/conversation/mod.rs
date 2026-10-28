@@ -349,13 +349,28 @@ impl QuillApp {
     }
 }
 
-/// Full-width "N Unread Messages" bar above the first unread message. In
-/// the wide layout the label is centred in the wide column while the bar
-/// stays full width (tdesktop `UnreadBar::paint`).
-fn unread_divider(count: i32, wide: bool, a11y_focused: bool, cx: &App) -> impl IntoElement {
-    let text = SharedString::from(quill::state::unread_bar_text(count));
+/// Full-width "Unread messages" bar above the first unread message
+/// (tdesktop `lng_unread_bar_some`, which shows no count). In the wide
+/// layout the label is centred in the wide column while the bar stays full
+/// width (tdesktop `UnreadBar::paint`). `probe` takes the bar's painted
+/// bounds, so the opened history can put it at the top of the view.
+fn unread_divider(
+    wide: bool,
+    a11y_focused: bool,
+    probe: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
+    cx: &App,
+) -> impl IntoElement {
+    let text = tr(keys::UNREAD_BAR_SOME);
     div()
+        .relative()
+        .child(
+            canvas(|_, _, _| {}, move |bounds, _, _, _| probe.set(Some(bounds)))
+                .absolute()
+                .inset_0()
+                .size_full(),
+        )
         .id("unread-divider")
+        .debug_selector(|| "unread-bar".to_string())
         // Screen-reader focus on the bar (`history_a11y`).
         .when(a11y_focused, |this| this.aria_active_descendant())
         .w_full()
@@ -368,7 +383,7 @@ fn unread_divider(count: i32, wide: bool, a11y_focused: bool, cx: &App) -> impl 
         .font_medium()
         .text_color(cx.theme().secondary_foreground)
         .role(Role::Heading)
-        .aria_label(text.clone())
+        .aria_label(text)
         .child(super::chat_wide_ui::wide_column(
             wide,
             div().w_full().flex().justify_center().child(text),
@@ -490,4 +505,5 @@ mod row_build;
 pub(super) mod row_chrome;
 mod row_splice;
 mod rows_cache;
+pub(super) mod unread_bar_anchor;
 pub(super) use rows_cache::{HistoryRowsKey, RowsInput};
