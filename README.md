@@ -89,7 +89,7 @@ Quill runs on your computer and keeps its data there. The local database is encr
 
 ## Use Quill with an AI agent
 
-Agent access lets an AI agent on your computer, such as Claude Code, Claude Desktop or Cursor, use your Telegram account through the Quill that is already running. It's off by default. Turn it on in Settings > Agent access, then connect an agent:
+Agent access lets an AI agent on your computer, such as Claude Code, Claude Desktop or Cursor, use your Telegram account through the Quill that is already running. It's off by default, and while it's off Quill shows nothing about agents. Turn it on in Settings > Advanced > Agent access, then connect an agent:
 
 ```sh
 claude mcp add quill -- /Applications/Quill.app/Contents/MacOS/quill mcp   # Claude Code

@@ -1917,3 +1917,66 @@ The Driving and Paused window states were not captured (no agent drives
 the demo window). The Claude Desktop and Cursor lines call
 `quill agent connect`, which comes from part A. The Window control switch
 shows twice (its group and its section); both are the same setting.
+
+## Master switch
+
+Some people want nothing to do with AI, so "Allow agents"
+(`access::enabled()`, off by default) is also the one switch that hides
+Agent access. There is no second setting: every surface reads that
+switch on each render, and nothing caches it.
+
+Off, the only trace in Quill is one row on Settings > Advanced: an
+"Agent access" switch with one plain line under it
+(`settings_window/agent_switch.rs`). Turning it on opens the Agent
+access page; turning "Allow agents" off on that page comes back to
+Advanced. The Advanced row shows only while access is off, so there is
+one switch on screen at a time. `Page::shown` and `Entry::shown`
+(`settings_catalog`) decide the sidebar, the page and search, recent
+searches included; a page request that arrives while off (a stale
+recent pick, a menu) shows Advanced instead.
+
+What hides while off, and where it is gated:
+
+| Surface | Gate |
+| --- | --- |
+| Sidebar entry, page, search results and recent picks | `Page::shown` / `Target::shown` with `access::enabled()` |
+| Chat header menu and profile More menu entries | `agent_state::sees_agents()` |
+| Connected strip and its tooltips | `visible_connected()` (reads `sees_agents()`) |
+| Requests, confirmations, raw-call asks | `agent_request()` reads `sees_agents()`; `set_enabled(false)` already denies every waiting prompt |
+| All-chats consent, Reset token dialogs | their dialog predicates read `access::enabled()`, so the shell closes them |
+| Takeover glow, sweep, ghost cursor, pill, Esc to pause | `takeover_layer` and the Esc and input hooks read `sees_agents()`; no fade, gone on the next frame |
+| Activity, Connect an agent, every page section | on the page, which is not shown |
+
+Grep for "agent", "Agent access", "takeover" and "mcp" found no other
+user-visible mention: `Q_NOTES_AGENT_DRIVING` and the driver's refusal
+notes only appear while an agent drives, which can't happen while off.
+Not hidden: What's new shows release notes fetched from GitHub, which
+mention Agent access in past releases; they are a changelog, not a
+feature surface.
+
+Turning it off keeps grants, the activity log, the other switches and
+this launch's token (its file is deleted while off and written again
+when it comes back on, as before). The list of agents kept out with
+Revoke is cleared, as it always was. The local socket stays: it is also
+the single-instance endpoint, so the agent server refuses every
+connection instead.
+
+Agents never reach the switch: `access::set_enabled` refuses while the
+UI driver injects input, and Settings is a hard-refused surface.
+
+Every "turn it on" message (the server's off error, `quill agent`'s exit
+help and usage, `describe`, `quill agent connect`, the UI driver's off
+refusal, the guide, SKILL.md, README, the site and `llms.txt`) names
+Settings > Advanced > Agent access (`switch_place!`). Messages about the
+page's own switches (window control, raw calls, revoked agents) keep
+Settings > Agent access (`settings_place!`): they only apply while it is
+on.
+
+Tests: `settings_catalog` (off finds only the Advanced switch, on only
+the page), `agent_switch_tests.rs` (sidebar, page and switch both ways,
+the driver can't flip it, search), `agent_dialogs_tests.rs` (off closes
+and denies a request, a consent can't show), `agent_takeover_tests.rs`
+(off mid-drive removes the pill on the next frame, clock pinned),
+`agent_presence_tests.rs` (the strip hides and comes back), `access.rs`
+(off and on keep grants, log, token and switches) and `server_tests.rs`
+(the off error names the Advanced switch).

@@ -21,7 +21,7 @@ pub fn switch_refusal() -> Option<String> {
         return Some(
             concat!(
                 "Agent access is off in Quill. Ask the user to turn it on (Quill: ",
-                settings_place!(),
+                switch_place!(),
                 "), then retry."
             )
             .into(),

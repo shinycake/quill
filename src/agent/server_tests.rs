@@ -53,6 +53,7 @@ fn agents_need_the_switch_and_this_launchs_token() {
     assert_eq!(access::read_published_token(&app_root), None);
     let answers = session(&endpoint, &[auth("x")]);
     assert_eq!(answers[0]["error"]["code"], super::code::ACCESS_OFF);
+    assert_eq!(answers[0]["error"]["message"], super::OFF_MESSAGE);
 
     access::set_enabled(true);
     let token = access::read_published_token(&app_root).unwrap_or_default();
@@ -153,4 +154,21 @@ fn agents_need_the_switch_and_this_launchs_token() {
     std::thread::sleep(Duration::from_millis(10));
     let answers = session(&endpoint, &[auth(&token)]);
     assert_eq!(answers[0]["error"]["code"], super::code::ACCESS_OFF);
+}
+
+#[test]
+fn turn_it_on_messages_point_at_the_advanced_switch() {
+    // While Agent access is off its page does not exist; the one switch is
+    // on Advanced, so every "turn it on" answer names that place.
+    let place = "Settings > Advanced > Agent access";
+    assert_eq!(crate::agent::SWITCH_PLACE, place);
+    assert!(super::OFF_MESSAGE.contains(place), "{}", super::OFF_MESSAGE);
+    assert!(
+        super::OFF_MESSAGE.starts_with("Agent access is off"),
+        "quill agent maps this prefix to its exit code"
+    );
+    assert!(
+        crate::agent::cli::Exit::AccessOff.meaning().contains(place),
+        "quill agent help"
+    );
 }

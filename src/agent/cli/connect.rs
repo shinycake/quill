@@ -3,7 +3,7 @@
 //! (merged into what is there, after a backup).
 
 use super::{Exit, Failure, Global, Output, files};
-use crate::agent::SETTINGS_PLACE;
+use crate::agent::SWITCH_PLACE;
 use serde_json::{Map, Value, json};
 use std::path::{Path, PathBuf};
 
@@ -302,7 +302,7 @@ pub(super) fn run(global: &Global, args: &[String]) -> Result<Output, Failure> {
         }
         text.push_str(&format!(
             "Or run `{} agent connect {} --yes` to add it for you; the old file is backed up first. \
-Then restart {} and turn on Agent access in Quill ({SETTINGS_PLACE}).",
+Then restart {} and turn on Agent access in Quill ({SWITCH_PLACE}).",
             cli_name(),
             app.arg_name(),
             app.label(),
@@ -343,7 +343,7 @@ Then restart {} and turn on Agent access in Quill ({SETTINGS_PLACE}).",
     }
     if matches!(outcome, Merge::Written { .. }) {
         text.push_str(&format!(
-            " Restart {} to load it, and turn on Agent access in Quill ({SETTINGS_PLACE}).",
+            " Restart {} to load it, and turn on Agent access in Quill ({SWITCH_PLACE}).",
             app.label()
         ));
     }
@@ -385,7 +385,7 @@ fn claude_code(global: &Global, exe: &str, print: bool) -> Output {
     Output::Text(format!(
         "Run this in a terminal to add Quill to Claude Code:\n\n  {}\n\n\
 Add --scope user after `add` to use it in every project. Then turn on Agent access in Quill \
-({SETTINGS_PLACE}) and ask Claude to call quill_status.",
+({SWITCH_PLACE}) and ask Claude to call quill_status.",
         shown.join("\n\n  ")
     ))
 }

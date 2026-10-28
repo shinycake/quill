@@ -131,7 +131,7 @@ impl Exit {
             Exit::AccessOff => {
                 concat!(
                     "Agent access is off. The user turns it on in Quill: ",
-                    settings_place!(),
+                    switch_place!(),
                     "."
                 )
             }

@@ -31,7 +31,7 @@ const IDLE_CHECK: Duration = Duration::from_secs(1);
 
 pub const OFF_MESSAGE: &str = concat!(
     "Agent access is off in Quill. Ask the user to turn it on in Quill: ",
-    settings_place!(),
+    switch_place!(),
     "."
 );
 /// The answer to an agent the user disconnected with Revoke.

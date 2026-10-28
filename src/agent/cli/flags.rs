@@ -592,7 +592,7 @@ confirmations as MCP agents. MCP apps use `quill mcp` instead.
 {WINDOWS_NOTE}
 Commands:
 ",
-        crate::agent::SETTINGS_PLACE
+        crate::agent::SWITCH_PLACE
     );
     for (alias, tool) in ALIASES {
         let title = find_tool(tool).map(|t| t.title).unwrap_or_default();

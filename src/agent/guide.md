@@ -1,7 +1,7 @@
 # Using Quill as an agent
 
 Quill is a desktop Telegram client. With Agent access turned on (Quill:
-Settings > Agent access), an agent on the same computer can use
+Settings > Advanced > Agent access), an agent on the same computer can use
 the user's Telegram account through the Quill that is already running. Quill
 talks to Telegram; the agent talks to Quill. Nothing leaves the computer
 except the Telegram traffic Quill would make anyway.

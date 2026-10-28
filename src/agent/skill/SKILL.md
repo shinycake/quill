@@ -18,7 +18,7 @@ tool for the first time in a session.
 ## Setup
 
 Agent access is off by default. The user turns it on in Quill under
-Settings > Agent access. You can't turn it on yourself.
+Settings > Advanced > Agent access. You can't turn it on yourself.
 
 If you have Quill's MCP tools (`quill_status`, `list_chats` and so on), use
 them. If not, use the command line, which reaches the same tools in the
