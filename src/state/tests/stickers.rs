@@ -234,6 +234,7 @@ fn message_emoji_packs_are_distinct_and_skip_unresolved_emoji() {
         // Emoji 9 has no sticker yet.
         entities: vec![entity(1, 0), entity(2, 1), entity(3, 2), entity(9, 3)],
         link_preview: None,
+        animated: None,
     });
     assert_eq!(session.message_emoji_pack_ids(&content), vec![70, 71]);
     assert!(

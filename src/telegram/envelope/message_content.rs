@@ -196,6 +196,9 @@ pub struct TextContent {
     pub text: String,
     pub entities: Vec<TextEntity>,
     pub link_preview: Option<LinkPreview>,
+    /// `messageAnimatedEmoji`: the emoji's sticker, drawn in place of the
+    /// text when the message shows big emoji (`animated_emoji`).
+    pub animated: Option<super::AnimatedEmoji>,
 }
 
 /// Phase C2i: service-row label for a `messageCall`, following
@@ -256,6 +259,7 @@ impl TextContent {
             text: text.into(),
             entities: Vec::new(),
             link_preview: None,
+            animated: None,
         }
     }
 }
@@ -467,12 +471,7 @@ pub(crate) fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<Parse
     };
     match value.get("@type").and_then(Value::as_str) {
         Some("messageText") => parse_message_text(value),
-        Some("messageAnimatedEmoji") => {
-            // TDLib sends standalone emoji as its own content constructor.
-            // Keep the text when animation metadata isn't available locally.
-            let text = serde_json::json!({"text": {"text": value.get("emoji").and_then(Value::as_str).unwrap_or(""), "entities": []}});
-            parse_message_text(&text)
-        }
+        Some("messageAnimatedEmoji") => super::parse_message_animated_emoji(value),
         Some("messagePhoto") => parse_message_photo(value),
         Some("messageDocument") => parse_message_document(value),
         Some("messageSticker") => parse_message_sticker(value),
@@ -718,6 +717,7 @@ pub(crate) fn parse_text_content(value: Option<&Value>) -> TextContent {
         text: text.clone(),
         entities: parse_text_entities(&text, value),
         link_preview: None,
+        animated: None,
     }
 }
 

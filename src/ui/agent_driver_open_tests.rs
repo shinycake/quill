@@ -49,6 +49,7 @@ fn put_link_in_chat_11(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> u
                 kind: TextEntityKind::Url,
             }],
             link_preview: None,
+            animated: None,
         });
         cx.notify();
         id

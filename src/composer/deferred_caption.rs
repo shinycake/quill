@@ -100,6 +100,7 @@ mod tests {
             text: "hi".into(),
             entities: Vec::new(),
             link_preview: None,
+            animated: None,
         });
         assert!(ComposerEdit::from_pending_media(ChatId(1), MessageId(2), &text).is_none());
         assert!(!has_editable_caption(&text));

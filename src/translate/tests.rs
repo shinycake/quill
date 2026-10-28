@@ -169,6 +169,7 @@ fn translation_replaces_text_and_captions() {
         text: "Привет".into(),
         entities: Vec::new(),
         link_preview: None,
+        animated: None,
     });
     assert_eq!(
         super::translatable_content(&content).map(|(t, _)| t),
@@ -190,6 +191,7 @@ fn translation_replaces_text_and_captions() {
         text: String::new(),
         entities: Vec::new(),
         link_preview: None,
+        animated: None,
     });
     assert!(super::translatable_content(&empty).is_none());
     // Content with no text is left alone.

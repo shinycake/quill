@@ -179,6 +179,7 @@ fn preview_style_for_text_keeps_icon_empty_and_entities() {
             kind: TextEntityKind::Bold,
         }],
         link_preview: None,
+        animated: None,
     });
     let style = preview_style(&content, "hello bold world");
     assert_eq!(

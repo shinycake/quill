@@ -70,6 +70,7 @@ fn reveal_text(text: &TextContent, chars: usize) -> TextContent {
             })
             .collect(),
         link_preview: None,
+        animated: None,
     }
 }
 
@@ -167,6 +168,7 @@ impl QuillApp {
                 text: tr(keys::Q_LEFTOVERS_THINKING).into(),
                 entities: Vec::new(),
                 link_preview: None,
+                animated: None,
             }),
         };
         Some(HistoryMessage {
@@ -218,6 +220,7 @@ mod tests {
                 },
             ],
             link_preview: None,
+            animated: None,
         };
         let cut = reveal_text(&text, 3);
         assert_eq!(cut.text, "hél");

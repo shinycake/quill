@@ -258,6 +258,7 @@ mod tests {
                 entity(14, 20, TextEntityKind::Italic),
             ],
             link_preview: None,
+            animated: None,
         }))
         .expect("text quotes");
         let parts = source.segments();
