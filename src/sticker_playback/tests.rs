@@ -10,14 +10,24 @@ fn fixtures() -> PathBuf {
 fn stickers_animate_with_transparent_backgrounds() {
     let cancelled = AtomicBool::new(false);
     let path = fixtures().join("demo-sticker.tgs");
-    let tgs = decode_tgs(&path, &cancelled).unwrap();
+    let decode = |cancelled: &AtomicBool| {
+        decode_tgs_sized(
+            &path,
+            128,
+            MAX_STICKER_FRAMES,
+            30.0,
+            FitzType::None,
+            cancelled,
+        )
+    };
+    let tgs = decode(&cancelled).unwrap();
     assert!((60..=61).contains(&tgs.frames.len()));
     assert_eq!(tgs.fps, 30.0);
     assert_ne!(tgs.frames[0], tgs.frames[15]);
     assert_eq!(tgs.frames[0][3], 0);
     assert!(tgs.frames[0].as_chunks::<4>().0.iter().any(|p| p[3] == 255));
     cancelled.store(true, Ordering::SeqCst);
-    assert!(decode_tgs(&path, &cancelled).is_err());
+    assert!(decode(&cancelled).is_err());
 }
 
 #[test]
@@ -26,9 +36,11 @@ fn video_stickers_animate_with_transparent_backgrounds() {
     let cancelled = AtomicBool::new(false);
     let cache = std::env::temp_dir().join(format!("quill-webm-sticker-{}", std::process::id()));
     let child = std::sync::Arc::new(Mutex::new(None));
-    let webm = decode_webm(
+    let webm = decode_webm_sized(
         &fixtures().join("demo-sticker.webm"),
         &cache,
+        128,
+        MAX_STICKER_FRAMES,
         &child,
         &cancelled,
     )

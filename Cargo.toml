@@ -154,6 +154,9 @@ quill-webview-protocol = { path = "crates/webview-protocol" }
 # (docs/decisions/codex-refactor-1.md, codex-refactor-2.md). Already in the
 # lockfile via GPUI.
 inventory = { version = "0.3", optional = true }
+# Animated sticker frame store (docs/decisions/sticker-player.md): one LZ4
+# block per frame.
+lz4_flex = { version = "0.14", default-features = false, features = ["std", "checked-decode"] }
 thiserror = "2"
 unicode-segmentation = "1.13"
 unicode-bidi = "0.3"

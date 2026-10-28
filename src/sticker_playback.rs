@@ -1,4 +1,7 @@
-//! Bounded sticker decoding; GPUI owns the display clock.
+//! Bounded sticker decoding. Animated stickers on screen stream through
+//! [`player`]; the whole-file decoders here are for stills (photo editor
+//! art, gift art), video stickers (decoded once, then stored by the
+//! player) and tests.
 #![deny(clippy::indexing_slicing)]
 use std::io::Read;
 use std::path::Path;
@@ -8,6 +11,7 @@ use std::sync::{
 };
 
 mod fitz;
+pub mod player;
 mod thorvg;
 mod tint;
 mod webm;
@@ -16,12 +20,8 @@ pub use fitz::{FitzType, apply_fitzpatrick};
 pub use tint::Tint;
 pub use webm::WebmFrames;
 
-pub const STICKER_EDGE: usize = 128;
+/// Frames of a video sticker decoded at most (Telegram caps them at 3 s).
 pub const MAX_STICKER_FRAMES: usize = 120;
-/// Playback rate cap for stickers and custom emoji drawn in the chat
-/// (Lottie files are usually 60 fps). At sticker and emoji sizes 30 fps
-/// looks the same and halves the frames held and the redraws.
-pub const MAX_PLAYBACK_FPS: f64 = 30.0;
 
 /// How many evenly spaced frames to render of a `total`-frame animation
 /// at `fps`: at most `max_frames`, and no more than `max_fps` needs.
@@ -106,20 +106,8 @@ fn tgs_json(path: &Path, fitz: FitzType) -> Result<Tgs, String> {
     Ok(Tgs { json: bytes, fps })
 }
 
-pub fn decode_tgs(path: &Path, cancelled: &AtomicBool) -> Result<StickerFrames, String> {
-    decode_tgs_sized(
-        path,
-        STICKER_EDGE,
-        MAX_STICKER_FRAMES,
-        MAX_PLAYBACK_FPS,
-        FitzType::None,
-        cancelled,
-    )
-}
-
-/// [`decode_tgs`] at `edge` × `edge` px with at most `max_frames` frames
-/// played at most `max_fps` (custom emoji decode smaller and shorter), with
-/// emoji skin tone `fitz`.
+/// A TGS file's frames at `edge` × `edge` px, at most `max_frames` of
+/// them played at most `max_fps`, with emoji skin tone `fitz`.
 pub fn decode_tgs_sized(
     path: &Path,
     edge: usize,
@@ -151,23 +139,6 @@ pub fn decode_tgs_sized(
         frames,
         fps: tgs.fps * count as f64 / total as f64,
     })
-}
-
-/// Video sticker frames at [`STICKER_EDGE`] (see [`decode_webm_sized`]).
-pub fn decode_webm(
-    path: &Path,
-    cache: &Path,
-    child: &std::sync::Arc<Mutex<Option<std::process::Child>>>,
-    cancelled: &AtomicBool,
-) -> Result<WebmFrames, String> {
-    decode_webm_sized(
-        path,
-        cache,
-        STICKER_EDGE,
-        MAX_STICKER_FRAMES,
-        child,
-        cancelled,
-    )
 }
 
 /// A WebM video sticker fit into `edge` × `edge` px, with at most
