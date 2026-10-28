@@ -123,6 +123,38 @@ async fn run_step(step: &str, demo_window: AnyWindowHandle, cx: &mut AsyncApp) {
         }
         return;
     }
+    // `dn:x,y`, `dm:x,y` and `up:x,y` press, drag and release the left
+    // button as separate steps, to capture a drag while it is held.
+    if let Some((kind, at)) = ["dn:", "dm:", "up:"]
+        .into_iter()
+        .find_map(|kind| Some((kind, step.strip_prefix(kind)?)))
+    {
+        if let Some(position) = point_step(at) {
+            let event = match kind {
+                "dn:" => PlatformInput::MouseDown(MouseDownEvent {
+                    button: MouseButton::Left,
+                    position,
+                    modifiers: Modifiers::default(),
+                    click_count: 1,
+                    first_mouse: false,
+                }),
+                "dm:" => PlatformInput::MouseMove(MouseMoveEvent {
+                    position,
+                    pressed_button: Some(MouseButton::Left),
+                    modifiers: Modifiers::default(),
+                }),
+                _ => PlatformInput::MouseUp(MouseUpEvent {
+                    button: MouseButton::Left,
+                    position,
+                    modifiers: Modifiers::default(),
+                    click_count: 1,
+                }),
+            };
+            dispatch(demo_window, cx, [event], false);
+        }
+        pause(cx, 40).await;
+        return;
+    }
     // `m:x,y` moves the pointer without clicking (hover).
     if let Some(hover) = step.strip_prefix("m:") {
         if let Some(position) = point_step(hover) {

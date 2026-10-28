@@ -10,6 +10,11 @@
 //! dragged row slides into its slot the same way and the final order is
 //! saved (`setPinnedChats`). Pure timing/geometry; the UI passes `now`.
 //!
+//! Quill departs from tdesktop to make the drag readable: the reorder
+//! starts as soon as the press becomes a drag (tdesktop waits 30px with no
+//! feedback), the row lifts off the list and stays inside the pinned block,
+//! and its slot shows where it will land.
+//!
 //! tdesktop does not animate anything else in the chat list: a chat moving
 //! up because of a new message jumps (no `_rowsAnimation` exists), so Quill
 //! does not invent one.
@@ -19,11 +24,11 @@ use std::collections::HashMap;
 use std::f32::consts::PI;
 use std::time::{Duration, Instant};
 
-/// `kStartReorderThreshold`: vertical px before a press starts a reorder.
-pub const START_THRESHOLD: f32 = 30.0;
-
 /// `st::stickersRowDuration`.
 pub const SLIDE: Duration = Duration::from_millis(200);
+
+/// How long the picked-up row takes to rise off the list.
+pub const LIFT: Duration = Duration::from_millis(150);
 
 #[derive(Debug, Clone, Copy)]
 struct Slide {
@@ -54,6 +59,9 @@ pub struct PinReorder {
     ids: Vec<i64>,
     heights: HashMap<i64, f32>,
     dragging: Option<i64>,
+    /// The row that was let go and is sliding into its slot.
+    dropped: Option<i64>,
+    began: Instant,
     start_y: f32,
     cur_y: f32,
     slides: HashMap<i64, Slide>,
@@ -62,7 +70,13 @@ pub struct PinReorder {
 impl PinReorder {
     /// Start dragging `dragging` from pointer position `y`. Needs at least
     /// two pinned chats (`updateReorderIndexGetCount() < 2` cancels).
-    pub fn begin(ids: Vec<i64>, heights: HashMap<i64, f32>, dragging: i64, y: f32) -> Option<Self> {
+    pub fn begin(
+        ids: Vec<i64>,
+        heights: HashMap<i64, f32>,
+        dragging: i64,
+        y: f32,
+        now: Instant,
+    ) -> Option<Self> {
         if ids.len() < 2 || !ids.contains(&dragging) {
             return None;
         }
@@ -70,6 +84,8 @@ impl PinReorder {
             ids,
             heights,
             dragging: Some(dragging),
+            dropped: None,
+            began: now,
             start_y: y,
             cur_y: y,
             slides: HashMap::new(),
@@ -142,9 +158,11 @@ impl PinReorder {
     /// Pointer released: the dragged row slides into its slot. Returns the
     /// final order to save.
     pub fn release(&mut self, now: Instant) -> Vec<i64> {
-        if let Some(dragging) = self.dragging.take() {
-            let from = self.cur_y - self.start_y;
+        if let Some(dragging) = self.dragging {
+            let from = self.dragged_offset(dragging);
             self.slides.insert(dragging, Slide { from, at: now });
+            self.dropped = Some(dragging);
+            self.dragging = None;
         }
         self.ids.clone()
     }
@@ -152,9 +170,39 @@ impl PinReorder {
     /// Vertical offset (px) to draw `id` at right now.
     pub fn offset(&self, id: i64, now: Instant) -> f32 {
         if self.dragging == Some(id) {
-            return self.cur_y - self.start_y;
+            return self.dragged_offset(id);
         }
         self.slides.get(&id).map_or(0.0, |slide| slide.value(now))
+    }
+
+    /// The dragged row follows the pointer but stays inside the pinned
+    /// block, so it never hovers over rows it cannot land between.
+    fn dragged_offset(&self, id: i64) -> f32 {
+        let index = self.position(id).unwrap_or(0);
+        let above: f32 = self.ids.iter().take(index).map(|id| self.height(*id)).sum();
+        let below: f32 = self
+            .ids
+            .iter()
+            .skip(index + 1)
+            .map(|id| self.height(*id))
+            .sum();
+        (self.cur_y - self.start_y).clamp(-above, below)
+    }
+
+    /// How far `id` is lifted off the list, 0 (flat) to 1 (picked up): it
+    /// rises while dragged and sets back down as it slides into its slot.
+    pub fn lift(&self, id: i64, now: Instant) -> f32 {
+        if self.dragging == Some(id) {
+            let t = now.saturating_duration_since(self.began).as_secs_f32() / LIFT.as_secs_f32();
+            return sine_in_out(t.clamp(0.0, 1.0));
+        }
+        if self.dropped == Some(id) {
+            return self.slides.get(&id).map_or(0.0, |slide| {
+                let t = now.saturating_duration_since(slide.at).as_secs_f32() / SLIDE.as_secs_f32();
+                1.0 - sine_in_out(t.clamp(0.0, 1.0))
+            });
+        }
+        0.0
     }
 
     /// Still dragging, or a slide is running (the list needs frames).
@@ -184,14 +232,14 @@ mod tests {
     #[test]
     fn needs_two_pinned_chats() {
         let (ids, heights) = rows(&[1]);
-        assert!(PinReorder::begin(ids, heights, 1, 0.0).is_none());
+        assert!(PinReorder::begin(ids, heights, 1, 0.0, Instant::now()).is_none());
     }
 
     #[test]
     fn small_drag_keeps_order_and_follows_pointer() {
         let (ids, heights) = rows(&[1, 2, 3]);
         let now = Instant::now();
-        let mut drag = PinReorder::begin(ids, heights, 2, 100.0).unwrap();
+        let mut drag = PinReorder::begin(ids, heights, 2, 100.0, now).unwrap();
         drag.drag_to(110.0, now);
         assert_eq!(drag.ids(), [1, 2, 3]);
         assert_eq!(drag.offset(2, now), 10.0);
@@ -202,7 +250,7 @@ mod tests {
     fn crossing_the_threshold_swaps_down_and_slides_the_neighbour() {
         let (ids, heights) = rows(&[1, 2, 3]);
         let t0 = Instant::now();
-        let mut drag = PinReorder::begin(ids, heights, 1, 0.0).unwrap();
+        let mut drag = PinReorder::begin(ids, heights, 1, 0.0, t0).unwrap();
         // Threshold: max(30, 60 - 30) = 30.
         drag.drag_to(29.0, t0);
         assert_eq!(drag.ids(), [1, 2, 3]);
@@ -225,7 +273,7 @@ mod tests {
     fn crossing_up_swaps_with_the_row_above() {
         let (ids, heights) = rows(&[1, 2, 3]);
         let t0 = Instant::now();
-        let mut drag = PinReorder::begin(ids, heights, 3, 200.0).unwrap();
+        let mut drag = PinReorder::begin(ids, heights, 3, 200.0, t0).unwrap();
         drag.drag_to(160.0, t0);
         assert_eq!(drag.ids(), [1, 3, 2]);
         assert_eq!(drag.offset(2, t0), -60.0);
@@ -235,7 +283,7 @@ mod tests {
     fn one_long_drag_crosses_several_rows() {
         let (ids, heights) = rows(&[1, 2, 3, 4]);
         let t0 = Instant::now();
-        let mut drag = PinReorder::begin(ids, heights, 1, 0.0).unwrap();
+        let mut drag = PinReorder::begin(ids, heights, 1, 0.0, t0).unwrap();
         drag.drag_to(150.0, t0);
         assert_eq!(drag.ids(), [2, 3, 4, 1]);
     }
@@ -244,7 +292,7 @@ mod tests {
     fn release_slides_home_then_settles() {
         let (ids, heights) = rows(&[1, 2]);
         let t0 = Instant::now();
-        let mut drag = PinReorder::begin(ids, heights, 1, 0.0).unwrap();
+        let mut drag = PinReorder::begin(ids, heights, 1, 0.0, t0).unwrap();
         drag.drag_to(20.0, t0);
         let order = drag.release(t0);
         assert_eq!(order, [1, 2]);
@@ -253,5 +301,31 @@ mod tests {
         let end = t0 + SLIDE;
         assert_eq!(drag.offset(1, end), 0.0);
         assert!(drag.settled(end));
+    }
+
+    #[test]
+    fn the_dragged_row_stays_inside_the_pinned_block() {
+        let (ids, heights) = rows(&[1, 2, 3]);
+        let t0 = Instant::now();
+        let mut drag = PinReorder::begin(ids, heights, 1, 0.0, t0).unwrap();
+        drag.drag_to(-80.0, t0);
+        assert_eq!(drag.offset(1, t0), 0.0, "no room above the first row");
+        drag.drag_to(500.0, t0);
+        assert_eq!(drag.ids(), [2, 3, 1]);
+        assert_eq!(drag.offset(1, t0), 0.0, "no room below the last row");
+    }
+
+    #[test]
+    fn the_row_lifts_while_dragged_and_sets_down_on_release() {
+        let (ids, heights) = rows(&[1, 2]);
+        let t0 = Instant::now();
+        let mut drag = PinReorder::begin(ids, heights, 1, 0.0, t0).unwrap();
+        assert_eq!(drag.lift(1, t0), 0.0);
+        assert_eq!(drag.lift(1, t0 + LIFT), 1.0);
+        assert_eq!(drag.lift(2, t0 + LIFT), 0.0);
+        let t1 = t0 + LIFT;
+        drag.release(t1);
+        assert_eq!(drag.lift(1, t1), 1.0);
+        assert_eq!(drag.lift(1, t1 + SLIDE), 0.0);
     }
 }

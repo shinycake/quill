@@ -586,18 +586,6 @@ impl QuillApp {
         {
             reorder.drag_to(y, now);
         } else {
-            // tdesktop `kStartReorderThreshold`: the pointer must travel
-            // 30px vertically before the press becomes a reorder.
-            let anchor = match self.chat_list.pin_drag_anchor {
-                Some((id, anchor)) if id == drag.chat_id.0 => anchor,
-                _ => {
-                    self.chat_list.pin_drag_anchor = Some((drag.chat_id.0, y));
-                    return;
-                }
-            };
-            if (y - anchor).abs() < quill::pin_reorder::START_THRESHOLD {
-                return;
-            }
             let Some(session) = self.session() else {
                 return;
             };
@@ -617,9 +605,20 @@ impl QuillApp {
                     Some((*id, f32::from(height)))
                 })
                 .collect();
+            let press = match self.chat_list.pin_press.take() {
+                Some((id, press)) if id == drag.chat_id.0 => press,
+                _ => y,
+            };
             self.chat_list.pin_reorder_archived = drag.archived;
             self.chat_list.pin_reorder =
-                quill::pin_reorder::PinReorder::begin(ids, heights, drag.chat_id.0, y);
+                quill::pin_reorder::PinReorder::begin(ids, heights, drag.chat_id.0, press, now)
+                    .map(|mut reorder| {
+                        reorder.drag_to(y, now);
+                        reorder
+                    });
+            // A reorder is not a long press: no peek preview over the drag.
+            self.chat_list.preview_press = None;
+            self.chat_list.preview = None;
         }
         self.notify_sidebar(cx);
     }
@@ -628,7 +627,6 @@ impl QuillApp {
     /// `savePinnedOrder`): the dragged row slides into its slot and the
     /// full order goes out as `setPinnedChats`.
     pub(super) fn finish_pin_drag(&mut self, cx: &mut Context<Self>) {
-        self.chat_list.pin_drag_anchor = None;
         let archived = self.chat_list.pin_reorder_archived;
         let Some(reorder) = self.chat_list.pin_reorder.as_mut() else {
             return;

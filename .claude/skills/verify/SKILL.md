@@ -68,6 +68,7 @@ order after the window is ready):
 | --- | --- |
 | `x,y` | left click |
 | `m:x,y` | move the pointer (hover states, tooltips, scrubber bubbles) |
+| `dn:x,y` / `dm:x,y` / `up:x,y` | press, drag (button held) and release the left button as separate steps; end on `dm:` to capture a drag mid-flight |
 | `mid:x,y` | middle click |
 | `r:x,y` | right click (context menus) |
 | `k:key` | one key press, GPUI key names (`escape`, `enter`, `space`, `cmd-f`) |
