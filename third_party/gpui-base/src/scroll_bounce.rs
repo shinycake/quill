@@ -1,22 +1,15 @@
 //! Boundary displacement only: the list keeps its clamped logical position.
-//!
-//! Quill patch: [`ScrollBounce::displacement`] reports the edge's offset and
-//! whether a finger holds it (see `QUILL-CHANGES.md`).
 
 use crate::overscroll::Overscroll;
 use crate::{OngoingScrollExt as _, ScrollbarHandle};
 use gpui::{
     AnyElement, App, Bounds, ContentMask, DispatchPhase, Element, ElementId, Global,
     GlobalElementId, Hitbox, HitboxBehavior, HitboxId, InspectorElementId, IntoElement, LayoutId,
-    OngoingScroll, Pixels, ScrollDelta, ScrollWheelEvent, TouchPhase, Window, point, px,
+    OngoingScroll, Pixels, ScrollDelta, ScrollEvent, TouchPhase, Window, point, px,
 };
 #[cfg(not(target_family = "wasm"))]
 use std::time::Instant;
-use std::{
-    cell::{Cell, RefCell},
-    rc::Rc,
-    time::Duration,
-};
+use std::{cell::RefCell, rc::Rc, time::Duration};
 #[cfg(target_family = "wasm")]
 use web_time::Instant;
 
@@ -31,9 +24,6 @@ pub struct ScrollBounceMotion {
     tracking: f32,
     response: Duration,
     max_stretch: Option<f32>,
-    /// Quill: the farthest a fling throws the edge, when that differs from
-    /// `max_stretch`.
-    max_throw: Option<f32>,
 }
 
 impl Default for ScrollBounceMotion {
@@ -51,7 +41,6 @@ impl Default for ScrollBounceMotion {
                 tracking: 0.55,
                 response: Duration::from_millis(524),
                 max_stretch: None,
-                max_throw: None,
             }
         } else {
             Self {
@@ -59,7 +48,6 @@ impl Default for ScrollBounceMotion {
                 // 2π / 12.5
                 response: Duration::from_micros(502_655),
                 max_stretch: Some(36.),
-                max_throw: None,
             }
         }
     }
@@ -112,21 +100,6 @@ impl ScrollBounceMotion {
         self
     }
 
-    /// Quill: the farthest a fling throws the edge, while a finger may still
-    /// stretch it as far as `max_stretch`. Defaults to `max_stretch`.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `max_throw` is not finite or not positive.
-    pub fn with_max_throw(mut self, max_throw: f32) -> Self {
-        assert!(
-            max_throw.is_finite() && max_throw > 0.,
-            "scroll bounce max throw must be finite and positive"
-        );
-        self.max_throw = Some(max_throw);
-        self
-    }
-
     /// Fraction of finger travel the stretched edge follows at first.
     pub fn tracking(&self) -> f32 {
         self.tracking
@@ -148,18 +121,6 @@ impl ScrollBounceMotion {
         let seconds = self.response.as_secs_f32();
         (seconds > 0.).then(|| std::f32::consts::TAU / seconds)
     }
-}
-
-/// How far a [`ScrollBounce`] edge is drawn from its place, as the owner of
-/// the wrapper last saw it.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct ScrollBounceDisplacement {
-    /// Pixels the content is drawn past the start (positive) or the end
-    /// (negative) of the scroll range.
-    pub offset: f32,
-    /// A finger on the trackpad still holds the stretched edge. False while
-    /// the edge returns, and for an edge thrown by a fling.
-    pub held: bool,
 }
 
 /// Adds vertical touch overscroll to an existing scroll viewport.
@@ -187,7 +148,6 @@ pub struct ScrollBounce {
     scroll_wheel: bool,
     motion: ScrollBounceMotion,
     on_scroll: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
-    displacement: Option<Rc<Cell<ScrollBounceDisplacement>>>,
 }
 
 impl ScrollBounce {
@@ -204,7 +164,6 @@ impl ScrollBounce {
             scroll_wheel: true,
             motion: ScrollBounceMotion::default(),
             on_scroll: None,
-            displacement: None,
         }
     }
 
@@ -239,14 +198,6 @@ impl ScrollBounce {
     /// Set how far a drag stretches past an edge and how the edge returns.
     pub fn motion(mut self, motion: ScrollBounceMotion) -> Self {
         self.motion = motion;
-        self
-    }
-
-    /// Write the edge's displacement into `cell` on every frame, so the
-    /// owner can react to a pull (pull to expand) without a second gesture
-    /// handler. Only the wheel-owning mode (the default) reports.
-    pub fn displacement(mut self, cell: Rc<Cell<ScrollBounceDisplacement>>) -> Self {
-        self.displacement = Some(cell);
         self
     }
 
@@ -388,14 +339,7 @@ impl Element for ScrollBounce {
                 if state.overscroll.step(cx.background_executor().now()) {
                     window.request_animation_frame();
                 }
-                let offset = state.overscroll.offset();
-                if let Some(cell) = &self.displacement {
-                    cell.set(ScrollBounceDisplacement {
-                        offset,
-                        held: state.overscroll.is_held(),
-                    });
-                }
-                offset
+                state.overscroll.offset()
             } else {
                 state.physics.motion = self.motion;
                 let now = Instant::now();
@@ -441,7 +385,7 @@ impl Element for ScrollBounce {
         if self.scroll_wheel {
             let hitbox = prepaint.hitbox.id;
             let handle = self.handle.clone();
-            window.on_mouse_event(move |_: &ScrollWheelEvent, phase, window, cx| {
+            window.on_mouse_event(move |_: &ScrollEvent, phase, window, cx| {
                 if phase == DispatchPhase::Capture
                     && hitbox.should_handle_scroll(window)
                     && max_scroll_extent(handle.as_ref()) > px(0.)
@@ -458,7 +402,7 @@ impl Element for ScrollBounce {
             let on_scroll = self.on_scroll.clone();
             let mut before = 0.;
             let mut allow_end_bounce = false;
-            window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
+            window.on_mouse_event(move |event: &ScrollEvent, phase, window, cx| {
                 let ScrollDelta::Pixels(mut delta) = event.delta else {
                     if phase == DispatchPhase::Capture && hitbox.should_handle_scroll(window) {
                         let mut state = state.borrow_mut();
@@ -610,7 +554,7 @@ impl Element for ScrollBounce {
             let handle = self.handle.clone();
             let view = window.current_view();
             let on_scroll = self.on_scroll.clone();
-            window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
+            window.on_mouse_event(move |event: &ScrollEvent, phase, window, cx| {
                 if phase != DispatchPhase::Capture
                     || !hitbox.should_handle_scroll(window)
                     || !owns_scroll(hitbox, cx)
@@ -647,9 +591,16 @@ impl Element for ScrollBounce {
                         |dy| {
                             let before = handle.offset();
                             let mut offset = before;
-                            offset.y = (before.y + px(dy)).clamp(-max, px(0.));
+                            let requested = before.y + px(dy);
+                            offset.y = requested.clamp(-max, px(0.));
                             handle.set_offset(offset);
-                            (offset.y - before.y).as_f32()
+                            // Only clamping leaves unused input; subtraction
+                            // can leave a rounding residue inside the list.
+                            if offset.y == requested {
+                                dy
+                            } else {
+                                (offset.y - before.y).as_f32()
+                            }
                         },
                     )
                 };
@@ -804,7 +755,7 @@ impl Physics {
         } else {
             0.
         };
-        if let Some(max) = self.motion.max_throw.or(self.motion.max_stretch) {
+        if let Some(max) = self.motion.max_stretch {
             outward =
                 outward.signum() * limit_throw(self.position.abs(), outward.abs(), omega, max);
         }
@@ -873,7 +824,7 @@ mod tests {
     }
 
     fn scroll(cx: &mut VisualTestContext, delta: f32, phase: TouchPhase) {
-        cx.simulate_event(ScrollWheelEvent {
+        cx.simulate_event(ScrollEvent {
             position: point(px(100.), px(100.)),
             delta: ScrollDelta::Pixels(point(px(0.), px(delta))),
             touch_phase: phase,
@@ -881,7 +832,7 @@ mod tests {
         });
     }
 
-    struct WheelViewport(ScrollHandle);
+    struct WheelViewport(ScrollHandle, Pixels);
 
     impl Render for WheelViewport {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
@@ -894,10 +845,39 @@ mod tests {
                     .h(px(200.))
                     .overflow_y_scroll()
                     .track_scroll(&self.0)
-                    .child(div().h(px(600.)).w_full()),
+                    .child(div().h(self.1).w_full()),
             )
             .enabled(true)
             .scroll_wheel(true)
+        }
+    }
+
+    #[gpui::test]
+    fn fractional_wheel_input_keeps_scrolling_deep_in_a_long_list(cx: &mut TestAppContext) {
+        for delta in [-0.09_f32, 0.09] {
+            let mut app = cx.new_app();
+            let handle = ScrollHandle::new();
+            let (_, cx) = app.add_window_view({
+                let handle = handle.clone();
+                move |_, _| WheelViewport(handle, px(2_000_000.))
+            });
+            draw(cx);
+            handle.set_offset(point(px(0.), px(-1_000_000.)));
+            draw(cx);
+            let origin = handle.bounds().origin;
+            scroll(cx, delta, TouchPhase::Started);
+            scroll(cx, delta.signum() * 20., TouchPhase::Moved);
+            scroll(cx, 0., TouchPhase::Ended);
+            cx.executor().advance_clock(Duration::from_millis(16));
+            draw(cx);
+            scroll(cx, delta, TouchPhase::Moved);
+            scroll(cx, 0., TouchPhase::Started);
+            scroll(cx, delta.signum() * 20., TouchPhase::Moved);
+            draw(cx);
+            // Here each 0.09px delta rounds to 0.0625px in the stored offset.
+            let expected = -1_000_000. + delta.signum() * 40.125;
+            assert!((handle.offset().y.as_f32() - expected).abs() < 0.001);
+            assert_eq!(handle.bounds().origin, origin);
         }
     }
 
@@ -906,11 +886,11 @@ mod tests {
         let handle = ScrollHandle::new();
         let (_, cx) = cx.add_window_view({
             let handle = handle.clone();
-            move |_, _| WheelViewport(handle)
+            move |_, _| WheelViewport(handle, px(600.))
         });
         draw(cx);
         let origin = handle.bounds().origin;
-        cx.simulate_event(ScrollWheelEvent {
+        cx.simulate_event(ScrollEvent {
             position: point(px(100.), px(100.)),
             delta: ScrollDelta::Lines(point(0., -100.)),
             ..Default::default()
@@ -927,11 +907,11 @@ mod tests {
         let handle = ScrollHandle::new();
         let (_, cx) = cx.add_window_view({
             let handle = handle.clone();
-            move |_, _| WheelViewport(handle)
+            move |_, _| WheelViewport(handle, px(600.))
         });
         draw(cx);
         let wheel = |cx: &mut VisualTestContext, dy| {
-            cx.simulate_event(ScrollWheelEvent {
+            cx.simulate_event(ScrollEvent {
                 position: point(px(100.), px(100.)),
                 delta: ScrollDelta::Lines(point(0., dy)),
                 ..Default::default()
@@ -1013,7 +993,7 @@ mod tests {
     }
 
     fn scroll_at(cx: &mut VisualTestContext, y: f32, delta: f32, phase: TouchPhase) {
-        cx.simulate_event(ScrollWheelEvent {
+        cx.simulate_event(ScrollEvent {
             position: point(px(100.), px(y)),
             delta: ScrollDelta::Pixels(point(px(0.), px(delta))),
             touch_phase: phase,
@@ -1105,7 +1085,7 @@ mod tests {
         cx.update(|window, cx| {
             for (delta, phase) in [(-30., TouchPhase::Started), (0., TouchPhase::Ended)] {
                 window.dispatch_event(
-                    gpui::PlatformInput::ScrollWheel(ScrollWheelEvent {
+                    gpui::PlatformInput::Scroll(ScrollEvent {
                         position: point(px(100.), px(100.)),
                         delta: ScrollDelta::Pixels(point(px(0.), px(delta))),
                         touch_phase: phase,
@@ -1136,7 +1116,7 @@ mod tests {
         cx.update(|window, cx| {
             for (delta, phase) in [(-30., TouchPhase::Started), (5., TouchPhase::Moved)] {
                 window.dispatch_event(
-                    gpui::PlatformInput::ScrollWheel(ScrollWheelEvent {
+                    gpui::PlatformInput::Scroll(ScrollEvent {
                         position: point(px(100.), px(100.)),
                         delta: ScrollDelta::Pixels(point(px(0.), px(delta))),
                         touch_phase: phase,
@@ -1425,7 +1405,7 @@ mod tests {
         cx.update(|window, cx| {
             for delta in [point(px(30.), px(-20.)), point(px(0.), px(-20.))] {
                 window.dispatch_event(
-                    gpui::PlatformInput::ScrollWheel(ScrollWheelEvent {
+                    gpui::PlatformInput::Scroll(ScrollEvent {
                         position: point(px(100.), px(100.)),
                         delta: ScrollDelta::Pixels(delta),
                         touch_phase: TouchPhase::Moved,

@@ -1,13 +1,8 @@
-// Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
-// an inline text field with its send button, the typed text on activation and
-// a circle-cropped `appLogoOverride` and an inline photo, through `notification_extras`. See
-// third_party/gpui-pre-windows/QUILL-CHANGES.md.
 //! System notifications as Windows toast notifications.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::hash::{Hash as _, Hasher as _};
-use std::path::Path;
 use std::rc::Rc;
 
 use futures::StreamExt as _;
@@ -16,13 +11,11 @@ use gpui::{
     ForegroundExecutor, SharedString, SystemNotification, SystemNotificationResponse, Task,
 };
 use windows::Data::Xml::Dom::XmlDocument;
-use windows::Foundation::{IReference, TypedEventHandler};
+use windows::Foundation::TypedEventHandler;
 use windows::UI::Notifications::{
     ToastActivatedEventArgs, ToastNotification, ToastNotificationManager, ToastNotifier,
 };
-use windows::core::{HSTRING, IInspectable, Interface as _, h};
-
-use crate::notification_extras::{NotificationExtras, store_reply_text, take_notification_extras};
+use windows::core::{IInspectable, Interface as _, h};
 
 type ResponseCallback = Rc<RefCell<Option<Box<dyn FnMut(SystemNotificationResponse)>>>>;
 
@@ -58,10 +51,7 @@ impl SystemNotificationState {
             return Ok(());
         };
 
-        // Quill: the sender image and the inline reply field registered for
-        // this tag.
-        let extras = take_notification_extras(&notification.tag);
-        let document = toast_document(&notification, &extras)?;
+        let document = toast_document(&notification)?;
         let toast = ToastNotification::CreateToastNotification(&document)?;
         // Windows caps toast tags at 64 characters (post-Creators Update),
         // so hash the arbitrary GPUI tag down to a fixed-width value.
@@ -74,32 +64,14 @@ impl SystemNotificationState {
 
         let sender = self.response_sender.clone();
         let response_tag = notification.tag.clone();
-        let text_input_id = extras.text_input.map(|input| input.action_id);
         toast.Activated(&TypedEventHandler::<ToastNotification, IInspectable>::new(
             move |_sender, arguments| {
-                let activated = arguments
+                let action_id = arguments
                     .as_ref()
-                    .and_then(|arguments| arguments.cast::<ToastActivatedEventArgs>().ok());
-                let action_id = activated
-                    .as_ref()
+                    .and_then(|arguments| arguments.cast::<ToastActivatedEventArgs>().ok())
                     .and_then(|arguments| arguments.Arguments().ok())
                     .filter(|arguments| !arguments.is_empty())
                     .map(|arguments| SharedString::from(arguments.to_string()));
-                // Quill: the send button of the inline reply field delivers
-                // the field's text in `UserInput`, keyed by the input id
-                // (the action id); park it for the application's handler.
-                if let (Some(activated), Some(input_id)) = (activated.as_ref(), &text_input_id)
-                    && action_id.as_deref() == Some(input_id.as_str())
-                {
-                    let text = activated
-                        .UserInput()
-                        .and_then(|input| input.Lookup(&HSTRING::from(input_id.as_str())))
-                        .and_then(|value| value.cast::<IReference<HSTRING>>())
-                        .and_then(|value| value.Value())
-                        .map(|text| text.to_string())
-                        .unwrap_or_default();
-                    store_reply_text(&response_tag, text);
-                }
                 sender
                     .unbounded_send(SystemNotificationResponse {
                         tag: response_tag.clone(),
@@ -182,10 +154,7 @@ impl SystemNotificationState {
     }
 }
 
-fn toast_document(
-    notification: &SystemNotification,
-    extras: &NotificationExtras,
-) -> windows::core::Result<XmlDocument> {
+fn toast_document(notification: &SystemNotification) -> windows::core::Result<XmlDocument> {
     let document = XmlDocument::new()?;
     let toast = document.CreateElement(h!("toast"))?;
     document.AppendChild(&toast)?;
@@ -195,52 +164,19 @@ fn toast_document(
     let binding = document.CreateElement(h!("binding"))?;
     binding.SetAttribute(h!("template"), h!("ToastGeneric"))?;
     visual.AppendChild(&binding)?;
-    // Quill: the sender's picture replaces the app logo, cropped to a circle.
-    if let Some(image) = extras.image.as_deref() {
-        let image_element = document.CreateElement(h!("image"))?;
-        image_element.SetAttribute(h!("placement"), h!("appLogoOverride"))?;
-        image_element.SetAttribute(h!("hint-crop"), h!("circle"))?;
-        image_element.SetAttribute(h!("src"), &image_source(image).as_str().into())?;
-        binding.AppendChild(&image_element)?;
-    }
     for text in [&notification.title, &notification.body] {
         let element = document.CreateElement(h!("text"))?;
         element.SetInnerText(&text.as_ref().into())?;
         binding.AppendChild(&element)?;
     }
-    // Quill: the message's photo, inline under the text.
-    if let Some(photo) = extras.photo.as_deref() {
-        let image_element = document.CreateElement(h!("image"))?;
-        image_element.SetAttribute(h!("src"), &image_source(photo).as_str().into())?;
-        binding.AppendChild(&image_element)?;
-    }
 
     if !notification.actions.is_empty() {
         let actions = document.CreateElement(h!("actions"))?;
         toast.AppendChild(&actions)?;
-        // Quill: the text field comes first so the send button sits next to it.
-        let text_input = extras.text_input.as_ref();
-        if let Some(input) = text_input {
-            let input_element = document.CreateElement(h!("input"))?;
-            input_element.SetAttribute(h!("id"), &input.action_id.as_str().into())?;
-            input_element.SetAttribute(h!("type"), h!("text"))?;
-            input_element
-                .SetAttribute(h!("placeHolderContent"), &input.placeholder.as_str().into())?;
-            actions.AppendChild(&input_element)?;
-        }
         for action in &notification.actions {
             let action_element = document.CreateElement(h!("action"))?;
+            action_element.SetAttribute(h!("content"), &action.label.as_ref().into())?;
             action_element.SetAttribute(h!("arguments"), &action.id.as_ref().into())?;
-            if let Some(input) = text_input.filter(|input| input.action_id == action.id) {
-                // The button that submits the field: it sends in the
-                // background, like Telegram Desktop's fastReply, so typing a
-                // reply never brings the window forward.
-                action_element.SetAttribute(h!("content"), &input.send_label.as_str().into())?;
-                action_element.SetAttribute(h!("hint-inputId"), &input.action_id.as_str().into())?;
-                action_element.SetAttribute(h!("activationType"), h!("background"))?;
-            } else {
-                action_element.SetAttribute(h!("content"), &action.label.as_ref().into())?;
-            }
             actions.AppendChild(&action_element)?;
         }
     }
@@ -249,15 +185,6 @@ fn toast_document(
     audio.SetAttribute(h!("silent"), h!("true"))?;
     toast.AppendChild(&audio)?;
     Ok(document)
-}
-
-/// Quill: the toast `src` for a local image, a `file:///` URI with forward
-/// slashes (the toast platform reads local files for desktop apps that way).
-fn image_source(image: &Path) -> String {
-    format!(
-        "file:///{}",
-        image.to_string_lossy().replace('\\', "/").trim_start_matches('/')
-    )
 }
 
 /// Registers the app's AUMID so toasts display correctly for an unpackaged app without a Start Menu shortcut.

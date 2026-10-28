@@ -1,6 +1,3 @@
-// Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
-// `Window::paint_surface_frame`; the paint filter and `Window::capture_frame`.
-// See third_party/gpui-pre/QUILL-CHANGES.md.
 #[cfg(feature = "profiler")]
 use crate::DebugFrameOverlayMode;
 #[cfg(any(feature = "inspector", debug_assertions))]
@@ -24,8 +21,8 @@ use crate::{
     SystemWindowTabController, TabStopMap, TaffyLayoutEngine, Task, TextInputConfiguration,
     TextInputStateChange, TextRenderingMode, TextStyle, TextStyleRefinement, ThermalState,
     TransformationMatrix, Underline, UnderlineStyle, WindowAppearance, WindowBackgroundAppearance,
-    WindowBounds, WindowControls, WindowDecorations, WindowOptions, WindowParams, WindowTextSystem,
-    WindowVisibility, point, prelude::*, px, rems, size, transparent_black,
+    WindowBounds, WindowControls, WindowDecorations, WindowInsets, WindowOptions, WindowParams,
+    WindowTextSystem, WindowVisibility, point, prelude::*, px, rems, size, transparent_black,
 };
 
 use crate::gestures::{GestureTuning, RecognizedTouchGesture, TouchGestureRecognizer};
@@ -42,7 +39,7 @@ use itertools::Itertools;
 use objc2_core_foundation::CFRetained;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use objc2_core_video::CVPixelBuffer;
-use parking_lot::RwLock;
+use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use raw_window_handle::{HandleError, HasDisplayHandle, HasWindowHandle};
 use refineable::Refineable;
 use scheduler::Instant;
@@ -71,7 +68,7 @@ use uuid::Uuid;
 pub(crate) mod a11y;
 mod prompts;
 
-pub use a11y::{A11yNodeSnapshot, A11ySubtreeBuilder, A11yTreeSnapshot};
+pub use a11y::A11ySubtreeBuilder;
 
 use self::a11y::A11y;
 #[cfg(not(target_family = "wasm"))]
@@ -466,23 +463,6 @@ impl Drop for ElementArenaScope {
     }
 }
 
-/// Quill: what [`Window::set_paint_filter`] takes.
-#[derive(Clone)]
-pub struct PaintFilter {
-    /// Given the tags of the elements being painted, outermost first,
-    /// whether their paint is drawn.
-    pub allows: std::rc::Rc<dyn Fn(&[SharedString]) -> bool>,
-    /// What covers the bounds of a tagged element whose paint the filter
-    /// refuses while its parent's was drawn, and the whole window when
-    /// paint outside every tagged element is refused: the hidden part
-    /// reads as hidden rather than empty.
-    pub hidden: Hsla,
-    /// What goes under a tagged element the filter draws while its
-    /// parent's paint was refused, standing in for the backgrounds the
-    /// filter left out (the window's own, usually).
-    pub shown: Hsla,
-}
-
 /// Returned when the element arena has been used and so must be cleared before the next draw.
 #[must_use]
 pub struct ArenaClearNeeded {
@@ -517,7 +497,12 @@ impl ArenaClearNeeded {
     }
 }
 
-pub(crate) type FocusMap = RwLock<SlotMap<FocusId, FocusRef>>;
+#[derive(Default)]
+pub(crate) struct FocusMap {
+    pub(crate) handles: SlotMap<FocusId, FocusRef>,
+    pub(crate) dropped_handles: Vec<FocusId>,
+}
+
 pub(crate) struct FocusRef {
     pub(crate) ref_count: AtomicUsize,
     pub(crate) tab_index: isize,
@@ -557,7 +542,7 @@ impl FocusId {
 /// A handle which can be used to track and manipulate the focused element in a window.
 pub struct FocusHandle {
     pub(crate) id: FocusId,
-    handles: Arc<FocusMap>,
+    handles: Arc<RwLock<FocusMap>>,
     /// The index of this element in the tab order.
     pub tab_index: isize,
     /// Whether this element can be focused by tab navigation.
@@ -571,8 +556,8 @@ impl std::fmt::Debug for FocusHandle {
 }
 
 impl FocusHandle {
-    pub(crate) fn new(handles: &Arc<FocusMap>) -> Self {
-        let id = handles.write().insert(FocusRef {
+    pub(crate) fn new(handles: &Arc<RwLock<FocusMap>>) -> Self {
+        let id = handles.write().handles.insert(FocusRef {
             ref_count: AtomicUsize::new(1),
             tab_index: 0,
             tab_stop: false,
@@ -586,9 +571,9 @@ impl FocusHandle {
         }
     }
 
-    pub(crate) fn for_id(id: FocusId, handles: &Arc<FocusMap>) -> Option<Self> {
+    pub(crate) fn for_id(id: FocusId, handles: &Arc<RwLock<FocusMap>>) -> Option<Self> {
         let lock = handles.read();
-        let focus = lock.get(id)?;
+        let focus = lock.handles.get(id)?;
         if atomic_incr_if_not_zero(&focus.ref_count) == 0 {
             return None;
         }
@@ -603,7 +588,7 @@ impl FocusHandle {
     /// Sets the tab index of the element associated with this handle.
     pub fn tab_index(mut self, index: isize) -> Self {
         self.tab_index = index;
-        if let Some(focus) = self.handles.write().get_mut(self.id) {
+        if let Some(focus) = self.handles.write().handles.get_mut(self.id) {
             focus.tab_index = index;
         }
         self
@@ -614,7 +599,7 @@ impl FocusHandle {
     /// When `false`, the element will not be included in the tab order.
     pub fn tab_stop(mut self, tab_stop: bool) -> Self {
         self.tab_stop = tab_stop;
-        if let Some(focus) = self.handles.write().get_mut(self.id) {
+        if let Some(focus) = self.handles.write().handles.get_mut(self.id) {
             focus.tab_stop = tab_stop;
         }
         self
@@ -683,12 +668,15 @@ impl Eq for FocusHandle {}
 
 impl Drop for FocusHandle {
     fn drop(&mut self) {
-        self.handles
-            .read()
-            .get(self.id)
-            .unwrap()
-            .ref_count
-            .fetch_sub(1, SeqCst);
+        let handles = self.handles.upgradable_read();
+        let focus = handles.handles.get(self.id).expect("focus handle missing");
+        let previous_count = focus.ref_count.fetch_sub(1, SeqCst);
+        assert_ne!(previous_count, 0, "over-released focus handle");
+        if previous_count == 1 {
+            RwLockUpgradableReadGuard::upgrade(handles)
+                .dropped_handles
+                .push(self.id);
+        }
     }
 }
 
@@ -696,7 +684,7 @@ impl Drop for FocusHandle {
 #[derive(Clone, Debug)]
 pub struct WeakFocusHandle {
     pub(crate) id: FocusId,
-    pub(crate) handles: Weak<FocusMap>,
+    pub(crate) handles: Weak<RwLock<FocusMap>>,
 }
 
 impl WeakFocusHandle {
@@ -797,7 +785,7 @@ impl HitboxId {
 impl HitboxId {
     /// Checks if the hitbox with this ID is currently hovered. Returns `false` during keyboard
     /// input modality so that keyboard navigation suppresses hover highlights. Except when handling
-    /// `ScrollWheelEvent`, this is typically what you want when determining whether to handle mouse
+    /// `ScrollEvent`, this is typically what you want when determining whether to handle mouse
     /// events or paint hover styles.
     ///
     /// See [`Hitbox::is_hovered`] for details.
@@ -835,7 +823,7 @@ impl HitboxId {
     }
 
     /// Checks if the hitbox with this ID contains the mouse and should handle scroll events.
-    /// Typically this should only be used when handling `ScrollWheelEvent`, and otherwise
+    /// Typically this should only be used when handling `ScrollEvent`, and otherwise
     /// `is_hovered` should be used. See the documentation of `Hitbox::is_hovered` for details about
     /// this distinction.
     pub fn should_handle_scroll(self, window: &Window) -> bool {
@@ -865,7 +853,7 @@ pub struct Hitbox {
 impl Hitbox {
     /// Checks if the hitbox is currently hovered. Returns `false` during keyboard input modality
     /// so that keyboard navigation suppresses hover highlights. Except when handling
-    /// `ScrollWheelEvent`, this is typically what you want when determining whether to handle mouse
+    /// `ScrollEvent`, this is typically what you want when determining whether to handle mouse
     /// events or paint hover styles.
     ///
     /// This can return `false` even when the hitbox contains the mouse, if a hitbox in front of
@@ -873,7 +861,7 @@ impl Hitbox {
     /// `HitboxBehavior::BlockMouseExceptScroll` (`InteractiveElement::block_mouse_except_scroll`),
     /// or if the current input modality is keyboard (see [`Window::last_input_was_keyboard`]).
     ///
-    /// Handling of `ScrollWheelEvent` should typically use `should_handle_scroll` instead.
+    /// Handling of `ScrollEvent` should typically use `should_handle_scroll` instead.
     /// Concretely, this is due to use-cases like overlays that cause the elements under to be
     /// non-interactive while still allowing scrolling. More abstractly, this is because
     /// `is_hovered` is about element interactions directly under the mouse - mouse moves, clicks,
@@ -895,7 +883,7 @@ impl Hitbox {
     }
 
     /// Checks if the hitbox contains the mouse and should handle scroll events. Typically this
-    /// should only be used when handling `ScrollWheelEvent`, and otherwise `is_hovered` should be
+    /// should only be used when handling `ScrollEvent`, and otherwise `is_hovered` should be
     /// used. See the documentation of `Hitbox::is_hovered` for details about this distinction.
     ///
     /// This can return `false` even when the hitbox contains the mouse, if a hitbox in front of
@@ -942,7 +930,7 @@ pub enum HitboxBehavior {
     /// [`InteractiveElement::block_mouse_except_scroll`].
     ///
     /// For mouse handlers that check those hitboxes, this behaves the same as registering a
-    /// bubble-phase handler for every mouse event type **except** `ScrollWheelEvent`:
+    /// bubble-phase handler for every mouse event type **except** `ScrollEvent`:
     ///
     /// ```ignore
     /// window.on_mouse_event(move |_: &EveryMouseEventTypeExceptScroll, phase, window, cx| {
@@ -952,7 +940,7 @@ pub enum HitboxBehavior {
     /// })
     /// ```
     ///
-    /// See the documentation of [`Hitbox::is_hovered`] for details of why `ScrollWheelEvent` is
+    /// See the documentation of [`Hitbox::is_hovered`] for details of why `ScrollEvent` is
     /// handled differently than other mouse events. If also blocking these scroll events is
     /// desired, then a `cx.stop_propagation()` handler like the one above can be used.
     ///
@@ -1063,12 +1051,6 @@ pub(crate) struct Frame {
     pub(crate) dispatch_tree: DispatchTree,
     pub(crate) scene: Scene,
     pub(crate) hitboxes: Vec<Hitbox>,
-    /// [`InteractiveElement::a11y_tag`] per tagged hitbox
-    /// ([`Window::hovered_a11y_tags`]).
-    pub(crate) hitbox_tags: FxHashMap<HitboxId, SharedString>,
-    /// The tags of the focused element and its tagged ancestors, outermost
-    /// first, as painted this frame ([`Window::focused_a11y_tags`]).
-    pub(crate) focus_tags: Vec<SharedString>,
     pub(crate) window_control_hitboxes: Vec<(WindowControlArea, Hitbox)>,
     pub(crate) deferred_draws: Vec<DeferredDraw>,
     pub(crate) input_handlers: Vec<Option<PlatformInputHandler>>,
@@ -1125,8 +1107,6 @@ impl Frame {
             dispatch_tree,
             scene: Scene::default(),
             hitboxes: Vec::new(),
-            hitbox_tags: FxHashMap::default(),
-            focus_tags: Vec::new(),
             window_control_hitboxes: Vec::new(),
             deferred_draws: Vec::new(),
             input_handlers: Vec::new(),
@@ -1157,8 +1137,6 @@ impl Frame {
         self.tooltip_requests.clear();
         self.cursor_styles.clear();
         self.hitboxes.clear();
-        self.hitbox_tags.clear();
-        self.focus_tags.clear();
         self.window_control_hitboxes.clear();
         self.deferred_draws.clear();
         self.tab_stops.clear();
@@ -1275,7 +1253,7 @@ pub struct Window {
     /// window, so that only actual changes are forwarded (reconfiguring a live
     /// input session can restart the IME connection).
     last_text_input_configuration: Option<TextInputConfiguration>,
-    focused_text_input_active: bool,
+    focused_text_input: Option<FocusId>,
     pub(crate) image_cache_stack: Vec<AnyImageCache>,
     pub(crate) rendered_frame: Frame,
     pub(crate) next_frame: Frame,
@@ -1290,17 +1268,6 @@ pub struct Window {
     default_prevented: bool,
     mouse_position: Point<Pixels>,
     mouse_hit_test: HitTest,
-    /// The [`InteractiveElement::a11y_tag`]s of the elements being painted,
-    /// outermost first (pushed and popped around each tagged element's
-    /// paint), so the focused element can record the tags above it.
-    pub(crate) a11y_tag_stack: Vec<SharedString>,
-    /// Quill: decides from [`Self::a11y_tag_stack`] whether what is painted
-    /// now reaches the scene ([`Self::set_paint_filter`]).
-    paint_filter: Option<PaintFilter>,
-    /// Quill: under a paint filter, the tag stack each tooltip's owner was
-    /// painted under; the tooltip is painted under the same tags, so it is
-    /// cut with its owner ([`Self::record_tooltip_tags`]).
-    tooltip_tags: Vec<(TooltipId, Vec<SharedString>)>,
     modifiers: Modifiers,
     capslock: Capslock,
     scale_factor: f32,
@@ -1640,6 +1607,8 @@ impl Window {
             icon,
             #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
             tabbing_identifier,
+            #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+            use_display_p3,
         } = options;
 
         let initial_window_title = titlebar
@@ -1665,6 +1634,8 @@ impl Window {
                 icon,
                 #[cfg(target_os = "macos")]
                 tabbing_identifier,
+                #[cfg(target_os = "macos")]
+                use_display_p3,
             },
         )?;
 
@@ -2187,7 +2158,7 @@ impl Window {
             element_opacity: 1.0,
             requested_autoscroll: None,
             last_text_input_configuration: None,
-            focused_text_input_active: false,
+            focused_text_input: None,
             rendered_frame: Frame::new(DispatchTree::new(cx.keymap.clone(), cx.actions.clone())),
             next_frame: Frame::new(DispatchTree::new(cx.keymap.clone(), cx.actions.clone())),
             next_frame_callbacks,
@@ -2201,9 +2172,6 @@ impl Window {
             default_prevented: true,
             mouse_position,
             mouse_hit_test: HitTest::default(),
-            a11y_tag_stack: Vec::new(),
-            tooltip_tags: Vec::new(),
-            paint_filter: None,
             modifiers,
             capslock,
             scale_factor,
@@ -2908,6 +2876,11 @@ impl Window {
         self.platform_window.bounds()
     }
 
+    /// Returns the regions of this window obscured by system UI and the keyboard.
+    pub fn insets(&self) -> WindowInsets {
+        self.platform_window.insets()
+    }
+
     /// Renders the current frame's scene to a texture and returns the pixel data as an RGBA image.
     /// This does not present the frame to screen - useful for visual testing where we want
     /// to capture what would be rendered without displaying it or requiring the window to be visible.
@@ -3452,7 +3425,8 @@ impl Window {
         self.last_input_modality == InputModality::Keyboard
     }
 
-    pub(crate) fn last_input_was_touch(&self) -> bool {
+    /// Returns whether the last input event came from a touch screen.
+    pub fn last_input_was_touch(&self) -> bool {
         self.last_input_modality == InputModality::Touch
     }
 
@@ -3502,10 +3476,6 @@ impl Window {
                 self.rendered_frame.input_handlers.push(Some(input_handler));
             }
         }
-        self.next_frame.scene.filtered = self.paint_filter.is_some();
-        self.tooltip_tags.clear();
-        self.update_paint_suppression();
-        self.cover_refused_window();
         if !cx.mode.skip_drawing() {
             self.draw_roots(cx);
             #[cfg(feature = "profiler")]
@@ -3527,7 +3497,7 @@ impl Window {
         // paint_range indices remain valid for reuse_paint on the next frame.
         // Search backwards to find the last Some entry, since reuse_paint may
         // have copied None slots from the previous frame. (Fixes #50456)
-        let focused_text_input_active = if let Some(mut input_handler) = self
+        let focused_text_input = if let Some(mut input_handler) = self
             .next_frame
             .input_handlers
             .iter_mut()
@@ -3536,15 +3506,15 @@ impl Window {
         {
             let accepts_text_input = input_handler.accepts_text_input(self, cx);
             self.platform_window.set_input_handler(input_handler);
-            accepts_text_input
+            self.focus.filter(|_| accepts_text_input)
         } else {
-            false
+            None
         };
         self.apply_text_input_configuration(cx);
-        if focused_text_input_active != self.focused_text_input_active {
-            self.focused_text_input_active = focused_text_input_active;
+        let previous = mem::replace(&mut self.focused_text_input, focused_text_input);
+        if previous.is_some() != focused_text_input.is_some() {
             self.platform_window
-                .text_input_state_changed(if focused_text_input_active {
+                .text_input_state_changed(if focused_text_input.is_some() {
                     TextInputStateChange::FocusGained
                 } else {
                     TextInputStateChange::FocusLost
@@ -3803,29 +3773,7 @@ impl Window {
         } else if let Some(mut drag_element) = active_drag_element {
             drag_element.paint(self, cx);
         } else if let Some(mut tooltip_element) = tooltip_element {
-            // Quill: under a paint filter the tooltip is painted under its
-            // owner's tags, so the filter decides it as it decided the
-            // owner.
-            let tags = self
-                .tooltip_bounds
-                .as_ref()
-                .filter(|_| self.paint_filter.is_some())
-                .and_then(|tooltip| {
-                    self.tooltip_tags
-                        .iter()
-                        .find(|(id, _)| *id == tooltip.id)
-                        .map(|(_, tags)| (tags.clone(), tooltip.bounds))
-                });
-            let pushed = tags.as_ref().map_or(0, |(tags, _)| tags.len());
-            if let Some((tags, bounds)) = tags {
-                for tag in tags {
-                    self.push_a11y_tag(tag, bounds);
-                }
-            }
             tooltip_element.paint(self, cx);
-            for _ in 0..pushed {
-                self.pop_a11y_tag();
-            }
         }
 
         #[cfg(any(feature = "inspector", debug_assertions))]
@@ -3841,13 +3789,10 @@ impl Window {
 
         // a11y may have been activated/deactivated halfway through the frame
         let a11y_active_start_of_frame = self.a11y.is_active();
-        let a11y_system_active_start_of_frame = self.a11y.is_system_active();
         self.a11y.sync_active_flag();
-        let a11y_system_active_end_of_frame = self.a11y.is_system_active();
+        let a11y_active_end_of_frame = self.a11y.is_active();
 
-        // A tree built only because it was forced stays in-process.
-        let should_send_a11y_update =
-            a11y_system_active_start_of_frame && a11y_system_active_end_of_frame;
+        let should_send_a11y_update = a11y_active_start_of_frame && a11y_active_end_of_frame;
 
         if a11y_active_start_of_frame {
             // Harvest frame metadata for the debug dump while the live window
@@ -5244,26 +5189,6 @@ impl Window {
         });
     }
 
-    /// QUILL: paint CPU surface pixels into the scene for the next frame at
-    /// the current z-index (platforms without CoreVideo).
-    ///
-    /// This method should only be called as part of the paint phase of element drawing.
-    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-    pub fn paint_surface_frame(&mut self, bounds: Bounds<Pixels>, frame: Arc<crate::SurfaceFrame>) {
-        use crate::PaintSurface;
-
-        self.invalidator.debug_assert_paint();
-
-        let bounds = self.snap_bounds(bounds);
-        let content_mask = self.snapped_content_mask();
-        self.next_frame.scene.insert_primitive(PaintSurface {
-            order: 0,
-            bounds,
-            content_mask,
-            frame,
-        });
-    }
-
     /// Removes an image from the sprite atlas.
     pub fn drop_image(&mut self, data: Arc<RenderImage>) -> Result<()> {
         for frame_index in 0..data.frame_count() {
@@ -5401,176 +5326,6 @@ impl Window {
         hitbox
     }
 
-    /// Record the [`InteractiveElement::a11y_tag`] of a hitbox inserted this
-    /// frame, for [`Self::hovered_a11y_tags`].
-    pub(crate) fn tag_hitbox(&mut self, id: HitboxId, tag: SharedString) {
-        self.next_frame.hitbox_tags.insert(id, tag);
-    }
-
-    /// The tags ([`InteractiveElement::a11y_tag`]) of the hitboxes under the
-    /// mouse as of the last mouse event, topmost first: the hitboxes a
-    /// mouse event would reach, as [`Hitbox::is_hovered`] sees them. The
-    /// walk ends with the hitboxes that only scroll would reach
-    /// ([`HitboxBehavior::BlockMouseExceptScroll`]) and at an occluding
-    /// hitbox ([`HitboxBehavior::BlockMouse`]), tagged or not, so an
-    /// overlay over a tagged region hides the region's tag.
-    pub fn hovered_a11y_tags(&self) -> Vec<SharedString> {
-        let hit_test = &self.mouse_hit_test;
-        let frame = &self.rendered_frame;
-        let mut tags = Vec::new();
-        for id in hit_test.ids.iter().take(hit_test.hover_hitbox_count) {
-            if let Some(tag) = frame.hitbox_tags.get(id) {
-                tags.push(tag.clone());
-            }
-            let occludes = frame
-                .hitboxes
-                .iter()
-                .any(|hitbox| hitbox.id == *id && hitbox.behavior == HitboxBehavior::BlockMouse);
-            if occludes {
-                break;
-            }
-        }
-        tags
-    }
-
-    /// Whether the focused element registered a text input handler in the
-    /// last frame ([`Self::handle_input`]): typed characters go into a text
-    /// field, not to key bindings alone.
-    pub fn focused_text_input(&self) -> bool {
-        !self.rendered_frame.input_handlers.is_empty()
-    }
-
-    /// The tags ([`InteractiveElement::a11y_tag`]) of the focused element
-    /// and the elements it was painted inside, innermost first, from the
-    /// last frame: what a key event would reach, read the way
-    /// [`Self::hovered_a11y_tags`] reads a click. Recorded when a focused
-    /// element registers a text input handler or tracks its focus handle;
-    /// empty when nothing focused was painted (focus in a deferred draw
-    /// records the tags of that draw's own ancestors only).
-    pub fn focused_a11y_tags(&self) -> Vec<SharedString> {
-        self.rendered_frame
-            .focus_tags
-            .iter()
-            .rev()
-            .cloned()
-            .collect()
-    }
-
-    /// Paint-time: an element tagged `tag` starts painting (its own
-    /// background and border included). Under a paint filter, an element
-    /// whose tag turns paint off is covered with the filter's `hidden`
-    /// fill over `bounds`, and one whose tag turns it back on gets the
-    /// `shown` fill under it.
-    pub(crate) fn push_a11y_tag(&mut self, tag: SharedString, bounds: Bounds<Pixels>) {
-        let was_hidden = self.next_frame.scene.suppressed;
-        self.a11y_tag_stack.push(tag);
-        self.update_paint_suppression();
-        let hidden = self.next_frame.scene.suppressed;
-        let Some(filter) = self.paint_filter.as_ref() else {
-            return;
-        };
-        let color = match (was_hidden, hidden) {
-            (false, true) => filter.hidden,
-            (true, false) => filter.shown,
-            _ => return,
-        };
-        self.next_frame.scene.suppressed = false;
-        self.paint_quad(fill(bounds, color));
-        self.next_frame.scene.suppressed = hidden;
-    }
-
-    /// Draw-time, under a paint filter that refuses paint outside every
-    /// tagged element: the window starts covered with the `hidden` fill.
-    fn cover_refused_window(&mut self) {
-        let Some(hidden) = self.paint_filter.as_ref().map(|filter| filter.hidden) else {
-            return;
-        };
-        if !self.next_frame.scene.suppressed {
-            return;
-        }
-        let bounds = Bounds::new(Point::default(), self.viewport_size()).scale(self.scale_factor());
-        self.next_frame.scene.suppressed = false;
-        self.next_frame.scene.insert_primitive(Quad {
-            bounds,
-            content_mask: ContentMask { bounds },
-            background: hidden.into(),
-            ..Quad::default()
-        });
-        self.next_frame.scene.suppressed = true;
-    }
-
-    /// Paint-time: the element [`Self::push_a11y_tag`] named is painted.
-    pub(crate) fn pop_a11y_tag(&mut self) {
-        self.a11y_tag_stack.pop();
-        self.update_paint_suppression();
-    }
-
-    fn update_paint_suppression(&mut self) {
-        self.next_frame.scene.suppressed = self
-            .paint_filter
-            .as_ref()
-            .is_some_and(|filter| !(filter.allows)(&self.a11y_tag_stack));
-    }
-
-    /// Draw only what `filter` allows from now on, `None` to draw
-    /// everything again. The filter gets the [`InteractiveElement::a11y_tag`]s
-    /// of the elements being painted, outermost first, and answers whether
-    /// what they paint reaches the scene; anything painted outside every
-    /// tagged element gets an empty list. A tagged element refused while
-    /// its parent was drawn is covered with the filter's `hidden` fill, one
-    /// drawn while its parent was refused gets the `shown` fill under it. A filtered frame renders every
-    /// view again (cached paint was never filtered and is not replayed).
-    /// Meant for one [`Self::draw`] followed by [`Self::capture_frame`]:
-    /// clear it and draw again before the frame is presented.
-    pub fn set_paint_filter(&mut self, filter: Option<PaintFilter>) {
-        self.paint_filter = filter;
-        self.refresh();
-    }
-
-    /// Whether a paint filter is set ([`Self::set_paint_filter`]).
-    pub fn has_paint_filter(&self) -> bool {
-        self.paint_filter.is_some()
-    }
-
-    /// The last drawn frame, rendered offscreen by the window's own
-    /// renderer and read back, in device pixels. Nothing is presented and
-    /// the screen is not read, so no other window can appear in it. An
-    /// error where the platform's renderer has no readback.
-    pub fn capture_frame(&self) -> anyhow::Result<image::RgbaImage> {
-        self.platform_window
-            .capture_image(&self.rendered_frame.scene)
-    }
-
-    /// Quill, paint-time: the element that owns tooltip `id` is being
-    /// painted. Under a paint filter, keep the tag stack above it, so the
-    /// tooltip is filtered as its owner is (it is drawn later, at the
-    /// root, where the stack is empty).
-    pub(crate) fn record_tooltip_tags(&mut self, id: Option<TooltipId>) {
-        let Some(id) = id else {
-            return;
-        };
-        if self.paint_filter.is_none() {
-            return;
-        }
-        self.tooltip_tags.push((id, self.a11y_tag_stack.clone()));
-    }
-
-    /// Paint-time: the focused element is being painted; keep the tag
-    /// stack above it for [`Self::focused_a11y_tags`].
-    pub(crate) fn record_focus_tags(&mut self) {
-        self.next_frame.focus_tags = self.a11y_tag_stack.clone();
-    }
-
-    /// The caret (or the start of the text being composed) of the text
-    /// input the platform types into, in window logical pixels: the
-    /// rectangle the input method's candidate window is placed by.
-    pub fn focused_text_caret(&mut self, cx: &mut App) -> Option<Bounds<Pixels>> {
-        let mut handler = self.platform_window.take_input_handler()?;
-        let bounds = handler.selected_bounds(self, cx);
-        self.platform_window.set_input_handler(handler);
-        bounds
-    }
-
     /// Set a hitbox which will act as a control area of the platform window.
     ///
     /// This method should only be called as part of the paint phase of element drawing.
@@ -5660,11 +5415,32 @@ impl Window {
         self.invalidator.debug_assert_paint();
 
         if focus_handle.is_focused(self) {
-            self.record_focus_tags();
             let cx = self.to_async(cx);
-            self.next_frame
-                .input_handlers
-                .push(Some(PlatformInputHandler::new(cx, Box::new(input_handler))));
+            self.next_frame.input_handlers.push(Some(
+                PlatformInputHandler::new(cx, Box::new(input_handler)).with_focus(focus_handle.id),
+            ));
+        }
+    }
+
+    /// Notifies native text services that the focused component's text changed.
+    ///
+    /// Text components should call this after application-driven edits, in addition
+    /// to notifying GPUI to redraw. Unfocused or unregistered components are ignored.
+    pub fn notify_text_input_changed(&self, focus_handle: &FocusHandle) {
+        if self.focused_text_input == Some(focus_handle.id) && focus_handle.is_focused(self) {
+            self.platform_window
+                .text_input_state_changed(TextInputStateChange::ContentChanged);
+        }
+    }
+
+    /// Notifies native text services that the focused component's selection changed.
+    ///
+    /// Text components should call this after application-driven selection changes,
+    /// in addition to notifying GPUI to redraw.
+    pub fn notify_text_selection_changed(&self, focus_handle: &FocusHandle) {
+        if self.focused_text_input == Some(focus_handle.id) && focus_handle.is_focused(self) {
+            self.platform_window
+                .text_input_state_changed(TextInputStateChange::SelectionChanged);
         }
     }
 
@@ -5839,13 +5615,13 @@ impl Window {
 
     /// Return a key binding string for an action, to display in the UI. Uses the highest precedence
     /// binding for the action (last binding added to the keymap).
-    pub fn keystroke_text_for(&self, action: &dyn Action) -> String {
+    pub fn keystroke_text_for(&self, action: &dyn Action, cx: &App) -> String {
         self.highest_precedence_binding_for_action(action)
             .map(|binding| {
                 binding
                     .keystrokes()
                     .iter()
-                    .map(ToString::to_string)
+                    .map(|keystroke| keystroke.display(cx.platform_info().os).to_string())
                     .collect::<Vec<_>>()
                     .join(" ")
             })
@@ -5907,10 +5683,10 @@ impl Window {
                 self.capslock = modifiers_changed.capslock;
                 PlatformInput::ModifiersChanged(modifiers_changed)
             }
-            PlatformInput::ScrollWheel(scroll_wheel) => {
+            PlatformInput::Scroll(scroll_wheel) => {
                 self.mouse_position = scroll_wheel.position;
                 self.modifiers = scroll_wheel.modifiers;
-                PlatformInput::ScrollWheel(scroll_wheel)
+                PlatformInput::Scroll(scroll_wheel)
             }
             PlatformInput::Pinch(pinch) => {
                 self.mouse_position = pinch.position;
@@ -5984,6 +5760,10 @@ impl Window {
             PlatformInput::TouchDrag(touch_drag) => {
                 self.mouse_position = touch_drag.start_position;
                 PlatformInput::TouchDrag(touch_drag)
+            }
+            PlatformInput::BackGesture(back) => {
+                self.mouse_position = back.start_position;
+                PlatformInput::BackGesture(back)
             }
             PlatformInput::KeyDown(_) | PlatformInput::KeyUp(_) => event,
         };
@@ -7276,43 +7056,6 @@ impl Window {
         self.a11y.debug_tree_json()
     }
 
-    /// Build the accessibility tree every frame whether or not assistive
-    /// technology is connected, so an in-process reader can read it with
-    /// [`Self::a11y_tree_snapshot`]. The tree is not sent to the platform
-    /// while only this asks for it. Turning it on or off redraws the window.
-    pub fn set_a11y_forced(&mut self, on: bool) {
-        if self.a11y.set_forced(on) {
-            self.refresh();
-        }
-    }
-
-    /// Whether [`Self::set_a11y_forced`] is on.
-    pub fn is_a11y_forced(&self) -> bool {
-        self.a11y.is_forced()
-    }
-
-    /// Whether assistive technology asked for the tree this frame. Unlike
-    /// [`Self::is_a11y_active`], a tree forced with [`Self::set_a11y_forced`]
-    /// does not count, so behaviour meant for screen-reader users (focus
-    /// announcements, key handling) can key off this.
-    pub fn is_a11y_system_active(&self) -> bool {
-        self.a11y.is_system_active()
-    }
-
-    /// The accessibility tree of the last frame that built one, with bounds
-    /// in window logical pixels. `None` until a frame built a tree (see
-    /// [`Self::is_a11y_active`] and [`Self::set_a11y_forced`]).
-    pub fn a11y_tree_snapshot(&self) -> Option<A11yTreeSnapshot> {
-        self.a11y.snapshot(self.scale_factor)
-    }
-
-    /// How many frames built an accessibility tree so far (the
-    /// `frame_number` the next [`Self::a11y_tree_snapshot`] carries), without
-    /// copying the tree.
-    pub fn a11y_tree_frame(&self) -> u64 {
-        self.a11y.frame_number()
-    }
-
     /// Register a listener for an accessibility action on a specific node.
     /// The listener will be called when a screen reader requests the given
     /// action on the node identified by `node_id`.
@@ -7543,7 +7286,7 @@ impl Window {
                     inspector.select(inspector_id, self);
                 }
             });
-        } else if let Some(event) = event.downcast_ref::<crate::ScrollWheelEvent>() {
+        } else if let Some(event) = event.downcast_ref::<crate::ScrollEvent>() {
             // This should be kept in sync with SCROLL_LINES in x11 platform.
             const SCROLL_LINES: f32 = 3.0;
             const SCROLL_PIXELS_PER_LAYER: f32 = 36.0;
@@ -8180,15 +7923,104 @@ mod tests {
     };
 
     use crate::{
-        AnyWindowHandle, AppContext as _, Bounds, ContentMask, Context, DispatchPhase,
-        DragMoveEvent, Empty, ExternalDragPayload, ExternalPaths, FileDragPaths, FileDropEvent,
-        FocusHandle, InputEvent as _, InteractiveElement as _, IntoElement, KeyDownEvent,
-        Keystroke, LongPressEvent, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement,
-        Pixels, PlatformInput, Point, Render, RequestFrameOptions, ScaledPixels,
-        StatefulInteractiveElement as _, Styled, TestAppContext, TouchDragEvent, TouchEvent,
-        TouchId, TouchPhase, Underline, UnderlineStyle, Window, WindowAppearance, WindowOptions,
-        canvas, div, hsla, point, px, size,
+        AnyWindowHandle, AppContext as _, BackGestureEvent, BackGesturePhase, Bounds, ContentMask,
+        Context, DispatchPhase, DragMoveEvent, Empty, ExternalDragPayload, ExternalPaths,
+        FileDragPaths, FileDropEvent, FocusHandle, InputEvent as _, InteractiveElement as _,
+        IntoElement, KeyDownEvent, Keystroke, LongPressEvent, MouseButton, MouseDownEvent,
+        MouseMoveEvent, ParentElement, Pixels, PlatformInput, Point, Render, RequestFrameOptions,
+        ScaledPixels, StatefulInteractiveElement as _, Styled, TestAppContext, TouchDragEvent,
+        TouchEvent, TouchId, TouchPhase, Underline, UnderlineStyle, Window, WindowAppearance,
+        WindowOptions, canvas, div, hsla, point, px, size,
     };
+
+    #[gpui::test]
+    async fn test_focus_handle_release(cx: &mut TestAppContext) {
+        let (handle, survivor) = cx.update(|cx| (cx.focus_handle(), cx.focus_handle()));
+        let handle_id = handle.id;
+        let weak_handle = handle.downgrade();
+        let retained = handle.clone();
+        drop(handle);
+
+        cx.update(|_| {});
+        cx.read(|cx| {
+            let handles = cx.focus_handles.read();
+            assert_eq!(handles.handles.len(), 2);
+            assert!(handles.dropped_handles.is_empty());
+        });
+        assert_eq!(weak_handle.upgrade().as_ref(), Some(&retained));
+
+        cx.background_spawn(async move { drop(retained) }).await;
+        assert_eq!(weak_handle.upgrade(), None);
+        cx.read(|cx| {
+            assert_eq!(cx.focus_handles.read().dropped_handles, [handle_id]);
+        });
+        cx.update(|_| {});
+        cx.read(|cx| {
+            let handles = cx.focus_handles.read();
+            assert_eq!(handles.handles.keys().collect::<Vec<_>>(), [survivor.id]);
+            assert!(handles.dropped_handles.is_empty());
+        });
+
+        let replacements = cx.update(|cx| [cx.focus_handle(), cx.focus_handle()]);
+        assert_eq!(weak_handle.upgrade(), None);
+        cx.update(|cx| {
+            drop(replacements);
+            cx.defer(move |_| drop(survivor));
+        });
+        cx.read(|cx| {
+            let handles = cx.focus_handles.read();
+            assert_eq!(handles.handles.len(), 0);
+            assert!(handles.dropped_handles.is_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn test_dropped_focus_handle_blurs_only_its_windows(cx: &mut TestAppContext) {
+        let windows = [
+            cx.add_window(|_, _| EmptyView),
+            cx.add_window(|_, _| EmptyView),
+            cx.add_window(|_, _| EmptyView),
+            cx.add_window(|_, _| EmptyView),
+            cx.add_window(|_, _| EmptyView),
+        ];
+        let (handle, other_handle, survivor) =
+            cx.update(|cx| (cx.focus_handle(), cx.focus_handle(), cx.focus_handle()));
+        for window in &windows[..2] {
+            window
+                .update(cx, |_, window, cx| window.focus(&handle, cx))
+                .expect("window exists");
+        }
+        windows[2]
+            .update(cx, |_, window, cx| window.focus(&other_handle, cx))
+            .expect("window exists");
+        windows[3]
+            .update(cx, |_, window, cx| window.focus(&survivor, cx))
+            .expect("window exists");
+
+        cx.update(|cx| {
+            for _ in 0..1_000 {
+                drop(cx.focus_handle());
+            }
+            drop((handle, other_handle));
+        });
+        for window in &windows[..3] {
+            window
+                .update(cx, |_, window, _| assert_eq!(window.focus, None))
+                .expect("window exists");
+        }
+        windows[3]
+            .update(cx, |_, window, cx| {
+                assert_eq!(window.focused(cx).as_ref(), Some(&survivor));
+                assert_eq!(window.focus_generation, 1);
+            })
+            .expect("window exists");
+        windows[4]
+            .update(cx, |_, window, _| {
+                assert_eq!(window.focus, None);
+                assert_eq!(window.focus_generation, 0);
+            })
+            .expect("window exists");
+    }
 
     #[cfg(feature = "profiler")]
     #[gpui::test]
@@ -8530,7 +8362,7 @@ mod tests {
         assert!(platform_window.frame_wake_count() > wakes);
         platform_window.simulate_frame_request(RequestFrameOptions::default());
         let wakes = platform_window.frame_wake_count();
-        platform_window.simulate_insets_change(crate::WindowInsets {
+        let insets = crate::WindowInsets {
             safe_area: crate::Edges {
                 top: px(60.),
                 right: px(20.),
@@ -8541,10 +8373,15 @@ mod tests {
                 bottom: px(350.),
                 ..Default::default()
             },
-        });
+            ..Default::default()
+        };
+        platform_window.simulate_insets_change(insets.clone());
         assert!(platform_window.frame_wake_count() > wakes);
         window
-            .update(cx, |_, window, _| {
+            .update(cx, |_, window, cx| {
+                let focus = cx.focus_handle();
+                window.focus(&focus, cx);
+                assert_eq!(window.insets(), insets);
                 assert_eq!(window.viewport_size(), size(px(400.), px(800.)));
                 assert_eq!(window.visual_viewport_bounds(), visual_bounds);
                 assert_eq!(
@@ -8553,6 +8390,7 @@ mod tests {
                 );
                 window.request_virtual_keyboard();
                 window.dismiss_virtual_keyboard();
+                assert!(focus.is_focused(window));
                 assert_eq!(window.viewport_size(), size(px(400.), px(800.)));
             })
             .unwrap();
@@ -8573,6 +8411,16 @@ mod tests {
                     window.fully_visible_bounds().size,
                     size(Pixels::ZERO, Pixels::ZERO)
                 );
+            })
+            .unwrap();
+
+        // Some backends update geometry snapshots without delivering inset callbacks.
+        use crate::PlatformWindow as _;
+        platform_window.on_insets_changed(Box::new(|_| {}));
+        platform_window.simulate_insets_change(crate::WindowInsets::default());
+        window
+            .update(cx, |_, window, _| {
+                assert_eq!(window.insets(), crate::WindowInsets::default());
             })
             .unwrap();
     }
@@ -9400,6 +9248,58 @@ mod tests {
                 (TouchPhase::Ended, px(40.)),
             ]
         );
+    }
+
+    #[gpui::test]
+    fn back_gesture_is_claimed_by_the_innermost_listener(cx: &mut TestAppContext) {
+        let claims = Rc::new(RefCell::new(Vec::new()));
+        let window = cx.add_window({
+            let claims = claims.clone();
+            move |_, _| BackListeners { claims }
+        });
+        let dispatch_back = |cx: &mut TestAppContext, x: f32| {
+            window
+                .update(cx, |_, window, cx| {
+                    window
+                        .dispatch_event(
+                            BackGestureEvent {
+                                phase: BackGesturePhase::Started,
+                                start_position: point(px(x), px(10.)),
+                                progress: 0.,
+                            }
+                            .to_platform_input(),
+                            cx,
+                        )
+                        .default_prevented
+                })
+                .unwrap()
+        };
+        assert!(dispatch_back(cx, 10.));
+        assert!(dispatch_back(cx, 80.));
+        assert!(!dispatch_back(cx, 150.));
+        assert_eq!(claims.borrow().as_slice(), ["inner", "outer"]);
+    }
+
+    struct BackListeners {
+        claims: Rc<RefCell<Vec<&'static str>>>,
+    }
+
+    impl Render for BackListeners {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            let claim = |name: &'static str| {
+                let claims = self.claims.clone();
+                move |_: &BackGestureEvent, _: &mut Window, _: &mut crate::App| {
+                    claims.borrow_mut().push(name)
+                }
+            };
+            div().size_full().child(
+                div()
+                    .w(px(100.))
+                    .h_full()
+                    .on_back_gesture(claim("outer"))
+                    .child(div().w(px(50.)).h_full().on_back_gesture(claim("inner"))),
+            )
+        }
     }
 
     struct TouchDragListener {

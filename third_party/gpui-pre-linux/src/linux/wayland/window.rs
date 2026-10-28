@@ -1,5 +1,3 @@
-// Modified by the Quill project (2026) from gpui-pre-linux 0.3.9 (Apache-2.0):
-// `capture_image` through `WgpuRenderer::capture_scene`. See third_party/gpui-pre-linux/QUILL-CHANGES.md.
 use std::{
     cell::{Cell, Ref, RefCell, RefMut},
     ffi::c_void,
@@ -2056,22 +2054,6 @@ impl PlatformWindow for WaylandWindow {
         if renderer.needs_redraw() {
             state.redraw_requested = true;
         }
-    }
-
-    // Quill: `Window::capture_frame`, offscreen with this window's renderer.
-    fn capture_image(&self, scene: &Scene) -> anyhow::Result<image::RgbaImage> {
-        let mut state = self
-            .0
-            .state
-            .try_borrow_mut()
-            .map_err(|_| anyhow::anyhow!("the window is busy"))?;
-        let renderer = state
-            .renderer
-            .as_mut()
-            .ok_or_else(|| anyhow::anyhow!("the window has no renderer"))?;
-        let (width, height, pixels) = renderer.capture_scene(scene)?;
-        image::RgbaImage::from_raw(width, height, pixels)
-            .ok_or_else(|| anyhow::anyhow!("the capture had the wrong size"))
     }
 
     fn schedule_frame(&self) {

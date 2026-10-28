@@ -1,5 +1,3 @@
-// Modified by the Quill project (2026) from gpui-base 0.7.3 (Apache-2.0):
-// formatting spans in the input engine. See third_party/gpui-base/QUILL-CHANGES.md.
 /// DisplayMap: Public facade for Editor/Input display mapping.
 ///
 /// This combines WrapMap and FoldMap to provide a unified API:
@@ -227,26 +225,6 @@ impl DisplayMap {
         self.rebuild_fold_projection();
     }
 
-    /// Install span fonts without wrapping anything: the edit that changed
-    /// them wraps its own rows next (Quill patch).
-    pub(crate) fn stage_span_fonts(&mut self, fonts: crate::input::text_spans::SpanFonts) {
-        self.wrap_map.stage_span_fonts(fonts);
-    }
-
-    /// Install the font changes of formatting spans, wrapping the rows
-    /// `rewrap` asks for again (Quill patch).
-    pub(crate) fn set_span_fonts(
-        &mut self,
-        fonts: crate::input::text_spans::SpanFonts,
-        rewrap: crate::input::text_spans::SpanRewrap,
-        cx: &mut App,
-    ) {
-        self.wrap_map.set_span_fonts(fonts, rewrap, cx);
-        if rewrap != crate::input::text_spans::SpanRewrap::None {
-            self.rebuild_fold_projection();
-        }
-    }
-
     /// Update layout parameters (wrap width or font)
     pub(crate) fn set_inline_metrics(
         &mut self,
@@ -268,9 +246,11 @@ impl DisplayMap {
         self.rebuild_fold_projection();
     }
 
-    /// The font and size the input lays its text out with.
-    pub fn text_style(&self) -> (&Font, Pixels) {
-        self.wrap_map.text_style()
+    /// Set the number of spaces per tab stop.
+    pub(crate) fn set_tab_size(&mut self, tab_size: usize, cx: &mut App) {
+        if self.wrap_map.set_tab_size(tab_size, cx) {
+            self.rebuild_fold_projection();
+        }
     }
 
     /// Set font parameters

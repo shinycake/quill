@@ -1,6 +1,3 @@
-// Modified by the Quill project (2026) from gpui-base 0.7.3 (Apache-2.0):
-// bidirectional text support and formatting spans in the input engine. See
-// third_party/gpui-base/QUILL-CHANGES.md.
 //! A text input field that allows the user to enter text.
 //!
 //! Based on the `Input` example from the `gpui` crate.
@@ -10,8 +7,9 @@ use gpui::{
     Action, App, AppContext, Bounds, ClipboardItem, Context, Edges, Entity, EntityInputHandler,
     EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement, KeyBinding,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point,
-    Render, ScrollHandle, ScrollWheelEvent, SharedString, Styled as _, Subscription,
-    UTF16Selection, WeakFocusHandle, Window, actions, div, point, prelude::FluentBuilder as _, px,
+    Render, ScrollEvent, ScrollHandle, SharedString, StatefulInteractiveElement as _, Styled as _,
+    Subscription, UTF16Selection, WeakFocusHandle, Window, actions, div, point,
+    prelude::FluentBuilder as _, px,
 };
 use gpui::{Autocapitalize, TextInputAction, TextInputConfiguration};
 use ropey::{Rope, RopeSlice};
@@ -45,7 +43,9 @@ use crate::input::{
     InputExtras as _, Position, RopeExt as _, element::RIGHT_MARGIN, layout::LastLayout,
 };
 use crate::overscroll::Overscroll;
-use crate::{AutoScroll, StepAction};
+use crate::{AutoScroll, StepAction, TestSupportExt as _};
+
+pub(super) const EDITOR_ELEMENT_ID: &str = "input-state";
 
 /// Vertical clearance to retain when revealing a text position.
 pub(crate) enum ScrollPadding {
@@ -175,7 +175,11 @@ pub(crate) fn init(cx: &mut App) {
             Some(CONTEXT),
         ),
         KeyBinding::new(
-            "secondary-enter",
+            if cx.platform_info().is_mac() {
+                "cmd-enter"
+            } else {
+                "ctrl-enter"
+            },
             Enter {
                 secondary: true,
                 shift: false,
@@ -419,16 +423,6 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) undo_manager: UndoManager,
     pub(super) inline_tokens: Option<Box<super::inline_tokens::InlineTokenStore>>,
     pub(super) pending_token: Option<super::InlineToken>,
-    /// Tokens of content being inserted, relative to it (Quill patch).
-    pub(super) pending_tokens: Option<Vec<super::InlineTokenSpan>>,
-    /// Formatting spans, sorted by start (Quill patch, `text_spans.rs`).
-    pub(super) text_spans: std::rc::Rc<[super::TextSpan]>,
-    /// The tags the next text typed at the caret takes (Quill patch).
-    pub(super) typing_spans: Option<super::text_spans::TypingSpans>,
-    /// Spans of content being inserted, relative to it (Quill patch).
-    pub(super) pending_spans: Option<Vec<super::TextSpan>>,
-    /// Presentation of span tags, installed by the view (Quill patch).
-    pub(super) span_styler: Option<super::TextSpanStyler>,
     pub(super) replaying_history: bool,
     pub(super) validated_token_edit: bool,
     pub(super) document_revision: u64,
@@ -478,6 +472,9 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) input_bounds: Bounds<Pixels>,
     /// The text bounds
     pub(super) last_bounds: Option<Bounds<Pixels>>,
+    /// The fully visible part of the window this input last asked its scroll
+    /// containers to reveal it in, while focused. `None` while unfocused.
+    pub(super) revealed_viewport: Option<Bounds<Pixels>>,
     pub(super) last_selected_range: Option<CursorSelection>,
     pub(super) selecting: bool,
     /// Anchor point of an in-progress columnar (block) selection.
@@ -516,7 +513,7 @@ pub struct InputBaseState<M: InputModeKind> {
     /// The size of the scrollable content.
     pub(crate) scroll_size: gpui::Size<Pixels>,
     pub(super) editor_scrollbar_snapshot: Cell<Option<EditorScrollbarSnapshot>>,
-    /// The unwrapped width of the longest line and what it was measured for.
+    /// The widest measured unwrapped line width and what it was measured for.
     pub(super) longest_line_width: Cell<Option<(LongestLineKey, Pixels)>>,
     pub(super) editor_paddings: Edges<Pixels>,
     /// The style this state paints with: what was projected onto it, with
@@ -529,6 +526,10 @@ pub struct InputBaseState<M: InputModeKind> {
     /// colours once and then never see them as unset again, which is the same
     /// freeze in a different place.
     projected_editor_style: InputEditorStyle,
+    accessibility: Option<InputAccessibility>,
+    /// What paints in place of Base's editor scrollbar, when a consumer
+    /// supplies its own.
+    pub(super) scrollbar_renderer: Option<crate::input::EditorScrollbarRenderer>,
 
     /// The mask pattern for formatting the input text
     pub(crate) mask_pattern: MaskPattern,
@@ -575,6 +576,74 @@ pub struct InputBaseState<M: InputModeKind> {
     _subscriptions: Vec<Subscription>,
 
     pub(super) auto_scroll: AutoScroll,
+}
+
+/// Accessibility presentation for the editor's existing keyboard-focus boundary.
+///
+/// Frames and their addon controls keep their own identities. This projection
+/// does not create a focus handle or register another text Tab stop. The engine
+/// supplies the live value and guards accessibility actions against its current
+/// disabled, read-only and masked state.
+#[derive(Clone, Debug)]
+pub struct InputAccessibility {
+    role: Option<gpui::Role>,
+    label: Option<SharedString>,
+    placeholder: Option<SharedString>,
+    accessibility_id: Option<SharedString>,
+    value_exposed: bool,
+}
+
+impl InputAccessibility {
+    pub fn new(role: Option<gpui::Role>) -> Self {
+        Self {
+            role,
+            label: None,
+            placeholder: None,
+            accessibility_id: None,
+            value_exposed: true,
+        }
+    }
+
+    pub fn with_label(mut self, label: Option<SharedString>) -> Self {
+        self.label = label;
+        self
+    }
+
+    pub fn with_placeholder(mut self, placeholder: Option<SharedString>) -> Self {
+        self.placeholder = placeholder;
+        self
+    }
+
+    pub fn with_accessibility_id(mut self, id: Option<SharedString>) -> Self {
+        self.accessibility_id = id;
+        self
+    }
+
+    /// Suppress values for secret content even when the mask is revealed.
+    pub fn with_value_exposed(mut self, exposed: bool) -> Self {
+        self.value_exposed = exposed;
+        self
+    }
+
+    pub fn role(&self) -> Option<gpui::Role> {
+        self.role
+    }
+
+    pub fn label(&self) -> Option<&SharedString> {
+        self.label.as_ref()
+    }
+
+    pub fn placeholder(&self) -> Option<&SharedString> {
+        self.placeholder.as_ref()
+    }
+
+    pub fn accessibility_id(&self) -> Option<&SharedString> {
+        self.accessibility_id.as_ref()
+    }
+
+    pub fn value_exposed(&self) -> bool {
+        self.value_exposed
+    }
 }
 
 /// Read-only styling data exposed to presentation facades.
@@ -707,6 +776,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         }
         let wrap_width = (width - RIGHT_MARGIN).max(px(1.));
         self.display_map.set_font(font, font_size, cx);
+        self.display_map
+            .set_tab_size(self.mode.tab_size().tab_size, cx);
         self.display_map
             .on_layout_changed(self.soft_wrap.then_some(wrap_width), cx);
         self.display_map
@@ -886,11 +957,6 @@ impl<M: InputModeKind> InputBaseState<M> {
             undo_manager,
             inline_tokens: None,
             pending_token: None,
-            pending_tokens: None,
-            text_spans: std::rc::Rc::from([]),
-            typing_spans: None,
-            pending_spans: None,
-            span_styler: None,
             replaying_history: false,
             validated_token_edit: false,
             document_revision: 0,
@@ -926,6 +992,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             last_layout: None,
             prepaint_caret_geometry: None,
             last_bounds: None,
+            revealed_viewport: None,
             last_selected_range: None,
             column_select_start: None,
             last_cursor: None,
@@ -942,6 +1009,8 @@ impl<M: InputModeKind> InputBaseState<M> {
             mask_pattern_set: false,
             editor_style: InputEditorStyle::default(),
             projected_editor_style: InputEditorStyle::default(),
+            accessibility: None,
+            scrollbar_renderer: None,
             diagnostic_popover: None,
             context_menu_handler: None,
             pending_context_menu: None,
@@ -1037,10 +1106,50 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.projected_editor_style = style;
     }
 
+    /// Project semantics onto the editor, never onto a second focus owner.
+    pub fn set_accessibility(&mut self, accessibility: InputAccessibility) {
+        self.accessibility = Some(accessibility);
+    }
+
+    fn handle_accessibility_focus(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.disabled {
+            self.focus(window, cx);
+        }
+    }
+
+    fn handle_accessibility_set_value(
+        &mut self,
+        data: Option<&gpui::accesskit::ActionData>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(gpui::accesskit::ActionData::Value(value)) = data else {
+            return;
+        };
+        // The action may have been queued before editability changed.
+        if self.is_editable() {
+            self.replace_all(value.to_string(), window, cx);
+        }
+    }
+
     /// Set presentation padding for multi-line text and its scrollbar layout.
     #[doc(hidden)]
     pub fn set_editor_paddings(&mut self, paddings: Edges<Pixels>) {
         self.editor_paddings = paddings;
+    }
+
+    /// Supply the element painted in place of the editor's scrollbar, or
+    /// `None` to keep Base's. The renderer is called where the editor paints
+    /// its scrollbar, with that frame's [`EditorScrollbarContext`]. Like
+    /// [`Self::set_editor_style`], this does not notify, so it can be called
+    /// while rendering.
+    ///
+    /// [`EditorScrollbarContext`]: crate::input::EditorScrollbarContext
+    pub fn set_scrollbar_renderer(
+        &mut self,
+        renderer: Option<crate::input::EditorScrollbarRenderer>,
+    ) {
+        self.scrollbar_renderer = renderer;
     }
 
     pub fn apply_highlighter_fold_candidates(
@@ -1086,17 +1195,6 @@ impl<M: InputModeKind> InputBaseState<M> {
         &self,
         offset: usize,
     ) -> (usize, usize, Option<Point<Pixels>>) {
-        self.line_and_position_for_offset_with_affinity(offset, false)
-    }
-
-    /// Like [`Self::line_and_position_for_offset`], placing a caret that hangs on the
-    /// character before `offset` (see [`Self::cursor_line_end_affinity`]) when
-    /// `line_end_affinity` is set.
-    pub(super) fn line_and_position_for_offset_with_affinity(
-        &self,
-        offset: usize,
-        line_end_affinity: bool,
-    ) -> (usize, usize, Option<Point<Pixels>>) {
         let Some(last_layout) = &self.last_layout else {
             return (0, 0, None);
         };
@@ -1106,8 +1204,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         for (vi, line) in last_layout.lines.iter().enumerate() {
             let prev_lines_offset = last_layout.visible_line_byte_offsets[vi];
             let local_offset = offset.saturating_sub(prev_lines_offset);
-            if let Some(pos) = line.position_for_index(local_offset, last_layout, line_end_affinity)
-            {
+            if let Some(pos) = line.position_for_index(local_offset, last_layout, false) {
                 let sub_line_index = (pos.y / line_height) as usize;
                 let adjusted_pos = point(pos.x + last_layout.line_number_width, pos.y + y_offset);
                 return (vi, sub_line_index, Some(adjusted_pos));
@@ -1134,13 +1231,9 @@ impl<M: InputModeKind> InputBaseState<M> {
     ) {
         let content = value.into();
         self.inline_tokens = None;
-        self.text_spans = std::rc::Rc::from([]);
-        self.typing_spans = None;
-        self.display_map.stage_span_fonts(std::rc::Rc::from([]));
         self.undo_manager.set_ignoring(true);
         self.emit_events = false;
         self.replace_text(content.text().clone(), window, cx);
-        self.install_spans(&content, cx);
         self.install_tokens(content);
         self.undo_manager.set_ignoring(false);
         self.emit_events = true;
@@ -1582,19 +1675,11 @@ impl<M: InputModeKind> InputBaseState<M> {
 
     pub(super) fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
         self.undo_manager.break_transaction_coalescing();
-        self.select_all_cursors_to_with_affinity(
-            |s, sel| s.step_horizontally(sel.cursor_offset(), s.line_end_affinity_for(sel), true),
-            false,
-            cx,
-        );
+        self.select_all_cursors_to(|s, sel| s.previous_boundary(sel.cursor_offset()), cx);
     }
 
     pub(super) fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
-        self.select_all_cursors_to_with_affinity(
-            |s, sel| s.step_horizontally(sel.cursor_offset(), s.line_end_affinity_for(sel), false),
-            false,
-            cx,
-        );
+        self.select_all_cursors_to(|s, sel| s.next_boundary(sel.cursor_offset()), cx);
     }
 
     pub(super) fn select_up(&mut self, _: &SelectUp, _: &mut Window, cx: &mut Context<Self>) {
@@ -1702,11 +1787,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         cx: &mut Context<Self>,
     ) {
         self.undo_manager.break_transaction_coalescing();
-        self.select_all_cursors_to_with_affinity(
-            |s, sel| {
-                s.step_word_horizontally(sel.cursor_offset(), s.line_end_affinity_for(sel), true)
-            },
-            false,
+        self.select_all_cursors_to(
+            |s, sel| s.previous_start_of_word_at(sel.cursor_offset()),
             cx,
         );
     }
@@ -1718,13 +1800,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         cx: &mut Context<Self>,
     ) {
         self.undo_manager.break_transaction_coalescing();
-        self.select_all_cursors_to_with_affinity(
-            |s, sel| {
-                s.step_word_horizontally(sel.cursor_offset(), s.line_end_affinity_for(sel), false)
-            },
-            false,
-            cx,
-        );
+        self.select_all_cursors_to(|s, sel| s.next_end_of_word_at(sel.cursor_offset()), cx);
     }
 
     /// Return the start offset of the previous word.
@@ -2591,6 +2667,15 @@ impl<M: InputModeKind> InputBaseState<M> {
         if window.default_prevented() {
             return;
         }
+        // A tap asks for the virtual keyboard. Focus alone does not when it
+        // moves from another input, or stays here, after the user hid it.
+        if event.button == MouseButton::Left
+            && crate::GlobalState::is_touch_press(cx)
+            && !self.disabled
+            && !self.readonly
+        {
+            window.request_virtual_keyboard();
+        }
         self.undo_manager.break_transaction_coalescing();
         // Treat every press like a cursor move: take focus now rather than
         // after GPUI's focus observer runs, show the caret at once and restart
@@ -2756,7 +2841,7 @@ impl<M: InputModeKind> InputBaseState<M> {
 
     pub(super) fn on_scroll_wheel(
         &mut self,
-        event: &ScrollWheelEvent,
+        event: &ScrollEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -2951,8 +3036,6 @@ impl<M: InputModeKind> InputBaseState<M> {
         {
             let line = &last_layout.lines[vi];
             let local_offset = offset.saturating_sub(last_layout.visible_line_byte_offsets[vi]);
-            // A right-to-left paragraph rests against the right edge: no margin there.
-            let safety_margin = if line.is_rtl() { px(0.) } else { safety_margin };
             if let Some(pos) = line.position_for_index(local_offset, last_layout, false) {
                 let bounds_width = bounds.size.width - last_layout.line_number_width;
                 let col_offset_x = pos.x;
@@ -3036,7 +3119,7 @@ impl<M: InputModeKind> InputBaseState<M> {
 
         let texts = self.selected_texts();
 
-        cx.write_to_clipboard(self.clipboard_item(texts.join("\n")));
+        cx.write_to_clipboard(ClipboardItem::new_string(texts.join("\n")));
     }
 
     pub(super) fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
@@ -3046,7 +3129,7 @@ impl<M: InputModeKind> InputBaseState<M> {
 
         let texts = self.selected_texts();
 
-        cx.write_to_clipboard(self.clipboard_item(texts.join("\n")));
+        cx.write_to_clipboard(ClipboardItem::new_string(texts.join("\n")));
 
         self.undo_manager.set_pending_intent(EditIntent::Atomic);
         self.replace_text_in_range_silent(None, "", window, cx);
@@ -3114,12 +3197,6 @@ impl<M: InputModeKind> InputBaseState<M> {
         let Some(mut new_text) = clipboard.text().filter(|text| !text.is_empty()) else {
             return;
         };
-        // A copy from an input with formatting spans or tokens carries them;
-        // paste restores them into a single selection (Quill patch).
-        if self.selections.is_single() && self.paste_rich(&clipboard, &new_text, window, cx) {
-            self.scroll_to(self.cursor(), None, cx);
-            return;
-        }
         // A paste is one atomic edit, never part of a typing run.
         self.undo_manager.set_pending_intent(EditIntent::Atomic);
 
@@ -3209,10 +3286,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         selection_before: CursorSelection,
         selection_after: Option<CursorSelection>,
     ) -> bool {
-        let revision = self.document_revision;
         self.document_revision = self.document_revision.wrapping_add(1);
         let token_delta = self.edit_tokens(range, new_text.len());
-        let span_snapshot = self.edit_spans(range, new_text, revision);
         if self.undo_manager.is_ignoring() {
             return false;
         }
@@ -3242,7 +3317,6 @@ impl<M: InputModeKind> InputBaseState<M> {
         let open_transaction = self.undo_manager.has_open_transaction();
         let mut change = Change::new(range, &old_text, new_range, new_text);
         change.token_delta = token_delta;
-        change.spans = span_snapshot;
         let recorded = self.undo_manager.record_transaction(change, intent);
         // A batch records its own cursor sets. This covers a change that is a
         // transaction on its own.
@@ -3274,12 +3348,10 @@ impl<M: InputModeKind> InputBaseState<M> {
             return;
         };
         let token_aware = self.inline_tokens.is_some()
-            || !self.text_spans.is_empty()
             || replay
                 .changes
                 .iter()
-                .any(|change| change.token_delta.is_some() || change.spans.is_some());
-        let spans_before = self.text_spans.clone();
+                .any(|change| change.token_delta.is_some());
         let emit_events = self.emit_events;
         if token_aware {
             self.emit_events = false;
@@ -3292,20 +3364,10 @@ impl<M: InputModeKind> InputBaseState<M> {
             } else {
                 (change.old_range.into(), &change.new_text)
             };
-            if !change.is_span_only() {
-                let range_utf16 = self.range_to_utf16(&range);
-                self.replace_text_in_range_silent(Some(range_utf16), text, window, cx);
-                self.replay_tokens(&range, text.len(), change.token_delta.as_deref(), undo);
-            }
-            if let Some(spans) = &change.spans {
-                self.text_spans = if undo {
-                    spans.before.clone()
-                } else {
-                    spans.after.clone()
-                };
-            }
+            let range_utf16 = self.range_to_utf16(&range);
+            self.replace_text_in_range_silent(Some(range_utf16), text, window, cx);
+            self.replay_tokens(&range, text.len(), change.token_delta.as_deref(), undo);
         }
-        self.refresh_span_layout(&spans_before, true, cx);
         self.restore_selections(replay.selections);
         self.mode
             .restore_auto_closed_pairs(replay.auto_closed_pairs.unwrap_or_default());
@@ -3401,13 +3463,6 @@ impl<M: InputModeKind> InputBaseState<M> {
     pub fn set_scroll_offset(&mut self, offset: gpui::Point<gpui::Pixels>, cx: &mut Context<Self>) {
         self.deferred_scroll_offset = Some(offset);
         cx.notify();
-    }
-
-    /// The font and size the input lays its text out with, so an overlay
-    /// (an inline bot's hint) can match it.
-    pub fn text_style(&self) -> (gpui::Font, gpui::Pixels) {
-        let (font, size) = self.display_map.text_style();
-        (font.clone(), size)
     }
 
     /// Laid-out line height; `None` before first layout.
@@ -3846,6 +3901,7 @@ impl<M: InputModeKind> InputBaseState<M> {
     }
 
     fn on_blur(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.revealed_viewport = None;
         if M::is_context_menu_open(self, cx) {
             return;
         }
@@ -4106,45 +4162,6 @@ impl<M: InputModeKind> InputBaseState<M> {
             last_bounds.origin + start_pos,
             last_bounds.origin + end_pos + point(px(0.), last_layout.line_height),
         ))
-    }
-
-    /// The rectangle the caret is drawn at, in window coordinates, with its affinity: at a
-    /// direction change in bidirectional text the caret offset has two places on screen, and
-    /// this is the one the caret is in (the plain [`Self::range_to_bounds`] of an empty range
-    /// is always the leading one). `None` when the caret is not laid out.
-    pub fn caret_bounds(&self) -> Option<Bounds<Pixels>> {
-        let last_layout = self.last_layout.as_ref()?;
-        let last_bounds = self.last_bounds?;
-        let (_, _, pos) =
-            self.line_and_position_for_offset_with_affinity(self.cursor(), self.cursor_line_end_affinity);
-        let pos = last_bounds.origin + pos?;
-        Some(Bounds::new(pos, gpui::size(px(0.), last_layout.line_height)))
-    }
-
-    /// Whether the caret hangs on the character before its offset: at the end of a soft
-    /// wrapped row, or on the near side of a direction change (see [`Self::caret_bounds`]).
-    pub fn caret_hangs_on_previous_character(&self) -> bool {
-        self.cursor_line_end_affinity
-    }
-
-    /// Return the rendered rectangles of a UTF-8 byte range in the current input contents, in
-    /// window coordinates: one per visual line the range crosses, and several on one line where
-    /// the range crosses a direction change in bidirectional text (a logical range is not one
-    /// visual interval there). Empty when the range is not currently laid out or visible.
-    pub fn range_to_rects(&self, range: &Range<usize>) -> Vec<Bounds<Pixels>> {
-        let (Some(last_layout), Some(last_bounds)) =
-            (self.last_layout.as_ref(), self.last_bounds.as_ref())
-        else {
-            return Vec::new();
-        };
-        let Some(corners) = TextElement::<M>::layout_range_corners(range, last_layout) else {
-            return Vec::new();
-        };
-        let origin = last_bounds.origin + point(last_layout.line_number_width, px(0.));
-        corners
-            .into_iter()
-            .map(|c| Bounds::from_corners(origin + c.top_left, origin + c.bottom_right))
-            .collect()
     }
 
     /// Replace text in range in silent.
@@ -4474,9 +4491,6 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         if !self.is_editable() {
             return;
         }
-        // An edit places the caret by text offset: it no longer hangs on the character before
-        // a direction change it may have been parked at.
-        self.cursor_line_end_affinity = false;
         let selection_before = *self.active_selection();
         // Committing a composition ends the transaction it opened, whether or
         // not the platform follows up with `unmark_text`.
@@ -4717,9 +4731,6 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         if !self.is_editable() {
             return;
         }
-        // An edit places the caret by text offset: it no longer hangs on the character before
-        // a direction change it may have been parked at.
-        self.cursor_line_end_affinity = false;
         let selection_before = *self.active_selection();
 
         let starts_composition = self.ime_marked_range.is_none();
@@ -4963,9 +4974,44 @@ impl<M: InputModeKind> Render for InputBaseState<M> {
         }
 
         let element = div()
-            .id("input-state")
+            .id(EDITOR_ELEMENT_ID)
             .key_context(CONTEXT)
-            .track_focus(&self.focus_handle)
+            .when_some(self.accessibility.as_ref(), |this, accessibility| {
+                this.when_some(accessibility.role, |this, role| this.role(role))
+                    .when_some(accessibility.label.clone(), |this, label| {
+                        this.aria_label(label)
+                    })
+                    .when_some(accessibility.placeholder.clone(), |this, placeholder| {
+                        this.aria_placeholder(placeholder)
+                    })
+                    .when_some(accessibility.accessibility_id.clone(), |this, id| {
+                        this.accessibility_id(id)
+                    })
+                    .when(
+                        accessibility.value_exposed
+                            && !self.masked
+                            && (window.is_a11y_active() || cfg!(feature = "test-support")),
+                        |this| this.aria_value(self.text.to_string()),
+                    )
+                    .on_a11y_action(gpui::AccessibleAction::Focus, {
+                        let entity = entity.clone();
+                        move |_, window, cx| {
+                            entity.update(cx, |state, cx| {
+                                state.handle_accessibility_focus(window, cx)
+                            });
+                        }
+                    })
+                    .when(self.is_editable(), |this| {
+                        this.on_a11y_action(gpui::AccessibleAction::SetValue, {
+                            let entity = entity.clone();
+                            move |data, window, cx| {
+                                entity.update(cx, |state, cx| {
+                                    state.handle_accessibility_set_value(data, window, cx)
+                                });
+                            }
+                        })
+                    })
+            })
             .when(self.is_editable(), |this| {
                 this.on_action(window.listener_for(&entity, InputBaseState::backspace))
                     .on_action(window.listener_for(&entity, InputBaseState::delete))
@@ -5061,7 +5107,7 @@ impl<M: InputModeKind> Render for InputBaseState<M> {
                 window.listener_for(&entity, InputBaseState::on_mouse_up),
             )
             .on_mouse_move(window.listener_for(&entity, InputBaseState::on_mouse_move))
-            .on_scroll_wheel(window.listener_for(&entity, InputBaseState::on_scroll_wheel))
+            .on_scroll(window.listener_for(&entity, InputBaseState::on_scroll_wheel))
             .when(self.is_multi_line() && !self.disabled, |this| {
                 this.on_modifiers_changed(cx.listener(|_, _, _, cx| cx.notify()))
             })
@@ -5101,12 +5147,97 @@ impl<M: InputModeKind> Render for InputBaseState<M> {
         // Actions only one mode handles are registered by that mode, where
         // `Self` is concrete enough to name its own entity type.
         M::register_actions(element, &entity, window)
+            .test_support()
+            .track_focus(&self.focus_handle)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gpui::test]
+    fn accessibility_actions_recheck_live_editability(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (state, cx) = cx.add_window_view(|window, cx| {
+            crate::input::InputState::new(window, cx).default_value("initial")
+        });
+        let changes = Rc::new(Cell::new(0));
+        let observed = changes.clone();
+        let _subscription = cx.update(|_, cx| {
+            cx.subscribe(&state, move |_, event: &InputEvent, _| {
+                if matches!(event, InputEvent::Change) {
+                    observed.set(observed.get() + 1);
+                }
+            })
+        });
+        cx.update(|window, cx| {
+            state.update(cx, |state, cx| {
+                state.handle_accessibility_set_value(None, window, cx);
+                state.handle_accessibility_focus(window, cx);
+                assert!(state.focus_handle.is_focused(window));
+            });
+            window.draw(cx).clear(cx);
+        });
+        assert_eq!(state.read_with(cx, |state, _| state.value()), "initial");
+        assert_eq!(changes.get(), 0);
+
+        let action = gpui::accesskit::ActionData::Value("updated🦀".into());
+        cx.update(|window, cx| {
+            state.update(cx, |state, cx| {
+                state.handle_accessibility_set_value(Some(&action), window, cx)
+            });
+        });
+        assert_eq!(state.read_with(cx, |state, _| state.value()), "updated🦀");
+        assert_eq!(changes.get(), 1);
+        for disabled in [false, true] {
+            cx.update(|window, cx| {
+                window.blur(cx);
+                state.update(cx, |state, cx| {
+                    state.set_disabled(disabled, cx);
+                    state.set_readonly(!disabled, cx);
+                    state.handle_accessibility_focus(window, cx);
+                    assert_eq!(state.focus_handle.is_focused(window), !disabled);
+                    let rejected = gpui::accesskit::ActionData::Value("rejected".into());
+                    state.handle_accessibility_set_value(Some(&rejected), window, cx);
+                });
+            });
+            assert_eq!(state.read_with(cx, |state, _| state.value()), "updated🦀");
+            assert_eq!(changes.get(), 1);
+        }
+        cx.update(|window, cx| {
+            state.update(cx, |state, cx| {
+                state.set_disabled(false, cx);
+                state.set_readonly(false, cx);
+                state.handle_accessibility_focus(window, cx);
+            });
+            window.draw(cx).clear(cx);
+            window.dispatch_action(Box::new(Undo), cx);
+        });
+        assert_eq!(state.read_with(cx, |state, _| state.value()), "initial");
+        cx.update(|window, cx| {
+            state.update(cx, |state, cx| {
+                state.set_masked(true, window, cx);
+                state.handle_accessibility_set_value(Some(&action), window, cx);
+            });
+        });
+        assert_eq!(state.read_with(cx, |state, _| state.value()), "updated🦀");
+    }
+
+    #[gpui::test]
+    fn accessibility_set_value_preserves_exact_editor_text(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            crate::input::EditorState::new(window, cx).language("rust")
+        });
+        let action = gpui::accesskit::ActionData::Value("(".into());
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                editor.handle_accessibility_set_value(Some(&action), window, cx)
+            });
+        });
+        assert_eq!(editor.read_with(cx, |editor, _| editor.value()), "(");
+    }
 
     #[gpui::test]
     fn revealing_a_password_keeps_text_assistance_disabled(cx: &mut TestAppContext) {
@@ -5950,7 +6081,7 @@ mod tests {
     use crate::theme::Theme;
     use gpui::{TestAppContext, VisualTestContext, size};
 
-    use crate::input::{EditorMode, EditorState, InputMode, LanguageConfig, TextareaMode};
+    use crate::input::{EditorMode, EditorState, InputMode, LanguageConfig, TabSize, TextareaMode};
 
     fn set_test_syntax_provider(
         provider: Rc<dyn crate::input::SyntaxContextProvider>,
@@ -6060,7 +6191,7 @@ mod tests {
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
                 state.on_scroll_wheel(
-                    &ScrollWheelEvent {
+                    &ScrollEvent {
                         delta: gpui::ScrollDelta::Pixels(point(px(0.), px(dy))),
                         touch_phase: phase,
                         ..Default::default()
@@ -6206,7 +6337,7 @@ mod tests {
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
                 state.on_scroll_wheel(
-                    &ScrollWheelEvent {
+                    &ScrollEvent {
                         delta: gpui::ScrollDelta::Pixels(point(px(1.), px(0.))),
                         touch_phase: gpui::TouchPhase::Ended,
                         ..Default::default()
@@ -6238,7 +6369,7 @@ mod tests {
             window.draw(cx).clear(cx);
             view.input.update(cx, |state, cx| {
                 state.on_scroll_wheel(
-                    &ScrollWheelEvent {
+                    &ScrollEvent {
                         delta: gpui::ScrollDelta::Lines(point(0., -100_000.)),
                         touch_phase: gpui::TouchPhase::Moved,
                         ..Default::default()
@@ -6267,7 +6398,7 @@ mod tests {
             window.draw(cx).clear(cx);
             view.input.update(cx, |state, cx| {
                 state.on_scroll_wheel(
-                    &ScrollWheelEvent {
+                    &ScrollEvent {
                         delta: gpui::ScrollDelta::Lines(point(0., 2.)),
                         touch_phase: gpui::TouchPhase::Moved,
                         ..Default::default()
@@ -6353,7 +6484,7 @@ mod tests {
             .update(cx, |_, window, cx| {
                 input.update(cx, |state, cx| {
                     state.on_scroll_wheel(
-                        &ScrollWheelEvent {
+                        &ScrollEvent {
                             delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-40.))),
                             ..Default::default()
                         },
@@ -6374,7 +6505,7 @@ mod tests {
             .update(cx, |_, window, cx| {
                 input.update(cx, |state, cx| {
                     state.on_scroll_wheel(
-                        &ScrollWheelEvent {
+                        &ScrollEvent {
                             delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-40.))),
                             ..Default::default()
                         },
@@ -9157,6 +9288,38 @@ mod tests {
                 assert_eq!(rows, 2);
             }
         }
+    }
+
+    #[gpui::test]
+    fn test_prewrap_uses_the_configured_tab_stops(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        cx.open_window(size(px(400.), px(100.)), |window, cx| {
+            let font = window.text_style().font();
+            let font_size = px(14.);
+            let font_id = window.text_system().resolve_font(&font);
+            let space_width = window.text_system().layout_width(font_id, font_size, ' ');
+            cx.new(|cx| {
+                let mut state = crate::input::EditorState::new(window, cx)
+                    .tab_size(TabSize {
+                        tab_size: 4,
+                        hard_tabs: true,
+                    })
+                    .default_value("\t\t");
+                for (tab_size, expected_rows) in [(4, 2), (2, 1), (8, 2)] {
+                    state.set_tab_size(
+                        TabSize {
+                            tab_size,
+                            hard_tabs: true,
+                        },
+                        cx,
+                    );
+                    state.prewrap(font.clone(), font_size, space_width * 5. + RIGHT_MARGIN, cx);
+                    assert_eq!(state.display_map().wrap_row_count(), expected_rows);
+                }
+                state
+            });
+            gpui::EmptyView
+        });
     }
 
     /// Prewrap counts with the state's wrapping indent, as the first layout

@@ -127,10 +127,6 @@ impl<E: Element> Element for A11yDisabled<E> {
         self.inner.a11y_role()
     }
 
-    fn a11y_tag(&self) -> Option<gpui::SharedString> {
-        self.inner.a11y_tag()
-    }
-
     fn write_a11y_info(&self, node: &mut accesskit::Node) {
         self.inner.write_a11y_info(node);
         if self.disabled {

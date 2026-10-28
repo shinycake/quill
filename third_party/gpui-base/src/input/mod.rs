@@ -1,6 +1,3 @@
-// Modified by the Quill project (2026) from gpui-base 0.7.3 (Apache-2.0):
-// bidirectional text support and formatting spans in the input engine. See
-// third_party/gpui-base/QUILL-CHANGES.md.
 //! Text input: the shared editing engine and the three states built on it.
 //!
 //! Nothing here should be `pub` unless it is reachable from outside the crate.
@@ -28,7 +25,6 @@ mod decorations;
 mod diagnostics;
 #[path = "editor/display_map/mod.rs"]
 mod display_map;
-pub mod bidi_paragraph;
 mod editor;
 #[path = "base/element.rs"]
 mod element;
@@ -39,11 +35,8 @@ mod indent;
 #[path = "base/inline_tokens.rs"]
 mod inline_tokens;
 mod input;
-#[path = "base/text_spans.rs"]
-mod text_spans;
 #[path = "base/token_presentation.rs"]
 mod token_presentation;
-pub use text_spans::{TextSpan, TextSpanStyle, TextSpanStyler};
 pub use inline_tokens::{InlineToken, InlineTokenError, InlineTokenSpan, InputContent};
 pub(crate) use token_presentation::InlineTokenPresentation;
 pub use token_presentation::{
@@ -70,13 +63,17 @@ mod movement;
 mod native;
 #[path = "base/rope_ext.rs"]
 mod rope_ext;
+mod scrollbar_presentation;
 #[path = "editor/search.rs"]
 mod search;
 #[path = "base/selection.rs"]
 mod selection;
 #[path = "base/state.rs"]
 mod state;
+#[path = "base/tab_stops.rs"]
+mod tab_stops;
 mod textarea;
+pub use scrollbar_presentation::{EditorScrollbarContext, EditorScrollbarRenderer};
 #[path = "base/touch.rs"]
 mod touch;
 #[path = "base/undo_manager.rs"]

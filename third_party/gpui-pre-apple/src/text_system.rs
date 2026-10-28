@@ -1,6 +1,3 @@
-// Modified by the Quill project (2026) from gpui-pre-apple 0.3.9 (Apache-2.0):
-// a malformed CoreText run is skipped instead of panicking.
-// See third_party/gpui-pre-apple/QUILL-CHANGES.md.
 use anyhow::anyhow;
 use collections::{HashMap, HashSet};
 use core_foundation::{
@@ -588,41 +585,32 @@ impl AppleTextSystemState {
         let mut runs = <Vec<ShapedRun>>::with_capacity(glyph_runs.len() as usize);
         let mut ix_converter = StringIndexConverter::new(text);
         for run in glyph_runs.into_iter() {
-            // Quill: a run without attributes or a font is skipped, and a glyph without a
-            // string index too, instead of upstream's `unwrap`s.
-            let Some(attributes) = run.attributes() else {
-                log::warn!("skipping a CoreText run without attributes");
-                continue;
-            };
-            // SAFETY: `kCTFontAttributeName` is a CoreText constant that lives for the
-            // whole process.
-            let font = unsafe { attributes.find(kCTFontAttributeName) }
-                .and_then(|font| font.downcast::<CTFont>());
-            let Some(font) = font else {
-                log::warn!("skipping a CoreText run without a font");
-                continue;
+            let attributes = run.attributes().unwrap();
+            let font = unsafe {
+                attributes
+                    .get(kCTFontAttributeName)
+                    .downcast::<CTFont>()
+                    .unwrap()
             };
             let font_id = self.id_for_native_font(font);
 
-            if !matches!(runs.last(), Some(last) if last.font_id == font_id) {
-                runs.push(ShapedRun {
-                    font_id,
-                    glyphs: Vec::with_capacity(run.glyph_count().try_into().unwrap_or(0)),
-                });
-            }
-            let Some(shaped_run) = runs.last_mut() else {
-                continue;
+            let glyphs = match runs.last_mut() {
+                Some(run) if run.font_id == font_id => &mut run.glyphs,
+                _ => {
+                    runs.push(ShapedRun {
+                        font_id,
+                        glyphs: Vec::with_capacity(run.glyph_count().try_into().unwrap_or(0)),
+                    });
+                    &mut runs.last_mut().unwrap().glyphs
+                }
             };
-            let glyphs = &mut shaped_run.glyphs;
             for ((&glyph_id, position), &glyph_utf16_ix) in run
                 .glyphs()
                 .iter()
                 .zip(run.positions().iter())
                 .zip(run.string_indices().iter())
             {
-                let Ok(glyph_utf16_ix) = usize::try_from(glyph_utf16_ix) else {
-                    continue;
-                };
+                let glyph_utf16_ix = usize::try_from(glyph_utf16_ix).unwrap();
                 if ix_converter.utf16_ix > glyph_utf16_ix {
                     // We cannot reuse current index converter, as it can only seek forward. Restart the search.
                     ix_converter = StringIndexConverter::new(text);

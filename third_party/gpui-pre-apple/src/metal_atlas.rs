@@ -1,5 +1,3 @@
-// Modified by the Quill project (2026) from gpui-pre-apple 0.3.9 (Apache-2.0):
-// images in textures of their own. See QUILL-CHANGES.md.
 use anyhow::{Context as _, Result};
 use derive_more::{Deref, DerefMut};
 use etagere::BucketedAtlasAllocator;
@@ -60,17 +58,12 @@ impl AtlasBackend for MetalAtlasTextures {
         size: Size<DevicePixels>,
         bytes: &[u8],
     ) -> Result<AtlasTile> {
-        self.insert_tile(kind, size, bytes, false)
-    }
-
-    // QUILL: images in textures of their own.
-    fn insert_image(
-        &mut self,
-        kind: AtlasTextureKind,
-        size: Size<DevicePixels>,
-        bytes: &[u8],
-    ) -> Result<AtlasTile> {
-        self.insert_tile(kind, size, bytes, true)
+        let tile = self.allocate(size, kind).context("failed to allocate")?;
+        let texture = self
+            .texture(tile.texture_id)
+            .context("allocated tile refers to a missing texture")?;
+        texture.upload(tile.bounds, bytes);
+        Ok(tile)
     }
 
     fn remove(&mut self, tile: AtlasTile) {
@@ -103,28 +96,10 @@ impl AtlasBackend for MetalAtlasTextures {
 }
 
 impl MetalAtlasTextures {
-    fn insert_tile(
-        &mut self,
-        kind: AtlasTextureKind,
-        size: Size<DevicePixels>,
-        bytes: &[u8],
-        images: bool,
-    ) -> Result<AtlasTile> {
-        let tile = self
-            .allocate(size, kind, images)
-            .context("failed to allocate")?;
-        let texture = self
-            .texture(tile.texture_id)
-            .context("allocated tile refers to a missing texture")?;
-        texture.upload(tile.bounds, bytes);
-        Ok(tile)
-    }
-
     fn allocate(
         &mut self,
         size: Size<DevicePixels>,
         texture_kind: AtlasTextureKind,
-        images: bool,
     ) -> Option<AtlasTile> {
         {
             let textures = match texture_kind {
@@ -133,18 +108,16 @@ impl MetalAtlasTextures {
                 AtlasTextureKind::Subpixel => unreachable!(),
             };
 
-            // QUILL: only textures holding the same kind of tile.
             if let Some(tile) = textures
                 .iter_mut()
                 .rev()
-                .filter(|texture| texture.images == images)
                 .find_map(|texture| texture.allocate(size))
             {
                 return Some(tile);
             }
         }
 
-        let texture = self.push_texture(size, texture_kind, images);
+        let texture = self.push_texture(size, texture_kind);
         texture.allocate(size)
     }
 
@@ -152,7 +125,6 @@ impl MetalAtlasTextures {
         &mut self,
         min_size: Size<DevicePixels>,
         kind: AtlasTextureKind,
-        images: bool,
     ) -> &mut MetalAtlasTexture {
         const DEFAULT_ATLAS_SIZE: Size<DevicePixels> = Size {
             width: DevicePixels(1024),
@@ -207,7 +179,6 @@ impl MetalAtlasTextures {
             allocator: etagere::BucketedAtlasAllocator::new(size_to_etagere(size)),
             metal_texture: AssertSend(metal_texture),
             live_atlas_keys: 0,
-            images,
         };
 
         if let Some(ix) = index {
@@ -237,8 +208,6 @@ struct MetalAtlasTexture {
     allocator: BucketedAtlasAllocator,
     metal_texture: AssertSend<metal::Texture>,
     live_atlas_keys: u32,
-    /// QUILL: holds image tiles only (else glyphs and SVGs only).
-    images: bool,
 }
 
 impl MetalAtlasTexture {
@@ -423,51 +392,6 @@ mod tests {
         atlas.remove(&big_key_a);
         let tile_b = insert_tile(&atlas, big_key_b, big);
         assert_eq!(tile_b.texture_id, keeper_tile.texture_id);
-    }
-
-    fn make_emoji_key(glyph: u32) -> AtlasKey {
-        AtlasKey::Glyph(gpui::RenderGlyphParams {
-            font_id: gpui::FontId(0),
-            glyph_id: gpui::GlyphId(glyph),
-            font_size: gpui::px(16.),
-            subpixel_variant: Point::default(),
-            scale_factor: 2.,
-            is_emoji: true,
-            subpixel_rendering: false,
-            dilation: 0,
-        })
-    }
-
-    /// QUILL: a color emoji drawn while a photo was on screen landed in the
-    /// photo's texture and kept it alive after the photo left.
-    #[test]
-    fn test_glyphs_never_keep_an_image_texture_alive() {
-        let Some(atlas) = create_atlas() else {
-            return;
-        };
-        let photo = make_image_key(1, 0);
-        let emoji = make_emoji_key(7);
-        let photo_tile = insert_tile(
-            &atlas,
-            photo.clone(),
-            Size {
-                width: DevicePixels(720),
-                height: DevicePixels(540),
-            },
-        );
-        let emoji_tile = insert_tile(
-            &atlas,
-            emoji,
-            Size {
-                width: DevicePixels(64),
-                height: DevicePixels(64),
-            },
-        );
-        assert_eq!(emoji_tile.texture_id.kind, photo_tile.texture_id.kind);
-        assert_ne!(emoji_tile.texture_id, photo_tile.texture_id);
-        atlas.remove(&photo);
-        assert!(atlas.metal_texture(photo_tile.texture_id).is_none());
-        assert!(atlas.metal_texture(emoji_tile.texture_id).is_some());
     }
 
     #[test]
