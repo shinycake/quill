@@ -284,6 +284,7 @@ impl Player {
     ) -> Option<Arc<RenderImage>> {
         self.drain();
         let key = spec.key(edge);
+        let high_rate = high_rate && !self.engine.coarse(&key);
         let mut retired: Vec<Arc<RenderImage>> = Vec::new();
         let shown = {
             let mut guard = self.inner.try_borrow_mut().ok()?;
@@ -653,7 +654,10 @@ impl StickerView {
             .get(&(self.head, key.file))
             .map(|(head, _)| *head)
             .unwrap_or_default();
-        let high = high_rate(self.active);
+        // A clip held to its file's rate still ticks at the display's, so
+        // each of its frames stays up for the same number of refreshes.
+        let display_high = high_rate(self.active);
+        let high = display_high && !self.player.engine.coarse(&key);
         let pick = match self.mode {
             PlayMode::At(_) => quill::sticker_playback::player::head::pick(
                 Duration::ZERO,
@@ -668,7 +672,7 @@ impl StickerView {
         };
         match pick {
             Some(pick) if pick.animating => {
-                (timeline.tick_fps(high).ceil() as u32).clamp(1, self.max_fps.max(1))
+                (timeline.tick_fps(display_high).ceil() as u32).clamp(1, self.max_fps.max(1))
             }
             _ => 0,
         }

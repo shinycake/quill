@@ -158,6 +158,9 @@ fn frame(
     clip.busy = false;
     clip.drawing = None;
     let first = drawn.is_some() && !std::mem::replace(&mut clip.delivered, true);
+    if let Some(draw) = timing.draw {
+        clip.note_draw(draw);
+    }
     let stats = &mut state.stats;
     if let Some(draw) = timing.draw {
         stats.drawn += 1;
