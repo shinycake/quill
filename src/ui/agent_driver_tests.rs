@@ -829,3 +829,45 @@ fn a_hidden_window_says_so_in_its_state_and_its_missing_frame(cx: &mut TestAppCo
     assert_eq!(state(&app, vcx), WindowState::Visible);
     read_tree(&app, vcx);
 }
+
+/// A right click on a granted row answers with the menu it opened.
+#[gpui_kit::test]
+fn open_menu_answers_with_the_rows_menu(cx: &mut TestAppContext) {
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    turn_on();
+    grant(11, Scope::ReadWrite);
+    let _presence = activity::connect("Test agent");
+    settle(vcx);
+    let tree = read_tree(&app, vcx);
+    let row = tree
+        .nodes
+        .iter()
+        .find(|node| {
+            node.role == "Button"
+                && node
+                    .tag
+                    .as_deref()
+                    .and_then(quill::agent::ui_driver::redact::chat_of_tag)
+                    == Some(11)
+        })
+        .map(|node| node.id.clone())
+        .unwrap_or_else(|| panic!("chat 11's row"));
+    let reply = drive(
+        &app,
+        vcx,
+        UiCommand::OpenMenu {
+            target: Target::Node(row),
+        },
+    );
+    let Ok(UiReply::Done { added, .. }) = reply else {
+        panic!("expected Done, got {reply:?}");
+    };
+    let items: Vec<_> = added
+        .iter()
+        .filter(|node| node.role == "MenuItem")
+        .filter_map(|node| node.name.clone())
+        .collect();
+    assert!(!items.is_empty(), "the menu's items: {added:?}");
+}
