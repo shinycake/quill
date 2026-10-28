@@ -77,9 +77,9 @@ impl UpdateControl {
             .then(|| release.clone())
     }
 
-    /// Whether the chat list shows it at its bottom: only while there is an
-    /// update to act on, as tdesktop's "Update Telegram" button.
-    pub fn in_chat_list(&self) -> bool {
+    /// Whether the title bar shows it: only while there is an update to act
+    /// on, as tdesktop's "Update Telegram" button under the chat list.
+    pub fn in_title_bar(&self) -> bool {
         !matches!(self, Self::Check { .. })
     }
 
@@ -175,21 +175,21 @@ mod tests {
             Unavailable::Checking,
         ] {
             let control = UpdateControl::of(&found, Err(quiet));
-            assert!(!control.in_chat_list(), "{quiet:?}");
+            assert!(!control.in_title_bar(), "{quiet:?}");
         }
     }
 
     #[test]
-    fn the_chat_list_shows_it_only_with_an_update_to_act_on() {
-        assert!(!UpdateControl::of(&UpdateState::UpToDate, Ok(())).in_chat_list());
-        assert!(!UpdateControl::of(&UpdateState::Checking, Ok(())).in_chat_list());
-        assert!(UpdateControl::of(&UpdateState::Available(release(true)), Ok(())).in_chat_list());
+    fn the_title_bar_shows_it_only_with_an_update_to_act_on() {
+        assert!(!UpdateControl::of(&UpdateState::UpToDate, Ok(())).in_title_bar());
+        assert!(!UpdateControl::of(&UpdateState::Checking, Ok(())).in_title_bar());
+        assert!(UpdateControl::of(&UpdateState::Available(release(true)), Ok(())).in_title_bar());
         assert!(
             UpdateControl::of(
                 &UpdateState::Staged(release(true), "plan.json".into()),
                 Ok(())
             )
-            .in_chat_list()
+            .in_title_bar()
         );
     }
 

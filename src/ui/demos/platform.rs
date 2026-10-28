@@ -94,7 +94,7 @@ impl QuillApp {
                 "update-plan.json".into(),
             ),
         };
-        // `QUILL_DEMO_UPDATE_IN=chats`: the chat list and its update button.
+        // `QUILL_DEMO_UPDATE_IN=chats`: the chat list with the update in the title bar.
         if std::env::var("QUILL_DEMO_UPDATE_IN").is_ok_and(|v| v == "chats") {
             return;
         }

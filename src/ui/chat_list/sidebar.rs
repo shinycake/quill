@@ -38,7 +38,6 @@ impl QuillApp {
         };
         let list = if mode == PaneMode::Ready {
             list.children(self.agent_connected_strip(cx))
-                .children(self.chat_list_update_button(cx))
         } else {
             list
         };

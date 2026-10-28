@@ -65,6 +65,8 @@ pub struct QuillApp {
     /// Files sent to Quill from outside (`ui/start_files_state.rs`).
     pub(super) start_files: super::start_files_state::StartFilesUi,
     pub(super) ai_compose: super::ai_compose_state::AiComposeUi,
+    /// The title bar update pill's motion (`ui/update_pill.rs`).
+    pub(super) update_pill: super::update_pill::UpdatePill,
     /// Agent access: the account Settings edits and the all-chats consent (`ui/agent_state.rs`).
     pub(super) agent_ui: super::agent_state::AgentUi,
     /// The agent takeover's wake-up and Esc (`ui/agent_takeover_state.rs`).
