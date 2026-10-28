@@ -66,11 +66,9 @@ mod platform {
     static WATCH: Once = Once::new();
 
     pub(super) fn running() -> bool {
+        // A thread that does not start leaves "no screen reader" in place.
         WATCH.call_once(|| {
-            let spawned = crate::thread_guard::spawn_guarded("quill-screen-reader", watch);
-            if let Err(error) = spawned {
-                log::warn!("screen reader watch did not start: {error}");
-            }
+            let _ = crate::thread_guard::spawn_guarded("quill-screen-reader", watch);
         });
         ON.load(Ordering::Relaxed)
     }
