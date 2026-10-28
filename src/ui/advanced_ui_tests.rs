@@ -378,33 +378,33 @@ fn click_id(vcx: &mut VisualTestContext, id: &'static str) {
     vcx.run_until_parked();
 }
 
-/// tdesktop's "Update Telegram": a staged update puts "Restart to update"
-/// at the bottom of the chat list, and no banner asks the same.
+/// A staged update puts "Restart to update" in the title bar, and no
+/// banner asks the same.
 #[gpui_kit::test]
-fn a_staged_update_asks_for_a_restart_from_the_chat_list(cx: &mut TestAppContext) {
+fn a_staged_update_asks_for_a_restart_from_the_title_bar(cx: &mut TestAppContext) {
     let _guard = AUTO_UPDATE_STATE.lock().unwrap_or_else(|e| e.into_inner());
     let (app, _shell, mut vcx) = new_app_on(cx, "ready-update-staged");
     let vcx = &mut vcx;
     // The demo opens Settings over the chat list.
     app.update(vcx, |app, _| app.close_settings());
     vcx.run_until_parked();
-    assert!(shown(vcx, "chat-list-update-button"));
+    assert!(shown(vcx, "title-bar-update"));
     assert!(!shown(vcx, "dismiss-update-banner"));
     app.update_in(vcx, |app, _, _| {
         assert_eq!(app.update_control(), quill::updater::UpdateControl::Restart);
         app.settings.update_state = quill::updater::UpdateState::UpToDate;
     });
     assert!(
-        !shown(vcx, "chat-list-update-button"),
-        "nothing to act on: the chat list has no update button"
+        !shown(vcx, "title-bar-update"),
+        "nothing to act on: the title bar has no update button"
     );
     quill::update_install::force_self_update_available(None);
 }
 
-/// "Update Quill" in the chat list starts the download; the button follows
+/// "Update Quill" in the title bar starts the download; the button follows
 /// it (offline here, so the download fails and offers the update again).
 #[gpui_kit::test]
-fn update_quill_in_the_chat_list_downloads_the_release(cx: &mut TestAppContext) {
+fn update_quill_in_the_title_bar_downloads_the_release(cx: &mut TestAppContext) {
     use quill::updater::{UpdateControl, UpdateState};
     let _guard = AUTO_UPDATE_STATE.lock().unwrap_or_else(|e| e.into_inner());
     let (app, _shell, mut vcx) = new_app_on(cx, "ready-update-install");
@@ -414,7 +414,7 @@ fn update_quill_in_the_chat_list_downloads_the_release(cx: &mut TestAppContext) 
     app.update_in(vcx, |app, _, _| {
         assert!(matches!(app.update_control(), UpdateControl::Install(_)));
     });
-    click_id(vcx, "chat-list-update-button");
+    click_id(vcx, "title-bar-update");
     app.update_in(vcx, |app, _, _| {
         assert!(
             matches!(app.settings.update_state, UpdateState::DownloadFailed(..)),
@@ -422,6 +422,6 @@ fn update_quill_in_the_chat_list_downloads_the_release(cx: &mut TestAppContext) 
         );
         assert!(matches!(app.update_control(), UpdateControl::Install(_)));
     });
-    assert!(shown(vcx, "chat-list-update-button"));
+    assert!(shown(vcx, "title-bar-update"));
     quill::update_install::force_self_update_available(None);
 }

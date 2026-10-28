@@ -146,6 +146,7 @@ mod stories_state;
 mod synthetic;
 pub(crate) mod tooltip_timing;
 mod twofa_state;
+mod update_pill;
 mod updates;
 mod updates_sync_ui;
 mod user_error;

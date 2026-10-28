@@ -321,6 +321,7 @@ impl QuillApp {
             share: super::share_state::ShareUi::new(window, cx, forward_search_input),
             start_files: super::start_files_state::StartFilesUi::new(window, cx),
             ai_compose: super::ai_compose_state::AiComposeUi::new(window, cx),
+            update_pill: Default::default(),
             agent_ui: super::agent_state::AgentUi::new(window, cx),
             takeover: super::agent_takeover_state::TakeoverUi::new(window, cx),
             focus_sidebar: cx.focus_handle(),

@@ -1,8 +1,7 @@
 //! Release checks run off the UI thread. One button carries the update
 //! through its steps (`UpdateControl`): Check for updates, Update Quill,
 //! the download, Restart to update. It sits in Settings and, while there is
-//! an update to act on, at the bottom of the chat list (tdesktop's "Update
-//! Telegram"). Quill checks at launch and every few hours, and downloads a
+//! an update to act on, in the title bar beside search (`update_pill`). Quill checks at launch and every few hours, and downloads a
 //! new release without a click; a downloaded update also installs the next
 //! time Quill starts (`update_install::apply_on_start`). Quill never
 //! restarts itself.
@@ -88,7 +87,7 @@ impl QuillApp {
     }
 
     /// The update button was pressed: the step it shows.
-    fn press_update_control(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn press_update_control(&mut self, cx: &mut Context<Self>) {
         match self.update_control() {
             UpdateControl::Check { busy: false } => self.check_for_updates(cx),
             UpdateControl::Install(release) => self.download_update(release, cx),
@@ -174,7 +173,7 @@ impl QuillApp {
     }
 
     /// The text of the update button.
-    fn update_control_label(control: &UpdateControl) -> SharedString {
+    pub(super) fn update_control_label(control: &UpdateControl) -> SharedString {
         match control {
             UpdateControl::Check { .. } => tr(keys::Q_OPS_CHECK_FOR_UPDATES).into(),
             UpdateControl::Install(_) => tr(keys::Q_OPS_UPDATE_QUILL).into(),
@@ -192,7 +191,7 @@ impl QuillApp {
         }
     }
 
-    /// The update button itself; `id` tells the chat list's from Settings'.
+    /// Settings' update button.
     fn update_control_button(
         &self,
         id: &'static str,
@@ -228,35 +227,6 @@ impl QuillApp {
                 .value(fraction * 100.)
                 .into_any_element()
         })
-    }
-
-    /// tdesktop's "Update Telegram" button at the bottom of the chat list,
-    /// there while an update can be installed, is downloading or is ready.
-    pub(in crate::ui) fn chat_list_update_button(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        let control = self.update_control();
-        if !control.in_chat_list() {
-            return None;
-        }
-        Some(
-            div()
-                .id("chat-list-update")
-                .flex_none()
-                .flex()
-                .flex_col()
-                .gap_1()
-                .children(Self::update_progress_bar(
-                    "chat-list-update-progress",
-                    &control,
-                ))
-                .child(
-                    self.update_control_button("chat-list-update-button", &control, cx)
-                        .w_full(),
-                )
-                .into_any_element(),
-        )
     }
 
     pub(in crate::ui) fn update_settings_section(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -458,7 +428,7 @@ impl QuillApp {
     }
 
     /// "Updated to Quill X" after an update, with its notes; the update
-    /// itself is offered at the bottom of the chat list.
+    /// itself is offered in the title bar.
     pub(super) fn update_banner(&self, cx: &mut Context<Self>) -> AnyElement {
         if !matches!(self.settings.update_state, UpdateState::Installed(_)) {
             return div().into_any_element();

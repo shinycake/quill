@@ -15,6 +15,7 @@ pub(super) fn title_bar(
     mode: PaneMode,
     live: bool,
     search_open: bool,
+    update: Option<AnyElement>,
     menu_bar: Option<Entity<gpui_kit::component::menu::AppMenuBar>>,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement {
@@ -39,6 +40,7 @@ pub(super) fn title_bar(
                 .gap_2()
                 .items_center()
                 .flex_none()
+                .children(update)
                 .when(mode == PaneMode::Ready, |this| {
                     this.child(
                         Button::new("search")

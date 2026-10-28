@@ -45,6 +45,7 @@ impl Render for QuillApp {
         self.windows.main = Some(window.window_handle());
         self.slices.a11y_active.set(self.a11y_tree_wanted(window));
         self.release_viewer_key_probe(window, cx);
+        self.sync_update_pill();
         // Bounded image memory: retired images and path images nothing can
         // show any more leave the atlas (`image_budget`).
         super::image_budget::begin_frame();
@@ -595,6 +596,7 @@ impl Render for QuillApp {
                 self.pane_mode(),
                 self.live.is_some(),
                 self.search_is_open(),
+                self.title_bar_update_button(cx),
                 // kit Phase 7: the in-window menu bar on Linux/Windows leads
                 // the title row (macOS uses the native menu bar installed by
                 // `setup_app_menus`).
