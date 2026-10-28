@@ -7,18 +7,17 @@
 use super::live_state::{FlyingStars, effect_progress, level_color};
 use super::live_view::sender_avatar;
 use super::*;
-use crate::ui::anim_layer::LayeredClip;
-use crate::ui::sticker_playback::{ClipKey, PlaybackSize};
+use crate::ui::sticker_player::{HeadId, StickerView, ViewAsk};
 use gpui_kit::assets::IconName;
 use quill::live_story::{
-    STAR_EFFECT_CANVAS_H, STAR_EFFECT_CANVAS_W, STAR_EFFECT_SIZE, StarEffectFrame,
-    burst_frame_index, burst_order, level_for_stars, ready_burst, star_effect_frame,
+    STAR_EFFECT_CANVAS_H, STAR_EFFECT_CANVAS_W, STAR_EFFECT_SIZE, StarEffectFrame, burst_order,
+    level_for_stars, ready_burst, star_effect_frame,
 };
 use quill::premium_hub::group_digits;
 use quill::state::Session;
 use quill::sticker_playback::Tint;
+use quill::sticker_playback::player::PlayMode;
 use quill::telegram::envelope::StickerItem;
-use std::sync::Arc;
 
 /// tdesktop `whoReadDateStyle`: the badge's 12 px font, on a 16 px line.
 const BADGE_FONT: f32 = 12.;
@@ -38,11 +37,23 @@ pub(super) struct StarBurst<'a> {
 }
 
 impl StarBurst<'_> {
-    pub(super) fn key(&self, sticker: &StickerItem) -> ClipKey {
-        ClipKey {
-            file: sticker.file_id,
-            tint: self.tint,
-        }
+    /// The view of `sticker`'s burst `age` into effect number `effect`:
+    /// played once on the effect's clock, tinted, drawn at the effect's
+    /// size.
+    pub(super) fn ask(
+        &self,
+        sticker: &StickerItem,
+        age: std::time::Duration,
+        effect: usize,
+    ) -> ViewAsk {
+        ViewAsk::sticker(
+            sticker.file_id,
+            sticker.format,
+            HeadId::of(("star-burst", sticker.file_id.0, effect)),
+            PlayMode::At(age),
+            STAR_EFFECT_SIZE,
+        )
+        .tinted(self.tint)
     }
 }
 
@@ -56,7 +67,7 @@ pub(super) fn star_burst(session: &Session) -> StarBurst<'_> {
 }
 
 /// `chrome::stars_gold()` as a tint for the burst's frames.
-pub(super) fn burst_tint() -> Tint {
+fn burst_tint() -> Tint {
     let gold = chrome::stars_gold().to_rgb();
     Tint([gold.b, gold.g, gold.r].map(|channel| (channel * 255.).round() as u8))
 }
@@ -77,14 +88,16 @@ impl QuillApp {
         let levels = session.live_levels();
         let burst = star_burst(session);
         let mut effects = Vec::new();
-        for effect in &live.flying {
+        let mut fps = 60;
+        for (index, effect) in live.flying.iter().enumerate() {
             let Some(progress) = effect_progress(effect.started, now) else {
                 continue;
             };
             let age = now.saturating_duration_since(effect.started);
-            let frame = self
-                .burst_clip(&burst, effect, cx)
-                .and_then(|clip| burst_frame(&clip, age));
+            let frame = self.burst_view(&burst, effect, index, age, cx);
+            if let Some(view) = &frame {
+                fps = fps.max(view.fps());
+            }
             let color = level_for_stars(&levels, effect.stars).first_color;
             let motion = star_effect_frame(progress, effect.shift);
             effects.push(effect_element(
@@ -97,7 +110,7 @@ impl QuillApp {
             return None;
         }
         if live.demo_clock.is_none() {
-            self.request_animation_tick(60, cx);
+            self.request_animation_tick(fps, cx);
         }
         Some(
             div()
@@ -112,59 +125,44 @@ impl QuillApp {
         )
     }
 
-    /// The burst `effect` plays (tdesktop `randomLoadedFrom`, resolved when
-    /// the effect starts): the first in its order whose tinted clip was
-    /// ready by then, else none. The seed's own is asked for while it is
-    /// missing, so later effects have it.
-    fn burst_clip(
+    /// The burst `effect` plays `age` in (tdesktop `randomLoadedFrom`,
+    /// resolved when the effect starts): the first in its order whose
+    /// tinted clip had a frame by then, else none. The seed's own is
+    /// opened while it is missing, so later effects have it.
+    fn burst_view(
         &self,
         burst: &StarBurst<'_>,
         effect: &FlyingStars,
+        number: usize,
+        age: std::time::Duration,
         cx: &mut Context<Self>,
-    ) -> Option<LayeredClip> {
-        let mut clips: Vec<Option<LayeredClip>> = burst
+    ) -> Option<StickerView> {
+        let own = burst_order(effect.seed, burst.candidates.len()).next();
+        let mut views: Vec<Option<StickerView>> = burst
             .candidates
             .iter()
-            .map(|sticker| self.decoded_clip(burst.key(sticker), PlaybackSize::Sticker, false))
+            .enumerate()
+            .map(|(index, sticker)| {
+                let ask = burst.ask(sticker, age, number);
+                if Some(index) == own {
+                    self.sticker_view(ask, cx)
+                } else {
+                    self.opened_sticker_view(ask, cx)
+                }
+            })
             .collect();
-        if let Some(own) = burst_order(effect.seed, clips.len()).next()
-            && clips.get(own).is_some_and(Option::is_none)
-            && let Some(sticker) = burst.candidates.get(own)
-        {
-            self.request_clip(
-                burst.key(sticker),
-                sticker.format,
-                PlaybackSize::Sticker,
-                cx,
-            );
-        }
-        let ready: Vec<Option<Instant>> = clips
+        let ready: Vec<Option<Instant>> = views
             .iter()
-            .map(|clip| clip.as_ref().map(|clip| clip.started))
+            .map(|view| view.as_ref().and_then(StickerView::ready_at))
             .collect();
         let pick = ready_burst(effect.seed, &ready, effect.started)?;
-        clips.get_mut(pick).and_then(Option::take)
+        views.get_mut(pick).and_then(Option::take)
     }
-}
-
-/// The burst's frame `age` into the effect: played once at the clip's own
-/// rate, gone after its last frame.
-fn burst_frame(clip: &LayeredClip, age: std::time::Duration) -> Option<Arc<RenderImage>> {
-    let index = burst_frame_index(age, clip.fps, clip.frames.len())?;
-    let frame = clip.frames.get(index).cloned()?;
-    if let Some(shown) = &clip.shown {
-        shown.set(Instant::now());
-    }
-    Some(frame)
 }
 
 /// The burst is drawn at full opacity: tdesktop draws it after restoring
 /// the badge's transform.
-fn effect_element(
-    frame: StarEffectFrame,
-    badge: Div,
-    burst: Option<Arc<RenderImage>>,
-) -> AnyElement {
+fn effect_element(frame: StarEffectFrame, badge: Div, burst: Option<StickerView>) -> AnyElement {
     div()
         .absolute()
         .left(px(frame.left))
@@ -174,7 +172,7 @@ fn effect_element(
         .items_center()
         .justify_center()
         .child(badge.opacity(frame.opacity.clamp(0.0, 1.0)))
-        .children(burst.map(|image| {
+        .children(burst.map(|view| {
             div()
                 .debug_selector(|| "live-story-effect-burst".into())
                 .absolute()
@@ -182,15 +180,9 @@ fn effect_element(
                 .child(
                     canvas(
                         |_, _, _| {},
-                        move |bounds, (), window, _| {
-                            let _ = window.paint_image(
-                                bounds,
-                                bounds,
-                                Corners::default(),
-                                image.clone(),
-                                0,
-                                false,
-                            );
+                        move |bounds, (), window, cx| {
+                            crate::ui::sticker_player::note_display(window, cx);
+                            view.paint(bounds, window);
                         },
                     )
                     .size_full(),

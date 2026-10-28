@@ -361,7 +361,7 @@ pub(super) fn session_chat_row(
     // Group previews lead with the sender ("Dad: …", "You: …").
     preview_sender: Option<String>,
     // Images for custom emoji in the preview.
-    preview_emoji: super::sticker_playback::PreviewEmoji,
+    preview_emoji: super::sticker_player::PreviewEmoji,
     // Telegram Desktop marks groups, channels and bots before the title.
     kind_icon: Option<IconName>,
     // A forum row (`displayAsForum`): its topics fill the second line, the

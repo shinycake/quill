@@ -9,34 +9,21 @@ pub(in crate::ui) fn sticker_attachment(
     files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
-    animated: Option<crate::ui::sticker_playback::AnimatedVisual>,
+    animated: Option<crate::ui::sticker_player::StickerView>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     // Telegram Desktop `Sticker::Size`: the sticker's own size, downscaled
     // into `maxStickerSize` (224).
     let (w, h) = sticker_box(sticker.width, sticker.height);
-    match animated {
-        Some(crate::ui::sticker_playback::AnimatedVisual::Image(image)) => {
-            return img(image)
-                .id(("sticker-animated", row_id))
-                .mt_2()
-                .w(w)
-                .h(h)
-                .aspect_ratio(w / h)
-                .object_fit(ObjectFit::Contain)
-                .into_any_element();
-        }
-        // Drawn by the conversation's animation layer (`anim_layer`):
-        // Lottie plays at up to 60 fps.
-        Some(crate::ui::sticker_playback::AnimatedVisual::Layered(clip)) => {
-            return crate::ui::anim_layer::frames(clip, 60)
-                .mt_2()
-                .flex_none()
-                .w(w)
-                .h(h)
-                .into_any_element();
-        }
-        None => {}
+    // Drawn by the conversation's animation layer (`anim_layer`), or in
+    // place outside the conversation, at the box's pixel size.
+    if let Some(view) = animated {
+        return crate::ui::anim_layer::frames(view)
+            .mt_2()
+            .flex_none()
+            .w(w)
+            .h(h)
+            .into_any_element();
     }
     let display_id = sticker.display_file_id().unwrap_or(sticker.file_id);
     let fallback_label = sticker_label(sticker);

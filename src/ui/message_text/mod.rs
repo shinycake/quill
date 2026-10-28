@@ -1,12 +1,12 @@
 //! message text rendering: rich text, entities, link previews, reply strips.
 #![deny(clippy::indexing_slicing)]
 
-use super::anim_layer::LayeredClip;
 use super::app::QuillApp;
 use super::demo::{demo_file_json, demo_thumb_png_path};
 use super::message_media::{file_is_downloading, photo_display_path};
 use super::message_payments::inline_keyboard_button;
 use super::pressable::PressableDiv;
+use super::sticker_player::StickerView;
 use super::*;
 use gpui_kit::component::avatar::Avatar;
 use gpui_kit::component::button::*;
@@ -555,7 +555,7 @@ fn paint_text_run(
     emoji_paths: &HashMap<i64, ImageSource>,
     // Decoded animated custom emoji, drawn by the conversation's
     // animation layer (`anim_layer`); they take precedence over stills.
-    layered: &HashMap<i64, LayeredClip>,
+    layered: &HashMap<i64, StickerView>,
     // Settings → Appearance: message font size.
     font: Pixels,
     cx: &mut Context<QuillApp>,
@@ -612,7 +612,7 @@ fn paint_text_run(
         if let Some(clip) = layered.get(&id) {
             // Small emoji look the same at 30 fps.
             return Some(
-                super::anim_layer::frames(clip.clone(), 30)
+                super::anim_layer::frames(clip.clone())
                     .flex_none()
                     .size(edge)
                     .into_any_element(),
@@ -789,7 +789,7 @@ fn quote_block(
     is_caption: bool,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     emoji_paths: &HashMap<i64, ImageSource>,
-    layered: &HashMap<i64, LayeredClip>,
+    layered: &HashMap<i64, StickerView>,
     // Settings → Appearance: message font size.
     font: Pixels,
     cx: &mut Context<QuillApp>,

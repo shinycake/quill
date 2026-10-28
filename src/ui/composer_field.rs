@@ -452,7 +452,11 @@ impl QuillApp {
         let images: Rc<HashMap<i64, ImageSource>> = Rc::new(if entities.is_empty() {
             HashMap::new()
         } else {
-            self.custom_emoji_images(&entities, cx)
+            self.custom_emoji_images(
+                &entities,
+                crate::ui::sticker_player::EmojiSide::default(),
+                cx,
+            )
         });
         move |token, _window, _cx| {
             let height = token.line_height();

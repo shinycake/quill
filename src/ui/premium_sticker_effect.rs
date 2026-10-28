@@ -17,7 +17,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::sticker_playback::PlaybackSize;
+use super::sticker_player::HeadId;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -35,6 +35,9 @@ const SIZE_FACTOR: f32 = 1.0 + 0.245 * 2.0;
 /// tdesktop `kPremiumShift`: of the sticker's width, the effect reaches past
 /// the sticker's outer edge by this much.
 const EDGE_SHARE: f32 = 21.0 / 240.0;
+/// The effect's edge when its sticker's box is not known: a sticker of
+/// the largest box (224 pt).
+pub(super) const DEFAULT_SIDE: f32 = 224.0 * SIZE_FACTOR;
 /// A paint note older than this is from a sticker that is no longer shown.
 const SEEN_FRESH: Duration = Duration::from_millis(1500);
 /// Messages remembered as played, at most (the set resets per chat anyway).
@@ -319,17 +322,17 @@ impl QuillApp {
             if !PLAYED.with(|played| played.borrow().pending(key)) {
                 continue;
             }
-            if self
-                .layered_clip(
-                    seen.animation,
-                    StickerFormat::Tgs,
-                    PlaybackSize::Sticker,
-                    false,
-                    cx,
-                )
-                .is_some()
-                && !paused
-            {
+            // Ready once the view the overlay will draw (same size and
+            // mirroring) has a frame.
+            let side = f32::from(seen.bounds.size.width.max(seen.bounds.size.height)) * SIZE_FACTOR;
+            let ask = super::emoji_effect::effect_ask(
+                seen.animation,
+                StickerFormat::Tgs,
+                HeadId::of(("premium-ready", key)),
+                side,
+                seen.outgoing,
+            );
+            if self.sticker_view(ask, cx).is_some() && !paused {
                 PLAYED.with(|played| played.borrow_mut().mark(key));
                 super::emoji_effect::push_premium(
                     effect_for(key, seen.animation),

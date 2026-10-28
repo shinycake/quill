@@ -9,14 +9,13 @@
 //! 1:1 call; and one that gave way to the call, showing Failed with Retry.
 #![deny(clippy::indexing_slicing)]
 
-use super::live_effects::{burst_tint, star_burst};
+use super::live_effects::star_burst;
 use super::live_state::{EFFECT_DURATION, FlyingStars, StarsBoxMode};
 use crate::ui::app::QuillApp;
 use crate::ui::calls::demo_feed::{DemoFeed, demo_feed};
 use crate::ui::demo::{demo_file_json, demo_media_allowlist};
 use crate::ui::groups::apply_ready_channels;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
-use crate::ui::sticker_playback::{ClipKey, PlaybackSize};
 use gpui_kit::*;
 use quill::calls::engine::{GroupCallMode, StreamState};
 use quill::diagnostics::DiagnosticSink;
@@ -31,7 +30,7 @@ use quill::telegram::envelope::{
 use quill::text::{TextEntity, TextEntityKind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 const CHANNEL: i64 = 13;
 const STORY: i32 = 61;
@@ -95,54 +94,58 @@ impl QuillApp {
             let sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
             seed_star_burst(session, &sink, &self.demo_ui.seq);
         }
-        if let Some(session) = self.session() {
-            let burst = star_burst(session);
-            for sticker in burst.candidates {
-                self.request_clip(
-                    burst.key(sticker),
-                    sticker.format,
-                    PlaybackSize::Sticker,
-                    cx,
-                );
-            }
-        }
-        // The bursts decode and tint in the background; the effects start
-        // once that settled, so they play them.
+        // The bursts open and tint on the player's workers; the effects
+        // start once that settled, so they play them.
+        let _ = self.star_bursts_settled(cx);
         let placed = std::rc::Rc::new(std::cell::Cell::new(false));
         cx.observe_self(move |this, cx| {
-            if placed.get() || !this.session().is_some_and(|s| this.star_bursts_settled(s)) {
+            if placed.get() || !this.star_bursts_settled(cx) {
                 return;
             }
             placed.set(true);
-            this.demo_star_effects();
+            this.demo_star_effects(cx);
             cx.notify();
         })
         .detach();
         cx.notify();
     }
 
-    /// Whether every burst's tinted clip is decoded or failed.
-    fn star_bursts_settled(&self, session: &Session) -> bool {
+    /// Whether every burst's tinted clip has its first frame or failed
+    /// (opening the ones not open yet).
+    fn star_bursts_settled(&self, cx: &mut Context<Self>) -> bool {
+        let Some(session) = self.session() else {
+            return false;
+        };
         let burst = star_burst(session);
-        burst
+        let asks: Vec<_> = burst
             .candidates
             .iter()
-            .all(|sticker| self.clip_settled(burst.key(sticker), PlaybackSize::Sticker))
+            .map(|sticker| burst.ask(sticker, Duration::ZERO, 0))
+            .collect();
+        // Every one is asked for (opened), not just up to the first unsettled.
+        let settled: Vec<bool> = asks
+            .into_iter()
+            .map(|ask| self.sticker_view(ask, cx).is_some() || self.sticker_failed(ask))
+            .collect();
+        settled.iter().all(|settled| *settled)
     }
 
     /// Three effects caught mid-flight on a stopped clock, all started
     /// after the burst was ready.
-    fn demo_star_effects(&mut self) {
+    fn demo_star_effects(&mut self, cx: &mut Context<Self>) {
         let ready = self
-            .decoded_clip(
-                ClipKey {
-                    file: FileId(BURST_FILE),
-                    tint: Some(burst_tint()),
-                },
-                PlaybackSize::Sticker,
-                false,
-            )
-            .map_or_else(Instant::now, |clip| clip.started);
+            .session()
+            .and_then(|session| {
+                let burst = star_burst(session);
+                let sticker = burst
+                    .candidates
+                    .iter()
+                    .find(|sticker| sticker.file_id == FileId(BURST_FILE))?;
+                Some(burst.ask(sticker, Duration::ZERO, 0))
+            })
+            .and_then(|ask| self.sticker_view(ask, cx))
+            .and_then(|view| view.ready_at())
+            .unwrap_or_else(Instant::now);
         let now = ready + EFFECT_DURATION;
         self.stories.live.demo_clock = Some(now);
         for (user_id, stars, progress, shift) in [

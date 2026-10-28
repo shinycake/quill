@@ -55,12 +55,9 @@ pub(crate) struct PlaybackUi {
     /// Last known position per message, so rows keep their seek bar fill (and
     /// resume from it) after pause/stop.
     pub(super) positions: HashMap<MessageId, f64>,
-    /// Animated stickers in the history and the panels.
-    pub(super) sticker_playback: super::sticker_playback::StickerPlayback,
-    /// Animated custom emoji (smaller frames, more clips).
-    pub(super) emoji_playback: super::sticker_playback::StickerPlayback,
-    /// Dice and slot machines in the history.
-    pub(super) dice_playback: super::sticker_playback::StickerPlayback,
+    /// Animated stickers, dice and custom emoji everywhere (one player,
+    /// shared by every view: `sticker_player`).
+    pub(super) stickers: std::rc::Rc<super::sticker_player::Player>,
     /// History row whose `image/gif` file is looping (`inline_playback`).
     pub(super) playing_animation: Option<MessageId>,
     pub(super) autoplayed_gifs: std::collections::HashSet<MessageId>,
@@ -142,9 +139,7 @@ impl PlaybackUi {
             seek_hover: None,
             tick: false,
             positions: HashMap::new(),
-            sticker_playback: Default::default(),
-            emoji_playback: Default::default(),
-            dice_playback: Default::default(),
+            stickers: std::rc::Rc::new(super::sticker_player::Player::new()),
             playing_animation: None,
             autoplayed_gifs: Default::default(),
             gif: None,

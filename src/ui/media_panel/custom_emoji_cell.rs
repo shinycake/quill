@@ -12,8 +12,8 @@ impl QuillApp {
         on_screen: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        // Every visible custom emoji animates (Telegram Desktop); the
-        // small emoji playback cache keeps that affordable. Rows the list
+        // Every visible custom emoji animates (Telegram Desktop), each
+        // drawn at its cell's pixel size by the sticker player. Rows the list
         // built beyond the viewport (overdraw) hold still and do not ask
         // the frame clock for redraws.
         let file_id = item.file_id;
@@ -28,9 +28,9 @@ impl QuillApp {
             // Battery and animations: the emoji panel shows stills.
             None
         } else if on_screen {
-            self.custom_emoji_image(file_id, item.format, cx)
+            self.custom_emoji_image(file_id, item.format, CUSTOM_EMOJI_SIZE, cx)
         } else {
-            self.custom_emoji_image_parked(file_id, item.format, cx)
+            self.custom_emoji_image_parked(file_id, item.format, CUSTOM_EMOJI_SIZE, cx)
         };
         let still = self.panel_still(&item);
         let premium = self.session().is_some_and(|s| s.my_is_premium());
@@ -93,7 +93,8 @@ impl QuillApp {
         let hovered = self.pickers.media_panel.hovered == Some(item.file_id);
         // Only the hovered sticker animates; the rest stay still.
         let animated = hovered
-            .then(|| self.sticker_image(item.file_id, item.format, cx))
+            // The cell less its padding (`p_1`).
+            .then(|| self.sticker_image(item.file_id, item.format, STICKER_CELL - 8., cx))
             .flatten();
         let still = self.panel_still(&item);
         let source = animated

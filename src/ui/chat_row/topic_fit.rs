@@ -6,7 +6,7 @@
 //! reads the text system to measure, and keeps nothing between frames.
 #![deny(clippy::indexing_slicing)]
 
-use crate::ui::anim_layer::LayeredClip;
+use crate::ui::sticker_player::StickerView;
 use gpui_kit::*;
 
 /// Gap between two titles (`topicsSkip`, 8px at the 12px row font): an en
@@ -18,7 +18,7 @@ const ICON: f32 = 14.;
 
 /// A topic icon's picture.
 pub(super) enum Picture {
-    Layered(LayeredClip),
+    Layered(StickerView),
     Still(ImageSource),
 }
 
@@ -26,7 +26,7 @@ impl Picture {
     /// The picture at its drawn size; `key` keeps image element ids apart.
     pub(super) fn element(&self, key: &str, id: i64) -> AnyElement {
         match self {
-            Picture::Layered(clip) => crate::ui::anim_layer::frames(clip.clone(), 30)
+            Picture::Layered(clip) => crate::ui::anim_layer::frames(clip.clone())
                 .size(px(ICON))
                 .flex_none()
                 .into_any_element(),

@@ -12,7 +12,7 @@ use super::super::chat_theme::{accent, bg_bubble_incoming, text_muted, text_prim
 use super::super::message_effect_badge::{self as badge, BadgeIcon};
 use super::super::motion::ease_out_circ;
 use super::super::nested_click::SwallowPress;
-use super::super::sticker_playback::{AnimatedVisual, PlaybackSize};
+use super::super::sticker_player::{HeadId, ViewAsk};
 use super::super::wallpaper::paint_wallpaper;
 use super::super::wallpaper_cache::Slot;
 use super::{Preview, SendMenu, tracker};
@@ -23,6 +23,7 @@ use quill::lang::{keys, tr, tr_with};
 use quill::message_effects_picker::{
     PREVIEW_BUTTON, PREVIEW_SIDE, PREVIEW_TOGGLE_MS, can_send, preview_origin,
 };
+use quill::sticker_playback::player::PlayMode;
 use std::time::{Duration, Instant};
 
 /// The sample bubble: wide enough that its left edge is off the card.
@@ -115,37 +116,34 @@ impl QuillApp {
         let hiding = preview.hiding.is_some();
 
         let icon = badge::effect_icon(effect, &session.media.files, &self.media_display_roots());
-        let clip = effect.animation().and_then(|animation| {
-            self.layered_clip(
+        // The effect loops over the card; the sample is incoming, on the
+        // left: mirrored (`request.mirrorHorizontal`).
+        let head = HeadId::of(("effect-preview", preview.effect_id));
+        let view = effect.animation().and_then(|animation| {
+            let ask = ViewAsk::sticker(
                 animation.file,
                 animation.format,
-                PlaybackSize::Sticker,
-                true,
-                cx,
+                head,
+                PlayMode::Loop,
+                PREVIEW_SIDE,
             )
+            .mirrored(true);
+            self.sticker_view(ask, cx)
+                .map(|view| (view, animation.file))
         });
         // Nothing to play (an unknown kind): the icon alone is the card.
         let animated = effect.animation().is_some();
-        let ready = !matches!(icon, BadgeIcon::Waiting) && (clip.is_some() || !animated);
-        let lottie = clip.filter(|_| ready).and_then(|clip| {
-            let started = preview.playing.get().unwrap_or_else(|| {
-                let now = Instant::now();
-                preview.playing.set(Some(now));
-                now
-            });
-            // The sample is incoming, on the left: mirrored
-            // (`request.mirrorHorizontal`).
-            match super::super::sticker_mirror::mirrored(AnimatedVisual::Layered(clip)) {
-                AnimatedVisual::Layered(clip) => Some(super::super::anim_layer::LayeredClip {
-                    started,
-                    looping: true,
-                    ..clip
-                }),
-                // A clip stays a clip; nothing to draw otherwise.
-                AnimatedVisual::Image(_) => None,
+        let ready = !matches!(icon, BadgeIcon::Waiting) && (view.is_some() || !animated);
+        let lottie = view.filter(|_| ready).map(|(view, file)| {
+            if preview.playing.get().is_none() {
+                // Shown again: from its first frame.
+                preview.playing.set(Some(Instant::now()));
+                self.playback.stickers.restart(head, file.0);
             }
+            view
         });
-        self.request_animation_tick(FPS, cx);
+        let fps = lottie.as_ref().map_or(0, |view| view.fps()).max(FPS);
+        self.request_animation_tick(fps, cx);
 
         let effect_id = preview.effect_id;
         let premium = session.my_is_premium();
@@ -199,7 +197,7 @@ impl QuillApp {
             .w(px(card.0))
             .h(px(card.1))
             .child(div().size_full().opacity(progress).child(body));
-        if let Some(clip) = lottie {
+        if let Some(view) = lottie {
             // The effect stays opaque while the card fades in.
             let opacity = if hiding { progress } else { 1. };
             layer = layer.child(
@@ -212,17 +210,9 @@ impl QuillApp {
                     .child(
                         canvas(
                             |_, _, _| {},
-                            move |bounds, _, window, _| {
-                                if let Some(frame) = clip.frame_now().cloned() {
-                                    let _ = window.paint_image(
-                                        bounds,
-                                        bounds,
-                                        Corners::default(),
-                                        frame,
-                                        0,
-                                        false,
-                                    );
-                                }
+                            move |bounds, _, window, cx| {
+                                super::super::sticker_player::note_display(window, cx);
+                                view.paint(bounds, window);
                             },
                         )
                         .size_full(),

@@ -23,12 +23,12 @@ pub(in crate::ui) fn session_history_row(
     seek_bar: Option<SeekBarView>,
     animation_playing: bool,
     gif_play: Option<crate::ui::gif_clip::GifPlay>,
-    sticker_frame: Option<super::super::sticker_playback::AnimatedVisual>,
+    sticker_frame: Option<super::super::sticker_player::StickerView>,
     // A dice's animated layers, bottom first (`DiceStickers::layers`;
     // empty for other rows).
-    dice_layers: Vec<Option<super::super::sticker_playback::AnimatedVisual>>,
+    dice_layers: Vec<Option<super::super::sticker_player::StickerView>>,
     // Decoded animations of the message's custom emoji (by custom emoji id).
-    animated_emoji: HashMap<i64, super::super::sticker_playback::AnimatedVisual>,
+    animated_emoji: HashMap<i64, super::super::sticker_player::StickerView>,
     // The row's clip playing inline (muted autoplay), if any.
     inline: Option<super::super::inline_video::InlineFrame>,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,

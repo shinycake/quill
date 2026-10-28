@@ -41,9 +41,9 @@ impl QuillApp {
                 Motion::Playing(flag) => flag.is_none_or(|flag| !power_saving::on(flag)),
             };
             if play {
-                self.custom_emoji_image(sticker.file_id, sticker.format, cx)
+                self.custom_emoji_image(sticker.file_id, sticker.format, side, cx)
             } else {
-                self.custom_emoji_image_parked(sticker.file_id, sticker.format, cx)
+                self.custom_emoji_image_parked(sticker.file_id, sticker.format, side, cx)
             }
         });
         match frame {

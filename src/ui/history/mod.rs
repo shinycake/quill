@@ -297,7 +297,7 @@ pub(super) fn album_history_row(
     chrome.footer_overlay = !has_caption;
     chrome.actions = Some(message_actions_button(first.chat_id, first.id, cx));
     let emoji: HashMap<i64, ImageSource> = HashMap::new();
-    let layered: HashMap<i64, super::anim_layer::LayeredClip> = HashMap::new();
+    let layered: HashMap<i64, super::sticker_player::StickerView> = HashMap::new();
     let extra = div()
         .id(("album-extra", album_id as u64))
         .flex()

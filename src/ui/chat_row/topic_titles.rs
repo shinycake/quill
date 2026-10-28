@@ -9,7 +9,7 @@
 use super::topic_fit::{FittedTitles, Picture, Title};
 use super::*;
 use crate::ui::app::QuillApp;
-use crate::ui::sticker_playback::PreviewEmoji;
+use crate::ui::sticker_player::PreviewEmoji;
 use quill::state::{RowForum, RowTopic};
 
 /// A forum row's data: the state's view of it and the images of the topic

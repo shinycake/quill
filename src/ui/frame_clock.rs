@@ -69,9 +69,12 @@ impl QuillApp {
                 self.frame.window_active.get(),
             );
         }
-        self.frame
-            .animation_demand
-            .set(self.frame.animation_demand.get().max(fps.clamp(1, 60)));
+        self.frame.animation_demand.set(
+            self.frame
+                .animation_demand
+                .get()
+                .max(fps.clamp(1, MAX_TICK_FPS)),
+        );
         self.frame.animation_targets.borrow_mut().insert(target);
         if plays_sound {
             self.frame.animation_sound.set(true);
@@ -83,9 +86,7 @@ impl QuillApp {
         cx.spawn(async move |this, cx| {
             let mut fps = 30;
             loop {
-                cx.background_executor()
-                    .timer(Duration::from_secs_f64(1.0 / f64::from(fps)))
-                    .await;
+                cx.background_executor().timer(tick_period(fps)).await;
                 let next = this
                     .update(cx, |this, cx| {
                         let demand = this.frame.animation_demand.replace(0);
@@ -114,6 +115,23 @@ impl QuillApp {
             let _ = this.update(cx, |this, _| this.frame.frame_clock_running.set(false));
         })
         .detach();
+    }
+}
+
+/// The fastest the clock ticks: animated stickers on a 120 Hz display
+/// (`sticker_player`).
+pub(super) const MAX_TICK_FPS: u32 = 120;
+
+/// The wait between two ticks at `fps`. A tick only marks the window for
+/// its next display frame, so at display-like rates the wait is a little
+/// shorter than a frame: a tick is then pending at every display frame
+/// instead of now and then landing just after one (a skipped frame).
+fn tick_period(fps: u32) -> Duration {
+    let frame = 1.0 / f64::from(fps.max(1));
+    if fps >= 48 {
+        Duration::from_secs_f64(frame * 0.92)
+    } else {
+        Duration::from_secs_f64(frame)
     }
 }
 
@@ -432,6 +450,17 @@ fn trace_caller(
 #[cfg(test)]
 mod tests {
     use super::tick_wanted;
+
+    #[test]
+    fn ticks_at_display_rates_land_before_each_display_frame() {
+        use super::tick_period;
+        use std::time::Duration;
+        assert_eq!(tick_period(30), Duration::from_secs_f64(1.0 / 30.0));
+        assert!(tick_period(60) < Duration::from_secs_f64(1.0 / 60.0));
+        assert!(tick_period(120) < Duration::from_secs_f64(1.0 / 120.0));
+        assert!(tick_period(120) > Duration::from_secs_f64(1.0 / 144.0));
+        assert_eq!(tick_period(0), Duration::from_secs(1));
+    }
 
     #[test]
     fn nothing_ticks_behind_another_app() {

@@ -164,7 +164,11 @@ impl Lottie {
             return Err("Could not render animated sticker".into());
         }
         // `0xAARRGGBB` as little-endian bytes is B, G, R, A on every host.
-        Ok(self.pixels.iter().flat_map(|p| p.to_le_bytes()).collect())
+        let mut out = vec![0u8; self.pixels.len() * 4];
+        for (bytes, pixel) in out.as_chunks_mut::<4>().0.iter_mut().zip(&self.pixels) {
+            *bytes = pixel.to_le_bytes();
+        }
+        Ok(out)
     }
 }
 

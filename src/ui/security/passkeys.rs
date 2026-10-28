@@ -186,7 +186,7 @@ impl QuillApp {
             .iter()
             .find(|item| item.custom_emoji_id == Some(custom_emoji_id))?;
         let source = (!power_saving::on(power_saving::Flag::EmojiChat))
-            .then(|| self.custom_emoji_image(item.file_id, item.format, cx))
+            .then(|| self.custom_emoji_image(item.file_id, item.format, size, cx))
             .flatten()
             .map(ImageSource::from)
             .or_else(|| {
