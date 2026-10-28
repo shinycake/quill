@@ -34,8 +34,9 @@ pub(crate) struct ChatListUi {
     /// `quill::pin_reorder`; `pin_reorder_archived` says which pinned list.
     pub(super) pin_reorder: Option<quill::pin_reorder::PinReorder>,
     pub(super) pin_reorder_archived: bool,
-    /// Where a pinned-row press started moving, until the 30px threshold.
-    pub(super) pin_drag_anchor: Option<(i64, f32)>,
+    /// Where the last press on a pinned row went down, so the dragged row
+    /// starts under the pointer instead of where the drag threshold fired.
+    pub(super) pin_press: Option<(i64, f32)>,
     /// Slice CL: the open peek preview — hovered/press-and-hold chat,
     /// or `None`. Transient; never an open chat.
     pub(super) preview: Option<ChatPreviewState>,
@@ -100,7 +101,7 @@ impl ChatListUi {
             global,
             pin_reorder: None,
             pin_reorder_archived: false,
-            pin_drag_anchor: None,
+            pin_press: None,
             preview: None,
             preview_press: None,
             open_at: None,

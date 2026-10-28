@@ -160,11 +160,9 @@ impl QuillApp {
                 } else {
                     self.chat_swipe_label(chat)
                 };
-                let pin_slide = self.chat_list.pin_reorder.as_ref().map(|r| {
-                    (
-                        r.offset(chat.id.0, std::time::Instant::now()),
-                        r.dragging() == Some(chat.id.0),
-                    )
+                let pin_drag = self.chat_list.pin_reorder.as_ref().map(|r| {
+                    let now = std::time::Instant::now();
+                    (r.offset(chat.id.0, now), r.lift(chat.id.0, now))
                 });
                 let row = session_chat_row(
                     chat,
@@ -225,19 +223,9 @@ impl QuillApp {
                     .into_any_element();
                 let row = self.chat_swipe_wrap(row, id, swipe_label, height, cx);
                 let row = self.drop_row_wrap(row, id, cx);
-                match pin_slide {
-                    // A row shifted by the pinned drag: the dragged row
-                    // follows the pointer above its neighbours, the
-                    // displaced ones slide home.
-                    Some((dy, dragging)) if dragging || dy != 0. => {
-                        let shifted = div().relative().top(px(dy)).w_full().child(row);
-                        if dragging {
-                            deferred(shifted).priority(10).into_any_element()
-                        } else {
-                            shifted.into_any_element()
-                        }
-                    }
-                    _ => row,
+                match pin_drag {
+                    Some((dy, lift)) => super::pin_lift::pin_drag_row(row, dy, lift, height, cx),
+                    None => row,
                 }
             }
             None => div().into_any_element(),

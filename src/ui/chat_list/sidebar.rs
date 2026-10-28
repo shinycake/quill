@@ -425,6 +425,11 @@ impl QuillApp {
                 .child(rows)
                 .children(pull_gap),
         );
+        let reordering = self
+            .chat_list
+            .pin_reorder
+            .as_ref()
+            .is_some_and(|reorder| reorder.dragging().is_some());
         div()
             .id("chat-rows")
             .role(gpui_kit::Role::Group)
@@ -456,6 +461,18 @@ impl QuillApp {
                 cx.listener(|this, _, _, cx| this.finish_pin_drag(cx)),
             )
             .child(bounce)
+            // Pinned rows keep the list's normal cursor; the grabbing hand
+            // shows only while a reorder is under way.
+            .when(reordering, |this| {
+                this.child(
+                    canvas(
+                        |_, _, _| {},
+                        |_, _, window, _| window.set_window_cursor_style(CursorStyle::ClosedHand),
+                    )
+                    .absolute()
+                    .size_0(),
+                )
+            })
             .into_any_element()
     }
 

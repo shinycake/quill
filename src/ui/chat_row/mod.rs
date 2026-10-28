@@ -889,8 +889,14 @@ pub(super) fn session_chat_row(
                 chat_id: id,
                 archived,
             };
-            this.cursor_move()
-                .on_drag(drag, |drag: &PinnedChatDrag, _, _, cx| cx.new(|_| drag.clone()))
+            this.on_drag(drag, |drag: &PinnedChatDrag, _, _, cx| cx.new(|_| drag.clone()))
+                .drag_start_distance(px(quill::selection_drag::START_DRAG_DISTANCE))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event: &MouseDownEvent, _, _| {
+                        this.chat_list.pin_press = Some((id.0, f32::from(event.position.y)));
+                    }),
+                )
                 .on_drop(cx.listener(move |this, _: &PinnedChatDrag, _, cx| {
                     this.finish_pin_drag(cx);
                 }))
@@ -972,6 +978,7 @@ pub(super) fn with_presence_dot_scaled(
 pub(super) const CHAT_ROW_AVATAR: f32 = 46.;
 
 mod folder_tag_context;
+mod pin_lift;
 pub(in crate::ui) use folder_tag_context::FolderTagContext;
 mod promoted_demo;
 mod selected_fg;
