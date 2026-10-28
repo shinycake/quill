@@ -272,7 +272,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .files
                 .get(&file_id.0)
                 .is_none_or(|file| file.needs_download());
-        if !preloaded && !self.session.should_download(file_id) {
+        // Asked for again right after a cancel: the cancel is undone.
+        let undoes_cancel = self.session.media.downloads.is_cancelling(file_id.0)
+            && self
+                .session
+                .media
+                .files
+                .get(&file_id.0)
+                .is_none_or(|file| file.needs_download());
+        if !preloaded && !undoes_cancel && !self.session.should_download(file_id) {
             return Ok(None);
         }
         let origin = origin
@@ -393,7 +401,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if file_id.0 == 0 || !self.session.media.downloads.is_requested(file_id.0) {
+        let requested = self.session.media.downloads.is_requested(file_id.0);
+        // A transfer TDLib started without a request of ours is cancelled
+        // the same way (tdesktop `cancelDownloadFile`).
+        let untracked = !requested
+            && self
+                .session
+                .media
+                .files
+                .get(&file_id.0)
+                .is_some_and(|file| {
+                    file.local.is_downloading_active && !file.local.is_downloading_completed
+                });
+        if file_id.0 == 0 || !(requested || untracked) {
             return Ok(false);
         }
         let extra = self
@@ -406,6 +426,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         match self.sender.send_json(&payload) {
             Ok(()) => {
+                if untracked {
+                    self.session.media.downloads.cancel_untracked(file_id.0);
+                }
                 self.session.abort_download(file_id);
                 Ok(true)
             }

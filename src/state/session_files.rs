@@ -172,6 +172,14 @@ impl Session {
             {
                 false
             }
+            // Cancelled, TDLib's idle update still on its way: an automatic
+            // download must not undo the cancel.
+            Some(file)
+                if file.local.is_downloading_active
+                    && self.media.downloads.is_cancelling(file_id.0) =>
+            {
+                false
+            }
             Some(file) => file.needs_download(),
             None => true,
         }

@@ -153,6 +153,12 @@ impl DownloadIntents {
         }
     }
 
+    /// A cancel went out and TDLib has not reported the transfer idle yet.
+    pub fn is_cancelling(&self, file_id: i32) -> bool {
+        self.get(file_id)
+            .is_some_and(|i| i.phase == Phase::Cancelled)
+    }
+
     /// TDLib reports the transfer idle: the cancel took effect.
     pub fn confirm_cancel(&mut self, file_id: i32) {
         if self
@@ -200,6 +206,21 @@ impl DownloadIntents {
                 }),
             );
         }
+    }
+
+    /// The user cancelled a transfer TDLib runs with no request of ours
+    /// (another device, a resume): the row stops showing progress at once,
+    /// and TDLib's idle update clears it (`confirm_cancel`).
+    pub fn cancel_untracked(&mut self, file_id: i32) {
+        let origin = self.get(file_id).map_or(DownloadOrigin::Auto, |i| i.origin);
+        self.put(
+            file_id,
+            Some(Intent {
+                origin,
+                paused: false,
+                phase: Phase::Cancelled,
+            }),
+        );
     }
 
     /// An explicit request after a stall: let the automatic path try again.
