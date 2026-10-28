@@ -128,6 +128,7 @@ impl QuillApp {
 
     /// The ids the results or recent picks list now.
     #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
     pub(super) fn settings_search_ids(&mut self) -> Vec<&'static str> {
         match self.search_listing() {
             Listing::Results(hits) => hits.iter().map(|hit| hit.target.id()).collect(),
