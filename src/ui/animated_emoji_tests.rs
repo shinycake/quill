@@ -151,12 +151,20 @@ fn a_lone_emoji_plays_once_and_a_tap_plays_it_again(cx: &mut TestAppContext) {
             "the replay started"
         );
     });
-    // A second tap while it plays does not start it over.
+    // A second tap while it plays does not start it over; once it played
+    // through (a slow machine can get there during `settle`), it does.
+    let replaying = app.read_with(&vcx, |app, _| {
+        app.playback
+            .stickers
+            .head_progress(play_head(key, 1), HAND_FILE)
+            .is_some_and(|(pos, total)| pos < total)
+    });
     app.update(&mut vcx, |app, _| {
         app.tap_animated_emoji(ChatId(CHAT), MessageId(FIRST_MESSAGE));
     });
     app.read_with(&vcx, |app, _| {
-        assert_eq!(app.playback.emoji_plays.borrow().generation(key), 1);
+        let expected = if replaying { 1 } else { 2 };
+        assert_eq!(app.playback.emoji_plays.borrow().generation(key), expected);
     });
     // Leaving the chat forgets it: it plays again next time.
     app.update(&mut vcx, |app, _| app.stop_sticker_playback());
