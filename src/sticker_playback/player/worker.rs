@@ -36,12 +36,8 @@ pub(super) fn run(me: usize, shared: &Shared) {
         // The UI is woken when a clip opened or failed and for a clip's
         // first frame; later frames are picked up as views paint.
         let wake = match job {
-            Job::Open {
-                key,
-                origin,
-                display_hz,
-            } => {
-                open(shared, &mut sources, &mut scratch, key, origin, display_hz);
+            Job::Open { key, origin } => {
+                open(shared, &mut sources, &mut scratch, key, origin);
                 true
             }
             Job::Frame { key, index, stored } => {
@@ -67,7 +63,6 @@ fn open(
     scratch: &mut Scratch,
     key: ClipKey,
     origin: Origin,
-    display_hz: f64,
 ) {
     let cancel = lock_or_recover(&shared.state)
         .clips
@@ -76,7 +71,7 @@ fn open(
         .unwrap_or_default();
     let mut packed: Vec<StoredFrame> = Vec::new();
     let opened = match origin {
-        Origin::Lottie(path) => Source::lottie(&path, key, display_hz),
+        Origin::Lottie(path) => Source::lottie(&path, key),
         Origin::Decoded(decode) => decode(&cancel)
             .and_then(|decoded| Source::stored(key, decoded))
             .and_then(|(source, frames)| {

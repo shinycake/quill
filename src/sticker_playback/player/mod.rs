@@ -3,9 +3,9 @@
 //! threads, with recent frames kept compressed.
 //!
 //! - A clip is one file drawn at one pixel size ([`ClipKey`]: file, edge,
-//!   skin tone, tint, mirroring). The UI asks for the frames its views will
-//!   show next ([`Engine::want`]); a worker draws them with ThorVG (or
-//!   unpacks them from the clip's [`store`]) and hands them back
+//!   skin tone, tint, mirroring, display rate). The UI asks for the frames
+//!   its views will show next ([`Engine::want`]); a worker draws them with
+//!   ThorVG (or unpacks them from the clip's [`store`]) and hands them back
 //!   ([`Engine::take_rendered`]).
 //! - Frames sit on a grid `step` times finer than the file's own rate when
 //!   the display is faster than 60 Hz (up to 120 frames a second), and
@@ -64,6 +64,10 @@ pub struct ClipKey {
     pub tint: Option<Tint>,
     /// Flipped left to right (tdesktop `mirrorHorizontal`).
     pub mirror: bool,
+    /// The display rate the frame grid is made for, from `grid_hz`. A
+    /// window moving to a faster display opens the clip again on a finer
+    /// grid.
+    pub hz: u32,
 }
 
 /// Straight-alpha BGRA frames, `edge` × `edge` each, at `fps`.
@@ -110,6 +114,15 @@ pub struct Rendered {
     pub key: ClipKey,
     pub index: u32,
     pub pixels: Vec<u8>,
+}
+
+/// The display rate class a clip's frame grid is made for: 60 at 61 Hz or
+/// less, else the display's rate up to 120.
+pub fn grid_hz(display_hz: f64) -> u32 {
+    if !display_hz.is_finite() || display_hz <= 61.0 {
+        return 60;
+    }
+    display_hz.round().min(120.0) as u32
 }
 
 /// The grid step for a `file_fps` animation on a display refreshing at

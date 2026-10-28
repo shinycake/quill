@@ -20,15 +20,15 @@ pub(super) struct Source {
 }
 
 impl Source {
-    /// Opens a TGS file for `key` on a display refreshing at `display_hz`.
-    pub(super) fn lottie(path: &Path, key: ClipKey, display_hz: f64) -> Result<Self, String> {
+    /// Opens a TGS file for `key`, on the frame grid for `key.hz`.
+    pub(super) fn lottie(path: &Path, key: ClipKey) -> Result<Self, String> {
         let tgs = super::super::tgs_json(path, key.fitz)?;
         let lottie = Lottie::load(&tgs.json, key.edge as usize)?;
         let total = lottie.total_frames();
         if !(1.0..=7200.0).contains(&total) || f64::from(total) / tgs.fps > 30.0 {
             return Err("Invalid animated sticker duration".into());
         }
-        let step = rate_step(tgs.fps, display_hz);
+        let step = rate_step(tgs.fps, f64::from(key.hz));
         let frames = (total.floor() as u32).max(1).saturating_mul(step);
         Ok(Self {
             kind: Kind::Lottie(Box::new(lottie)),

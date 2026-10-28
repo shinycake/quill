@@ -38,7 +38,7 @@ pub struct EngineStats {
 pub(super) struct Clip {
     pub(super) worker: usize,
     /// Set until a worker takes it to open the clip.
-    pub(super) origin: Option<(Origin, f64)>,
+    pub(super) origin: Option<Origin>,
     pub(super) state: ClipState,
     pub(super) store: HashMap<u32, StoredFrame>,
     pub(super) store_bytes: usize,
@@ -63,7 +63,6 @@ pub(super) enum Job {
     Open {
         key: ClipKey,
         origin: Origin,
-        display_hz: f64,
     },
     Frame {
         key: ClipKey,
@@ -159,9 +158,8 @@ impl Engine {
         *lock_or_recover(&self.shared.waker) = Some(waker);
     }
 
-    /// Opens `key` from `origin` unless it is open. `display_hz` picks the
-    /// frame grid.
-    pub fn open(&self, key: ClipKey, origin: Origin, display_hz: f64) {
+    /// Opens `key` from `origin` unless it is open.
+    pub fn open(&self, key: ClipKey, origin: Origin) {
         let mut state = lock_or_recover(&self.shared.state);
         if let Some(clip) = state.clips.get_mut(&key) {
             clip.used = Instant::now();
@@ -181,7 +179,7 @@ impl Engine {
             key,
             Clip {
                 worker,
-                origin: Some((origin, display_hz)),
+                origin: Some(origin),
                 state: ClipState::Opening,
                 store: HashMap::new(),
                 store_bytes: 0,
@@ -405,13 +403,9 @@ impl State {
             .iter_mut()
             .find(|(_, clip)| clip.worker == me && !clip.busy && clip.origin.is_some())
         {
-            let (origin, display_hz) = clip.origin.take()?;
+            let origin = clip.origin.take()?;
             clip.busy = true;
-            return Some(Job::Open {
-                key: *key,
-                origin,
-                display_hz,
-            });
+            return Some(Job::Open { key: *key, origin });
         }
         let key = self
             .clips

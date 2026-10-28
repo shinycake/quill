@@ -183,7 +183,7 @@ impl Player {
     }
 
     /// The image `file` shows or will show first, at any size (a test).
-    #[cfg(test)]
+    #[cfg(all(test, feature = "demo-capture"))]
     pub(super) fn any_frame(&self, file: i32) -> Option<Arc<RenderImage>> {
         let inner = self.inner.try_borrow().ok()?;
         inner
@@ -256,7 +256,7 @@ impl Player {
         };
         let now = Instant::now();
         let clip = inner.clips.entry(key).or_insert_with(|| {
-            self.engine.open(key, self.origin(spec, edge), display_hz());
+            self.engine.open(key, self.origin(spec, edge));
             UiClip::default()
         });
         clip.used = Some(now);
@@ -288,7 +288,7 @@ impl Player {
             let mut guard = self.inner.try_borrow_mut().ok()?;
             let inner = &mut *guard;
             let clip = inner.clips.entry(key).or_insert_with(|| {
-                self.engine.open(key, self.origin(spec, edge), display_hz());
+                self.engine.open(key, self.origin(spec, edge));
                 UiClip::default()
             });
             clip.used = Some(now);

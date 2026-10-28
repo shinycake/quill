@@ -147,6 +147,11 @@ fn rate_steps_fill_the_display_up_to_120_fps() {
     assert_eq!(rate_step(25.0, 120.0), 4, "never past 120 fps");
     assert_eq!(rate_step(60.0, 144.0), 2);
     assert_eq!(rate_step(60.0, f64::NAN), 1);
+    // Clips are keyed by display class: every 60 Hz display shares one.
+    assert_eq!(grid_hz(59.94), 60);
+    assert_eq!(grid_hz(f64::NAN), 60);
+    assert_eq!(grid_hz(119.88), 120);
+    assert_eq!(grid_hz(240.0), 120);
 }
 
 #[test]
@@ -194,6 +199,7 @@ fn key(file: i32, edge: u32) -> ClipKey {
         fitz: FitzType::None,
         tint: None,
         mirror: false,
+        hz: 60,
     }
 }
 
@@ -250,7 +256,7 @@ fn decoded_clips_play_from_the_store_tinted_and_mirrored() {
     let engine = Engine::new(2, 64 << 20);
     let mut key = key(1, 16);
     key.tint = Some(Tint([0, 184, 255]));
-    engine.open(key, synthetic(16, 40), 120.0);
+    engine.open(key, synthetic(16, 40));
     let frames = frames_of(&engine, key, &[0, 1, 17, 39, 5]);
     assert_eq!(frames.len(), 5);
     let info = engine.info(&key).unwrap();
@@ -286,10 +292,10 @@ fn skin_tones_are_separate_clips_with_their_own_colors() {
         fitz: FitzType::Type5,
         ..plain
     };
-    engine.open(plain, Origin::Lottie(path.clone()), 60.0);
-    engine.open(toned, Origin::Lottie(path.clone()), 60.0);
+    engine.open(plain, Origin::Lottie(path.clone()));
+    engine.open(toned, Origin::Lottie(path.clone()));
     // Opening the same key again is a no-op.
-    engine.open(plain, Origin::Lottie(path.clone()), 60.0);
+    engine.open(plain, Origin::Lottie(path.clone()));
     assert_eq!(engine.stats().clips, 2);
     let a = frames_of(&engine, plain, &[0]);
     let b = frames_of(&engine, toned, &[0]);
@@ -302,9 +308,12 @@ fn a_high_rate_grid_draws_in_between_frames() {
     let path = tgs_fixture(&fixtures().join("trim-paths.json"), "grid");
     let engine = Engine::new(1, 64 << 20);
     let low = key(8, 32);
-    let high = key(9, 32);
-    engine.open(low, Origin::Lottie(path.clone()), 60.0);
-    engine.open(high, Origin::Lottie(path.clone()), 120.0);
+    let high = ClipKey {
+        hz: grid_hz(120.0),
+        ..key(9, 32)
+    };
+    engine.open(low, Origin::Lottie(path.clone()));
+    engine.open(high, Origin::Lottie(path.clone()));
     let a = frames_of(&engine, low, &[1]);
     let b = frames_of(&engine, high, &[1, 2]);
     let (low_info, high_info) = (engine.info(&low).unwrap(), engine.info(&high).unwrap());
@@ -328,7 +337,7 @@ fn stores_are_evicted_least_recently_used_under_the_budget() {
     let engine = Engine::new(2, budget);
     let keys: Vec<ClipKey> = (0..4).map(|n| key(100 + n, 64)).collect();
     for key in &keys {
-        engine.open(*key, Origin::Lottie(path.clone()), 60.0);
+        engine.open(*key, Origin::Lottie(path.clone()));
     }
     for (n, key) in keys.iter().enumerate() {
         let frames: Vec<u32> = (0..12).collect();
@@ -357,7 +366,7 @@ fn stores_are_evicted_least_recently_used_under_the_budget() {
 fn a_closed_clip_is_gone_with_its_frames() {
     let engine = Engine::new(1, 64 << 20);
     let key = key(3, 16);
-    engine.open(key, synthetic(16, 4), 60.0);
+    engine.open(key, synthetic(16, 4));
     frames_of(&engine, key, &[0]);
     assert!(engine.stats().store_bytes > 0);
     engine.close(&key);
@@ -380,14 +389,14 @@ fn sticker_store_bench() {
         .filter(|p| p.extension().is_some_and(|e| e == "tgs"))
         .collect();
     files.sort();
-    for (edge, hz) in [(224u32, 60.0), (448, 60.0), (448, 120.0), (112, 60.0)] {
+    for (edge, hz) in [(224u32, 60), (448, 60), (448, 120), (112, 60)] {
         let mut draw = Vec::new();
         let mut unpack = Vec::new();
         let mut pack = Vec::new();
         let (mut raw, mut stored, mut frames) = (0usize, 0usize, 0usize);
         let mut scratch = Scratch::default();
         for file in &files {
-            let Ok(mut source) = Source::lottie(file, key(1, edge), hz) else {
+            let Ok(mut source) = Source::lottie(file, ClipKey { hz, ..key(1, edge) }) else {
                 continue;
             };
             for index in 0..source.timeline.frames {

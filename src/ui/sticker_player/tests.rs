@@ -32,6 +32,7 @@ fn player(count: u8) -> (Player, ClipSpec) {
         fitz: FitzType::None,
         tint: None,
         mirror: false,
+        hz: 60,
     };
     // Opens it; its first frame is drawn without anyone asking.
     assert!(!player.prepare(&spec, EDGE));

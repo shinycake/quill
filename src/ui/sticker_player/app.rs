@@ -10,7 +10,7 @@ use quill::ids::FileId;
 use quill::local_path::sandboxed_display_path;
 use quill::locks::lock_or_recover;
 use quill::power_saving;
-use quill::sticker_playback::player::{ClipKey, PlayMode, Rest};
+use quill::sticker_playback::player::{ClipKey, PlayMode, Rest, grid_hz};
 use quill::sticker_playback::{FitzType, Tint};
 use quill::telegram::envelope::{DicePhase, StickerFormat};
 use std::cell::Cell;
@@ -104,15 +104,23 @@ impl ViewAsk {
         Self { tint, ..self }
     }
 
-    /// Its clip at the size its box has on the last painted window.
+    /// Its clip at the size its box has on the last painted window, on
+    /// the frame grid for that window's display. A WebM clip keeps its own
+    /// frames, and a view capped at 60 frames a second never steps finer.
     pub(super) fn key(&self) -> ClipKey {
-        let scale = DISPLAY.with(Cell::get).0;
+        let (scale, display_hz) = DISPLAY.with(Cell::get);
+        let hz = if self.format == StickerFormat::Webm || self.max_fps <= 60 {
+            grid_hz(0.0)
+        } else {
+            grid_hz(display_hz).min(self.max_fps)
+        };
         ClipKey {
             file: self.file.0,
             edge: edge_for(self.side * scale),
             fitz: self.fitz,
             tint: self.tint,
             mirror: self.mirror,
+            hz,
         }
     }
 }
@@ -193,6 +201,7 @@ impl QuillApp {
         let path = self.sticker_path(ask.file, cx);
         let path = path?;
         self.ensure_sticker_pump(cx);
+        let key = ask.key();
         let spec = ClipSpec {
             file: ask.file,
             format: ask.format,
@@ -200,8 +209,9 @@ impl QuillApp {
             fitz: ask.fitz,
             tint: ask.tint,
             mirror: ask.mirror,
+            hz: key.hz,
         };
-        let edge = ask.key().edge;
+        let edge = key.edge;
         let player = &self.playback.stickers;
         if !player.prepare(&spec, edge) {
             return None;

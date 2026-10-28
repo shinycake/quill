@@ -32,6 +32,8 @@ pub(in crate::ui) struct ClipSpec {
     pub(in crate::ui) fitz: FitzType,
     pub(in crate::ui) tint: Option<Tint>,
     pub(in crate::ui) mirror: bool,
+    /// The display rate its frame grid is made for (`ClipKey::hz`).
+    pub(in crate::ui) hz: u32,
 }
 
 impl ClipSpec {
@@ -42,6 +44,7 @@ impl ClipSpec {
             fitz: self.fitz,
             tint: self.tint,
             mirror: self.mirror,
+            hz: self.hz,
         }
     }
 
