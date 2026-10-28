@@ -183,7 +183,8 @@ impl Player {
     }
 
     /// The image `file` shows or will show first, at any size (a test).
-    #[cfg(all(test, feature = "demo-capture"))]
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
     pub(super) fn any_frame(&self, file: i32) -> Option<Arc<RenderImage>> {
         let inner = self.inner.try_borrow().ok()?;
         inner
