@@ -24,11 +24,7 @@ use std::time::{Duration, Instant};
 impl QuillApp {
     pub(super) fn maybe_autoplay_gif(&mut self, ix: usize, cx: &mut Context<Self>) {
         if self.playback.playing_animation.is_some()
-            || self
-                .playback
-                .intent
-                .as_ref()
-                .is_some_and(|intent| intent.target.kind() == PlayKind::Gif)
+            || self.playback.intent.is_some()
             || self.playback.playing_voice.is_some()
             || self.playback.playing_audio.is_some()
             || self.recording_active()

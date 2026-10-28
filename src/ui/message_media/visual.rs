@@ -328,7 +328,9 @@ pub(in crate::ui) fn animation_attachment(
             .bg(fill_muted())
             .into_any_element()
     };
-    let gif_disc = if downloading_now && !playing {
+    let gif_disc = if !playing && file_is_downloading(play_id, files, downloading) {
+        MediaDisc::Cancel(download_fraction(play_id, files))
+    } else if downloading_now && !playing {
         MediaDisc::Progress(download_fraction(play_id, files))
     } else if playing {
         MediaDisc::Pause

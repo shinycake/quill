@@ -109,12 +109,10 @@ impl QuillApp {
     /// through `removeFileFromDownloads`; one-shot automatic downloads use
     /// `cancelDownloadFile` (TGX's cancel button on downloading media).
     pub(super) fn cancel_media_download(&mut self, file_id: FileId, cx: &mut Context<Self>) {
+        self.drop_play_intent_for(file_id);
         if let Some(live) = self.live.as_mut() {
             let note = match live.driver.cancel_download(file_id) {
-                Ok(true) => {
-                    self.drop_play_intent_for(file_id);
-                    StatusNote::silent(tr(keys::Q_OPS_DOWNLOAD_CANCELED))
-                }
+                Ok(true) => StatusNote::silent(tr(keys::Q_OPS_DOWNLOAD_CANCELED)),
                 Ok(false) => StatusNote::silent(tr(keys::Q_OPS_NOTHING_TO_CANCEL)),
                 Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_CANCEL_THE_DOWNLOAD)),
             };
@@ -123,7 +121,6 @@ impl QuillApp {
             if session.media.downloads.is_requested(file_id.0) {
                 session.abort_download(file_id);
             }
-            self.drop_play_intent_for(file_id);
             self.connection.set_note(StatusNote::silent(tr(
                 keys::Q_OPS_DEMO_CANCELDOWNLOADFILE_RUNS_WITH_LIVE,
             )));

@@ -37,6 +37,16 @@ pub(super) enum PlayTarget {
 }
 
 impl PlayTarget {
+    pub(super) const fn message(&self) -> MessageId {
+        match self {
+            Self::Voice { message, .. }
+            | Self::Audio { message, .. }
+            | Self::Gif { message }
+            | Self::Inline { message, .. }
+            | Self::Viewer { message } => *message,
+        }
+    }
+
     pub(super) const fn kind(&self) -> PlayKind {
         match self {
             Self::Voice { .. } => PlayKind::Voice,
@@ -120,6 +130,13 @@ impl QuillApp {
         self.playback
             .intent
             .take_if(|intent| intent.target.kind() == kind);
+    }
+
+    /// Drop a target parked for `message` (its track stopped).
+    pub(super) fn drop_play_intent_for_message(&mut self, message: MessageId) {
+        self.playback
+            .intent
+            .take_if(|intent| intent.target.message() == message);
     }
 
     /// Drop the target waiting on `file` (its download failed or stopped).

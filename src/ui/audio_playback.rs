@@ -3,7 +3,7 @@
 
 use super::app::QuillApp;
 use super::demo::{demo_file_json, demo_media_allowlist, demo_thumb_png_path};
-use super::play_intent::{PlayKind, PlayTarget};
+use super::play_intent::PlayTarget;
 use super::playback_state::{SeekHover, SeekSite};
 use super::*;
 use crate::ui::status_note::StatusNote;
@@ -81,8 +81,9 @@ impl QuillApp {
         // Save the position before clearing the id: clear_playback_state
         // reads active_playback_id().
         self.clear_playback_state();
-        self.playback.playing_voice = None;
-        self.drop_play_intent(PlayKind::Voice);
+        if let Some(message) = self.playback.playing_voice.take() {
+            self.drop_play_intent_for_message(message);
+        }
     }
 
     pub(super) fn stop_audio_playback(&mut self) {
@@ -90,8 +91,9 @@ impl QuillApp {
             self.kill_shared_player();
         }
         self.clear_playback_state();
-        self.playback.playing_audio = None;
-        self.drop_play_intent(PlayKind::Audio);
+        if let Some(message) = self.playback.playing_audio.take() {
+            self.drop_play_intent_for_message(message);
+        }
     }
 
     /// Drop the seek-bar state for the active track (slider entity, scrub
