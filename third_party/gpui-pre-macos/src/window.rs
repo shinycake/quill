@@ -676,9 +676,14 @@ const DRAWABLE_RELEASE_AFTER: Duration = Duration::from_secs(3);
 struct FrameIdle {
     /// Something drew, presented or asked for a frame during this step.
     activity: AtomicBool,
-    /// The display link was stopped because nothing needed frames; the
-    /// frame waker requests one step to start it again.
-    stopped: AtomicBool,
+    /// The display link is pacing this window's frames.
+    running: AtomicBool,
+    /// AppKit last reported the window visible (its occlusion state). A
+    /// visible window whose link is not running gets a step from the frame
+    /// waker, however the link came to stop: idling, or a restart that
+    /// found no screen yet or missed the occlusion change that would have
+    /// retried it.
+    visible: AtomicBool,
     /// Counts idle stops, so a drawable release scheduled by one stop is
     /// skipped once the window drew again, even if it went idle again.
     idle_stops: AtomicU64,
@@ -867,30 +872,31 @@ impl MacWindowState {
     fn start_display_link(&mut self) {
         self.stop_display_link();
         self.last_frame_activity = Instant::now();
-        unsafe {
-            if !self
-                .native_window
+        let visible = unsafe {
+            self.native_window
                 .occlusionState()
                 .contains(NSWindowOcclusionState::NSWindowOcclusionStateVisible)
-            {
-                return;
-            }
+        };
+        self.frame_idle.visible.store(visible, Ordering::Relaxed);
+        if !visible {
+            return;
         }
         let Some(display_id) = display_id_for_screen(unsafe { self.native_window.screen() }) else {
             // AppKit can temporarily report no screen while displays are being reconfigured.
             return;
         };
         let data = self.native_view.as_ptr() as *mut c_void;
-        self.frame_source
-            .get_or_insert_with(|| WindowFrameSource::new(data, step))
-            .start(display_id)
-            .log_err();
+        let source = self
+            .frame_source
+            .get_or_insert_with(|| WindowFrameSource::new(data, step));
+        source.start(display_id).log_err();
+        self.frame_idle
+            .running
+            .store(source.is_running(), Ordering::Relaxed);
     }
 
     fn stop_display_link(&mut self) {
-        // Stopped for a reason other than idling (occlusion, a direct
-        // draw): only `start_display_link` restarts it.
-        self.frame_idle.stopped.store(false, Ordering::Relaxed);
+        self.frame_idle.running.store(false, Ordering::Relaxed);
         if let Some(frame_source) = self.frame_source.as_mut() {
             frame_source.stop();
         }
@@ -2182,10 +2188,11 @@ impl PlatformWindow for MacWindow {
     }
 
     // Quill: GPUI calls this when the window becomes dirty or queues a
-    // next-frame callback. While the display link is stopped for idling,
-    // ask for one step now; `step` draws and restarts the link. While it
-    // runs (or is stopped because the window is hidden) this does nothing,
-    // so frames stay paced by the display. The waker may outlive the
+    // next-frame callback. While a visible window's display link is not
+    // running (stopped for idling, or a restart that failed), ask for one
+    // step now; `step` draws and restarts the link. While it runs (or the
+    // window is hidden) this does nothing, so frames stay paced by the
+    // display. The waker may outlive the
     // window: dropping `WindowFrameSource` cancels the dispatch source, so
     // a late `merge_data` never runs `step` on a freed view.
     fn frame_waker(&self) -> Option<Rc<dyn Fn()>> {
@@ -2197,7 +2204,7 @@ impl PlatformWindow for MacWindow {
             .requests();
         let idle = self.2.clone();
         Some(Rc::new(move || {
-            if idle.stopped.load(Ordering::Relaxed) {
+            if idle.visible.load(Ordering::Relaxed) && !idle.running.load(Ordering::Relaxed) {
                 requests.merge_data(1);
             }
         }))
@@ -3086,6 +3093,7 @@ extern "C" fn window_did_change_occlusion_state(this: &Object, _: Sel, _: id) {
             lock.start_display_link();
         } else {
             lock.stop_display_link();
+            lock.frame_idle.visible.store(false, Ordering::Relaxed);
             // Quill: nothing is drawn until the window shows again.
             lock.renderer.release_idle_drawables();
         }
@@ -3435,7 +3443,7 @@ extern "C" fn step(view: *mut c_void) {
     // the main thread and a CoreVideo thread 60–120 times a second for
     // nothing). The frame waker brings it back on the next change.
     idle.activity.store(false, Ordering::Relaxed);
-    let woken = idle.stopped.load(Ordering::Relaxed);
+    let woken = !idle.running.load(Ordering::Relaxed);
 
     if let Some(mut callback) = lock.request_frame_callback.take() {
         let (signal_at, signal_source) = lock
@@ -3470,7 +3478,6 @@ extern "C" fn step(view: *mut c_void) {
             .is_some_and(WindowFrameSource::is_running)
     {
         lock.stop_display_link();
-        idle.stopped.store(true, Ordering::Relaxed);
         let stop = idle.idle_stops.fetch_add(1, Ordering::Relaxed) + 1;
         let window = Arc::downgrade(&window_state);
         if let Ok(when) = DRAWABLE_RELEASE_AFTER.try_into() {
@@ -3480,7 +3487,7 @@ extern "C" fn step(view: *mut c_void) {
                 };
                 let mut lock = window.lock();
                 let idle = &lock.frame_idle;
-                if idle.stopped.load(Ordering::Relaxed)
+                if !idle.running.load(Ordering::Relaxed)
                     && idle.idle_stops.load(Ordering::Relaxed) == stop
                 {
                     lock.renderer.release_idle_drawables();

@@ -19,9 +19,12 @@ The Quill project changed it in 2026 so an idle window stops costing CPU:
   after 250 ms of those the window unsubscribes from the display link.
   `MacWindow` implements `frame_waker` (GPUI calls it when a window becomes
   dirty or queues a next-frame callback) to request one step on the window's
-  dispatch source while the link is idle; that step draws and resubscribes.
-  `schedule_frame` and `draw` mark activity. Stops for other reasons
-  (occlusion, direct draws) behave as before. The waker holds the window's
+  dispatch source while the window is visible and the link is not running;
+  that step draws and resubscribes. `schedule_frame` and `draw` mark
+  activity. The waker keys on whether the link runs, not on why it stopped:
+  a restart that finds no screen yet, or misses the occlusion change that
+  would retry it, no longer leaves a visible window that never repaints
+  (`docs/decisions/notification-click-repaint.md`). The waker holds the window's
   dispatch source; window teardown still cancels it, so a waker that
   outlives the window never runs a step.
 - `src/display_link.rs`: `WindowFrameSource::is_running` and
