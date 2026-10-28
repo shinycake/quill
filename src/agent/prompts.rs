@@ -90,7 +90,10 @@ pub fn file(
     reason: String,
 ) -> Option<(u64, Receiver<Decision>)> {
     let mut queue = crate::locks::lock_or_recover(&QUEUE);
-    if queue.len() >= MAX_WAITING {
+    // Checked under the lock: switching access off sets the flag before
+    // `deny_all` drains the queue, so a late request is either drained or
+    // refused here, never left waiting while access is off.
+    if queue.len() >= MAX_WAITING || !crate::agent::access::enabled() {
         return None;
     }
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
@@ -176,6 +179,7 @@ mod tests {
     #[test]
     fn a_prompt_waits_for_the_user_and_withdraws_on_timeout() {
         let _guard = crate::locks::lock_or_recover(&crate::agent::access::TEST_LOCK);
+        crate::agent::access::set_enabled(true);
         let (id, rx) = file(
             AccountKey::primary(),
             "Test agent".into(),
@@ -200,5 +204,19 @@ mod tests {
         .unwrap_or_else(|| panic!("filed"));
         assert_eq!(wait(id, &rx, Duration::from_millis(10)), None);
         assert!(current().is_none_or(|p| p.id != id), "withdrawn");
+    }
+
+    #[test]
+    fn a_request_filed_while_access_is_off_is_refused() {
+        let _guard = crate::locks::lock_or_recover(&crate::agent::access::TEST_LOCK);
+        crate::agent::access::set_enabled(false);
+        let filed = file(
+            AccountKey::primary(),
+            "Test agent".into(),
+            Ask::Contacts,
+            "why".into(),
+        );
+        assert!(filed.is_none(), "nothing waits while access is off");
+        assert!(current().is_none());
     }
 }

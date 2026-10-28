@@ -10,6 +10,7 @@ fn ctx(recent: &[String]) -> SearchContext<'_> {
         english: &english,
         platform: Platforms::MACOS,
         recent,
+        agent_access: true,
     }
 }
 
@@ -100,6 +101,7 @@ fn every_entry_finds_itself_by_its_title() {
                 english: &english,
                 platform,
                 recent: &[],
+                agent_access: entry.shown(true),
             },
         );
         assert!(
@@ -181,6 +183,51 @@ fn recent_searches_keep_the_newest_known_picks() {
         super::target("account.log_out").map(|t| t.page()),
         Some(Page::Account)
     );
+}
+
+#[test]
+fn agent_access_off_leaves_only_its_switch_on_advanced() {
+    let off = SearchContext {
+        agent_access: false,
+        ..ctx(&[])
+    };
+    for query in [
+        "agent access",
+        "mcp",
+        "allow agents",
+        "takeover",
+        "activity",
+    ] {
+        let hits = search(query, &off);
+        assert!(
+            hits.iter()
+                .all(|hit| hit.target.page() != Page::AgentAccess),
+            "{query}: {:?}",
+            hits.iter().map(|h| h.target.id()).collect::<Vec<_>>()
+        );
+    }
+    let ids = |ctx: &SearchContext| -> Vec<&'static str> {
+        search("agent access", ctx)
+            .into_iter()
+            .map(|hit| hit.target.id())
+            .collect()
+    };
+    assert_eq!(ids(&off).first(), Some(&super::AGENT_SWITCH));
+    let on = ids(&ctx(&[]));
+    assert_eq!(on.first(), Some(&"agent_access"), "{on:?}");
+    assert!(!on.contains(&super::AGENT_SWITCH), "one switch at a time");
+
+    assert!(!Page::AgentAccess.shown(false));
+    assert!(
+        Page::ALL
+            .into_iter()
+            .filter(|p| *p != Page::AgentAccess)
+            .all(|p| p.shown(false))
+    );
+    assert!(Page::ALL.into_iter().all(|p| p.shown(true)));
+    let switch = find(super::AGENT_SWITCH).expect("the Advanced switch is an entry");
+    assert_eq!(switch.page, Page::Advanced);
+    assert!(switch.shown(false) && !switch.shown(true));
 }
 
 #[test]

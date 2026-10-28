@@ -11,6 +11,7 @@ mod agent_activity_demo;
 mod agent_grants;
 mod agent_grants_demo;
 mod agent_page;
+mod agent_switch;
 mod agent_tools;
 mod agent_window;
 mod log_out;
@@ -148,8 +149,13 @@ impl QuillApp {
     }
 
     /// The page the window shows: the chosen one, Account by default.
+    /// Agent access turned off under its page leaves Advanced, where its
+    /// switch now is.
     fn settings_page_shown(&self) -> Page {
-        self.settings.page.unwrap_or(Page::Account)
+        match self.settings.page.unwrap_or(Page::Account) {
+            page if page.shown(quill::agent::access::enabled()) => page,
+            _ => Page::Advanced,
+        }
     }
 
     /// The whole settings window, in place of the chat list and the chat.
@@ -167,7 +173,7 @@ impl QuillApp {
         if self.settings.page == Some(Page::Language) {
             self.ensure_language_box(window, cx);
         }
-        if self.settings.page == Some(Page::AgentAccess) {
+        if self.settings.page == Some(Page::AgentAccess) && quill::agent::access::enabled() {
             self.ensure_agent_page(window, cx);
         }
         let searching = self.settings_searching(window, cx);

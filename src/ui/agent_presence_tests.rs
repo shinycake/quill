@@ -51,6 +51,18 @@ fn the_strip_follows_who_is_connected(cx: &mut TestAppContext) {
     let second = activity::connect("Cursor");
     settle(vcx);
     assert!(vcx.debug_bounds("agent-connected").is_some());
+    access::set_enabled(false);
+    settle(vcx);
+    assert!(
+        vcx.debug_bounds("agent-connected").is_none(),
+        "Agent access off hides the strip"
+    );
+    access::set_enabled(true);
+    settle(vcx);
+    assert!(
+        vcx.debug_bounds("agent-connected").is_some(),
+        "on brings it back"
+    );
     drop(first);
     drop(second);
     settle(vcx);

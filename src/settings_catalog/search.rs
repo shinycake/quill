@@ -37,6 +37,14 @@ impl Target {
         }
     }
 
+    /// Whether it shows, given whether Agent access is on ([`Page::shown`]).
+    pub fn shown(self, agent_access: bool) -> bool {
+        match self {
+            Target::Page(page) => page.shown(agent_access),
+            Target::Entry(entry) => entry.shown(agent_access),
+        }
+    }
+
     fn depth(self) -> u8 {
         match self {
             Target::Page(_) => 0,
@@ -54,12 +62,14 @@ pub struct Hit {
 }
 
 /// What search needs from the app: strings in the current language and in
-/// English, the platform, and recent search picks (newest first).
+/// English, the platform, recent search picks (newest first) and whether
+/// Agent access is on (off, its page and rows are not found).
 pub struct SearchContext<'a> {
     pub text: &'a dyn Fn(Key) -> &'static str,
     pub english: &'a dyn Fn(Key) -> &'static str,
     pub platform: Platforms,
     pub recent: &'a [String],
+    pub agent_access: bool,
 }
 
 /// Most results shown for one query.
@@ -121,6 +131,7 @@ pub fn search(query: &str, ctx: &SearchContext) -> Vec<Hit> {
         .map(Target::Entry);
     let mut hits: Vec<Hit> = pages
         .chain(entries)
+        .filter(|target| target.shown(ctx.agent_access))
         .filter_map(|target| {
             let (mut score, highlight) = score_target(query, target, ctx)?;
             if let Some(rank) = ctx.recent.iter().position(|id| id == target.id()) {

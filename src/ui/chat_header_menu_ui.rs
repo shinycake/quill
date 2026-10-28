@@ -115,8 +115,7 @@ impl QuillApp {
                         session.is_some_and(|s| s.ton_wallet.profile_address(user).is_some())
                     }),
                     new_window: self.can_open_chat_window(c),
-                    agent_access: crate::ui::agent_state::sees_agents()
-                        && quill::agent::access::enabled(),
+                    agent_access: crate::ui::agent_state::sees_agents(),
                 })
             })
             .unwrap_or_default();

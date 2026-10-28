@@ -47,15 +47,19 @@ impl QuillApp {
         // stand in for it, so none is current.
         let current = (!narrow && !searching).then(|| self.settings_page_shown());
         let owner = cx.entity().downgrade();
-        let items = Page::ALL.into_iter().map(|page| {
-            let owner = owner.clone();
-            SidebarMenuItem::new(tr(page.title()))
-                .icon(page_icon(page))
-                .active(current == Some(page))
-                .on_click(move |_, _, cx| {
-                    let _ = owner.update(cx, |this, cx| this.show_settings_page(page, cx));
-                })
-        });
+        let agent_access = quill::agent::access::enabled();
+        let items = Page::ALL
+            .into_iter()
+            .filter(|page| page.shown(agent_access))
+            .map(|page| {
+                let owner = owner.clone();
+                SidebarMenuItem::new(tr(page.title()))
+                    .icon(page_icon(page))
+                    .active(current == Some(page))
+                    .on_click(move |_, _, cx| {
+                        let _ = owner.update(cx, |this, cx| this.show_settings_page(page, cx));
+                    })
+            });
         Sidebar::new("settings-sidebar")
             .collapsible(false)
             .when(narrow, |this| this.w_full())

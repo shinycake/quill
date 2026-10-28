@@ -38,6 +38,7 @@ impl QuillApp {
                 cx,
                 |this, window, cx| this.replay_first_run(window, cx),
             ))
+            .children(self.agent_access_advanced_row(cx))
             .into_any_element()
     }
 

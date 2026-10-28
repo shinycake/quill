@@ -61,23 +61,21 @@ fn the_agent_access_page_turns_access_on_and_offers_the_setup_command(cx: &mut T
     app.update(vcx, |_, cx| cx.notify());
     settle(vcx);
     app.update(vcx, |app, cx| {
-        app.open_settings(Some(Page::AgentAccess));
+        app.open_settings(Some(Page::Advanced));
         cx.notify();
     });
     settle(vcx);
+    assert!(!access::enabled(), "off by default");
+
+    // Off, the page's only way in is Advanced's switch (`agent_switch.rs`).
+    vcx.update(|window, cx| window.click("advanced-agent-access-switch", cx));
+    settle(vcx);
+    assert!(access::enabled());
     assert!(
         vcx.debug_bounds("agent-summary").is_some(),
         "the summary card shows"
     );
-    assert!(
-        vcx.debug_bounds("agent-section-chats").is_none(),
-        "with access off only the switch, the log and the setup lines show"
-    );
-    assert!(!access::enabled(), "off by default");
-
-    vcx.update(|window, cx| window.click("agent-access-switch", cx));
-    settle(vcx);
-    assert!(access::enabled());
+    assert!(vcx.debug_bounds("agent-section-chats").is_some());
 
     // The setup lines sit at the bottom of a long page: scroll there the
     // way a search result does.
@@ -106,6 +104,10 @@ fn the_agent_access_page_turns_access_on_and_offers_the_setup_command(cx: &mut T
     vcx.update(|window, cx| window.click("agent-access-switch", cx));
     settle(vcx);
     assert!(!access::enabled());
+    assert!(
+        vcx.debug_bounds("advanced-agent-access").is_some(),
+        "off, Settings goes to the switch on Advanced"
+    );
 }
 
 #[test]

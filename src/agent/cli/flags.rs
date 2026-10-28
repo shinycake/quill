@@ -144,7 +144,9 @@ impl Command {
         if !call {
             match word {
                 "install-skill" => return Self::Builtin(&["dir"]),
-                "connect" | "describe" | "guide" | "help" => return Self::Builtin(&[]),
+                "connect" | "describe" | "guide" | "help" | "setup-prompt" => {
+                    return Self::Builtin(&[]);
+                }
                 _ => {}
             }
         }
@@ -592,7 +594,7 @@ confirmations as MCP agents. MCP apps use `quill mcp` instead.
 {WINDOWS_NOTE}
 Commands:
 ",
-        crate::agent::SETTINGS_PLACE
+        crate::agent::SWITCH_PLACE
     );
     for (alias, tool) in ALIASES {
         let title = find_tool(tool).map(|t| t.title).unwrap_or_default();
@@ -603,6 +605,7 @@ Commands:
   describe      Every tool, resource and exit code as JSON
   guide         The guide for agents (also the quill://guide resource)
   install-skill Install the Quill skill for Claude Code
+  setup-prompt  A prompt that tells an AI agent how to connect to Quill
   connect       Set up Claude Code, Claude Desktop or Cursor
   help <cmd>    Help for a command or tool
 
@@ -651,6 +654,14 @@ Example:
 Prints the guide for agents: what Quill can do, grants, every tool, recipes,
 errors and the rules. It is the same text as the quill://guide resource, and
 works when Quill is not running.
+"
+        }
+        "setup-prompt" => {
+            "quill agent setup-prompt
+
+Prints the prompt the Agent access page copies: paste it into an AI agent
+and it connects itself to this Quill, checks the connection and reads the
+guide. The commands in it use this Quill's real path.
 "
         }
         "describe" => {

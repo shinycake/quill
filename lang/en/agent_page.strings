@@ -203,3 +203,6 @@
 "qll_agent_page_claude_desktop_hint" = "Run this in a terminal, then restart Claude Desktop.";
 "qll_agent_page_cursor" = "Cursor";
 "qll_agent_page_cursor_hint" = "Run this in a terminal, then restart Cursor.";
+"qll_agent_page_setup_prompt" = "Setup prompt";
+"qll_agent_page_setup_prompt_hint" = "Paste this into your AI agent. It tells the agent how to connect to Quill, check that it works, and what it may do.";
+"qll_agent_page_copy_prompt" = "Copy prompt";

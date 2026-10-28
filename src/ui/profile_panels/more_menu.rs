@@ -141,9 +141,7 @@ impl QuillApp {
             }),
             can_report: chat.is_some_and(|chat| chat.can_be_reported),
             joined,
-            agent_access: chat.is_some()
-                && crate::ui::agent_state::sees_agents()
-                && quill::agent::access::enabled(),
+            agent_access: chat.is_some() && crate::ui::agent_state::sees_agents(),
         }
     }
 

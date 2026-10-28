@@ -114,9 +114,14 @@ impl QuillApp {
         self.agent_request().is_some()
     }
 
-    /// The consent for "All other chats" is open.
+    /// The consent for "All other chats" is open (never with access off).
     pub(super) fn agent_consent_open(&self) -> bool {
-        self.agent_ui.consent.is_some()
+        self.agent_ui.consent.is_some() && quill::agent::access::enabled()
+    }
+
+    /// "Reset the agent token?" is open (never with access off).
+    fn agent_reset_open(&self) -> bool {
+        self.agent_ui.page.reset_confirm && quill::agent::access::enabled()
     }
 
     pub(super) fn build_agent_request_dialog(
@@ -435,7 +440,7 @@ crate::ui::shell::register_dialogs! {
     /// Settings: "Reset token" asks first.
     AgentResetToken => DialogSpec::new(
         1057,
-        |app| app.agent_ui.page.reset_confirm,
+        |app| app.agent_reset_open(),
         QuillApp::build_agent_reset_dialog,
     )
     .closes(|app, _, cx| {

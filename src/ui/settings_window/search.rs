@@ -106,11 +106,13 @@ impl QuillApp {
     fn search_listing(&mut self) -> Listing {
         let query = self.settings.search.query.clone();
         let recent: Vec<String> = self.search_recent().as_slice().to_vec();
+        let agent_access = quill::agent::access::enabled();
         if query.trim().is_empty() {
             return Listing::Recent(
                 recent
                     .iter()
                     .filter_map(|id| settings_catalog::target(id))
+                    .filter(|target| target.shown(agent_access))
                     .collect(),
             );
         }
@@ -119,8 +121,19 @@ impl QuillApp {
             english: &english,
             platform: Platforms::current(),
             recent: &recent,
+            agent_access,
         };
         Listing::Results(settings_catalog::search(&query, &ctx))
+    }
+
+    /// The ids the results or recent picks list now.
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
+    pub(super) fn settings_search_ids(&mut self) -> Vec<&'static str> {
+        match self.search_listing() {
+            Listing::Results(hits) => hits.iter().map(|hit| hit.target.id()).collect(),
+            Listing::Recent(targets) => targets.iter().map(|target| target.id()).collect(),
+        }
     }
 
     fn listing_len(&mut self) -> usize {

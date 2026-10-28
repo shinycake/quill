@@ -1,7 +1,7 @@
 //! Agent access: local AI agents (Claude Code, Claude Desktop, Cursor and
 //! any other MCP client) use the user's account through the running Quill.
 //!
-//! Off by default (Settings > Agent access). Agents reach Quill
+//! Off by default (Settings > Advanced > Agent access). Agents reach Quill
 //! over its existing local socket ([`crate::single_instance`]) with the
 //! `quill-agent 1` header and a per-launch token ([`access`]); `quill mcp`
 //! ([`mcp`]) is the stdio MCP server that bridges to it, and `quill agent`
@@ -11,16 +11,26 @@
 //! `docs/decisions/agent-access.md`.
 #![deny(clippy::indexing_slicing)]
 
-/// Where Agent access lives in Quill's settings, for messages and help. A
-/// macro, so `concat!` can build constant messages from it.
+/// Where Agent access's page is in Quill's settings, for messages about its
+/// other switches. The page exists only while access is on. A macro, so
+/// `concat!` can build constant messages from it.
 macro_rules! settings_place {
     () => {
         "Settings > Agent access"
     };
 }
 
-/// [`settings_place!`] as a constant, for `format!`.
-pub const SETTINGS_PLACE: &str = settings_place!();
+/// Where the user turns Agent access on: while it is off, its one switch
+/// is on the Advanced page (`docs/decisions/agent-access.md`, "Master
+/// switch"). Every "turn it on" message names this place.
+macro_rules! switch_place {
+    () => {
+        "Settings > Advanced > Agent access"
+    };
+}
+
+/// [`switch_place!`] as a constant, for `format!`.
+pub const SWITCH_PLACE: &str = switch_place!();
 
 pub mod access;
 pub mod activity;
