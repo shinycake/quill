@@ -17,7 +17,7 @@ use quill::agent::ui_driver::bridge::{self, BridgeError, Button, Target, UiComma
 use quill::agent::ui_driver::keys::parse_sequence;
 use quill::agent::ui_driver::tree::UiTree;
 use quill::agent::{access, activity};
-use quill::ids::AccountKey;
+use quill::ids::{AccountKey, ChatId};
 use std::time::Duration;
 
 pub(super) fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
@@ -514,6 +514,35 @@ fn the_composer_send_goes_to_the_agent_path_and_read_only_refuses(cx: &mut TestA
         draft, "hi there",
         "the draft stays until the agent path sends"
     );
+    let row_draft = |vcx: &mut VisualTestContext| {
+        vcx.update(|_, cx| {
+            app.read(cx)
+                .demo_session
+                .as_ref()
+                .and_then(|s| s.chats.get(&11))
+                .and_then(|chat| chat.draft.clone())
+        })
+    };
+    // The demo has no driver to save drafts: store it as a save would.
+    vcx.update(|_, cx| {
+        app.update(cx, |app, _| {
+            if let Some(session) = app.demo_session.as_mut() {
+                session.store_composer_draft(
+                    ChatId(11),
+                    quill::composer::DraftTopic::Chat,
+                    Some(quill::telegram::ChatDraft {
+                        text: "hi there".into(),
+                        rich: None,
+                        reply_to_message_id: None,
+                        quote: None,
+                        item: Default::default(),
+                        suggested_post: None,
+                    }),
+                );
+            }
+        })
+    });
+    assert!(row_draft(vcx).is_some(), "the chat holds the draft");
 
     // The agent path reports the send: the box clears.
     let reply = drive(
@@ -526,6 +555,7 @@ fn the_composer_send_goes_to_the_agent_path_and_read_only_refuses(cx: &mut TestA
     );
     assert!(matches!(reply, Ok(UiReply::Ok)), "{reply:?}");
     assert_eq!(vcx.update(|_, cx| app.read(cx).composer_markup(cx)), "");
+    assert_eq!(row_draft(vcx), None, "the sent draft is gone");
 
     // A chat granted for reading only takes no input at all.
     grant(11, Scope::Read);

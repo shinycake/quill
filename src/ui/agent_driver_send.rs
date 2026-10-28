@@ -11,7 +11,7 @@ use gpui_kit::*;
 use quill::agent::ui_driver::bridge::UiSend;
 use quill::agent::ui_driver::guard;
 use quill::composer::SendOptions;
-use quill::ids::RequestId;
+use quill::ids::{ChatId, RequestId};
 use quill::telegram::requests::send_text;
 use serde_json::Value;
 
@@ -76,7 +76,8 @@ impl QuillApp {
     }
 
     /// The agent path delivered a [`UiSend`]: clear the box if it still
-    /// holds that text for that chat.
+    /// holds that text for that chat, with its reply and its draft, as a
+    /// send from the window does.
     pub(super) fn agent_composer_sent(
         &mut self,
         chat_id: i64,
@@ -92,6 +93,15 @@ impl QuillApp {
         }
         self.composer
             .update(cx, |input, cx| input.set_value("", window, cx));
+        self.composer_ui.set_reply(None);
+        let chat = ChatId(chat_id);
+        let topic = self.open_draft_topic(chat);
+        match self.live.as_mut() {
+            Some(live) => {
+                let _ = live.driver.clear_draft_after_agent_send(chat, topic);
+            }
+            None => self.forget_local_draft(chat),
+        }
         cx.notify();
     }
 }

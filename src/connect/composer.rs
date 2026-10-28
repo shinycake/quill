@@ -178,6 +178,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_draft(chat_id, topic, None, None, None).map(Some)
     }
 
+    /// The agent path sent the composer's text (the window never sends it
+    /// itself): clear the slot's draft here and in TDLib. The debounced
+    /// save of the typed text can land after the send, so this clears
+    /// whatever the slot holds rather than checking it first.
+    pub fn clear_draft_after_agent_send(
+        &mut self,
+        chat_id: ChatId,
+        topic: DraftTopic,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.cancel_pending_draft();
+        if !self.session.accepts_composer_draft(chat_id, topic) {
+            self.session.store_composer_draft(chat_id, topic, None);
+            return Ok(None);
+        }
+        self.send_draft(chat_id, topic, None, None, None).map(Some)
+    }
+
     pub fn cancel_pending_draft(&mut self) {
         self.pending_draft = None;
         self.draft_clock = DraftSaveClock::idle();
