@@ -2,6 +2,7 @@
 "qll_agent_access" = "Agent access";
 "qll_agent_access_about" = "Let AI agents on this computer, such as Claude Code, use your Telegram account through Quill. Only apps running under your user account can connect, and Quill itself never sends your messages to an AI service.";
 "qll_agent_access_allow" = "Allow agents";
+"qll_agent_access_switch_hint" = "Let AI apps on this computer use your Telegram account through Quill. Off by default.";
 "qll_agent_access_connect" = "Connect an agent";
 "qll_agent_access_claude_code" = "Claude Code";
 "qll_agent_access_claude_code_hint" = "Run this in a terminal.";

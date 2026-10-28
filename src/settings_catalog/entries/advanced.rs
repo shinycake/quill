@@ -1,7 +1,7 @@
 //! Advanced page entries.
 
 use crate::lang::keys;
-use crate::settings_catalog::{Entry, Page};
+use crate::settings_catalog::{AGENT_SWITCH, Entry, Page};
 
 const P: Page = Page::Advanced;
 
@@ -44,6 +44,7 @@ pub(super) const ENTRIES: &[Entry] = &[
     )
     .section(keys::Q_SETTINGS_ADVANCED_SEC_SETTINGS_FILE)
     .keywords(&["restore", "load"]),
+    Entry::new(AGENT_SWITCH, P, keys::Q_AGENT_ACCESS).keywords(&["ai", "mcp"]),
     Entry::new("advanced.debug_logs", P, keys::Q_OPS_DEBUG_LOGS).keywords(&[
         "log",
         "diagnostics",

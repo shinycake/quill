@@ -77,10 +77,7 @@ impl QuillApp {
             tr(keys::Q_AGENT_ACCESS_ALLOW),
             Some(tr(keys::Q_AGENT_PAGE_ALLOW_HINT)),
             on,
-            cx.listener(|_, &next: &bool, _, cx| {
-                access::set_enabled(next);
-                cx.notify();
-            }),
+            cx.listener(|this, &next: &bool, _, cx| this.set_agent_access(next, cx)),
             cx,
         )];
         if on {

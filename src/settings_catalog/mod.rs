@@ -118,7 +118,19 @@ impl Page {
     pub fn entries(self) -> &'static [Entry] {
         entries::of(self)
     }
+
+    /// Whether the page is in the sidebar and in search. Agent access shows
+    /// only while it is on; off, its one trace is the switch on Advanced
+    /// ([`AGENT_SWITCH`]).
+    pub fn shown(self, agent_access: bool) -> bool {
+        self != Page::AgentAccess || agent_access
+    }
 }
+
+/// The id of Advanced's "Agent access" switch, the way to turn Agent access
+/// on. It shows only while Agent access is off; on, the switch is the first
+/// row of the Agent access page.
+pub const AGENT_SWITCH: &str = "advanced.agent_access";
 
 /// Operating systems a setting is offered on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -190,6 +202,11 @@ impl Entry {
     pub const fn only(mut self, platforms: Platforms) -> Entry {
         self.platforms = platforms;
         self
+    }
+
+    /// Whether the row shows, given whether Agent access is on.
+    pub fn shown(&self, agent_access: bool) -> bool {
+        self.page.shown(agent_access) && (self.id != AGENT_SWITCH || !agent_access)
     }
 
     /// How deep the entry sits: rows on a page are 1, rows in a section 2.

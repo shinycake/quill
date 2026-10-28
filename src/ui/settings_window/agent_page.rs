@@ -259,28 +259,28 @@ fn claim_icon(claim: &Claim, summary: &AccessSummary) -> IconName {
 
 impl QuillApp {
     /// The page, top to bottom: what it is, the summary card, then one
-    /// section per area. With Agent access off only the switch, the log
-    /// and the setup lines show; nothing else applies.
+    /// section per area. The page exists only while Agent access is on
+    /// (`Page::shown`); off, its switch is on Advanced (`agent_switch.rs`).
     pub(super) fn agent_access_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let account = self.agent_settings_account();
         let summary = visible_summary(&account);
         let muted = cx.theme().muted_foreground;
-        let mut sections: Vec<(Section, AnyElement)> = vec![(
-            Section::Connection,
-            self.agent_connection_section(&summary, cx),
-        )];
-        if summary.enabled {
-            sections.push((Section::Chats, self.agent_chats_section(&summary, cx)));
-            sections.push((Section::Tools, self.agent_tools_section(&summary, cx)));
-            sections.push((Section::AlwaysAsks, self.agent_asks_section(&summary, cx)));
-            sections.push((Section::Window, self.agent_window_section(&summary, cx)));
-            sections.push((
+        let sections: Vec<(Section, AnyElement)> = vec![
+            (
+                Section::Connection,
+                self.agent_connection_section(&summary, cx),
+            ),
+            (Section::Chats, self.agent_chats_section(&summary, cx)),
+            (Section::Tools, self.agent_tools_section(&summary, cx)),
+            (Section::AlwaysAsks, self.agent_asks_section(&summary, cx)),
+            (Section::Window, self.agent_window_section(&summary, cx)),
+            (
                 Section::Confirmations,
                 self.agent_confirm_section(&summary, cx),
-            ));
-        }
-        sections.push((Section::Activity, self.agent_activity_section(cx)));
-        sections.push((Section::Connect, self.agent_connect_section(cx)));
+            ),
+            (Section::Activity, self.agent_activity_section(cx)),
+            (Section::Connect, self.agent_connect_section(cx)),
+        ];
         let page = &self.agent_ui.page;
         div()
             .flex()
@@ -488,6 +488,14 @@ impl QuillApp {
     }
 }
 
+/// Screenshot demos: Agent access on, unless `QUILL_DEMO_AGENT_ACCESS=off`
+/// shows Quill with it off (no agent surface anywhere).
+fn demo_access_from_env() {
+    quill::fast_buttons::set_persistence(false);
+    let off = std::env::var("QUILL_DEMO_AGENT_ACCESS").is_ok_and(|access| access == "off");
+    quill::agent::access::set_enabled(!off);
+}
+
 /// Screenshot demos: `QUILL_DEMO_AGENT_SECTION=<section id>|focus` scrolls
 /// the page there; `QUILL_DEMO_AGENT_RAW=off` turns raw calls off.
 pub(super) fn demo_scroll_from_env(app: &mut QuillApp) {
@@ -531,6 +539,7 @@ impl QuillApp {
 crate::ui::screenshot_demo::register_demos![
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-agent-access").setup(
         |app, _, _| {
+            demo_access_from_env();
             app.open_settings(Some(Page::AgentAccess));
             demo_scroll_from_env(app);
         }
@@ -550,11 +559,11 @@ crate::ui::screenshot_demo::register_demos![
             app.open_agent_access_for_chat(chat_id, cx);
         }
     ),
-    // A chat open with Agent access on, for its header menu's entry.
+    // A chat open with Agent access on, for its header menu's entry
+    // (`QUILL_DEMO_AGENT_ACCESS=off`: the menu without it).
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-agent-chat-menu").setup(
         |app, window, cx| {
-            quill::fast_buttons::set_persistence(false);
-            quill::agent::access::set_enabled(true);
+            demo_access_from_env();
             if let Some(chat_id) = app.demo_agent_chat() {
                 app.select_listed_chat(quill::ids::ChatId(chat_id), window, cx);
             }
