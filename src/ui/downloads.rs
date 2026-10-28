@@ -32,12 +32,16 @@ impl QuillApp {
                 Ok(Some(_)) => StatusNote::silent(tr(keys::Q_OPS_DOWNLOADING)),
                 Ok(None) => StatusNote::silent(tr(keys::Q_OPS_ALREADY_LOCAL_OR_IN_PROGRESS)),
                 Err(_) => {
-                    self.clear_pending_media_playback(file_id);
+                    self.drop_play_intent_for(file_id);
                     StatusNote::error(tr(keys::Q_OPS_COULD_NOT_DOWNLOAD_PLEASE_TRY))
                 }
             };
             self.connection.set_note(note);
-        } else if self.demo_session.is_some() {
+        } else if let Some(session) = self.demo_session.as_mut() {
+            // The transfer starts as the driver records one; no bytes arrive.
+            if session.should_download(file_id) {
+                session.begin_user_download(file_id);
+            }
             self.connection.set_note(StatusNote::silent(tr(
                 keys::Q_OPS_DEMO_ADDFILETODOWNLOADS_RUNS_WITH_LIVE,
             )));
@@ -45,47 +49,18 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn clear_pending_media_playback(&mut self, file_id: FileId) {
-        self.playback
-            .pending_gif_play
-            .take_if(|(_, id, _)| *id == file_id);
-        self.playback
-            .pending_audio_play
-            .take_if(|(_, _, id, _)| *id == file_id);
-        self.playback
-            .pending_voice_play
-            .take_if(|(_, _, id, ..)| *id == file_id);
-        self.viewer.pending_play.take_if(|(_, id)| *id == file_id);
-    }
-
     pub(super) fn discard_stopped_media_playback(&mut self, cx: &mut Context<Self>) {
-        let failed: Vec<_> = [
-            self.playback
-                .pending_gif_play
-                .as_ref()
-                .map(|(_, id, _)| *id),
-            self.playback
-                .pending_audio_play
-                .as_ref()
-                .map(|(_, _, id, _)| *id),
-            self.viewer.pending_play.map(|(_, id)| id),
-            self.playback.pending_voice_play.map(|(_, _, id, ..)| id),
-        ]
-        .into_iter()
-        .flatten()
-        .filter(|id| {
-            self.session().is_some_and(|s| {
-                s.media.downloads.is_failed(id.0)
-                    || (s.file(*id).and_then(|f| f.usable_path()).is_none()
-                        && !s.media.downloads.is_downloading(id.0, &s.media.files)
-                        && !s.requests.has_download(*id))
-            })
-        })
-        .collect();
-        if !failed.is_empty() {
-            for file_id in failed {
-                self.clear_pending_media_playback(file_id);
-            }
+        let Some(file_id) = self.playback.intent.as_ref().map(|intent| intent.file) else {
+            return;
+        };
+        let stopped = self.session().is_some_and(|s| {
+            s.media.downloads.is_failed(file_id.0)
+                || (s.file(file_id).and_then(|f| f.usable_path()).is_none()
+                    && !s.media.downloads.is_downloading(file_id.0, &s.media.files)
+                    && !s.requests.has_download(file_id))
+        });
+        if stopped {
+            self.drop_play_intent_for(file_id);
             self.connection.set_note(StatusNote::silent(tr(
                 keys::Q_OPS_DOWNLOAD_STOPPED_PRESS_PLAY_TO,
             )));
@@ -134,17 +109,18 @@ impl QuillApp {
     /// through `removeFileFromDownloads`; one-shot automatic downloads use
     /// `cancelDownloadFile` (TGX's cancel button on downloading media).
     pub(super) fn cancel_media_download(&mut self, file_id: FileId, cx: &mut Context<Self>) {
+        self.drop_play_intent_for(file_id);
         if let Some(live) = self.live.as_mut() {
             let note = match live.driver.cancel_download(file_id) {
-                Ok(true) => {
-                    self.clear_pending_media_playback(file_id);
-                    StatusNote::silent(tr(keys::Q_OPS_DOWNLOAD_CANCELED))
-                }
+                Ok(true) => StatusNote::silent(tr(keys::Q_OPS_DOWNLOAD_CANCELED)),
                 Ok(false) => StatusNote::silent(tr(keys::Q_OPS_NOTHING_TO_CANCEL)),
                 Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_CANCEL_THE_DOWNLOAD)),
             };
             self.connection.set_note(note);
-        } else if self.demo_session.is_some() {
+        } else if let Some(session) = self.demo_session.as_mut() {
+            if session.media.downloads.is_requested(file_id.0) {
+                session.abort_download(file_id);
+            }
             self.connection.set_note(StatusNote::silent(tr(
                 keys::Q_OPS_DEMO_CANCELDOWNLOADFILE_RUNS_WITH_LIVE,
             )));

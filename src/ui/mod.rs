@@ -113,6 +113,7 @@ mod photo_editor_set;
 mod pickers_state;
 mod pin_box;
 mod platform_cursor;
+mod play_intent;
 mod playback_state;
 mod presence;
 mod privacy;

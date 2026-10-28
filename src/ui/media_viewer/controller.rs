@@ -5,6 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
+use crate::ui::play_intent::PlayTarget;
 use crate::ui::video_player::controls::{
     ControllerActions, PictureOverlay, PictureState, VideoController, WaitingCheck, speed_trigger,
 };
@@ -138,7 +139,6 @@ impl QuillApp {
                     progress,
                     on_cancel: Rc::new(move |_, cx| {
                         let _ = view.update(cx, |this, cx| {
-                            this.viewer.pending_play = None;
                             this.cancel_media_download(play_id, cx);
                         });
                     }),
@@ -147,8 +147,10 @@ impl QuillApp {
                 PictureState::Download {
                     on_start: Rc::new(move |_, cx| {
                         let _ = view.update(cx, |this, cx| {
-                            this.viewer.pending_play = Some((message_id, play_id));
-                            this.request_media_download(play_id, None, cx);
+                            let target = PlayTarget::Viewer {
+                                message: message_id,
+                            };
+                            this.play_when_ready(play_id, target, cx);
                         });
                     }),
                 }

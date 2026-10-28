@@ -115,11 +115,17 @@ fn set_local(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, file: i32, loc
     app.update_in(vcx, |app, _, _| {
         let session = app.demo_session.as_mut().expect("the demo session");
         assert!(session.media.files.contains_key(&file), "the clip's file");
-        session
-            .media
-            .files
-            .update(file, |file| file.local.is_downloading_completed = local);
+        session.media.files.update(file, |file| {
+            file.local.is_downloading_completed = local;
+            file.local.is_downloading_active = false;
+        });
     });
+}
+
+/// What the poll loop does after a download lands.
+fn land(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    app.update_in(vcx, |app, _, cx| app.resume_play_intent(cx));
+    settle(app, vcx);
 }
 
 fn round_note(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> MessageContent {
@@ -153,13 +159,16 @@ fn a_clicked_round_video_plays_with_sound_once_downloaded(cx: &mut TestAppContex
     });
     settle(&app, vcx);
     app.read_with(vcx, |app, _| {
-        let videos = &app.playback.inline_videos;
-        assert_eq!(videos.demand(ROUND), Some(Demand::Sound));
-        assert!(videos.player(ROUND).is_none(), "nothing to play yet");
+        assert_eq!(
+            app.playback.intent.as_ref().map(|intent| intent.file),
+            Some(FileId(ROUND_FILE)),
+            "the press waits for the clip"
+        );
+        assert!(app.playback.inline_videos.player(ROUND).is_none());
     });
     // The download lands: it plays from the start with sound.
     set_local(&app, vcx, ROUND_FILE, true);
-    settle(&app, vcx);
+    land(&app, vcx);
     let player = app
         .read_with(vcx, |app, _| {
             let videos = &app.playback.inline_videos;
@@ -276,5 +285,91 @@ fn a_video_labelled_image_gif_plays_on_the_inline_player(cx: &mut TestAppContext
         assert!(app.playback.gif_decodes.is_empty());
         assert_eq!(videos.demand(LABELLED_GIF), Some(Demand::Loop));
         assert!(videos.player(LABELLED_GIF).is_some());
+    });
+}
+
+#[gpui_kit::test]
+fn a_second_press_while_the_round_video_downloads_cancels_it(cx: &mut TestAppContext) {
+    let _scripts = queue_scripts(16);
+    let (app, mut vcx) = autoplay_off(cx);
+    let vcx = &mut vcx;
+    set_local(&app, vcx, ROUND_FILE, false);
+    let MessageContent::VideoNote(note) = round_note(&app, vcx) else {
+        panic!("message 611 is a round video");
+    };
+    let press = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.update_in(vcx, |app, _, cx| {
+            app.play_video_note(ChatId(ROUND.0), MessageId(ROUND.1), &note, cx);
+        });
+        settle(app, vcx);
+    };
+    press(&app, vcx);
+    assert!(app.read_with(vcx, |app, _| app.playback.intent.is_some()));
+    press(&app, vcx);
+    assert!(
+        app.read_with(vcx, |app, _| app.playback.intent.is_none()),
+        "the second press cancels the download and the play"
+    );
+    // Landing anyway (it finished before the cancel): nothing starts.
+    set_local(&app, vcx, ROUND_FILE, true);
+    land(&app, vcx);
+    assert!(
+        app.read_with(vcx, |app, _| app.playback.inline_videos.player(ROUND))
+            .is_none()
+    );
+}
+
+#[gpui_kit::test]
+fn one_press_on_a_voice_note_plays_it_once_downloaded(cx: &mut TestAppContext) {
+    const VOICE: i64 = 91;
+    const VOICE_FILE: i32 = 82;
+    let (app, mut vcx) = autoplay_off(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, _| {
+        let session = app.demo_session.as_mut().expect("the demo session");
+        crate::ui::audio_playback::apply_ready_voice(session, &app.demo_ui.sink, &app.demo_ui.seq);
+    });
+    set_local(&app, vcx, VOICE_FILE, false);
+    let press = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.update_in(vcx, |app, _, cx| {
+            app.press_media(FileId(VOICE_FILE), cx, |app, cx| {
+                app.toggle_voice_playback(
+                    ChatId(11),
+                    MessageId(VOICE),
+                    FileId(VOICE_FILE),
+                    true,
+                    3.,
+                    cx,
+                );
+            });
+        });
+        settle(app, vcx);
+    };
+    // Pressed twice: the download stops and nothing plays when it lands.
+    press(&app, vcx);
+    assert!(app.read_with(vcx, |app, _| app.playback.intent.is_some()));
+    press(&app, vcx);
+    set_local(&app, vcx, VOICE_FILE, true);
+    land(&app, vcx);
+    app.read_with(vcx, |app, _| {
+        assert!(app.playback.intent.is_none());
+        assert_eq!(app.playback.playing_voice, None, "cancelled");
+    });
+    // Pressed once: it plays by itself once downloaded.
+    set_local(&app, vcx, VOICE_FILE, false);
+    press(&app, vcx);
+    app.read_with(vcx, |app, _| {
+        assert!(app.playback.intent.is_some(), "parked for the download");
+        assert_eq!(app.playback.playing_voice, None);
+    });
+    set_local(&app, vcx, VOICE_FILE, true);
+    land(&app, vcx);
+    app.read_with(vcx, |app, _| {
+        assert!(app.playback.intent.is_none());
+        assert_eq!(
+            app.playback.playing_voice,
+            Some(MessageId(VOICE)),
+            "plays by itself"
+        );
     });
 }

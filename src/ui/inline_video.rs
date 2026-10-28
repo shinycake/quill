@@ -11,6 +11,7 @@
 
 use super::app::QuillApp;
 use super::inline_players::{Demand, InlineVideos};
+use super::play_intent::PlayTarget;
 use super::video_player::VideoPlayer;
 use gpui_kit::*;
 use quill::ids::{ChatId, FileId, MessageId};
@@ -415,20 +416,20 @@ impl QuillApp {
             self.open_media_viewer(chat_id, message_id, cx);
             return;
         }
+        if !self.file_is_local(file_id) {
+            let target = PlayTarget::Inline {
+                chat: chat_id,
+                message: message_id,
+                demand,
+            };
+            self.play_when_ready(file_id, target, cx);
+            self.notify_conversation(cx);
+            return;
+        }
+        self.playback.intent = None;
         self.playback
             .inline_videos
             .request((chat_id.0, message_id.0), demand);
-        let local = self.session().is_some_and(|session| {
-            session
-                .media
-                .files
-                .get(&file_id.0)
-                .and_then(|file| file.usable_path())
-                .is_some()
-        });
-        if !local {
-            self.request_media_download(file_id, None, cx);
-        }
         self.notify_conversation(cx);
         cx.notify();
     }
@@ -458,7 +459,9 @@ impl QuillApp {
         let Some(play_id) = note.play_file_id() else {
             return;
         };
-        self.play_inline_on_demand(chat_id, message_id, play_id, Demand::Sound, cx);
+        self.press_media(play_id, cx, |this, cx| {
+            this.play_inline_on_demand(chat_id, message_id, play_id, Demand::Sound, cx);
+        });
     }
 }
 

@@ -8,6 +8,7 @@ use super::gif_clip::{GifClip, GifError};
 use super::inline_players::Demand;
 use super::inline_video::InlineTile;
 use super::message_media::MediaFrameKind;
+use super::play_intent::{PlayKind, PlayTarget};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::{FileId, MessageId};
@@ -23,7 +24,7 @@ use std::time::{Duration, Instant};
 impl QuillApp {
     pub(super) fn maybe_autoplay_gif(&mut self, ix: usize, cx: &mut Context<Self>) {
         if self.playback.playing_animation.is_some()
-            || self.playback.pending_gif_play.is_some()
+            || self.playback.intent.is_some()
             || self.playback.playing_voice.is_some()
             || self.playback.playing_audio.is_some()
             || self.recording_active()
@@ -81,7 +82,7 @@ impl QuillApp {
         // The clip hands its pictures to the atlas sweeper when it drops.
         self.playback.gif = None;
         self.playback.gif_started_at = None;
-        self.playback.pending_gif_play = None;
+        self.drop_play_intent(PlayKind::Gif);
     }
 
     /// The GIF's play disc: an `image/gif` file loops here, decoded in
@@ -105,7 +106,7 @@ impl QuillApp {
             self.play_open_chat_clip(message_id, file_id, Demand::Loop, cx);
             return;
         }
-        self.play_gif_file(message_id, file_id, mime, cx);
+        self.play_gif_file(message_id, file_id, cx);
     }
 
     /// A clip of the open chat on demand on the inline player.
@@ -122,13 +123,7 @@ impl QuillApp {
         self.play_inline_on_demand(chat_id, message_id, file_id, demand, cx);
     }
 
-    fn play_gif_file(
-        &mut self,
-        message_id: MessageId,
-        file_id: FileId,
-        mime: String,
-        cx: &mut Context<Self>,
-    ) {
+    fn play_gif_file(&mut self, message_id: MessageId, file_id: FileId, cx: &mut Context<Self>) {
         let path = self.session().and_then(|session| {
             session
                 .media
@@ -138,11 +133,16 @@ impl QuillApp {
                 .map(str::to_string)
         });
         let Some(path) = path else {
-            self.playback.pending_gif_play = Some((message_id, file_id, mime));
-            self.request_media_download(file_id, None, cx);
+            self.play_when_ready(
+                file_id,
+                PlayTarget::Gif {
+                    message: message_id,
+                },
+                cx,
+            );
             return;
         };
-        self.playback.pending_gif_play = None;
+        self.playback.intent = None;
         let roots = self.media_display_roots();
         let Some(safe) = sandboxed_display_path(&path, &roots) else {
             self.connection
@@ -234,7 +234,7 @@ impl QuillApp {
             // Started again after this decode saw the stop: decode anew.
             Err(GifError::Cancelled) => {
                 self.playback.playing_animation = None;
-                self.play_gif_file(message_id, file_id, "image/gif".into(), cx);
+                self.play_gif_file(message_id, file_id, cx);
                 return;
             }
             // Labelled `image/gif`, but a video: the inline player takes it.
@@ -251,23 +251,6 @@ impl QuillApp {
         }
         self.notify_conversation(cx);
         cx.notify();
-    }
-
-    pub(super) fn resume_pending_gif(&mut self, cx: &mut Context<Self>) {
-        let Some((message_id, file_id, mime)) = self.playback.pending_gif_play.clone() else {
-            return;
-        };
-        let ready = self.session().is_some_and(|session| {
-            session
-                .media
-                .files
-                .get(&file_id.0)
-                .and_then(|file| file.usable_path())
-                .is_some()
-        });
-        if ready {
-            self.toggle_animation_playback(message_id, file_id, mime, cx);
-        }
     }
 
     pub(super) fn spawn_voice_tick(&mut self, cx: &mut Context<Self>) {

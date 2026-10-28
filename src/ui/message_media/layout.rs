@@ -171,6 +171,9 @@ pub(in crate::ui) enum MediaDisc {
     Download,
     /// Downloading — the fraction once TDLib knows the total size.
     Progress(Option<f32>),
+    /// Downloading, and a press cancels: the ring holds a cross
+    /// (tdesktop `historyFileThumbCancel`).
+    Cancel(Option<f32>),
     Play,
     Pause,
 }
@@ -179,12 +182,19 @@ pub(in crate::ui) enum MediaDisc {
 /// download arrow, a progress ring, or play/pause.
 pub(in crate::ui) fn media_disc(id: impl Into<ElementId>, state: MediaDisc) -> Stateful<Div> {
     let inner: AnyElement = match state {
-        MediaDisc::Progress(fraction) => ProgressCircle::new("media-disc-ring")
+        MediaDisc::Progress(fraction) => download_ring(fraction).into_any_element(),
+        MediaDisc::Cancel(fraction) => div()
+            .relative()
             .size(px(34.))
-            .color(gpui_kit::white())
-            .loading(fraction.is_none())
-            .value(fraction.unwrap_or(0.) * 100.)
-            .accessibility_label(quill::lang::tr(quill::lang::keys::SR_MESSAGE_DOWNLOADING))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(download_ring(fraction).absolute().inset_0())
+            .child(
+                Icon::new(gpui_kit::assets::IconName::X)
+                    .size(px(16.))
+                    .text_color(gpui_kit::white()),
+            )
             .into_any_element(),
         MediaDisc::Download | MediaDisc::Play | MediaDisc::Pause => {
             let icon = match state {
@@ -208,6 +218,15 @@ pub(in crate::ui) fn media_disc(id: impl Into<ElementId>, state: MediaDisc) -> S
         .items_center()
         .justify_center()
         .child(inner)
+}
+
+fn download_ring(fraction: Option<f32>) -> ProgressCircle {
+    ProgressCircle::new("media-disc-ring")
+        .size(px(34.))
+        .color(gpui_kit::white())
+        .loading(fraction.is_none())
+        .value(fraction.unwrap_or(0.) * 100.)
+        .accessibility_label(quill::lang::tr(quill::lang::keys::SR_MESSAGE_DOWNLOADING))
 }
 
 /// Download fraction of `file_id`, when TDLib reported a total.

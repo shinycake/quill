@@ -117,7 +117,11 @@ pub(in crate::ui) fn video_note_attachment(
                 .into_any_element(),
         }
     };
-    let disc = if downloading_now && !has_visual {
+    // Over the thumbnail too: a press while the clip downloads cancels it.
+    let clip_downloading = file_is_downloading(play_id, files, downloading);
+    let disc = if clip_downloading {
+        MediaDisc::Cancel(download_fraction(play_id, files))
+    } else if downloading_now && !has_visual {
         MediaDisc::Progress(download_fraction(play_id, files))
     } else {
         MediaDisc::Play

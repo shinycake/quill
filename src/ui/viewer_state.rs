@@ -2,7 +2,6 @@
 #![deny(clippy::indexing_slicing)]
 
 use gpui_kit::*;
-use quill::ids::FileId;
 use quill::ids::MessageId;
 use quill::media_viewer::MediaViewer;
 use quill::media_viewer::SwipeNav;
@@ -51,9 +50,6 @@ pub(crate) struct ViewerUi {
     /// Guard for the viewer's media-session tick (media keys and the OS
     /// Now Playing widget, 250 ms).
     pub(super) session_tick: bool,
-    /// Play was requested before the clip was local. Resumed from the poll
-    /// loop when `downloadFile` finishes.
-    pub(super) pending_play: Option<(MessageId, FileId)>,
     /// MED1: photo rotation and mirror flips (photos only; reset on
     /// open/step). Rendered from `viewer_rotated`.
     pub(super) orientation: quill::media_viewer::ViewerOrientation,
@@ -115,7 +111,6 @@ impl ViewerUi {
             gif: None,
             video_layer: None,
             session_tick: false,
-            pending_play: None,
             orientation: Default::default(),
             rotated: None,
             reorient_pending: None,
