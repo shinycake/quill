@@ -349,10 +349,10 @@ impl QuillApp {
         let (layer, inline) = parts.layer.demand();
         let slice = parts.slice.entity_id();
         if layer > 0 {
-            self.request_animation_tick_for(Some(painter), layer.min(60), cx);
+            self.request_animation_tick_for(Some(painter), layer, cx);
         }
         if inline > 0 {
-            self.request_animation_tick_for(Some(slice), inline.min(60), cx);
+            self.request_animation_tick_for(Some(slice), inline, cx);
         }
     }
 
