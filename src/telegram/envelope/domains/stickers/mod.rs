@@ -30,6 +30,9 @@ pub enum StickersPayload {
         /// `stickerSet.sticker_type` is `stickerTypeCustomEmoji`.
         is_custom_emoji: bool,
         stickers: Vec<StickerItem>,
+        /// `stickerSet.emojis`: each sticker's emoticons, in the order of
+        /// `stickers`.
+        emojis: Vec<Vec<String>>,
         files: Vec<ParsedFile>,
     },
     /// Slice S8: `trendingStickerSets` — `getTrendingStickerSets`.

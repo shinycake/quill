@@ -70,6 +70,7 @@ pub mod drop_modes;
 pub mod drop_topic;
 pub mod earn;
 pub mod emoji;
+pub mod emoji_animations;
 pub mod emoji_catalog;
 pub mod emoji_interaction;
 pub mod emoji_replace;
