@@ -2,7 +2,9 @@
 //! - turns `lang/en/*.strings` into the interface string keys
 //!   (`OUT_DIR/lang_keys.rs`, included by `src/lang/keys.rs`);
 //! - on Windows, embeds `assets/icons/Quill.ico` as the application icon of
-//!   `quill.exe`, and gives its main thread an 8 MB stack.
+//!   `quill.exe`, and gives its main thread an 8 MB stack;
+//! - compiles the vendored ThorVG (`third_party/thorvg`, the animated sticker
+//!   renderer) into a static library.
 
 #[path = "src/lang/parse.rs"]
 #[allow(dead_code)]
@@ -17,6 +19,7 @@ fn main() -> Result<(), String> {
     let manifest = PathBuf::from(env("CARGO_MANIFEST_DIR")?);
     let out = PathBuf::from(env("OUT_DIR")?);
     lang_keys(&manifest, &out)?;
+    thorvg(&manifest, &out)?;
     #[cfg(windows)]
     windows_icon(&manifest, &out)?;
     windows_main_stack();
@@ -34,6 +37,97 @@ fn windows_main_stack() {
             _ => {}
         }
     }
+}
+
+/// ThorVG with only what stickers need: the CPU rasterizer, the Lottie loader
+/// (no expressions, no file IO) and the C API. Built the same in every
+/// profile, so debug builds decode at release speed and the golden-frame test
+/// sees the same pixels everywhere. See docs/decisions/thorvg-sticker-renderer.md.
+fn thorvg(manifest: &Path, out: &Path) -> Result<(), String> {
+    let root = manifest.join("third_party").join("thorvg");
+    println!("cargo:rerun-if-changed={}", root.display());
+    let version_file = root.join("VERSION");
+    let version_text = std::fs::read_to_string(&version_file)
+        .map_err(|err| format!("{}: {err}", version_file.display()))?;
+    let version = version_text
+        .lines()
+        .find_map(|line| line.strip_prefix("version "))
+        .ok_or_else(|| format!("{}: no version line", version_file.display()))?;
+    let config_dir = out.join("thorvg");
+    std::fs::create_dir_all(&config_dir)
+        .map_err(|err| format!("{}: {err}", config_dir.display()))?;
+    // No THORVG_THREAD_SUPPORT: Quill decodes on its own worker threads, one
+    // canvas per decode, and ThorVG's scheduler then runs every task inline on
+    // the calling thread. Its process-wide state stays behind `StrictKey`,
+    // which is a real mutex only when the compiler defines
+    // __STDCPP_THREADS__, so the build stops if one does not.
+    // No THORVG_PARTIAL_RENDER_SUPPORT: each frame is a full redraw.
+    let config = format!(
+        "#define THORVG_VERSION_STRING \"{version}\"\n\
+         #define THORVG_CPU_ENGINE_SUPPORT 1\n\
+         #define THORVG_LOTTIE_LOADER_SUPPORT 1\n\
+         #define THORVG_CAPI_BINDING_SUPPORT 1\n\
+         #if !defined(__STDCPP_THREADS__)\n\
+         #error \"ThorVG's StrictKey needs __STDCPP_THREADS__ to lock\"\n\
+         #endif\n"
+    );
+    let config_path = config_dir.join("config.h");
+    std::fs::write(&config_path, config)
+        .map_err(|err| format!("{}: {err}", config_path.display()))?;
+
+    let source_dirs = [
+        "src/common",
+        "src/renderer",
+        "src/renderer/cpu_engine",
+        "src/loaders/raw",
+        "src/loaders/lottie",
+        "src/bindings/capi",
+    ];
+    let mut build = cc::Build::new();
+    build
+        .cpp(true)
+        .std("c++14")
+        .opt_level(3)
+        .debug(false)
+        .warnings(false)
+        .cargo_warnings(false)
+        .include(&config_dir)
+        .include(root.join("inc"))
+        .define("TVG_STATIC", None)
+        .define("NDEBUG", None);
+    for dir in source_dirs {
+        let dir = root.join(dir);
+        build.include(&dir);
+        let mut sources: Vec<PathBuf> = std::fs::read_dir(&dir)
+            .map_err(|err| format!("{}: {err}", dir.display()))?
+            .filter_map(|entry| entry.ok().map(|e| e.path()))
+            .filter(|path| path.extension().is_some_and(|ext| ext == "cpp"))
+            .collect();
+        sources.sort();
+        build.files(sources);
+    }
+    if std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os == "windows") {
+        build
+            .define("NOMINMAX", None)
+            .define("WIN32_LEAN_AND_MEAN", None);
+    }
+    if build.get_compiler().is_like_msvc() {
+        // ThorVG has no try/catch and no dynamic_cast; _HAS_EXCEPTIONS=0
+        // keeps the MSVC STL headers consistent with /EHs-c-.
+        build
+            .flag("/EHs-c-")
+            .flag("/GR-")
+            .define("_HAS_EXCEPTIONS", "0");
+    } else {
+        // Same as ThorVG's meson build for GCC and Clang, except that the
+        // stack protector and unwind tables stay on: the input is untrusted,
+        // and crash reports need to walk through these frames.
+        build
+            .flag("-fno-exceptions")
+            .flag("-fno-rtti")
+            .flag("-fno-math-errno");
+    }
+    build.try_compile("thorvg").map_err(|err| err.to_string())
 }
 
 fn env(name: &str) -> Result<String, String> {
