@@ -11,6 +11,7 @@ mod common_groups;
 mod composer;
 mod derived_state;
 mod dice;
+mod emoji_tap;
 mod group_call_bar;
 mod group_permissions;
 pub(in crate::ui) mod group_photos;
