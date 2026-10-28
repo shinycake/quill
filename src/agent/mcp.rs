@@ -6,9 +6,9 @@
 //! verbatim, and Quill's answers come back verbatim. The first forwarded
 //! request starts Quill when it is not running and waits for its socket.
 
+use super::link::SharedStream;
 use super::server::code;
 use crate::single_instance::Endpoint;
-use interprocess::local_socket::{RecvHalf, SendHalf, prelude::*};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, Write};
@@ -57,7 +57,7 @@ fn failure(id: &Value, is_tool: bool, message: &str) -> Value {
 type Pending = Arc<Mutex<HashMap<String, (Value, bool)>>>;
 
 struct Link {
-    send: SendHalf,
+    send: SharedStream,
     alive: Arc<AtomicBool>,
     pending: Pending,
 }
@@ -214,7 +214,8 @@ fn open_link(out: &Out) -> Result<Link, String> {
         CLIENT_NAME.get().map(String::as_str),
     )
     .map_err(|refused| refused.message())?;
-    let (recv, send) = stream.split();
+    let send = SharedStream::new(stream);
+    let recv = send.clone();
     let alive = Arc::new(AtomicBool::new(true));
     let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
     let reader = {
@@ -234,7 +235,7 @@ fn open_link(out: &Out) -> Result<Link, String> {
 
 /// Copy Quill's answers to stdout; when Quill goes away, fail what is still
 /// waiting so the agent is never left hanging.
-fn relay(recv: RecvHalf, out: &Out, alive: &AtomicBool, pending: &Pending) {
+fn relay(recv: SharedStream, out: &Out, alive: &AtomicBool, pending: &Pending) {
     let reader = BufReader::new(recv);
     for line in reader.lines() {
         let Ok(line) = line else {

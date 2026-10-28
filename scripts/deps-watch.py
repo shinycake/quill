@@ -262,12 +262,21 @@ def src_crates():
     return Issue("crates", title, "\n\n".join(parts))
 
 
+def pick_newest(releases: list):
+    """Highest-versioned non-draft, non-prerelease release as (tag, url), or None.
+
+    By version, not creation order: a backport (actions/cache v5.1.0) can be
+    published after the newer major (v6.1.0)."""
+    stable = [r for r in releases if not r.get("draft") and not r.get("prerelease") and vtuple(r["tag_name"])]
+    if not stable:
+        return None
+    best = max(stable, key=lambda r: vtuple(r["tag_name"]))
+    return best["tag_name"], best["html_url"]
+
+
 def newest_release(repo: str):
-    """Newest non-draft, non-prerelease release tag of a GitHub repo, or None."""
-    for rel in get_json(f"{API}/repos/{repo}/releases?per_page=15"):
-        if not rel.get("draft") and not rel.get("prerelease"):
-            return rel["tag_name"], rel["html_url"]
-    return None
+    """Newest stable release tag of a GitHub repo, or None."""
+    return pick_newest(get_json(f"{API}/repos/{repo}/releases?per_page=15"))
 
 
 def native_issue(key, label, pinned, latest, url, where, extra=""):

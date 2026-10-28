@@ -24,6 +24,13 @@ class Versions(unittest.TestCase):
         self.assertTrue(dw.is_breaking_newer("0.0.4", "0.0.3"))
         self.assertTrue(dw.is_breaking_newer("1.0.0", "0.9.9"))
 
+    def test_pick_newest_ignores_creation_order(self):
+        rel = lambda tag, **kw: {"tag_name": tag, "html_url": f"u/{tag}", **kw}
+        # actions/cache, 2026-06-26: v5.1.0 was published after v6.1.0.
+        releases = [rel("v5.1.0"), rel("v6.1.0"), rel("v7.0.0-rc1", prerelease=True), rel("v8", draft=True), rel("nightly")]
+        self.assertEqual(dw.pick_newest(releases), ("v6.1.0", "u/v6.1.0"))
+        self.assertIsNone(dw.pick_newest([rel("v1", draft=True)]))
+
 
 class Cargo(unittest.TestCase):
     def test_parse_update(self):

@@ -243,8 +243,8 @@ pub fn serve(stream: Stream) {
         id: presence.id(),
     };
     let _ = stream.set_recv_timeout(Some(IDLE_CHECK));
-    let (recv, send) = stream.split();
-    let send = Arc::new(Mutex::new(send));
+    let recv = super::link::SharedStream::new(stream);
+    let send = Arc::new(Mutex::new(recv.clone()));
     let in_flight = Arc::new(AtomicUsize::new(0));
     let watching = Arc::new(AtomicU64::new(0));
     // A subscription's watcher stops with its connection.

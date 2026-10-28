@@ -81,7 +81,7 @@ jobs:
           arch: x64
       - name: restore TDLib build
         id: tdlib-cache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: native/prefix
           key: tdlib-windows-mt-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib-windows.ps1', 'scripts/windows-common.ps1', 'native/patches/*') }}
@@ -93,7 +93,7 @@ jobs:
       # bump (build-tdlib-windows.ps1 refuses a source tree at another commit).
       - name: restore TDLib work tree
         if: steps.tdlib-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: |
             native/td
@@ -106,7 +106,7 @@ jobs:
         run: scripts/build-tdlib-windows.ps1
       - name: save TDLib work tree
         if: always() && steps.tdlib-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: |
             native/td
@@ -114,7 +114,7 @@ jobs:
           key: tdlib-windows-mt-work-${{ hashFiles('src/pins.rs', 'native/patches/*') }}-${{ github.run_id }}
       - name: save TDLib build
         if: steps.tdlib-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: native/prefix
           key: tdlib-windows-mt-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib-windows.ps1', 'scripts/windows-common.ps1', 'native/patches/*') }}
@@ -144,7 +144,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: restore FFmpeg build
         id: ffmpeg-cache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: vendor/ffmpeg/prefix
           key: ffmpeg-windows-${{ runner.arch }}-${{ hashFiles('scripts/build-ffmpeg.sh', 'native/quillvideo/*') }}
@@ -162,7 +162,7 @@ jobs:
         run: bash scripts/build-ffmpeg.sh
       - name: save FFmpeg build
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: vendor/ffmpeg/prefix
           key: ffmpeg-windows-${{ runner.arch }}-${{ hashFiles('scripts/build-ffmpeg.sh', 'native/quillvideo/*') }}

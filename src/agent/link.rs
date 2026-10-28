@@ -213,6 +213,34 @@ pub fn open(
     }
 }
 
+/// One end of a connection that a reader and a writer share across threads.
+/// `&Stream` reads and writes, so clones of this handle replace interprocess'
+/// deprecated `split` halves.
+#[derive(Clone)]
+pub struct SharedStream(std::sync::Arc<Stream>);
+
+impl SharedStream {
+    pub fn new(stream: Stream) -> Self {
+        Self(std::sync::Arc::new(stream))
+    }
+}
+
+impl std::io::Read for SharedStream {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        (&*self.0).read(buf)
+    }
+}
+
+impl Write for SharedStream {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        (&*self.0).write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        (&*self.0).flush()
+    }
+}
+
 #[cfg(test)]
 #[path = "link_tests.rs"]
 mod tests;
