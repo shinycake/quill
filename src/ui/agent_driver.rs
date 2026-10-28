@@ -27,13 +27,25 @@ use quill::agent::ui_driver::guard;
 use quill::agent::ui_driver::policy;
 use quill::agent::ui_driver::surface::{self, Surface};
 use quill::agent::ui_driver::takeover;
-use quill::agent::ui_driver::tree::UiTree;
+use quill::agent::ui_driver::tree::{UiNode, UiTree};
 use quill::composer::SendKeyMode;
 use std::time::Duration;
 
 /// How often a task looks for a new frame, and how many times.
 const FRAME_WAIT: Duration = Duration::from_millis(16);
 const FRAME_TRIES: u32 = 90;
+/// Frames an input's answer waits past the first for what it opens.
+const SETTLE_FRAMES: u32 = 8;
+
+/// Whether the answer to `command` should wait another frame: a right
+/// click until a menu shows, a click until anything new shows.
+fn still_settling(command: &UiCommand, added: &[&UiNode]) -> bool {
+    match command {
+        UiCommand::OpenMenu { .. } => !added.iter().any(|node| node.role.contains("Menu")),
+        UiCommand::Click { .. } => added.is_empty(),
+        _ => false,
+    }
+}
 /// The agent task wakes this often while the tree is forced, to turn it
 /// off once the agent stops driving (`bridge::DRIVE_WINDOW`).
 pub(super) const FORCED_WAKE: Duration = Duration::from_secs(5);
@@ -110,7 +122,7 @@ impl QuillApp {
         }
         // Decided before any frame is waited for, so a blocked surface
         // answers at once.
-        if window.is_a11y_system_active() {
+        if quill::screen_reader::running() {
             pending.answer(UiReply::Refused(surface::screen_reader_active()));
             return;
         }
@@ -211,7 +223,7 @@ impl QuillApp {
                 let outcome = app
                     .update_in(cx, |app, window, _| {
                         (
-                            check_step(&pending, generation, &surface, app, window),
+                            check_step(&pending, generation, &surface, app),
                             window.a11y_tree_frame(),
                         )
                     })
@@ -267,9 +279,23 @@ impl QuillApp {
             // surface the agent may not see answers with its note instead.
             // Paused or stopped while it came, the frame after is the
             // user's: the agent gets the note, not the tree.
-            let found = wait_for_tree(&app, cx, tree.frame.saturating_add(1))
+            let mut found = wait_for_tree(&app, cx, tree.frame.saturating_add(1))
                 .await
                 .and_then(|found| takeover::refusal().map_or(Ok(found), Err));
+            // A menu opens a frame or two after the click that asks for it
+            // (the press opens it, the release lets it paint): wait for it
+            // rather than answer "no menu".
+            for _ in 0..SETTLE_FRAMES {
+                let Ok((_, after)) = &found else {
+                    break;
+                };
+                if !still_settling(&command, &after.new_since(&tree)) {
+                    break;
+                }
+                found = wait_for_tree(&app, cx, after.frame.saturating_add(1))
+                    .await
+                    .and_then(|found| takeover::refusal().map_or(Ok(found), Err));
+            }
             let (after, added) = match found {
                 Ok((_, after)) => {
                     let added = after.new_since(&tree).into_iter().cloned().collect();
@@ -398,7 +424,6 @@ fn check_step(
     generation: u64,
     expected: &Surface,
     app: &QuillApp,
-    window: &Window,
 ) -> Result<Surface, String> {
     if pending.cancelled() {
         return Err(policy::cancelled());
@@ -409,7 +434,7 @@ fn check_step(
     if grants::generation() != generation {
         return Err(policy::grants_changed());
     }
-    if window.is_a11y_system_active() {
+    if quill::screen_reader::running() {
         return Err(surface::screen_reader_active());
     }
     let now = app.driver_surface();

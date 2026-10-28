@@ -17,7 +17,7 @@ use quill::agent::ui_driver::bridge::{self, BridgeError, Button, Target, UiComma
 use quill::agent::ui_driver::keys::parse_sequence;
 use quill::agent::ui_driver::tree::UiTree;
 use quill::agent::{access, activity};
-use quill::ids::AccountKey;
+use quill::ids::{AccountKey, ChatId};
 use std::time::Duration;
 
 pub(super) fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
@@ -514,6 +514,35 @@ fn the_composer_send_goes_to_the_agent_path_and_read_only_refuses(cx: &mut TestA
         draft, "hi there",
         "the draft stays until the agent path sends"
     );
+    let row_draft = |vcx: &mut VisualTestContext| {
+        vcx.update(|_, cx| {
+            app.read(cx)
+                .demo_session
+                .as_ref()
+                .and_then(|s| s.chats.get(&11))
+                .and_then(|chat| chat.draft.clone())
+        })
+    };
+    // The demo has no driver to save drafts: store it as a save would.
+    vcx.update(|_, cx| {
+        app.update(cx, |app, _| {
+            if let Some(session) = app.demo_session.as_mut() {
+                session.store_composer_draft(
+                    ChatId(11),
+                    quill::composer::DraftTopic::Chat,
+                    Some(quill::telegram::ChatDraft {
+                        text: "hi there".into(),
+                        rich: None,
+                        reply_to_message_id: None,
+                        quote: None,
+                        item: Default::default(),
+                        suggested_post: None,
+                    }),
+                );
+            }
+        })
+    });
+    assert!(row_draft(vcx).is_some(), "the chat holds the draft");
 
     // The agent path reports the send: the box clears.
     let reply = drive(
@@ -526,6 +555,7 @@ fn the_composer_send_goes_to_the_agent_path_and_read_only_refuses(cx: &mut TestA
     );
     assert!(matches!(reply, Ok(UiReply::Ok)), "{reply:?}");
     assert_eq!(vcx.update(|_, cx| app.read(cx).composer_markup(cx)), "");
+    assert_eq!(row_draft(vcx), None, "the sent draft is gone");
 
     // A chat granted for reading only takes no input at all.
     grant(11, Scope::Read);
@@ -798,4 +828,46 @@ fn a_hidden_window_says_so_in_its_state_and_its_missing_frame(cx: &mut TestAppCo
     vcx.simulate_visibility_change(WindowVisibility::Visible);
     assert_eq!(state(&app, vcx), WindowState::Visible);
     read_tree(&app, vcx);
+}
+
+/// A right click on a granted row answers with the menu it opened.
+#[gpui_kit::test]
+fn open_menu_answers_with_the_rows_menu(cx: &mut TestAppContext) {
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    turn_on();
+    grant(11, Scope::ReadWrite);
+    let _presence = activity::connect("Test agent");
+    settle(vcx);
+    let tree = read_tree(&app, vcx);
+    let row = tree
+        .nodes
+        .iter()
+        .find(|node| {
+            node.role == "Button"
+                && node
+                    .tag
+                    .as_deref()
+                    .and_then(quill::agent::ui_driver::redact::chat_of_tag)
+                    == Some(11)
+        })
+        .map(|node| node.id.clone())
+        .unwrap_or_else(|| panic!("chat 11's row"));
+    let reply = drive(
+        &app,
+        vcx,
+        UiCommand::OpenMenu {
+            target: Target::Node(row),
+        },
+    );
+    let Ok(UiReply::Done { added, .. }) = reply else {
+        panic!("expected Done, got {reply:?}");
+    };
+    let items: Vec<_> = added
+        .iter()
+        .filter(|node| node.role == "MenuItem")
+        .filter_map(|node| node.name.clone())
+        .collect();
+    assert!(!items.is_empty(), "the menu's items: {added:?}");
 }

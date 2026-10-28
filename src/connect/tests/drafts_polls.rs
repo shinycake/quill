@@ -290,6 +290,58 @@ fn private_draft_debounces_then_flushes_and_skips_channels() {
 }
 
 #[test]
+fn an_agent_send_clears_the_draft_even_after_a_late_save() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    for update in [
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+    ] {
+        driver
+            .ingest(copy_and_parse(update, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    }
+    // The typed text's debounced save fires after the agent path sent it.
+    let DraftSaveOutcome::Debounced { token, .. } = driver
+        .note_composer_draft(ChatId(7), "sent by the agent", None, 1_000, true)
+        .unwrap()
+    else {
+        panic!("expected debounce");
+    };
+    driver.commit_debounced_draft(token).unwrap();
+    assert!(driver.session.chats.get(&7).unwrap().draft.is_some());
+
+    driver
+        .clear_draft_after_agent_send(ChatId(7), DraftTopic::Chat)
+        .unwrap();
+    let sent = recorder.snapshot();
+    let last = sent.last().unwrap();
+    assert!(last.contains("setChatDraftMessage"), "{last}");
+    assert!(last.contains("\"draft_message\":null"), "{last}");
+    assert!(driver.session.chats.get(&7).unwrap().draft.is_none());
+
+    // A save still waiting when the send lands never fires.
+    let DraftSaveOutcome::Debounced { token, .. } = driver
+        .note_composer_draft(ChatId(7), "again", None, 9_000, true)
+        .unwrap()
+    else {
+        panic!("expected debounce");
+    };
+    driver
+        .clear_draft_after_agent_send(ChatId(7), DraftTopic::Chat)
+        .unwrap();
+    assert!(driver.commit_debounced_draft(token).unwrap().is_none());
+    assert!(driver.session.chats.get(&7).unwrap().draft.is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn quoted_draft_round_trips_input_text_quote() {
     // Slice G1: a composer reply carrying a validated partial quote is
     // saved to the server draft as `inputTextQuote` (schema 1.8.67

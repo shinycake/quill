@@ -162,7 +162,7 @@ fn capture_frame(
 ) -> Result<(image::RgbaImage, UiTree, ShotScope), String> {
     let (before, scope, filter) = app
         .update_in(cx, |app, window, cx| {
-            if window.is_a11y_system_active() {
+            if quill::screen_reader::running() {
                 return Err(surface::screen_reader_active());
             }
             // Paused or stopped, the window is the user's.

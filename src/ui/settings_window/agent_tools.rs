@@ -257,6 +257,7 @@ fn off_reason(reason: OffReason) -> &'static str {
         OffReason::WindowControlOff => keys::Q_AGENT_PAGE_OFF_WINDOW,
         OffReason::Paused => keys::Q_AGENT_PAGE_OFF_PAUSED,
         OffReason::Stopped => keys::Q_AGENT_PAGE_OFF_STOPPED,
+        OffReason::ScreenReader => keys::Q_AGENT_PAGE_OFF_SCREEN_READER,
         OffReason::NoCapture => keys::Q_AGENT_PAGE_OFF_CAPTURE,
     })
 }

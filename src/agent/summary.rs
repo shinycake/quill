@@ -31,6 +31,9 @@ pub struct Inputs {
     pub takeover: Takeover,
     /// Whether this build can take screenshots.
     pub screenshots_built: bool,
+    /// A screen reader is on ([`crate::screen_reader::running`]): the
+    /// driver refuses every window tool while it runs.
+    pub screen_reader: bool,
     pub grants: AccountGrants,
     /// Whether the window driver shows the whole window
     /// ([`super::grants::window_shows_everything`]): it follows the open
@@ -126,9 +129,13 @@ pub enum WindowView {
 pub enum WindowState {
     Off,
     Ready,
-    Driving { agent: String },
+    Driving {
+        agent: String,
+    },
     Paused,
     Stopped,
+    /// A screen reader is on, so the driver stays out of the window.
+    ScreenReader,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,6 +178,7 @@ pub enum OffReason {
     WindowControlOff,
     Paused,
     Stopped,
+    ScreenReader,
     NoCapture,
 }
 
@@ -198,7 +206,7 @@ impl OffReason {
             OffReason::WindowControlOff => Some(Fix::TurnOnWindowControl),
             OffReason::Paused => Some(Fix::LetContinue),
             OffReason::Stopped => Some(Fix::RestartWindowControl),
-            OffReason::NoCapture => None,
+            OffReason::ScreenReader | OffReason::NoCapture => None,
         }
     }
 
@@ -211,6 +219,7 @@ impl OffReason {
             OffReason::WindowControlOff => "the user has not let agents drive Quill's window",
             OffReason::Paused => "the user took control of the window",
             OffReason::Stopped => "the user pressed Stop",
+            OffReason::ScreenReader => "a screen reader is on",
             OffReason::NoCapture => "this build cannot take screenshots",
         }
     }
@@ -402,6 +411,7 @@ fn tool_state(tool: &ToolInfo, inputs: &Inputs, chats: &Chats, window: &Window) 
             WindowState::Off => ToolState::Off(OffReason::WindowControlOff),
             WindowState::Stopped => ToolState::Off(OffReason::Stopped),
             WindowState::Paused => ToolState::Off(OffReason::Paused),
+            WindowState::ScreenReader => ToolState::Off(OffReason::ScreenReader),
             _ if tool.name == "take_screenshot" && !window.screenshots => {
                 ToolState::Off(OffReason::NoCapture)
             }
@@ -508,6 +518,7 @@ pub fn summarize(inputs: &Inputs) -> AccessSummary {
             (_, false) => WindowState::Off,
             (Takeover::Stopped, true) => WindowState::Stopped,
             (Takeover::Paused, true) => WindowState::Paused,
+            (_, true) if inputs.screen_reader => WindowState::ScreenReader,
             (Takeover::Driving { agent }, true) => WindowState::Driving {
                 agent: agent.clone(),
             },
@@ -591,6 +602,7 @@ pub fn live_inputs(account: &AccountKey) -> Inputs {
         raw_calls: super::access::raw_calls(),
         takeover,
         screenshots_built: super::ui_driver::shot::CAPTURE_BUILT,
+        screen_reader: crate::screen_reader::running(),
         grants: super::grants::for_account(account),
         window_shows_everything: super::grants::window_shows_everything(),
         connected: super::activity::connected()
@@ -615,6 +627,7 @@ impl WindowState {
             WindowState::Driving { .. } => "driving",
             WindowState::Paused => "paused",
             WindowState::Stopped => "stopped",
+            WindowState::ScreenReader => "screen_reader",
         }
     }
 }

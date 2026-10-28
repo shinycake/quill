@@ -9,6 +9,7 @@ fn inputs() -> Inputs {
         raw_calls: true,
         takeover: Takeover::Idle,
         screenshots_built: true,
+        screen_reader: false,
         grants: AccountGrants::default(),
         window_shows_everything: false,
         connected: Vec::new(),
@@ -233,6 +234,34 @@ fn window_tools_follow_the_switch_pause_stop_and_capture() {
         Some(ToolState::Off(OffReason::NoCapture))
     );
     assert_eq!(OffReason::NoCapture.fix(), None);
+
+    // A screen reader holds every window tool, even mid-drive; a pause or
+    // Stop still says what the user did.
+    for takeover in [
+        Takeover::Idle,
+        Takeover::Driving {
+            agent: "Claude Code".into(),
+        },
+    ] {
+        let held = summarize(&Inputs {
+            screen_reader: true,
+            takeover,
+            ..on.clone()
+        });
+        assert_eq!(held.window.state, WindowState::ScreenReader);
+        assert_eq!(
+            state(&held, "click_element"),
+            Some(ToolState::Off(OffReason::ScreenReader))
+        );
+        assert_eq!(held.describe()["window_control"]["state"], "screen_reader");
+    }
+    let paused_too = summarize(&Inputs {
+        screen_reader: true,
+        takeover: Takeover::Paused,
+        ..on.clone()
+    });
+    assert_eq!(paused_too.window.state, WindowState::Paused);
+    assert_eq!(OffReason::ScreenReader.fix(), None);
 
     let confirming = summarize(&Inputs {
         confirm_sends: true,

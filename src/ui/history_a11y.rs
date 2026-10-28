@@ -113,15 +113,16 @@ pub(crate) fn step(count: usize, current: Option<usize>, key: A11yKey) -> Option
 }
 
 impl QuillApp {
-    /// A screen reader (or another accessibility client) reads the window.
-    /// Not the agent UI driver, which only forces the tree to be built:
-    /// the user's keys keep their ordinary meaning while an agent drives.
+    /// A screen reader is on and reads the window. Neither the agent UI
+    /// driver, which only forces the tree to be built, nor another
+    /// accessibility client (macOS `AXVisualSupportAgent`, a window manager)
+    /// counts: the user's keys keep their ordinary meaning.
     pub(super) fn screen_reader_on(&self, window: &Window) -> bool {
         #[cfg(test)]
         if self.message_ui.a11y.force_screen_reader {
             return true;
         }
-        window.is_a11y_system_active()
+        window.is_a11y_system_active() && quill::screen_reader::running()
     }
 
     /// Something reads the accessibility tree this frame: a screen reader,

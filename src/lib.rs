@@ -205,6 +205,7 @@ pub mod row_fx;
 pub mod schedule;
 #[doc(hidden)]
 pub mod scratch;
+pub mod screen_reader;
 pub mod search_filters;
 pub mod search_tabs;
 pub mod selection_drag;

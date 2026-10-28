@@ -223,6 +223,9 @@ pub(super) fn claim_text(claim: &Claim, summary: &AccessSummary) -> String {
             ),
             WindowState::Paused => tr(keys::Q_AGENT_PAGE_CLAIM_WINDOW_PAUSED).to_string(),
             WindowState::Stopped => tr(keys::Q_AGENT_PAGE_CLAIM_WINDOW_STOPPED).to_string(),
+            WindowState::ScreenReader => {
+                tr(keys::Q_AGENT_PAGE_CLAIM_WINDOW_SCREEN_READER).to_string()
+            }
         },
         Claim::EachSend(true) => tr(keys::Q_AGENT_PAGE_CLAIM_EACH_SEND_ON).to_string(),
         Claim::EachSend(false) => tr(keys::Q_AGENT_PAGE_CLAIM_EACH_SEND_OFF).to_string(),
@@ -490,10 +493,14 @@ impl QuillApp {
 
 /// Screenshot demos: Agent access on, unless `QUILL_DEMO_AGENT_ACCESS=off`
 /// shows Quill with it off (no agent surface anywhere).
+/// `QUILL_DEMO_AGENT_WINDOW=on` also lets agents drive the window.
 fn demo_access_from_env() {
     quill::fast_buttons::set_persistence(false);
     let off = std::env::var("QUILL_DEMO_AGENT_ACCESS").is_ok_and(|access| access == "off");
     quill::agent::access::set_enabled(!off);
+    if std::env::var("QUILL_DEMO_AGENT_WINDOW").is_ok_and(|window| window == "on") {
+        quill::agent::access::set_ui_driver(true);
+    }
 }
 
 /// Screenshot demos: `QUILL_DEMO_AGENT_SECTION=<section id>|focus` scrolls
