@@ -7,7 +7,6 @@
 #     quill-webview              RUNPATH $ORIGIN/lib  (mini apps; needs the system's WebKitGTK 4.1)
 #     lib/libtdjson.so           RUNPATH $ORIGIN
 #     lib/libntgcalls.so         RUNPATH $ORIGIN
-#     lib/librlottie.so          RUNPATH $ORIGIN
 #     lib/libquillvideo.so       RUNPATH $ORIGIN  (in-process video, native/quillvideo)
 #     lib/libav{codec,format,util,filter,device}.so.N, libsw{scale,resample}.so.N   FFmpeg, LGPL-2.1+
 #     ffmpeg, ffprobe            RUNPATH $ORIGIN/lib  (same FFmpeg build, no libx264; video send/edit, photos, camera)
@@ -22,7 +21,6 @@
 #   QUILL_WEBVIEW_BIN    mini-app helper           (default target/release/quill-webview)
 #   QUILL_TDJSON_PATH    libtdjson.so              (default native/prefix/lib/libtdjson.so)
 #   QUILL_NTGCALLS_LIB   libntgcalls.so            (default vendor/ntgcalls/lib/libntgcalls.so)
-#   QUILL_RLOTTIE_PATH   librlottie.so             (default vendor/rlottie/prefix/lib/librlottie.so)
 #   QUILL_FFMPEG_PREFIX  scripts/build-ffmpeg.sh   (default vendor/ffmpeg/prefix)
 #   OUT                  output directory          (default dist/linux)
 # Requires patchelf, readelf, ldd, tar.
@@ -39,11 +37,10 @@ BIN="${QUILL_BIN:-target/release/quill}"
 WEBVIEW_BIN="${QUILL_WEBVIEW_BIN:-target/release/quill-webview}"
 TDJSON="${QUILL_TDJSON_PATH:-native/prefix/lib/libtdjson.so}"
 NTGCALLS="${QUILL_NTGCALLS_LIB:-vendor/ntgcalls/lib/libntgcalls.so}"
-RLOTTIE="${QUILL_RLOTTIE_PATH:-vendor/rlottie/prefix/lib/librlottie.so}"
 FFMPEG="${QUILL_FFMPEG_PREFIX:-vendor/ffmpeg/prefix}"
 QUILLVIDEO="$FFMPEG/lib/libquillvideo.so"
 OUT="${OUT:-dist/linux}"
-for f in "$BIN" "$WEBVIEW_BIN" "$TDJSON" "$NTGCALLS" "$RLOTTIE" "$QUILLVIDEO" "$FFMPEG/bin/ffmpeg" "$FFMPEG/bin/ffprobe"; do
+for f in "$BIN" "$WEBVIEW_BIN" "$TDJSON" "$NTGCALLS" "$QUILLVIDEO" "$FFMPEG/bin/ffmpeg" "$FFMPEG/bin/ffprobe"; do
   [[ -f "$f" ]] || { echo "error: missing input $f" >&2; exit 2; }
 done
 
@@ -57,10 +54,9 @@ mkdir -p "$PKG/lib" "$PKG/share/applications" "$PKG/share/icons/hicolor"
 
 install -m 755 "$BIN" "$PKG/quill"
 install -m 755 "$WEBVIEW_BIN" "$PKG/quill-webview"
-# cp -L: rlottie/tdjson installs may be symlink chains; ship the real file under the name the loader opens.
+# cp -L: tdjson installs may be symlink chains; ship the real file under the name the loader opens.
 install -m 755 "$(readlink -f "$TDJSON")" "$PKG/lib/libtdjson.so"
 install -m 755 "$(readlink -f "$NTGCALLS")" "$PKG/lib/libntgcalls.so"
-install -m 755 "$(readlink -f "$RLOTTIE")" "$PKG/lib/librlottie.so"
 # In-process video: the shim plus FFmpeg's shared libraries under their
 # sonames (dynamic linking keeps FFmpeg replaceable, as the LGPL asks).
 install -m 755 "$(readlink -f "$QUILLVIDEO")" "$PKG/lib/libquillvideo.so"
@@ -102,7 +98,7 @@ vendor_openssl
 
 # Only drop symbols from libraries we built ourselves; the prebuilt ntgcalls and
 # distro OpenSSL are left as shipped.
-strip --strip-unneeded "$PKG/lib/libtdjson.so" "$PKG/lib/librlottie.so" \
+strip --strip-unneeded "$PKG/lib/libtdjson.so" \
   "$PKG"/lib/libquillvideo.so "$PKG"/lib/libav*.so.* "$PKG"/lib/libsw*.so.* \
   "$PKG/ffmpeg" "$PKG/ffprobe" || true
 

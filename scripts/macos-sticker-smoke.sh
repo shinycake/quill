@@ -79,7 +79,7 @@ swiftc "$TMP/check.swift" -o "$TMP/check"
 cd "$ROOT"
 for mode in on off; do
   rm -f "$OUT/.quill-ready-ready-sticker-playback"
-  QUILL_DEMO_LINGER_MS=30000 QUILL_DEMO_LOOP_STICKERS="$mode" QUILL_RLOTTIE_PATH="${QUILL_RLOTTIE_PATH:-$ROOT/vendor/rlottie/prefix/lib/librlottie.dylib}" "$BINARY" --screenshot-demo ready-sticker-playback "$OUT" > "$OUT/app-$mode.log" 2>&1 &
+  QUILL_DEMO_LINGER_MS=30000 QUILL_DEMO_LOOP_STICKERS="$mode" "$BINARY" --screenshot-demo ready-sticker-playback "$OUT" > "$OUT/app-$mode.log" 2>&1 &
   APP_PID=$!
   for _ in {1..40}; do [[ -f "$OUT/.quill-ready-ready-sticker-playback" ]] && break; sleep 0.1; done
   WINDOW_ID="$("$TMP/check" window "$APP_PID")"

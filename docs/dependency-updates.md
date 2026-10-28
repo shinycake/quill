@@ -23,7 +23,7 @@ Updates are found by a weekly watch, filed as issues, and integrated in small PR
 | `gpui-kit` | gpui-kit on crates.io, and `gpui-base` / `gpui-pre-*` | `=` pin in `Cargo.toml`, `third_party/*/Cargo.toml` |
 | `crates` | `cargo update --dry-run`, newer majors via the crates.io API | `Cargo.lock`, the resolved direct deps of every workspace member |
 | `native:ffmpeg` | FFmpeg release tags | `TAG` in `scripts/build-ffmpeg.sh` |
-| `native:rlottie` | Samsung/rlottie master (no releases) | `PIN` in `scripts/build-rlottie.sh` |
+| `native:thorvg` | thorvg/thorvg releases | `tag` in `third_party/thorvg/VERSION` |
 | `native:ntgcalls` | pytgcalls/ntgcalls releases | `NTGCALLS_VERSION` in `scripts/vendor-ntgcalls.sh` |
 | `native:rust` | rust-lang/rust releases | `rust-toolchain.toml` |
 | `actions` | latest release of every action in `.github/workflows` | `uses:` refs |
@@ -80,10 +80,19 @@ the `=` pinned crates. Updates there are deliberate and visually verified.
   the tag's commit), check `licenses/ffmpeg/` and the `windows-ffmpeg` job cache key
   (it hashes the script), rebuild `quillvideo`, run the `video_decode` tests.
   `scripts/release-lgpl-sources.sh` reads the pin for the LGPL source archive.
-- **rlottie**: change `PIN` in `scripts/build-rlottie.sh` **and** `$pin` in
-  `scripts/build-rlottie-windows.ps1`; both apply
-  `native/patches/rlottie-animated-shape-budget.patch` (Samsung/rlottie#602), so
-  drop the patch once upstream merges it, then run the sticker tests.
+- **ThorVG** (animated stickers, compiled in by `build.rs`): run
+  `scripts/vendor-thorvg.sh <tag>`, which replaces `third_party/thorvg` with that
+  tag's CPU engine, Lottie loader, raw loader and C API and records the commit in
+  `VERSION`. Build (a new source file is picked up automatically; a new
+  `#include` of an unvendored file fails here, so extend the script's list), then
+  regenerate the golden frames and look at every changed one:
+  `QUILL_GOLDEN_DIFF=<dir> cargo test --no-default-features --test sticker_golden -- --ignored`
+  writes old, new and diff PNGs to `<dir>`. Commit the new references with the
+  bump and say in the PR what changed and why it is right. Run the
+  `sticker_playback` tests and a `/verify` capture of animated stickers. Read
+  the release notes for C API changes (`src/sticker_playback/thorvg.rs` declares
+  the functions it calls) and for new threading or allocator behavior
+  (docs/decisions/thorvg-sticker-renderer.md lists what Quill relies on).
 - **ntgcalls**: change `NTGCALLS_VERSION` and the per-asset checksums in
   `scripts/vendor-ntgcalls.sh`; check the calls smoke path and
   `scripts/release-lgpl-sources.sh`.

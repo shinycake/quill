@@ -6,9 +6,8 @@ Install:        ./install.sh            (to ~/.local; add a prefix argument to c
 Uninstall:      ./install.sh --uninstall
 
 This directory is relocatable. Quill finds its native libraries in lib/ beside
-the executable (libtdjson.so, libntgcalls.so, librlottie.so, libquillvideo.so
-with the FFmpeg libraries it plays video through, plus a bundled
-OpenSSL 3), so no environment variables are needed. The ffmpeg and ffprobe
+the executable (libtdjson.so, libntgcalls.so, libquillvideo.so with the
+FFmpeg libraries it plays video through, plus a bundled OpenSSL 3), so no environment variables are needed. The ffmpeg and ffprobe
 programs beside it (same FFmpeg build) run the video editor, photo resizing
 and the camera; Quill uses them before any ffmpeg on PATH. This build has no
 H.264 or VP9 encoder (those are GPL or external libraries): to edit and send

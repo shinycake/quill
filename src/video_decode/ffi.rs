@@ -1,5 +1,5 @@
 //! The runtime-loaded `quillvideo` shim (`native/quillvideo`): FFmpeg
-//! behind a six-function C ABI. Loaded like rlottie and tdjson, from the
+//! behind a six-function C ABI. Loaded like tdjson, from the
 //! package (next to the binary or in its `lib/`), `QUILL_VIDEO_LIB`, or a
 //! development build under `vendor/ffmpeg/prefix`.
 

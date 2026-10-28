@@ -1,8 +1,8 @@
 name: package-macos
 # Reusable: Quill.app for macOS 14+ on Apple Silicon, built on a GitHub-hosted
-# arm64 runner (never the personal self-hosted Mac). TDLib and rlottie are built
-# from source (cached), ntgcalls is the pinned upstream library, OpenSSL is
-# bundled from the runner's Homebrew by scripts/macos-package-smoke.sh.
+# arm64 runner (never the personal self-hosted Mac). TDLib is built from source
+# (cached), ntgcalls is the pinned upstream library, OpenSSL is bundled from the
+# runner's Homebrew by scripts/macos-package-smoke.sh.
 # Not notarized: there is no Developer ID (docs/decisions/codex-release-pipeline.md).
 # Signed with the owner's Apple Development identity when the caller passes
 # MACOS_SIGNING_P12, ad-hoc otherwise. The certificate keeps the keychain
@@ -81,21 +81,6 @@ jobs:
         with:
           path: native/prefix
           key: tdlib-macos-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib.sh', 'native/patches/*') }}
-      - name: restore rlottie build
-        id: rlottie-cache
-        uses: actions/cache/restore@v5
-        with:
-          path: vendor/rlottie/prefix
-          key: rlottie-macos-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie.sh', 'native/patches/rlottie-animated-shape-budget.patch') }}
-      - name: build rlottie
-        if: steps.rlottie-cache.outputs.cache-hit != 'true'
-        run: bash scripts/build-rlottie.sh
-      - name: save rlottie build
-        if: steps.rlottie-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        with:
-          path: vendor/rlottie/prefix
-          key: rlottie-macos-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie.sh', 'native/patches/rlottie-animated-shape-budget.patch') }}
       - name: vendor ntgcalls (checksum pinned)
         run: bash scripts/vendor-ntgcalls.sh
       # The secrets reach only this step, as compile-time env read by
@@ -148,7 +133,7 @@ jobs:
         run: |
           QUILL_BIN="$PWD/target/release/quill" QUILL_TDJSON_PATH="$PWD/native/prefix/lib/libtdjson.dylib" \
             bash scripts/macos-package-smoke.sh
-          for lib in libtdjson.dylib libntgcalls.dylib librlottie.dylib; do
+          for lib in libtdjson.dylib libntgcalls.dylib; do
             test -f "dist/Quill.app/Contents/Frameworks/$lib" || { echo "missing Frameworks/$lib" >&2; exit 1; }
           done
           codesign --verify --deep --strict --verbose=2 dist/Quill.app

@@ -5,3 +5,5 @@ native/patches/** -text
 *.py text eol=lf
 # Compiled in with include_str! and parsed (SKILL.md frontmatter): keep LF on Windows.
 src/agent/**/*.md text eol=lf
+# Vendored ThorVG: kept byte for byte as scripts/vendor-thorvg.sh copied it.
+third_party/thorvg/** -text

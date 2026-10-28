@@ -1,16 +1,18 @@
 //! Bounded sticker decoding; GPUI owns the display clock.
 #![deny(clippy::indexing_slicing)]
-use std::ffi::{CString, c_char, c_void};
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{
-    Mutex, OnceLock,
+    Mutex,
     atomic::{AtomicBool, Ordering},
 };
 
+mod fitz;
+mod thorvg;
 mod tint;
 mod webm;
 mod webm_ffi;
+pub use fitz::{FitzType, apply_fitzpatrick};
 pub use tint::Tint;
 pub use webm::WebmFrames;
 
@@ -33,12 +35,18 @@ pub fn sampled_frame_count(total: usize, fps: f64, max_frames: usize, max_fps: f
 }
 
 pub struct StickerFrames {
-    /// Native BGRA, matching GPUI's RenderImage format.
+    /// Straight-alpha BGRA, GPUI's RenderImage format.
     pub frames: Vec<Vec<u8>>,
     pub fps: f64,
 }
 
-fn tgs_json(path: &Path) -> Result<CString, String> {
+/// A TGS file's Lottie JSON, checked and recoloured for its skin tone.
+struct Tgs {
+    json: Vec<u8>,
+    fps: f64,
+}
+
+fn tgs_json(path: &Path, fitz: FitzType) -> Result<Tgs, String> {
     let file = std::fs::File::open(path).map_err(|_| "Could not read animated sticker")?;
     if file
         .metadata()
@@ -56,7 +64,7 @@ fn tgs_json(path: &Path) -> Result<CString, String> {
     if bytes.len() > 8_388_608 {
         return Err("Animated sticker is too large".into());
     }
-    let value: serde_json::Value =
+    let mut value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|_| "Invalid animated sticker")?;
     for dimension in ["w", "h"] {
         if !value
@@ -90,81 +98,12 @@ fn tgs_json(path: &Path) -> Result<CString, String> {
     {
         return Err("Invalid animated sticker duration".into());
     }
-    CString::new(bytes).map_err(|_| "Invalid animated sticker".into())
-}
-
-struct Rlottie {
-    _library: libloading::Library,
-    from_data: unsafe extern "C" fn(*const c_char, *const c_char, *const c_char) -> *mut c_void,
-    destroy: unsafe extern "C" fn(*mut c_void),
-    total_frames: unsafe extern "C" fn(*const c_void) -> usize,
-    fps: unsafe extern "C" fn(*const c_void) -> f64,
-    render: unsafe extern "C" fn(*mut c_void, usize, *mut u32, usize, usize, usize),
-}
-
-impl Rlottie {
-    fn load() -> Result<Self, String> {
-        let name = if cfg!(target_os = "macos") {
-            "librlottie.dylib"
-        } else if cfg!(target_os = "windows") {
-            "rlottie.dll"
-        } else {
-            "librlottie.so"
-        };
-        let mut candidates: Vec<PathBuf> = std::env::var_os("QUILL_RLOTTIE_PATH")
-            .map(PathBuf::from)
-            .into_iter()
-            .collect();
-        if let Some(dir) = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(Path::to_path_buf))
-        {
-            candidates.push(dir.join(name));
-            candidates.push(dir.join("lib").join(name));
-            candidates.push(dir.join("../Frameworks").join(name));
-            for ancestor in dir.ancestors() {
-                candidates.push(ancestor.join("vendor/rlottie/prefix/lib").join(name));
-            }
-        }
-        for path in candidates {
-            // SAFETY: only explicit owner-configured or bundled native libraries are loaded.
-            let Ok(library) = (unsafe { libloading::Library::new(path) }) else {
-                continue;
-            };
-            // SAFETY: signatures match the pinned rlottie C API. The library remains alive
-            // for the process, so initialization and function pointers never outlive it.
-            unsafe {
-                let init = *library
-                    .get::<unsafe extern "C" fn()>(b"lottie_init\0")
-                    .map_err(|_| "Incompatible rlottie library")?;
-                let cache = *library
-                    .get::<unsafe extern "C" fn(usize)>(b"lottie_configure_model_cache_size\0")
-                    .map_err(|_| "Incompatible rlottie library")?;
-                let renderer = Self {
-                    from_data: *library
-                        .get(b"lottie_animation_from_data\0")
-                        .map_err(|_| "Incompatible rlottie library")?,
-                    destroy: *library
-                        .get(b"lottie_animation_destroy\0")
-                        .map_err(|_| "Incompatible rlottie library")?,
-                    total_frames: *library
-                        .get(b"lottie_animation_get_totalframe\0")
-                        .map_err(|_| "Incompatible rlottie library")?,
-                    fps: *library
-                        .get(b"lottie_animation_get_framerate\0")
-                        .map_err(|_| "Incompatible rlottie library")?,
-                    render: *library
-                        .get(b"lottie_animation_render\0")
-                        .map_err(|_| "Incompatible rlottie library")?,
-                    _library: library,
-                };
-                init();
-                cache(0);
-                return Ok(renderer);
-            }
-        }
-        Err("Animated stickers need the bundled rlottie renderer".into())
+    if apply_fitzpatrick(&mut value, fitz) {
+        // serde_json keeps the file's key order (preserve_order), which
+        // ThorVG's streaming parser needs ("ty" first in a shape).
+        bytes = serde_json::to_vec(&value).map_err(|_| "Invalid animated sticker")?;
     }
+    Ok(Tgs { json: bytes, fps })
 }
 
 pub fn decode_tgs(path: &Path, cancelled: &AtomicBool) -> Result<StickerFrames, String> {
@@ -173,84 +112,44 @@ pub fn decode_tgs(path: &Path, cancelled: &AtomicBool) -> Result<StickerFrames, 
         STICKER_EDGE,
         MAX_STICKER_FRAMES,
         MAX_PLAYBACK_FPS,
+        FitzType::None,
         cancelled,
     )
 }
 
 /// [`decode_tgs`] at `edge` × `edge` px with at most `max_frames` frames
-/// played at most `max_fps` (custom emoji decode smaller and shorter).
+/// played at most `max_fps` (custom emoji decode smaller and shorter), with
+/// emoji skin tone `fitz`.
 pub fn decode_tgs_sized(
     path: &Path,
     edge: usize,
     max_frames: usize,
     max_fps: f64,
+    fitz: FitzType,
     cancelled: &AtomicBool,
 ) -> Result<StickerFrames, String> {
-    let data = tgs_json(path)?;
-    // ponytail: serialize native renders behind one lock; separate renderer processes if throughput matters.
-    static RENDERER: OnceLock<Mutex<Option<Rlottie>>> = OnceLock::new();
-    let mut slot = RENDERER
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .map_err(|_| "Animated sticker renderer failed")?;
+    let tgs = tgs_json(path, fitz)?;
     if cancelled.load(Ordering::SeqCst) {
         return Err("Sticker playback cancelled".into());
     }
-    let renderer: &Rlottie = match &mut *slot {
-        Some(renderer) => renderer,
-        empty => empty.insert(Rlottie::load()?),
-    };
-    // SAFETY: the validated, NUL-terminated JSON and empty resource strings stay alive;
-    // this animation is used only while the library's global lock is held.
-    let animation = unsafe { (renderer.from_data)(data.as_ptr(), c"".as_ptr(), c"".as_ptr()) };
-    if animation.is_null() {
-        return Err("Could not render animated sticker".into());
-    }
-    struct Animation<'a>(*mut c_void, &'a Rlottie);
-    impl Drop for Animation<'_> {
-        fn drop(&mut self) {
-            // SAFETY: this pointer belongs to one live animation and is destroyed once.
-            unsafe { (self.1.destroy)(self.0) };
-        }
-    }
-    let animation = Animation(animation, renderer);
-    // SAFETY: animation and its owning library are alive and exclusively held.
-    let (total, original_fps) = unsafe {
-        (
-            (renderer.total_frames)(animation.0),
-            (renderer.fps)(animation.0),
-        )
-    };
-    if total == 0
-        || total > 7200
-        || !(1.0..=120.0).contains(&original_fps)
-        || total as f64 / original_fps > 30.0
-    {
+    let mut lottie = thorvg::Lottie::load(&tgs.json, edge)?;
+    let total_frames = lottie.total_frames();
+    if !(1.0..=7200.0).contains(&total_frames) || f64::from(total_frames) / tgs.fps > 30.0 {
         return Err("Invalid animated sticker duration".into());
     }
-    let count = sampled_frame_count(total, original_fps, max_frames, max_fps);
+    let total = total_frames as usize;
+    let count = sampled_frame_count(total, tgs.fps, max_frames, max_fps);
     let mut frames = Vec::with_capacity(count);
     for index in 0..count {
         if cancelled.load(Ordering::SeqCst) {
             return Err("Sticker playback cancelled".into());
         }
-        let mut pixels = vec![0u32; edge * edge];
-        // SAFETY: renderer writes exactly the edge×edge surface with its correct byte stride.
-        unsafe {
-            (renderer.render)(
-                animation.0,
-                index * total / count,
-                pixels.as_mut_ptr(),
-                edge,
-                edge,
-                edge * 4,
-            )
-        };
-        frames.push(pixels.into_iter().flat_map(u32::to_ne_bytes).collect());
+        // Evenly spaced; ThorVG interpolates between whole frames.
+        frames.push(lottie.render(index as f32 * total as f32 / count as f32)?);
     }
     Ok(StickerFrames {
         frames,
-        fps: original_fps * count as f64 / total as f64,
+        fps: tgs.fps * count as f64 / total as f64,
     })
 }
 
@@ -291,127 +190,4 @@ pub fn decode_webm_sized(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Write;
-
-    #[test]
-    #[ignore = "requires the pinned rlottie runtime and ffmpeg; run scripts/sticker-fixtures.py first"]
-    fn native_stickers_animate_with_transparent_backgrounds() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/screenshots/fixtures");
-        let cancelled = AtomicBool::new(false);
-        let tgs = decode_tgs(&root.join("demo-sticker.tgs"), &cancelled).unwrap();
-        assert!((60..=61).contains(&tgs.frames.len()));
-        assert_eq!(tgs.fps, 30.0);
-        assert_ne!(tgs.frames[0], tgs.frames[15]);
-        assert_eq!(tgs.frames[0][3], 0);
-        assert!(tgs.frames[0].as_chunks::<4>().0.iter().any(|p| p[3] == 255));
-        cancelled.store(true, Ordering::SeqCst);
-        assert!(decode_tgs(&root.join("demo-sticker.tgs"), &cancelled).is_err());
-        cancelled.store(false, Ordering::SeqCst);
-        let cache = std::env::temp_dir().join(format!("quill-webm-sticker-{}", std::process::id()));
-        let child = std::sync::Arc::new(Mutex::new(None));
-        let webm =
-            decode_webm(&root.join("demo-sticker.webm"), &cache, &child, &cancelled).unwrap();
-        assert!(webm.frames.len() > 1 && webm.frames.len() <= MAX_STICKER_FRAMES);
-        assert_ne!(webm.frames[0], webm.frames[10]);
-        assert_eq!(webm.frames[0][3], 0);
-        assert!(child.lock().unwrap().is_none());
-        assert!(!cache.exists());
-        let mut legacy = serde_json::to_value(crate::settings::MediaPrefs::default()).unwrap();
-        legacy
-            .as_object_mut()
-            .unwrap()
-            .remove("loop_animated_stickers");
-        assert!(
-            serde_json::from_value::<crate::settings::MediaPrefs>(legacy)
-                .unwrap()
-                .loop_animated_stickers
-        );
-    }
-    #[test]
-    #[ignore = "requires the pinned, patched rlottie runtime (scripts/build-rlottie.sh)"]
-    fn animated_paths_are_not_dropped_by_the_shape_budget() {
-        // Sixteen animated four-point bars. Unpatched rlottie charges each
-        // keyframed path 1024 points against its 15000-point shape budget
-        // and drops the front bars, as it dropped stickers' faces and hands.
-        // Raw JSON: rlottie needs "ty" first, and serde_json sorts keys.
-        let bar = |x: usize| {
-            let shape = format!(
-                r#"{{"i":[[0,0],[0,0],[0,0],[0,0]],"o":[[0,0],[0,0],[0,0],[0,0]],"v":[[{x},0],[{},0],[{},64],[{x},64]],"c":true}}"#,
-                x + 3,
-                x + 3
-            );
-            format!(
-                r#"{{"ty":"sh","ks":{{"a":1,"k":[{{"t":0,"i":{{"x":0.5,"y":0.5}},"o":{{"x":0.5,"y":0.5}},"s":[{shape}],"e":[{shape}]}},{{"t":1,"s":[{shape}]}}]}}}}"#
-            )
-        };
-        let bars: Vec<String> = (0..16).map(|i| bar(i * 4)).collect();
-        let path = fixture_text(&format!(
-            r#"{{"v":"5.7.0","fr":30,"ip":0,"op":2,"w":64,"h":64,"assets":[],"layers":[{{"ty":4,"ip":0,"op":2,"st":0,"ks":{{"o":{{"a":0,"k":100}},"r":{{"a":0,"k":0}},"p":{{"a":0,"k":[0,0,0]}},"a":{{"a":0,"k":[0,0,0]}},"s":{{"a":0,"k":[100,100,100]}}}},"shapes":[{},{{"ty":"fl","c":{{"a":0,"k":[1,1,1,1]}},"o":{{"a":0,"k":100}},"r":1}}]}}]}}"#,
-            bars.join(",")
-        ));
-        let decoded = decode_tgs_sized(&path, 64, 1, f64::INFINITY, &AtomicBool::new(false));
-        let _ = std::fs::remove_file(path);
-        let frames = decoded.unwrap().frames;
-        let frame = frames.first().unwrap();
-        let painted: Vec<usize> = (0..16)
-            .filter(|bar| frame.get((32 * 64 + bar * 4 + 1) * 4 + 3) == Some(&255))
-            .collect();
-        assert_eq!(painted, (0..16).collect::<Vec<_>>());
-    }
-
-    #[test]
-    fn playback_samples_at_most_the_rate_cap() {
-        // A 3 s, 60 fps sticker: 90 frames at 30 fps.
-        assert_eq!(sampled_frame_count(180, 60.0, 120, 30.0), 90);
-        // A 2 s, 60 fps sticker: 60 frames (was all 120).
-        assert_eq!(sampled_frame_count(120, 60.0, 120, 30.0), 60);
-        // Already at or under the cap: every frame, up to the frame cap.
-        assert_eq!(sampled_frame_count(60, 30.0, 120, 30.0), 60);
-        assert_eq!(sampled_frame_count(200, 24.0, 120, 30.0), 120);
-        // Custom emoji: the frame cap binds first.
-        assert_eq!(sampled_frame_count(180, 60.0, 36, 30.0), 36);
-        // No cap.
-        assert_eq!(sampled_frame_count(120, 60.0, 120, f64::INFINITY), 120);
-        assert_eq!(sampled_frame_count(0, 60.0, 120, 30.0), 1);
-    }
-
-    fn fixture(value: &serde_json::Value) -> PathBuf {
-        fixture_text(&value.to_string())
-    }
-
-    fn fixture_text(json: &str) -> PathBuf {
-        let path = std::env::temp_dir().join(format!("quill-sticker-{}.tgs", std::process::id()));
-        let mut gzip = flate2::write::GzEncoder::new(
-            std::fs::File::create(&path).unwrap(),
-            flate2::Compression::default(),
-        );
-        gzip.write_all(json.as_bytes()).unwrap();
-        gzip.finish().unwrap();
-        path
-    }
-
-    #[test]
-    fn tgs_validation_rejects_external_resources_and_bad_bounds() {
-        let base =
-            serde_json::json!({"w":512,"h":512,"fr":60,"ip":0,"op":120,"assets":[],"layers":[]});
-        let path = fixture(&base);
-        assert!(tgs_json(&path).is_ok());
-        for patch in [
-            serde_json::json!({"assets":[{"p":"/etc/passwd"}]}),
-            serde_json::json!({"w":0}),
-            serde_json::json!({"fr":0}),
-            serde_json::json!({"op":7201}),
-        ] {
-            let mut value = base.clone();
-            for (key, replacement) in patch.as_object().unwrap() {
-                value[key] = replacement.clone();
-            }
-            assert!(tgs_json(&fixture(&value)).is_err());
-        }
-        std::fs::write(&path, b"bad gzip").unwrap();
-        assert!(tgs_json(&path).is_err());
-        let _ = std::fs::remove_file(path);
-    }
-}
+mod tests;

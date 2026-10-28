@@ -1,8 +1,8 @@
 name: package-windows
 # Reusable: the Windows zip (docs/decisions/codex-windows-package.md).
 # windows-build: the UI release binary + core tests. windows-native: TDLib
-# (static OpenSSL/zlib/CRT) from source, ntgcalls prebuilt. windows-rlottie and
-# windows-ffmpeg build in parallel. windows-package: assemble, check and smoke
+# (static OpenSSL/zlib/CRT) from source, ntgcalls prebuilt. windows-ffmpeg
+# builds in parallel. windows-package: assemble, check and smoke
 # the zip. Everything links the C runtime statically or uses the OS Universal
 # CRT, so no VC++ runtime DLL ships (docs/decisions/codex-release-pipeline.md).
 on:
@@ -130,38 +130,6 @@ jobs:
           retention-days: 3
           if-no-files-found: error
 
-  windows-rlottie:
-    name: windows-rlottie
-    runs-on: windows-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-      - name: restore rlottie build
-        id: rlottie-cache
-        uses: actions/cache/restore@v5
-        with:
-          path: vendor/rlottie/prefix
-          key: rlottie-windows-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie-windows.ps1', 'scripts/windows-common.ps1', 'native/patches/rlottie-animated-shape-budget.patch') }}
-      - name: build rlottie
-        if: steps.rlottie-cache.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: scripts/build-rlottie-windows.ps1
-      - name: save rlottie build
-        if: steps.rlottie-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        with:
-          path: vendor/rlottie/prefix
-          key: rlottie-windows-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie-windows.ps1', 'scripts/windows-common.ps1', 'native/patches/rlottie-animated-shape-budget.patch') }}
-      - uses: actions/upload-artifact@v7
-        with:
-          name: quill-windows-rlottie
-          path: vendor/rlottie/prefix/bin/rlottie.dll
-          retention-days: 3
-          if-no-files-found: error
-
   # FFmpeg (LGPL, shared) with the ffmpeg/ffprobe programs + the quillvideo
   # shim, built with MinGW-w64 (MSYS2 UCRT64): the DLLs and programs import
   # only Windows system DLLs (the Universal CRT is part of Windows 10+).
@@ -225,7 +193,7 @@ jobs:
   windows-package:
     name: windows-package
     runs-on: windows-latest
-    needs: [windows-build, windows-native, windows-rlottie, windows-ffmpeg]
+    needs: [windows-build, windows-native, windows-ffmpeg]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -240,10 +208,6 @@ jobs:
         with:
           name: quill-windows-native
           path: .
-      - uses: actions/download-artifact@v8
-        with:
-          name: quill-windows-rlottie
-          path: vendor/rlottie/prefix/bin
       - uses: actions/download-artifact@v8
         with:
           name: quill-windows-ffmpeg

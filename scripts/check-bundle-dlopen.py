@@ -14,7 +14,7 @@ def main() -> int:
     pkg = os.path.realpath(sys.argv[1])
     lib_dir = os.path.join(pkg, "lib")
     failures = []
-    for name in ("libtdjson.so", "libntgcalls.so", "librlottie.so", "libquillvideo.so"):
+    for name in ("libtdjson.so", "libntgcalls.so", "libquillvideo.so"):
         path = os.path.join(lib_dir, name)
         try:
             ctypes.CDLL(path)

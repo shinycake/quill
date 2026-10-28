@@ -43,13 +43,6 @@ fn set_gift_count(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, count: us
     });
 }
 
-fn rlottie_decodes() -> bool {
-    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("docs/screenshots/fixtures/demo-gift-model.tgs");
-    let cancelled = std::sync::atomic::AtomicBool::new(false);
-    quill::sticker_playback::decode_tgs_sized(&fixture, 64, 1, 1., &cancelled).is_ok()
-}
-
 fn panel_bounds_height(vcx: &mut VisualTestContext) -> f64 {
     let bounds = vcx.debug_bounds("peer-qr-panel").expect("the panel");
     f64::from(f32::from(bounds.size.height))
@@ -143,14 +136,11 @@ fn someone_elses_box_shows_their_saved_theme(cx: &mut TestAppContext) {
         let view = app.qr_view().expect("view");
         assert_eq!(view.appearance.gift, Some(gift.id));
         assert_eq!(view.appearance.center, gift.center);
-        // Stills need rlottie, which the headless Linux CI job does not ship.
-        if rlottie_decodes() {
-            assert!(
-                app.qr_gift_model(&gift).is_some(),
-                "the model still is made for the pattern"
-            );
-            assert!(app.qr_gift_symbol(&gift).is_some());
-        }
+        assert!(
+            app.qr_gift_model(&gift).is_some(),
+            "the model still is made for the pattern"
+        );
+        assert!(app.qr_gift_symbol(&gift).is_some());
     });
     // Nothing of theirs is saved by closing.
     close_box(&app, vcx);

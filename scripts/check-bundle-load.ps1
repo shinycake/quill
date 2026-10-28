@@ -1,11 +1,11 @@
-# Load tdjson/ntgcalls/rlottie/quillvideo from the package and assert the FFmpeg DLLs mapped
+# Load tdjson/ntgcalls/quillvideo from the package and assert the FFmpeg DLLs mapped
 # into this process came from the package directory, and that no OpenSSL/zlib DLL was
 # loaded at all (tdjson.dll links them statically).
 # Run with the package directory's DLLs not on PATH.   pwsh scripts/check-bundle-load.ps1 <dir>
 param([Parameter(Mandatory)][string]$Dir)
 $ErrorActionPreference = 'Stop'
 $Dir = (Resolve-Path $Dir).Path
-foreach ($name in 'tdjson.dll', 'ntgcalls.dll', 'rlottie.dll', 'quillvideo.dll') {
+foreach ($name in 'tdjson.dll', 'ntgcalls.dll', 'quillvideo.dll') {
     $path = Join-Path $Dir $name
     $handle = [System.Runtime.InteropServices.NativeLibrary]::Load($path)
     Write-Host "loaded $name"

@@ -305,6 +305,10 @@ debug = false
 inherits = "dev"
 debug = true
 
+[build-dependencies]
+# Compiles the vendored ThorVG sticker renderer (build.rs, third_party/thorvg).
+cc = { version = "1", features = ["parallel"] }
+
 [target.'cfg(windows)'.build-dependencies]
 # Application icon resource (build.rs).
 embed-resource = "3"
