@@ -290,7 +290,7 @@ impl QuillApp {
             .min_h_0()
             .overflow_y_scroll()
             .track_scroll(&self.pickers.gif_scroll)
-            .on_scroll_wheel(cx.listener(|this, _, _, _| this.load_more_gifs_if_needed()))
+            .on_scroll(cx.listener(|this, _, _, _| this.load_more_gifs_if_needed()))
             .child(grid)
             .into_any_element()
     }

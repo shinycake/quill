@@ -187,7 +187,7 @@ impl QuillApp {
             .min_h_0()
             .overflow_y_scroll()
             .track_scroll(&self.search_ui.results_scroll)
-            .on_scroll_wheel(cx.listener(|this, _, _, cx| {
+            .on_scroll(cx.listener(|this, _, _, cx| {
                 if this
                     .session()
                     .is_some_and(|s| s.search.search.tabs.has_more())

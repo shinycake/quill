@@ -321,7 +321,7 @@ impl QuillApp {
                 .max_h(px(SECTION_MAX_HEIGHT))
                 .overflow_y_scroll()
                 .track_scroll(&posted_scroll)
-                .on_scroll_wheel(watch_scroll(cx, Self::story_posted_more));
+                .on_scroll(watch_scroll(cx, Self::story_posted_more));
             for story_id in &chat_page_ids {
                 let story_id = *story_id;
                 let label = label_for(story_id);
@@ -380,7 +380,7 @@ impl QuillApp {
                 .max_h(px(SECTION_MAX_HEIGHT))
                 .overflow_y_scroll()
                 .track_scroll(&archive_scroll)
-                .on_scroll_wheel(watch_scroll(cx, Self::story_archive_more));
+                .on_scroll(watch_scroll(cx, Self::story_archive_more));
             for story_id in &archived_ids {
                 let label = label_for(*story_id);
                 archive_rows = archive_rows.child(

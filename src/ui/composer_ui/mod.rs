@@ -367,7 +367,7 @@ fn composer_context_bar_rich(
             let on_right = run.clone();
             this.cursor_pointer()
                 .on_click(move |event, window, cx| {
-                    let click = if event.modifiers().secondary() {
+                    let click = if event.modifiers().secondary(cx) {
                         BarClick::LeftModified
                     } else {
                         BarClick::Left

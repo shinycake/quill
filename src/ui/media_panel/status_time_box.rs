@@ -153,7 +153,7 @@ impl QuillApp {
                     _ => {}
                 }
             }))
-            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _, cx| {
+            .on_scroll(cx.listener(|this, event: &ScrollEvent, _, cx| {
                 let moved = event.delta.pixel_delta(px(ITEM_HEIGHT)).y;
                 let Some(until) = this.pickers.media_panel.until.as_mut() else {
                     return;

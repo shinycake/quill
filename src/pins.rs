@@ -6,7 +6,7 @@
 /// snapshot crates; `gpui-base`, `gpui-component`, `gpui-pre` and
 /// `gpui-pre-{apple,macos,linux,windows,wgpu}` are patched copies in
 /// `third_party/` (docs/decisions/gpui-kit-0-8-0.md).
-pub const GPUI_KIT_VERSION: &str = "0.8.0";
+pub const GPUI_KIT_VERSION: &str = "0.8.1";
 
 /// Official TDLib git commit used as the schema/runtime baseline.
 pub const TDLIB_GIT_COMMIT: &str = "0e88653dcbf4e44c73cb655a05b58cd749a91169";

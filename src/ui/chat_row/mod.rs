@@ -537,7 +537,7 @@ pub(super) fn session_chat_row(
             // check instead of opening the chat.
             if selecting {
                 this.toggle_chat_selected(id, cx);
-            } else if event.modifiers().secondary() {
+            } else if event.modifiers().secondary(cx) {
                 // Ctrl+click (Cmd on macOS) opens the chat in a new window
                 // (tdesktop `dialogs_inner_widget.cpp`: `row.newWindow =
                 // modifiers & Qt::ControlModifier`).

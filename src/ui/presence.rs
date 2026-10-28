@@ -70,7 +70,7 @@ pub(super) fn input_probe() -> impl IntoElement {
                     note_real_input(RealInput::Press, window);
                 }
             });
-            window.on_mouse_event(|_: &ScrollWheelEvent, phase, window, _| {
+            window.on_mouse_event(|_: &ScrollEvent, phase, window, _| {
                 if phase == DispatchPhase::Capture {
                     note_real_input(RealInput::Scroll, window);
                 }

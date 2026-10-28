@@ -79,7 +79,7 @@ impl QuillApp {
             .gap_1()
             .overflow_x_scroll()
             .track_scroll(&handle)
-            .on_scroll_wheel(move |event, window, cx| {
+            .on_scroll(move |event, window, cx| {
                 // A vertical wheel moves the strip sideways.
                 let delta = event.delta.pixel_delta(window.line_height());
                 if delta.y.abs() > delta.x.abs() {

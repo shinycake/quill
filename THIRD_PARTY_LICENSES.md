@@ -12,15 +12,15 @@ license texts under `licenses/`.
 
 ## Overview
 
-- MIT License: 680
+- MIT License: 676
 - Apache License 2.0: 42
 - Unicode License v3: 24
 - ISC License: 22
 - BSD 3-Clause "New" or "Revised" License: 16
 - Mozilla Public License 2.0: 16
 - BSD Zero Clause License: 4
-- zlib License: 4
-- Creative Commons Zero v1.0 Universal: 3
+- zlib License: 3
+- Creative Commons Zero v1.0 Universal: 2
 - BSD 2-Clause "Simplified" License: 1
 - Community Data License Agreement Permissive 2.0: 1
 - The Unlicense: 1
@@ -1439,8 +1439,8 @@ Apache License
 
 Used by:
 - [dunce 1.0.5](https://gitlab.com/kornelski/dunce)
-- [gpui-kit-assets 0.8.0](https://github.com/longbridge/gpui-kit)
-- [gpui-kit 0.8.0](https://github.com/longbridge/gpui-kit)
+- [gpui-kit-assets 0.8.1](https://github.com/longbridge/gpui-kit)
+- [gpui-kit 0.8.1](https://github.com/longbridge/gpui-kit)
 - [interprocess 2.4.7](https://github.com/kotauskas/interprocess)
 - [ryu 1.0.23](https://github.com/dtolnay/ryu)
 - [spirv 0.4.0+sdk-1.4.341.0](https://github.com/gfx-rs/rspirv)
@@ -1525,24 +1525,24 @@ limitations under the License.
 ### Apache License 2.0
 
 Used by:
-- [gpui-pre 0.3.9](https://github.com/zed-industries/zed)
-- [gpui-pre-apple 0.3.9](https://github.com/zed-industries/zed)
-- [gpui-pre-linux 0.3.9](https://github.com/zed-industries/zed)
-- [gpui-pre-macos 0.3.9](https://github.com/zed-industries/zed)
-- [gpui-pre-wgpu 0.3.9](https://github.com/zed-industries/zed)
-- [gpui-pre-windows 0.3.9](https://github.com/zed-industries/zed)
-- [gpui-pre-collections 0.3.9](https://github.com/zed-industries/zed)
-- [gpui-pre-derive-refineable 0.3.9](https://github.com/zed-industries/zed)
-- [gpui-pre-http-client 0.3.9](https://github.com/zed-industries/zed)
-- [gpui-pre-macros 0.3.9](https://github.com/zed-industries/zed)
-- [gpui-pre-platform 0.3.9](https://github.com/zed-industries/zed)
-- [gpui-pre-refineable 0.3.9](https://github.com/zed-industries/zed)
-- [gpui-pre-scheduler 0.3.9](https://github.com/zed-industries/zed)
-- [gpui-pre-shared-string 0.3.9](https://github.com/zed-industries/zed)
-- [gpui-pre-sum-tree 0.3.9](https://github.com/zed-industries/zed)
-- [gpui-pre-util 0.3.9](https://github.com/zed-industries/zed)
-- [gpui-pre-ztracing-macro 0.3.9](https://github.com/zed-industries/zed)
-- [gpui-pre-ztracing 0.3.9](https://github.com/zed-industries/zed)
+- [gpui-pre 0.3.10](https://github.com/zed-industries/zed)
+- [gpui-pre-apple 0.3.10](https://github.com/zed-industries/zed)
+- [gpui-pre-linux 0.3.10](https://github.com/zed-industries/zed)
+- [gpui-pre-macos 0.3.10](https://github.com/zed-industries/zed)
+- [gpui-pre-wgpu 0.3.10](https://github.com/zed-industries/zed)
+- [gpui-pre-windows 0.3.10](https://github.com/zed-industries/zed)
+- [gpui-pre-collections 0.3.10](https://github.com/zed-industries/zed)
+- [gpui-pre-derive-refineable 0.3.10](https://github.com/zed-industries/zed)
+- [gpui-pre-http-client 0.3.10](https://github.com/zed-industries/zed)
+- [gpui-pre-macros 0.3.10](https://github.com/zed-industries/zed)
+- [gpui-pre-platform 0.3.10](https://github.com/zed-industries/zed)
+- [gpui-pre-refineable 0.3.10](https://github.com/zed-industries/zed)
+- [gpui-pre-scheduler 0.3.10](https://github.com/zed-industries/zed)
+- [gpui-pre-shared-string 0.3.10](https://github.com/zed-industries/zed)
+- [gpui-pre-sum-tree 0.3.10](https://github.com/zed-industries/zed)
+- [gpui-pre-util 0.3.10](https://github.com/zed-industries/zed)
+- [gpui-pre-ztracing-macro 0.3.10](https://github.com/zed-industries/zed)
+- [gpui-pre-ztracing 0.3.10](https://github.com/zed-industries/zed)
 
 ````text
 Copyright 2022 - 2025 Zed Industries, Inc.
@@ -1773,9 +1773,9 @@ Apache License
 ### Apache License 2.0
 
 Used by:
-- [gpui-base 0.8.0](https://github.com/longbridge/gpui-kit)
-- [gpui-component 0.8.0](https://github.com/longbridge/gpui-kit)
-- [gpui-component-macros 0.8.0](https://crates.io/crates/gpui-component-macros)
+- [gpui-base 0.8.1](https://github.com/longbridge/gpui-kit)
+- [gpui-component 0.8.1](https://github.com/longbridge/gpui-kit)
+- [gpui-component-macros 0.8.1](https://crates.io/crates/gpui-component-macros)
 
 ````text
 Copyright 2024 - 2026 Longbridge <https://longbridge.com>
@@ -2492,7 +2492,6 @@ For these and/or other purposes and motivations, and without any expectation of 
 ### Creative Commons Zero v1.0 Universal
 
 Used by:
-- [hexf-parse 0.2.1](https://github.com/lifthrasiir/hexf)
 - [tiny-keccak 2.0.2](https://crates.io/crates/tiny-keccak)
 
 ````text
@@ -5009,8 +5008,6 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [cocoa-foundation 0.2.1](https://github.com/servo/core-foundation-rs)
-- [cocoa 0.26.1](https://github.com/servo/core-foundation-rs)
 - [core-foundation-sys 0.8.7](https://github.com/servo/core-foundation-rs)
 - [core-foundation 0.10.1](https://github.com/servo/core-foundation-rs)
 - [core-graphics-types 0.2.0](https://github.com/servo/core-foundation-rs)
@@ -6278,7 +6275,6 @@ Used by:
 - [const-random-macro 0.1.16](https://github.com/tkaitchuck/constrandom)
 - [const-random 0.1.18](https://github.com/tkaitchuck/constrandom)
 - [hashbrown 0.14.5](https://github.com/rust-lang/hashbrown)
-- [hashbrown 0.15.5](https://github.com/rust-lang/hashbrown)
 - [hashbrown 0.16.1](https://github.com/rust-lang/hashbrown)
 - [hashbrown 0.17.1](https://github.com/rust-lang/hashbrown)
 
@@ -9542,7 +9538,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [bit-set 0.9.1](https://github.com/contain-rs/bit-set)
+- [bit-set 0.10.0](https://github.com/contain-rs/bit-set)
 
 ````text
 Copyright (c) 2026 The Rust Project Developers
@@ -11389,14 +11385,15 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [naga 29.0.4](https://github.com/gfx-rs/wgpu)
-- [wgpu-core-deps-apple 29.0.4](https://github.com/gfx-rs/wgpu)
-- [wgpu-core-deps-windows-linux-android 29.0.4](https://github.com/gfx-rs/wgpu)
-- [wgpu-core 29.0.4](https://github.com/gfx-rs/wgpu)
-- [wgpu-hal 29.0.4](https://github.com/gfx-rs/wgpu)
-- [wgpu-naga-bridge 29.0.4](https://github.com/gfx-rs/wgpu)
-- [wgpu-types 29.0.4](https://github.com/gfx-rs/wgpu)
-- [wgpu 29.0.4](https://github.com/gfx-rs/wgpu)
+- [naga-types 30.0.1](https://github.com/gfx-rs/wgpu)
+- [naga 30.0.1](https://github.com/gfx-rs/wgpu)
+- [wgpu-core-deps-apple 30.0.1](https://github.com/gfx-rs/wgpu)
+- [wgpu-core-deps-windows-linux-android 30.0.1](https://github.com/gfx-rs/wgpu)
+- [wgpu-core 30.0.1](https://github.com/gfx-rs/wgpu)
+- [wgpu-hal 30.0.1](https://github.com/gfx-rs/wgpu)
+- [wgpu-naga-bridge 30.0.1](https://github.com/gfx-rs/wgpu)
+- [wgpu-types 30.0.1](https://github.com/gfx-rs/wgpu)
+- [wgpu 30.0.1](https://github.com/gfx-rs/wgpu)
 
 ````text
 MIT License
@@ -11501,8 +11498,6 @@ Used by:
 - [dasp_sample 0.11.0](https://github.com/rustaudio/sample.git)
 - [dispatch2 0.3.1](https://github.com/madsmtm/objc2)
 - [dpi 0.1.2](https://github.com/rust-windowing/winit)
-- [gpu-descriptor-types 0.2.0](https://github.com/zakarumych/gpu-descriptor)
-- [gpu-descriptor 0.3.2](https://github.com/zakarumych/gpu-descriptor)
 - [granit-parser 1.3.0](https://github.com/bourumir-wyngs/granit-parser)
 - [harfrust 0.5.2](https://github.com/harfbuzz/harfrust)
 - [libm 0.2.16](https://github.com/rust-lang/compiler-builtins)
@@ -11554,7 +11549,7 @@ Used by:
 - [rust-i18n-support 4.2.4](https://github.com/longbridge/rust-i18n)
 - [seahash 4.1.0](https://gitlab.redox-os.org/redox-os/seahash)
 - [svg_fmt 0.4.5](https://github.com/nical/rust_debug)
-- [taffy 0.13.0](https://github.com/DioxusLabs/taffy)
+- [taffy 0.15.0](https://github.com/DioxusLabs/taffy)
 - [tauri-winrt-notification 0.8.1](https://github.com/tauri-apps/winrt-notification)
 - [windows-collections 0.3.2](https://github.com/microsoft/windows-rs)
 - [windows-core 0.58.0](https://github.com/microsoft/windows-rs)
@@ -14616,7 +14611,6 @@ the following restrictions:
 ### zlib License
 
 Used by:
-- [foldhash 0.1.5](https://github.com/orlp/foldhash)
 - [foldhash 0.2.0](https://github.com/orlp/foldhash)
 
 ````text

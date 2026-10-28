@@ -408,7 +408,7 @@ impl QuillApp {
         if Self::saved_topics_in_flight(session) {
             list = list.child(loading_row("saved-sublists-loading", cx));
         }
-        list.on_scroll_wheel(watch_scroll(cx, Self::saved_topics_more))
+        list.on_scroll(watch_scroll(cx, Self::saved_topics_more))
             .into_any_element()
     }
 

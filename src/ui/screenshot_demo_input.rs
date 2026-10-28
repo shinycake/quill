@@ -6,7 +6,7 @@ use std::time::Duration;
 use gpui_kit::gpui::{
     AnyWindowHandle, AsyncApp, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, PinchEvent, Pixels, PlatformInput, Point,
-    ScrollDelta, ScrollWheelEvent, TouchPhase, point, px,
+    ScrollDelta, ScrollEvent, TouchPhase, point, px,
 };
 
 /// Runs the `QUILL_DEMO_CLICK=step[;step…]` script against the demo window,
@@ -175,11 +175,14 @@ async fn run_step(step: &str, demo_window: AnyWindowHandle, cx: &mut AsyncApp) {
     // included (`cmd-f`).
     if let Some(key) = step.strip_prefix("k:") {
         let key = key.trim();
-        let keystroke = Keystroke::parse(key).unwrap_or_else(|_| Keystroke {
-            modifiers: Modifiers::default(),
-            key: key.to_string(),
-            key_char: None,
-        });
+        let keystroke =
+            Keystroke::parse_with_os(key, crate::ui::host_os::HOST_OS).unwrap_or_else(|_| {
+                Keystroke {
+                    modifiers: Modifiers::default(),
+                    key: key.to_string(),
+                    key_char: None,
+                }
+            });
         dispatch(
             demo_window,
             cx,
@@ -215,7 +218,7 @@ async fn run_step(step: &str, demo_window: AnyWindowHandle, cx: &mut AsyncApp) {
     // `w:` sends one phased trackpad scroll event ([`wheel_step`]).
     if let Some(wheel) = step.strip_prefix("w:") {
         if let Some(event) = wheel_step(wheel) {
-            dispatch(demo_window, cx, [PlatformInput::ScrollWheel(event)], false);
+            dispatch(demo_window, cx, [PlatformInput::Scroll(event)], false);
         }
         pause(cx, 40).await;
         return;
@@ -238,11 +241,12 @@ async fn run_step(step: &str, demo_window: AnyWindowHandle, cx: &mut AsyncApp) {
             dispatch(
                 demo_window,
                 cx,
-                [PlatformInput::ScrollWheel(ScrollWheelEvent {
+                [PlatformInput::Scroll(ScrollEvent {
                     position: point(px(x), px(y)),
                     delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
                     modifiers: Modifiers::default(),
                     touch_phase: TouchPhase::Moved,
+                    source: gpui_kit::ScrollSource::Pointer,
                 })],
                 false,
             );
@@ -325,7 +329,7 @@ fn point_step(step: &str) -> Option<Point<Pixels>> {
 /// The `w:` step `x,y,dx,dy,s|m|e[,cmd]`: one phased trackpad scroll event
 /// (started / moved / ended), to script a swipe. `cmd` holds Cmd (Ctrl off
 /// macOS). `None` when the step does not parse.
-pub(crate) fn wheel_step(step: &str) -> Option<ScrollWheelEvent> {
+pub(crate) fn wheel_step(step: &str) -> Option<ScrollEvent> {
     let mut parts: Vec<&str> = step.split(',').map(str::trim).collect();
     let primary = parts.last() == Some(&"cmd");
     if primary {
@@ -339,15 +343,16 @@ pub(crate) fn wheel_step(step: &str) -> Option<ScrollWheelEvent> {
         "e" => TouchPhase::Ended,
         _ => TouchPhase::Moved,
     };
-    Some(ScrollWheelEvent {
+    Some(ScrollEvent {
         position: point(px(x.parse().ok()?), px(y.parse().ok()?)),
         delta: ScrollDelta::Pixels(point(px(dx.parse().ok()?), px(dy.parse().ok()?))),
         modifiers: if primary {
-            Modifiers::secondary_key()
+            crate::ui::host_os::secondary_key()
         } else {
             Modifiers::default()
         },
         touch_phase,
+        source: gpui_kit::ScrollSource::Pointer,
     })
 }
 /// The `z:` step `x,y,delta`: one trackpad pinch centred on the point,
@@ -386,7 +391,7 @@ mod tests {
         assert_eq!(started.modifiers, Modifiers::default());
         let zoom = wheel_step("10,20,0,40,m,cmd").expect("a step");
         assert_eq!(zoom.touch_phase, TouchPhase::Moved);
-        assert_eq!(zoom.modifiers, Modifiers::secondary_key());
+        assert_eq!(zoom.modifiers, crate::ui::host_os::secondary_key());
         assert!(wheel_step("10,20,0").is_none());
         assert!(wheel_step("10,20,x,40,e").is_none());
     }

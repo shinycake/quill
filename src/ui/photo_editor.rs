@@ -639,7 +639,7 @@ impl QuillApp {
                     // The wheel zooms the picked image (tdesktop's scene
                     // zoom in the sticker editor).
                     let wheel_hitbox = hitbox.clone();
-                    window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
+                    window.on_mouse_event(move |event: &ScrollEvent, phase, window, cx| {
                         if phase == DispatchPhase::Bubble && wheel_hitbox.is_hovered(window) {
                             let delta = event.delta.pixel_delta(px(20.)).y / px(1.);
                             let _ = app.update(cx, |this, cx| {

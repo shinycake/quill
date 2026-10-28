@@ -498,7 +498,7 @@ impl QuillApp {
         });
         let bottom_bar = div()
             .debug_selector(|| "media-viewer-bottom-band".into())
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .on_scroll(|_, _, cx| cx.stop_propagation())
             .absolute()
             .left_0()
             .right_0()

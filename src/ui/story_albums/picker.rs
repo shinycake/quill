@@ -272,7 +272,7 @@ impl QuillApp {
             .max_h(px(380.))
             .overflow_y_scroll()
             .track_scroll(&scroll)
-            .on_scroll_wheel(cx.listener(|this, _, _, cx| {
+            .on_scroll(cx.listener(|this, _, _, cx| {
                 this.spawn_scoped(cx, async move |this, cx| {
                     let _ = this.update(cx, |this, cx| this.picker_load_near_end(cx));
                 })

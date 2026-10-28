@@ -4,7 +4,7 @@
 //! feature for gpui-kit's test support).
 use super::wheel_ui_tests::{new_app, notch, settle};
 use crate::ui::app::QuillApp;
-use gpui_kit::{Entity, Modifiers, TestAppContext, VisualTestContext};
+use gpui_kit::{Entity, TestAppContext, VisualTestContext};
 use quill::ids::{FileId, MessageId};
 use quill::media_viewer::{ZoomLevels, wheel_zoom_factor};
 use quill::telegram::envelope::{MessageContent, PhotoContent, PhotoSizeView};
@@ -114,7 +114,12 @@ fn cmd_wheel_still_zooms_continuously(cx: &mut TestAppContext) {
     let (bounds, _) = app
         .update_in(vcx, |app, window, cx| app.viewer_media_bounds(window, cx))
         .expect("the media box");
-    notch(vcx, bounds.center(), 1., Modifiers::secondary_key());
+    notch(
+        vcx,
+        bounds.center(),
+        1.,
+        crate::ui::host_os::secondary_key(),
+    );
     let zoom = app.read_with(vcx, |app, _| app.viewer.zoom.zoom);
     assert!(
         close(zoom, wheel_zoom_factor(40.0)),

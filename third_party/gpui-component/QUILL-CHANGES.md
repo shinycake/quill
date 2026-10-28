@@ -2,9 +2,9 @@
 
 This directory is gpui-component 0.8.1 from crates.io (Apache-2.0,
 `LICENSE-APACHE`), used through `[patch.crates-io]` in Quill's `Cargo.toml`.
-Commit `d0bc6816` added the unmodified registry copy (without `.cargo-ok`,
+Commit `6be84cd7` added the unmodified registry copy (without `.cargo-ok`,
 `.cargo_vcs_info.json`, `Cargo.lock` and `Cargo.toml.orig`), so
-`git diff d0bc6816 -- third_party/gpui-component` shows every change.
+`git diff 6be84cd7 -- third_party/gpui-component` shows every change.
 (First vendored at 0.7.3 in `255bf944`; carried to 0.8.0 in
 `docs/decisions/gpui-kit-0-8-0.md` and to 0.8.1 in `docs/decisions/gpui-kit-0-8-1.md`.)
 

@@ -98,7 +98,7 @@ pub(super) fn watch<T: 'static>(
 ) -> Div {
     after_layout(cx, move |this, cx| check(this, cx, false));
     div()
-        .on_scroll_wheel(cx.listener(move |this, _, _, cx| check(this, cx, true)))
+        .on_scroll(cx.listener(move |this, _, _, cx| check(this, cx, true)))
         .child(body)
 }
 
@@ -108,7 +108,7 @@ pub(super) fn watch<T: 'static>(
 pub(super) fn watch_scroll<T: 'static>(
     cx: &mut Context<T>,
     check: fn(&mut T, &mut Context<T>, bool),
-) -> impl Fn(&ScrollWheelEvent, &mut Window, &mut App) + 'static {
+) -> impl Fn(&ScrollEvent, &mut Window, &mut App) + 'static {
     after_layout(cx, move |this, cx| check(this, cx, false));
     cx.listener(move |this, _, _, cx| check(this, cx, true))
 }

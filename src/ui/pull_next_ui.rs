@@ -193,7 +193,7 @@ impl QuillApp {
     /// must not see it.
     fn pull_wheel(
         &mut self,
-        event: &ScrollWheelEvent,
+        event: &ScrollEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -411,7 +411,7 @@ impl QuillApp {
             |_, _, _| {},
             move |bounds, _, window, _| {
                 let app = app.clone();
-                window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
+                window.on_mouse_event(move |event: &ScrollEvent, phase, window, cx| {
                     if phase != DispatchPhase::Capture || !bounds.contains(&event.position) {
                         return;
                     }

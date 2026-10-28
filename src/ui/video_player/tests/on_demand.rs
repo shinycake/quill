@@ -12,7 +12,7 @@ use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
-use gpui_kit::{Modifiers, ScrollDelta, ScrollWheelEvent, point};
+use gpui_kit::{Modifiers, ScrollDelta, ScrollEvent, point};
 use quill::ids::{ChatId, FileId, MessageId};
 use quill::telegram::envelope::MessageContent;
 use std::cell::RefCell;
@@ -74,7 +74,7 @@ fn reopen_at_bottom(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
         app.select_listed_chat(ChatId(11), window, cx)
     });
     settle(app, vcx);
-    vcx.simulate_event(ScrollWheelEvent {
+    vcx.simulate_event(ScrollEvent {
         position: point(px(800.), px(300.)),
         delta: ScrollDelta::Pixels(point(px(0.), px(-5000.))),
         modifiers: Modifiers::default(),

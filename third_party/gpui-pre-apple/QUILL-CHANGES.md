@@ -3,11 +3,11 @@
 This directory is gpui-pre-apple 0.3.10 from crates.io (Apache-2.0,
 `LICENSE-APACHE`), GPUI's Metal renderer and, since 0.3.9, its CoreText text
 system, used through `[patch.crates-io]` in Quill's `Cargo.toml`. Commit
-`d0bc6816` added the unmodified registry copy, including `vendor/gpui` (the
+`6be84cd7` added the unmodified registry copy, including `vendor/gpui` (the
 GPUI sources `build.rs` reads to generate the shader header; `.gitignore`
 keeps `third_party/*/vendor/`), without the registry's `.cargo-ok`,
 `.cargo_vcs_info.json`, `Cargo.toml.orig` and `Cargo.lock`, so
-`git diff d0bc6816 -- third_party/gpui-pre-apple` shows every change. Changed
+`git diff 6be84cd7 -- third_party/gpui-pre-apple` shows every change. Changed
 code is marked `QUILL`. (The patch was first made on 0.3.8, vendored in
 `088b96c3`, and carried to 0.3.9 in `docs/decisions/gpui-kit-0-7-3.md`, and to 0.3.10 in `docs/decisions/gpui-kit-0-8-1.md`.)
 

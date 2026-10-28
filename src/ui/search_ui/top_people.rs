@@ -166,7 +166,7 @@ impl QuillApp {
                 }
                 // Ctrl (Cmd on macOS) opens the chat in its own window
                 // (`chosenRow`'s `newWindow`).
-                let new_window = event.modifiers().secondary()
+                let new_window = event.modifiers().secondary(cx)
                     && this
                         .session()
                         .and_then(|s| s.chats.get(&id.0))

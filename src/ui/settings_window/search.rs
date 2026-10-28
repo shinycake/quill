@@ -256,7 +256,7 @@ impl QuillApp {
         }
         let keystroke = &event.keystroke;
         let mods = keystroke.modifiers;
-        if keystroke.key == "f" && mods.secondary() && !mods.shift && !mods.alt {
+        if keystroke.key == "f" && mods.secondary(cx) && !mods.shift && !mods.alt {
             self.focus_settings_search(None, window, cx);
             return true;
         }
@@ -279,7 +279,7 @@ impl QuillApp {
             .as_deref()
             .filter(|t| t.chars().all(|c| !c.is_control()) && !t.trim().is_empty());
         if self.settings.focus.is_focused(window)
-            && !mods.secondary()
+            && !mods.secondary(cx)
             && !mods.control
             && !mods.alt
             && let Some(text) = typed

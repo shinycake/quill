@@ -15,6 +15,7 @@ use super::actions::{
     ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn, ViewerZoomOut,
     ViewerZoomReset,
 };
+use super::host_os::HOST_OS;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
@@ -306,58 +307,57 @@ pub const REBINDABLE_ACTIONS: &[RebindableAction] = &[
 /// Parity slice (platform-custom-keybindings): build the key binding for a
 /// rebindable action id and keystroke string. Returns `None` for unknown ids
 /// or unparsable keystrokes (a bad saved pref never breaks startup).
-pub fn keybinding_for(id: &str, keystroke: &str) -> Option<KeyBinding> {
-    // `KeyBinding::new` unwraps the keystroke parse — validate first so a bad
-    // saved pref can never panic startup. An empty string parses as a blank
-    // key, which is not a usable chord.
-    let Ok(parsed) = Keystroke::parse(keystroke) else {
+pub fn keybinding_for(id: &str, keystroke: &str, cx: &App) -> Option<KeyBinding> {
+    // An empty string parses as a blank key, which is not a usable chord.
+    let Ok(parsed) = Keystroke::parse_with_os(keystroke, HOST_OS) else {
         return None;
     };
     if parsed.key.is_empty() {
         return None;
     }
-    match id {
-        "focus-sidebar" => Some(KeyBinding::new(keystroke, FocusSidebar, None)),
-        "focus-composer" => Some(KeyBinding::new(keystroke, FocusComposer, None)),
-        "toggle-sidebar" => Some(KeyBinding::new(keystroke, ToggleSidebar, None)),
-        "next-chat" => Some(KeyBinding::new(keystroke, NextChat, None)),
-        "prev-chat" => Some(KeyBinding::new(keystroke, PrevChat, None)),
-        "load-older" => Some(KeyBinding::new(keystroke, LoadOlder, None)),
-        "open-search" => Some(KeyBinding::new(keystroke, OpenSearch, None)),
-        "open-chat-search" => Some(KeyBinding::new(keystroke, OpenChatSearch, None)),
-        "chat-search-newer" => Some(KeyBinding::new(keystroke, ChatSearchNewer, None)),
-        "chat-search-older" => Some(KeyBinding::new(keystroke, ChatSearchOlder, None)),
-        "cancel-search" => Some(KeyBinding::new(keystroke, CancelSearch, None)),
-        "format-bold" => Some(KeyBinding::new(keystroke, FormatBold, None)),
-        "format-italic" => Some(KeyBinding::new(keystroke, FormatItalic, None)),
-        "format-underline" => Some(KeyBinding::new(keystroke, FormatUnderline, None)),
-        "format-strikethrough" => Some(KeyBinding::new(keystroke, FormatStrikethrough, None)),
-        "format-monospace" => Some(KeyBinding::new(keystroke, FormatMonospace, None)),
-        "format-blockquote" => Some(KeyBinding::new(keystroke, FormatBlockQuote, None)),
-        "format-spoiler" => Some(KeyBinding::new(keystroke, FormatSpoiler, None)),
-        "format-clear" => Some(KeyBinding::new(keystroke, FormatClear, None)),
-        "viewer-prev" => Some(KeyBinding::new(keystroke, ViewerPrev, None)),
-        "viewer-next" => Some(KeyBinding::new(keystroke, ViewerNext, None)),
-        "viewer-zoom-reset" => Some(KeyBinding::new(keystroke, ViewerZoomReset, None)),
-        "viewer-zoom-in" => Some(KeyBinding::new(keystroke, ViewerZoomIn, None)),
-        "viewer-zoom-out" => Some(KeyBinding::new(keystroke, ViewerZoomOut, None)),
-        "viewer-flip-h" => Some(KeyBinding::new(keystroke, ViewerFlipHorizontal, None)),
-        "viewer-flip-v" => Some(KeyBinding::new(keystroke, ViewerFlipVertical, None)),
-        "viewer-copy" => Some(KeyBinding::new(keystroke, ViewerCopy, None)),
-        "viewer-save" => Some(KeyBinding::new(keystroke, ViewerSave, None)),
-        "story-pause" => Some(KeyBinding::new(keystroke, StoryTogglePause, None)),
-        "reopen-closed-window" => Some(KeyBinding::new(keystroke, ReopenClosedWindow, None)),
-        "archive-chat" => Some(KeyBinding::new(keystroke, ArchiveOpenChat, None)),
-        "show-scheduled" => Some(KeyBinding::new(keystroke, ShowScheduledMessages, None)),
-        "just-send" => Some(KeyBinding::new(keystroke, JustSend, None)),
-        "send-silently" => Some(KeyBinding::new(keystroke, SendSilently, None)),
-        "schedule-send" => Some(KeyBinding::new(keystroke, ScheduleSend, None)),
-        "toggle-link-preview" => Some(KeyBinding::new(keystroke, ToggleLinkPreview, None)),
-        "record-round" => Some(KeyBinding::new(keystroke, RecordRoundMessage, None)),
-        "ai-compose-apply" => Some(KeyBinding::new(keystroke, AiComposeApply, None)),
-        "show-admin-log" => Some(KeyBinding::new(keystroke, ShowAdminLog, None)),
-        _ => None,
-    }
+    let action: Box<dyn Action> = match id {
+        "focus-sidebar" => Box::new(FocusSidebar),
+        "focus-composer" => Box::new(FocusComposer),
+        "toggle-sidebar" => Box::new(ToggleSidebar),
+        "next-chat" => Box::new(NextChat),
+        "prev-chat" => Box::new(PrevChat),
+        "load-older" => Box::new(LoadOlder),
+        "open-search" => Box::new(OpenSearch),
+        "open-chat-search" => Box::new(OpenChatSearch),
+        "chat-search-newer" => Box::new(ChatSearchNewer),
+        "chat-search-older" => Box::new(ChatSearchOlder),
+        "cancel-search" => Box::new(CancelSearch),
+        "format-bold" => Box::new(FormatBold),
+        "format-italic" => Box::new(FormatItalic),
+        "format-underline" => Box::new(FormatUnderline),
+        "format-strikethrough" => Box::new(FormatStrikethrough),
+        "format-monospace" => Box::new(FormatMonospace),
+        "format-blockquote" => Box::new(FormatBlockQuote),
+        "format-spoiler" => Box::new(FormatSpoiler),
+        "format-clear" => Box::new(FormatClear),
+        "viewer-prev" => Box::new(ViewerPrev),
+        "viewer-next" => Box::new(ViewerNext),
+        "viewer-zoom-reset" => Box::new(ViewerZoomReset),
+        "viewer-zoom-in" => Box::new(ViewerZoomIn),
+        "viewer-zoom-out" => Box::new(ViewerZoomOut),
+        "viewer-flip-h" => Box::new(ViewerFlipHorizontal),
+        "viewer-flip-v" => Box::new(ViewerFlipVertical),
+        "viewer-copy" => Box::new(ViewerCopy),
+        "viewer-save" => Box::new(ViewerSave),
+        "story-pause" => Box::new(StoryTogglePause),
+        "reopen-closed-window" => Box::new(ReopenClosedWindow),
+        "archive-chat" => Box::new(ArchiveOpenChat),
+        "show-scheduled" => Box::new(ShowScheduledMessages),
+        "just-send" => Box::new(JustSend),
+        "send-silently" => Box::new(SendSilently),
+        "schedule-send" => Box::new(ScheduleSend),
+        "toggle-link-preview" => Box::new(ToggleLinkPreview),
+        "record-round" => Box::new(RecordRoundMessage),
+        "ai-compose-apply" => Box::new(AiComposeApply),
+        "show-admin-log" => Box::new(ShowAdminLog),
+        _ => return None,
+    };
+    KeyBinding::load(keystroke, action, None, false, None, cx).ok()
 }
 
 /// The composer link chord: Cmd+K on macOS, Ctrl+K elsewhere
@@ -631,7 +631,7 @@ fn canonical_chord(ks: &Keystroke) -> String {
 }
 
 fn parse_chord(source: &str) -> Option<Keystroke> {
-    let ks = Keystroke::parse(source).ok()?;
+    let ks = Keystroke::parse_with_os(source, HOST_OS).ok()?;
     if ks.key.is_empty() {
         return None;
     }
@@ -691,7 +691,7 @@ fn trace_keys(cx: &mut App) {
         let ks = &event.keystroke;
         eprintln!(
             "key: {} key={:?} key_char={:?} mods={:?} action={}",
-            ks.unparse(),
+            ks.unparse(HOST_OS),
             ks.key,
             ks.key_char,
             ks.modifiers,
@@ -730,7 +730,7 @@ pub fn apply_custom_bindings(cx: &mut App, customs: &[CustomKeybinding]) {
     bindings.extend(pack_bindings());
     for row in resolve_keybindings(customs) {
         for chord in row.live {
-            if let Some(kb) = keybinding_for(row.id, &chord) {
+            if let Some(kb) = keybinding_for(row.id, &chord, cx) {
                 bindings.push(kb);
             }
         }
@@ -756,13 +756,18 @@ mod tests {
     // gpui's `#[test]` proc macro, which would shadow the builtin test
     // attribute and fail macro expansion ("recursion limit reached").
     use super::{
-        Action, KeybindingConflict, Keystroke, Modifiers, OpenPinnedChat, QuitApp,
+        Action, HOST_OS, KeybindingConflict, Keystroke, Modifiers, OpenPinnedChat, QuitApp,
         REBINDABLE_ACTIONS, canonical_event_chord, capture_active, composer_bindings,
         composer_scoped_bindings, conflict_message, context_menu_captures_key, default_bindings,
-        fixed_keystrokes, invalidate_account_keybindings, keybinding_conflict, keybinding_for,
-        resolve_keybindings, same_chord,
+        fixed_keystrokes, invalidate_account_keybindings, keybinding_conflict, resolve_keybindings,
     };
     use quill::settings::CustomKeybinding;
+
+    /// `keybinding_for` in a test app.
+    #[cfg(feature = "demo-capture")]
+    fn binding_for(id: &str, keystroke: &str) -> Option<gpui_kit::KeyBinding> {
+        gpui_kit::TestAppContext::single().update(|cx| super::keybinding_for(id, keystroke, cx))
+    }
 
     fn custom(id: &str, keystroke: &str) -> CustomKeybinding {
         CustomKeybinding {
@@ -772,6 +777,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "demo-capture")]
     fn reference_table_matches_resolved_defaults() {
         let defaults = default_bindings();
         // macOS adds ⌃⌘F first, for the Window menu's Toggle Full Screen.
@@ -779,10 +785,10 @@ mod tests {
         assert_eq!(defaults.len(), expected);
         for row in resolve_keybindings(&[]) {
             for chord in row.live {
-                let binding = keybinding_for(row.id, &chord).unwrap();
+                let binding = binding_for(row.id, &chord).unwrap();
                 assert!(defaults.iter().any(|default| default.action().name()
                     == binding.action().name()
-                    && same_chord(
+                    && super::same_chord(
                         default.keystrokes()[0].inner(),
                         binding.keystrokes()[0].inner()
                     )));
@@ -791,22 +797,27 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "demo-capture")]
     fn ctrl_l_locks_and_shift_variant_focuses_the_composer() {
         let lock = super::LockApp.name();
         let mut chords: Vec<String> = default_bindings()
             .iter()
             .filter(|binding| binding.action().name() == lock)
-            .map(|binding| binding.keystrokes()[0].inner().unparse())
+            .map(|binding| binding.keystrokes()[0].inner().unparse(HOST_OS))
             .collect();
         chords.sort();
         // GPUI spells Cmd `super` off macOS: compare in its own spelling.
         let mut expected: Vec<String> = ["cmd-l", "ctrl-l"]
             .iter()
-            .map(|chord| Keystroke::parse(chord).unwrap().unparse())
+            .map(|chord| {
+                Keystroke::parse_with_os(chord, HOST_OS)
+                    .unwrap()
+                    .unparse(HOST_OS)
+            })
             .collect();
         expected.sort();
         assert_eq!(chords, expected);
-        assert!(keybinding_for("focus-composer", "ctrl-shift-l").is_some());
+        assert!(binding_for("focus-composer", "ctrl-shift-l").is_some());
     }
 
     #[test]
@@ -864,21 +875,24 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "demo-capture")]
     fn keybinding_for_valid_id_and_keystroke() {
-        assert!(keybinding_for("focus-composer", "ctrl-shift-l").is_some());
-        assert!(keybinding_for("cancel-search", "escape").is_some());
+        assert!(binding_for("focus-composer", "ctrl-shift-l").is_some());
+        assert!(binding_for("cancel-search", "escape").is_some());
     }
 
     #[test]
+    #[cfg(feature = "demo-capture")]
     fn keybinding_for_unknown_id_is_none() {
-        assert!(keybinding_for("nope", "ctrl-shift-l").is_none());
+        assert!(binding_for("nope", "ctrl-shift-l").is_none());
     }
 
     #[test]
+    #[cfg(feature = "demo-capture")]
     fn keybinding_for_invalid_keystroke_is_none() {
-        // Must not panic (KeyBinding::new unwraps the parse).
-        assert!(keybinding_for("focus-composer", "not-a-keystroke-%%%").is_none());
-        assert!(keybinding_for("focus-composer", "").is_none());
+        // Must not panic on a bad saved chord.
+        assert!(binding_for("focus-composer", "not-a-keystroke-%%%").is_none());
+        assert!(binding_for("focus-composer", "").is_none());
     }
 
     #[test]
@@ -898,13 +912,14 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "demo-capture")]
     fn custom_keystroke_on_fixed_keystroke_is_rejected() {
         // Mirrors apply_custom_bindings' collision rule: a custom "cmd-q"
         // for Search must not shadow the fixed Quit binding.
         let fixed = fixed_keystrokes();
-        let kb = keybinding_for("open-search", "cmd-q").unwrap();
+        let kb = binding_for("open-search", "cmd-q").unwrap();
         assert!(kb.keystrokes().iter().any(|k| fixed.contains(k.inner())));
-        let ok = keybinding_for("open-search", "ctrl-k").unwrap();
+        let ok = binding_for("open-search", "ctrl-k").unwrap();
         assert!(!ok.keystrokes().iter().any(|k| fixed.contains(k.inner())));
         for reserved in [
             "cmd-q",
@@ -1003,7 +1018,7 @@ mod tests {
         let mut seen: Vec<Keystroke> = fixed_keystrokes();
         for row in &resolved {
             for chord in &row.live {
-                let ks = Keystroke::parse(chord).unwrap();
+                let ks = Keystroke::parse_with_os(chord, HOST_OS).unwrap();
                 assert!(
                     !seen.iter().any(|claimed| {
                         claimed.modifiers == ks.modifiers
@@ -1081,7 +1096,7 @@ mod tests {
             .iter()
             .map(|c| gpui_kit::KeyContext::parse(c).unwrap())
             .collect();
-        let input = [Keystroke::parse(chord).unwrap()];
+        let input = [Keystroke::parse_with_os(chord, HOST_OS).unwrap()];
         let (bindings, _) = keymap().bindings_for_input(&input, &stack);
         bindings.first().map(|b| b.action().name().to_string())
     }
@@ -1224,7 +1239,7 @@ mod tests {
     fn pinned_chord_n_opens_pinned_chat_n() {
         let keymap = keymap();
         for n in 1..=8usize {
-            let input = [Keystroke::parse(&primary(&n.to_string())).unwrap()];
+            let input = [Keystroke::parse_with_os(&primary(&n.to_string()), HOST_OS).unwrap()];
             let (found, _) = keymap.bindings_for_input(&input, &[]);
             let action = found.first().unwrap().action();
             assert!(
@@ -1257,7 +1272,7 @@ mod tests {
             ("pagedown".to_string(), "HistoryPageDown"),
             (primary("]"), "ShowChatPreview"),
         ] {
-            let input = [Keystroke::parse(&chord).unwrap()];
+            let input = [Keystroke::parse_with_os(&chord, HOST_OS).unwrap()];
             let (found, _) = keymap.bindings_for_input(&input, &stack);
             assert_eq!(
                 found[0].action().name(),
@@ -1290,11 +1305,12 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "demo-capture")]
     fn rebound_quick_switch_keeps_working_inside_the_composer() {
         let live = resolve_keybindings(&[custom("open-search", "cmd-p")]);
         let row = live.iter().find(|row| row.id == "open-search").unwrap();
         assert_eq!(row.live, vec!["cmd-p".to_string()]);
-        let mut bindings = vec![keybinding_for("open-search", "cmd-p").unwrap()];
+        let mut bindings = vec![binding_for("open-search", "cmd-p").unwrap()];
         bindings.extend(composer_bindings());
         let keymap = gpui_kit::Keymap::new(bindings);
         let stack: Vec<gpui_kit::KeyContext> = ["QuillComposer", "Input"]

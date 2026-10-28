@@ -2,10 +2,10 @@
 
 This directory is gpui-pre-windows 0.3.10 from crates.io (Apache-2.0,
 `LICENSE-APACHE`), GPUI's Windows platform, used through `[patch.crates-io]`
-in Quill's `Cargo.toml`. Commit `d0bc6816` added the unmodified registry copy
+in Quill's `Cargo.toml`. Commit `6be84cd7` added the unmodified registry copy
 (without the registry's `.cargo-ok`, `.cargo_vcs_info.json`,
 `Cargo.toml.orig` and `Cargo.lock`), so
-`git diff d0bc6816 -- third_party/gpui-pre-windows` shows every change.
+`git diff 6be84cd7 -- third_party/gpui-pre-windows` shows every change.
 (The patch was first made on 0.3.7, carried to 0.3.8 in
 `docs/decisions/codex-gpui-kit-0.7.1.md` and to 0.3.9 in `docs/decisions/gpui-kit-0-7-3.md`, and to 0.3.10 in `docs/decisions/gpui-kit-0-8-1.md`.)
 

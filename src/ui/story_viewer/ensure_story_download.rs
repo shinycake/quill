@@ -323,7 +323,7 @@ impl QuillApp {
             .max_h(px(260.))
             .overflow_y_scroll()
             .track_scroll(&self.stories.viewers_scroll)
-            .on_scroll_wheel(cx.listener(|this, _, _, cx| this.story_viewers_scrolled(cx)))
+            .on_scroll(cx.listener(|this, _, _, cx| this.story_viewers_scrolled(cx)))
             .p_2()
             .rounded_md()
             .bg(bg_canvas())

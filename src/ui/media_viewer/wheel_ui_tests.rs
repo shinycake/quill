@@ -10,7 +10,7 @@ use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::{
-    AppContext, Entity, Modifiers, Pixels, Point, ScrollDelta, ScrollWheelEvent, TouchPhase,
+    AppContext, Entity, Modifiers, Pixels, Point, ScrollDelta, ScrollEvent, TouchPhase,
 };
 use gpui_kit::{TestAppContext, VisualTestContext, point, px, size};
 use quill::ids::{ChatId, FileId, MessageId};
@@ -104,7 +104,7 @@ pub(in crate::ui::media_viewer) fn notch(
 ) {
     vcx.simulate_mouse_move(at, None, Modifiers::default());
     settle(vcx);
-    vcx.simulate_event(ScrollWheelEvent {
+    vcx.simulate_event(ScrollEvent {
         position: at,
         delta: ScrollDelta::Lines(point(0., lines)),
         modifiers,
@@ -151,7 +151,7 @@ fn a_wheel_notch_moves_to_the_next_item_and_cmd_wheel_zooms(cx: &mut TestAppCont
     notch(vcx, picture, 1., Modifiers::default());
     assert_eq!(current(&app, vcx), 8902);
 
-    notch(vcx, picture, 1., Modifiers::secondary_key());
+    notch(vcx, picture, 1., crate::ui::host_os::secondary_key());
     app.read_with(vcx, |app, _| {
         assert_eq!(
             app.viewer.state.current().map(|i| i.message_id.0),
@@ -183,7 +183,7 @@ fn a_trackpad_flick_moves_exactly_one_item(cx: &mut TestAppContext) {
     settle(vcx);
 
     for frame in 0..5 {
-        vcx.simulate_event(ScrollWheelEvent {
+        vcx.simulate_event(ScrollEvent {
             position: picture,
             delta: ScrollDelta::Pixels(point(px(0.), px(-70.))),
             modifiers: Modifiers::default(),
@@ -192,6 +192,7 @@ fn a_trackpad_flick_moves_exactly_one_item(cx: &mut TestAppContext) {
             } else {
                 TouchPhase::Moved
             },
+            source: gpui_kit::ScrollSource::Pointer,
         });
     }
     settle(vcx);
@@ -224,11 +225,12 @@ fn a_wheel_over_the_caption_or_the_bottom_band_keeps_the_item(cx: &mut TestAppCo
 }
 
 fn trackpad(vcx: &mut VisualTestContext, at: Point<Pixels>, dx: f32, dy: f32, phase: TouchPhase) {
-    vcx.simulate_event(ScrollWheelEvent {
+    vcx.simulate_event(ScrollEvent {
         position: at,
         delta: ScrollDelta::Pixels(point(px(dx), px(dy))),
         modifiers: Modifiers::default(),
         touch_phase: phase,
+        source: gpui_kit::ScrollSource::Pointer,
     });
     settle(vcx);
 }

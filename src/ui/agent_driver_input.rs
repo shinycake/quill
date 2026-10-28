@@ -12,7 +12,7 @@
 use super::app::QuillApp;
 use gpui_kit::gpui::{
     App, KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, PlatformInput, Point, ScrollDelta, ScrollWheelEvent, TouchPhase, Window,
+    MouseUpEvent, Pixels, PlatformInput, Point, ScrollDelta, ScrollEvent, TouchPhase, Window,
     point, px,
 };
 use quill::agent::ui_driver::bridge::{Button, Target, UiCommand};
@@ -280,11 +280,12 @@ pub(super) fn press_at(
         Pointer::Scroll { dx, dy } => {
             // Agents say "dy > 0 scrolls down"; a wheel delta moves the
             // content, so it points the other way.
-            vec![PlatformInput::ScrollWheel(ScrollWheelEvent {
+            vec![PlatformInput::Scroll(ScrollEvent {
                 position,
                 delta: ScrollDelta::Pixels(point(px(-dx), px(-dy))),
                 modifiers: Modifiers::default(),
                 touch_phase: TouchPhase::Moved,
+                source: gpui_kit::ScrollSource::Pointer,
             })]
         }
     };

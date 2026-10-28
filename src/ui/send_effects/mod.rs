@@ -409,7 +409,7 @@ impl QuillApp {
         let mut layer = div()
             .w(open.viewport.width)
             .h(open.viewport.height)
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .on_scroll(|_, _, cx| cx.stop_propagation())
             .child(
                 anchored()
                     .position(open.position)

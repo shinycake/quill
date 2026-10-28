@@ -42,10 +42,10 @@ use gpui_kit::{
     Decorations, DispatchEventResult, ExternalDragPayload, FileDropEvent, ForegroundExecutor,
     GpuSpecs, GraphicalEnvironment, Keymap, Menu, MenuItem, Modifiers, OwnedMenu,
     PathPromptOptions, Pixels, Platform, PlatformAtlas, PlatformDisplay, PlatformGestures,
-    PlatformInput, PlatformInputHandler, PlatformKeyboardLayout, PlatformKeyboardMapper,
-    PlatformTextSystem, PlatformWindow, Point, PromptButton, PromptLevel, RequestFrameOptions,
-    ResizeEdge, Scene, ScreenCaptureSource, ScrollDelta, Size, SystemNotification,
-    SystemNotificationResponse, SystemWindowTab, Task, TextInputConfiguration,
+    PlatformInfo, PlatformInput, PlatformInputHandler, PlatformKeyboardLayout,
+    PlatformKeyboardMapper, PlatformTextSystem, PlatformWindow, Point, PromptButton, PromptLevel,
+    RequestFrameOptions, ResizeEdge, Scene, ScreenCaptureSource, ScrollDelta, Size,
+    SystemNotification, SystemNotificationResponse, SystemWindowTab, Task, TextInputConfiguration,
     TextInputStateChange, ThermalState, WindowAppearance, WindowBackgroundAppearance, WindowBounds,
     WindowButtonLayout, WindowControlArea, WindowControls, WindowDecorations, WindowInsets,
     WindowParams, WindowVisibility, WindowingRequest, px,
@@ -196,12 +196,12 @@ pub(crate) fn zoom_input(input: PlatformInput, zoom: f32) -> PlatformInput {
             e.position = p(e.position);
             PlatformInput::MouseExited(e)
         }
-        PlatformInput::ScrollWheel(mut e) => {
+        PlatformInput::Scroll(mut e) => {
             e.position = p(e.position);
             if let ScrollDelta::Pixels(delta) = e.delta {
                 e.delta = ScrollDelta::Pixels(p(delta));
             }
-            PlatformInput::ScrollWheel(e)
+            PlatformInput::Scroll(e)
         }
         PlatformInput::Pinch(mut e) => {
             e.position = p(e.position);
@@ -216,6 +216,10 @@ pub(crate) fn zoom_input(input: PlatformInput, zoom: f32) -> PlatformInput {
             e.start_position = p(e.start_position);
             e.position = p(e.position);
             PlatformInput::TouchDrag(e)
+        }
+        PlatformInput::BackGesture(mut e) => {
+            e.start_position = p(e.start_position);
+            PlatformInput::BackGesture(e)
         }
         PlatformInput::Touch(mut e) => {
             e.position = p(e.position);
@@ -357,6 +361,9 @@ impl HasDisplayHandle for ZoomWindow {
 }
 
 impl Platform for ZoomPlatform {
+    fn platform_info(&self) -> PlatformInfo {
+        self.inner.platform_info()
+    }
     fn background_executor(&self) -> BackgroundExecutor {
         self.inner.background_executor()
     }
@@ -638,6 +645,16 @@ impl Platform for ZoomPlatform {
     }
     fn write_credentials(&self, url: &str, username: &str, password: &[u8]) -> Task<AnyResult<()>> {
         self.inner.write_credentials(url, username, password)
+    }
+    #[cfg(target_os = "macos")]
+    fn write_credentials_if_not_exists(
+        &self,
+        url: &str,
+        username: &str,
+        password: &[u8],
+    ) -> Task<AnyResult<bool>> {
+        self.inner
+            .write_credentials_if_not_exists(url, username, password)
     }
     fn read_credentials(&self, url: &str) -> Task<AnyResult<Option<(String, Vec<u8>)>>> {
         self.inner.read_credentials(url)
@@ -951,6 +968,7 @@ impl PlatformWindow for ZoomWindow {
         WindowInsets {
             safe_area: insets.safe_area.map(|v| inn(*v, zoom)),
             ime: insets.ime.map(|v| inn(*v, zoom)),
+            corner_radii: insets.corner_radii.map(|v| inn(*v, zoom)),
         }
     }
     fn on_insets_changed(&self, mut callback: Box<dyn FnMut(WindowInsets)>) {
@@ -960,6 +978,7 @@ impl PlatformWindow for ZoomWindow {
             callback(WindowInsets {
                 safe_area: insets.safe_area.map(|v| inn(*v, zoom)),
                 ime: insets.ime.map(|v| inn(*v, zoom)),
+                corner_radii: insets.corner_radii.map(|v| inn(*v, zoom)),
             })
         }))
     }
@@ -1003,7 +1022,7 @@ impl PlatformWindow for ZoomWindow {
 mod tests {
     #![allow(clippy::string_slice, reason = "test code slices known-good literals")]
     use super::*;
-    use gpui_kit::{MouseButton, MouseDownEvent, ScrollWheelEvent, point};
+    use gpui_kit::{MouseButton, MouseDownEvent, ScrollEvent, point};
 
     #[test]
     fn zoom_for_percent_clamps_like_the_setting() {
@@ -1048,12 +1067,12 @@ mod tests {
         };
         assert_eq!(e.position, point(px(200.), px(100.)));
 
-        let scroll = PlatformInput::ScrollWheel(ScrollWheelEvent {
+        let scroll = PlatformInput::Scroll(ScrollEvent {
             position: point(px(40.), px(40.)),
             delta: ScrollDelta::Pixels(point(px(0.), px(-30.))),
             ..Default::default()
         });
-        let PlatformInput::ScrollWheel(e) = zoom_input(scroll, 2.) else {
+        let PlatformInput::Scroll(e) = zoom_input(scroll, 2.) else {
             panic!("event kind changed");
         };
         assert_eq!(e.position, point(px(20.), px(20.)));
@@ -1062,11 +1081,11 @@ mod tests {
         };
         assert_eq!(delta, point(px(0.), px(-15.)));
 
-        let lines = PlatformInput::ScrollWheel(ScrollWheelEvent {
+        let lines = PlatformInput::Scroll(ScrollEvent {
             delta: ScrollDelta::Lines(point(0., 3.)),
             ..Default::default()
         });
-        let PlatformInput::ScrollWheel(e) = zoom_input(lines, 2.) else {
+        let PlatformInput::Scroll(e) = zoom_input(lines, 2.) else {
             panic!("event kind changed");
         };
         assert!(matches!(e.delta, ScrollDelta::Lines(l) if l == point(0., 3.)));

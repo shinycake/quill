@@ -2,10 +2,10 @@
 
 This directory is gpui-pre-wgpu 0.3.10 from crates.io (Apache-2.0,
 `LICENSE-APACHE`), GPUI's wgpu renderer and cosmic-text text system (Linux),
-used through `[patch.crates-io]` in Quill's `Cargo.toml`. Commit `d0bc6816` added
+used through `[patch.crates-io]` in Quill's `Cargo.toml`. Commit `6be84cd7` added
 the unmodified registry copy (without the registry's `.cargo-ok`,
 `.cargo_vcs_info.json`, `Cargo.toml.orig` and `Cargo.lock`), so
-`git diff d0bc6816 -- third_party/gpui-pre-wgpu` shows every change. The crate's
+`git diff 6be84cd7 -- third_party/gpui-pre-wgpu` shows every change. The crate's
 own unit tests read fonts from the Zed source tree and do not build here.
 
 The Quill project changed it in 2026 so emoji draw in colour on Linux
