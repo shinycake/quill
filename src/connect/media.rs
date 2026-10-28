@@ -272,7 +272,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .files
                 .get(&file_id.0)
                 .is_none_or(|file| file.needs_download());
-        if !preloaded && !self.session.should_download(file_id) {
+        // Asked for again right after a cancel: the cancel is undone.
+        let undoes_cancel = self.session.media.downloads.is_cancelling(file_id.0)
+            && self
+                .session
+                .media
+                .files
+                .get(&file_id.0)
+                .is_none_or(|file| file.needs_download());
+        if !preloaded && !undoes_cancel && !self.session.should_download(file_id) {
             return Ok(None);
         }
         let origin = origin

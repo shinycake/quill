@@ -153,6 +153,12 @@ impl DownloadIntents {
         }
     }
 
+    /// A cancel went out and TDLib has not reported the transfer idle yet.
+    pub fn is_cancelling(&self, file_id: i32) -> bool {
+        self.get(file_id)
+            .is_some_and(|i| i.phase == Phase::Cancelled)
+    }
+
     /// TDLib reports the transfer idle: the cancel took effect.
     pub fn confirm_cancel(&mut self, file_id: i32) {
         if self

@@ -371,9 +371,27 @@ fn a_transfer_tdlib_runs_on_its_own_can_be_cancelled() {
     assert_eq!(cancel["@type"], "cancelDownloadFile");
     assert_eq!(cancel["file_id"], 9);
     assert!(!downloads(&driver), "the row stops at once");
+    assert!(
+        !driver.session.should_download(FileId(9)),
+        "no automatic download undoes the cancel"
+    );
     // TDLib confirms: the file is idle and nothing is left behind.
     ingest(&mut driver, &file(false));
     assert!(!downloads(&driver));
     assert_eq!(driver.cancel_download(FileId(9)), Ok(false), "nothing left");
+    // Asked for again: it downloads.
+    assert!(matches!(
+        driver.download_user_file(FileId(9), None),
+        Ok(Some(_))
+    ));
+    // Cancelled and asked for again before TDLib reports it idle: it
+    // downloads again.
+    ingest(&mut driver, &file(true));
+    assert_eq!(driver.cancel_download(FileId(9)), Ok(true));
+    assert!(matches!(
+        driver.download_user_file(FileId(9), None),
+        Ok(Some(_))
+    ));
+    assert!(downloads(&driver));
     let _ = std::fs::remove_dir_all(&dir);
 }
