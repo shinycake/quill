@@ -246,3 +246,39 @@ fn a_raw_call_shows_the_risk_and_the_request(cx: &mut TestAppContext) {
         "an allowed raw call grants nothing"
     );
 }
+
+#[gpui_kit::test]
+fn turning_access_off_closes_requests_and_the_consent(cx: &mut TestAppContext) {
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    reset_for_test(&AccountKey::primary());
+    settle(vcx);
+
+    let (id, rx) = file(ask_chat(Scope::Read));
+    settle(vcx);
+    assert_eq!(open_kind(&shell, vcx), Some(DialogKind::AgentRequest));
+    quill::agent::access::set_enabled(false);
+    settle(vcx);
+    assert_eq!(open_kind(&shell, vcx), None, "the request is gone");
+    assert_eq!(answer_of(id, &rx), Some(Decision::Denied), "and denied");
+    assert!(prompts::current_for(&AccountKey::primary()).is_none());
+
+    // A consent left over from before can't show while access is off.
+    app.update(vcx, |app, cx| {
+        app.agent_ui.consent = Some(crate::ui::agent_state::AllChatsConsent {
+            account: AccountKey::primary(),
+            scope: Scope::Read,
+        });
+        cx.notify();
+    });
+    settle(vcx);
+    assert_eq!(open_kind(&shell, vcx), None, "no consent with access off");
+    quill::agent::access::set_enabled(true);
+    settle(vcx);
+    assert_eq!(open_kind(&shell, vcx), Some(DialogKind::AgentConsent));
+    quill::agent::access::set_enabled(false);
+    settle(vcx);
+    assert_eq!(open_kind(&shell, vcx), None, "off closes the consent");
+    app.update(vcx, |app, _| app.agent_ui.consent = None);
+}

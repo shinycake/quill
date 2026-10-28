@@ -377,6 +377,62 @@ mod tests {
     }
 
     #[test]
+    fn off_and_on_again_keeps_grants_log_token_and_switches() {
+        use crate::agent::{activity, grants};
+        use crate::ids::AccountKey;
+        let _guard = crate::locks::lock_or_recover(&super::TEST_LOCK);
+        crate::fast_buttons::set_persistence(false);
+        let account = AccountKey::primary();
+        super::set_enabled(true);
+        super::set_confirm_sends(true);
+        super::set_ui_driver(true);
+        super::set_raw_calls(false);
+        super::set_takeover_effect(TakeoverEffect::StillGlow);
+        grants::update(&account, |g| g.contacts = true);
+        activity::record(activity::Action {
+            id: 0,
+            time: 0,
+            account: account.clone(),
+            agent: "Claude Code".into(),
+            tool: "send_message".into(),
+            chat_id: 7,
+            chat_title: "Ann".into(),
+            summary: "kept while off".into(),
+            ok: true,
+            declined: false,
+            message_ids: Vec::new(),
+            undone: false,
+        });
+        let token = super::token();
+        let kept = |when: &str| {
+            assert!(grants::for_account(&account).contacts, "{when}: grants");
+            assert!(
+                activity::recent(&account)
+                    .iter()
+                    .any(|a| a.summary == "kept while off"),
+                "{when}: activity log"
+            );
+            assert!(super::confirm_sends() && super::ui_driver(), "{when}");
+            assert!(!super::raw_calls(), "{when}: raw calls");
+            assert_eq!(super::takeover_effect(), TakeoverEffect::StillGlow);
+            assert!(super::token_matches(&token), "{when}: token");
+        };
+
+        super::set_enabled(false);
+        assert!(!super::enabled());
+        kept("off");
+        super::set_enabled(true);
+        kept("on again");
+
+        super::set_confirm_sends(false);
+        super::set_ui_driver(false);
+        super::set_raw_calls(true);
+        super::set_takeover_effect(TakeoverEffect::Automatic);
+        grants::update(&account, |g| g.contacts = false);
+        super::set_enabled(false);
+    }
+
+    #[test]
     fn a_reset_token_replaces_the_old_one_and_ends_connections() {
         let _guard = crate::locks::lock_or_recover(&super::TEST_LOCK);
         let before = super::token();

@@ -214,7 +214,7 @@ impl QuillApp {
 
     /// The request the dialog shows: the oldest one for the active account.
     pub(super) fn agent_request(&self) -> Option<Prompt> {
-        if !sees_prompts() {
+        if !sees_agents() {
             return None;
         }
         prompts::current_for(&active_account())
@@ -331,15 +331,17 @@ fn sees_prompts() -> bool {
     true
 }
 
-/// Whether this window shows agent state: always, except in UI tests that
-/// did not set agent state up.
+/// Whether this window shows anything about agents: only while Agent
+/// access is on. Off, every agent surface (menu entries, the connected
+/// strip, requests, consents, the takeover) is gone, read here on each
+/// render. UI tests that did not set agent state up never see it.
 pub(super) fn sees_agents() -> bool {
-    sees_prompts()
+    quill::agent::access::enabled() && sees_prompts()
 }
 
 /// The agents connected now.
 pub(super) fn visible_connected() -> Vec<activity::Connected> {
-    if sees_prompts() {
+    if sees_agents() {
         activity::connected()
     } else {
         Vec::new()

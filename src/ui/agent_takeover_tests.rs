@@ -363,3 +363,22 @@ fn the_sweep_follows_the_effect_and_the_saving_signals_live(cx: &mut TestAppCont
     assert!(!clock_running(&app, vcx), "paused: no frames");
     takeover::reset_for_test();
 }
+
+#[gpui_kit::test]
+fn turning_access_off_mid_drive_removes_the_takeover_at_once(cx: &mut TestAppContext) {
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let _presence = turn_on();
+    drive_at(1000);
+    settle(vcx);
+    assert!(pill(vcx), "driving shows the takeover");
+
+    access::set_enabled(false);
+    app.update(vcx, |_, cx| cx.notify());
+    vcx.update(|window, cx| window.render_frame(cx));
+    // The takeover clock is pinned, so a fade could not have moved on:
+    // only the gate removes the layer this frame.
+    assert!(!pill(vcx), "no fade: the glow, ghost and pill are gone now");
+    takeover::reset_for_test();
+}
