@@ -73,6 +73,11 @@ impl Overscroll {
         self.physics.offset()
     }
 
+    /// Whether a finger holds the stretched edge.
+    pub(crate) fn is_held(&self) -> bool {
+        self.physics.is_dragging() && self.physics.offset() != 0.
+    }
+
     /// A new gesture starts: it may stretch the edge again.
     fn start_gesture(&mut self) {
         self.spent = false;

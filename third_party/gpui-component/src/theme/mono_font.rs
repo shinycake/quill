@@ -12,9 +12,9 @@
 //! `add_fonts`, and Windows lists families under their localized names, so an
 //! English name for a CJK font would look missing when it is not.
 
-use gpui::{App, SharedString};
+use gpui::{App, BackgroundExecutor, SharedString, TextSystem};
 use gpui_base::TypographyTokens;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 /// Monospace families tried, in order, when the platform default is missing.
 const MONO_FONT_ALTERNATES: &[&str] = if cfg!(target_os = "macos") {
@@ -61,14 +61,27 @@ fn installed_default_mono_font_family(cx: &App) -> SharedString {
         .clone()
 }
 
+static INSTALLED_FONT_NAMES: OnceLock<Vec<String>> = OnceLock::new();
+
 /// The families installed on the machine, listed once per process.
 ///
-/// Enumerating fonts costs around a hundred milliseconds on macOS, and the
+/// Enumerating fonts costs around fifty milliseconds on macOS, and the
 /// answer only depends on the system fonts, which do not change while the
 /// process runs.
-pub(super) fn installed_font_names(cx: &App) -> &'static [String] {
-    static NAMES: OnceLock<Vec<String>> = OnceLock::new();
-    NAMES.get_or_init(|| cx.text_system().all_font_names())
+pub fn installed_font_names(cx: &App) -> &'static [String] {
+    INSTALLED_FONT_NAMES.get_or_init(|| cx.text_system().all_font_names())
+}
+
+/// Lists the installed families on a background thread, so the theme's
+/// `init` (the first caller of [`installed_font_names`]) finds the list
+/// ready, or waits only for the rest of it, instead of enumerating fonts on
+/// the main thread while the application starts.
+pub fn prefetch_installed_font_names(text_system: Arc<TextSystem>, executor: &BackgroundExecutor) {
+    executor
+        .spawn(async move {
+            INSTALLED_FONT_NAMES.get_or_init(|| text_system.all_font_names());
+        })
+        .detach();
 }
 
 /// `default` when it is installed, else the first installed alternate, else

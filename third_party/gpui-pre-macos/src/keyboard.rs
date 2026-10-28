@@ -1,12 +1,15 @@
+// Modified by the Quill project (2026) from gpui-pre-macos 0.3.9 (Apache-2.0):
+// input source ids and names are read lossily instead of panicking.
+// See third_party/gpui-pre-macos/QUILL-CHANGES.md.
 use collections::HashMap;
-use std::ffi::c_void;
+use std::ffi::{CStr, c_void};
 
 use objc2::msg_send;
 
 use gpui::{KeybindingKeystroke, Keystroke, PlatformKeyboardLayout, PlatformKeyboardMapper};
 
 use crate::{
-    NSStringExt, TISCopyCurrentKeyboardLayoutInputSource, TISGetInputSourceProperty,
+    TISCopyCurrentKeyboardLayoutInputSource, TISGetInputSourceProperty,
     kTISPropertyInputSourceID, kTISPropertyLocalizedName,
 };
 
@@ -64,22 +67,36 @@ impl MacKeyboardLayout {
             let id = TISGetInputSourceProperty(
                 current_keyboard,
                 kTISPropertyInputSourceID as *const c_void,
-            )
-            .to_str()
-            .to_string();
+            );
+            let id: *const std::os::raw::c_char = msg_send![id, UTF8String];
+            let id = c_string_lossy(id);
 
             let name = TISGetInputSourceProperty(
                 current_keyboard,
                 kTISPropertyLocalizedName as *const c_void,
-            )
-            .to_str()
-            .to_string();
+            );
+            let name: *const std::os::raw::c_char = msg_send![name, UTF8String];
+            let name = c_string_lossy(name);
 
             let _: () = msg_send![current_keyboard, release];
 
             Self { id, name }
         }
     }
+}
+
+/// Quill: an input source property as a `String`, lossy instead of upstream's
+/// `to_str().unwrap()`, and empty for a null pointer (a missing property).
+///
+/// # Safety
+///
+/// `ptr` is null or points to a NUL-terminated string that stays alive for the call.
+unsafe fn c_string_lossy(ptr: *const std::os::raw::c_char) -> String {
+    if ptr.is_null() {
+        return String::new();
+    }
+    // SAFETY: non-null, and the caller guarantees it is NUL-terminated and alive.
+    unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned()
 }
 
 impl MacKeyboardMapper {

@@ -192,10 +192,10 @@ icu_locale_core = { version = "2", default-features = false }
 icu_normalizer = { version = "2", default-features = false, features = ["compiled_data"] }
 # `sync`: plural rules live in the shared string snapshot (Send + Sync).
 icu_provider = { version = "2", default-features = false, features = ["sync"] }
-gpui_shared_string = { package = "gpui-pre-shared-string", version = "=0.3.9" }
+gpui_shared_string = { package = "gpui-pre-shared-string", version = "=0.3.10" }
 
 [dependencies.gpui-kit]
-version = "=0.8.0"
+version = "=0.8.1"
 optional = true
 default-features = false
 features = ["component", "assets", "syntect"]
@@ -203,7 +203,7 @@ features = ["component", "assets", "syntect"]
 # The input engine under gpui-kit (patched below), named directly for the
 # composer's formatting spans (docs/decisions/codex-composer-input.md).
 [dependencies.gpui-base]
-version = "=0.8.0"
+version = "=0.8.1"
 optional = true
 
 # tray-icon is GTK/libappindicator on Linux and needs gtk::init plus a GTK main
@@ -266,7 +266,7 @@ objc2-core-location = { version = "0.3.2", optional = true, default-features = f
 # GPUI's `SystemNotification` through the Quill patch in the vendored platform
 # crate (`notification_extras`, docs/decisions/codex-notify-native.md). Same
 # crate GPUI already links.
-gpui_macos = { package = "gpui-pre-macos", version = "=0.3.9", optional = true, default-features = false }
+gpui_macos = { package = "gpui-pre-macos", version = "=0.3.10", optional = true, default-features = false }
 # Lock-screen / media-key Now Playing (MPNowPlayingInfoCenter, MPRemoteCommandCenter).
 objc2-media-player = { version = "0.3.2", optional = true, default-features = false, features = ["std", "MPNowPlayingInfoCenter", "MPRemoteCommandCenter", "MPRemoteCommand", "MPMediaItem", "MPRemoteCommandEvent", "block2"] }
 
@@ -334,27 +334,27 @@ windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalizati
 # GPUI's `SystemNotification` through the Quill patch in the vendored platform
 # crate (`notification_extras`, docs/decisions/codex-notify-native.md). Same
 # crate GPUI already links.
-gpui_windows = { package = "gpui-pre-windows", version = "=0.3.9", optional = true, default-features = false }
+gpui_windows = { package = "gpui-pre-windows", version = "=0.3.10", optional = true, default-features = false }
 
 # Right-to-left composer typing (docs/decisions/codex-rtl-composer.md): gpui-base
 # 0.8.0 with a bidi-aware input engine. Each patched crate's QUILL-CHANGES.md names
 # the commit holding its pristine registry copy; a diff against it isolates the patch.
 [patch.crates-io]
 gpui-base = { path = "third_party/gpui-base" }
-# gpui-component 0.8.0. Folder tabs: the TabBar indicator jumps instead of
+# gpui-component 0.8.1. Folder tabs: the TabBar indicator jumps instead of
 # springing when only the selected tab bounds change
 # (docs/decisions/folder-tabs-no-badge-spring.md).
 gpui-component = { path = "third_party/gpui-component" }
-# Idle CPU (docs/decisions/codex-idle-cpu.md): gpui-pre-macos 0.3.9 with a
+# Idle CPU (docs/decisions/codex-idle-cpu.md): gpui-pre-macos 0.3.10 with a
 # display link that stops while the window has nothing to draw.
 gpui-pre-macos = { path = "third_party/gpui-pre-macos" }
 # Idle frames on X11 and Windows (docs/decisions/codex-idle-frames-x11-windows.md):
-# gpui-pre-linux and gpui-pre-windows 0.3.9, whose per-frame wake pauses while
+# gpui-pre-linux and gpui-pre-windows 0.3.10, whose per-frame wake pauses while
 # the window has nothing to draw.
 gpui-pre-linux = { path = "third_party/gpui-pre-linux" }
 gpui-pre-windows = { path = "third_party/gpui-pre-windows" }
 # Colour emoji on Linux (docs/decisions/linux-titlebar-emoji.md): gpui-pre-wgpu
-# 0.3.9 shaping emoji graphemes with Noto Color Emoji, so flags and keycaps are
+# 0.3.10 shaping emoji graphemes with Noto Color Emoji, so flags and keycaps are
 # not drawn with FreeSans' boxed letters.
 gpui-pre-wgpu = { path = "third_party/gpui-pre-wgpu" }
 gpui-pre-apple = { path = "third_party/gpui-pre-apple" }

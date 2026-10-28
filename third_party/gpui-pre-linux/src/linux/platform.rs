@@ -1,3 +1,6 @@
+// Modified by the Quill project (2026) from gpui-pre-linux 0.3.9 (Apache-2.0):
+// the event loop drains xcb's event queue before it sleeps.
+// See third_party/gpui-pre-linux/QUILL-CHANGES.md.
 use std::{
     cell::RefCell,
     env,
@@ -626,7 +629,18 @@ impl Platform for LinuxPlatform {
             .take()
             .expect("App is already running");
         event_loop
-            .run(None, &mut (), |_| self.apply_pending_mode())
+            .run(None, &mut (), |_| {
+                self.apply_pending_mode();
+                // Quill: X11 requests made by any callback, not only by a
+                // runnable, can read events into xcb's queue, where they don't
+                // wake the loop. Drain it once per round, before the loop
+                // sleeps: an idle X11 window has no periodic timer that would
+                // pick them up (third_party/gpui-pre-linux/QUILL-CHANGES.md).
+                let drain = self.with_common(|common| common.after_runnable.clone());
+                if let Some(drain) = drain {
+                    drain();
+                }
+            })
             .log_err();
 
         let quit = self.with_common(|common| common.callbacks.quit.take());

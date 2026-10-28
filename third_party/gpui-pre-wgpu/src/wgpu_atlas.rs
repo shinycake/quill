@@ -1,4 +1,6 @@
 // Modified for gpui-pre (snapshot of zed@08cbb88): adapt device queues and sRGB detection to wgpu 30.0.1.
+// Modified by the Quill project (2026) from gpui-pre-wgpu 0.3.9 (Apache-2.0):
+// images in textures of their own. See QUILL-CHANGES.md.
 use anyhow::{Context as _, Result};
 use etagere::{BucketedAtlasAllocator, size2};
 use gpui::{
@@ -132,9 +134,17 @@ impl AtlasBackend for WgpuAtlasTextures {
         size: Size<DevicePixels>,
         bytes: &[u8],
     ) -> Result<AtlasTile> {
-        let tile = self.allocate(size, kind).context("failed to allocate")?;
-        self.upload_texture(tile.texture_id, tile.bounds, bytes);
-        Ok(tile)
+        self.insert_tile(kind, size, bytes, false)
+    }
+
+    // QUILL: images in textures of their own.
+    fn insert_image(
+        &mut self,
+        kind: AtlasTextureKind,
+        size: Size<DevicePixels>,
+        bytes: &[u8],
+    ) -> Result<AtlasTile> {
+        self.insert_tile(kind, size, bytes, true)
     }
 
     fn remove(&mut self, tile: AtlasTile) {
@@ -160,24 +170,41 @@ impl AtlasBackend for WgpuAtlasTextures {
 }
 
 impl WgpuAtlasTextures {
+    fn insert_tile(
+        &mut self,
+        kind: AtlasTextureKind,
+        size: Size<DevicePixels>,
+        bytes: &[u8],
+        images: bool,
+    ) -> Result<AtlasTile> {
+        let tile = self
+            .allocate(size, kind, images)
+            .context("failed to allocate")?;
+        self.upload_texture(tile.texture_id, tile.bounds, bytes);
+        Ok(tile)
+    }
+
     fn allocate(
         &mut self,
         size: Size<DevicePixels>,
         texture_kind: AtlasTextureKind,
+        images: bool,
     ) -> Option<AtlasTile> {
         {
             let textures = &mut self.storage[texture_kind];
 
+            // QUILL: only textures holding the same kind of tile.
             if let Some(tile) = textures
                 .iter_mut()
                 .rev()
+                .filter(|texture| texture.images == images)
                 .find_map(|texture| texture.allocate(size))
             {
                 return Some(tile);
             }
         }
 
-        let texture = self.push_texture(size, texture_kind);
+        let texture = self.push_texture(size, texture_kind, images);
         texture.allocate(size)
     }
 
@@ -185,6 +212,7 @@ impl WgpuAtlasTextures {
         &mut self,
         min_size: Size<DevicePixels>,
         kind: AtlasTextureKind,
+        images: bool,
     ) -> &mut WgpuAtlasTexture {
         const DEFAULT_ATLAS_SIZE: Size<DevicePixels> = Size {
             width: DevicePixels(1024),
@@ -235,6 +263,7 @@ impl WgpuAtlasTextures {
             texture,
             view,
             live_atlas_keys: 0,
+            images,
         };
 
         if let Some(ix) = index {
@@ -344,6 +373,8 @@ struct WgpuAtlasTexture {
     view: wgpu::TextureView,
     format: wgpu::TextureFormat,
     live_atlas_keys: u32,
+    /// QUILL: holds image tiles only (else glyphs and SVGs only).
+    images: bool,
 }
 
 impl WgpuAtlasTexture {
@@ -545,6 +576,57 @@ mod tests {
 
         assert_eq!(second_tile.texture_id, first_tile.texture_id);
         assert_ne!(second_generation, first_generation);
+        Ok(())
+    }
+
+    /// QUILL: a color emoji drawn while a photo was on screen landed in the
+    /// photo's texture and kept it alive after the photo left.
+    #[test]
+    fn glyphs_never_keep_an_image_texture_alive() -> anyhow::Result<()> {
+        let (device, queue) = test_device_and_queue()?;
+        let atlas = WgpuAtlas::new(device, queue, wgpu::TextureFormat::Bgra8Unorm);
+        let insert = |key: AtlasKey, size: Size<DevicePixels>| {
+            let byte_count = (size.width.0 as usize) * (size.height.0 as usize) * 4;
+            atlas
+                .get_or_insert_with(key, &mut || {
+                    Ok(Some((size, Cow::Owned(vec![0u8; byte_count]))))
+                })
+                .expect("allocation should succeed")
+                .expect("callback returns Some")
+        };
+        let photo = AtlasKey::Image(RenderImageParams {
+            image_id: ImageId(1),
+            frame_index: 0,
+        });
+        let emoji = AtlasKey::Glyph(gpui::RenderGlyphParams {
+            font_id: gpui::FontId(0),
+            glyph_id: gpui::GlyphId(7),
+            font_size: gpui::px(16.),
+            subpixel_variant: Point::default(),
+            scale_factor: 2.,
+            is_emoji: true,
+            subpixel_rendering: false,
+            dilation: 0,
+        });
+        let photo_tile = insert(
+            photo.clone(),
+            Size {
+                width: DevicePixels(720),
+                height: DevicePixels(540),
+            },
+        );
+        let emoji_tile = insert(
+            emoji,
+            Size {
+                width: DevicePixels(64),
+                height: DevicePixels(64),
+            },
+        );
+        assert_eq!(emoji_tile.texture_id.kind, photo_tile.texture_id.kind);
+        assert_ne!(emoji_tile.texture_id, photo_tile.texture_id);
+        atlas.remove(&photo);
+        assert!(atlas.get_texture_info(photo_tile.texture_id).is_none());
+        assert!(atlas.get_texture_info(emoji_tile.texture_id).is_some());
         Ok(())
     }
 

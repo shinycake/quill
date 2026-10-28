@@ -1,3 +1,7 @@
+// Modified by the Quill project (2026) from gpui-pre-linux 0.3.9 (Apache-2.0):
+// the refresh timer parks while the window is idle, and a bad
+// GPUI_X11_SCALE_FACTOR is ignored with a warning instead of panicking.
+// See third_party/gpui-pre-linux/QUILL-CHANGES.md.
 use anyhow::{Context as _, anyhow};
 use ashpd::WindowIdentifier;
 use calloop::{
@@ -41,11 +45,11 @@ use xkbc::x11::ffi::{XKB_X11_MIN_MAJOR_XKB_VERSION, XKB_X11_MIN_MINOR_XKB_VERSIO
 use xkbcommon::xkb::{self as xkbc, STATE_LAYOUT_EFFECTIVE};
 
 use super::{
-    ButtonOrScroll, ScrollDirection, X11Display, X11WindowStatePtr, XcbAtoms, XimCallbackEvent,
-    XimHandler, button_or_scroll_from_event_detail, check_reply,
+    ButtonOrScroll, IDLE_FRAMES_ENV, ScrollDirection, X11Display, X11WindowStatePtr, XcbAtoms,
+    XimCallbackEvent, XimHandler, button_or_scroll_from_event_detail, check_reply,
     clipboard::{self, Clipboard},
     get_reply, get_valuator_axis_index, handle_connection_error, modifiers_from_state,
-    pressed_button_from_mask, xcb_flush,
+    next_frame_at, pressed_button_from_mask, xcb_flush,
 };
 
 use crate::linux::{
@@ -84,6 +88,9 @@ pub(crate) struct WindowRef {
     refresh_state: Option<RefreshState>,
     last_visibility: Visibility,
     is_mapped: bool,
+    /// Quill: the ping source through which the frame waker resumes a parked
+    /// refresh timer (see `X11FrameIdle`).
+    frame_resume: Option<RegistrationToken>,
 }
 
 impl WindowRef {
@@ -255,12 +262,19 @@ impl X11ClientStatePtr {
         };
         let mut state = client.0.borrow_mut();
 
-        if let Some(window_ref) = state.windows.remove(&x_window)
-            && let Some(RefreshState::PeriodicRefresh {
+        if let Some(window_ref) = state.windows.remove(&x_window) {
+            // Quill: a parked timer already dropped itself.
+            if let Some(RefreshState::PeriodicRefresh {
                 event_loop_token, ..
             }) = window_ref.refresh_state
-        {
-            state.loop_handle.remove(event_loop_token);
+                && window_ref.window.frame.take_registered_timer()
+            {
+                state.loop_handle.remove(event_loop_token);
+            }
+            // Quill: the frame waker's ping source goes with the window.
+            if let Some(frame_resume) = window_ref.frame_resume {
+                state.loop_handle.remove(frame_resume);
+            }
         }
         if state.mouse_focused_window == Some(x_window) {
             state.mouse_focused_window = None;
@@ -343,11 +357,16 @@ impl Drop for X11Connection {
         let refresh_tokens = state
             .windows
             .values_mut()
-            .filter_map(|window| match window.refresh_state.take() {
-                Some(RefreshState::PeriodicRefresh {
-                    event_loop_token, ..
-                }) => Some(event_loop_token),
-                _ => None,
+            .flat_map(|window| {
+                // Quill: a parked timer already dropped itself.
+                let refresh = match window.refresh_state.take() {
+                    Some(RefreshState::PeriodicRefresh {
+                        event_loop_token, ..
+                    }) if window.window.frame.take_registered_timer() => Some(event_loop_token),
+                    _ => None,
+                };
+                // Quill: the frame waker's ping source goes too.
+                refresh.into_iter().chain(window.frame_resume.take())
             })
             .collect::<Vec<_>>();
         for token in refresh_tokens {
@@ -1742,11 +1761,36 @@ impl X11Client {
         .log_err();
         xcb_flush(&state.xcb_connection);
 
+        // Quill: read the kill switch while opening the first window.
+        if !super::idle_frames_enabled() {
+            log::info!("{IDLE_FRAMES_ENV} is off: X11 windows will not idle their refresh timer");
+        }
+        // Quill: a ping the frame waker sends to resume this window's parked
+        // refresh timer. Without it the window never parks.
+        let frame_resume = calloop::ping::make_ping()
+            .map_err(anyhow::Error::from)
+            .and_then(|(ping, source)| {
+                let this = state.this.clone();
+                let token = state
+                    .loop_handle
+                    .insert_source(source, move |(), &mut (), _| {
+                        if let Some(client) = this.get_client() {
+                            client.0.borrow_mut().resume_refresh_loop(x_window);
+                        }
+                    })
+                    .map_err(|err| anyhow!("{}", err.error))?;
+                window.0.frame.resume.set(ping).ok();
+                Ok(token)
+            })
+            .context("X11: failed to set up the frame waker; the window will not idle")
+            .log_err();
+
         let window_ref = WindowRef {
             window: window.0.clone(),
             refresh_state: None,
             last_visibility: Visibility::UNOBSCURED,
             is_mapped: false,
+            frame_resume,
         };
 
         state.windows.insert(x_window, window_ref);
@@ -1984,7 +2028,10 @@ impl X11ClientState {
                     event_loop_token,
                 }),
             ) => {
-                self.loop_handle.remove(event_loop_token);
+                // Quill: a parked timer already dropped itself.
+                if window_ref.window.frame.take_registered_timer() {
+                    self.loop_handle.remove(event_loop_token);
+                }
                 window_ref.refresh_state = Some(RefreshState::Hidden { refresh_rate });
             }
             (true, Some(RefreshState::Hidden { refresh_rate })) => {
@@ -2046,19 +2093,54 @@ impl X11ClientState {
         }
     }
 
+    /// Quill: the frame waker's ping handler. Starts a new refresh timer
+    /// that ticks now and then at the refresh rate, in place of the parked
+    /// one (which dropped itself) or, should one still run, of that one. A
+    /// hidden window has no timer; showing it starts one.
+    fn resume_refresh_loop(&mut self, x_window: xproto::Window) {
+        let Some(window_ref) = self.windows.get_mut(&x_window) else {
+            return;
+        };
+        let Some(RefreshState::PeriodicRefresh {
+            refresh_rate,
+            event_loop_token,
+        }) = window_ref.refresh_state
+        else {
+            return;
+        };
+        if window_ref.window.frame.take_registered_timer() {
+            self.loop_handle.remove(event_loop_token);
+        }
+        let event_loop_token = self.start_refresh_loop(x_window, refresh_rate);
+        if let Some(window_ref) = self.windows.get_mut(&x_window) {
+            window_ref.refresh_state = Some(RefreshState::PeriodicRefresh {
+                refresh_rate,
+                event_loop_token,
+            });
+        }
+    }
+
     #[must_use]
     fn start_refresh_loop(
         &self,
         x_window: xproto::Window,
         refresh_rate: Duration,
     ) -> RegistrationToken {
+        // Quill: a (re)started timer runs at the refresh rate and becomes the
+        // window's current one (0, never current, if the window is gone).
+        let timer = self
+            .windows
+            .get(&x_window)
+            .map_or(0, |window_ref| window_ref.window.frame.start_timer());
         self.loop_handle
             .insert_source(calloop::timer::Timer::immediate(), {
                 let this = self.this.clone();
-                move |mut instant, (), _| {
+                move |instant, (), _| {
                     let Some(client) = this.get_client() else {
                         return calloop::timer::TimeoutAction::Drop;
                     };
+                    let mut parked = false;
+                    let mut frame = None;
                     let xcb_connection = {
                         let mut state = client.0.borrow_mut();
                         let xcb_connection = state.xcb_connection.clone();
@@ -2071,17 +2153,29 @@ impl X11ClientState {
                                 signal_at: PlatformFrameSignal::capture(|| instant),
                                 signal_source: FrameRequestSource::LocalSchedule,
                             });
+                            // Quill: idle frames park the timer.
+                            parked = window.frame_idle_after_refresh();
+                            frame = Some(window.frame.clone());
                         }
                         xcb_connection
                     };
                     client.process_x11_events(&xcb_connection).log_err();
 
-                    // Take into account that some frames have been skipped
-                    let now = Instant::now();
-                    while instant < now {
-                        instant += refresh_rate;
+                    // Quill: stop when the window is gone or a newer timer
+                    // replaced this one (its start removed this source).
+                    let Some(frame) = frame.filter(|frame| frame.is_current_timer(timer)) else {
+                        return calloop::timer::TimeoutAction::Drop;
+                    };
+                    // Quill: the next refresh instant, skipping frames that
+                    // were missed. Parked, none: the timer drops itself, and
+                    // the frame waker starts a new one (`resume_refresh_loop`).
+                    match next_frame_at(parked, instant, refresh_rate, Instant::now()) {
+                        Some(next) => calloop::timer::TimeoutAction::ToInstant(next),
+                        None => {
+                            frame.timer_parked(timer);
+                            calloop::timer::TimeoutAction::Drop
+                        }
                     }
-                    calloop::timer::TimeoutAction::ToInstant(instant)
                 }
             })
             .expect("Failed to initialize window refresh timer")
@@ -2227,7 +2321,10 @@ pub fn mode_refresh_rate(mode: &randr::ModeInfo) -> Duration {
     }
 
     let millihertz = mode.dot_clock as u64 * 1_000 / (mode.htotal as u64 * mode.vtotal as u64);
-    let micros = 1_000_000_000 / millihertz;
+    // Quill: a dot clock below 1 mHz rounds to zero; upstream divided by it.
+    let Some(micros) = 1_000_000_000u64.checked_div(millihertz) else {
+        return Duration::from_millis(16);
+    };
     log::info!("Refreshing every {}ms", micros / 1_000);
     Duration::from_micros(micros)
 }
@@ -2629,18 +2726,24 @@ fn get_scale_factor(
                 if valid_scale_factor(scale) {
                     DpiMode::Scale(scale)
                 } else {
-                    panic!(
-                        "`{}` must be a positive normal number or `randr`. Got `{}`",
-                        GPUI_X11_SCALE_FACTOR_ENV, var
+                    // Quill: ignore the value instead of upstream's panic.
+                    log::warn!(
+                        "ignoring `{}`: it must be a positive normal number or `randr`. Got `{}`",
+                        GPUI_X11_SCALE_FACTOR_ENV,
+                        var
                     );
+                    DpiMode::NotSet
                 }
             } else if var.is_empty() {
                 DpiMode::NotSet
             } else {
-                panic!(
-                    "`{}` must be a positive number or `randr`. Got `{}`",
-                    GPUI_X11_SCALE_FACTOR_ENV, var
+                // Quill: ignore the value instead of upstream's panic.
+                log::warn!(
+                    "ignoring `{}`: it must be a positive number or `randr`. Got `{}`",
+                    GPUI_X11_SCALE_FACTOR_ENV,
+                    var
                 );
+                DpiMode::NotSet
             }
         })
         .unwrap_or(DpiMode::NotSet);

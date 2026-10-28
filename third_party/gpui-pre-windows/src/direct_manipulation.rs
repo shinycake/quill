@@ -1,5 +1,9 @@
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
+// reports when a touchpad gesture needs vsync frames or a slower poll. See
+// third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Instant;
 
 use anyhow::Result;
 use gpui::*;
@@ -18,6 +22,13 @@ use crate::*;
 /// visual output.
 const DEFAULT_VIEWPORT_SIZE: i32 = 1000;
 
+// Quill: the viewport runs in manual-update mode, so it only advances when the
+// window calls `update` (every frame in `draw_window`). How long a touchpad
+// contact keeps the window's frames running, and how long it is polled after
+// that so a resting finger that starts moving later is still recognized, is
+// decided by `contact_frames` in `frame_idle.rs` (`CONTACT_KEEPS_FRAMES`,
+// `CONTACT_POLLED_FOR`); the poll runs on a window timer (`events.rs`).
+
 pub(crate) struct DirectManipulationHandler {
     manager: IDirectManipulationManager,
     update_manager: IDirectManipulationUpdateManager,
@@ -26,6 +37,10 @@ pub(crate) struct DirectManipulationHandler {
     window: HWND,
     scale_factor: Rc<Cell<f32>>,
     pending_events: Rc<RefCell<Vec<PlatformInput>>>,
+    /// Quill: the viewport is running or in inertia.
+    gesture_active: Rc<Cell<bool>>,
+    /// Quill: when a touchpad contact was last handed to the viewport.
+    last_contact: Cell<Option<Instant>>,
 }
 
 impl DirectManipulationHandler {
@@ -65,12 +80,14 @@ impl DirectManipulationHandler {
 
             let scale_factor = Rc::new(Cell::new(scale_factor));
             let pending_events = Rc::new(RefCell::new(Vec::new()));
+            let gesture_active = Rc::new(Cell::new(false));
 
             let event_handler: IDirectManipulationViewportEventHandler =
                 DirectManipulationEventHandler::new(
                     window,
                     Rc::clone(&scale_factor),
                     Rc::clone(&pending_events),
+                    Rc::clone(&gesture_active),
                 )
                 .into();
 
@@ -86,8 +103,31 @@ impl DirectManipulationHandler {
                 window,
                 scale_factor,
                 pending_events,
+                gesture_active,
+                last_contact: Cell::new(None),
             })
         }
+    }
+
+    /// Quill: what the window owes the viewport (see `contact_frames`).
+    pub fn contact_frames(&self) -> ContactFrames {
+        contact_frames(
+            self.last_contact.get().map(|contact| contact.elapsed()),
+            self.gesture_active.get(),
+        )
+    }
+
+    /// Quill: whether a touchpad gesture may be in progress, so the window
+    /// must keep calling `update` every vblank: the viewport is running or
+    /// in inertia, or a contact was handed to it within
+    /// `CONTACT_KEEPS_FRAMES`.
+    pub fn keeps_frames_running(&self) -> bool {
+        self.contact_frames() == ContactFrames::Frames
+    }
+
+    /// Quill: `update` produced input that `draw_window` has not delivered.
+    pub fn has_pending_events(&self) -> bool {
+        !self.pending_events.borrow().is_empty()
     }
 
     pub fn set_scale_factor(&self, scale_factor: f32) {
@@ -101,6 +141,7 @@ impl DirectManipulationHandler {
             if GetPointerType(pointer_id, &mut pointer_type).is_ok() && pointer_type == PT_TOUCHPAD
             {
                 self.viewport.SetContact(pointer_id).log_err();
+                self.last_contact.set(Some(Instant::now()));
             }
         }
     }
@@ -143,6 +184,7 @@ struct DirectManipulationEventHandler {
     last_y_offset: Cell<f32>,
     scroll_phase: Cell<TouchPhase>,
     pending_events: Rc<RefCell<Vec<PlatformInput>>>,
+    gesture_active: Rc<Cell<bool>>,
 }
 
 impl DirectManipulationEventHandler {
@@ -150,6 +192,7 @@ impl DirectManipulationEventHandler {
         window: HWND,
         scale_factor: Rc<Cell<f32>>,
         pending_events: Rc<RefCell<Vec<PlatformInput>>>,
+        gesture_active: Rc<Cell<bool>>,
     ) -> Self {
         Self {
             window,
@@ -160,6 +203,7 @@ impl DirectManipulationEventHandler {
             last_y_offset: Cell::new(0.0),
             scroll_phase: Cell::new(TouchPhase::Started),
             pending_events,
+            gesture_active,
         }
     }
 
@@ -213,6 +257,29 @@ impl IDirectManipulationViewportEventHandler_Impl for DirectManipulationEventHan
     ) -> windows_core::Result<()> {
         if current == previous {
             return Ok(());
+        }
+
+        // Quill: a running or coasting viewport needs `update` every vblank.
+        self.gesture_active
+            .set(current == DIRECTMANIPULATION_RUNNING || current == DIRECTMANIPULATION_INERTIA);
+
+        // Quill: the fingers lifted and the content coasts. Like a macOS
+        // trackpad, the release ends the gesture and the inertia arrives as
+        // phaseless `Moved` deltas (momentum). Without this, `Ended` came
+        // only after the inertia, so consumers saw a held finger for the
+        // whole fling (`docs/decisions/elastic-chat-list.md`).
+        if current == DIRECTMANIPULATION_INERTIA
+            && previous == DIRECTMANIPULATION_RUNNING
+            && self.gesture_kind.get() == GestureKind::Scroll
+        {
+            self.pending_events
+                .borrow_mut()
+                .push(PlatformInput::ScrollWheel(ScrollWheelEvent {
+                    position: self.mouse_position(),
+                    delta: ScrollDelta::Pixels(point(px(0.0), px(0.0))),
+                    modifiers: current_modifiers(),
+                    touch_phase: TouchPhase::Ended,
+                }));
         }
 
         // A new gesture interrupted inertia, so end the old sequence.

@@ -1,47 +1,75 @@
+// Modified by the Quill project (2026) from gpui-pre-macos 0.3.9 (Apache-2.0):
+// inline text-input actions, typed-text responses and a picture attachment,
+// through `notification_extras`, and every notification-center call on a
+// worker thread. See third_party/gpui-pre-macos/QUILL-CHANGES.md.
 //! System notifications through the `UNUserNotificationCenter` API.
 //!
 //! Everything here runs lazily: nothing touches the notification center (and
 //! so nothing can trigger the authorization prompt or the framework's
 //! not-in-a-bundle abort) until the application posts a notification or
 //! registers a response callback.
+//!
+//! The center is driven from one worker thread (Quill): posting copies the
+//! picture and makes `usernoted` validate it, and every call is a round trip
+//! to that daemon, none of which may hold up the main thread. One thread
+//! keeps the calls in order, so a dismiss never overtakes the post it undoes.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::path::Path;
 use std::rc::Rc;
+use std::sync::mpsc;
 
 use block2::RcBlock;
 use futures::StreamExt as _;
-use futures::channel::mpsc;
+use futures::channel::mpsc::{UnboundedSender, unbounded};
 use gpui::{
     ForegroundExecutor, SharedString, SystemNotification, SystemNotificationAction,
     SystemNotificationResponse, Task,
 };
-use objc2::rc::Retained;
+use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::{Bool, ProtocolObject};
 use objc2::{AnyThread, DefinedClass, define_class, msg_send};
-use objc2_foundation::{NSArray, NSBundle, NSError, NSObject, NSObjectProtocol, NSSet, NSString};
+use objc2_foundation::{
+    NSArray, NSBundle, NSError, NSObject, NSObjectProtocol, NSSet, NSString, NSURL,
+};
 use objc2_user_notifications::{
     UNAuthorizationOptions, UNMutableNotificationContent, UNNotification, UNNotificationAction,
-    UNNotificationActionOptions, UNNotificationCategory, UNNotificationCategoryOptions,
-    UNNotificationDefaultActionIdentifier, UNNotificationPresentationOptions,
-    UNNotificationRequest, UNNotificationResponse, UNUserNotificationCenter,
+    UNNotificationActionOptions, UNNotificationAttachment, UNNotificationCategory,
+    UNNotificationCategoryOptions, UNNotificationDefaultActionIdentifier,
+    UNNotificationPresentationOptions, UNNotificationRequest, UNNotificationResponse,
+    UNTextInputNotificationAction, UNTextInputNotificationResponse, UNUserNotificationCenter,
     UNUserNotificationCenterDelegate,
 };
+
+use crate::notification_extras::{
+    NotificationExtras, TextInputAction, store_reply_text, take_notification_extras,
+};
+
+/// The actions of one notification category: the buttons, and which of them
+/// is a text field (Quill).
+type CategoryKey = (Vec<SystemNotificationAction>, Option<TextInputAction>);
 
 type ResponseCallback = Rc<RefCell<Option<Box<dyn FnMut(SystemNotificationResponse)>>>>;
 
 pub(crate) struct SystemNotificationState {
     initialized: bool,
-    center: Option<NotificationCenter>,
+    worker: Option<mpsc::Sender<Job>>,
     callback: ResponseCallback,
     _response_task: Option<Task<()>>,
+}
+
+/// What the worker thread does with the notification center, in order.
+enum Job {
+    Show(SystemNotification, NotificationExtras),
+    Dismiss(String),
 }
 
 impl SystemNotificationState {
     pub(crate) fn new() -> Self {
         Self {
             initialized: false,
-            center: None,
+            worker: None,
             callback: Rc::new(RefCell::new(None)),
             _response_task: None,
         }
@@ -49,16 +77,16 @@ impl SystemNotificationState {
 
     pub(crate) fn show(&mut self, executor: &ForegroundExecutor, notification: SystemNotification) {
         self.initialize(executor);
-        if let Some(center) = &self.center {
-            center.show(notification);
-        }
+        // Quill: the sender image and the inline reply field registered for
+        // this tag, taken now so a later registration for the same tag is
+        // not picked up by this post.
+        let extras = take_notification_extras(&notification.tag);
+        self.send(Job::Show(notification, extras));
     }
 
     pub(crate) fn dismiss(&mut self, executor: &ForegroundExecutor, tag: &str) {
         self.initialize(executor);
-        if let Some(center) = &self.center {
-            center.dismiss(tag);
-        }
+        self.send(Job::Dismiss(tag.to_string()));
     }
 
     pub(crate) fn on_response(
@@ -70,15 +98,23 @@ impl SystemNotificationState {
         *self.callback.borrow_mut() = Some(callback);
     }
 
+    /// A job for the worker. Once the worker is gone (not in an app bundle,
+    /// or the thread could not start) notifications are dropped.
+    fn send(&self, job: Job) {
+        if let Some(worker) = &self.worker {
+            worker.send(job).ok();
+        }
+    }
+
     fn initialize(&mut self, executor: &ForegroundExecutor) {
         if self.initialized {
             return;
         }
         self.initialized = true;
 
-        let (sender, mut receiver) = mpsc::unbounded();
-        self.center = NotificationCenter::new(sender);
-        if self.center.is_none() {
+        let (sender, mut receiver) = unbounded();
+        self.worker = spawn_worker(sender);
+        if self.worker.is_none() {
             return;
         }
 
@@ -100,6 +136,33 @@ impl SystemNotificationState {
     }
 }
 
+/// Start the thread that owns the notification center and runs every job
+/// in the order it was sent. The thread ends at once when the center cannot
+/// be used (not running from an app bundle).
+fn spawn_worker(responses: UnboundedSender<SystemNotificationResponse>) -> Option<mpsc::Sender<Job>> {
+    let (jobs, queue) = mpsc::channel::<Job>();
+    let spawned = std::thread::Builder::new()
+        .name("gpui-notifications".to_string())
+        .spawn(move || {
+            let Some(center) = autoreleasepool(|_| NotificationCenter::new(responses)) else {
+                return;
+            };
+            while let Ok(job) = queue.recv() {
+                autoreleasepool(|_| match job {
+                    Job::Show(notification, extras) => center.show(notification, extras),
+                    Job::Dismiss(tag) => center.dismiss(&tag),
+                });
+            }
+        });
+    match spawned {
+        Ok(_) => Some(jobs),
+        Err(error) => {
+            log::warn!("system notifications disabled: no worker thread: {error}");
+            None
+        }
+    }
+}
+
 struct NotificationCenter {
     center: Retained<UNUserNotificationCenter>,
     /// The center's `delegate` property is weak; keeping the delegate retained
@@ -108,14 +171,12 @@ struct NotificationCenter {
     /// The union of every action set registered so far. Categories are shared
     /// by notifications with identical actions because macOS replaces the
     /// entire registered set whenever a category is added.
-    categories: RefCell<
-        HashMap<Vec<SystemNotificationAction>, (SharedString, Retained<UNNotificationCategory>)>,
-    >,
+    categories: RefCell<HashMap<CategoryKey, (SharedString, Retained<UNNotificationCategory>)>>,
     authorization_requested: Cell<bool>,
 }
 
 impl NotificationCenter {
-    fn new(sender: mpsc::UnboundedSender<SystemNotificationResponse>) -> Option<Self> {
+    fn new(sender: UnboundedSender<SystemNotificationResponse>) -> Option<Self> {
         // `UNUserNotificationCenter` raises `NSInternalInconsistencyException`
         // ("bundleProxyForCurrentProcess is nil"), aborting the process, when
         // the binary isn't part of an app bundle — which is how dev builds run
@@ -161,15 +222,23 @@ impl NotificationCenter {
             );
     }
 
-    fn show(&self, notification: SystemNotification) {
+    fn show(&self, notification: SystemNotification, extras: NotificationExtras) {
         self.request_authorization();
 
         let content = UNMutableNotificationContent::new();
         content.setTitle(&NSString::from_str(&notification.title));
         content.setBody(&NSString::from_str(&notification.body));
         if !notification.actions.is_empty() {
-            let category_identifier = self.register_category(&notification.actions);
+            let category_identifier =
+                self.register_category(&notification.actions, extras.text_input);
             content.setCategoryIdentifier(&NSString::from_str(&category_identifier));
+        }
+        // The system shows one attachment: the message's photo when there
+        // is one, else the sender's picture.
+        if let Some(image) = extras.photo.or(extras.image)
+            && let Some(attachment) = image_attachment(&image)
+        {
+            content.setAttachments(&NSArray::from_retained_slice(&[attachment]));
         }
 
         // A nil trigger delivers immediately. Reusing the tag as the request
@@ -194,9 +263,14 @@ impl NotificationCenter {
             .addNotificationRequest_withCompletionHandler(&request, Some(&completion));
     }
 
-    fn register_category(&self, actions: &[SystemNotificationAction]) -> SharedString {
+    fn register_category(
+        &self,
+        actions: &[SystemNotificationAction],
+        text_input: Option<TextInputAction>,
+    ) -> SharedString {
         let mut categories = self.categories.borrow_mut();
-        if let Some((identifier, _category)) = categories.get(actions) {
+        let key: CategoryKey = (actions.to_vec(), text_input);
+        if let Some((identifier, _category)) = categories.get(&key) {
             return identifier.clone();
         }
 
@@ -205,6 +279,18 @@ impl NotificationCenter {
         let platform_actions: Vec<Retained<UNNotificationAction>> = actions
             .iter()
             .map(|action| {
+                // Quill: the reply button opens a text field; its response
+                // is a `UNTextInputNotificationResponse` with the same id.
+                if let Some(input) = key.1.as_ref().filter(|input| input.action_id == action.id) {
+                    let text_action = UNTextInputNotificationAction::actionWithIdentifier_title_options_textInputButtonTitle_textInputPlaceholder(
+                        &NSString::from_str(&action.id),
+                        &NSString::from_str(&action.label),
+                        UNNotificationActionOptions::empty(),
+                        &NSString::from_str(&input.send_label),
+                        &NSString::from_str(&input.placeholder),
+                    );
+                    return Retained::into_super(text_action);
+                }
                 UNNotificationAction::actionWithIdentifier_title_options(
                     &NSString::from_str(&action.id),
                     &NSString::from_str(&action.label),
@@ -220,7 +306,7 @@ impl NotificationCenter {
                 UNNotificationCategoryOptions::empty(),
             );
 
-        categories.insert(actions.to_vec(), (identifier.clone(), category));
+        categories.insert(key, (identifier.clone(), category));
         let all: Vec<Retained<UNNotificationCategory>> = categories
             .values()
             .map(|(_identifier, category)| category.clone())
@@ -239,8 +325,51 @@ impl NotificationCenter {
     }
 }
 
+/// Quill: a notification attachment showing the picture at `image`. The
+/// system moves an attached file into its own store, so the picture is copied
+/// to a temporary file first and the application's copy stays where it is.
+/// The copy keeps the extension, which the system reads the format from. A
+/// copy the center refuses is removed again.
+fn image_attachment(image: &Path) -> Option<Retained<UNNotificationAttachment>> {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let extension = image
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("png");
+    let copy = std::env::temp_dir().join(format!(
+        "gpui-notification-{}-{nanos}.{extension}",
+        std::process::id()
+    ));
+    if let Err(error) = std::fs::copy(image, &copy) {
+        log::warn!("failed to copy the system notification image: {error}");
+        return None;
+    }
+    let url = NSURL::fileURLWithPath(&NSString::from_str(&copy.to_string_lossy()));
+    // SAFETY: `options` is nil, which the API allows.
+    let attachment = unsafe {
+        UNNotificationAttachment::attachmentWithIdentifier_URL_options_error(
+            &NSString::from_str("image"),
+            &url,
+            None,
+        )
+    };
+    match attachment {
+        Ok(attachment) => Some(attachment),
+        Err(error) => {
+            log::warn!(
+                "system notification image rejected: {}",
+                error.localizedDescription()
+            );
+            let _ = std::fs::remove_file(&copy);
+            None
+        }
+    }
+}
+
 struct DelegateIvars {
-    sender: mpsc::UnboundedSender<SystemNotificationResponse>,
+    sender: UnboundedSender<SystemNotificationResponse>,
 }
 
 define_class!(
@@ -265,6 +394,12 @@ define_class!(
         ) {
             let tag = response.notification().request().identifier().to_string();
             let action = response.actionIdentifier();
+            // Quill: a response from the inline reply field carries the typed
+            // text; park it under the tag for the application's handler.
+            if let Some(text_response) = response.downcast_ref::<UNTextInputNotificationResponse>()
+            {
+                store_reply_text(&tag, text_response.userText().to_string());
+            }
             // The other well-known identifier, `UNNotificationDismissActionIdentifier`,
             // is only delivered for categories opting into dismiss callbacks,
             // which we never request.
@@ -301,7 +436,7 @@ define_class!(
 );
 
 impl NotificationResponseDelegate {
-    fn new(sender: mpsc::UnboundedSender<SystemNotificationResponse>) -> Retained<Self> {
+    fn new(sender: UnboundedSender<SystemNotificationResponse>) -> Retained<Self> {
         let this = Self::alloc().set_ivars(DelegateIvars { sender });
         // SAFETY: `NSObject`'s `init` is its designated initializer.
         unsafe { msg_send![super(this), init] }

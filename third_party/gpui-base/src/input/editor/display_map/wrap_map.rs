@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-base 0.7.3 (Apache-2.0):
+// formatting spans in the input engine. See third_party/gpui-base/QUILL-CHANGES.md.
 /// WrapMap: Soft-wrapping layer (Buffer → Wrap rows).
 ///
 /// This module wraps the existing TextWrapper and provides:
@@ -111,6 +113,21 @@ impl WrapMap {
         self.wrapper.update(changed_text, range, new_text, cx);
     }
 
+    /// Install span fonts without wrapping anything (Quill patch).
+    pub(super) fn stage_span_fonts(&mut self, fonts: crate::input::text_spans::SpanFonts) {
+        self.wrapper.stage_span_fonts(fonts);
+    }
+
+    /// Install the font changes of formatting spans (Quill patch).
+    pub(super) fn set_span_fonts(
+        &mut self,
+        fonts: crate::input::text_spans::SpanFonts,
+        rewrap: crate::input::text_spans::SpanRewrap,
+        cx: &mut App,
+    ) {
+        self.wrapper.set_span_fonts(fonts, rewrap, cx);
+    }
+
     /// Update layout parameters (wrap width or font)
     pub(super) fn set_inline_metrics(
         &mut self,
@@ -132,6 +149,10 @@ impl WrapMap {
     /// Set the number of spaces per tab stop. Returns whether it changed.
     pub(super) fn set_tab_size(&mut self, tab_size: usize, cx: &mut App) -> bool {
         self.wrapper.set_tab_size(tab_size, cx)
+    }
+
+    pub(super) fn text_style(&self) -> (&Font, Pixels) {
+        self.wrapper.text_style()
     }
 
     /// Set font parameters

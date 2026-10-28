@@ -1,3 +1,6 @@
+// Modified by the Quill project (2026) from gpui-base 0.7.3 (Apache-2.0):
+// bidirectional text support and formatting spans in the input engine. See
+// third_party/gpui-base/QUILL-CHANGES.md.
 use super::inline_line::InputLine;
 use gpui::Half;
 use std::borrow::Cow;
@@ -36,6 +39,21 @@ fn measured_wrap_boundaries(
     wrapping_indent: WrappingIndent,
     mut measure: impl FnMut(&str) -> Pixels,
 ) -> Vec<gpui::Boundary> {
+    measured_wrap_boundaries_in(text, width, wrapping_indent, &[], |range| {
+        measure(&text[range])
+    })
+}
+
+/// [`measured_wrap_boundaries`] measuring byte ranges of `text`, which never
+/// breaks inside one of the `atomic` ranges (inline tokens) (Quill patch: a
+/// line with formatting spans is measured with their fonts).
+fn measured_wrap_boundaries_in(
+    text: &str,
+    width: Pixels,
+    wrapping_indent: WrappingIndent,
+    atomic: &[Range<usize>],
+    mut measure: impl FnMut(Range<usize>) -> Pixels,
+) -> Vec<gpui::Boundary> {
     let indent = if wrapping_indent == WrappingIndent::Same {
         text.chars()
             .take_while(|&c| c == ' ')
@@ -44,10 +62,11 @@ fn measured_wrap_boundaries(
     } else {
         0
     };
-    let indent_width = measure(&text[..indent]);
+    let indent_width = measure(0..indent);
     let ends: Vec<usize> = text
         .grapheme_indices(true)
         .map(|(ix, grapheme)| ix + grapheme.len())
+        .filter(|&end| !atomic.iter().any(|r| r.start < end && end < r.end))
         .collect();
     let opportunities: Vec<usize> = unicode_linebreak::linebreaks(text)
         .map(|(ix, _)| ix)
@@ -67,7 +86,7 @@ fn measured_wrap_boundaries(
         let remaining = ends.len() - first;
         let mut low = 0;
         let mut high = 1;
-        while measure(&text[start..ends[first + high - 1]]) <= available {
+        while measure(start..ends[first + high - 1]) <= available {
             low = high;
             if high == remaining {
                 break;
@@ -76,7 +95,7 @@ fn measured_wrap_boundaries(
         }
         while low + 1 < high {
             let mid = (low + high) / 2;
-            if measure(&text[start..ends[first + mid - 1]]) <= available {
+            if measure(start..ends[first + mid - 1]) <= available {
                 low = mid;
             } else {
                 high = mid;
@@ -101,6 +120,97 @@ fn measured_wrap_boundaries(
         start = end;
     }
     result
+}
+
+/// The text runs of the byte range `range` of a line starting at `line_start`,
+/// with the font changes of the formatting spans applied (Quill patch).
+pub(crate) fn styled_runs(
+    font: &Font,
+    line_start: usize,
+    range: Range<usize>,
+    fonts: &[(Range<usize>, crate::input::text_spans::FontChange)],
+) -> Vec<gpui::TextRun> {
+    let abs = line_start + range.start..line_start + range.end;
+    let mut cuts = vec![abs.start, abs.end];
+    for (r, _) in fonts {
+        if r.start < abs.end && abs.start < r.end {
+            cuts.push(r.start.clamp(abs.start, abs.end));
+            cuts.push(r.end.clamp(abs.start, abs.end));
+        }
+    }
+    cuts.sort_unstable();
+    cuts.dedup();
+    cuts.windows(2)
+        .map(|w| {
+            let mut run_font = font.clone();
+            for (r, change) in fonts {
+                if r.start <= w[0] && w[0] < r.end {
+                    change.apply(&mut run_font);
+                }
+            }
+            gpui::TextRun {
+                len: w[1] - w[0],
+                font: run_font,
+                color: gpui::black(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            }
+        })
+        .collect()
+}
+
+/// Wrap boundaries of a line that holds formatting spans: text measured with
+/// the spans' fonts, inline elements (tokens) by their measured width and
+/// never split (Quill patch).
+#[allow(clippy::too_many_arguments)]
+fn styled_wrap_boundaries(
+    line_str: &str,
+    line_start: usize,
+    wrap_width: Pixels,
+    wrapping_indent: WrappingIndent,
+    metrics: &[(Range<usize>, Pixels)],
+    fonts: &[(Range<usize>, crate::input::text_spans::FontChange)],
+    font: &Font,
+    font_size: Pixels,
+    text_system: &gpui::WindowTextSystem,
+) -> Vec<gpui::Boundary> {
+    let line_end = line_start + line_str.len();
+    // Tokens of this line, relative to it.
+    let tokens: Vec<(Range<usize>, Pixels)> = metrics
+        .iter()
+        .filter(|(r, _)| line_start <= r.start && r.end <= line_end)
+        .map(|(r, w)| (r.start - line_start..r.end - line_start, *w))
+        .filter(|(r, _)| line_str.is_char_boundary(r.start) && line_str.is_char_boundary(r.end))
+        .collect();
+    let atomic: Vec<Range<usize>> = tokens.iter().map(|(r, _)| r.clone()).collect();
+    let shape = |range: Range<usize>| -> Pixels {
+        if range.is_empty() {
+            return px(0.);
+        }
+        let runs = styled_runs(font, line_start, range.clone(), fonts);
+        text_system
+            .layout_line(&line_str[range], font_size, &runs, None)
+            .width
+    };
+    measured_wrap_boundaries_in(line_str, wrap_width, wrapping_indent, &atomic, |range| {
+        let mut width = px(0.);
+        let mut at = range.start;
+        for (token, token_width) in &tokens {
+            if token.end <= range.start || token.start >= range.end {
+                continue;
+            }
+            if at < token.start {
+                width += shape(at..token.start);
+            }
+            width += *token_width;
+            at = token.end;
+        }
+        if at < range.end {
+            width += shape(at..range.end);
+        }
+        width
+    })
 }
 
 /// A line with soft wrapped lines info.
@@ -231,6 +341,8 @@ pub(crate) struct TextWrapper {
     pub(crate) lines: SumTree<LineItem>,
 
     inline_metrics: Rc<[(Range<usize>, Pixels)]>,
+    /// Font changes of formatting spans (Quill patch, `text_spans.rs`).
+    span_fonts: crate::input::text_spans::SpanFonts,
     _initialized: bool,
 }
 
@@ -246,6 +358,7 @@ impl TextWrapper {
             tab_size: TabSize::default().tab_size,
             lines: SumTree::new(&()),
             inline_metrics: Rc::from([]),
+            span_fonts: Rc::from([]),
             _initialized: false,
         }
     }
@@ -349,6 +462,11 @@ impl TextWrapper {
         true
     }
 
+    /// The font and size the text was last wrapped with.
+    pub(crate) fn text_style(&self) -> (&Font, Pixels) {
+        (&self.font, self.font_size)
+    }
+
     pub(crate) fn set_font(&mut self, font: Font, font_size: Pixels, cx: &mut App) {
         if self.font.eq(&font) && self.font_size == font_size {
             return;
@@ -388,6 +506,7 @@ impl TextWrapper {
             .text_system()
             .line_wrapper(self.font.clone(), self.font_size);
         let metrics = self.inline_metrics.clone();
+        let span_fonts = self.span_fonts.clone();
         let text_system = gpui::WindowTextSystem::new(cx.text_system().clone());
         let font = self.font.clone();
         let font_size = self.font_size;
@@ -398,6 +517,23 @@ impl TextWrapper {
             range,
             new_text,
             &mut |line_str, wrap_width, line_start| {
+                let line_end = line_start + line_str.len();
+                if span_fonts
+                    .iter()
+                    .any(|(r, _)| r.start < line_end && line_start < r.end)
+                {
+                    return styled_wrap_boundaries(
+                        line_str,
+                        line_start,
+                        wrap_width,
+                        wrapping_indent,
+                        &metrics,
+                        &span_fonts,
+                        &font,
+                        font_size,
+                        &text_system,
+                    );
+                }
                 let mut fragments = Vec::new();
                 let mut offset = 0;
                 let first = metrics.partition_point(|(r, _)| r.end <= line_start);
@@ -473,6 +609,80 @@ impl TextWrapper {
                 Some((token, *width))
             })
             .collect();
+    }
+
+    /// Install the font changes of the formatting spans (Quill patch). `rewrap`
+    /// says which rows to wrap again: none (an edit that rewraps its own rows
+    /// next), the rows of entries that changed, or every row an old or new
+    /// entry touches (after undo or redo moved text and spans together).
+    /// Install span fonts without wrapping anything: the edit that changed
+    /// them wraps its own rows next (Quill patch).
+    pub(crate) fn stage_span_fonts(&mut self, fonts: crate::input::text_spans::SpanFonts) {
+        self.span_fonts = fonts;
+    }
+
+    pub(crate) fn set_span_fonts(
+        &mut self,
+        fonts: crate::input::text_spans::SpanFonts,
+        rewrap: crate::input::text_spans::SpanRewrap,
+        cx: &mut App,
+    ) {
+        use crate::input::text_spans::SpanRewrap;
+        if rewrap == SpanRewrap::None || self.wrap_width.is_none() {
+            self.span_fonts = fonts;
+            return;
+        }
+        let affected: Vec<Range<usize>> = if rewrap == SpanRewrap::Touched {
+            self.span_fonts
+                .iter()
+                .chain(fonts.iter())
+                .map(|(r, _)| r.clone())
+                .collect()
+        } else {
+            self.span_fonts
+                .iter()
+                .filter(|entry| !fonts.contains(entry))
+                .chain(
+                    fonts
+                        .iter()
+                        .filter(|entry| !self.span_fonts.contains(entry)),
+                )
+                .map(|(r, _)| r.clone())
+                .collect()
+        };
+        self.span_fonts = fonts;
+        if affected.is_empty() {
+            return;
+        }
+        let text = self.text.clone();
+        let len = text.len();
+        let mut rows: Vec<(usize, usize)> = affected
+            .iter()
+            .map(|r| {
+                (
+                    text.offset_to_point(r.start.min(len)).row,
+                    text.offset_to_point(r.end.min(len)).row,
+                )
+            })
+            .collect();
+        rows.sort_unstable();
+        let mut merged: Vec<(usize, usize)> = Vec::new();
+        for (a, b) in rows {
+            match merged.last_mut() {
+                Some(last) if a <= last.1 + 1 => last.1 = last.1.max(b),
+                _ => merged.push((a, b)),
+            }
+        }
+        for (first, last) in merged {
+            let start = text.line_start_offset(first);
+            let end = text.line_end_offset(last);
+            self.update(
+                &text,
+                &(start..end),
+                &Rope::from(text.slice(start..end).to_string()),
+                cx,
+            );
+        }
     }
 
     pub(crate) fn set_inline_metrics(
@@ -764,11 +974,16 @@ pub(crate) struct LineLayout {
     /// Whether any run of this line carries a background color, so [`Self::paint_background`]
     /// can skip the glyph walk for the common case of a line without highlights.
     has_background: bool,
+    /// Whether the paragraph's base direction is right-to-left (first strong character,
+    /// UAX #9 P2/P3). Such a line is aligned to the right edge, whatever the input's
+    /// own alignment is.
+    rtl: bool,
 }
 
 impl LineLayout {
     pub(crate) fn new() -> Self {
         Self {
+            rtl: false,
             len: 0,
             longest_width: px(0.),
             wrapped_lines: SmallVec::new(),
@@ -783,6 +998,45 @@ impl LineLayout {
     pub(crate) fn with_background(mut self, has_background: bool) -> Self {
         self.has_background = has_background;
         self
+    }
+
+    /// Mark the paragraph as right-to-left.
+    pub(crate) fn rtl(mut self, rtl: bool) -> Self {
+        self.rtl = rtl;
+        self
+    }
+
+    /// Whether this paragraph's base direction is right-to-left.
+    pub(crate) fn is_rtl(&self) -> bool {
+        self.rtl
+    }
+
+    /// Whether any visual row of this paragraph was laid out by the bidi path.
+    pub(crate) fn has_bidi(&self) -> bool {
+        self.wrapped_lines.iter().any(InputLine::is_bidi)
+    }
+
+    /// The alignment this paragraph is painted with: right for a right-to-left
+    /// paragraph, otherwise the input's own.
+    pub(crate) fn align(&self, text_align: TextAlign) -> TextAlign {
+        if self.rtl {
+            TextAlign::Right
+        } else {
+            text_align
+        }
+    }
+
+    /// Distance from the line's left edge to the left edge of visual line `i`.
+    ///
+    /// A right-to-left paragraph hugs the right edge row by row; any other paragraph uses the
+    /// input's alignment against the longest row.
+    pub(crate) fn sub_line_offset(&self, i: usize, last_layout: &LastLayout) -> Pixels {
+        if self.rtl {
+            let width = self.wrapped_lines.get(i).map_or(px(0.), |line| line.width);
+            (last_layout.content_width - width).max(px(0.))
+        } else {
+            last_layout.alignment_offset(self.longest_width)
+        }
     }
 
     /// Set the left offset reserved for continuation wrapped lines.
@@ -877,8 +1131,6 @@ impl LineLayout {
         let mut acc_len = 0;
         let mut offset_y = px(0.);
 
-        let x_offset = last_layout.alignment_offset(self.longest_width);
-
         for (i, line) in self.wrapped_lines.iter().enumerate() {
             let is_last = i + 1 == self.wrapped_lines.len();
 
@@ -894,8 +1146,14 @@ impl LineLayout {
             };
 
             if matches {
-                let x = line.x_for_index(offset.saturating_sub(acc_len))
-                    + x_offset
+                let local = offset.saturating_sub(acc_len);
+                // With affinity the caret hangs on the character before the offset: at a
+                // wrapped row's end, or at a direction change inside a bidi row.
+                let x = if line_end_affinity {
+                    line.x_for_index_trailing(local)
+                } else {
+                    line.x_for_index(local)
+                } + self.sub_line_offset(i, last_layout)
                     + self.line_indent(i);
                 return Some(point(x, offset_y));
             }
@@ -909,6 +1167,91 @@ impl LineLayout {
         None
     }
 
+    /// The top-left of the box an inline object over the local byte `range` is
+    /// drawn in, relative to this line layout. On a bidi row this is the left
+    /// edge of the object's rectangle; the caret position of its start would
+    /// be its right edge in a right-to-left run (Quill patch).
+    pub(crate) fn object_position(
+        &self,
+        range: Range<usize>,
+        last_layout: &LastLayout,
+    ) -> Option<Point<Pixels>> {
+        let mut acc_len = 0;
+        let mut offset_y = px(0.);
+        for (i, line) in self.wrapped_lines.iter().enumerate() {
+            let is_last = i + 1 == self.wrapped_lines.len();
+            let inside = range.start >= acc_len
+                && (range.start < acc_len + line.len
+                    || (is_last && range.start <= acc_len + line.len));
+            if inside {
+                let local = range.start - acc_len..(range.end - acc_len).min(line.len);
+                let left = if line.is_bidi() {
+                    line.range_rects(local.clone())
+                        .into_iter()
+                        .map(|(left, _)| left)
+                        .reduce(|a, b| a.min(b))
+                        .unwrap_or_else(|| line.x_for_index(local.start))
+                } else {
+                    line.x_for_index(local.start)
+                };
+                let x = left + self.sub_line_offset(i, last_layout) + self.line_indent(i);
+                return Some(point(x, offset_y));
+            }
+            acc_len += if is_last { line.len + 1 } else { line.len };
+            offset_y += last_layout.line_height;
+        }
+        None
+    }
+
+    /// The caret stop one step visually left (`left`) or right of the stop `(offset,
+    /// trailing)`, local byte indexes in this line layout. `trailing` is the caret affinity:
+    /// the caret hangs on the character before `offset` (the end of a wrapped row, or the other
+    /// side of a direction change). `None` when the visual row holding the stop has no bidi
+    /// content or the caret is already at its visual edge; the caller then steps logically.
+    pub(crate) fn visual_step(
+        &self,
+        offset: usize,
+        trailing: bool,
+        left: bool,
+    ) -> Option<(usize, bool)> {
+        let (i, acc_len) = self.row_of_stop(offset, trailing)?;
+        self.wrapped_lines[i]
+            .visual_step(offset - acc_len, trailing, left)
+            .map(|(ix, trailing)| (ix + acc_len, trailing))
+    }
+
+    /// The row a caret stop is drawn on, with the offset the row starts at.
+    fn row_of_stop(&self, offset: usize, trailing: bool) -> Option<(usize, usize)> {
+        let mut acc_len = 0;
+        for (i, line) in self.wrapped_lines.iter().enumerate() {
+            let is_last = i + 1 == self.wrapped_lines.len();
+            let inside = if trailing && offset > acc_len {
+                offset <= acc_len + line.len
+            } else {
+                offset >= acc_len && (offset < acc_len + line.len || is_last)
+            };
+            if inside {
+                return Some((i, acc_len));
+            }
+            acc_len += line.len;
+        }
+        None
+    }
+
+    /// Steps over the characters between two stops: the character the caret passes going
+    /// from `from` to `to`, both `(offset, trailing)` stops of this layout.
+    pub(crate) fn char_between_stops(
+        &self,
+        from: (usize, bool),
+        to: (usize, bool),
+    ) -> Option<char> {
+        let (i, acc_len) = self.row_of_stop(from.0, from.1)?;
+        let line = &self.wrapped_lines[i];
+        let a = line.stop_x(from.0 - acc_len, from.1);
+        let b = line.stop_x(to.0.checked_sub(acc_len)?, to.1);
+        line.char_between(a, b)
+    }
+
     /// Get the closest index for the given x in this line layout.
     ///
     /// This ignores y, so it only makes sense for a layout that is known to occupy a single
@@ -916,11 +1259,9 @@ impl LineLayout {
     /// reports the caret affinity that a wrap boundary needs.
     pub(crate) fn closest_index_for_x(&self, x: Pixels, last_layout: &LastLayout) -> usize {
         let mut acc_len = 0;
-        let x_offset = last_layout.alignment_offset(self.longest_width);
-        let x = x - x_offset;
-
         for (i, line) in self.wrapped_lines.iter().enumerate() {
             let line_indent = self.line_indent(i);
+            let x = x - self.sub_line_offset(i, last_layout);
             if x <= line_indent + line.width {
                 return acc_len + line.closest_index_for_x(x - line_indent);
             }
@@ -941,11 +1282,11 @@ impl LineLayout {
     ) -> Option<(usize, usize, Pixels)> {
         let mut offset = 0;
         let mut line_top = px(0.);
-        let x_offset = last_layout.alignment_offset(self.longest_width);
 
         for (i, line) in self.wrapped_lines.iter().enumerate() {
             let line_bottom = line_top + last_layout.line_height;
             if pos.y >= line_top && pos.y < line_bottom {
+                let x_offset = self.sub_line_offset(i, last_layout);
                 return Some((i, offset, pos.x - x_offset - self.line_indent(i)));
             }
 
@@ -973,8 +1314,10 @@ impl LineLayout {
     ) -> Option<(usize, bool)> {
         let (i, offset, x) = self.wrapped_line_at(pos, last_layout)?;
         let line = &self.wrapped_lines[i];
-        let ix = line.closest_index_for_x(x);
-        let line_end_affinity = i + 1 < self.wrapped_lines.len() && ix == line.len;
+        let (ix, trailing) = line.closest_stop_for_x(x);
+        // The same flag serves a bidi direction change: the caret hangs on the character
+        // before the offset, at the end of a wrapped row or on the near side of a run.
+        let line_end_affinity = (i + 1 < self.wrapped_lines.len() && ix == line.len) || trailing;
 
         Some((offset + ix, line_end_affinity))
     }
@@ -1054,7 +1397,7 @@ impl LineLayout {
             _ = line.paint_background(
                 pos + point(self.line_indent(ix), ix * line_height),
                 line_height,
-                text_align,
+                self.align(text_align),
                 align_width,
                 window,
                 cx,
@@ -1075,7 +1418,7 @@ impl LineLayout {
             _ = line.paint(
                 pos + point(self.line_indent(ix), ix * line_height),
                 line_height,
-                text_align,
+                self.align(text_align),
                 align_width,
                 window,
                 cx,

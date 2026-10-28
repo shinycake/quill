@@ -91,6 +91,21 @@ impl A11yDebug {
         });
     }
 
+    /// The last tree update captured, if any frame built one.
+    pub(crate) fn last_update(&self) -> Option<&TreeUpdate> {
+        self.last_tree_update.as_ref()
+    }
+
+    /// The node GPUI reported as focused in the last captured frame.
+    pub(crate) fn last_focus(&self) -> Option<NodeId> {
+        self.last_gpui_focus
+    }
+
+    /// How many frames were captured so far.
+    pub(crate) fn frame_number(&self) -> u64 {
+        self.frame_number
+    }
+
     #[cfg(debug_assertions)]
     pub(crate) fn capture_node_info(&mut self, node_info: &FxHashMap<NodeId, NodeDebugInfo>) {
         self.last_node_info = node_info.clone();

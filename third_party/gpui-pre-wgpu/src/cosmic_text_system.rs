@@ -1,3 +1,6 @@
+// Modified by the Quill project (2026) from gpui-pre-wgpu 0.3.9 (Apache-2.0):
+// emoji graphemes are shaped with the colour emoji font.
+// See third_party/gpui-pre-wgpu/QUILL-CHANGES.md.
 use anyhow::{Context as _, Ok, Result};
 use collections::HashMap;
 use cosmic_text::{
@@ -19,6 +22,7 @@ use swash::{
     scale::{Render, ScaleContext, Source, StrikeWith},
     zeno::{Format, Vector},
 };
+use unicode_properties::emoji::{EmojiStatus, UnicodeEmoji as _};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub struct CosmicTextSystem(RwLock<CosmicTextSystemState>);
@@ -59,6 +63,9 @@ struct CosmicTextSystemState {
     font_ids_by_family_cache: HashMap<FontKey, SmallVec<[FontId; 4]>>,
     system_font_fallback: String,
     missing_glyph_sink: Option<Arc<dyn MissingGlyphSink>>,
+    /// The installed colour emoji family that emoji graphemes are shaped
+    /// with, if any (see [`colour_emoji_family`]).
+    emoji_family: Option<SharedString>,
 }
 
 struct LoadedFont {
@@ -130,6 +137,7 @@ impl CosmicTextSystem {
 
     pub fn new(system_font_fallback: &str) -> Self {
         let font_system = FontSystem::new();
+        let emoji_family = colour_emoji_family(font_system.db());
 
         Self(RwLock::new(CosmicTextSystemState {
             font_system,
@@ -141,6 +149,7 @@ impl CosmicTextSystem {
             font_ids_by_family_cache: HashMap::default(),
             system_font_fallback: system_font_fallback.to_string(),
             missing_glyph_sink: None,
+            emoji_family,
         }))
     }
 
@@ -149,6 +158,7 @@ impl CosmicTextSystem {
             "en-US".to_string(),
             cosmic_text::fontdb::Database::new(),
         );
+        let emoji_family = None;
 
         Self(RwLock::new(CosmicTextSystemState {
             font_system,
@@ -160,6 +170,7 @@ impl CosmicTextSystem {
             font_ids_by_family_cache: HashMap::default(),
             system_font_fallback: system_font_fallback.to_string(),
             missing_glyph_sink: None,
+            emoji_family,
         }))
     }
 }
@@ -332,6 +343,7 @@ impl CosmicTextSystemState {
         for bytes in fonts {
             db.load_font_source(cosmic_text::fontdb::Source::Binary(Arc::new(bytes)));
         }
+        self.emoji_family = colour_emoji_family(self.font_system.db());
         Ok(())
     }
 
@@ -697,6 +709,7 @@ impl CosmicTextSystemState {
         font_runs: &[FontRun],
     ) -> LineLayout {
         let mut attrs_list = AttrsList::new(&Attrs::new());
+        let emoji_family = self.emoji_family.clone();
         let mut offs = 0;
         for run in font_runs {
             let run_end = offs + run.len;
@@ -735,12 +748,26 @@ impl CosmicTextSystemState {
                 )
             };
 
+            // Only runs with non-ASCII text can hold an emoji.
+            let emoji_attrs = emoji_family
+                .as_ref()
+                .filter(|_| text.get(offs..run_end).is_some_and(|run| !run.is_ascii()))
+                .map(|family| primary_attrs.clone().family(Family::Name(family)));
             for span in spans {
                 let attrs = match span.slot {
                     None => &primary_attrs,
                     Some(ix) => &fallback_attrs[ix],
                 };
-                attrs_list.add_span(span.start..span.end, attrs);
+                match &emoji_attrs {
+                    Some(emoji_attrs) => add_span_with_emoji(
+                        &mut attrs_list,
+                        text,
+                        span.start..span.end,
+                        attrs,
+                        emoji_attrs,
+                    ),
+                    None => attrs_list.add_span(span.start..span.end, attrs),
+                }
             }
             offs = run_end;
         }
@@ -1034,6 +1061,84 @@ fn find_best_match(
     }
 
     Ok(best_index)
+}
+
+/// The colour emoji family the renderer draws in colour
+/// ([`check_is_known_emoji_font`]), when it is installed.
+fn colour_emoji_family(db: &cosmic_text::fontdb::Database) -> Option<SharedString> {
+    const FAMILY: &str = "Noto Color Emoji";
+    db.faces()
+        .any(|face| face.families.iter().any(|family| family.0 == FAMILY))
+        .then(|| SharedString::new_static(FAMILY))
+}
+
+/// Adds `range` with `attrs`, except that each grapheme asking for emoji
+/// presentation gets `emoji_attrs`.
+///
+/// cosmic-text's own fallback walks a fixed list that reaches GNU
+/// FreeSans and DejaVu Sans before Noto Color Emoji. FreeSans draws the
+/// regional indicators as boxed letters and both have outline glyphs for many
+/// emoji, so a flag became two boxed letters and a keycap a boxed digit.
+/// Naming the emoji font for those graphemes shapes them whole, in colour.
+fn add_span_with_emoji<'a>(
+    attrs_list: &mut AttrsList,
+    text: &str,
+    range: Range<usize>,
+    attrs: &Attrs<'a>,
+    emoji_attrs: &Attrs<'a>,
+) {
+    let Some(span_text) = text.get(range.clone()) else {
+        attrs_list.add_span(range, attrs);
+        return;
+    };
+    if span_text.is_ascii() {
+        attrs_list.add_span(range, attrs);
+        return;
+    }
+    let mut plain_start = range.start;
+    for (at, grapheme) in span_text.grapheme_indices(true) {
+        if !is_emoji_presentation(grapheme) {
+            continue;
+        }
+        let start = range.start + at;
+        let end = start + grapheme.len();
+        if plain_start < start {
+            attrs_list.add_span(plain_start..start, attrs);
+        }
+        attrs_list.add_span(start..end, emoji_attrs);
+        plain_start = end;
+    }
+    if plain_start < range.end {
+        attrs_list.add_span(plain_start..range.end, attrs);
+    }
+}
+
+/// Whether a grapheme cluster is shown as an emoji (Unicode TR #51): a
+/// character whose default presentation is emoji, U+FE0F, a keycap, a flag,
+/// or an emoji with a skin tone, a ZWJ sequence or tags. U+FE0E asks for text.
+fn is_emoji_presentation(grapheme: &str) -> bool {
+    if grapheme.is_ascii() || grapheme.contains('\u{FE0E}') {
+        return false;
+    }
+    if grapheme.contains('\u{FE0F}') || grapheme.contains('\u{20E3}') {
+        return true;
+    }
+    let mut chars = grapheme.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    let presentation = matches!(
+        first.emoji_status(),
+        EmojiStatus::EmojiPresentation
+            | EmojiStatus::EmojiPresentationAndModifierBase
+            | EmojiStatus::EmojiPresentationAndEmojiComponent
+            | EmojiStatus::EmojiPresentationAndModifierAndEmojiComponent
+    );
+    presentation
+        || (first.is_emoji_char()
+            && chars.any(
+                |c| matches!(c, '\u{200D}' | '\u{1F3FB}'..='\u{1F3FF}' | '\u{E0020}'..='\u{E007F}'),
+            ))
 }
 
 /// one contiguous slice of a `FontRun` that maps to a single slot. `slot` is

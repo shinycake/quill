@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
+// a tooltip is filtered under its owner's tags. See third_party/gpui-pre/QUILL-CHANGES.md.
 use crate::{
     ActiveTooltip, AnyView, App, Bounds, DispatchPhase, Element, ElementId, GlobalElementId,
     HighlightStyle, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId,
@@ -1166,6 +1168,8 @@ impl Element for InteractiveText {
     ) {
         let current_view = window.current_view();
         let text_layout = self.text.layout().clone();
+        // Quill: its tooltip is filtered under the tags above it.
+        window.record_tooltip_tags(self.tooltip_id);
         window.with_element_state::<InteractiveTextState, _>(
             global_id.unwrap(),
             |interactive_state, window| {

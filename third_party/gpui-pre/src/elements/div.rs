@@ -655,7 +655,23 @@ impl Interactivity {
                 constructor(value.downcast_ref().unwrap(), offset, window, cx).into()
             }),
             external_payload: None,
+            start_distance: DRAG_THRESHOLD,
         });
+    }
+
+    /// Sets how far (Manhattan distance, in pixels) the pointer must move
+    /// with the button down before this element's drag starts; the default
+    /// is 2. A press that moves less stays a click. Must be called after
+    /// [`Self::on_drag`]. Quill patch.
+    pub fn drag_start_distance(&mut self, distance: Pixels)
+    where
+        Self: Sized,
+    {
+        let Some(drag_listener) = self.drag_listener.as_mut() else {
+            debug_assert!(false, "drag_start_distance must be called after on_drag");
+            return;
+        };
+        drag_listener.start_distance = f64::from(distance);
     }
 
     /// Registers a callback resolving a payload to offer the platform if a drag started by this
@@ -1375,6 +1391,17 @@ pub trait StatefulInteractiveElement: InteractiveElement {
         self
     }
 
+    /// Tag this element for an in-process reader of the accessibility tree
+    /// ([`crate::Window::a11y_tree_snapshot`]). The tag rides the element's
+    /// node in the snapshot and its hitbox
+    /// ([`crate::Window::hovered_a11y_tags`]); it is never sent to the
+    /// platform adapter, so assistive technology does not see it. An element
+    /// with a tag always gets a hitbox.
+    fn a11y_tag(mut self, tag: impl Into<SharedString>) -> Self {
+        self.interactivity().aria.tag = Some(tag.into());
+        self
+    }
+
     /// Set the accessible label for this element.
     fn aria_label(mut self, label: impl Into<SharedString>) -> Self {
         self.interactivity().aria.label = Some(label.into());
@@ -1678,6 +1705,16 @@ pub trait StatefulInteractiveElement: InteractiveElement {
         self
     }
 
+    /// Sets how far the pointer must move before the drag of [`Self::on_drag`]
+    /// starts. The fluent API equivalent to [`Interactivity::drag_start_distance`].
+    fn drag_start_distance(mut self, distance: Pixels) -> Self
+    where
+        Self: Sized,
+    {
+        self.interactivity().drag_start_distance(distance);
+        self
+    }
+
     /// Registers a callback resolving a payload to offer the platform if a drag started by this
     /// element leaves the window. It is invoked at most once per drag gesture, when the pointer
     /// exits the viewport. Must be called after [`Self::on_drag`], with the same dragged value
@@ -1813,6 +1850,7 @@ pub(crate) struct DragListener {
     value: Arc<dyn Any>,
     render: Box<dyn Fn(&dyn Any, Point<Pixels>, &mut Window, &mut App) -> AnyView + 'static>,
     external_payload: Option<ExternalDragPayloadResolver>,
+    start_distance: f64,
 }
 
 type ExternalDragPayloadResolver =
@@ -1962,6 +2000,10 @@ impl Element for Div {
 
     fn write_a11y_info(&self, node: &mut accesskit::Node) {
         self.interactivity.write_a11y_info(node);
+    }
+
+    fn a11y_tag(&self) -> Option<SharedString> {
+        self.interactivity.aria.tag.clone()
     }
 
     fn a11y_synthetic_children(
@@ -2155,6 +2197,8 @@ impl IntoElement for Div {
 #[derive(Default)]
 pub(crate) struct AriaProperties {
     pub(crate) author_id: Option<SharedString>,
+    /// [`InteractiveElement::a11y_tag`]: for in-process readers only.
+    pub(crate) tag: Option<SharedString>,
     pub(crate) label: Option<SharedString>,
     pub(crate) description: Option<SharedString>,
     pub(crate) keyshortcuts: Option<SharedString>,
@@ -2384,10 +2428,12 @@ impl Interactivity {
                     if focus_handle.is_focused(window) {
                         window.a11y.set_focus(node_id);
                     }
-                } else if focus_handle.is_focused(window) {
+                } else if focus_handle.is_focused(window)
+                    && !window.a11y.focus_nearest_focusable_ancestor()
+                {
                     // Focusable, but with no element id it can't have an
-                    // accessibility node, so screen readers fall back to the
-                    // whole window.
+                    // accessibility node, and no focusable node encloses it,
+                    // so screen readers fall back to the whole window.
                     window
                         .a11y
                         .note_focus_without_node(focus_handle.id, "it has no element id");
@@ -2439,7 +2485,11 @@ impl Interactivity {
                         style.overflow_mask(bounds, window.rem_size()),
                         |window| {
                             let hitbox = if self.should_insert_hitbox(&style, window, cx) {
-                                Some(window.insert_hitbox(bounds, self.hitbox_behavior))
+                                let hitbox = window.insert_hitbox(bounds, self.hitbox_behavior);
+                                if let Some(tag) = &self.aria.tag {
+                                    window.tag_hitbox(hitbox.id, tag.clone());
+                                }
+                                Some(hitbox)
                             } else {
                                 None
                             };
@@ -2456,7 +2506,8 @@ impl Interactivity {
     }
 
     fn should_insert_hitbox(&self, style: &Style, window: &Window, cx: &App) -> bool {
-        self.hitbox_behavior != HitboxBehavior::Normal
+        self.aria.tag.is_some()
+            || self.hitbox_behavior != HitboxBehavior::Normal
             || self.window_control.is_some()
             || style.mouse_cursor.is_some()
             || self.group.is_some()
@@ -2593,6 +2644,16 @@ impl Interactivity {
                     tab_group = self.tab_index;
                 }
 
+                // The tag spans this element's own background and border
+                // and its children's paint: the focused element records it
+                // (`Window::focused_a11y_tags`) and a paint filter reads it
+                // (`Window::set_paint_filter`).
+                let tagged = self.aria.tag.is_some();
+                if let Some(tag) = &self.aria.tag {
+                    window.push_a11y_tag(tag.clone(), bounds);
+                }
+                // Quill: its tooltip is filtered under these tags.
+                window.record_tooltip_tags(self.tooltip_id);
                 window.with_element_opacity(style.opacity, |window| {
                     style.paint(bounds, window, cx, |window: &mut Window, cx: &mut App| {
                         window.with_text_style(style.text_style().cloned(), |window| {
@@ -2610,6 +2671,9 @@ impl Interactivity {
                                         // to the first item in the whole window instead of its own.
                                         if let Some(focus_handle) = &self.tracked_focus_handle {
                                             window.next_frame.tab_stops.insert(focus_handle);
+                                            if focus_handle.is_focused(window) {
+                                                window.record_focus_tags();
+                                            }
                                         }
                                         if let Some(hitbox) = hitbox {
                                             #[cfg(debug_assertions)]
@@ -2684,6 +2748,9 @@ impl Interactivity {
                         });
                     });
                 });
+                if tagged {
+                    window.pop_a11y_tag();
+                }
 
                 ((), element_state)
             },
@@ -3038,7 +3105,13 @@ impl Interactivity {
                         let mut pending_mouse_down = pending_mouse_down.borrow_mut();
                         if let Some(mouse_down) = pending_mouse_down.clone()
                             && !cx.has_active_drag()
-                            && (event.position - mouse_down.position).magnitude() > DRAG_THRESHOLD
+                            && drag_listener.as_ref().is_some_and(|listener| {
+                                {
+                                    let moved = event.position - mouse_down.position;
+                                    f64::from(moved.x.abs() + moved.y.abs())
+                                        > listener.start_distance
+                                }
+                            })
                             && let Some(listener) = drag_listener.take()
                             && mouse_down.button == MouseButton::Left
                         {
@@ -4173,6 +4246,10 @@ where
 
     fn write_a11y_info(&self, node: &mut accesskit::Node) {
         self.element.write_a11y_info(node);
+    }
+
+    fn a11y_tag(&self) -> Option<SharedString> {
+        self.element.a11y_tag()
     }
 
     fn a11y_synthetic_children(

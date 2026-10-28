@@ -488,6 +488,9 @@ impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> Element fo
     fn a11y_role(&self) -> Option<gpui::Role> {
         self.inner.a11y_role()
     }
+    fn a11y_tag(&self) -> Option<gpui::SharedString> {
+        self.inner.a11y_tag()
+    }
     fn write_a11y_info(&self, node: &mut gpui::accesskit::Node) {
         self.inner.write_a11y_info(node);
     }

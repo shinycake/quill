@@ -1,6 +1,7 @@
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
+// device-loss retries no longer unwrap. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use anyhow::{Context, Result};
 use gpui_util::ResultExt;
-use itertools::Itertools;
 use windows::Win32::{
     Foundation::HMODULE,
     Graphics::{
@@ -22,17 +23,17 @@ use windows::Win32::{
 use windows::core::Interface;
 
 pub(crate) fn try_to_recover_from_device_lost<T>(mut f: impl FnMut() -> Result<T>) -> Result<T> {
-    (0..5)
-        .map(|i| {
-            if i > 0 {
-                // Add a small delay before retrying
-                std::thread::sleep(std::time::Duration::from_millis(100 + i * 10));
-            }
-            f()
-        })
-        .find_or_last(Result::is_ok)
-        .unwrap()
-        .context("DirectXRenderer failed to recover from lost device after multiple attempts")
+    // Quill: a loop instead of upstream's `find_or_last(..).unwrap()`.
+    let mut result = f();
+    for i in 1..5 {
+        if result.is_ok() {
+            break;
+        }
+        // Add a small delay before retrying
+        std::thread::sleep(std::time::Duration::from_millis(100 + i * 10));
+        result = f();
+    }
+    result.context("DirectXRenderer failed to recover from lost device after multiple attempts")
 }
 
 #[derive(Clone)]

@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
+// `AtlasBackend::insert_image`, `PlatformWindow::capture_image`. See third_party/gpui-pre/QUILL-CHANGES.md.
 mod app_menu;
 mod keyboard;
 mod keystroke;
@@ -1435,6 +1437,14 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn render_to_image(&self, _scene: &Scene) -> Result<RgbaImage> {
         anyhow::bail!("render_to_image not implemented for this platform")
     }
+
+    /// Quill: renders `scene` offscreen with this window's renderer and
+    /// reads the pixels back (RGBA, device pixels), without presenting it
+    /// or reading the screen. Backs [`Window::capture_frame`]; built in
+    /// every configuration, unlike [`Self::render_to_image`].
+    fn capture_image(&self, _scene: &Scene) -> Result<image::RgbaImage> {
+        anyhow::bail!("this platform's renderer cannot capture the window")
+    }
 }
 
 /// A renderer for headless windows that can produce real rendered output.
@@ -1795,6 +1805,19 @@ pub trait AtlasBackend {
         bytes: &[u8],
     ) -> Result<AtlasTile>;
 
+    /// QUILL: insert an image tile. Images come and go while glyphs and
+    /// SVGs stay for good, so a backend that frees a texture once its last
+    /// tile goes keeps images in textures of their own: one long-lived
+    /// glyph in an image texture would keep the whole texture alive.
+    fn insert_image(
+        &mut self,
+        kind: AtlasTextureKind,
+        size: Size<DevicePixels>,
+        bytes: &[u8],
+    ) -> Result<AtlasTile> {
+        self.insert(kind, size, bytes)
+    }
+
     fn remove(&mut self, tile: AtlasTile);
 }
 
@@ -1841,9 +1864,13 @@ impl<Backend: AtlasBackend> AtlasState<Backend> {
                 let Some((size, bytes)) = build()? else {
                     return Ok(None);
                 };
-                let tile = self
-                    .backend
-                    .insert(entry.key().texture_kind(), size, &bytes)?;
+                let kind = entry.key().texture_kind();
+                // QUILL: images in textures of their own (`insert_image`).
+                let tile = if matches!(entry.key(), AtlasKey::Image(_)) {
+                    self.backend.insert_image(kind, size, &bytes)?
+                } else {
+                    self.backend.insert(kind, size, &bytes)?
+                };
                 entry.insert(tile);
                 Ok(Some(tile))
             }

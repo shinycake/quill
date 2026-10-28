@@ -2,7 +2,7 @@ use std::{ops::Range, time::Duration};
 
 use gpui::{
     AnyElement, App, Context, ElementId, Entity, FollowMode, Hsla, InteractiveElement as _,
-    IntoElement, ListAlignment, ListOffset, ListState, ParentElement as _, RenderOnce, Role,
+    IntoElement, ListAlignment, ListOffset, ListState, ParentElement as _, Pixels, RenderOnce, Role,
     SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
     linear_color_stop, linear_gradient, list, prelude::FluentBuilder as _, px, rems,
 };
@@ -72,6 +72,13 @@ impl MessageScrollerState {
     /// [`Self::item_count`] until then.
     pub fn logical_scroll_top(&self) -> ListOffset {
         self.list_state.logical_scroll_top()
+    }
+
+    /// How far the viewport is from the first row's top and from the last
+    /// row's bottom, with rows not measured yet counted at the mean row
+    /// height, and the viewport's height. `None` until a row is laid out.
+    pub fn distance_to_edges(&self) -> Option<(Pixels, Pixels, Pixels)> {
+        self.list_state.estimated_distance_to_edges()
     }
 
     /// Reset the list to `item_count` rows.
@@ -157,6 +164,36 @@ impl MessageScrollerState {
         true
     }
 
+    /// The row at the top of the viewport and how many pixels of it are
+    /// scrolled above the viewport. `None` while the list follows its
+    /// tail, so callers keep a position only for a reader who moved away.
+    pub fn top_anchor(&self) -> Option<(usize, f32)> {
+        // Not `is_scrolled_up`: that reads the previous layout's extent, which
+        // right after a reset or a scroll_to still describes the old content.
+        // The follow state is set by the scroll itself and re-engaged by the
+        // layout when the list rests at its end.
+        if self.list_state.is_following_tail() {
+            return None;
+        }
+        let top = self.list_state.logical_scroll_top();
+        (top.item_ix < self.list_state.item_count())
+            .then(|| (top.item_ix, f32::from(top.offset_in_item)))
+    }
+
+    /// Scroll so row `index` starts `offset` pixels above the viewport top.
+    pub fn scroll_to_item_offset(&mut self, index: usize, offset: f32, cx: &mut Context<Self>) -> bool {
+        if index >= self.list_state.item_count() {
+            return false;
+        }
+
+        self.list_state.scroll_to(ListOffset {
+            item_ix: index,
+            offset_in_item: px(offset.max(0.)),
+        });
+        cx.notify();
+        true
+    }
+
     /// Resume tail following and scroll to the latest row.
     pub fn scroll_to_end(&mut self, cx: &mut Context<Self>) {
         self.list_state.set_follow_mode(FollowMode::Tail);
@@ -186,6 +223,8 @@ pub struct MessageScroller {
     scrollbar: bool,
     jump_button: bool,
     jump_button_label: SharedString,
+    jump_button_shown_after: Pixels,
+    jump_button_always: bool,
 }
 
 impl MessageScroller {
@@ -216,6 +255,8 @@ impl MessageScroller {
             scrollbar: true,
             jump_button: true,
             jump_button_label: "Jump to latest".into(),
+            jump_button_shown_after: px(0.),
+            jump_button_always: false,
         }
     }
 
@@ -228,6 +269,20 @@ impl MessageScroller {
     /// Enable or disable the built-in jump-to-latest button.
     pub fn jump_button(mut self, jump_button: bool) -> Self {
         self.jump_button = jump_button;
+        self
+    }
+
+    /// Show the jump button only once the viewport is more than `distance`
+    /// above the last row's bottom (zero: as soon as it is scrolled up).
+    pub fn with_jump_button_shown_after(mut self, distance: Pixels) -> Self {
+        self.jump_button_shown_after = distance;
+        self
+    }
+
+    /// Show the jump button wherever the list is scrolled, for content that
+    /// continues past the last loaded row.
+    pub fn jump_button_always(mut self, always: bool) -> Self {
+        self.jump_button_always = always;
         self
     }
 
@@ -304,11 +359,17 @@ impl Styled for MessageScroller {
 impl RenderOnce for MessageScroller {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let root_id = self.id.clone();
-        let (list_state, scrolled_up) = {
+        let (list_state, scrolled_up, below) = {
             let state = self.state.read(cx);
-            (state.list_state.clone(), state.is_scrolled_up())
+            (
+                state.list_state.clone(),
+                state.is_scrolled_up(),
+                state.distance_to_edges().map(|(_, below, _)| below),
+            )
         };
-        let show_jump_button = self.jump_button && scrolled_up;
+        let far_enough = below.is_none_or(|below| below > self.jump_button_shown_after);
+        let show_jump_button =
+            self.jump_button && (self.jump_button_always || (scrolled_up && far_enough));
         let jump_button_visibility = if self.jump_button {
             transition(
                 (root_id.clone(), "jump-button-visibility"),
@@ -474,6 +535,7 @@ mod tests {
             assert_eq!(state.read(cx).item_count(), 3);
             assert!(!state.read(cx).is_scrolled_up());
             assert!(state.read(cx).is_following_tail());
+            assert_eq!(state.read(cx).top_anchor(), None);
 
             state.update(cx, |state, cx| {
                 assert!(!state.scroll_to_item(3, cx));
@@ -551,6 +613,23 @@ mod tests {
             (after_wheel.item_ix, after_wheel.offset_in_item),
             (11, px(0.))
         );
+    }
+
+    #[gpui::test]
+    fn top_anchor_reads_a_restored_position_before_any_layout(cx: &mut gpui::TestAppContext) {
+        let state = cx.new(|cx| MessageScrollerState::new(6, cx));
+        cx.update(|cx| {
+            state.update(cx, |state, cx| {
+                state.reset(6, cx);
+                assert!(state.scroll_to_item_offset(2, 12., cx));
+                // No layout ran: `is_scrolled_up` still reads the old extent,
+                // the restored position must not look like the tail.
+                assert!(!state.is_scrolled_up());
+                assert_eq!(state.top_anchor(), Some((2, 12.)));
+                state.scroll_to_end(cx);
+                assert_eq!(state.top_anchor(), None);
+            });
+        });
     }
 
     #[gpui::test]

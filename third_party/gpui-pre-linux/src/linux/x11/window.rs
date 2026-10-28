@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-pre-linux 0.3.9 (Apache-2.0):
+// the refresh timer parks while the window is idle; `capture_image`. See third_party/gpui-pre-linux/QUILL-CHANGES.md.
 use anyhow::{Context as _, anyhow};
 use x11rb::connection::RequestConnection;
 
@@ -30,10 +32,19 @@ use x11rb::{
 };
 
 use std::{
-    cell::RefCell, ffi::c_void, fmt::Display, num::NonZeroU32, ptr::NonNull, rc::Rc, sync::Arc,
+    cell::{Cell, OnceCell, RefCell},
+    ffi::c_void,
+    fmt::Display,
+    num::NonZeroU32,
+    ptr::NonNull,
+    rc::Rc,
+    sync::Arc,
+    time::Instant,
 };
 
-use super::{X11Display, XINPUT_ALL_DEVICE_GROUPS, XINPUT_ALL_DEVICES};
+use super::{
+    FrameIdle, X11Display, XINPUT_ALL_DEVICE_GROUPS, XINPUT_ALL_DEVICES, idle_frames_enabled,
+};
 
 x11rb::atom_manager! {
     pub XcbAtoms: AtomsCookie {
@@ -313,6 +324,103 @@ pub(crate) struct X11WindowStatePtr {
     pub(crate) callbacks: Rc<RefCell<Callbacks>>,
     xcb: Rc<XCBConnection>,
     pub(crate) x_window: xproto::Window,
+    // Quill: shared by the refresh timer, `draw`, `schedule_frame` and the
+    // frame waker.
+    pub(crate) frame: Rc<X11FrameIdle>,
+}
+
+/// Quill: upstream's refresh timer asks a visible window for a frame at the
+/// refresh rate forever. The timer now parks after `FRAME_IDLE_AFTER` of
+/// frames that neither drew, presented nor asked for another frame: it drops
+/// itself, so an idle window has no timer at all, and the frame waker starts
+/// a new one at once. All of it runs on the main thread.
+pub(crate) struct X11FrameIdle {
+    /// Something drew, presented or asked for another frame since the
+    /// refresh timer last ran.
+    activity: Cell<bool>,
+    idle: Cell<FrameIdle>,
+    /// Wakes the event loop, whose handler restarts the refresh timer at the
+    /// refresh rate. Unset if the ping could not be created; the window then
+    /// never parks.
+    pub(crate) resume: OnceCell<calloop::ping::Ping>,
+    /// Which refresh timer is the window's current one; each start counts up,
+    /// so a timer callback can tell it was replaced.
+    timer: Cell<u64>,
+    /// Whether the current timer is still registered with the event loop (a
+    /// parked timer drops itself, and its token must not be removed again).
+    timer_registered: Cell<bool>,
+}
+
+impl X11FrameIdle {
+    fn new() -> Self {
+        Self {
+            activity: Cell::new(false),
+            idle: Cell::new(FrameIdle::new(Instant::now())),
+            resume: OnceCell::new(),
+            timer: Cell::new(0),
+            timer_registered: Cell::new(false),
+        }
+    }
+
+    fn mark_activity(&self) {
+        self.activity.set(true);
+    }
+
+    /// The frame waker: GPUI has a frame to draw.
+    fn demand(&self) {
+        let mut idle = self.idle.get();
+        let resume = idle.demand(Instant::now());
+        self.idle.set(idle);
+        if resume && let Some(ping) = self.resume.get() {
+            ping.ping();
+        }
+    }
+
+    /// After the refresh timer's frame request; returns whether the timer
+    /// should park (stop until the frame waker restarts it).
+    fn after_frame(&self, keep_running: bool) -> bool {
+        // Never parks with the kill switch (`QUILL_IDLE_FRAMES=0`) or
+        // without a way to resume.
+        let active = self.activity.take()
+            || keep_running
+            || self.resume.get().is_none()
+            || !idle_frames_enabled();
+        let mut idle = self.idle.get();
+        idle.frame(active, Instant::now());
+        self.idle.set(idle);
+        idle.is_parked()
+    }
+
+    /// A refresh timer is being started at the refresh rate: it becomes the
+    /// current one, registered, with a fresh grace period. Returns its
+    /// number for `is_current_timer` and `timer_parked`.
+    pub(crate) fn start_timer(&self) -> u64 {
+        let mut idle = self.idle.get();
+        idle.reset(Instant::now());
+        self.idle.set(idle);
+        let timer = self.timer.get().wrapping_add(1);
+        self.timer.set(timer);
+        self.timer_registered.set(true);
+        timer
+    }
+
+    /// Whether `timer` is still the window's current refresh timer.
+    pub(crate) fn is_current_timer(&self, timer: u64) -> bool {
+        self.timer.get() == timer
+    }
+
+    /// The current refresh timer `timer` parked and drops itself.
+    pub(crate) fn timer_parked(&self, timer: u64) {
+        if self.is_current_timer(timer) {
+            self.timer_registered.set(false);
+        }
+    }
+
+    /// The current timer is about to be removed: returns whether it is still
+    /// registered (so its token must be removed), and forgets it either way.
+    pub(crate) fn take_registered_timer(&self) -> bool {
+        self.timer_registered.replace(false)
+    }
 }
 
 impl rwh::HasWindowHandle for RawWindow {
@@ -958,6 +1066,7 @@ impl X11Window {
             callbacks: Rc::new(RefCell::new(Callbacks::default())),
             xcb: xcb.clone(),
             x_window,
+            frame: Rc::new(X11FrameIdle::new()),
         };
 
         let state = ptr.state.borrow_mut();
@@ -1179,6 +1288,14 @@ impl X11WindowStatePtr {
         if let Some(fun) = callbacks.close.take() {
             fun()
         }
+    }
+
+    /// Quill: called by the refresh timer after `refresh`; returns whether
+    /// the timer should park (stop until a frame demand). A pending forced render
+    /// after GPU recovery keeps it running.
+    pub(crate) fn frame_idle_after_refresh(&self) -> bool {
+        let recovering = self.state.borrow().force_render_after_recovery;
+        self.frame.after_frame(recovering)
     }
 
     pub fn refresh(&self, mut request_frame_options: RequestFrameOptions) {
@@ -1701,6 +1818,22 @@ impl PlatformWindow for X11Window {
         self.0.callbacks.borrow_mut().request_frame = Some(callback);
     }
 
+    // Quill: GPUI asks for another frame (the window is still dirty, or
+    // next-frame callbacks are queued): keep the refresh timer running.
+    fn schedule_frame(&self) {
+        self.0.frame.mark_activity();
+    }
+
+    // Quill: GPUI calls this when the window becomes dirty or queues a
+    // next-frame callback. While the refresh timer is parked it pings the
+    // event loop, which restarts the timer at once; otherwise it only
+    // restarts the idle grace period. Holds no window state, so it is safe
+    // to call re-entrantly and after the window is gone.
+    fn frame_waker(&self) -> Option<Rc<dyn Fn()>> {
+        let frame = self.0.frame.clone();
+        Some(Rc::new(move || frame.demand()))
+    }
+
     fn on_input(&self, callback: Box<dyn FnMut(PlatformInput) -> gpui::DispatchEventResult>) {
         self.0.callbacks.borrow_mut().input = Some(callback);
     }
@@ -1749,6 +1882,8 @@ impl PlatformWindow for X11Window {
     }
 
     fn draw(&self, scene: &Scene) {
+        // Quill: a drawn (or presented) frame keeps the refresh timer running.
+        self.0.frame.mark_activity();
         let mut inner = self.0.state.borrow_mut();
         let inner = &mut *inner;
         let Some(renderer) = &mut inner.renderer else {
@@ -1780,6 +1915,22 @@ impl PlatformWindow for X11Window {
         if renderer.needs_redraw() {
             inner.force_render_after_recovery = true;
         }
+    }
+
+    // Quill: `Window::capture_frame`, offscreen with this window's renderer.
+    fn capture_image(&self, scene: &Scene) -> anyhow::Result<image::RgbaImage> {
+        let mut inner = self
+            .0
+            .state
+            .try_borrow_mut()
+            .map_err(|_| anyhow!("the window is busy"))?;
+        let renderer = inner
+            .renderer
+            .as_mut()
+            .ok_or_else(|| anyhow!("the window has no renderer"))?;
+        let (width, height, pixels) = renderer.capture_scene(scene)?;
+        image::RgbaImage::from_raw(width, height, pixels)
+            .ok_or_else(|| anyhow!("the capture had the wrong size"))
     }
 
     fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas> {

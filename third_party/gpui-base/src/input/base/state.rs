@@ -1,3 +1,6 @@
+// Modified by the Quill project (2026) from gpui-base 0.7.3 (Apache-2.0):
+// bidirectional text support and formatting spans in the input engine. See
+// third_party/gpui-base/QUILL-CHANGES.md.
 //! A text input field that allows the user to enter text.
 //!
 //! Based on the `Input` example from the `gpui` crate.
@@ -423,6 +426,16 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) undo_manager: UndoManager,
     pub(super) inline_tokens: Option<Box<super::inline_tokens::InlineTokenStore>>,
     pub(super) pending_token: Option<super::InlineToken>,
+    /// Tokens of content being inserted, relative to it (Quill patch).
+    pub(super) pending_tokens: Option<Vec<super::InlineTokenSpan>>,
+    /// Formatting spans, sorted by start (Quill patch, `text_spans.rs`).
+    pub(super) text_spans: std::rc::Rc<[super::TextSpan]>,
+    /// The tags the next text typed at the caret takes (Quill patch).
+    pub(super) typing_spans: Option<super::text_spans::TypingSpans>,
+    /// Spans of content being inserted, relative to it (Quill patch).
+    pub(super) pending_spans: Option<Vec<super::TextSpan>>,
+    /// Presentation of span tags, installed by the view (Quill patch).
+    pub(super) span_styler: Option<super::TextSpanStyler>,
     pub(super) replaying_history: bool,
     pub(super) validated_token_edit: bool,
     pub(super) document_revision: u64,
@@ -957,6 +970,11 @@ impl<M: InputModeKind> InputBaseState<M> {
             undo_manager,
             inline_tokens: None,
             pending_token: None,
+            pending_tokens: None,
+            text_spans: std::rc::Rc::from([]),
+            typing_spans: None,
+            pending_spans: None,
+            span_styler: None,
             replaying_history: false,
             validated_token_edit: false,
             document_revision: 0,
@@ -1195,6 +1213,17 @@ impl<M: InputModeKind> InputBaseState<M> {
         &self,
         offset: usize,
     ) -> (usize, usize, Option<Point<Pixels>>) {
+        self.line_and_position_for_offset_with_affinity(offset, false)
+    }
+
+    /// Like [`Self::line_and_position_for_offset`], placing a caret that hangs on the
+    /// character before `offset` (see [`Self::cursor_line_end_affinity`]) when
+    /// `line_end_affinity` is set.
+    pub(super) fn line_and_position_for_offset_with_affinity(
+        &self,
+        offset: usize,
+        line_end_affinity: bool,
+    ) -> (usize, usize, Option<Point<Pixels>>) {
         let Some(last_layout) = &self.last_layout else {
             return (0, 0, None);
         };
@@ -1204,7 +1233,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         for (vi, line) in last_layout.lines.iter().enumerate() {
             let prev_lines_offset = last_layout.visible_line_byte_offsets[vi];
             let local_offset = offset.saturating_sub(prev_lines_offset);
-            if let Some(pos) = line.position_for_index(local_offset, last_layout, false) {
+            if let Some(pos) = line.position_for_index(local_offset, last_layout, line_end_affinity)
+            {
                 let sub_line_index = (pos.y / line_height) as usize;
                 let adjusted_pos = point(pos.x + last_layout.line_number_width, pos.y + y_offset);
                 return (vi, sub_line_index, Some(adjusted_pos));
@@ -1231,9 +1261,13 @@ impl<M: InputModeKind> InputBaseState<M> {
     ) {
         let content = value.into();
         self.inline_tokens = None;
+        self.text_spans = std::rc::Rc::from([]);
+        self.typing_spans = None;
+        self.display_map.stage_span_fonts(std::rc::Rc::from([]));
         self.undo_manager.set_ignoring(true);
         self.emit_events = false;
         self.replace_text(content.text().clone(), window, cx);
+        self.install_spans(&content, cx);
         self.install_tokens(content);
         self.undo_manager.set_ignoring(false);
         self.emit_events = true;
@@ -1675,11 +1709,19 @@ impl<M: InputModeKind> InputBaseState<M> {
 
     pub(super) fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
         self.undo_manager.break_transaction_coalescing();
-        self.select_all_cursors_to(|s, sel| s.previous_boundary(sel.cursor_offset()), cx);
+        self.select_all_cursors_to_with_affinity(
+            |s, sel| s.step_horizontally(sel.cursor_offset(), s.line_end_affinity_for(sel), true),
+            false,
+            cx,
+        );
     }
 
     pub(super) fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
-        self.select_all_cursors_to(|s, sel| s.next_boundary(sel.cursor_offset()), cx);
+        self.select_all_cursors_to_with_affinity(
+            |s, sel| s.step_horizontally(sel.cursor_offset(), s.line_end_affinity_for(sel), false),
+            false,
+            cx,
+        );
     }
 
     pub(super) fn select_up(&mut self, _: &SelectUp, _: &mut Window, cx: &mut Context<Self>) {
@@ -1787,8 +1829,11 @@ impl<M: InputModeKind> InputBaseState<M> {
         cx: &mut Context<Self>,
     ) {
         self.undo_manager.break_transaction_coalescing();
-        self.select_all_cursors_to(
-            |s, sel| s.previous_start_of_word_at(sel.cursor_offset()),
+        self.select_all_cursors_to_with_affinity(
+            |s, sel| {
+                s.step_word_horizontally(sel.cursor_offset(), s.line_end_affinity_for(sel), true)
+            },
+            false,
             cx,
         );
     }
@@ -1800,7 +1845,13 @@ impl<M: InputModeKind> InputBaseState<M> {
         cx: &mut Context<Self>,
     ) {
         self.undo_manager.break_transaction_coalescing();
-        self.select_all_cursors_to(|s, sel| s.next_end_of_word_at(sel.cursor_offset()), cx);
+        self.select_all_cursors_to_with_affinity(
+            |s, sel| {
+                s.step_word_horizontally(sel.cursor_offset(), s.line_end_affinity_for(sel), false)
+            },
+            false,
+            cx,
+        );
     }
 
     /// Return the start offset of the previous word.
@@ -3036,6 +3087,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         {
             let line = &last_layout.lines[vi];
             let local_offset = offset.saturating_sub(last_layout.visible_line_byte_offsets[vi]);
+            // A right-to-left paragraph rests against the right edge: no margin there.
+            let safety_margin = if line.is_rtl() { px(0.) } else { safety_margin };
             if let Some(pos) = line.position_for_index(local_offset, last_layout, false) {
                 let bounds_width = bounds.size.width - last_layout.line_number_width;
                 let col_offset_x = pos.x;
@@ -3119,7 +3172,7 @@ impl<M: InputModeKind> InputBaseState<M> {
 
         let texts = self.selected_texts();
 
-        cx.write_to_clipboard(ClipboardItem::new_string(texts.join("\n")));
+        cx.write_to_clipboard(self.clipboard_item(texts.join("\n")));
     }
 
     pub(super) fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
@@ -3129,7 +3182,7 @@ impl<M: InputModeKind> InputBaseState<M> {
 
         let texts = self.selected_texts();
 
-        cx.write_to_clipboard(ClipboardItem::new_string(texts.join("\n")));
+        cx.write_to_clipboard(self.clipboard_item(texts.join("\n")));
 
         self.undo_manager.set_pending_intent(EditIntent::Atomic);
         self.replace_text_in_range_silent(None, "", window, cx);
@@ -3197,6 +3250,12 @@ impl<M: InputModeKind> InputBaseState<M> {
         let Some(mut new_text) = clipboard.text().filter(|text| !text.is_empty()) else {
             return;
         };
+        // A copy from an input with formatting spans or tokens carries them;
+        // paste restores them into a single selection (Quill patch).
+        if self.selections.is_single() && self.paste_rich(&clipboard, &new_text, window, cx) {
+            self.scroll_to(self.cursor(), None, cx);
+            return;
+        }
         // A paste is one atomic edit, never part of a typing run.
         self.undo_manager.set_pending_intent(EditIntent::Atomic);
 
@@ -3286,8 +3345,10 @@ impl<M: InputModeKind> InputBaseState<M> {
         selection_before: CursorSelection,
         selection_after: Option<CursorSelection>,
     ) -> bool {
+        let revision = self.document_revision;
         self.document_revision = self.document_revision.wrapping_add(1);
         let token_delta = self.edit_tokens(range, new_text.len());
+        let span_snapshot = self.edit_spans(range, new_text, revision);
         if self.undo_manager.is_ignoring() {
             return false;
         }
@@ -3317,6 +3378,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         let open_transaction = self.undo_manager.has_open_transaction();
         let mut change = Change::new(range, &old_text, new_range, new_text);
         change.token_delta = token_delta;
+        change.spans = span_snapshot;
         let recorded = self.undo_manager.record_transaction(change, intent);
         // A batch records its own cursor sets. This covers a change that is a
         // transaction on its own.
@@ -3348,10 +3410,12 @@ impl<M: InputModeKind> InputBaseState<M> {
             return;
         };
         let token_aware = self.inline_tokens.is_some()
+            || !self.text_spans.is_empty()
             || replay
                 .changes
                 .iter()
-                .any(|change| change.token_delta.is_some());
+                .any(|change| change.token_delta.is_some() || change.spans.is_some());
+        let spans_before = self.text_spans.clone();
         let emit_events = self.emit_events;
         if token_aware {
             self.emit_events = false;
@@ -3364,10 +3428,20 @@ impl<M: InputModeKind> InputBaseState<M> {
             } else {
                 (change.old_range.into(), &change.new_text)
             };
-            let range_utf16 = self.range_to_utf16(&range);
-            self.replace_text_in_range_silent(Some(range_utf16), text, window, cx);
-            self.replay_tokens(&range, text.len(), change.token_delta.as_deref(), undo);
+            if !change.is_span_only() {
+                let range_utf16 = self.range_to_utf16(&range);
+                self.replace_text_in_range_silent(Some(range_utf16), text, window, cx);
+                self.replay_tokens(&range, text.len(), change.token_delta.as_deref(), undo);
+            }
+            if let Some(spans) = &change.spans {
+                self.text_spans = if undo {
+                    spans.before.clone()
+                } else {
+                    spans.after.clone()
+                };
+            }
         }
+        self.refresh_span_layout(&spans_before, true, cx);
         self.restore_selections(replay.selections);
         self.mode
             .restore_auto_closed_pairs(replay.auto_closed_pairs.unwrap_or_default());
@@ -3463,6 +3537,13 @@ impl<M: InputModeKind> InputBaseState<M> {
     pub fn set_scroll_offset(&mut self, offset: gpui::Point<gpui::Pixels>, cx: &mut Context<Self>) {
         self.deferred_scroll_offset = Some(offset);
         cx.notify();
+    }
+
+    /// The font and size the input lays its text out with, so an overlay
+    /// (an inline bot's hint) can match it.
+    pub fn text_style(&self) -> (gpui::Font, gpui::Pixels) {
+        let (font, size) = self.display_map.text_style();
+        (font.clone(), size)
     }
 
     /// Laid-out line height; `None` before first layout.
@@ -4164,6 +4245,45 @@ impl<M: InputModeKind> InputBaseState<M> {
         ))
     }
 
+    /// The rectangle the caret is drawn at, in window coordinates, with its affinity: at a
+    /// direction change in bidirectional text the caret offset has two places on screen, and
+    /// this is the one the caret is in (the plain [`Self::range_to_bounds`] of an empty range
+    /// is always the leading one). `None` when the caret is not laid out.
+    pub fn caret_bounds(&self) -> Option<Bounds<Pixels>> {
+        let last_layout = self.last_layout.as_ref()?;
+        let last_bounds = self.last_bounds?;
+        let (_, _, pos) =
+            self.line_and_position_for_offset_with_affinity(self.cursor(), self.cursor_line_end_affinity);
+        let pos = last_bounds.origin + pos?;
+        Some(Bounds::new(pos, gpui::size(px(0.), last_layout.line_height)))
+    }
+
+    /// Whether the caret hangs on the character before its offset: at the end of a soft
+    /// wrapped row, or on the near side of a direction change (see [`Self::caret_bounds`]).
+    pub fn caret_hangs_on_previous_character(&self) -> bool {
+        self.cursor_line_end_affinity
+    }
+
+    /// Return the rendered rectangles of a UTF-8 byte range in the current input contents, in
+    /// window coordinates: one per visual line the range crosses, and several on one line where
+    /// the range crosses a direction change in bidirectional text (a logical range is not one
+    /// visual interval there). Empty when the range is not currently laid out or visible.
+    pub fn range_to_rects(&self, range: &Range<usize>) -> Vec<Bounds<Pixels>> {
+        let (Some(last_layout), Some(last_bounds)) =
+            (self.last_layout.as_ref(), self.last_bounds.as_ref())
+        else {
+            return Vec::new();
+        };
+        let Some(corners) = TextElement::<M>::layout_range_corners(range, last_layout) else {
+            return Vec::new();
+        };
+        let origin = last_bounds.origin + point(last_layout.line_number_width, px(0.));
+        corners
+            .into_iter()
+            .map(|c| Bounds::from_corners(origin + c.top_left, origin + c.bottom_right))
+            .collect()
+    }
+
     /// Replace text in range in silent.
     ///
     /// This will not trigger any UI interaction, such as auto-completion.
@@ -4491,6 +4611,9 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         if !self.is_editable() {
             return;
         }
+        // An edit places the caret by text offset: it no longer hangs on the character before
+        // a direction change it may have been parked at.
+        self.cursor_line_end_affinity = false;
         let selection_before = *self.active_selection();
         // Committing a composition ends the transaction it opened, whether or
         // not the platform follows up with `unmark_text`.
@@ -4731,6 +4854,9 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         if !self.is_editable() {
             return;
         }
+        // An edit places the caret by text offset: it no longer hangs on the character before
+        // a direction change it may have been parked at.
+        self.cursor_line_end_affinity = false;
         let selection_before = *self.active_selection();
 
         let starts_composition = self.ime_marked_range.is_none();

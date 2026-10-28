@@ -1,3 +1,6 @@
+// Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
+// `Window::paint_surface_frame`; the paint filter and `Window::capture_frame`.
+// See third_party/gpui-pre/QUILL-CHANGES.md.
 #[cfg(feature = "profiler")]
 use crate::DebugFrameOverlayMode;
 #[cfg(any(feature = "inspector", debug_assertions))]
@@ -68,7 +71,7 @@ use uuid::Uuid;
 pub(crate) mod a11y;
 mod prompts;
 
-pub use a11y::A11ySubtreeBuilder;
+pub use a11y::{A11yNodeSnapshot, A11ySubtreeBuilder, A11yTreeSnapshot};
 
 use self::a11y::A11y;
 #[cfg(not(target_family = "wasm"))]
@@ -461,6 +464,23 @@ impl Drop for ElementArenaScope {
             );
         }
     }
+}
+
+/// Quill: what [`Window::set_paint_filter`] takes.
+#[derive(Clone)]
+pub struct PaintFilter {
+    /// Given the tags of the elements being painted, outermost first,
+    /// whether their paint is drawn.
+    pub allows: std::rc::Rc<dyn Fn(&[SharedString]) -> bool>,
+    /// What covers the bounds of a tagged element whose paint the filter
+    /// refuses while its parent's was drawn, and the whole window when
+    /// paint outside every tagged element is refused: the hidden part
+    /// reads as hidden rather than empty.
+    pub hidden: Hsla,
+    /// What goes under a tagged element the filter draws while its
+    /// parent's paint was refused, standing in for the backgrounds the
+    /// filter left out (the window's own, usually).
+    pub shown: Hsla,
 }
 
 /// Returned when the element arena has been used and so must be cleared before the next draw.
@@ -1051,6 +1071,12 @@ pub(crate) struct Frame {
     pub(crate) dispatch_tree: DispatchTree,
     pub(crate) scene: Scene,
     pub(crate) hitboxes: Vec<Hitbox>,
+    /// [`InteractiveElement::a11y_tag`] per tagged hitbox
+    /// ([`Window::hovered_a11y_tags`]).
+    pub(crate) hitbox_tags: FxHashMap<HitboxId, SharedString>,
+    /// The tags of the focused element and its tagged ancestors, outermost
+    /// first, as painted this frame ([`Window::focused_a11y_tags`]).
+    pub(crate) focus_tags: Vec<SharedString>,
     pub(crate) window_control_hitboxes: Vec<(WindowControlArea, Hitbox)>,
     pub(crate) deferred_draws: Vec<DeferredDraw>,
     pub(crate) input_handlers: Vec<Option<PlatformInputHandler>>,
@@ -1107,6 +1133,8 @@ impl Frame {
             dispatch_tree,
             scene: Scene::default(),
             hitboxes: Vec::new(),
+            hitbox_tags: FxHashMap::default(),
+            focus_tags: Vec::new(),
             window_control_hitboxes: Vec::new(),
             deferred_draws: Vec::new(),
             input_handlers: Vec::new(),
@@ -1137,6 +1165,8 @@ impl Frame {
         self.tooltip_requests.clear();
         self.cursor_styles.clear();
         self.hitboxes.clear();
+        self.hitbox_tags.clear();
+        self.focus_tags.clear();
         self.window_control_hitboxes.clear();
         self.deferred_draws.clear();
         self.tab_stops.clear();
@@ -1268,6 +1298,17 @@ pub struct Window {
     default_prevented: bool,
     mouse_position: Point<Pixels>,
     mouse_hit_test: HitTest,
+    /// The [`InteractiveElement::a11y_tag`]s of the elements being painted,
+    /// outermost first (pushed and popped around each tagged element's
+    /// paint), so the focused element can record the tags above it.
+    pub(crate) a11y_tag_stack: Vec<SharedString>,
+    /// Quill: decides from [`Self::a11y_tag_stack`] whether what is painted
+    /// now reaches the scene ([`Self::set_paint_filter`]).
+    paint_filter: Option<PaintFilter>,
+    /// Quill: under a paint filter, the tag stack each tooltip's owner was
+    /// painted under; the tooltip is painted under the same tags, so it is
+    /// cut with its owner ([`Self::record_tooltip_tags`]).
+    tooltip_tags: Vec<(TooltipId, Vec<SharedString>)>,
     modifiers: Modifiers,
     capslock: Capslock,
     scale_factor: f32,
@@ -2172,6 +2213,9 @@ impl Window {
             default_prevented: true,
             mouse_position,
             mouse_hit_test: HitTest::default(),
+            a11y_tag_stack: Vec::new(),
+            tooltip_tags: Vec::new(),
+            paint_filter: None,
             modifiers,
             capslock,
             scale_factor,
@@ -3476,6 +3520,10 @@ impl Window {
                 self.rendered_frame.input_handlers.push(Some(input_handler));
             }
         }
+        self.next_frame.scene.filtered = self.paint_filter.is_some();
+        self.tooltip_tags.clear();
+        self.update_paint_suppression();
+        self.cover_refused_window();
         if !cx.mode.skip_drawing() {
             self.draw_roots(cx);
             #[cfg(feature = "profiler")]
@@ -3773,7 +3821,29 @@ impl Window {
         } else if let Some(mut drag_element) = active_drag_element {
             drag_element.paint(self, cx);
         } else if let Some(mut tooltip_element) = tooltip_element {
+            // Quill: under a paint filter the tooltip is painted under its
+            // owner's tags, so the filter decides it as it decided the
+            // owner.
+            let tags = self
+                .tooltip_bounds
+                .as_ref()
+                .filter(|_| self.paint_filter.is_some())
+                .and_then(|tooltip| {
+                    self.tooltip_tags
+                        .iter()
+                        .find(|(id, _)| *id == tooltip.id)
+                        .map(|(_, tags)| (tags.clone(), tooltip.bounds))
+                });
+            let pushed = tags.as_ref().map_or(0, |(tags, _)| tags.len());
+            if let Some((tags, bounds)) = tags {
+                for tag in tags {
+                    self.push_a11y_tag(tag, bounds);
+                }
+            }
             tooltip_element.paint(self, cx);
+            for _ in 0..pushed {
+                self.pop_a11y_tag();
+            }
         }
 
         #[cfg(any(feature = "inspector", debug_assertions))]
@@ -3789,10 +3859,13 @@ impl Window {
 
         // a11y may have been activated/deactivated halfway through the frame
         let a11y_active_start_of_frame = self.a11y.is_active();
+        let a11y_system_active_start_of_frame = self.a11y.is_system_active();
         self.a11y.sync_active_flag();
-        let a11y_active_end_of_frame = self.a11y.is_active();
+        let a11y_system_active_end_of_frame = self.a11y.is_system_active();
 
-        let should_send_a11y_update = a11y_active_start_of_frame && a11y_active_end_of_frame;
+        // A tree built only because it was forced stays in-process.
+        let should_send_a11y_update =
+            a11y_system_active_start_of_frame && a11y_system_active_end_of_frame;
 
         if a11y_active_start_of_frame {
             // Harvest frame metadata for the debug dump while the live window
@@ -5189,6 +5262,26 @@ impl Window {
         });
     }
 
+    /// QUILL: paint CPU surface pixels into the scene for the next frame at
+    /// the current z-index (platforms without CoreVideo).
+    ///
+    /// This method should only be called as part of the paint phase of element drawing.
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+    pub fn paint_surface_frame(&mut self, bounds: Bounds<Pixels>, frame: Arc<crate::SurfaceFrame>) {
+        use crate::PaintSurface;
+
+        self.invalidator.debug_assert_paint();
+
+        let bounds = self.snap_bounds(bounds);
+        let content_mask = self.snapped_content_mask();
+        self.next_frame.scene.insert_primitive(PaintSurface {
+            order: 0,
+            bounds,
+            content_mask,
+            frame,
+        });
+    }
+
     /// Removes an image from the sprite atlas.
     pub fn drop_image(&mut self, data: Arc<RenderImage>) -> Result<()> {
         for frame_index in 0..data.frame_count() {
@@ -5326,6 +5419,176 @@ impl Window {
         hitbox
     }
 
+    /// Record the [`InteractiveElement::a11y_tag`] of a hitbox inserted this
+    /// frame, for [`Self::hovered_a11y_tags`].
+    pub(crate) fn tag_hitbox(&mut self, id: HitboxId, tag: SharedString) {
+        self.next_frame.hitbox_tags.insert(id, tag);
+    }
+
+    /// The tags ([`InteractiveElement::a11y_tag`]) of the hitboxes under the
+    /// mouse as of the last mouse event, topmost first: the hitboxes a
+    /// mouse event would reach, as [`Hitbox::is_hovered`] sees them. The
+    /// walk ends with the hitboxes that only scroll would reach
+    /// ([`HitboxBehavior::BlockMouseExceptScroll`]) and at an occluding
+    /// hitbox ([`HitboxBehavior::BlockMouse`]), tagged or not, so an
+    /// overlay over a tagged region hides the region's tag.
+    pub fn hovered_a11y_tags(&self) -> Vec<SharedString> {
+        let hit_test = &self.mouse_hit_test;
+        let frame = &self.rendered_frame;
+        let mut tags = Vec::new();
+        for id in hit_test.ids.iter().take(hit_test.hover_hitbox_count) {
+            if let Some(tag) = frame.hitbox_tags.get(id) {
+                tags.push(tag.clone());
+            }
+            let occludes = frame
+                .hitboxes
+                .iter()
+                .any(|hitbox| hitbox.id == *id && hitbox.behavior == HitboxBehavior::BlockMouse);
+            if occludes {
+                break;
+            }
+        }
+        tags
+    }
+
+    /// Whether the focused element registered a text input handler in the
+    /// last frame ([`Self::handle_input`]): typed characters go into a text
+    /// field, not to key bindings alone.
+    pub fn focused_text_input(&self) -> bool {
+        !self.rendered_frame.input_handlers.is_empty()
+    }
+
+    /// The tags ([`InteractiveElement::a11y_tag`]) of the focused element
+    /// and the elements it was painted inside, innermost first, from the
+    /// last frame: what a key event would reach, read the way
+    /// [`Self::hovered_a11y_tags`] reads a click. Recorded when a focused
+    /// element registers a text input handler or tracks its focus handle;
+    /// empty when nothing focused was painted (focus in a deferred draw
+    /// records the tags of that draw's own ancestors only).
+    pub fn focused_a11y_tags(&self) -> Vec<SharedString> {
+        self.rendered_frame
+            .focus_tags
+            .iter()
+            .rev()
+            .cloned()
+            .collect()
+    }
+
+    /// Paint-time: an element tagged `tag` starts painting (its own
+    /// background and border included). Under a paint filter, an element
+    /// whose tag turns paint off is covered with the filter's `hidden`
+    /// fill over `bounds`, and one whose tag turns it back on gets the
+    /// `shown` fill under it.
+    pub(crate) fn push_a11y_tag(&mut self, tag: SharedString, bounds: Bounds<Pixels>) {
+        let was_hidden = self.next_frame.scene.suppressed;
+        self.a11y_tag_stack.push(tag);
+        self.update_paint_suppression();
+        let hidden = self.next_frame.scene.suppressed;
+        let Some(filter) = self.paint_filter.as_ref() else {
+            return;
+        };
+        let color = match (was_hidden, hidden) {
+            (false, true) => filter.hidden,
+            (true, false) => filter.shown,
+            _ => return,
+        };
+        self.next_frame.scene.suppressed = false;
+        self.paint_quad(fill(bounds, color));
+        self.next_frame.scene.suppressed = hidden;
+    }
+
+    /// Draw-time, under a paint filter that refuses paint outside every
+    /// tagged element: the window starts covered with the `hidden` fill.
+    fn cover_refused_window(&mut self) {
+        let Some(hidden) = self.paint_filter.as_ref().map(|filter| filter.hidden) else {
+            return;
+        };
+        if !self.next_frame.scene.suppressed {
+            return;
+        }
+        let bounds = Bounds::new(Point::default(), self.viewport_size()).scale(self.scale_factor());
+        self.next_frame.scene.suppressed = false;
+        self.next_frame.scene.insert_primitive(Quad {
+            bounds,
+            content_mask: ContentMask { bounds },
+            background: hidden.into(),
+            ..Quad::default()
+        });
+        self.next_frame.scene.suppressed = true;
+    }
+
+    /// Paint-time: the element [`Self::push_a11y_tag`] named is painted.
+    pub(crate) fn pop_a11y_tag(&mut self) {
+        self.a11y_tag_stack.pop();
+        self.update_paint_suppression();
+    }
+
+    fn update_paint_suppression(&mut self) {
+        self.next_frame.scene.suppressed = self
+            .paint_filter
+            .as_ref()
+            .is_some_and(|filter| !(filter.allows)(&self.a11y_tag_stack));
+    }
+
+    /// Draw only what `filter` allows from now on, `None` to draw
+    /// everything again. The filter gets the [`InteractiveElement::a11y_tag`]s
+    /// of the elements being painted, outermost first, and answers whether
+    /// what they paint reaches the scene; anything painted outside every
+    /// tagged element gets an empty list. A tagged element refused while
+    /// its parent was drawn is covered with the filter's `hidden` fill, one
+    /// drawn while its parent was refused gets the `shown` fill under it. A filtered frame renders every
+    /// view again (cached paint was never filtered and is not replayed).
+    /// Meant for one [`Self::draw`] followed by [`Self::capture_frame`]:
+    /// clear it and draw again before the frame is presented.
+    pub fn set_paint_filter(&mut self, filter: Option<PaintFilter>) {
+        self.paint_filter = filter;
+        self.refresh();
+    }
+
+    /// Whether a paint filter is set ([`Self::set_paint_filter`]).
+    pub fn has_paint_filter(&self) -> bool {
+        self.paint_filter.is_some()
+    }
+
+    /// The last drawn frame, rendered offscreen by the window's own
+    /// renderer and read back, in device pixels. Nothing is presented and
+    /// the screen is not read, so no other window can appear in it. An
+    /// error where the platform's renderer has no readback.
+    pub fn capture_frame(&self) -> anyhow::Result<image::RgbaImage> {
+        self.platform_window
+            .capture_image(&self.rendered_frame.scene)
+    }
+
+    /// Quill, paint-time: the element that owns tooltip `id` is being
+    /// painted. Under a paint filter, keep the tag stack above it, so the
+    /// tooltip is filtered as its owner is (it is drawn later, at the
+    /// root, where the stack is empty).
+    pub(crate) fn record_tooltip_tags(&mut self, id: Option<TooltipId>) {
+        let Some(id) = id else {
+            return;
+        };
+        if self.paint_filter.is_none() {
+            return;
+        }
+        self.tooltip_tags.push((id, self.a11y_tag_stack.clone()));
+    }
+
+    /// Paint-time: the focused element is being painted; keep the tag
+    /// stack above it for [`Self::focused_a11y_tags`].
+    pub(crate) fn record_focus_tags(&mut self) {
+        self.next_frame.focus_tags = self.a11y_tag_stack.clone();
+    }
+
+    /// The caret (or the start of the text being composed) of the text
+    /// input the platform types into, in window logical pixels: the
+    /// rectangle the input method's candidate window is placed by.
+    pub fn focused_text_caret(&mut self, cx: &mut App) -> Option<Bounds<Pixels>> {
+        let mut handler = self.platform_window.take_input_handler()?;
+        let bounds = handler.selected_bounds(self, cx);
+        self.platform_window.set_input_handler(handler);
+        bounds
+    }
+
     /// Set a hitbox which will act as a control area of the platform window.
     ///
     /// This method should only be called as part of the paint phase of element drawing.
@@ -5415,6 +5678,7 @@ impl Window {
         self.invalidator.debug_assert_paint();
 
         if focus_handle.is_focused(self) {
+            self.record_focus_tags();
             let cx = self.to_async(cx);
             self.next_frame.input_handlers.push(Some(
                 PlatformInputHandler::new(cx, Box::new(input_handler)).with_focus(focus_handle.id),
@@ -7054,6 +7318,43 @@ impl Window {
     /// Debug representation of the last frame's accessibility information.
     pub fn debug_a11y_tree_json(&self) -> Option<String> {
         self.a11y.debug_tree_json()
+    }
+
+    /// Build the accessibility tree every frame whether or not assistive
+    /// technology is connected, so an in-process reader can read it with
+    /// [`Self::a11y_tree_snapshot`]. The tree is not sent to the platform
+    /// while only this asks for it. Turning it on or off redraws the window.
+    pub fn set_a11y_forced(&mut self, on: bool) {
+        if self.a11y.set_forced(on) {
+            self.refresh();
+        }
+    }
+
+    /// Whether [`Self::set_a11y_forced`] is on.
+    pub fn is_a11y_forced(&self) -> bool {
+        self.a11y.is_forced()
+    }
+
+    /// Whether assistive technology asked for the tree this frame. Unlike
+    /// [`Self::is_a11y_active`], a tree forced with [`Self::set_a11y_forced`]
+    /// does not count, so behaviour meant for screen-reader users (focus
+    /// announcements, key handling) can key off this.
+    pub fn is_a11y_system_active(&self) -> bool {
+        self.a11y.is_system_active()
+    }
+
+    /// The accessibility tree of the last frame that built one, with bounds
+    /// in window logical pixels. `None` until a frame built a tree (see
+    /// [`Self::is_a11y_active`] and [`Self::set_a11y_forced`]).
+    pub fn a11y_tree_snapshot(&self) -> Option<A11yTreeSnapshot> {
+        self.a11y.snapshot(self.scale_factor)
+    }
+
+    /// How many frames built an accessibility tree so far (the
+    /// `frame_number` the next [`Self::a11y_tree_snapshot`] carries), without
+    /// copying the tree.
+    pub fn a11y_tree_frame(&self) -> u64 {
+        self.a11y.frame_number()
     }
 
     /// Register a listener for an accessibility action on a specific node.
