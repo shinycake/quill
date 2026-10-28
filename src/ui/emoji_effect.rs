@@ -14,8 +14,9 @@
 //!
 //! Where a message is on screen is noted while the history paints
 //! (`anchor_tracker`); an effect for a message that is not visible is
-//! dropped, as tdesktop does. The anchor is the emoji glyph at the start of
-//! the text block, not the footer's reserved space. Like tdesktop, the
+//! dropped, as tdesktop does. The anchor is the lone emoji's sticker
+//! (`animated_emoji`), or the large glyph at the start of the text block
+//! when there is no sticker, not the footer's reserved space. Like tdesktop, the
 //! sticker is mirrored for messages on the left (the player draws it
 //! mirrored, a clip of its own). Effects
 //! past the fifth wait their turn (`may_start`, tdesktop `checkDelayed`).
@@ -25,7 +26,6 @@ use super::app::QuillApp;
 use super::premium_sticker_effect;
 use super::sticker_player::{HeadId, StickerView, ViewAsk};
 use gpui_kit::*;
-use quill::bubble_layout::LARGE_EMOJI_SIZE;
 use quill::emoji_interaction::{EmojiEffect, MAX_PLAYS};
 use quill::ids::{ChatId, FileId, MessageId};
 use quill::state::Session;
@@ -276,21 +276,24 @@ fn anchor(key: Key) -> Option<Bounds<Pixels>> {
     ANCHORS.with(|anchors| anchors.borrow().get(&key).copied())
 }
 
-/// An invisible child that notes where a lone emoji is painted.
-fn anchor_tracker(key: Key) -> impl IntoElement {
+/// An invisible child that notes where a lone emoji is painted: the whole
+/// block for a sticker, the first `glyph` points of it for a large glyph.
+fn anchor_tracker(key: Key, glyph: Option<f32>) -> impl IntoElement {
     canvas(
         |_, _, _| {},
         move |block, _, window, _| {
-            // The emoji is the first thing in the block; the rest is the
+            // A glyph is the first thing in the block; the rest is the
             // time footer's reserved space.
-            let glyph = LARGE_EMOJI_SIZE as f32;
-            let bounds = Bounds::new(
-                block.origin,
-                size(
-                    block.size.width.min(px(glyph)),
-                    block.size.height.min(px(glyph * GLYPH_LINE)),
+            let bounds = match glyph {
+                Some(glyph) => Bounds::new(
+                    block.origin,
+                    size(
+                        block.size.width.min(px(glyph)),
+                        block.size.height.min(px(glyph * GLYPH_LINE)),
+                    ),
                 ),
-            );
+                None => block,
+            };
             let visible = bounds.intersect(&window.content_mask().bounds);
             if visible.size.width > Pixels::ZERO && visible.size.height > Pixels::ZERO {
                 ANCHORS.with(|anchors| {
@@ -305,16 +308,18 @@ fn anchor_tracker(key: Key) -> impl IntoElement {
 }
 
 /// A lone emoji message (`msg_key` is chat id, message id) that plays an
-/// effect when clicked.
+/// effect when clicked. `glyph`: the emoji's size when it is a large glyph
+/// at the block's start; `None` when the block is the sticker.
 pub(super) fn tappable(
     block: Stateful<Div>,
     msg_key: (i64, u64),
+    glyph: Option<f32>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let key = (msg_key.0, msg_key.1 as i64);
     block
         .relative()
-        .child(anchor_tracker(key))
+        .child(anchor_tracker(key, glyph))
         .on_mouse_up(
             MouseButton::Left,
             cx.listener(move |this, event: &MouseUpEvent, window, cx| {
@@ -323,6 +328,7 @@ pub(super) fn tappable(
                     && !gpui_kit::base::TextSelection::has_selection(window, cx)
                 {
                     this.tap_animated_emoji(ChatId(key.0), MessageId(key.1));
+                    cx.notify();
                 }
             }),
         )
@@ -444,6 +450,8 @@ impl QuillApp {
     /// A lone emoji was clicked: ask TDLib for its effect. The answer is
     /// queued in the session and starts in [`Self::emoji_effect_overlay`].
     pub(super) fn tap_animated_emoji(&mut self, chat_id: ChatId, message_id: MessageId) {
+        // tdesktop `emojiStickerClicked`: the sticker plays again too.
+        self.replay_lone_emoji(chat_id, message_id);
         if let Some(live) = self.live.as_mut() {
             // A 404 (no effect for this emoji) comes back as an error that
             // needs no notice; the usual animation is all there is.
@@ -616,6 +624,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let mut watched: Vec<(ChatId, String)> = Vec::new();
+        let mut replays: Vec<(ChatId, MessageId)> = Vec::new();
         let waiting: Vec<(usize, i32)> = ACTIVE.with(|active| {
             active
                 .borrow()
@@ -664,6 +673,11 @@ impl QuillApp {
                     // Plays once from its first frame, whatever the loop
                     // setting says.
                     entry.view = Some((view, Instant::now()));
+                    // tdesktop `stickerClearLoopPlayed` as an interaction
+                    // starts: the lone emoji under it plays along.
+                    if !entry.premium && entry.message.is_none() {
+                        replays.push((entry.effect.chat_id, entry.effect.message_id));
+                    }
                     if entry.effect.incoming {
                         watched.push((entry.effect.chat_id, entry.effect.sticker.emoji.clone()));
                     }
@@ -681,6 +695,9 @@ impl QuillApp {
                     }
             });
         });
+        for (chat_id, message_id) in replays {
+            self.replay_lone_emoji(chat_id, message_id);
+        }
         for (chat_id, sticker_emoji) in watched {
             let emoji = ACTIVE
                 .with(|active| {

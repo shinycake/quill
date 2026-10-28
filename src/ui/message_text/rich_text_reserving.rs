@@ -314,7 +314,8 @@ pub(in crate::ui) fn message_text_block(
         && text.entities.is_empty()
         && quill::emoji_catalog::big_emoji_count(&text.text) == Some(1)
     {
-        return super::super::emoji_effect::tappable(block, msg_key, cx);
+        let glyph = f32::from(font);
+        return super::super::emoji_effect::tappable(block, msg_key, Some(glyph), cx);
     }
     block.into_any_element()
 }

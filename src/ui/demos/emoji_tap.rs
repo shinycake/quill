@@ -1,7 +1,8 @@
 //! Screenshot demo: the effect of a tap on a lone emoji (injected, no live
-//! Telegram). The other party's lone emoji is tapped a moment after the
-//! chat shows, and its effect (the demo sticker) plays over it, mirrored as
-//! for a message on the left, at tdesktop's effect size (`emoji_effect`).
+//! Telegram). The other party's lone animated emoji (the demo hand, drawn
+//! as its 112 pt sticker) is tapped a moment after the chat shows, and its
+//! effect (the demo sticker) plays over it, mirrored as for a message on
+//! the left, at tdesktop's effect size (`emoji_effect`).
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
@@ -43,9 +44,7 @@ impl QuillApp {
         let file = demo_file_json(EFFECT_FILE, &path.to_string_lossy(), true);
         let updates = [
             format!(r#"{{"@type":"updateFile","file":{file}}}"#),
-            format!(
-                r#"{{"@type":"updateNewMessage","message":{{"id":{MESSAGE},"chat_id":{CHAT},"date":1760000000,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"🎉","entities":[]}}}}}}}}"#
-            ),
+            super::animated_emoji::hand_message_json(MESSAGE, false, "👋", 0),
         ];
         for json in updates {
             if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &sink) {
@@ -68,7 +67,7 @@ impl QuillApp {
                         custom_emoji_id: None,
                         id: i64::from(EFFECT_FILE),
                         set_id: 0,
-                        emoji: "🎉".into(),
+                        emoji: "👋".into(),
                         width: 512,
                         height: 512,
                         format: StickerFormat::Tgs,

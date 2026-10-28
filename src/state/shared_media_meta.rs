@@ -588,6 +588,7 @@ mod tests {
             text: text.into(),
             entities,
             link_preview: link,
+            animated: None,
         }
     }
 

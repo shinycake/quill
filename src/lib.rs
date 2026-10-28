@@ -8,6 +8,7 @@ pub mod advanced;
 pub mod agent;
 pub mod ai_compose;
 pub mod album;
+pub mod animated_emoji;
 pub mod animation;
 pub mod app_theme;
 pub mod archive_mute;

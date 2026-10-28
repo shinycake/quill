@@ -117,6 +117,7 @@ impl QuillApp {
                             let side = f32::from(w.max(h));
                             self.history_sticker(message, sticker, mirror, side, cx)
                         }
+                        MessageContent::Text(_) => self.lone_emoji_view(message, cx),
                         _ => None,
                     },
                     match &message.content {

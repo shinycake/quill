@@ -132,8 +132,11 @@ pub(in crate::ui) fn mirrors(has_premium_effect: bool, right_aligned: bool) -> b
 }
 
 impl QuillApp {
+    /// Close every clip and forget every head and every lone emoji played:
+    /// another chat opened, the chat closed, another account.
     pub(in crate::ui) fn stop_sticker_playback(&mut self) {
         self.playback.stickers.stop();
+        self.playback.emoji_plays.get_mut().clear();
     }
 
     /// Whether looping is on (Settings → Chat → "Loop animated stickers").
@@ -144,7 +147,7 @@ impl QuillApp {
 
     /// How a sticker in a chat plays: looping, or once resting on its last
     /// frame.
-    fn sticker_mode(&self) -> PlayMode {
+    pub(in crate::ui) fn sticker_mode(&self) -> PlayMode {
         if self.loop_stickers() {
             PlayMode::Loop
         } else {
@@ -362,6 +365,10 @@ impl QuillApp {
         let MessageContent::Text(text) = &message.content else {
             return out;
         };
+        // Custom emoji drawn big are stickers of their own size.
+        if let Some(big) = self.big_custom_emoji_views(message, cx) {
+            return big;
+        }
         if power_saving::on(power_saving::Flag::EmojiChat) {
             return out;
         }

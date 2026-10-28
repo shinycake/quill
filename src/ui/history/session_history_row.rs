@@ -48,15 +48,8 @@ pub(in crate::ui) fn session_history_row(
     // drawn big) stand on their own, without a bubble, as in Telegram
     // Desktop. Their time then sits on the chat background, so it takes
     // the theme's text color instead of the bubble's.
-    let emoji_only = match &message.content {
-        MessageContent::Text(text) => {
-            text.link_preview.is_none()
-                && session.is_none_or(|s| s.settings.media_prefs.big_emoji)
-                && quill::emoji_catalog::big_emoji_count_with_entities(&text.text, &text.entities)
-                    .is_some()
-        }
-        _ => false,
-    };
+    let emoji_media = super::super::animated_emoji::message_emoji_media(message, session);
+    let emoji_only = emoji_media.is_some();
     let look = if emoji_only
         || matches!(
             message.content,
@@ -416,7 +409,7 @@ pub(in crate::ui) fn session_history_row(
                     files,
                     downloading,
                     media_roots,
-                    sticker_frame,
+                    sticker_frame.clone(),
                     cx,
                 ),
                 cx,
@@ -642,7 +635,19 @@ pub(in crate::ui) fn session_history_row(
     let reserve_footer = tail_empty && message.date > 0 && !ends_rtl;
     // M2: ephemeral content replaces the regular content for rendering
     // (bot-built flows show the ephemeral variant to the current user).
+    // A lone animated emoji or big custom emoji: stickers, not text.
+    let emoji_block = super::super::animated_emoji::message_block(
+        message,
+        emoji_media.as_ref(),
+        sticker_frame.as_ref(),
+        &animated_emoji,
+        files,
+        media_roots,
+        session,
+        cx,
+    );
     let text_body = match effective_content(&message.content, message.ephemeral.as_ref()) {
+        MessageContent::Text(_) if emoji_block.is_some() => None,
         MessageContent::Text(text) => Some(message_text_block(
             (message.chat_id.0, message.id.0 as u64),
             text,
@@ -759,6 +764,7 @@ pub(in crate::ui) fn session_history_row(
         }
         (media, _) => media,
     };
+    let extra_media = extra_media.or(emoji_block);
     // Photo/GIF/video bubbles without a reply or forward header: the
     // picture sits on a thin inset and a caption gets its own padding.
     let media_led = header.is_none()
