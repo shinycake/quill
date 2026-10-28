@@ -111,8 +111,8 @@ with diff images to the temp directory.
 | --- | --- |
 | `matte-mask` (hand-written) | track matte, animated subtract mask, animated roundness, stroke |
 | `fitz-face` none and type 5 (hand-written) | skin tone on fill, keyframed stroke, solid layer; gradient kept |
-| `trim-paths` (cached sticker 440fbc4810c2) | trim paths, 48 animated paths; rlottie was 5.7% off |
-| `many-paths` (cached sticker d8f36dcb4076) | 104 animated paths, the face and hand case of `rlottie-shape-budget.md` |
+| `trim-paths` (generated, `generate.py`) | trim paths on 48 animated paths |
+| `many-paths` (generated, `generate.py`) | 104 animated paths in layers and a precomp, past the old shape budget |
 
 The references come from ThorVG itself at the pinned tag. A bump regenerates
 them (`docs/dependency-updates.md`) and the PR shows each changed PNG.

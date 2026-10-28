@@ -1,5 +1,5 @@
-//! Golden frames for the vendored ThorVG (third_party/thorvg): a few real and
-//! hand-written stickers rendered at 128 px against committed reference
+//! Golden frames for the vendored ThorVG (third_party/thorvg): a few hand-written
+//! stickers (tests/fixtures/stickers/generate.py makes the two big ones) rendered at 128 px against committed reference
 //! frames, so a ThorVG update shows every pixel it changes.
 //!
 //! After a bump, regenerate and look at what changed:
@@ -54,18 +54,18 @@ const CASES: &[Case] = &[
         file: "fitz-face.json",
         fitz: FitzType::Type5,
     },
-    // Trim paths and 48 animated paths; the previous renderer drew 5.7% of
-    // it differently from Telegram's.
+    // Trim paths on 48 animated paths.
     Case {
         name: "trim-paths",
-        file: "trim-paths.tgs",
+        file: "trim-paths.json",
         fitz: FitzType::None,
     },
-    // 104 animated paths: a face-and-hand case the previous renderer
-    // dropped (docs/decisions/thorvg-sticker-renderer.md).
+    // 104 animated paths in layers and a precomp: past the shape budget
+    // that made the previous renderer drop layers
+    // (docs/decisions/thorvg-sticker-renderer.md).
     Case {
         name: "many-paths",
-        file: "many-paths.tgs",
+        file: "many-paths.json",
         fitz: FitzType::None,
     },
 ];
