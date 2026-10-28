@@ -23,9 +23,15 @@ impl QuillApp {
     /// A Music or Voice row's disc: pause while it plays, a cross while it
     /// downloads (a press cancels), play otherwise.
     fn shared_track_icon(&self, item: &SharedMediaItem) -> IconName {
-        let message = Some(item.message_id);
-        let active =
-            self.playback.playing_voice == message || self.playback.playing_audio == message;
+        let chat = self
+            .session()
+            .and_then(|session| session.media.shared_media.chat_id);
+        let active = self.active_playback_id() == Some(item.message_id)
+            && self
+                .playback
+                .player
+                .chat
+                .is_none_or(|playing| Some(playing) == chat);
         if active && self.playback.is_playing() {
             return IconName::Pause;
         }
