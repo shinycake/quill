@@ -540,6 +540,7 @@ mod suggested_posts_state;
 mod suggested_posts_ui;
 mod suggestions_block;
 mod system_unlock;
+mod text_rows;
 mod threads;
 mod threads_demo;
 mod toast_queue;
