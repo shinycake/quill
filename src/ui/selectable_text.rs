@@ -266,7 +266,10 @@ impl SelectableRichText {
                 paragraph: paragraph.clone(),
                 bounds,
             },
-            None => Laid::Styled(self.styled.layout().clone()),
+            None => Laid::Styled {
+                layout: self.styled.layout().clone(),
+                text: self.text.clone(),
+            },
         }
     }
 }
@@ -274,7 +277,10 @@ impl SelectableRichText {
 /// The laid-out text a paragraph reads positions from, whichever path made it.
 #[derive(Clone)]
 enum Laid {
-    Styled(TextLayout),
+    Styled {
+        layout: TextLayout,
+        text: SharedString,
+    },
     Bidi {
         paragraph: Rc<BidiParagraph>,
         bounds: Bounds<Pixels>,
@@ -284,25 +290,18 @@ enum Laid {
 impl Laid {
     fn index_for_position(&self, position: Point<Pixels>) -> Option<usize> {
         match self {
-            Laid::Styled(layout) => layout.index_for_position(position).ok(),
+            Laid::Styled { layout, .. } => layout.index_for_position(position).ok(),
             Laid::Bidi { paragraph, bounds } => paragraph
                 .index_for_position(position - bounds.origin, bounds.size.width)
                 .ok(),
         }
     }
 
-    /// Rectangles covering the byte `range`, one per row (and per visual piece).
+    /// Rectangles covering the byte `range`, one per row (and per visual piece),
+    /// each only as wide as the glyphs it covers.
     fn range_rects(&self, range: Range<usize>) -> Vec<Bounds<Pixels>> {
         match self {
-            Laid::Styled(layout) => {
-                let (Some(start), Some(end)) = (
-                    layout.position_for_index(range.start),
-                    layout.position_for_index(range.end),
-                ) else {
-                    return Vec::new();
-                };
-                selection_quads(start, end, layout.bounds(), layout.line_height())
-            }
+            Laid::Styled { layout, text } => super::text_rows::range_rects(layout, text, range),
             Laid::Bidi { paragraph, bounds } => paragraph
                 .range_rects(range, bounds.size.width)
                 .into_iter()
@@ -313,7 +312,7 @@ impl Laid {
 
     fn geometry(&self) -> Rc<dyn RunGeometry> {
         match self {
-            Laid::Styled(layout) => Rc::new(layout.clone()),
+            Laid::Styled { layout, .. } => Rc::new(layout.clone()),
             Laid::Bidi { paragraph, bounds } => {
                 paragraph.geometry(bounds.origin, bounds.size.width)
             }
@@ -353,36 +352,6 @@ fn emoji_bounds(layout: &TextLayout, range: &Range<usize>, font: Pixels) -> Opti
         top + (line_height - edge) / 2.,
     );
     Some(Bounds::new(origin, size(edge, edge)))
-}
-
-/// Selection highlight rectangles from `start` to `end` over wrapped lines.
-fn selection_quads(
-    start: Point<Pixels>,
-    end: Point<Pixels>,
-    bounds: Bounds<Pixels>,
-    line_height: Pixels,
-) -> Vec<Bounds<Pixels>> {
-    if start.y == end.y {
-        return vec![Bounds::from_corners(
-            start,
-            point(end.x, end.y + line_height),
-        )];
-    }
-    let mut quads = vec![Bounds::from_corners(
-        start,
-        point(bounds.right(), start.y + line_height),
-    )];
-    if end.y > start.y + line_height {
-        quads.push(Bounds::from_corners(
-            point(bounds.left(), start.y + line_height),
-            point(bounds.right(), end.y),
-        ));
-    }
-    quads.push(Bounds::from_corners(
-        point(bounds.left(), end.y),
-        point(end.x, end.y + line_height),
-    ));
-    quads
 }
 
 impl IntoElement for SelectableRichText {
@@ -518,7 +487,7 @@ impl Element for SelectableRichText {
                         .range_rects(item.range.clone())
                         .first()
                         .map(|rect| emoji_box(*rect, font)),
-                    Laid::Styled(layout) => emoji_bounds(layout, &item.range, font),
+                    Laid::Styled { layout, .. } => emoji_bounds(layout, &item.range, font),
                 };
                 let Some(rect) = rect else {
                     continue;
@@ -1012,6 +981,47 @@ mod tests {
             let centre = rect.origin.y + rect.size.height / 2.;
             assert!((centre - (line.origin.y + layout.line_height() / 2.)).abs() < px(1.));
             assert!(rect.size.width >= px(7.) && rect.size.width <= px(24.));
+        });
+    }
+
+    /// A link that wraps is underlined only under its own glyphs on every
+    /// row: the first row stops at its last glyph, not the column's edge.
+    #[test]
+    fn wrapped_range_rects_hug_each_row() {
+        let url = "https://locations.example.com/ll/us/tx/austin/13096-research-blvd/suite-a/order";
+        let text = format!("{url} now");
+        lay_out(&text, |layout, lines| {
+            assert!(lines >= 2, "the link wraps");
+            let start = text.find("https").unwrap_or(0);
+            let rects =
+                super::super::text_rows::range_rects(layout, &text, start..start + url.len());
+            assert_eq!(rects.len(), lines, "one rect per row");
+            let edge = layout.bounds().right();
+            let mut covered = px(0.);
+            for (ix, rect) in rects.iter().enumerate() {
+                assert!(rect.size.width > px(0.) && rect.right() <= edge);
+                assert!(
+                    (rect.origin.y - (layout.bounds().top() + layout.line_height() * ix as f32))
+                        .abs()
+                        < px(0.5)
+                );
+                covered += rect.size.width;
+            }
+            // Together the rows are as wide as the URL set on one line.
+            let first = rects.first().map_or(px(0.), |rect| rect.left());
+            let start_x = layout.position_for_index(start).map_or(px(0.), |p| p.x);
+            assert!((first - start_x).abs() < px(0.5));
+            let one_line = layout
+                .line_layout_for_index(start)
+                .map(|line| {
+                    line.unwrapped_layout.x_for_index(start + url.len())
+                        - line.unwrapped_layout.x_for_index(start)
+                })
+                .unwrap_or_default();
+            assert!(
+                (covered - one_line).abs() < px(1.),
+                "{covered:?} vs {one_line:?}"
+            );
         });
     }
 }

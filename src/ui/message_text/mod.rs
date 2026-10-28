@@ -52,10 +52,12 @@ pub(super) fn apply_ready_link_preview(
 ) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let thumb = demo_file_json(41, &demo_thumb_png_path(), true);
-    let body = "see https://example.com/story";
+    // Long enough to wrap, so hovering it shows the underline on each row.
+    let url = "https://example.com/stories/2026/10/a-short-story-about-links-that-wrap/";
+    let body = format!("see {url}");
     let url_at = body.find("https").unwrap_or(0);
-    let url_len = "https://example.com/story".len();
-    let text_json = serde_json::to_string(body).unwrap_or_default();
+    let url_len = url.len();
+    let text_json = serde_json::to_string(&body).unwrap_or_default();
     let json = format!(
         r#"{{"@type":"updateMessageContent","chat_id":11,"message_id":101,"new_content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{text_json},"entities":[{{"@type":"textEntity","offset":{url_at},"length":{url_len},"type":{{"@type":"textEntityTypeUrl"}}}}]}},"link_preview":{{"@type":"linkPreview","url":"https://example.com/story","display_url":"example.com","site_name":"Example","title":"A short story","description":{{"@type":"formattedText","text":"Telegram-style link preview for a private chat.","entities":[]}},"author":"","type":{{"@type":"linkPreviewTypeArticle","photo":{{"@type":"photo","has_stickers":false,"minithumbnail":null,"sizes":[{{"@type":"photoSize","type":"m","photo":{thumb},"width":90,"height":90,"progressive_sizes":[]}}]}}}},"has_large_media":true,"show_large_media":false,"show_media_above_description":false,"skip_confirmation":true,"show_above_text":false,"instant_view_version":0}},"link_preview_options":null}}}}"#
     );
