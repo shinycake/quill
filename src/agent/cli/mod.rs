@@ -11,10 +11,13 @@ mod connect;
 mod describe;
 mod files;
 mod flags;
+mod setup_prompt;
 mod skill;
 
 use serde_json::{Value, json};
 use std::io::Write;
+
+pub use setup_prompt::setup_prompt;
 
 /// The setup lines the Agent access page shows, built like the ones
 /// `quill agent connect` prints. Each is `(shell label, line)`; the label is
@@ -26,11 +29,24 @@ pub struct SetupLines {
     pub mcp: Vec<(&'static str, String)>,
 }
 
-/// [`SetupLines`] for this Quill. On Windows the `quill agent` lines run the
-/// console helper next to `quill.exe`, which waits and passes the exit code
-/// on.
+/// [`SetupLines`] for this Quill.
 pub fn setup_lines() -> SetupLines {
     let windows = cfg!(windows);
+    let (gui, cli) = executables(windows);
+    SetupLines {
+        claude_code: connect::claude_code_commands(&gui, windows),
+        // Typed into a terminal: the path is the command.
+        claude_desktop: connect::command_lines(&cli, windows, "agent connect claude-desktop --yes"),
+        cursor: connect::command_lines(&cli, windows, "agent connect cursor --yes"),
+        // Pasted into an app's server settings, not run by a shell.
+        mcp: connect::shell_lines(&gui, windows, |quoted| format!("{quoted} mcp")),
+    }
+}
+
+/// This Quill's executable, and the one to run `quill agent` with: on
+/// Windows the console helper next to `quill.exe`, which waits and passes
+/// the exit code on.
+fn executables(windows: bool) -> (String, String) {
     let exe = super::link::executable();
     let gui = exe
         .as_ref()
@@ -43,14 +59,7 @@ pub fn setup_lines() -> SetupLines {
             .into_owned(),
         _ => gui.clone(),
     };
-    SetupLines {
-        claude_code: connect::claude_code_commands(&gui, windows),
-        // Typed into a terminal: the path is the command.
-        claude_desktop: connect::command_lines(&cli, windows, "agent connect claude-desktop --yes"),
-        cursor: connect::command_lines(&cli, windows, "agent connect cursor --yes"),
-        // Pasted into an app's server settings, not run by a shell.
-        mcp: connect::shell_lines(&gui, windows, |quoted| format!("{quoted} mcp")),
-    }
+    (gui, cli)
 }
 
 /// How `quill agent` ended. The numbers are part of its interface.
@@ -223,6 +232,7 @@ fn dispatch(global: &Global, rest: &[String]) -> Result<Output, Failure> {
         "describe" => Ok(Output::Json(describe::describe())),
         "guide" => Ok(Output::Text(crate::agent::guide::GUIDE.to_string())),
         "install-skill" => skill::run(global, tail),
+        "setup-prompt" => Ok(Output::Text(setup_prompt())),
         "connect" => connect::run(global, tail),
         "call" => {
             let (tool, flag_args) = tail.split_first().ok_or_else(|| {

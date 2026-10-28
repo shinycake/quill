@@ -147,7 +147,14 @@ fn help_comes_from_the_registry() {
     );
     let read = flags::tool_help(&tool("read"));
     assert!(read.contains("1 to 99. Default 50."), "{read}");
-    for topic in ["call", "describe", "guide", "install-skill", "connect"] {
+    for topic in [
+        "call",
+        "describe",
+        "guide",
+        "install-skill",
+        "connect",
+        "setup-prompt",
+    ] {
         assert!(flags::builtin_help(topic).is_some(), "{topic}");
     }
 }

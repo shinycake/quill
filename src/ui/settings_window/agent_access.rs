@@ -148,6 +148,7 @@ impl QuillApp {
         group(
             None,
             [
+                self.agent_setup_prompt_row(cx),
                 self.agent_command_row(
                     "claude-code",
                     tr(keys::Q_AGENT_ACCESS_CLAUDE_CODE),
@@ -243,6 +244,67 @@ impl QuillApp {
             );
         }
         row.into_any_element()
+    }
+
+    /// The prompt that has an agent connect itself, the same text
+    /// `quill agent setup-prompt` prints.
+    fn agent_setup_prompt_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        let prompt = quill::agent::cli::setup_prompt();
+        let copied = prompt.clone();
+        let muted = cx.theme().muted_foreground;
+        div()
+            .flex()
+            .flex_col()
+            .gap_1p5()
+            .px_3()
+            .py_2()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap_0p5()
+                            .child(div().text_sm().child(tr(keys::Q_AGENT_PAGE_SETUP_PROMPT)))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(muted)
+                                    .child(tr(keys::Q_AGENT_PAGE_SETUP_PROMPT_HINT)),
+                            ),
+                    )
+                    .child(
+                        Button::new("agent-copy-setup-prompt")
+                            .label(tr(keys::Q_AGENT_PAGE_COPY_PROMPT))
+                            .outline()
+                            .small()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(copied.clone()));
+                                this.connection
+                                    .set_note(StatusNote::info(tr(keys::Q_AGENT_ACCESS_COPIED)));
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .id("agent-setup-prompt")
+                    .max_h(rems(9.))
+                    .overflow_y_scroll()
+                    .px_2()
+                    .py_1p5()
+                    .rounded(cx.theme().radius)
+                    .bg(cx.theme().muted)
+                    .font_family(MONO_FONT)
+                    .text_xs()
+                    .child(prompt),
+            )
+            .into_any_element()
     }
 
     /// Reset token, once the user said yes in its dialog.
