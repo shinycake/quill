@@ -2,7 +2,7 @@
 //! `HistoryInner` (`history/history_inner_widget.cpp`):
 //!
 //! - The list's children are the messages (an album is one) with the
-//!   "N Unread Messages" bar as its own child. One of them holds
+//!   "Unread messages" bar as its own child. One of them holds
 //!   accessibility focus; GPUI reports it as the focused history's active
 //!   descendant, so the screen reader reads it whenever focus enters the
 //!   history or moves to another message (`announceAccessibilityFocus`).
@@ -51,7 +51,7 @@ pub(crate) struct HistoryA11y {
 /// One accessibility child of the history.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum A11yItem {
-    /// The "N Unread Messages" bar above the row at this index.
+    /// The "Unread messages" bar above the row at this index.
     Bar(usize),
     /// The message row at this index.
     Row(usize),

@@ -348,6 +348,51 @@ impl Session {
         }
     }
 
+    /// The opened history could not bring the "Unread messages" bar to the
+    /// top of the view: the unread run fits on the last screen. tdesktop
+    /// then opens at the bottom without a bar
+    /// (`HistoryWidget::countAutomaticScrollTop`). Only the bar goes; reads
+    /// are held as before (`opened_with_unread`). The open thread of
+    /// `chat_id`, if any, owns the bar.
+    pub fn hide_unread_bar(&mut self, chat_id: ChatId) {
+        if let Some(thread) = self
+            .threads
+            .thread
+            .as_mut()
+            .filter(|thread| thread.chat_id == chat_id && thread.thread_id != 0)
+        {
+            thread.unread_anchor = None;
+        } else if let Some(history) = self.histories.get_mut(&chat_id.0) {
+            history.unread_anchor = None;
+        }
+    }
+
+    /// Bring back the bar above the first unread message of the open
+    /// history for the jump-down button (tdesktop `CornerButtons::downClick`
+    /// shows the history at `ShowAtUnreadMsgId`), and re-anchor the view at
+    /// it. Returns `None` when nothing is unread. `Some(true)`: the window
+    /// holds the first unread message; `Some(false)`: it was replaced and a
+    /// window around the read boundary has to load.
+    pub fn show_first_unread(&mut self, chat_id: ChatId) -> Option<bool> {
+        let anchor = self
+            .chats
+            .get(&chat_id.0)
+            .and_then(ChatSummary::unread_anchor)?;
+        let history = self.histories.entry(chat_id.0).or_default();
+        history.unread_anchor = Some(anchor);
+        let covered = history.unread_bar_message().is_some()
+            && (history.loaded_complete
+                || history
+                    .oldest_id()
+                    .is_some_and(|oldest| oldest.0 <= anchor.0));
+        if covered {
+            history.window_epoch = history.window_epoch.wrapping_add(1);
+        } else {
+            self.reset_history_window(chat_id);
+        }
+        Some(covered)
+    }
+
     /// Prepare the window for a chat opened at `open` (after `open_chat`).
     /// A saved position keeps a window that holds its message; otherwise
     /// the window is replaced and the load around the message becomes the

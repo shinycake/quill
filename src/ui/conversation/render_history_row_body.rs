@@ -374,6 +374,31 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The jump-down button: the first unread message under the "Unread
+    /// messages" bar while any are left (the scroller re-anchors there, or
+    /// when the window around it lands), else the latest. A thread keeps
+    /// jumping to its latest replies.
+    pub(in crate::ui) fn jump_down_messages(&mut self, cx: &mut Context<Self>) {
+        let unread = !self.thread_active()
+            && self.live.as_ref().is_some_and(|live| {
+                let session = &live.driver.session;
+                session
+                    .open_chat
+                    .and_then(|chat| session.chats.get(&chat.0))
+                    .and_then(quill::state::ChatSummary::unread_anchor)
+                    .is_some()
+            });
+        if !unread {
+            self.jump_to_latest_messages(cx);
+            return;
+        }
+        self.forget_scroll_on_return_to_latest();
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.jump_down();
+        }
+        cx.notify();
+    }
+
     /// The "Couldn't load messages · Retry" row: ask for the first page
     /// again.
     pub(in crate::ui) fn retry_history_load(&mut self, cx: &mut Context<Self>) {

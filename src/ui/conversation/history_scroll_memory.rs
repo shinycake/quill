@@ -80,21 +80,24 @@ impl QuillApp {
         if open.forgets() {
             self.history.scroll_memory.forget(key);
         }
-        let target = highlighted.or_else(|| {
-            rows.iter()
-                .position(HistoryRow::unread_divider)
-                .map(|ix| ix.saturating_sub(1))
-        });
-        self.history
-            .scroller
-            .update(cx, |state, cx| match (open, target) {
-                (ScrollOpen::Restore { row, offset }, _) => {
+        let bar = rows.iter().position(HistoryRow::unread_divider);
+        self.history.bar_anchor.set(None);
+        match (open, highlighted, bar) {
+            (ScrollOpen::Restore { row, offset }, _, _) => {
+                self.history.scroller.update(cx, |state, cx| {
                     state.scroll_to_item_offset(row, offset, cx);
-                }
-                (_, Some(ix)) => {
+                });
+            }
+            (_, Some(ix), _) => {
+                self.history.scroller.update(cx, |state, cx| {
                     state.scroll_to_item(ix, cx);
-                }
-                _ => state.scroll_to_end(cx),
-            });
+                });
+            }
+            (_, None, Some(ix)) => self.anchor_at_unread_bar(ix, cx),
+            _ => self
+                .history
+                .scroller
+                .update(cx, |state, cx| state.scroll_to_end(cx)),
+        }
     }
 }

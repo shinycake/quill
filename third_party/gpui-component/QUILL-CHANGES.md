@@ -53,3 +53,10 @@ from its own theme tokens and runs the parse on a background thread
 `ListState::estimated_distance_to_edges` through, so Quill's history asks for
 the next page while three screens are left (`docs/decisions/history-preload.md`).
 Re-apply when re-vendoring.
+
+`src/message_scroller.rs`: `MessageScroller::with_jump_button_shown_after`
+keeps the jump-to-latest button hidden until the viewport is more than that
+distance above the last row (tdesktop `historyToDownShownAfter`, 480px), and
+`jump_button_always` shows it wherever the list is scrolled, for a history
+whose loaded window stops short of the latest message. Background:
+`docs/decisions/unread-open-landing.md`.

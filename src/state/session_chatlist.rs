@@ -193,10 +193,6 @@ impl Session {
             .chats
             .get(&chat_id.0)
             .and_then(ChatSummary::unread_anchor);
-        let unread_count = self
-            .chats
-            .get(&chat_id.0)
-            .map_or(0, |chat| chat.unread_count);
         self.reclaim_chat_history(chat_id);
         let view_generation = self.view_generation;
         let history = self.history_entry(chat_id);
@@ -210,10 +206,6 @@ impl Session {
         history.saved_open_missed = false;
         history.unread_anchor = unread_anchor;
         history.opened_with_unread = history.unread_anchor.is_some();
-        history.unread_at_open = match history.unread_anchor {
-            Some(_) => unread_count,
-            None => 0,
-        };
     }
 
     /// Message ids of the open history that are due for `viewMessages`

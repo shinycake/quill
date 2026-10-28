@@ -507,10 +507,6 @@ pub struct HistoryState {
     /// messages: the window loads around it and the UI draws the "Unread
     /// messages" divider after it. Cleared by jumping to the latest.
     pub unread_anchor: Option<MessageId>,
-    /// The chat's unread count when it was opened with `unread_anchor`:
-    /// the "N Unread Messages" bar text (the live count shrinks as rows
-    /// are read; the bar keeps what was unread on open).
-    pub unread_at_open: i32,
     /// The chat was opened with unread messages and the UI has not shown
     /// anything yet. Separate from `unread_anchor` (the bar), like
     /// tdesktop's `_firstUnreadView` versus `_unreadBarView`: deleting the
@@ -621,7 +617,7 @@ impl HistoryState {
         self.load_failed = false;
     }
 
-    /// The message the "N Unread Messages" bar sits above: the first
+    /// The message the "Unread messages" bar sits above: the first
     /// incoming one after `unread_anchor` (the rule the rows are built by).
     pub fn unread_bar_message(&self) -> Option<MessageId> {
         let anchor = self.unread_anchor?;

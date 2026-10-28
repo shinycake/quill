@@ -223,6 +223,8 @@ pub struct MessageScroller {
     scrollbar: bool,
     jump_button: bool,
     jump_button_label: SharedString,
+    jump_button_shown_after: Pixels,
+    jump_button_always: bool,
 }
 
 impl MessageScroller {
@@ -253,6 +255,8 @@ impl MessageScroller {
             scrollbar: true,
             jump_button: true,
             jump_button_label: "Jump to latest".into(),
+            jump_button_shown_after: px(0.),
+            jump_button_always: false,
         }
     }
 
@@ -265,6 +269,20 @@ impl MessageScroller {
     /// Enable or disable the built-in jump-to-latest button.
     pub fn jump_button(mut self, jump_button: bool) -> Self {
         self.jump_button = jump_button;
+        self
+    }
+
+    /// Show the jump button only once the viewport is more than `distance`
+    /// above the last row's bottom (zero: as soon as it is scrolled up).
+    pub fn with_jump_button_shown_after(mut self, distance: Pixels) -> Self {
+        self.jump_button_shown_after = distance;
+        self
+    }
+
+    /// Show the jump button wherever the list is scrolled, for content that
+    /// continues past the last loaded row.
+    pub fn jump_button_always(mut self, always: bool) -> Self {
+        self.jump_button_always = always;
         self
     }
 
@@ -341,11 +359,17 @@ impl Styled for MessageScroller {
 impl RenderOnce for MessageScroller {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let root_id = self.id.clone();
-        let (list_state, scrolled_up) = {
+        let (list_state, scrolled_up, below) = {
             let state = self.state.read(cx);
-            (state.list_state.clone(), state.is_scrolled_up())
+            (
+                state.list_state.clone(),
+                state.is_scrolled_up(),
+                state.distance_to_edges().map(|(_, below, _)| below),
+            )
         };
-        let show_jump_button = self.jump_button && scrolled_up;
+        let far_enough = below.is_none_or(|below| below > self.jump_button_shown_after);
+        let show_jump_button =
+            self.jump_button && (self.jump_button_always || (scrolled_up && far_enough));
         let jump_button_visibility = if self.jump_button {
             transition(
                 (root_id.clone(), "jump-button-visibility"),

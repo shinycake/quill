@@ -208,6 +208,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.fetch_history()
     }
 
+    /// The jump-down button: with unread messages left, show the first of
+    /// them under the "Unread messages" bar (loading the window around the
+    /// read boundary when it is not loaded); otherwise jump to the latest
+    /// (tdesktop `CornerButtons::downClick` → `ShowAtUnreadMsgId`).
+    pub fn jump_down(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        let Some(chat_id) = self.session.open_chat else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        match self.session.show_first_unread(chat_id) {
+            Some(true) => Ok(None),
+            Some(false) => self.fetch_history(),
+            None => self.jump_to_latest(),
+        }
+    }
+
     /// Parity slice 4: the forum topic a send to `chat_id` is addressed to.
     /// `Some` only when `chat_id` is the open chat and a topic is selected
     /// there; the `sendMessage` request then carries

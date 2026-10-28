@@ -92,6 +92,14 @@ pub(crate) struct HistoryUi {
     /// First and last row on screen at the last paint (the page keys scroll
     /// by this many rows).
     pub(super) scroll_view_probe: std::rc::Rc<std::cell::Cell<Option<(usize, usize)>>>,
+    /// Where the "Unread messages" bar was painted in the last frame.
+    pub(super) bar_probe: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
+    /// The bar the opened history is landing on, checked after each paint
+    /// (`unread_bar_anchor`).
+    pub(super) bar_anchor:
+        std::rc::Rc<std::cell::Cell<Option<super::conversation::unread_bar_anchor::BarAnchor>>>,
+    /// Where the bar sat in its row at the last open (`BarOffsets`).
+    pub(super) bar_offsets: super::conversation::unread_bar_anchor::BarOffsets,
     /// Rows painted in the last frame with their window bounds, kept until
     /// the next paint: drag selection hit-tests the pointer against them.
     pub(super) hit_rows: std::rc::Rc<std::cell::RefCell<Vec<(usize, Bounds<Pixels>)>>>,
@@ -182,6 +190,9 @@ impl HistoryUi {
             scroll_probe: Default::default(),
             scroll_top_probe: Default::default(),
             scroll_view_probe: Default::default(),
+            bar_probe: Default::default(),
+            bar_anchor: Default::default(),
+            bar_offsets: Default::default(),
             hit_rows: Default::default(),
             viewport: Default::default(),
             palette: Default::default(),

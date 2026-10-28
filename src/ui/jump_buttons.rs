@@ -188,15 +188,7 @@ fn corner_button(kind: UnreadJumpKind, count: i32, owner: WeakEntity<QuillApp>) 
 
 #[cfg(test)]
 mod tests {
-    use quill::state::{UnreadJumpKind, oldest_message_id, unread_bar_text};
-
-    #[test]
-    fn unread_bar_text_pluralises_like_tdesktop() {
-        assert_eq!(unread_bar_text(1), "1 Unread Message");
-        assert_eq!(unread_bar_text(2), "2 Unread Messages");
-        assert_eq!(unread_bar_text(120), "120 Unread Messages");
-        assert_eq!(unread_bar_text(0), "Unread Messages");
-    }
+    use quill::state::{UnreadJumpKind, oldest_message_id};
 
     #[test]
     fn oldest_unread_marker_is_the_smallest_id() {

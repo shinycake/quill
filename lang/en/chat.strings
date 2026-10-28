@@ -109,6 +109,7 @@
 "lng_sr_chat_column_message" = "Message";
 "lng_sr_message_column_dice" = "Dice";
 "lng_sure_delete_and_exit" = "Are you sure you want to delete all message history and leave «{group}»?\n\nThis action cannot be undone.";
+"lng_unread_bar_some" = "Unread messages";
 "lng_view_button_voice_chat_channel" = "Live stream";
 "qll_chat_active_now" = "Active now";
 "qll_chat_add_a_caption" = "Add a caption…";

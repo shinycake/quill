@@ -79,6 +79,10 @@ impl Harness {
     fn history(&self) -> &crate::state::HistoryState {
         self.driver.session.histories.get(&7).expect("history")
     }
+
+    fn history_mut(&mut self) -> &mut crate::state::HistoryState {
+        self.driver.session.histories.get_mut(&7).expect("history")
+    }
 }
 
 fn message_json(id: i64, outgoing: bool) -> String {
@@ -350,16 +354,6 @@ fn chat_peer_online_follows_the_private_user_status() {
 }
 
 #[test]
-fn unread_bar_count_is_captured_when_the_chat_opens() {
-    let mut h = Harness::with_unread_chat();
-    let first = h.driver.select_chat(ChatId(7)).unwrap().unwrap();
-    h.answer(first, &[20, 30, 40]);
-    // The live counter shrinks as rows are read; the bar keeps the count.
-    h.ingest(r#"{"@type":"updateChatReadInbox","chat_id":7,"last_read_inbox_message_id":40,"unread_count":1}"#);
-    assert_eq!(h.history().unread_at_open, 3);
-}
-
-#[test]
 fn deleting_the_message_under_the_unread_bar_removes_the_bar() {
     let mut h = Harness::with_unread_chat();
     let first = h.driver.select_chat(ChatId(7)).unwrap().unwrap();
@@ -383,7 +377,6 @@ fn deleting_the_bar_message_before_the_ui_reports_reads_nothing() {
     h.ingest(&format!(r#"{{"@type":"updateDeleteMessages","chat_id":7,"message_ids":[{}],"is_permanent":true,"from_cache":false}}"#, bar.0));
     assert_eq!(h.history().unread_anchor, None);
     assert!(h.driver.session.message_ids_to_view(ChatId(7)).is_empty());
-    assert_eq!(h.history().unread_at_open, 3);
 }
 
 #[test]
@@ -871,4 +864,63 @@ fn a_refused_default_window_after_a_missing_saved_message_shows_retry() {
         h.driver.session.history_load_failed(ChatId(7)),
         "the usual Retry row, not a skeleton"
     );
+}
+
+#[test]
+fn jump_down_shows_the_first_unread_message_in_the_window() {
+    let mut h = Harness::with_unread_chat();
+    let first = h.driver.select_chat(ChatId(7)).unwrap().unwrap();
+    h.answer(first, &[20, 30, 40]);
+    h.history_mut().end_unread_open();
+    let epoch = h.history().window_epoch;
+    let sent = h.recorder.snapshot().len();
+
+    assert_eq!(h.driver.jump_down().unwrap(), None);
+    assert_eq!(h.history().unread_anchor, Some(MessageId(30)));
+    assert_eq!(h.history().unread_bar_message(), Some(MessageId(40)));
+    // The UI re-anchors at the bar; nothing is loaded.
+    assert_eq!(h.history().window_epoch, epoch.wrapping_add(1));
+    assert_eq!(h.recorder.snapshot().len(), sent);
+}
+
+#[test]
+fn jump_down_loads_around_a_first_unread_message_past_the_window() {
+    let mut h = Harness::with_unread_chat();
+    let first = h.driver.select_chat(ChatId(7)).unwrap().unwrap();
+    h.answer(first, &[20, 30, 40]);
+    h.ingest(r#"{"@type":"updateChatReadInbox","chat_id":7,"last_read_inbox_message_id":40,"unread_count":1}"#);
+
+    let around = h
+        .driver
+        .jump_down()
+        .unwrap()
+        .expect("page around the boundary");
+    let request = h.last_history_request();
+    assert_eq!(request["from_message_id"], 40);
+    assert!(h.history().messages.is_empty());
+    h.answer(around, &[40, 50, 60]);
+    assert_eq!(h.history().unread_bar_message(), Some(MessageId(50)));
+}
+
+#[test]
+fn jump_down_without_unread_messages_jumps_to_the_latest() {
+    let mut h = Harness::with_unread_chat();
+    let first = h.driver.select_chat(ChatId(7)).unwrap().unwrap();
+    h.answer(first, &[20, 30, 40]);
+    h.ingest(r#"{"@type":"updateChatReadInbox","chat_id":7,"last_read_inbox_message_id":60,"unread_count":0}"#);
+
+    h.driver.jump_down().unwrap().expect("latest page");
+    assert_eq!(h.last_history_request()["from_message_id"], 0);
+    assert_eq!(h.history().unread_anchor, None);
+}
+
+#[test]
+fn hiding_the_bar_keeps_reads_held_back() {
+    let mut h = Harness::with_unread_chat();
+    let first = h.driver.select_chat(ChatId(7)).unwrap().unwrap();
+    h.answer(first, &[20, 30, 40]);
+    h.driver.session.hide_unread_bar(ChatId(7));
+    assert_eq!(h.history().unread_anchor, None);
+    assert!(h.history().opened_with_unread);
+    assert!(h.driver.session.message_ids_to_view(ChatId(7)).is_empty());
 }

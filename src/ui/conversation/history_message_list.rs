@@ -354,6 +354,9 @@ impl QuillApp {
         let painted_ids = self.history.painted_ids.clone();
         let seen = self.history.seen.clone();
         let seen_app = cx.weak_entity();
+        let bar_probe = self.history.bar_probe.clone();
+        let bar_anchor = self.history.bar_anchor.clone();
+        let bar_app = cx.weak_entity();
         let viewport = self.history.viewport.clone();
         let history_focus = self.message_ui.history_focus.clone();
         let drag_app = cx.weak_entity();
@@ -469,6 +472,12 @@ impl QuillApp {
                 // Jump to latest: shows the unread count, and replaces a
                 // window that stops short of the latest message instead of
                 // only scrolling to its end.
+                // tdesktop `cornerButtonsDownShown`: past
+                // `historyToDownShownAfter` (480px) from the bottom, anywhere
+                // while unread messages are left below, or always while the
+                // window stops short of the latest message.
+                .with_jump_button_shown_after(px(if unread_count > 0 { 0. } else { 480. }))
+                .jump_button_always(has_newer)
                 .with_jump_button_renderer({
                     let jump = cx.weak_entity();
                     move |button| {
@@ -490,7 +499,7 @@ impl QuillApp {
                             .on_click(move |_, _, cx| {
                                 let _ = jump.update(cx, |this, cx| {
                                     this.in_window_scope(window_chat, cx, |this, cx| {
-                                        this.jump_to_latest_messages(cx)
+                                        this.jump_down_messages(cx)
                                     })
                                 });
                             })
@@ -573,6 +582,19 @@ impl QuillApp {
                                 });
                             },
                         );
+                        if let Some(fix) = super::unread_bar_anchor::check_bar_anchor(
+                            &bar_anchor,
+                            bar_probe.take(),
+                            bounds,
+                        ) {
+                            cx.defer(move |cx| {
+                                let _ = bar_app.update(cx, |this, cx| {
+                                    this.in_window_scope(window_chat, cx, |this, cx| {
+                                        this.fix_bar_anchor(fix, cx)
+                                    })
+                                });
+                            });
+                        }
                         rows.clear();
                         // Hand the buffer back to reuse its allocation.
                         if let Ok(mut slot) = probe.try_borrow_mut()
@@ -627,6 +649,7 @@ impl QuillApp {
         let has_day = row.day_label().is_some();
         // The wide layout centres dates and the unread label in its column.
         let wide = self.chat_wide();
+        let bar_probe = self.history.bar_probe.clone();
         let probe = self.history.scroll_probe.clone();
         let painted_ids = self.history.painted_ids.clone();
         let ids = row.message_ids();
@@ -679,13 +702,8 @@ impl QuillApp {
                 }))
             })
             .when(row.unread_divider(), |this| {
-                let viewed = self.viewed_chat();
-                let unread_at_open = self
-                    .session()
-                    .and_then(|s| viewed.and_then(|chat| s.histories.get(&chat.0)))
-                    .map_or(0, |h| h.unread_at_open);
                 this.child(super::chat_palette::with_palette(palette, false, || {
-                    unread_divider(unread_at_open, wide, bar_focused, cx)
+                    unread_divider(wide, bar_focused, bar_probe.clone(), cx)
                 }))
             })
             .child(element)
