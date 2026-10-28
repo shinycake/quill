@@ -223,6 +223,9 @@ pub(super) fn claim_text(claim: &Claim, summary: &AccessSummary) -> String {
             ),
             WindowState::Paused => tr(keys::Q_AGENT_PAGE_CLAIM_WINDOW_PAUSED).to_string(),
             WindowState::Stopped => tr(keys::Q_AGENT_PAGE_CLAIM_WINDOW_STOPPED).to_string(),
+            WindowState::ScreenReader => {
+                tr(keys::Q_AGENT_PAGE_CLAIM_WINDOW_SCREEN_READER).to_string()
+            }
         },
         Claim::EachSend(true) => tr(keys::Q_AGENT_PAGE_CLAIM_EACH_SEND_ON).to_string(),
         Claim::EachSend(false) => tr(keys::Q_AGENT_PAGE_CLAIM_EACH_SEND_OFF).to_string(),

@@ -94,8 +94,8 @@ impl QuillApp {
             .into_any_element()
     }
 
-    /// "Now": ready, driving, paused or stopped, with the one button that
-    /// changes it.
+    /// "Now": ready, driving, paused, stopped or held for a screen reader,
+    /// with the one button that changes it.
     fn agent_window_state_row(&self, state: &WindowState, cx: &mut Context<Self>) -> AnyElement {
         let (tag, fix) = match state {
             WindowState::Off => (
@@ -120,6 +120,10 @@ impl QuillApp {
             WindowState::Stopped => (
                 Tag::secondary().child(tr(keys::Q_AGENT_PAGE_WINDOW_STOPPED)),
                 Some(Fix::RestartWindowControl),
+            ),
+            WindowState::ScreenReader => (
+                Tag::color(ColorName::Amber).child(tr(keys::Q_AGENT_PAGE_WINDOW_SCREEN_READER)),
+                None,
             ),
         };
         div()

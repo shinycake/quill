@@ -56,6 +56,7 @@ pub fn run(_args: &Value) -> Result<ToolOutput, ToolError> {
     let driving = matches!(access.window.state, WindowStatus::Driving { .. });
     let paused = access.window.state == WindowStatus::Paused;
     let stopped = access.window.state == WindowStatus::Stopped;
+    let screen_reader = access.window.state == WindowStatus::ScreenReader;
     text.push_str(if !ui_driver {
         concat!(
             "UI driver: off. The user can turn on \"Let agents drive Quill's window\" in ",
@@ -64,6 +65,8 @@ pub fn run(_args: &Value) -> Result<ToolOutput, ToolError> {
         )
     } else if stopped {
         "UI driver: stopped. The user pressed Stop in Quill; don't drive its window again. Reconnecting does not undo it; only the user can, in Quill's settings.\n"
+    } else if screen_reader {
+        "UI driver: held. A screen reader is on, so the UI tools refuse until the user turns it off; use the chat tools meanwhile.\n"
     } else if paused {
         "UI driver: paused. The user took control of Quill's window and it stays paused, across reconnects, until they press \"Let it continue\" in Quill; wait, then check quill_status again.\n"
     } else {
@@ -98,10 +101,12 @@ Screenshots: one a second and 20 a minute, cut to your grants like the tree.\n"
             // each tool's state and why.
             "access": access.describe(),
             "ui_driver": {
-                "available": ui_driver && !stopped,
+                "available": ui_driver && !stopped && !screen_reader,
                 "active": driving,
                 "paused": paused,
                 "stopped": stopped,
+                // A screen reader is on: every UI tool refuses while it runs.
+                "screen_reader": screen_reader,
                 // "visible", "hidden", "minimised", "not open" or "not
                 // answering"; null while
                 // the driver is off, paused or stopped.
@@ -111,11 +116,13 @@ Screenshots: one a second and 20 a minute, cut to your grants like the tree.\n"
                     Value::from("the user turns \"Let agents drive Quill's window\" off and on, or restarts Quill")
                 } else if paused {
                     Value::from("the user presses \"Let it continue\" in Quill")
+                } else if screen_reader {
+                    Value::from("the user turns the screen reader off")
                 } else {
                     Value::Null
                 },
                 "screenshots": {
-                    "available": ui_driver && !stopped && access.window.screenshots,
+                    "available": ui_driver && !stopped && !screen_reader && access.window.screenshots,
                     "per_minute": crate::agent::ui_driver::shot::PER_MINUTE,
                     "min_interval_ms": crate::agent::ui_driver::shot::MIN_INTERVAL.as_millis() as u64,
                     "max_long_side": crate::agent::ui_driver::shot::MAX_LONG_SIDE,

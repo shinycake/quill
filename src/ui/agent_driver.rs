@@ -110,7 +110,7 @@ impl QuillApp {
         }
         // Decided before any frame is waited for, so a blocked surface
         // answers at once.
-        if window.is_a11y_system_active() {
+        if quill::screen_reader::running() {
             pending.answer(UiReply::Refused(surface::screen_reader_active()));
             return;
         }
@@ -211,7 +211,7 @@ impl QuillApp {
                 let outcome = app
                     .update_in(cx, |app, window, _| {
                         (
-                            check_step(&pending, generation, &surface, app, window),
+                            check_step(&pending, generation, &surface, app),
                             window.a11y_tree_frame(),
                         )
                     })
@@ -398,7 +398,6 @@ fn check_step(
     generation: u64,
     expected: &Surface,
     app: &QuillApp,
-    window: &Window,
 ) -> Result<Surface, String> {
     if pending.cancelled() {
         return Err(policy::cancelled());
@@ -409,7 +408,7 @@ fn check_step(
     if grants::generation() != generation {
         return Err(policy::grants_changed());
     }
-    if window.is_a11y_system_active() {
+    if quill::screen_reader::running() {
         return Err(surface::screen_reader_active());
     }
     let now = app.driver_surface();

@@ -487,9 +487,19 @@ intro, pending deletes) is blocked likewise. Then the open chat: granted,
 or `Blocked("an ungranted chat")`. A blocked surface makes `read_ui_tree`
 answer a short note ("Quill is showing Settings; agents can't see or use
 it. Ask the user.") and refuses every input; an agent cannot approve its
-own request because the request is a surface it never sees. A system
-screen reader being active (`Window::is_a11y_system_active`) refuses
-reads and input outright: the tree then belongs to the user.
+own request because the request is a surface it never sees. A screen
+reader that is on (`quill::screen_reader::running`) refuses reads and input
+outright: the window then belongs to the user.
+
+Not `Window::is_a11y_system_active`, which the first version used: GPUI
+turns that on for any accessibility client that asks for the tree, and on
+macOS `AXVisualSupportAgent`, window managers and launchers do with
+VoiceOver off, which held the driver for no visible reason (2026-10-28).
+`screen_reader::running` asks the OS for the reader itself
+(`NSWorkspace.isVoiceOverEnabled` or Switch Control on macOS,
+`SPI_GETSCREENREADER` on Windows, AT-SPI's `ScreenReaderEnabled` on Linux)
+and the summary reads the same function, so `quill_status` and the Agent
+access page say "held for screen reader" exactly when the tools refuse.
 
 Two scopes, one widening switch. `DriverScope::Granted` is the base: the
 chat list's own parts (search, folder tabs, rows of granted chats, search
@@ -742,8 +752,8 @@ notes, the chord policy and the step split.
   fixed after the live test (below).
 - `open_menu` reports the nodes that appeared one frame after the click; a
   menu that animates in over several frames may need a `read_ui_tree`.
-- A system screen reader and the driver do not share the window; a user
-  who runs both gets the driver refused until the reader disconnects.
+- A screen reader and the driver do not share the window; a user who runs
+  both gets the driver refused until the reader is turned off.
 
 ## Phase 5 step 2: takeover state
 

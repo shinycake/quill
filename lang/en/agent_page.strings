@@ -22,6 +22,7 @@
 "qll_agent_page_claim_window_driving" = "{agent} is using Quill's window now.";
 "qll_agent_page_claim_window_paused" = "Window control is paused until you let the agent continue.";
 "qll_agent_page_claim_window_stopped" = "You stopped window control. Allow it again to let agents back in.";
+"qll_agent_page_claim_window_screen_reader" = "Agents can't use Quill's window while a screen reader is on.";
 "qll_agent_page_claim_each_send_on" = "Quill asks you before an agent sends anything.";
 "qll_agent_page_claim_each_send_off" = "Agents send without asking you first.";
 "qll_agent_page_claim_always_asks" = "Quill always asks you before money, Stars, gifts or account changes.";
@@ -83,6 +84,7 @@
 "qll_agent_page_off_window" = "Window control is off.";
 "qll_agent_page_off_paused" = "Paused until you let the agent continue.";
 "qll_agent_page_off_stopped" = "You stopped window control.";
+"qll_agent_page_off_screen_reader" = "A screen reader is on.";
 "qll_agent_page_off_capture" = "This build of Quill can't take screenshots.";
 "qll_agent_page_turn_on" = "Turn on";
 "qll_agent_page_share_contacts" = "Share contacts";
@@ -189,6 +191,7 @@
 "qll_agent_page_window_now" = "Now";
 "qll_agent_page_window_ready" = "Ready";
 "qll_agent_page_window_stopped" = "Stopped";
+"qll_agent_page_window_screen_reader" = "Held for screen reader";
 "qll_agent_page_window_never" = "Agents never reach Settings, signing out, payments or your account, even with window control on.";
 "qll_agent_page_confirm_note" = "Each request opens a dialog with what the agent wants to do. If you don't answer within two minutes, nothing is sent.";
 "qll_agent_page_filter_agents" = "All agents";

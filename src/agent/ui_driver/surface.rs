@@ -101,9 +101,10 @@ pub fn ungranted_chat(chat_id: i64) -> String {
     )
 }
 
-/// A system screen reader has the tree: the driver stays out of its way.
+/// A screen reader is on (`crate::screen_reader`): the driver stays out of
+/// its way.
 pub fn screen_reader_active() -> String {
-    "A screen reader is using Quill's window right now, so agents do not drive it. Use the chat tools, or ask the user.".to_string()
+    "A screen reader is on, so agents do not drive Quill's window until the user turns it off. Use the chat tools, or ask the user.".to_string()
 }
 
 #[cfg(test)]

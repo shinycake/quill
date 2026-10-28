@@ -18,7 +18,7 @@ impl QuillApp {
     /// that built one, cut to the grants. `Err` carries the note the agent
     /// gets instead.
     pub(super) fn agent_tree(&self, window: &Window) -> Result<(Surface, Option<UiTree>), String> {
-        if window.is_a11y_system_active() {
+        if quill::screen_reader::running() {
             return Err(surface::screen_reader_active());
         }
         let surface = self.driver_surface();
