@@ -112,7 +112,7 @@ pub(crate) fn photo_message(id: i64, age_days: i64, caption: &str) -> Value {
     )
 }
 
-fn tab_messages(tab: SharedMediaTab) -> Vec<Value> {
+pub(crate) fn tab_messages(tab: SharedMediaTab) -> Vec<Value> {
     let thumb = demo_thumb_png_path();
     let document = |id: i64, age: i64, name: &str, size: i64| {
         message(

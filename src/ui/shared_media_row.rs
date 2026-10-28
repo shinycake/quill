@@ -5,6 +5,7 @@
 
 use super::app::QuillApp;
 use super::{accent, danger, success, warning};
+use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -19,6 +20,29 @@ use quill::text::LinkTarget;
 const TILE: f32 = 40.;
 
 impl QuillApp {
+    /// A Music or Voice row's disc: pause while it plays, a cross while it
+    /// downloads (a press cancels), play otherwise.
+    fn shared_track_icon(&self, item: &SharedMediaItem) -> IconName {
+        let message = Some(item.message_id);
+        let active =
+            self.playback.playing_voice == message || self.playback.playing_audio == message;
+        if active && self.playback.is_playing() {
+            return IconName::Pause;
+        }
+        let fetching = self.session().is_some_and(|session| {
+            super::message_media::file_is_downloading(
+                item.file,
+                &session.media.files,
+                &session.media.downloads,
+            )
+        });
+        if fetching {
+            IconName::X
+        } else {
+            IconName::Play
+        }
+    }
+
     /// The text of a meta row; none for rows that only show their label.
     pub(super) fn shared_media_row_lines(
         &self,
@@ -81,6 +105,15 @@ impl QuillApp {
                 .text_color(theme.secondary_foreground)
                 .text_base()
                 .child(lines.badge.clone()),
+            SharedMediaMeta::Music { .. } | SharedMediaMeta::Voice { .. } => tile
+                .rounded_full()
+                .bg(accent())
+                .text_color(gpui_kit::white())
+                .child(
+                    Icon::new(self.shared_track_icon(item))
+                        .size(px(18.))
+                        .text_color(gpui_kit::white()),
+                ),
             _ => tile
                 .rounded_full()
                 .bg(accent())
