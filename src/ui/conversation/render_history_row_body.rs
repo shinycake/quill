@@ -105,21 +105,17 @@ impl QuillApp {
                     animation,
                     match &message.content {
                         MessageContent::Sticker(sticker) => {
-                            self.history_sticker(sticker.file_id, sticker.format, cx)
-                                .map(|visual| {
-                                    // tdesktop `Sticker::mirrorHorizontal`.
-                                    if crate::ui::sticker_mirror::mirrors(
-                                        sticker.premium_animation.is_some(),
-                                        quill::chat_wide::has_right_layout(
-                                            message.is_outgoing,
-                                            look.wide,
-                                        ),
-                                    ) {
-                                        crate::ui::sticker_mirror::mirrored(visual)
-                                    } else {
-                                        visual
-                                    }
-                                })
+                            // tdesktop `Sticker::mirrorHorizontal`.
+                            let mirror = crate::ui::sticker_player::mirrors(
+                                sticker.premium_animation.is_some(),
+                                quill::chat_wide::has_right_layout(message.is_outgoing, look.wide),
+                            );
+                            let (w, h) = crate::ui::message_media::sticker_box(
+                                sticker.width,
+                                sticker.height,
+                            );
+                            let side = f32::from(w.max(h));
+                            self.history_sticker(message, sticker, mirror, side, cx)
                         }
                         _ => None,
                     },
@@ -130,8 +126,9 @@ impl QuillApp {
                                 stickers
                                     .layers()
                                     .iter()
-                                    .map(|s| {
-                                        self.history_dice_sticker(s.file_id, s.format, phase, cx)
+                                    .enumerate()
+                                    .map(|(index, s)| {
+                                        self.history_dice_sticker(message, index, s, phase, cx)
                                     })
                                     .collect()
                             })

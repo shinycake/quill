@@ -4,34 +4,35 @@
 //! A tap on a lone emoji in a one-to-one chat asks TDLib for the effect
 //! (`clickAnimatedEmojiMessage`); the other party's tap arrives as
 //! `updateAnimatedEmojiMessageClicked`. Both land in
-//! `Session::stickers.interactions`. This module starts them: a clip of the
-//! effect sticker is drawn over the message, 5x the emoji's height, hugging
-//! the side the bubble sits on, for as long as the sticker runs. The frame
-//! comes from the clip's own clock (`LayeredClip::frame_now`), and the
-//! window's frame clock keeps ticking while an effect plays.
+//! `Session::stickers.interactions`. This module starts them: the effect
+//! sticker is drawn over the message at tdesktop's `EmojiEffectSize` (three
+//! times the 112 pt big emoji), hugging the side the bubble sits on, for one
+//! play. Each effect is a view of the sticker player with its own head: it
+//! is drawn at the overlay's pixel size and starts on its first ready frame,
+//! at the display's rate (`sticker_player`), and the window's frame clock
+//! ticks at that rate while an effect plays.
 //!
 //! Where a message is on screen is noted while the history paints
 //! (`anchor_tracker`); an effect for a message that is not visible is
 //! dropped, as tdesktop does. The anchor is the emoji glyph at the start of
 //! the text block, not the footer's reserved space. Like tdesktop, the
-//! sticker is mirrored for messages on the left: its decoded frames are
-//! flipped once when the effect starts and kept for the next one. Effects
+//! sticker is mirrored for messages on the left (the player draws it
+//! mirrored, a clip of its own). Effects
 //! past the fifth wait their turn (`may_start`, tdesktop `checkDelayed`).
 #![deny(clippy::indexing_slicing)]
 
-use super::anim_layer::LayeredClip;
 use super::app::QuillApp;
 use super::premium_sticker_effect;
-use super::sticker_playback::PlaybackSize;
+use super::sticker_player::{HeadId, StickerView, ViewAsk};
 use gpui_kit::*;
 use quill::bubble_layout::LARGE_EMOJI_SIZE;
 use quill::emoji_interaction::{EmojiEffect, MAX_PLAYS};
-use quill::ids::{ChatId, MessageId};
+use quill::ids::{ChatId, FileId, MessageId};
 use quill::state::Session;
-use quill::telegram::envelope::MessageContent;
-use std::cell::RefCell;
+use quill::sticker_playback::player::{PlayMode, Rest};
+use quill::telegram::envelope::{MessageContent, StickerFormat};
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// tdesktop `kMaxDelay`: an effect whose sticker has not arrived by then
@@ -43,12 +44,10 @@ const SMALL_DELAY: Duration = Duration::from_millis(200);
 const MAX_QUEUED: usize = 8;
 /// The glyph's line is this many times its size tall.
 const GLYPH_LINE: f32 = 1.2;
-/// Frame rate asked of the clock while an effect plays.
-const TICK_FPS: u32 = 30;
-/// The effect is this many emoji heights wide and tall, within bounds.
-const SIZE_FACTOR: f32 = 5.0;
-const MIN_SIDE: f32 = 200.0;
-const MAX_SIDE: f32 = 360.0;
+/// Frame rate asked of the clock while an effect waits for its first frame.
+const OPENING_FPS: u32 = 30;
+/// tdesktop `Sticker::EmojiEffectSize`: three times the 112 pt big emoji.
+const EMOJI_EFFECT_SIDE: f32 = 112.0 * 3.0;
 /// tdesktop `GenerateRandomShift`: up to 8% of the emoji's size.
 const SHIFT_SHARE: f32 = 0.08;
 
@@ -59,6 +58,29 @@ thread_local! {
     /// and message id, as far as it shows in the history's clip.
     static ANCHORS: RefCell<HashMap<Key, Bounds<Pixels>>> = RefCell::new(HashMap::new());
     static ACTIVE: RefCell<Vec<Active>> = const { RefCell::new(Vec::new()) };
+    /// The next effect's play head.
+    static NEXT_HEAD: Cell<u64> = const { Cell::new(0) };
+}
+
+fn next_head() -> HeadId {
+    let id = NEXT_HEAD.with(|next| {
+        let id = next.get();
+        next.set(id.wrapping_add(1));
+        id
+    });
+    HeadId::of(("effect", id))
+}
+
+/// The view an effect plays: once, mirrored for a message on the left,
+/// `side` points across.
+pub(super) fn effect_ask(
+    file: FileId,
+    format: StickerFormat,
+    head: HeadId,
+    side: f32,
+    outgoing: bool,
+) -> ViewAsk {
+    ViewAsk::sticker(file, format, head, PlayMode::Once(Rest::Last), side).mirrored(!outgoing)
 }
 
 struct Active {
@@ -67,8 +89,10 @@ struct Active {
     /// On the executor clock (`cx.background_executor().now()`), like
     /// `missing`; a clip's `started` is on the real clock.
     queued: Instant,
-    /// The decoded sticker and when it began.
-    clip: Option<LayeredClip>,
+    /// Its play head.
+    head: HeadId,
+    /// The sticker playing and when it was given (wall clock).
+    view: Option<(StickerView, Instant)>,
     seed: u64,
     /// A Premium sticker's effect (`premium_sticker_effect`): placed around
     /// the sticker, not an emoji.
@@ -144,7 +168,8 @@ pub(super) fn push_premium(effect: EmojiEffect, outgoing: bool, now: Instant) {
             outgoing,
             effect,
             queued: now,
-            clip: None,
+            head: next_head(),
+            view: None,
             premium: true,
             message: None,
             wait: START_WAIT,
@@ -171,7 +196,8 @@ pub(super) fn push_message(
             outgoing,
             effect,
             queued: now,
-            clip: None,
+            head: next_head(),
+            view: None,
             premium: false,
             message: Some(MessageEffectPlay {
                 effect_id,
@@ -333,70 +359,36 @@ fn may_start(playing: &[(Duration, Duration)]) -> bool {
     playing.len() < 3 || playing.iter().any(|(at, total)| *at * 2 > *total)
 }
 
-/// Mirror an RGBA/BGRA image left to right: `bytes` is `height` rows of
-/// `width` 4-byte pixels.
-fn flip_rows(bytes: &[u8], width: usize) -> Vec<u8> {
-    let mut out = Vec::with_capacity(bytes.len());
-    for row in bytes.chunks_exact(width * 4) {
-        for pixel in row.as_chunks::<4>().0.iter().rev() {
-            out.extend_from_slice(pixel);
-        }
+/// The edge of `active`'s effect in points.
+fn effect_side(active: &Active) -> f32 {
+    if active.message.is_some() {
+        MESSAGE_EFFECT_SIDE
+    } else if active.premium {
+        let key = (active.effect.chat_id.0, active.effect.message_id.0);
+        premium_sticker_effect::anchor(key)
+            .map(|sticker| premium_sticker_effect::effect_rect(sticker, active.outgoing).0)
+            .unwrap_or(premium_sticker_effect::DEFAULT_SIDE)
+    } else {
+        EMOJI_EFFECT_SIDE
     }
-    out
 }
 
-thread_local! {
-    /// Mirrored frames by sticker file; two at most (frames are large).
-    static MIRRORED: RefCell<Vec<(i32, Arc<[Arc<RenderImage>]>)>> = const { RefCell::new(Vec::new()) };
+/// How far `view` played and its length; zero while it waits for its
+/// first frame (it counts as just started).
+fn progress(view: &StickerView) -> (Duration, Duration) {
+    view.progress().unwrap_or((Duration::ZERO, Duration::ZERO))
 }
 
-/// Every frame of `frames` mirrored left to right (a frame that cannot be
-/// read stays as it is).
-pub(super) fn flip_frames(frames: &[Arc<RenderImage>]) -> Arc<[Arc<RenderImage>]> {
-    frames
-        .iter()
-        .map(|frame| {
-            let width = frame.size(0).width.0.max(0) as u32;
-            let height = frame.size(0).height.0.max(0) as u32;
-            let flipped = frame.as_bytes(0).and_then(|bytes| {
-                image::RgbaImage::from_raw(width, height, flip_rows(bytes, width as usize))
-            });
-            match flipped {
-                Some(rgba) => Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
-                    image::Frame::new(rgba),
-                ]))),
-                None => frame.clone(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .into()
-}
-
-/// The frames of `file` mirrored, made once and kept.
-fn mirrored_frames(file: i32, frames: &Arc<[Arc<RenderImage>]>) -> Arc<[Arc<RenderImage>]> {
-    if let Some(found) = MIRRORED.with(|m| {
-        m.borrow()
-            .iter()
-            .find(|(id, _)| *id == file)
-            .map(|(_, frames)| frames.clone())
-    }) {
-        return found;
-    }
-    let flipped = flip_frames(frames);
-    MIRRORED.with(|m| {
-        let mut m = m.borrow_mut();
-        if m.len() >= 2 {
-            let (_, old) = m.remove(0);
-            super::image_budget::retire_all(old.iter().cloned());
+/// Whether an effect given its view at `given` still plays at `now`: until
+/// its head played it through, or (a view no longer drawn) its length plus
+/// the start wait on the wall clock.
+fn still_playing(view: &StickerView, given: Instant, now: Instant) -> bool {
+    match view.progress() {
+        Some((pos, total)) => {
+            pos < total && now.saturating_duration_since(given) < total + START_WAIT
         }
-        m.push((file, flipped.clone()));
-    });
-    flipped
-}
-
-/// The effect's edge for an emoji `height` tall.
-fn effect_side(height: f32) -> f32 {
-    (height * SIZE_FACTOR).clamp(MIN_SIDE, MAX_SIDE)
+        None => now.saturating_duration_since(given) < START_WAIT,
+    }
 }
 
 /// A shift in `-SHIFT_SHARE..=SHIFT_SHARE` of `size` on each axis, from
@@ -472,11 +464,15 @@ impl QuillApp {
         let now = cx.background_executor().now();
         self.premium_autoplay(cx);
         self.message_effects_pass(window_active, cx);
-        let queued = self
-            .live
-            .as_mut()
-            .map(|live| live.driver.session.stickers.interactions.take_pending())
-            .unwrap_or_default();
+        // The live session's, else a screenshot demo's.
+        let queued = match self.live.as_mut() {
+            Some(live) => live.driver.session.stickers.interactions.take_pending(),
+            None => self
+                .demo_session
+                .as_mut()
+                .map(|session| session.stickers.interactions.take_pending())
+                .unwrap_or_default(),
+        };
         let none_here =
             || ACTIVE.with(|active| active.borrow().iter().all(|a| a.effect.chat_id != open));
         if queued.is_empty() && none_here() {
@@ -507,7 +503,8 @@ impl QuillApp {
                         outgoing: outgoing.unwrap_or(false),
                         effect,
                         queued: started,
-                        clip: None,
+                        head: next_head(),
+                        view: None,
                         premium: false,
                         message: None,
                         wait: START_WAIT,
@@ -518,7 +515,7 @@ impl QuillApp {
         follow_badges(open, now);
         let shown = self.chats_on_screen();
         self.advance_effects(open, &shown, now, cx);
-        let drawn: Vec<(Key, bool, u64, bool, bool, LayeredClip)> = ACTIVE.with(|active| {
+        let drawn: Vec<(Key, bool, u64, bool, bool, StickerView)> = ACTIVE.with(|active| {
             active
                 .borrow()
                 .iter()
@@ -530,7 +527,7 @@ impl QuillApp {
                         a.seed,
                         a.premium,
                         a.message.is_some(),
-                        a.clip.clone()?,
+                        a.view.as_ref()?.0.clone(),
                     ))
                 })
                 .collect()
@@ -538,12 +535,19 @@ impl QuillApp {
         if none_here() {
             return None;
         }
-        self.request_animation_tick_for(None, TICK_FPS, cx);
+        let fps = drawn
+            .iter()
+            .map(|(.., view)| view.fps())
+            .max()
+            .unwrap_or(0)
+            .max(OPENING_FPS);
+        self.request_animation_tick_for(None, fps, cx);
         Some(
             canvas(
                 |_, _, _| {},
-                move |_, _, window, _| {
-                    for (key, outgoing, seed, premium, message, clip) in &drawn {
+                move |_, _, window, cx| {
+                    super::sticker_player::note_display(window, cx);
+                    for (key, outgoing, seed, premium, message, view) in &drawn {
                         let (side, (x, y)) = if *message {
                             let Some(badge) = super::message_effect_badge::seen(*key) else {
                                 continue;
@@ -572,7 +576,7 @@ impl QuillApp {
                                 continue;
                             };
                             let height = f32::from(anchor.size.height);
-                            let side = effect_side(height);
+                            let side = EMOJI_EFFECT_SIDE;
                             let origin = effect_origin(
                                 (
                                     f32::from(anchor.left()),
@@ -587,19 +591,7 @@ impl QuillApp {
                             (side, origin)
                         };
                         let bounds = Bounds::new(point(px(x), px(y)), size(px(side), px(side)));
-                        if let Some(shown) = &clip.shown {
-                            shown.set(Instant::now());
-                        }
-                        if let Some(frame) = clip.frame_now().cloned() {
-                            let _ = window.paint_image(
-                                bounds,
-                                bounds,
-                                Corners::default(),
-                                frame,
-                                0,
-                                false,
-                            );
-                        }
+                        view.paint(bounds, window);
                     }
                 },
             )
@@ -629,49 +621,49 @@ impl QuillApp {
                 .borrow()
                 .iter()
                 .enumerate()
-                .filter(|(_, a)| a.clip.is_none() && a.effect.chat_id == open)
+                .filter(|(_, a)| a.view.is_none() && a.effect.chat_id == open)
                 .map(|(i, a)| (i, a.effect.sticker.file_id.0))
                 .collect()
         });
-        let mut clips: Vec<(usize, Option<LayeredClip>)> = Vec::new();
+        let mut views: Vec<(usize, Option<StickerView>)> = Vec::new();
         for (index, _) in &waiting {
-            let Some(sticker) = ACTIVE.with(|active| {
-                active
-                    .borrow()
-                    .get(*index)
-                    .map(|a| a.effect.sticker.clone())
+            let Some(ask) = ACTIVE.with(|active| {
+                active.borrow().get(*index).map(|a| {
+                    let sticker = &a.effect.sticker;
+                    effect_ask(
+                        sticker.file_id,
+                        sticker.format,
+                        a.head,
+                        effect_side(a),
+                        a.outgoing,
+                    )
+                })
             }) else {
                 continue;
             };
-            let clip = self.effect_clip(&sticker, cx);
-            clips.push((*index, clip));
+            views.push((*index, self.sticker_view(ask, cx)));
         }
         ACTIVE.with(|active| {
             let mut active = active.borrow_mut();
-            for (index, clip) in clips {
+            for (index, view) in views {
                 // tdesktop `checkDelayed` counts one history's effects.
                 let playing: Vec<(Duration, Duration)> = active
                     .iter()
                     .filter(|a| a.effect.chat_id == open)
-                    .filter_map(|a| a.clip.as_ref())
-                    .map(|c| (c.started.elapsed(), c.duration))
+                    .filter_map(|a| a.view.as_ref())
+                    .map(|(view, _)| progress(view))
                     .collect();
-                // `effect_clip` ran between collecting `index` and here; if
+                // `sticker_view` ran between collecting `index` and here; if
                 // the list shrank meanwhile, skip rather than index past it.
                 let Some(entry) = active.get_mut(index) else {
                     continue;
                 };
-                if let Some(mut clip) = clip
+                if let Some(view) = view
                     && may_start(&playing)
                 {
-                    // Plays once from now, whatever the loop setting says;
-                    // mirrored for a message on the left.
-                    clip.started = Instant::now();
-                    clip.looping = false;
-                    if !entry.outgoing {
-                        clip.frames = mirrored_frames(entry.effect.sticker.file_id.0, &clip.frames);
-                    }
-                    entry.clip = Some(clip);
+                    // Plays once from its first frame, whatever the loop
+                    // setting says.
+                    entry.view = Some((view, Instant::now()));
                     if entry.effect.incoming {
                         watched.push((entry.effect.chat_id, entry.effect.sticker.emoji.clone()));
                     }
@@ -683,8 +675,8 @@ impl QuillApp {
                 }
                 a.message
                     .is_none_or(|play| play.missing.is_none_or(|at| badge_within_grace(now, at)))
-                    && match &a.clip {
-                        Some(clip) => clip.started.elapsed() < clip.duration,
+                    && match &a.view {
+                        Some((view, given)) => still_playing(view, *given, Instant::now()),
                         None => !sticker_wait_over(now, a.queued, a.wait),
                     }
             });
@@ -711,28 +703,13 @@ impl QuillApp {
             }
         }
     }
-
-    /// The decoded effect sticker; starts the download and decode.
-    fn effect_clip(
-        &self,
-        sticker: &quill::telegram::envelope::StickerItem,
-        cx: &mut Context<Self>,
-    ) -> Option<LayeredClip> {
-        self.layered_clip(
-            sticker.file_id,
-            sticker.format,
-            PlaybackSize::Sticker,
-            false,
-            cx,
-        )
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        BADGE_GRACE, MAX_SIDE, MIN_SIDE, SHIFT_SHARE, START_WAIT, badge_within_grace,
-        effect_origin, effect_side, flip_rows, may_start, shift_for, sticker_wait_over,
+        BADGE_GRACE, SHIFT_SHARE, START_WAIT, badge_within_grace, effect_origin, may_start,
+        shift_for, sticker_wait_over,
     };
     use std::time::{Duration, Instant};
 
@@ -768,13 +745,6 @@ mod tests {
     }
 
     #[test]
-    fn effect_size_follows_the_emoji_within_bounds() {
-        assert_eq!(effect_side(10.0), MIN_SIDE);
-        assert_eq!(effect_side(48.0), 240.0);
-        assert_eq!(effect_side(500.0), MAX_SIDE);
-    }
-
-    #[test]
     fn shift_stays_within_a_share_of_the_emoji() {
         for seed in 0..500 {
             let (x, y) = shift_for(seed, 50.0);
@@ -782,16 +752,6 @@ mod tests {
             assert!(y.abs() <= SHIFT_SHARE * 50.0 + 1e-4);
         }
         assert_ne!(shift_for(1, 50.0), shift_for(2, 50.0));
-    }
-
-    #[test]
-    fn flip_mirrors_each_row() {
-        // Two rows of three pixels; pixel i has bytes [i, i, i, i].
-        let bytes: Vec<u8> = (0..6u8).flat_map(|i| [i; 4]).collect();
-        let flipped = flip_rows(&bytes, 3);
-        let pixels: Vec<u8> = flipped.chunks(4).map(|p| p[0]).collect();
-        assert_eq!(pixels, vec![2, 1, 0, 5, 4, 3]);
-        assert_eq!(flip_rows(&flipped, 3), bytes);
     }
 
     #[test]

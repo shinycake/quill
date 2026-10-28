@@ -1,4 +1,5 @@
 use super::*;
+use std::time::Duration;
 
 fn message(id: i32, sender: i64, date: i32, stars: i64) -> ParsedGroupCallMessage {
     ParsedGroupCallMessage {
@@ -200,15 +201,4 @@ fn an_effect_plays_the_first_burst_ready_when_it_started_in_seed_order() {
     assert_eq!(ready_burst(0, &[Some(at(30))], at(20)), None);
     assert_eq!(ready_burst(0, &[None, None], at(20)), None);
     assert_eq!(ready_burst(5, &[], at(20)), None);
-}
-
-#[test]
-fn a_burst_plays_once_and_has_no_frame_after_its_last() {
-    let at = Duration::from_millis;
-    assert_eq!(burst_frame_index(at(0), 30., 30), Some(0));
-    assert_eq!(burst_frame_index(at(500), 30., 30), Some(15));
-    assert_eq!(burst_frame_index(at(999), 30., 30), Some(29));
-    assert_eq!(burst_frame_index(at(1000), 30., 30), None);
-    assert_eq!(burst_frame_index(at(1900), 30., 30), None);
-    assert_eq!(burst_frame_index(at(0), 30., 0), None);
 }

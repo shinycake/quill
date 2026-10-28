@@ -23,7 +23,7 @@ pub(super) fn paragraph_text(
     is_caption: bool,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     emoji_paths: &HashMap<i64, ImageSource>,
-    layered: &HashMap<i64, LayeredClip>,
+    layered: &HashMap<i64, StickerView>,
 ) -> ParagraphText {
     let mut text = String::new();
     let mut highlights: Vec<(std::ops::Range<usize>, HighlightStyle)> = Vec::new();

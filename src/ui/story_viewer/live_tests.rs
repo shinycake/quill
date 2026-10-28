@@ -6,7 +6,6 @@
 //! playing beside a 1:1 call, and the header drawn by the live
 //! controller). Nothing reaches Telegram: the app
 //! has no connection and joins nothing.
-use super::live_effects::burst_tint;
 use super::live_state::{
     EFFECT_DURATION, FlyingStars, SendAction, StarsBoxMode, effect_progress, pin_label,
     pinned_comments, send_action,
@@ -16,7 +15,6 @@ use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
-use crate::ui::sticker_playback::{ClipKey, PlaybackSize};
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
@@ -684,7 +682,7 @@ fn star_effects_rise_over_the_stars_button_and_go(cx: &mut TestAppContext) {
     assert!(find(vcx, "live-story-effect-badge").is_none());
 }
 
-/// The burst's gold frames come from its decode's background job, and an
+/// The burst's gold frames come from the sticker player's workers, and an
 /// effect plays them only when they were ready before it started (tdesktop
 /// `ReactionFlyAnimation` resolves its effect once).
 #[gpui_kit::test]
@@ -692,10 +690,6 @@ fn a_tinted_burst_is_made_off_thread_and_plays_for_effects_after_it(cx: &mut Tes
     let (app, mut vcx) = open_live(cx, "ready-live-story-stars");
     let vcx = &mut vcx;
     let file = FileId(9001);
-    let key = ClipKey {
-        file,
-        tint: Some(burst_tint()),
-    };
     let effect = |started| FlyingStars {
         sender: MessageSender::User { user_id: 801 },
         stars: 5,
@@ -718,19 +712,28 @@ fn a_tinted_burst_is_made_off_thread_and_plays_for_effects_after_it(cx: &mut Tes
     assert!(find(vcx, "live-story-effect-badge").is_some());
     assert!(find(vcx, "live-story-effect-burst").is_none());
 
-    let white = image::RgbaImage::from_pixel(4, 4, image::Rgba([255; 4]));
+    // Three white frames in place of the file.
     app.update(vcx, |app, cx| {
-        app.spawn_clip_job(
-            key,
-            PlaybackSize::Sticker,
-            move |_, _| Ok((vec![white; 3], 30.)),
-            cx,
+        app.playback.stickers.set_fixture(
+            file.0,
+            std::sync::Arc::new(|edge| {
+                let len = (edge as usize).pow(2) * 4;
+                quill::sticker_playback::player::DecodedFrames {
+                    frames: vec![vec![255; len]; 3],
+                    fps: 30.,
+                }
+            }),
         );
+        cx.notify();
     });
+    for _ in 0..3 {
+        frames(vcx);
+        app.read_with(vcx, |app, _| app.playback.stickers.settle());
+    }
     frames(vcx);
     let first_pixel = app.read_with(vcx, |app, _| {
-        let clip = app.decoded_clip(key, PlaybackSize::Sticker, false)?;
-        let bytes = clip.frames.first()?.as_bytes(0)?;
+        let image = app.playback.stickers.any_frame(file.0)?;
+        let bytes = image.as_bytes(0)?;
         bytes.get(..4).map(<[u8]>::to_vec)
     });
     assert_eq!(first_pixel, Some(vec![0, 184, 255, 255]), "tinted gold");

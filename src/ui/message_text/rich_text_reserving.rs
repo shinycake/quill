@@ -17,7 +17,7 @@ pub(in crate::ui) fn rich_text_reserving(
     font: Pixels,
     emoji_paths: &HashMap<i64, ImageSource>,
     // Animated custom emoji for the animation layer (see `paint_text_run`).
-    layered: &HashMap<i64, LayeredClip>,
+    layered: &HashMap<i64, StickerView>,
     reserve: Option<Pixels>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
@@ -114,7 +114,7 @@ pub(super) fn inline_paragraph(
     is_caption: bool,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     emoji_paths: &HashMap<i64, ImageSource>,
-    layered: &HashMap<i64, LayeredClip>,
+    layered: &HashMap<i64, StickerView>,
     font: Pixels,
     reserve: Option<Pixels>,
     cx: &mut Context<QuillApp>,
@@ -234,7 +234,7 @@ pub(in crate::ui) fn message_text_block(
     custom_emoji: Option<&quill::emoji::CustomEmojiStickers>,
     // Animated frames of this message's custom emoji, when decoded; they
     // replace the still images.
-    animated_emoji: &HashMap<i64, super::super::sticker_playback::AnimatedVisual>,
+    animated_emoji: &HashMap<i64, super::super::sticker_player::StickerView>,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     // Settings → Appearance: message font size.
     font: Pixels,
@@ -266,18 +266,8 @@ pub(in crate::ui) fn message_text_block(
             .link_preview
             .as_ref()
             .is_some_and(|preview| preview.has_card());
-    let mut images = custom_emoji_paths(&text.entities, custom_emoji, files, media_roots);
-    let mut layered = HashMap::new();
-    for (id, visual) in animated_emoji {
-        match visual {
-            super::super::sticker_playback::AnimatedVisual::Image(frame) => {
-                images.insert(*id, ImageSource::from(frame.clone()));
-            }
-            super::super::sticker_playback::AnimatedVisual::Layered(clip) => {
-                layered.insert(*id, clip.clone());
-            }
-        }
-    }
+    let images = custom_emoji_paths(&text.entities, custom_emoji, files, media_roots);
+    let layered = animated_emoji;
     let line = rich_text_reserving(
         &text.text,
         &text.entities,
@@ -286,7 +276,7 @@ pub(in crate::ui) fn message_text_block(
         revealed,
         font,
         &images,
-        &layered,
+        layered,
         reserve.filter(|_| !card_below),
         cx,
     );

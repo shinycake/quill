@@ -171,7 +171,6 @@
 "qll_av_in_call_chat_needs_a" = "In-call chat needs a live connection.";
 "qll_av_in_progress" = " · in progress";
 "qll_av_incoming_invitation" = "📞 Incoming {kind} invitation";
-"qll_av_invalid_sticker_frame" = "Invalid sticker frame";
 "qll_av_invitation" = "📞 {kind} invitation{state}";
 "qll_av_invitation_declined" = "Invitation declined.";
 "qll_av_invitation_sent" = "Invitation sent…";
@@ -294,8 +293,6 @@
 "qll_av_starting_the_recording" = "Starting the recording…";
 "qll_av_starting_the_video_chat" = "Starting the video chat…";
 "qll_av_starts_soon" = "Starts soon";
-"qll_av_sticker_has_no_frames" = "Sticker has no frames";
-"qll_av_sticker_playback_cancelled" = "Sticker playback cancelled";
 "qll_av_stop_sharing_screen" = "Stop Sharing Screen";
 "qll_av_stopping_the_recording" = "Stopping the recording…";
 "qll_av_stream_keys_need_a_live" = "Stream keys need a live connection.";
@@ -320,7 +317,6 @@
 "qll_av_unpin" = "Unpin";
 "qll_av_unpin_album" = "Unpin album";
 "qll_av_unpinning_album" = "unpinning album…";
-"qll_av_unsupported_animated_sticker" = "Unsupported animated sticker";
 "qll_av_updating_your_start_notification" = "Updating your start notification…";
 "qll_av_user" = "User {user_id}";
 "qll_av_video_chat" = "video chat";

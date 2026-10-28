@@ -5,7 +5,7 @@
 //! the rolled value. A slot machine stacks its five stickers in that square.
 
 use super::*;
-use crate::ui::sticker_playback::AnimatedVisual;
+use crate::ui::sticker_player::StickerView;
 use quill::lang::{keys, tr_with};
 use quill::telegram::envelope::{DiceContent, StickerContent};
 
@@ -18,7 +18,7 @@ pub(in crate::ui) fn dice_row(
     dice: &DiceContent,
     files: &quill::state::FileMap,
     media_roots: &[PathBuf],
-    layers: Vec<Option<AnimatedVisual>>,
+    layers: Vec<Option<StickerView>>,
 ) -> AnyElement {
     let side = px(quill::bubble_layout::DICE_SIZE as f32);
     let stickers = dice
@@ -80,29 +80,17 @@ fn dice_layer(
     sticker: &StickerContent,
     files: &quill::state::FileMap,
     media_roots: &[PathBuf],
-    animated: Option<AnimatedVisual>,
+    animated: Option<StickerView>,
     side: Pixels,
 ) -> Option<AnyElement> {
-    match animated {
-        Some(AnimatedVisual::Image(image)) => {
-            return Some(
-                img(image)
-                    .id(("dice-layer", id))
-                    .size(side)
-                    .object_fit(ObjectFit::Contain)
-                    .into_any_element(),
-            );
-        }
-        // Drawn by the conversation's animation layer (`anim_layer`).
-        Some(AnimatedVisual::Layered(clip)) => {
-            return Some(
-                crate::ui::anim_layer::frames(clip, 60)
-                    .flex_none()
-                    .size(side)
-                    .into_any_element(),
-            );
-        }
-        None => {}
+    // Drawn by the conversation's animation layer (`anim_layer`).
+    if let Some(view) = animated {
+        return Some(
+            crate::ui::anim_layer::frames(view)
+                .flex_none()
+                .size(side)
+                .into_any_element(),
+        );
     }
     let path = sticker
         .display_file_id()

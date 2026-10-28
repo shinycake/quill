@@ -834,7 +834,11 @@ impl QuillApp {
             // The quote as it reads in the message, with its formatting and
             // no quote marks (tdesktop `FieldHeader::updateShownMessageText`).
             (Some(quote), _) => {
-                let emoji = self.custom_emoji_images(&quote.entities, cx);
+                let emoji = self.custom_emoji_images(
+                    &quote.entities,
+                    super::sticker_player::EmojiSide(14.),
+                    cx,
+                );
                 div()
                     .text_sm()
                     .child(super::chatlist_style::chat_list_preview_line(
@@ -847,7 +851,11 @@ impl QuillApp {
                     .into_any_element()
             }
             (None, Some(quill::telegram::envelope::MessageContent::Text(text))) => {
-                let emoji = self.custom_emoji_images(&text.entities, cx);
+                let emoji = self.custom_emoji_images(
+                    &text.entities,
+                    super::sticker_player::EmojiSide(14.),
+                    cx,
+                );
                 div()
                     .text_sm()
                     .child(super::chatlist_style::chat_list_preview_line(

@@ -36,11 +36,10 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::sticker_player::StickerView;
 use gpui_kit::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 thread_local! {
     /// The layer of the slice being rendered, laid out or painted.
@@ -79,58 +78,6 @@ fn next_seq() -> u64 {
     })
 }
 
-/// A decoded animation and when it started, so the frame to show can be
-/// picked at paint time.
-#[derive(Clone)]
-pub(super) struct LayeredClip {
-    pub(super) frames: Arc<[Arc<RenderImage>]>,
-    pub(super) fps: f64,
-    pub(super) started: Instant,
-    pub(super) duration: Duration,
-    pub(super) looping: bool,
-    /// Plays this many times, then rests on its first frame (tdesktop
-    /// `LimitedLoopsEmoji`, used by Premium emoji statuses). `looping` is
-    /// then ignored.
-    pub(super) loops: Option<u32>,
-    /// When the clip was last drawn, for its cache's eviction: a clip the
-    /// layer draws is on screen although its row doesn't render.
-    pub(super) shown: Option<Rc<Cell<Instant>>>,
-}
-
-impl LayeredClip {
-    pub(super) fn animates(&self) -> bool {
-        if let Some(loops) = self.loops {
-            return self.frames.len() > 1 && self.started.elapsed() < self.duration * loops;
-        }
-        self.frames.len() > 1 && (self.looping || self.started.elapsed() < self.duration)
-    }
-
-    pub(super) fn frame_now(&self) -> Option<&Arc<RenderImage>> {
-        let count = self.frames.len();
-        let elapsed = self.started.elapsed();
-        if let Some(loops) = self.loops
-            && elapsed >= self.duration * loops
-        {
-            return self.frames.first();
-        }
-        let index = if self.loops.is_none() && !self.looping && elapsed >= self.duration {
-            count.saturating_sub(1)
-        } else {
-            (elapsed.as_secs_f64() * self.fps) as usize % count.max(1)
-        };
-        self.frames.get(index)
-    }
-
-    fn paint(&self, bounds: Bounds<Pixels>, window: &mut Window) {
-        if let Some(shown) = &self.shown {
-            shown.set(Instant::now());
-        }
-        if let Some(frame) = self.frame_now().cloned() {
-            let _ = window.paint_image(bounds, bounds, Corners::default(), frame, 0, false);
-        }
-    }
-}
-
 /// Paints time-driven content into the given bounds.
 pub(super) type PaintFn = Rc<dyn Fn(Bounds<Pixels>, &mut Window)>;
 /// Builds the element the layer draws, afresh each frame.
@@ -139,8 +86,8 @@ pub(super) type BuildFn = Rc<dyn Fn() -> Option<AnyElement>>;
 /// What a layered item draws.
 #[derive(Clone)]
 pub(super) enum Content {
-    /// An animated sticker or custom emoji, at most `max_fps`.
-    Frames { clip: LayeredClip, max_fps: u32 },
+    /// An animated sticker or custom emoji.
+    Frames(StickerView),
     /// Clock-driven drawing (spoiler specks, typing dots) at `fps`.
     Paint { paint: PaintFn, fps: u32 },
     /// A live tile (an inline video and the badges over it), rebuilt from
@@ -155,13 +102,7 @@ pub(super) enum Content {
 impl Content {
     fn fps(&self) -> u32 {
         match self {
-            Content::Frames { clip, max_fps } => {
-                if clip.animates() {
-                    (clip.fps.ceil() as u32).clamp(1, *max_fps)
-                } else {
-                    0
-                }
-            }
+            Content::Frames(view) => view.fps(),
             Content::Paint { fps, .. } | Content::Tile { fps, .. } => *fps,
             Content::Mirror { .. } => 0,
         }
@@ -175,7 +116,7 @@ impl Content {
     /// layer draws it). Tiles and mirrors are the row's own children.
     fn paint_inline(&self, bounds: Bounds<Pixels>, window: &mut Window) {
         match self {
-            Content::Frames { clip, .. } => clip.paint(bounds, window),
+            Content::Frames(view) => view.paint(bounds, window),
             Content::Paint { paint, .. } => paint(bounds, window),
             Content::Tile { .. } | Content::Mirror { .. } => {}
         }
@@ -383,7 +324,7 @@ impl Layer {
                 continue;
             }
             window.with_content_mask(Some(item.mask), |window| match &item.content {
-                Content::Frames { clip, .. } => clip.paint(item.bounds, window),
+                Content::Frames(view) => view.paint(item.bounds, window),
                 Content::Paint { paint, .. } => paint(item.bounds, window),
                 Content::Tile { .. } | Content::Mirror { .. } => {
                     if let Some(element) = built.get_mut(ix).and_then(Option::as_mut) {
@@ -407,8 +348,8 @@ pub(super) struct Layered {
 }
 
 /// An animated sticker or custom emoji, sized by its style.
-pub(super) fn frames(clip: LayeredClip, max_fps: u32) -> Layered {
-    Layered::new(Content::Frames { clip, max_fps }, None)
+pub(super) fn frames(view: StickerView) -> Layered {
+    Layered::new(Content::Frames(view), None)
 }
 
 /// Clock-driven drawing at `fps`, sized by its style.
@@ -553,6 +494,9 @@ impl Element for Layered {
             UNDER_LAYER.with(|flag| flag.set(outer));
         }
         if !drawn_by_layer {
+            if matches!(self.content, Content::Frames(_)) {
+                super::sticker_player::note_display(window, cx);
+            }
             self.content.paint_inline(bounds, window);
         }
     }
@@ -718,6 +662,7 @@ impl Element for LayerPainter {
         window: &mut Window,
         cx: &mut App,
     ) {
+        super::sticker_player::note_display(window, cx);
         self.layer.paint(built, window, cx);
         // Keep the frame clock going while anything here animates (also
         // the first frame after new content appeared).
@@ -733,11 +678,9 @@ impl Element for LayerPainter {
 
 #[cfg(test)]
 mod tests {
-    use super::{Content, Layer, LayeredClip};
-    use gpui_kit::{Bounds, ContentMask, RenderImage, point, px, size};
+    use super::{Content, Layer};
+    use gpui_kit::{Bounds, ContentMask, point, px, size};
     use std::rc::Rc;
-    use std::sync::Arc;
-    use std::time::{Duration, Instant};
 
     fn rect(x: f32, y: f32, w: f32, h: f32) -> Bounds<gpui_kit::Pixels> {
         Bounds::new(point(px(x), px(y)), size(px(w), px(h)))
@@ -749,10 +692,11 @@ mod tests {
         }
     }
 
+    /// Animated content at 10 fps.
     fn frames() -> Content {
-        Content::Frames {
-            clip: clip(true, 0),
-            max_fps: 30,
+        Content::Paint {
+            paint: Rc::new(|_, _| {}),
+            fps: 10,
         }
     }
 
@@ -842,63 +786,5 @@ mod tests {
         // Nothing animates once the slice prepaints an empty frame.
         layer.begin_frame();
         assert_eq!(layer.demand(), (0, 0));
-    }
-
-    fn clip(looping: bool, elapsed_ms: u64) -> LayeredClip {
-        let frames: Vec<Arc<RenderImage>> = (0..4)
-            .map(|_| {
-                Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
-                    image::Frame::new(image::RgbaImage::new(1, 1)),
-                ])))
-            })
-            .collect();
-        LayeredClip {
-            frames: frames.into(),
-            fps: 10.,
-            started: Instant::now()
-                .checked_sub(Duration::from_millis(elapsed_ms))
-                .unwrap_or_else(Instant::now),
-            duration: Duration::from_millis(400),
-            looping,
-            loops: None,
-            shown: None,
-        }
-    }
-
-    #[test]
-    fn limited_loops_play_then_rest_on_the_first_frame() {
-        let limited = |elapsed_ms| LayeredClip {
-            loops: Some(2),
-            ..clip(false, elapsed_ms)
-        };
-        // 400 ms per loop: frame 2 of the second loop, then at rest.
-        assert_eq!(index(&limited(650)), 2);
-        assert!(limited(650).animates());
-        assert_eq!(index(&limited(800)), 0);
-        assert!(!limited(800).animates());
-        assert_eq!(index(&limited(5000)), 0);
-    }
-
-    fn index(clip: &LayeredClip) -> usize {
-        let frame = clip.frame_now().expect("a frame");
-        clip.frames
-            .iter()
-            .position(|f| Arc::ptr_eq(f, frame))
-            .expect("one of the clip's frames")
-    }
-
-    #[test]
-    fn frames_follow_the_clock() {
-        assert_eq!(index(&clip(true, 250)), 2);
-        // Looping wraps around.
-        assert_eq!(index(&clip(true, 650)), 2);
-        assert!(clip(true, 650).animates());
-    }
-
-    #[test]
-    fn a_finished_one_shot_holds_its_last_frame() {
-        let done = clip(false, 900);
-        assert_eq!(index(&done), 3);
-        assert!(!done.animates());
     }
 }

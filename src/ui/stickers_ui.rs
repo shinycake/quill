@@ -135,7 +135,7 @@ impl QuillApp {
             emoji.clone()
         };
         let cell_id = format!("sticker-{prefix}-{}-{}", sticker.set_id, sticker.id);
-        let animated = self.sticker_image(file_id, sticker.format, cx);
+        let animated = self.sticker_image(file_id, sticker.format, 72., cx);
         let source = animated
             .map(ImageSource::Render)
             .or_else(|| path.map(ImageSource::from));

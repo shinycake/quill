@@ -16,7 +16,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::{GroupCallMessageLevel, MessageSender, ParsedGroupCallMessage};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 /// tdesktop `kMaxShownVideoStreamMessages`.
 pub const MAX_SHOWN_COMMENTS: usize = 100;
@@ -402,13 +402,6 @@ pub fn ready_burst(seed: u64, ready: &[Option<Instant>], started: Instant) -> Op
             .flatten()
             .is_some_and(|at| at <= started)
     })
-}
-
-/// The frame of a `count`-frame burst at `fps`, `age` into its effect: it
-/// plays once, so there is none after the last.
-pub fn burst_frame_index(age: Duration, fps: f64, count: usize) -> Option<usize> {
-    let index = (age.as_secs_f64() * fps) as usize;
-    (index < count).then_some(index)
 }
 
 #[cfg(test)]

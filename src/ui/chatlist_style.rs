@@ -41,7 +41,7 @@ pub(crate) fn chat_list_preview_line_layered(
     preview: &str,
     entities: &[TextEntity],
     emoji: &std::collections::HashMap<i64, ImageSource>,
-    layered: &std::collections::HashMap<i64, super::anim_layer::LayeredClip>,
+    layered: &std::collections::HashMap<i64, super::sticker_player::StickerView>,
     // The sender ("Name: ") in the accent color. Right-to-left previews lay it out as the
     // first run of the one line (Telegram Desktop builds "from: text" as one
     // `Ui::Text::String`, so a Latin name makes the paragraph left-to-right); the caller
@@ -166,7 +166,7 @@ pub(crate) fn chat_list_preview_line_layered(
             continue;
         }
         if let Some(clip) = run.custom_emoji_id.and_then(|id| layered.get(&id)) {
-            let frames = super::anim_layer::frames(clip.clone(), 30);
+            let frames = super::anim_layer::frames(clip.clone());
             parts.push((false, div().child(frames.size(px(14.)).flex_none())));
             continue;
         }

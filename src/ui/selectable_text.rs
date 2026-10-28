@@ -62,7 +62,7 @@ pub(super) enum InlineEmojiVisual {
     /// A still image (a sticker's static frame).
     Image(ImageSource),
     /// An animated clip drawn by the history's animation layer.
-    Clip(super::anim_layer::LayeredClip),
+    Clip(super::sticker_player::StickerView),
 }
 
 /// The text standing in for an inline custom emoji: an em space, which
@@ -500,7 +500,7 @@ impl Element for SelectableRichText {
                         .into_any_element(),
                     InlineEmojiVisual::Clip(clip) => {
                         super::anim_layer::with_layer(self.layer.as_ref(), || {
-                            super::anim_layer::frames(clip.clone(), 30)
+                            super::anim_layer::frames(clip.clone())
                                 .flex_none()
                                 .size(rect.size.width)
                                 .into_any_element()
