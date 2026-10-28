@@ -412,27 +412,23 @@ pub(super) fn pill_label(label: &str, cx: &App) -> Stateful<Div> {
 }
 
 impl QuillApp {
-    /// Report the history rows the list rendered last frame as seen
-    /// (`viewMessages` through the driver), so only messages actually on
-    /// screen are marked read. Skipped while the window is inactive —
+    /// Report the history rows whose bottom edge was on screen at the last
+    /// paint as seen (`viewMessages` through the driver), so only messages
+    /// the reader could see are marked read. Skipped while the window is inactive —
     /// nothing is "seen" behind another app — and when the set is
     /// unchanged; the driver also drops ids already viewed or in flight.
     pub(super) fn report_visible_history(&mut self, window_active: bool, cx: &mut Context<Self>) {
         self.history.window_active = window_active;
-        let rendered = std::mem::take(&mut *self.history.rendered_rows.borrow_mut());
-        if !window_active || rendered.is_empty() {
+        if !window_active {
             return;
         }
         let Some(chat_id) = self.viewed_chat() else {
             return;
         };
-        let mut ids: Vec<MessageId> = rendered
-            .into_iter()
-            .filter_map(|ix| self.history.rows.get(ix))
-            .flat_map(HistoryRow::message_ids)
-            .collect();
-        ids.sort_unstable_by_key(|id| id.0);
-        ids.dedup();
+        let ids = match self.history.seen.try_borrow().as_deref() {
+            Ok(Some((chat, ids))) if *chat == chat_id && !ids.is_empty() => ids.clone(),
+            _ => return,
+        };
         if self
             .history
             .reported_visible
@@ -487,6 +483,7 @@ impl ConversationPart {
 mod conversation_part1;
 mod header_view;
 mod history_message_list;
+mod history_reads;
 mod history_scroll_memory;
 mod render_history_row_body;
 mod row_build;

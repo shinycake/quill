@@ -351,6 +351,9 @@ impl QuillApp {
         let top_probe = self.history.scroll_top_probe.clone();
         let view_probe = self.history.scroll_view_probe.clone();
         let hit_rows = self.history.hit_rows.clone();
+        let painted_ids = self.history.painted_ids.clone();
+        let seen = self.history.seen.clone();
+        let seen_app = cx.weak_entity();
         let viewport = self.history.viewport.clone();
         let history_focus = self.message_ui.history_focus.clone();
         let drag_app = cx.weak_entity();
@@ -505,7 +508,7 @@ impl QuillApp {
             .child(
                 canvas(
                     |_, _, _| {},
-                    move |bounds, _, window, _| {
+                    move |bounds, _, window, cx| {
                         // Take the rows out so no guard is held across the
                         // calls below; a re-entrant borrow skips one frame.
                         let Ok(mut slot) = probe.try_borrow_mut() else {
@@ -549,6 +552,27 @@ impl QuillApp {
                             })
                             .map(|(ix, _, _)| *ix);
                         let range = on_screen.clone().min().zip(on_screen.max());
+                        super::history_reads::note_seen(
+                            &painted_ids,
+                            &seen,
+                            viewed_chat,
+                            bounds,
+                            || {
+                                // Redraw so `report_visible_history` reads the
+                                // newly seen rows (scrolling alone doesn't
+                                // re-render the app view).
+                                cx.defer(move |cx| {
+                                    let _ = seen_app.update(cx, |this, cx| {
+                                        this.in_window_scope(window_chat, cx, |this, cx| {
+                                            this.notify_tick(
+                                                crate::ui::app_slice::SliceKind::Conversation,
+                                                cx,
+                                            )
+                                        })
+                                    });
+                                });
+                            },
+                        );
                         rows.clear();
                         // Hand the buffer back to reuse its allocation.
                         if let Ok(mut slot) = probe.try_borrow_mut()
@@ -594,29 +618,7 @@ impl QuillApp {
         let Some(row) = self.history.rows.get(ix) else {
             return div().into_any_element();
         };
-        {
-            let mut rendered = self.history.rendered_rows.borrow_mut();
-            if !rendered.contains(&ix) {
-                rendered.push(ix);
-            }
-        }
-        // A row scrolled into view that hasn't been reported yet: redraw
-        // the conversation (its window's view) so `report_visible_history`
-        // sees it promptly (list scrolling alone doesn't re-render the app
-        // view). The other slices keep their frame.
         self.note_stale_chrome(ix, row, cx);
-        let unreported = self.live.is_some()
-            && self.history.window_active
-            && row.message_ids().iter().any(|id| {
-                !self
-                    .history
-                    .reported_visible
-                    .as_ref()
-                    .is_some_and(|(_, ids)| ids.contains(id))
-            });
-        if unreported {
-            self.notify_tick(crate::ui::app_slice::SliceKind::Conversation, cx);
-        }
         let palette = self.history.palette.get();
         let outgoing = super::chat_palette::row_is_outgoing(row);
         let element = super::chat_palette::with_palette(palette, outgoing, || {
@@ -626,13 +628,19 @@ impl QuillApp {
         // The wide layout centres dates and the unread label in its column.
         let wide = self.chat_wide();
         let probe = self.history.scroll_probe.clone();
-        // Notes where the row is painted, for the floating date pill.
+        let painted_ids = self.history.painted_ids.clone();
+        let ids = row.message_ids();
+        // Notes where the row is painted, for the floating date pill and
+        // for what is read.
         let tracker = canvas(
             |_, _, _| {},
             move |bounds, _, _, _| {
                 // A re-entrant borrow drops this row's probe for one frame.
                 if let Ok(mut rows) = probe.try_borrow_mut() {
                     rows.push((ix, bounds, has_day));
+                }
+                if let Ok(mut painted) = painted_ids.try_borrow_mut() {
+                    painted.push((bounds, ids));
                 }
             },
         )
