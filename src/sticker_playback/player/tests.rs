@@ -67,6 +67,35 @@ fn a_fixed_position_shows_nothing_past_the_end() {
 }
 
 #[test]
+fn jittered_paints_hold_each_frame_for_the_same_number_of_refreshes() {
+    // A 60 fps file on a 120 Hz screen, shown at the file's rate: paints
+    // every 8.33 ms, up to 1 ms early or late, show each frame twice.
+    let tl = timeline(120, 60.0, 2);
+    let mut shown = Vec::new();
+    for paint in 0..60u32 {
+        let jitter = [-1.0, 0.6, -0.4, 1.0][paint as usize % 4];
+        let at = (f64::from(paint) * 1000.0 / 120.0 + jitter).max(0.0);
+        let pos = Duration::from_secs_f64(at / 1000.0);
+        shown.push(pick(pos, PlayMode::Loop, tl, false).unwrap().index);
+    }
+    for pair in shown.chunks(2) {
+        assert_eq!(pair.len(), 2);
+        assert_eq!(pair.first(), pair.last(), "{shown:?}");
+    }
+}
+
+#[test]
+fn a_clip_too_slow_for_the_fine_grid_drops_to_its_files_rate() {
+    use super::engine::too_slow_for_grid;
+    // A 60 fps file on a 120 frame grid has 8.3 ms a frame.
+    let fine = timeline(120, 60.0, 2);
+    assert!(!too_slow_for_grid(ms(2), fine));
+    assert!(too_slow_for_grid(ms(5), fine));
+    // Already at its own rate: nothing coarser to drop to.
+    assert!(!too_slow_for_grid(ms(50), timeline(60, 60.0, 1)));
+}
+
+#[test]
 fn a_low_rate_shows_only_the_files_own_frames() {
     // A 60 fps file on a 120 frame grid (step 2).
     let tl = timeline(120, 60.0, 2);

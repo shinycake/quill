@@ -13,6 +13,9 @@ use std::time::{Duration, Instant};
 
 /// Frames asked for ahead of the one shown (the ready queue).
 pub const AHEAD: usize = 3;
+/// How early, in grid frames, a paint may land and still show the frame
+/// due on the next grid line.
+const GRID_SLACK: f64 = 0.25;
 /// A view not drawn for longer than this paused meanwhile.
 pub const PAUSE_GAP: Duration = Duration::from_millis(200);
 
@@ -159,8 +162,12 @@ pub fn pick(pos: Duration, mode: PlayMode, timeline: Timeline, high_rate: bool) 
         PlayMode::At(at) => at,
         _ => pos,
     };
-    let rate = timeline.grid_fps() / f64::from(stride);
-    let shown = (pos.as_secs_f64() * rate).floor();
+    // A head starts on a paint, so later paints land near whole grid
+    // frames, a little early or late. Counting a paint up to a quarter
+    // frame early as on time keeps every frame up for the same number of
+    // refreshes, instead of one, then three.
+    let on_grid = (pos.as_secs_f64() * timeline.grid_fps() + GRID_SLACK).floor();
+    let shown = (on_grid / f64::from(stride) + 1e-9).floor();
     let along = if shown.is_finite() && shown >= 0.0 {
         (shown as u64).saturating_mul(u64::from(stride))
     } else {

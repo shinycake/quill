@@ -3,7 +3,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::store::StoredFrame;
-use super::{Cancel, ClipInfo, ClipKey, ClipState, Origin, Rendered};
+use super::{Cancel, ClipInfo, ClipKey, ClipState, Origin, Rendered, Timeline};
 use crate::locks::lock_or_recover;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Condvar, Mutex};
@@ -57,7 +57,41 @@ pub(super) struct Clip {
     /// Round-robin order among a worker's clips.
     pub(super) served: u64,
     pub(super) cancel: Cancel,
+    /// How long its frames take to draw, smoothed.
+    pub(super) draw_cost: Duration,
+    /// Its frames draw too slowly for the fine grid: it plays at its
+    /// file's own rate from then on, so it never falls behind.
+    pub(super) coarse: bool,
 }
+
+impl Clip {
+    /// Notes that one of its frames took `draw` to draw.
+    pub(super) fn note_draw(&mut self, draw: Duration) {
+        self.draw_cost = if self.draw_cost.is_zero() {
+            draw
+        } else {
+            (self.draw_cost * 3 + draw) / 4
+        };
+        if let ClipState::Ready(info) = &self.state {
+            self.coarse |= too_slow_for_grid(self.draw_cost, info.timeline);
+        }
+    }
+}
+
+/// Whether frames that take `draw_cost` to draw can't keep up with
+/// `timeline`'s fine grid. A worker draws one clip's frames one at a time,
+/// and needs room for the other clips it owns and for slower frames.
+pub(super) fn too_slow_for_grid(draw_cost: Duration, timeline: Timeline) -> bool {
+    let grid = timeline.grid_fps();
+    timeline.step > 1
+        && grid.is_finite()
+        && grid > 0.0
+        && draw_cost > Duration::from_secs_f64(COARSE_SHARE / grid)
+}
+
+/// The share of a grid frame's time one frame may take to draw before its
+/// clip drops to the file's own rate.
+const COARSE_SHARE: f64 = 0.4;
 
 pub(super) enum Job {
     Open {
@@ -193,6 +227,8 @@ impl Engine {
                 used: Instant::now(),
                 served: 0,
                 cancel: Cancel::default(),
+                draw_cost: Duration::ZERO,
+                coarse: false,
             },
         );
         drop(state);
@@ -205,6 +241,15 @@ impl Engine {
             .clips
             .get(key)
             .map(|clip| clip.state.clone())
+    }
+
+    /// Whether `key` plays only at its file's own rate (its frames draw
+    /// too slowly for the fine grid).
+    pub fn coarse(&self, key: &ClipKey) -> bool {
+        lock_or_recover(&self.shared.state)
+            .clips
+            .get(key)
+            .is_some_and(|clip| clip.coarse)
     }
 
     /// The opened clip's frames, if it opened.

@@ -150,6 +150,29 @@ it moved, and every frame sat unpacked in memory at a fixed size.
   (estimated, not measured). It plays once, so every frame is drawn live,
   which still fits a 120 Hz frame on one worker.
 
+### Follow-up: the tap effect stuttered (2026-10-28)
+
+The estimate above was wrong for real effects. The 😂 and 👏 effects from a
+real account draw at 672 px in 2.6 ms median and 6.0 ms at p90 (bench above,
+2 files, 620 frames), and their busiest stretch is slower than that. At
+120 Hz one worker has 8.3 ms a frame, so the effect fell behind about
+three quarters of a second in and most later frames came late. Separately,
+paints land up to a millisecond either side of each refresh, so mapping
+wall time to frames with a plain floor showed some frames for one refresh
+and others for three.
+
+Two changes, both traced on the real 😂 effect (`ready-emoji-tap-effect`
+with its file swapped in, a frame log per paint):
+
+- Each clip keeps a smoothed draw time. Once it passes 40% of a grid
+  frame, the clip plays at its file's own rate for the rest of its life,
+  while views still tick at the display's rate.
+- A head counts a paint up to a quarter grid frame early as on time.
+
+Before: the second half of the effect late, frames held for 1, 2 or 3
+refreshes (35, 72 and 29 times). After: 1 late paint out of 358, and
+146 of 150 frames held for exactly 2 refreshes (the rest at the switch).
+
 ## Verification
 
 `/verify` captures at 2x, before and after: a sticker message in history,
