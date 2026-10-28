@@ -23,6 +23,8 @@ pub(super) struct ChromeFacts {
     pub(super) can_delete: bool,
     pub(super) can_set_main: bool,
     pub(super) can_report: bool,
+    /// The item is a message the user may answer here.
+    pub(super) can_reply: bool,
     pub(super) profile_view: bool,
     /// The profile photo viewer's own header ("Photo 2 of 5", "Group
     /// Photo", ...).
@@ -47,6 +49,7 @@ impl QuillApp {
             can_delete,
             can_set_main,
             can_report,
+            can_reply,
             profile_view,
             header,
         } = facts;
@@ -256,6 +259,20 @@ impl QuillApp {
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.report_viewer_profile_photo(cx);
                             })),
+                        )
+                    })
+                    .when(can_reply, |this| {
+                        this.child(
+                            icon_action(
+                                ("media-viewer-reply", row_id),
+                                gpui_kit::assets::IconName::Reply,
+                                tr(keys::Q_MEDIA_REPLY),
+                            )
+                            .on_click(cx.listener(
+                                |this, _, window, cx| {
+                                    this.reply_from_viewer(window, cx);
+                                },
+                            )),
                         )
                     })
                     .when(!protected && !profile_view, |this| {
