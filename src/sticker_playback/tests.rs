@@ -57,9 +57,9 @@ fn one_layer(shapes: &str) -> String {
     )
 }
 
-fn first_frame(json: &str) -> Vec<u8> {
+fn first_frame(json: &str, fitz: FitzType) -> Vec<u8> {
     let path = fixture_text(json);
-    let decoded = decode_tgs_sized(&path, 64, 1, f64::INFINITY, &AtomicBool::new(false));
+    let decoded = decode_tgs_sized(&path, 64, 1, f64::INFINITY, fitz, &AtomicBool::new(false));
     let _ = std::fs::remove_file(path);
     decoded.unwrap().frames.remove(0)
 }
@@ -75,14 +75,41 @@ const SQUARE: &str =
 #[test]
 fn frames_are_straight_alpha_bgra() {
     // Half-transparent orange: premultiplied output would halve the colour.
-    let frame = first_frame(&one_layer(&format!(
-        r#"{SQUARE},{{"ty":"fl","c":{{"a":0,"k":[1,0.5,0,1]}},"o":{{"a":0,"k":50}},"r":1}}"#
-    )));
+    let frame = first_frame(
+        &one_layer(&format!(
+            r#"{SQUARE},{{"ty":"fl","c":{{"a":0,"k":[1,0.5,0,1]}},"o":{{"a":0,"k":50}},"r":1}}"#
+        )),
+        FitzType::None,
+    );
     let [b, g, r, a] = pixel(&frame, 32, 32);
     assert!((127..=129).contains(&a), "alpha {a}");
     assert!(
         r >= 254 && (126..=129).contains(&g) && b <= 1,
         "{b} {g} {r}"
+    );
+}
+
+#[test]
+fn a_skin_tone_recolours_the_rendered_emoji() {
+    let json = one_layer(&format!(
+        r#"{SQUARE},{{"ty":"fl","c":{{"a":0,"k":[1,0,0,1]}},"o":{{"a":0,"k":100}},"r":1}}"#
+    ))
+    .replacen(
+        r#""assets""#,
+        r#""fitz":[{"o":16711680,"f12":65280,"f3":255,"f4":0,"f5":0,"f6":0}],"assets""#,
+        1,
+    );
+    assert_eq!(
+        pixel(&first_frame(&json, FitzType::None), 32, 32),
+        [0, 0, 255, 255]
+    );
+    assert_eq!(
+        pixel(&first_frame(&json, FitzType::Type12), 32, 32),
+        [0, 255, 0, 255]
+    );
+    assert_eq!(
+        pixel(&first_frame(&json, FitzType::Type3), 32, 32),
+        [255, 0, 0, 255]
     );
 }
 
@@ -102,10 +129,13 @@ fn animated_paths_are_all_drawn() {
         )
     };
     let bars: Vec<String> = (0..16).map(|i| bar(i * 4)).collect();
-    let frame = first_frame(&one_layer(&format!(
-        r#"{},{{"ty":"fl","c":{{"a":0,"k":[1,1,1,1]}},"o":{{"a":0,"k":100}},"r":1}}"#,
-        bars.join(",")
-    )));
+    let frame = first_frame(
+        &one_layer(&format!(
+            r#"{},{{"ty":"fl","c":{{"a":0,"k":[1,1,1,1]}},"o":{{"a":0,"k":100}},"r":1}}"#,
+            bars.join(",")
+        )),
+        FitzType::None,
+    );
     let painted: Vec<usize> = (0..16)
         .filter(|bar| pixel(&frame, bar * 4 + 1, 32)[3] == 255)
         .collect();
@@ -153,7 +183,7 @@ fn fixture_text(json: &str) -> PathBuf {
 fn tgs_validation_rejects_external_resources_and_bad_bounds() {
     let base = serde_json::json!({"w":512,"h":512,"fr":60,"ip":0,"op":120,"assets":[],"layers":[]});
     let path = fixture(&base);
-    assert!(tgs_json(&path).is_ok());
+    assert!(tgs_json(&path, FitzType::None).is_ok());
     for patch in [
         serde_json::json!({"assets":[{"p":"/etc/passwd"}]}),
         serde_json::json!({"w":0}),
@@ -165,10 +195,10 @@ fn tgs_validation_rejects_external_resources_and_bad_bounds() {
             value[key] = replacement.clone();
         }
         let patched = fixture(&value);
-        assert!(tgs_json(&patched).is_err());
+        assert!(tgs_json(&patched, FitzType::None).is_err());
         let _ = std::fs::remove_file(patched);
     }
     std::fs::write(&path, b"bad gzip").unwrap();
-    assert!(tgs_json(&path).is_err());
+    assert!(tgs_json(&path, FitzType::None).is_err());
     let _ = std::fs::remove_file(path);
 }

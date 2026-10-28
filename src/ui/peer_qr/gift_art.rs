@@ -96,9 +96,15 @@ fn sticker_bgra(path: &PathBuf, format: StickerFormat, edge: usize) -> Option<im
     match format {
         StickerFormat::Tgs => {
             let cancelled = AtomicBool::new(false);
-            let frames =
-                quill::sticker_playback::decode_tgs_sized(path, edge, 1, f64::INFINITY, &cancelled)
-                    .ok()?;
+            let frames = quill::sticker_playback::decode_tgs_sized(
+                path,
+                edge,
+                1,
+                f64::INFINITY,
+                quill::sticker_playback::FitzType::None,
+                &cancelled,
+            )
+            .ok()?;
             image::RgbaImage::from_raw(side, side, frames.frames.into_iter().next()?)
         }
         _ => {

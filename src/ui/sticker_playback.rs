@@ -386,6 +386,7 @@ fn decode_frames(
                 edge as usize,
                 max_frames,
                 quill::sticker_playback::MAX_PLAYBACK_FPS,
+                quill::sticker_playback::FitzType::None,
                 cancel,
             )?;
             let frames = decoded

@@ -7,10 +7,12 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+mod fitz;
 mod thorvg;
 mod tint;
 mod webm;
 mod webm_ffi;
+pub use fitz::{FitzType, apply_fitzpatrick};
 pub use tint::Tint;
 pub use webm::WebmFrames;
 
@@ -38,13 +40,13 @@ pub struct StickerFrames {
     pub fps: f64,
 }
 
-/// A TGS file's Lottie JSON, checked.
+/// A TGS file's Lottie JSON, checked and recoloured for its skin tone.
 struct Tgs {
     json: Vec<u8>,
     fps: f64,
 }
 
-fn tgs_json(path: &Path) -> Result<Tgs, String> {
+fn tgs_json(path: &Path, fitz: FitzType) -> Result<Tgs, String> {
     let file = std::fs::File::open(path).map_err(|_| "Could not read animated sticker")?;
     if file
         .metadata()
@@ -62,7 +64,7 @@ fn tgs_json(path: &Path) -> Result<Tgs, String> {
     if bytes.len() > 8_388_608 {
         return Err("Animated sticker is too large".into());
     }
-    let value: serde_json::Value =
+    let mut value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|_| "Invalid animated sticker")?;
     for dimension in ["w", "h"] {
         if !value
@@ -96,6 +98,11 @@ fn tgs_json(path: &Path) -> Result<Tgs, String> {
     {
         return Err("Invalid animated sticker duration".into());
     }
+    if apply_fitzpatrick(&mut value, fitz) {
+        // serde_json keeps the file's key order (preserve_order), which
+        // ThorVG's streaming parser needs ("ty" first in a shape).
+        bytes = serde_json::to_vec(&value).map_err(|_| "Invalid animated sticker")?;
+    }
     Ok(Tgs { json: bytes, fps })
 }
 
@@ -105,20 +112,23 @@ pub fn decode_tgs(path: &Path, cancelled: &AtomicBool) -> Result<StickerFrames, 
         STICKER_EDGE,
         MAX_STICKER_FRAMES,
         MAX_PLAYBACK_FPS,
+        FitzType::None,
         cancelled,
     )
 }
 
 /// [`decode_tgs`] at `edge` × `edge` px with at most `max_frames` frames
-/// played at most `max_fps` (custom emoji decode smaller and shorter).
+/// played at most `max_fps` (custom emoji decode smaller and shorter), with
+/// emoji skin tone `fitz`.
 pub fn decode_tgs_sized(
     path: &Path,
     edge: usize,
     max_frames: usize,
     max_fps: f64,
+    fitz: FitzType,
     cancelled: &AtomicBool,
 ) -> Result<StickerFrames, String> {
-    let tgs = tgs_json(path)?;
+    let tgs = tgs_json(path, fitz)?;
     if cancelled.load(Ordering::SeqCst) {
         return Err("Sticker playback cancelled".into());
     }

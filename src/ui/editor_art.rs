@@ -50,9 +50,15 @@ pub(super) fn sticker_pixels(path: &Path, format: StickerFormat) -> Option<RgbaI
     let cancelled = std::sync::atomic::AtomicBool::new(false);
     let image = match format {
         StickerFormat::Tgs => {
-            let frames =
-                quill::sticker_playback::decode_tgs_sized(path, 512, 1, f64::INFINITY, &cancelled)
-                    .ok()?;
+            let frames = quill::sticker_playback::decode_tgs_sized(
+                path,
+                512,
+                1,
+                f64::INFINITY,
+                quill::sticker_playback::FitzType::None,
+                &cancelled,
+            )
+            .ok()?;
             let mut bytes = frames.frames.into_iter().next()?;
             // Straight-alpha BGRA to RGBA.
             for pixel in bytes.as_chunks_mut::<4>().0 {
