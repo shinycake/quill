@@ -203,14 +203,16 @@ pub(in crate::ui) fn voice_note_row(
                 .child(
                     action_disc(("voice-play", row_key), outgoing, icon, ring, label, cx).on_click(
                         cx.listener(move |this, _, _, cx| {
-                            this.toggle_voice_playback(
-                                chat_id,
-                                message_id,
-                                file_id,
-                                listened,
-                                note_duration,
-                                cx,
-                            );
+                            this.press_media(file_id, cx, |this, cx| {
+                                this.toggle_voice_playback(
+                                    chat_id,
+                                    message_id,
+                                    file_id,
+                                    listened,
+                                    note_duration,
+                                    cx,
+                                );
+                            });
                         }),
                     ),
                 )
@@ -330,7 +332,9 @@ pub(in crate::ui) fn audio_row(
         .and_then(|path| sandboxed_display_path(path, media_roots));
     let play = cx.listener(move |this, _, _, cx| {
         if let Some(chat_id) = this.open_chat_id() {
-            this.toggle_audio_playback(chat_id, message_id, file_id, audio_duration, cx);
+            this.press_media(file_id, cx, |this, cx| {
+                this.toggle_audio_playback(chat_id, message_id, file_id, audio_duration, cx);
+            });
         }
     });
     // Album art, when there is one, carries the play glyph on a scrim;

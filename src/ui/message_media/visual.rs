@@ -396,12 +396,12 @@ pub(in crate::ui) fn animation_attachment(
                                                 cx,
                                             );
                                         }
-                                        this.toggle_animation_playback(
-                                            message_id,
-                                            play_id,
-                                            mime.clone(),
-                                            cx,
-                                        );
+                                        let mime = mime.clone();
+                                        this.press_media(play_id, cx, |this, cx| {
+                                            this.toggle_animation_playback(
+                                                message_id, play_id, mime, cx,
+                                            );
+                                        });
                                     })),
                             ),
                     )

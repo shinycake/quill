@@ -30,13 +30,12 @@ pub(crate) struct PlaybackUi {
     pub(super) playing_voice: Option<MessageId>,
     /// History row whose music file (`messageAudio`) is playing. Shares `voice_player`.
     pub(super) playing_audio: Option<MessageId>,
-    /// Play was tapped before the track was local. Resume when `downloadFile` finishes.
-    pub(super) pending_audio_play: Option<(ChatId, MessageId, FileId, f64)>,
+    /// What a press asked to play once its file is downloaded (`play_intent`).
+    pub(super) intent: Option<super::play_intent::PlayIntent>,
     /// The right-click menu of a Playlist page track.
     pub(super) playlist_menu: Option<super::playlist_manage::PlaylistMenu>,
     /// A track of your own playlist waiting for the "remove" confirmation.
     pub(super) playlist_remove: Option<FileId>,
-    pub(super) pending_voice_play: Option<(ChatId, MessageId, FileId, bool, f64)>,
     /// In-process player for the active voice note / audio file.
     pub(super) audio: super::audio::AudioEngine,
     /// Length of the loaded track (TDLib's rounded duration). Plain data:
@@ -72,8 +71,6 @@ pub(crate) struct PlaybackUi {
     /// The GIF decodes running, by message, and their cancel flags (set
     /// when playback stops; one decode per GIF at a time).
     pub(super) gif_decodes: HashMap<MessageId, std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    /// Play was tapped before the clip was local. Resume when `downloadFile` finishes.
-    pub(super) pending_gif_play: Option<(MessageId, FileId, String)>,
     /// A linked `?t=` media timestamp waiting for its message to load
     /// (chat, message, seconds, polls waited).
     pub(super) pending_media_seek: Option<(ChatId, quill::ids::MessageId, i32, u32)>,
@@ -134,10 +131,9 @@ impl PlaybackUi {
             player: Default::default(),
             playing_voice: None,
             playing_audio: None,
-            pending_audio_play: None,
+            intent: None,
             playlist_menu: None,
             playlist_remove: None,
-            pending_voice_play: None,
             audio: super::audio::AudioEngine::new(audio_output.clone()),
             track_length: None,
             seek_slider: None,
@@ -154,7 +150,6 @@ impl PlaybackUi {
             gif: None,
             gif_started_at: None,
             gif_decodes: HashMap::new(),
-            pending_gif_play: None,
             pending_media_seek: None,
             inline_videos: Default::default(),
             userpic_videos: Default::default(),

@@ -11,6 +11,7 @@ use crate::ui::demo::{
 use crate::ui::demos::video_fixtures::{
     apply_ready_gifs, apply_ready_video, apply_ready_video_note, apply_ready_video_viewer,
 };
+use crate::ui::play_intent::{PlayIntent, PlayTarget};
 use crate::ui::playback::PlaybackKind;
 use crate::ui::playback_state::{SeekHover, SeekSite};
 use crate::ui::recording_state::{CaptureFor, CaptureMedia};
@@ -95,6 +96,13 @@ register_demos![
         "screenshot demo — voice record bar + history playback"
     )
     .setup(QuillApp::demo_ready_voice),
+    // The incoming voice note (90) and the round video (611) not downloaded
+    // yet: a press downloads and plays, a second press cancels.
+    DemoSpec::chats(
+        "ready-media-unloaded",
+        "screenshot demo — voice note and round video before download"
+    )
+    .setup(QuillApp::demo_ready_media_unloaded),
     // The incoming voice note playing at ~40%: the waveform scrubber on
     // the active row and the player bar. `QUILL_DEMO_SEEK_HOVER=<0..1>`
     // puts the pointer over the row's scrubber.
@@ -186,22 +194,21 @@ impl QuillApp {
 
     fn demo_ready_downloads(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         // Exercise failed playback recovery without a network request.
-        self.playback.pending_gif_play = Some((MessageId(205), FileId(26), String::new()));
-        self.playback.pending_audio_play = Some((ChatId(11), MessageId(205), FileId(26), 1.));
-        self.viewer.pending_play = Some((MessageId(205), FileId(26)));
-        self.playback.pending_voice_play =
-            Some((ChatId(11), MessageId(205), FileId(26), false, 1.));
+        let audio = |message, file| PlayIntent {
+            file: FileId(file),
+            target: PlayTarget::Audio {
+                chat: ChatId(11),
+                message: MessageId(message),
+                duration: 1.,
+            },
+        };
+        self.playback.intent = Some(audio(205, 26));
         self.discard_stopped_media_playback(cx);
-        assert!(
-            self.playback.pending_gif_play.is_none()
-                && self.playback.pending_audio_play.is_none()
-                && self.viewer.pending_play.is_none()
-                && self.playback.pending_voice_play.is_none()
-        );
-        self.playback.pending_audio_play = Some((ChatId(11), MessageId(204), FileId(24), 1.));
+        assert!(self.playback.intent.is_none());
+        self.playback.intent = Some(audio(204, 24));
         self.discard_stopped_media_playback(cx);
-        assert!(self.playback.pending_audio_play.is_some());
-        self.playback.pending_audio_play = None;
+        assert!(self.playback.intent.is_some());
+        self.playback.intent = None;
     }
 
     fn demo_ready_emoji_packs(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -285,6 +292,22 @@ impl QuillApp {
         ));
     }
 
+    fn demo_ready_media_unloaded(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+        apply_ready_voice(session, &self.demo_ui.sink, &self.demo_ui.seq);
+        apply_ready_video_note(session, &self.demo_ui.sink, &self.demo_ui.seq);
+        session.settings.media_prefs.autoplay_videos = false;
+        for file in [81, 92] {
+            session.media.files.update(file, |file| {
+                file.local.path.clear();
+                file.local.is_downloading_completed = false;
+            });
+        }
+    }
+
     fn demo_starting_camera(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         self.recording.starting = true;
         cx.notify();
@@ -309,13 +332,13 @@ impl QuillApp {
                 session.media.files.insert(waiting);
             }
             self.toggle_voice_playback(ChatId(11), MessageId(91), FileId(82), true, 3., cx);
-            assert!(self.playback.pending_voice_play.is_some());
+            assert!(self.playback.intent.is_some());
             if let Some(session) = self.demo_session.as_mut() {
                 session.media.files.insert(local);
             }
-            self.resume_pending_voice(cx);
+            self.resume_play_intent(cx);
             assert!(
-                self.playback.pending_voice_play.is_none()
+                self.playback.intent.is_none()
                     && self.playback.playing_voice == Some(MessageId(91))
             );
             self.stop_voice_playback();

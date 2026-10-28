@@ -303,21 +303,19 @@ impl QuillApp {
         };
         let chat = message.chat_id;
         match &message.content {
-            MessageContent::VoiceNote(note) => self.toggle_voice_playback(
-                chat,
-                message.id,
-                note.file_id,
-                note.is_listened,
-                f64::from(note.duration),
-                cx,
-            ),
-            MessageContent::Audio(audio) => self.toggle_audio_playback(
-                chat,
-                message.id,
-                audio.file_id,
-                f64::from(audio.duration),
-                cx,
-            ),
+            MessageContent::VoiceNote(note) => {
+                let (file, listened, duration) =
+                    (note.file_id, note.is_listened, f64::from(note.duration));
+                self.press_media(file, cx, |this, cx| {
+                    this.toggle_voice_playback(chat, message.id, file, listened, duration, cx);
+                });
+            }
+            MessageContent::Audio(audio) => {
+                let (file, duration) = (audio.file_id, f64::from(audio.duration));
+                self.press_media(file, cx, |this, cx| {
+                    this.toggle_audio_playback(chat, message.id, file, duration, cx);
+                });
+            }
             MessageContent::VideoNote(note) => {
                 if note.is_secret {
                     return false;

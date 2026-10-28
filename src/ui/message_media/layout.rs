@@ -179,12 +179,30 @@ pub(in crate::ui) enum MediaDisc {
 /// download arrow, a progress ring, or play/pause.
 pub(in crate::ui) fn media_disc(id: impl Into<ElementId>, state: MediaDisc) -> Stateful<Div> {
     let inner: AnyElement = match state {
-        MediaDisc::Progress(fraction) => ProgressCircle::new("media-disc-ring")
+        // The cross says a press cancels (tdesktop `historyFileThumbCancel`).
+        MediaDisc::Progress(fraction) => div()
+            .relative()
             .size(px(34.))
-            .color(gpui_kit::white())
-            .loading(fraction.is_none())
-            .value(fraction.unwrap_or(0.) * 100.)
-            .accessibility_label(quill::lang::tr(quill::lang::keys::SR_MESSAGE_DOWNLOADING))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                ProgressCircle::new("media-disc-ring")
+                    .absolute()
+                    .inset_0()
+                    .size(px(34.))
+                    .color(gpui_kit::white())
+                    .loading(fraction.is_none())
+                    .value(fraction.unwrap_or(0.) * 100.)
+                    .accessibility_label(quill::lang::tr(
+                        quill::lang::keys::SR_MESSAGE_DOWNLOADING,
+                    )),
+            )
+            .child(
+                Icon::new(gpui_kit::assets::IconName::X)
+                    .size(px(16.))
+                    .text_color(gpui_kit::white()),
+            )
             .into_any_element(),
         MediaDisc::Download | MediaDisc::Play | MediaDisc::Pause => {
             let icon = match state {

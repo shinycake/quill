@@ -347,6 +347,14 @@ impl QuillApp {
                 let message_id = playlist_message_id(track.file_id);
                 let active = playing == Some(message_id);
                 let (file_id, duration) = (track.file_id, f64::from(track.duration));
+                // A press while the track downloads cancels it.
+                let fetching = self.session().is_some_and(|session| {
+                    super::message_media::file_is_downloading(
+                        file_id,
+                        &session.media.files,
+                        &session.media.downloads,
+                    )
+                });
                 let mut name = track_name(track);
                 let drag_title = name.clone();
                 if track.duration > 0 {
@@ -372,6 +380,8 @@ impl QuillApp {
                         .child(div().w(px(20.)).text_color(accent()).child(
                             if active && is_playing {
                                 "❚❚"
+                            } else if fetching {
+                                "✕"
                             } else {
                                 "▶"
                             },
@@ -411,7 +421,9 @@ impl QuillApp {
                             ))
                         })
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.toggle_audio_playback(chat, message_id, file_id, duration, cx);
+                            this.press_media(file_id, cx, |this, cx| {
+                                this.toggle_audio_playback(chat, message_id, file_id, duration, cx);
+                            });
                         })),
                 );
             }

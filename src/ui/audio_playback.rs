@@ -3,6 +3,7 @@
 
 use super::app::QuillApp;
 use super::demo::{demo_file_json, demo_media_allowlist, demo_thumb_png_path};
+use super::play_intent::{PlayKind, PlayTarget};
 use super::playback_state::{SeekHover, SeekSite};
 use super::*;
 use crate::ui::status_note::StatusNote;
@@ -81,7 +82,7 @@ impl QuillApp {
         // reads active_playback_id().
         self.clear_playback_state();
         self.playback.playing_voice = None;
-        self.playback.pending_voice_play = None;
+        self.drop_play_intent(PlayKind::Voice);
     }
 
     pub(super) fn stop_audio_playback(&mut self) {
@@ -90,7 +91,7 @@ impl QuillApp {
         }
         self.clear_playback_state();
         self.playback.playing_audio = None;
-        self.playback.pending_audio_play = None;
+        self.drop_play_intent(PlayKind::Audio);
     }
 
     /// Drop the seek-bar state for the active track (slider entity, scrub
@@ -515,13 +516,16 @@ impl QuillApp {
                 .map(str::to_string)
         });
         let Some(path) = path else {
-            self.playback.pending_audio_play = None;
-            self.playback.pending_voice_play =
-                Some((chat_id, message_id, file_id, listened, duration_secs));
-            self.request_media_download(file_id, None, cx);
+            let target = PlayTarget::Voice {
+                chat: chat_id,
+                message: message_id,
+                listened,
+                duration: duration_secs,
+            };
+            self.play_when_ready(file_id, target, cx);
             return;
         };
-        self.playback.pending_voice_play = None;
+        self.playback.intent = None;
         let roots = self.media_display_roots();
         let Some(safe) = sandboxed_display_path(&path, &roots) else {
             self.connection
@@ -591,12 +595,15 @@ impl QuillApp {
                 .map(str::to_string)
         });
         let Some(path) = path else {
-            self.playback.pending_voice_play = None;
-            self.playback.pending_audio_play = Some((chat_id, message_id, file_id, duration_secs));
-            self.request_media_download(file_id, None, cx);
+            let target = PlayTarget::Audio {
+                chat: chat_id,
+                message: message_id,
+                duration: duration_secs,
+            };
+            self.play_when_ready(file_id, target, cx);
             return;
         };
-        self.playback.pending_audio_play = None;
+        self.playback.intent = None;
         let roots = self.media_display_roots();
         let Some(safe) = sandboxed_display_path(&path, &roots) else {
             self.connection
@@ -626,40 +633,6 @@ impl QuillApp {
             StatusNote::error(tr(keys::Q_AV_AUDIO_CANT_BE_PLAYED))
         });
         cx.notify();
-    }
-
-    pub(super) fn resume_pending_voice(&mut self, cx: &mut Context<Self>) {
-        let Some((chat_id, message_id, file_id, listened, duration)) =
-            self.playback.pending_voice_play
-        else {
-            return;
-        };
-        if self
-            .session()
-            .and_then(|s| s.file(file_id))
-            .and_then(|f| f.usable_path())
-            .is_some()
-        {
-            self.toggle_voice_playback(chat_id, message_id, file_id, listened, duration, cx);
-        }
-    }
-
-    pub(super) fn resume_pending_audio(&mut self, cx: &mut Context<Self>) {
-        let Some((chat_id, message_id, file_id, duration_secs)) = self.playback.pending_audio_play
-        else {
-            return;
-        };
-        let ready = self.session().is_some_and(|session| {
-            session
-                .media
-                .files
-                .get(&file_id.0)
-                .and_then(|file| file.usable_path())
-                .is_some()
-        });
-        if ready {
-            self.toggle_audio_playback(chat_id, message_id, file_id, duration_secs, cx);
-        }
     }
 
     pub(super) fn mark_voice_opened(&mut self, chat_id: ChatId, message_id: MessageId) {

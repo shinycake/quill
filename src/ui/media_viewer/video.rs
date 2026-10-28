@@ -3,12 +3,13 @@
 //! helpers shared with inline playback and calls.
 
 use super::*;
+use crate::ui::play_intent::{PlayKind, PlayTarget};
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// Start viewer playback when the current item is a video whose clip is
-    /// local; otherwise trigger `downloadFile` for the clip and park the
-    /// request in `viewer_pending_play` (resumed from the poll loop).
+    /// local; otherwise download the clip and play it once it lands
+    /// (`play_intent`).
     pub(in crate::ui) fn maybe_autoplay_viewer_video(&mut self, cx: &mut Context<Self>) {
         let Some(item) = self.viewer.state.current().cloned() else {
             return;
@@ -19,12 +20,14 @@ impl QuillApp {
             ViewerVideoStart::Nothing => {}
             ViewerVideoStart::ParkDownload => {
                 if let Some(play_id) = item.play_file_id {
-                    self.viewer.pending_play = Some((item.message_id, play_id));
-                    self.request_media_download(play_id, None, cx);
+                    let target = PlayTarget::Viewer {
+                        message: item.message_id,
+                    };
+                    self.play_when_ready(play_id, target, cx);
                 }
             }
             ViewerVideoStart::PlayNow => {
-                self.viewer.pending_play = None;
+                self.playback.intent = None;
                 // `decide_viewer_video_start` only plays a local clip.
                 let Some(path) = path else {
                     return;
@@ -63,38 +66,6 @@ impl QuillApp {
             .state
             .current()
             .is_some_and(MediaViewerItem::loops)
-    }
-
-    /// Resume a parked viewer play once `downloadFile` lands the clip.
-    /// Routes through `maybe_autoplay_viewer_video`: it re-derives the
-    /// current item, clears the pending flag, and either reuses cached
-    /// frames or starts async extraction — never straight to playback
-    /// with an empty frame cache.
-    pub(in crate::ui) fn resume_pending_viewer_video(&mut self, cx: &mut Context<Self>) {
-        let Some((message_id, file_id)) = self.viewer.pending_play else {
-            return;
-        };
-        let ready = self.session().is_some_and(|session| {
-            session
-                .media
-                .files
-                .get(&file_id.0)
-                .and_then(|file| file.usable_path())
-                .is_some()
-        });
-        if !ready {
-            return;
-        }
-        let matches = self
-            .viewer
-            .state
-            .current()
-            .is_some_and(|item| item.message_id == message_id && item.plays_clip());
-        if !matches {
-            self.viewer.pending_play = None;
-            return;
-        }
-        self.maybe_autoplay_viewer_video(cx);
     }
 
     /// Play `item`'s clip in the viewer from its start (or the second a
@@ -323,7 +294,7 @@ impl QuillApp {
         self.viewer.gif = None;
         self.viewer.video = None;
         self.viewer.video_path = None;
-        self.viewer.pending_play = None;
+        self.drop_play_intent(PlayKind::Viewer);
         // The player is gone, so a boost has nothing to restore.
         let _ = self.viewer.controls.clear_clip();
     }
