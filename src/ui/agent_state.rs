@@ -73,6 +73,7 @@ impl AgentUi {
                         // The user is usually in another app: a request
                         // they have not seen yet brings Quill forward.
                         let fresh = prompts::current_for(&active_account())
+                            .filter(|_| sees_agents())
                             .map(|prompt| prompt.id)
                             .filter(|id| *id != announced);
                         if let Some(id) = fresh {

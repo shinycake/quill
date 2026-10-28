@@ -1957,7 +1957,7 @@ feature surface.
 Turning it off keeps grants, the activity log, the other switches and
 this launch's token (its file is deleted while off and written again
 when it comes back on, as before). The list of agents kept out with
-Revoke is cleared, as it always was. The local socket stays: it is also
+Revoke is cleared, and a takeover pause or Stop is lifted, as they always were. A request an agent files after the switch goes off is refused under the request queue's lock, so nothing waits hidden or raises the window. The local socket stays: it is also
 the single-instance endpoint, so the agent server refuses every
 connection instead.
 

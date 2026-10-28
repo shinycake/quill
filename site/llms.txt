@@ -17,7 +17,7 @@ Key facts:
 ## Agent access
 
 - What it is: AI agents on the user's own computer (Claude Code, Claude Desktop, Cursor or any MCP client) use the user's Telegram account through the Quill that is already running.
-- Off by default, and Quill shows nothing about agents while it is off. The user turns it on in Quill: Settings > Advanced > Agent access.
+- Off by default; while it is off, the only trace in Quill is one switch. The user turns it on in Quill: Settings > Advanced > Agent access.
 - MCP: `quill mcp` is a stdio MCP server, a mode of the Quill executable. Claude Code: `claude mcp add quill -- <path to quill> mcp`. `quill agent connect claude-desktop|cursor --yes` merges the entry into that app's config after a backup.
 - Command line: `quill agent <command>` reaches the same tools without MCP (`status`, `chats`, `read`, `send`, `search`, `call <tool> --json '{…}'`). `quill agent describe` prints every tool's schema, example and output as JSON; exit codes name each failure (3 Quill not running, 4 access off, 5 token, 6 window control off). On Windows the command line is `quill-cli.exe`, next to `quill.exe`; it waits and passes the exit code on.
 - Skill: `quill agent install-skill` writes a Claude Code Agent Skill to `~/.claude/skills/quill`.

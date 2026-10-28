@@ -1,5 +1,5 @@
-//! The Agent access switches (Settings > Agent access) and the token agents
-//! authenticate with.
+//! The Agent access switches (the master switch in Settings > Advanced, the
+//! rest on Settings > Agent access) and the token agents authenticate with.
 //!
 //! Off by default. While it is on, a fresh random token sits in
 //! `agent-token` in the app data directory, readable by the owner only; it
