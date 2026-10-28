@@ -14,7 +14,7 @@
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::telegram::envelope::StickerItem;
 use serde_json::{Value, json};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 /// tdesktop `kAccumulateSeenRequests`: one "watching" action per emoji and
 /// chat in this many milliseconds.
@@ -23,6 +23,9 @@ pub const SEEN_INTERVAL_MS: u64 = 1000;
 pub const MAX_PLAYS: usize = 5;
 /// Effects waiting to start, newest kept.
 const MAX_PENDING: usize = 8;
+/// Renamed messages remembered at most; past it the oldest names are
+/// dropped and such a message at worst plays its emoji once more.
+const MAX_ALIASES: usize = 1024;
 
 /// `clickAnimatedEmojiMessage chat_id:int53 message_id:int53 = Sticker`.
 pub fn click_animated_emoji_message(
@@ -69,6 +72,10 @@ pub struct EmojiInteractions {
     pending: VecDeque<EmojiEffect>,
     /// When "watching" was last sent for an emoji in a chat.
     seen_sent: Vec<(ChatId, String, u64)>,
+    /// Messages sent from here that got their final id: the key their
+    /// lone emoji plays under, so it keeps playing across the rename
+    /// (tdesktop hands the player to the new view, `stickerTakePlayer`).
+    aliases: HashMap<(i64, i64), (i64, i64)>,
 }
 
 impl EmojiInteractions {
@@ -85,6 +92,26 @@ impl EmojiInteractions {
     /// Hand the waiting effects to the window.
     pub fn take_pending(&mut self) -> Vec<EmojiEffect> {
         self.pending.drain(..).collect()
+    }
+
+    /// A message sent from here got its final id (or failed under a new
+    /// one): its lone emoji keeps its play.
+    pub fn renamed(&mut self, old: (i64, i64), new: (i64, i64)) {
+        if old == new {
+            return;
+        }
+        let root = self.play_key(old);
+        if self.aliases.len() >= MAX_ALIASES {
+            self.aliases.clear();
+        }
+        self.aliases.remove(&old);
+        self.aliases.insert(new, root);
+    }
+
+    /// The key a message's lone emoji plays under: the id it was sent
+    /// with, for a message sent from here.
+    pub fn play_key(&self, key: (i64, i64)) -> (i64, i64) {
+        self.aliases.get(&key).copied().unwrap_or(key)
     }
 
     /// Whether "watching" for this emoji may go out now (and note it).
@@ -172,6 +199,18 @@ mod tests {
         assert_eq!(taken.len(), MAX_PENDING);
         assert_eq!(taken[0].sticker.file_id, FileId(5));
         assert!(state.take_pending().is_empty());
+    }
+
+    #[test]
+    fn a_renamed_message_keeps_the_key_it_was_sent_with() {
+        let mut state = EmojiInteractions::default();
+        assert_eq!(state.play_key((1, 5)), (1, 5));
+        state.renamed((1, 5), (1, 90));
+        assert_eq!(state.play_key((1, 90)), (1, 5));
+        // Failed, then resent under another id: still the first one.
+        state.renamed((1, 90), (1, 91));
+        assert_eq!(state.play_key((1, 91)), (1, 5));
+        assert_eq!(state.play_key((1, 90)), (1, 90));
     }
 
     #[test]

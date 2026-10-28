@@ -196,6 +196,9 @@ impl Session {
                     .effects
                     .watch
                     .renamed((chat_id.0, old_message_id.0), (chat_id.0, message.id.0));
+                self.stickers
+                    .interactions
+                    .renamed((chat_id.0, old_message_id.0), (chat_id.0, message.id.0));
                 let row = history_message(message, false);
                 self.index_poll(&row);
                 let history = self.history_entry(chat_id);
@@ -246,6 +249,9 @@ impl Session {
                 self.stickers
                     .effects
                     .watch
+                    .renamed((chat_id.0, old_message_id.0), (chat_id.0, message.id.0));
+                self.stickers
+                    .interactions
                     .renamed((chat_id.0, old_message_id.0), (chat_id.0, message.id.0));
                 // M1: mark the row failed. The retry affordance is gated
                 // separately on `can_retry` (`resendMessages` via
