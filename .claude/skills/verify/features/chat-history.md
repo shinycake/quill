@@ -34,9 +34,7 @@ are drawn (not empty), the time footer sits inside the bubble.
 - Message effects: `ready-message-effects`. A click on the badge of
   "Happy birthday!" (`450,153;p:400`) plays its effect again;
   `QUILL_DEMO_EFFECTS=arrive` with `p:350` shows an unread message arriving
-  and playing its effect once. Set `QUILL_RLOTTIE_PATH` to the vendored
-  `librlottie.dylib` in a dev build, or the effect shows a renderer notice.
-  The demo's effect animation is a placeholder circle.
+  and playing its effect once. The demo's effect animation is a placeholder circle.
 - A chat in its own window: `QUILL_DEMO_EFFECTS=window` (on
   `ready-message-effects`) and `QUILL_DEMO_USERPICS=window` (on
   `ready-group-video-userpics`) open the chat in a new window; capture it

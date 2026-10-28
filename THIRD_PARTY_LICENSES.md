@@ -6,12 +6,13 @@ features on the shipped targets (macOS arm64, Linux x86_64/arm64, Windows x86_64
 Build-only and dev-only crates are excluded. Do not edit by hand.
 
 Native libraries shipped next to the binary (TDLib, OpenSSL, zlib, FFmpeg,
-ntgcalls, rlottie, the Visual C++ runtime) and bundled data files are listed in
-`THIRD_PARTY.md`, with their license texts under `licenses/`.
+ntgcalls, the Visual C++ runtime), the C++ code compiled into it (ThorVG with
+RapidJSON) and bundled data files are listed in `THIRD_PARTY.md`, with their
+license texts under `licenses/`.
 
 ## Overview
 
-- MIT License: 671
+- MIT License: 683
 - Apache License 2.0: 42
 - Unicode License v3: 24
 - ISC License: 22
@@ -3343,32 +3344,6 @@ third-party/chromium/LICENSE.
 ### MIT License
 
 Used by:
-- [quill 0.1.0](https://github.com/shinycake/quill)
-
-````text
-							 MIT License
-Copyright (c) 2017 Sean Barrett
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-of the Software, and to permit persons to whom the Software is furnished to do
-so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-````
-
-### MIT License
-
-Used by:
 - [rustybuzz 0.20.1](https://github.com/harfbuzz/rustybuzz)
 
 ````text
@@ -3510,6 +3485,37 @@ endef
 
 # EOF
 
+````
+
+### MIT License
+
+Used by:
+- [quill 0.1.0](https://github.com/shinycake/quill)
+
+````text
+# RapidJSON
+# Included with the ThorVG build options -Dloaders="lottie" (default).
+# This component is enabled when THORVG_LOTTIE_LOADER_SUPPORT is set to 1.
+ 
+Copyright (C) 2015 THL A29 Limited, a Tencent company, and Milo Yip. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ````
 
 ### MIT License
@@ -3663,6 +3669,716 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 	}
 	return 0;
 }
+
+````
+
+### MIT License
+
+Used by:
+- [quill 0.1.0](https://github.com/shinycake/quill)
+
+````text
+/*
+ * Copyright (c) 2020 - 2026 ThorVG project. All rights reserved.
+
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+#ifndef _TVG_COMPRESSOR_H_
+#define _TVG_COMPRESSOR_H_
+
+#include <cstdint>
+
+namespace tvg
+{
+    size_t b64Decode(const char* encoded, const size_t len, char** decoded);
+    unsigned long djb2Encode(const char* str);
+}
+
+#endif  //_TVG_COMPRESSOR_H_
+
+````
+
+### MIT License
+
+Used by:
+- [quill 0.1.0](https://github.com/shinycake/quill)
+
+````text
+/*
+ * Copyright (c) 2020 - 2026 ThorVG project. All rights reserved.
+
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+#ifndef _TVG_RAW_LOADER_H_
+#define _TVG_RAW_LOADER_H_
+
+struct RawLoader : BitmapLoader
+{
+    RawLoader() : BitmapLoader(FileType::Raw) {}
+    ~RawLoader();
+
+    using Loader::open;
+    bool open(const uint32_t* data, uint32_t w, uint32_t h, ColorSpace cs, Ownership owner);
+    bool read() override;
+};
+
+
+#endif //_TVG_RAW_LOADER_H_
+
+````
+
+### MIT License
+
+Used by:
+- [quill 0.1.0](https://github.com/shinycake/quill)
+
+````text
+/*
+ * Copyright (c) 2020 - 2026 ThorVG project. All rights reserved.
+
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+#include "tvgLoader.h"
+#include "tvgRawLoader.h"
+
+RawLoader::~RawLoader()
+{
+    if (owner != Ownership::Borrow) tvg::free(surface.buf32);
+}
+
+bool RawLoader::open(const uint32_t* data, uint32_t w, uint32_t h, ColorSpace cs, Ownership owner)
+{
+    if (!Loader::read()) return true;
+
+    if (!data || w == 0 || h == 0) return false;
+
+    this->w = (float)w;
+    this->h = (float)h;
+    this->owner = owner;
+
+    if (owner == Ownership::Copy) {
+        surface.buf32 = tvg::malloc<uint32_t>(sizeof(uint32_t) * w * h);
+        memcpy((void*)surface.buf32, data, sizeof(uint32_t) * w * h);
+    } else {
+        surface.buf32 = const_cast<uint32_t*>(data);
+    }
+
+    surface.setup(surface.buf32, w, w, h, sizeof(uint32_t), cs);
+    return true;
+}
+
+bool RawLoader::read()
+{
+    Loader::read();
+
+    return true;
+}
+
+````
+
+### MIT License
+
+Used by:
+- [quill 0.1.0](https://github.com/shinycake/quill)
+
+````text
+/*
+ * Copyright (c) 2020 - 2026 ThorVG project. All rights reserved.
+
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+#include "tvgScene.h"
+
+
+Scene::Scene() = default;
+
+
+Scene* Scene::gen() noexcept
+{
+    return new SceneImpl;
+}
+
+
+Type Scene::type() const noexcept
+{
+    return Type::Scene;
+}
+
+
+Result Scene::add(Paint* target, Paint* at) noexcept
+{
+    return to<SceneImpl>(this)->insert(target, at);
+}
+
+
+Result Scene::remove(Paint* paint) noexcept
+{
+    if (paint) return to<SceneImpl>(this)->remove(paint);
+    else return to<SceneImpl>(this)->clearPaints();
+}
+
+
+const list<Paint*>& Scene::paints() const noexcept
+{
+    return to<SceneImpl>(this)->paints;
+}
+
+
+Result Scene::add(SceneEffect effect, ...) noexcept
+{
+    va_list args;
+    va_start(args, effect);
+    auto ret = to<SceneImpl>(this)->add(effect, args);
+    va_end(args);
+    return ret;
+}
+
+````
+
+### MIT License
+
+Used by:
+- [quill 0.1.0](https://github.com/shinycake/quill)
+
+````text
+/*
+ * Copyright (c) 2020 - 2026 ThorVG project. All rights reserved.
+
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+#include "tvgSwCommon.h"
+
+/************************************************************************/
+/* Internal Class Implementation                                        */
+/************************************************************************/
+
+static thread_local SwMpool* _pool = nullptr;
+static Array<SwMpool*> _pools;
+static uint32_t _threads = 0;
+static StrictKey _key;
+
+/************************************************************************/
+/* External Class Implementation                                        */
+/************************************************************************/
+
+SwMpool* mpoolReq()
+{
+    if (!_pool) {
+        _pool = new SwMpool(_threads);
+        ScopedLock lock(_key);
+        _pools.push(_pool);
+    }
+    return _pool;
+}
+
+void mpoolInit(uint32_t threads)
+{
+    _threads = threads;
+}
+
+void mpoolTerm()
+{
+    for (auto p : _pools) {
+        delete p;
+        _pool = nullptr;
+    }
+    _pools.reset();
+}
+````
+
+### MIT License
+
+Used by:
+- [quill 0.1.0](https://github.com/shinycake/quill)
+
+````text
+/*
+ * Copyright (c) 2021 - 2026 ThorVG project. All rights reserved.
+
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+#ifndef _TVG_ACCESSOR_H_
+#define _TVG_ACCESSOR_H_
+
+#include "tvgPaint.h"
+
+namespace tvg
+{
+
+struct AccessorEntity
+{
+    uint32_t id;  // for fast access (equal to paint->id)
+    Paint* paint;
+    char* name;
+};
+
+struct AccessorCallback
+{
+    function<bool(const Paint* paint, void* data)> func;
+    void* data;
+};
+
+struct AccessorIterator
+{
+    virtual ~AccessorIterator() {}
+    virtual const Paint* next() = 0;
+
+    static AccessorIterator* iterator(const Paint* paint)
+    {
+        return PAINT(paint)->iterator();
+    }
+};
+
+}
+
+#endif //_TVG_ACCESSOR_H_
+
+````
+
+### MIT License
+
+Used by:
+- [quill 0.1.0](https://github.com/shinycake/quill)
+
+````text
+/*
+ * Copyright (c) 2021 - 2026 ThorVG project. All rights reserved.
+
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+#ifndef _TVG_SAVE_MODULE_H_
+#define _TVG_SAVE_MODULE_H_
+
+#include "tvgCommon.h"
+
+namespace tvg
+{
+
+struct SaveModule
+{
+    virtual ~SaveModule() {}
+    virtual bool save(Paint* paint, Paint* bg, const char* filename, uint32_t quality) = 0;
+    virtual bool save(Animation* animation, Paint* bg, const char* filename, uint32_t quality, uint32_t fps) = 0;
+    virtual bool close() = 0;
+};
+
+}
+
+#endif //_TVG_SAVE_MODULE_H_
+
+````
+
+### MIT License
+
+Used by:
+- [quill 0.1.0](https://github.com/shinycake/quill)
+
+````text
+/*
+ * Copyright (c) 2023 - 2026 ThorVG project. All rights reserved.
+
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+#ifndef _TVG_LOTTIE_INTERPOLATOR_H_
+#define _TVG_LOTTIE_INTERPOLATOR_H_
+
+#define SPLINE_TABLE_SIZE 11
+
+struct LottieInterpolator
+{
+    char* key;
+    Point outTangent, inTangent;
+
+    float progress(float t);
+    void set(const char* key, Point& inTangent, Point& outTangent);
+
+private:
+    static constexpr float SAMPLE_STEP_SIZE = 1.0f / float(SPLINE_TABLE_SIZE - 1);
+    float samples[SPLINE_TABLE_SIZE];
+
+    float getTForX(float aX);
+    float binarySubdivide(float aX, float aA, float aB);
+    float NewtonRaphsonIterate(float aX, float aGuessT);
+};
+
+#endif //_TVG_LOTTIE_INTERPOLATOR_H_
+````
+
+### MIT License
+
+Used by:
+- [quill 0.1.0](https://github.com/shinycake/quill)
+
+````text
+/*
+ * Copyright (c) 2024 the ThorVG project. All rights reserved.
+
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY  KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+#ifndef _TVG_ANIMATION_H_
+#define _TVG_ANIMATION_H_
+
+#include "tvgCommon.h"
+#include "tvgPicture.h"
+
+struct Animation::Impl
+{
+    Picture* picture = nullptr;
+
+    Impl()
+    {
+        picture = Picture::gen();
+        picture->ref();
+    }
+
+    ~Impl()
+    {
+        picture->unref();
+    }
+};
+
+#endif //_TVG_ANIMATION_H_
+
+````
+
+### MIT License
+
+Used by:
+- [quill 0.1.0](https://github.com/shinycake/quill)
+
+````text
+/*
+ * Copyright (c) 2024 the ThorVG project. All rights reserved.
+
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+#ifndef _TVG_LOTTIE_RENDER_POOLER_H_
+#define _TVG_LOTTIE_RENDER_POOLER_H_
+
+#include "tvgCommon.h"
+#include "tvgArray.h"
+#include "tvgPaint.h"
+
+
+template<typename T>
+struct LottieRenderPooler
+{
+    Array<T*> pooler;
+
+    ~LottieRenderPooler()
+    {
+        ARRAY_FOREACH(p, pooler) {
+            (*p)->unref();
+        }
+    }
+
+    T* pooling(bool copy = false)
+    {
+        //return available one.
+        ARRAY_FOREACH(p, pooler) {
+            if ((*p)->refCnt() == 1) return *p;
+        }
+
+        //no empty, generate a new one.
+        auto p = copy ? static_cast<T*>(pooler[0]->duplicate()) : T::gen();
+        p->ref();
+        pooler.push(p);
+        return p;
+    }
+};
+
+
+#endif //_TVG_LOTTIE_RENDER_POOLER_H_
+````
+
+### MIT License
+
+Used by:
+- [quill 0.1.0](https://github.com/shinycake/quill)
+
+````text
+/*
+ * Copyright (c) 2026 ThorVG project. All rights reserved.
+
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+#ifndef _TVG_ALLOCATOR_H_
+#define _TVG_ALLOCATOR_H_
+
+#include <cstdlib>
+#include <cstddef>
+
+//separate memory alloators for clean customization
+namespace tvg
+{
+    template<typename T = void>
+    static inline T* malloc(size_t size)
+    {
+        return static_cast<T*>(std::malloc(size));
+    }
+
+    template<typename T = void>
+    static inline T* calloc(size_t nmem, size_t size)
+    {
+        return static_cast<T*>(std::calloc(nmem, size));
+    }
+
+    template<typename T = void>
+    static inline T* realloc(T* ptr, size_t size)
+    {
+        return static_cast<T*>(std::realloc(ptr, size));
+    }
+
+    template<typename T = void>
+    static inline void free(T* ptr)
+    {
+        std::free(ptr);
+    }
+}
+
+#endif //_TVG_ALLOCATOR_H_
+````
+
+### MIT License
+
+Used by:
+- [quill 0.1.0](https://github.com/shinycake/quill)
+
+````text
+/*
+ * Copyright (c) 2026 ThorVG project. All rights reserved.
+
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+#ifndef _TVG_COLOR_H_
+#define _TVG_COLOR_H_
+
+
+#include "tvgCommon.h"
+
+namespace tvg
+{
+    struct RGB
+    {
+        uint8_t r, g, b;
+    };
+
+    struct RGBA
+    {
+        uint8_t r, g, b, a;
+    };
+
+    struct HSL
+    {
+        float h, s, l;
+    };
+}
+
+#endif //_TVG_COLOR_H_
 
 ````
 
@@ -9363,22 +10079,6 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [quill 0.1.0](https://github.com/shinycake/quill)
-
-````text
-Copyright 2020 (see AUTHORS)
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-````
-
-### MIT License
-
-Used by:
 - [extended 0.1.0](https://github.com/depp/extended-rs)
 
 ````text
@@ -10082,6 +10782,35 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+````
+
+### MIT License
+
+Used by:
+- [quill 0.1.0](https://github.com/shinycake/quill)
+
+````text
+MIT License
+
+Copyright (c) 2020 - 2026 ThorVG Project
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ````
 
 ### MIT License

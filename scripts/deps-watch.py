@@ -12,7 +12,7 @@ Sources (KEY):
                    vendored gpui-base / gpui-pre-* copies in third_party/
   crates           cargo update --dry-run (compatible) + newer majors (crates.io)
   native:ffmpeg    scripts/build-ffmpeg.sh TAG vs FFmpeg tags
-  native:rlottie   scripts/build-rlottie.sh PIN vs Samsung/rlottie master
+  native:thorvg    third_party/thorvg/VERSION tag vs thorvg/thorvg releases
   native:ntgcalls  scripts/vendor-ntgcalls.sh vs pytgcalls/ntgcalls releases
   native:rust      rust-toolchain.toml vs rust-lang/rust latest release
   actions          `uses:` refs in .github/workflows vs each action's latest release
@@ -300,23 +300,16 @@ def src_ffmpeg():
     )
 
 
-def src_rlottie():
-    pin = re.search(r"^PIN=([0-9a-f]{40})$", read("scripts/build-rlottie.sh"), re.M).group(1)
-    cmp = get_json(f"{API}/repos/Samsung/rlottie/compare/{pin}...master")
-    ahead = cmp.get("ahead_by", 0)
-    if not ahead:
-        print(f"rlottie: pin {pin[:9]} is master")
+def src_thorvg():
+    pinned = re.search(r"^tag (\S+)$", read("third_party/thorvg/VERSION"), re.M).group(1)
+    rel = newest_release("thorvg/thorvg")
+    if not rel or vtuple(rel[0]) <= vtuple(pinned):
+        print(f"thorvg: pinned {pinned}, latest {rel[0] if rel else 'none'}")
         return None
-    head = cmp["commits"][-1]["sha"] if cmp.get("commits") else "master"
-    title = f"rlottie has {ahead} new commit(s) on master"
-    body = (
-        f"Samsung/rlottie master is {ahead} commit(s) ahead of the pin `{pin[:9]}` "
-        "(`scripts/build-rlottie.sh` and `scripts/build-rlottie-windows.ps1`, which must stay in sync).\n\n"
-        f"- Compare: https://github.com/Samsung/rlottie/compare/{pin}...{head}\n"
-        f"- Procedure: the native dependencies section of `{DOC}`.\n"
-        "- rlottie has no releases; only bump for fixes that matter and re-run the sticker smoke tests."
+    return native_issue(
+        "native:thorvg", "ThorVG", pinned, rel[0], rel[1], "third_party/thorvg/VERSION",
+        f"- Rerun `scripts/vendor-thorvg.sh {rel[0]}`, regenerate the sticker golden frames and look at the diffs.\n",
     )
-    return Issue("native:rlottie", title, body)
 
 
 def src_ntgcalls():
@@ -394,7 +387,7 @@ SOURCES = {
     "gpui-kit": src_gpui_kit,
     "crates": src_crates,
     "native:ffmpeg": src_ffmpeg,
-    "native:rlottie": src_rlottie,
+    "native:thorvg": src_thorvg,
     "native:ntgcalls": src_ntgcalls,
     "native:rust": src_rust,
     "actions": src_actions,

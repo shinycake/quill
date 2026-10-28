@@ -80,12 +80,6 @@ if [[ -f "$NTG_LIB" ]]; then
   cp "$NTG_LIB" "$DIST/Contents/Frameworks/libntgcalls.dylib"
 fi
 
-RLOTTIE="${QUILL_RLOTTIE_PATH:-$ROOT/vendor/rlottie/prefix/lib/librlottie.dylib}"
-if [[ -f "$RLOTTIE" ]]; then
-  cp -L "$RLOTTIE" "$DIST/Contents/Frameworks/librlottie.dylib"
-  install_name_tool -id @rpath/librlottie.dylib "$DIST/Contents/Frameworks/librlottie.dylib"
-fi
-
 # Bundle every non-system dylib the bundled libraries link (OpenSSL for tdjson,
 # and anything else a Homebrew-built library drags in), rewrite their ids to
 # @rpath/<name> and every reference to @loader_path/<name>, so the app depends

@@ -6,16 +6,16 @@
 #     quill-cli.exe              console front for `quill agent` (waits, passes the exit code on)
 #     quill-webview.exe          mini apps (WebView2; the Evergreen runtime ships with Windows 10/11)
 #     tdjson.dll                         TDLib, OpenSSL and zlib linked in statically
-#     ntgcalls.dll rlottie.dll
+#     ntgcalls.dll
 #     quillvideo.dll av{codec,format,util,filter,device}-N.dll sw{scale,resample}-N.dll   in-process video (FFmpeg, LGPL-2.1+)
 #     ffmpeg.exe ffprobe.exe             the programs for video send/edit, photos, camera (same FFmpeg build, no libx264)
 #     licenses/ffmpeg/                   FFmpeg license texts + exact source and configure line
 #     README.txt LICENSE THIRD_PARTY.md THIRD_PARTY_LICENSES.md
 #     licenses/                          native-library license texts and notices
 #
-# Env (all optional): QUILL_BIN, QUILL_CLI_BIN, QUILL_TDJSON_DIR, QUILL_NTGCALLS_DLL, QUILL_RLOTTIE_DLL, QUILL_FFMPEG_PREFIX, OUT.
+# Env (all optional): QUILL_BIN, QUILL_CLI_BIN, QUILL_TDJSON_DIR, QUILL_NTGCALLS_DLL, QUILL_FFMPEG_PREFIX, OUT.
 # Needs an MSVC developer environment (dumpbin.exe). No VC++ runtime DLLs are
-# shipped: quill.exe, tdjson.dll and rlottie.dll link the C runtime statically
+# shipped: quill.exe and tdjson.dll link the C runtime statically
 # (/MT), ntgcalls.dll already does, and the MinGW-built FFmpeg DLLs use the
 # Universal CRT that is part of Windows 10+ (docs/decisions/codex-release-pipeline.md).
 . "$PSScriptRoot/windows-common.ps1"
@@ -27,7 +27,6 @@ $cli = Pick $env:QUILL_CLI_BIN 'target/release/quill-cli.exe'
 $webview = Pick $env:QUILL_WEBVIEW_BIN 'target/release/quill-webview.exe'
 $tdDir = Pick $env:QUILL_TDJSON_DIR 'native/prefix/bin'
 $ntg = Pick $env:QUILL_NTGCALLS_DLL 'vendor/ntgcalls/lib/Release/ntgcalls.dll'
-$rlottie = Pick $env:QUILL_RLOTTIE_DLL 'vendor/rlottie/prefix/bin/rlottie.dll'
 $ffmpeg = Pick $env:QUILL_FFMPEG_PREFIX 'vendor/ffmpeg/prefix'
 $out = Pick $env:OUT 'dist/windows'
 
@@ -37,7 +36,7 @@ if ($videoDlls.Count -ne 8) { throw "expected quillvideo.dll and 7 FFmpeg DLLs i
 foreach ($exe in 'ffmpeg.exe', 'ffprobe.exe') {
     if (-not (Test-Path (Join-Path $ffmpeg "bin/$exe"))) { throw "missing $ffmpeg/bin/$exe" }
 }
-foreach ($f in @($bin, $cli, $webview, $ntg, $rlottie, (Join-Path $tdDir 'tdjson.dll'))) {
+foreach ($f in @($bin, $cli, $webview, $ntg, (Join-Path $tdDir 'tdjson.dll'))) {
     if (-not (Test-Path $f)) { throw "missing input $f" }
 }
 
@@ -53,7 +52,6 @@ Copy-Item $cli (Join-Path $pkg 'quill-cli.exe')
 Copy-Item $webview (Join-Path $pkg 'quill-webview.exe')
 Copy-Item (Join-Path $tdDir 'tdjson.dll') $pkg
 Copy-Item $ntg (Join-Path $pkg 'ntgcalls.dll')
-Copy-Item $rlottie (Join-Path $pkg 'rlottie.dll')
 # In-process video: the shim plus FFmpeg's DLLs, dynamically linked so they
 # stay replaceable (LGPL), with FFmpeg's license texts.
 foreach ($dll in $videoDlls) { Copy-Item $dll.FullName $pkg }
@@ -68,9 +66,10 @@ Copy-Item 'scripts/windows-package-README.txt' (Join-Path $pkg 'README.txt')
 # License and third-party notices (mirrors scripts/stage-licenses.sh).
 Copy-Item 'LICENSE', 'THIRD_PARTY.md', 'THIRD_PARTY_LICENSES.md' $pkg
 $licDir = Join-Path $pkg 'licenses'
-New-Item -ItemType Directory -Force (Join-Path $licDir 'rlottie'), (Join-Path $licDir 'unicode-emoji') | Out-Null
+New-Item -ItemType Directory -Force (Join-Path $licDir 'thorvg'), (Join-Path $licDir 'unicode-emoji') | Out-Null
 Copy-Item 'licenses/*.txt' $licDir
-Copy-Item 'licenses/rlottie/*' (Join-Path $licDir 'rlottie')
+Copy-Item 'third_party/thorvg/LICENSE' (Join-Path $licDir 'thorvg/LICENSE')
+Copy-Item 'third_party/thorvg/src/loaders/lottie/rapidjson/LICENSE' (Join-Path $licDir 'thorvg/rapidjson-LICENSE')
 Copy-Item 'assets/emoji/LICENSE.txt' (Join-Path $licDir 'unicode-emoji/LICENSE.txt')
 
 & "$PSScriptRoot/check-bundle-pe.ps1" $pkg

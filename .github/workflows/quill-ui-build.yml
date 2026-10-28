@@ -73,9 +73,6 @@ jobs:
       - name: compile mini-app helper
         if: inputs.package
         run: cargo build --release --locked -p quill-webview
-      - name: build bundled TGS renderer
-        if: inputs.package
-        run: bash scripts/build-rlottie.sh
       - name: package smoke
         if: inputs.package
         run: bash scripts/macos-package-smoke.sh

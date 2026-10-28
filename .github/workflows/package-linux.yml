@@ -77,21 +77,6 @@ jobs:
         with:
           path: native/prefix
           key: tdlib-linux-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib.sh', 'native/patches/*') }}
-      - name: restore rlottie build
-        id: rlottie-cache
-        uses: actions/cache/restore@v5
-        with:
-          path: vendor/rlottie/prefix
-          key: rlottie-linux-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie.sh', 'native/patches/rlottie-animated-shape-budget.patch') }}
-      - name: build rlottie
-        if: steps.rlottie-cache.outputs.cache-hit != 'true'
-        run: bash scripts/build-rlottie.sh
-      - name: save rlottie build
-        if: steps.rlottie-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        with:
-          path: vendor/rlottie/prefix
-          key: rlottie-linux-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie.sh', 'native/patches/rlottie-animated-shape-budget.patch') }}
       # In-process video (docs/decisions/codex-video-cross-platform.md):
       # FFmpeg (LGPL, shared) with the ffmpeg/ffprobe programs + the quillvideo shim.
       - name: restore FFmpeg build

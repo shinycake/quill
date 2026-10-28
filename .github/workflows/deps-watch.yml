@@ -2,7 +2,7 @@ name: deps-watch
 
 # Weekly dependency watch (docs/dependency-updates.md). scripts/deps-watch.py
 # checks TDLib, gpui-kit and the vendored gpui crates, other Cargo crates,
-# FFmpeg / rlottie / ntgcalls / the Rust toolchain, and the GitHub Actions used
+# FFmpeg / ThorVG / ntgcalls / the Rust toolchain, and the GitHub Actions used
 # in these workflows. Each finding is one issue (label deps-watch) that later
 # runs update in place and close when the update lands. It only reads upstream
 # and opens/edits/closes issues; it never opens PRs or touches the tree.
