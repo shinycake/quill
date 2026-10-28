@@ -661,6 +661,42 @@ impl QuillApp {
         self.jump_to_replied_message(message_id, cx);
     }
 
+    /// Whether the viewer offers Reply for `item`: a sent message of the
+    /// open chat (not a profile photo or poll option, not timed media)
+    /// while that chat shows its composer (tdesktop `canWriteMessage()`).
+    pub(super) fn viewer_can_reply(&self, item: &MediaViewerItem, timed: bool) -> bool {
+        if timed
+            || !matches!(
+                self.viewer.state.source(),
+                ViewerSource::Chat | ViewerSource::SharedMedia
+            )
+        {
+            return false;
+        }
+        let Some(session) = self.session() else {
+            return false;
+        };
+        // Shared Media pages past the loaded history are sent messages.
+        let sent = item.message_id.0 > 0
+            && session
+                .histories
+                .get(&item.chat_id.0)
+                .and_then(|history| history.messages.get(&item.message_id.0))
+                .is_none_or(|message| !message.pending);
+        sent && session.open_chat == Some(item.chat_id) && self.composer_available(self.pane_mode())
+    }
+
+    /// Reply from the viewer: close it and start a reply to the shown
+    /// message, the composer focused.
+    pub(in crate::ui) fn reply_from_viewer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(item) = self.viewer.state.current() else {
+            return;
+        };
+        let (chat_id, message_id) = (item.chat_id, item.message_id);
+        self.close_media_viewer(cx);
+        self.begin_reply_from_message(chat_id, message_id, window, cx);
+    }
+
     /// MED1: pin/unpin the album the viewer item belongs to. TGX
     /// `MessagePinAlbum` pins each member (`pinChatMessage` per message —
     /// TDLib 1.8.67 has no album-level pin, schema line 13559). When any
@@ -761,3 +797,8 @@ impl QuillApp {
             .and_then(|m| (m.media_album_id != 0).then_some(m.media_album_id))
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "reply_ui_tests.rs"]
+mod reply_ui_tests;

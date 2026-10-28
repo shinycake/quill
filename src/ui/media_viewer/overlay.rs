@@ -123,6 +123,7 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|facts| facts.actions.report);
         let header = profile_facts.map(|facts| facts.header);
+        let can_reply = self.viewer_can_reply(&item, ttl.is_some());
         // The visual fills the fit area (`geometry`); the media fits inside
         // it (object-fit contain). Scroll zooms (1×–8×, frame-center
         // kept) and drag pans when zoomed.
@@ -505,6 +506,7 @@ impl QuillApp {
                 can_delete,
                 can_set_main,
                 can_report,
+                can_reply,
                 profile_view,
                 header,
             };
