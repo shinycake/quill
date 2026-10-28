@@ -13,6 +13,7 @@ use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{SharedMediaAction, SharedMediaTab, calendar_media, month_sections};
 use quill::text::LinkTarget;
@@ -65,6 +66,7 @@ impl QuillApp {
             let link_url = item.meta.link_url().map(str::to_owned);
             let chat_id = state_chat;
             let is_message = action == SharedMediaAction::Message;
+            let track = SharedTrack::of(item);
             let item_ix = if is_message {
                 message_id.0 as u64
             } else {
@@ -72,6 +74,7 @@ impl QuillApp {
             };
             let row = div()
                 .id(("shared-media-item", item_ix))
+                .debug_selector(move || format!("shared-media-item-{item_ix}"))
                 .flex()
                 .items_center()
                 .gap_2()
@@ -113,6 +116,13 @@ impl QuillApp {
                         return;
                     }
                     match (link_url.as_ref(), chat_id) {
+                        // Music and voice rows play in place (tdesktop
+                        // `Overview::Layout::{Document, Voice}`).
+                        (None, Some(chat_id)) if track.is_some() => {
+                            if let Some(track) = track {
+                                this.press_shared_track(chat_id, message_id, track, cx);
+                            }
+                        }
                         (Some(url), Some(chat_id)) => this.queue_link(
                             LinkTarget::Url {
                                 url: url.clone(),
@@ -252,5 +262,52 @@ impl QuillApp {
             session.open_shared_media_calendar(quill::local_time::now_unix());
         }
         cx.notify();
+    }
+}
+
+/// A Music or Voice row's track: what a press on the row plays.
+#[derive(Clone, Copy)]
+pub(super) struct SharedTrack {
+    file: quill::ids::FileId,
+    voice: bool,
+    duration: f64,
+}
+
+impl SharedTrack {
+    pub(super) fn of(item: &quill::state::SharedMediaItem) -> Option<Self> {
+        use quill::state::SharedMediaMeta;
+        let (voice, duration) = match &item.meta {
+            SharedMediaMeta::Music { duration, .. } => (false, *duration),
+            SharedMediaMeta::Voice { duration, .. } => (true, *duration),
+            _ => return None,
+        };
+        (item.file.0 != 0).then_some(Self {
+            file: item.file,
+            voice,
+            duration: f64::from(duration),
+        })
+    }
+}
+
+impl QuillApp {
+    fn press_shared_track(
+        &mut self,
+        chat: ChatId,
+        message: MessageId,
+        track: SharedTrack,
+        cx: &mut Context<Self>,
+    ) {
+        let SharedTrack {
+            file,
+            voice,
+            duration,
+        } = track;
+        self.press_media(file, cx, |this, cx| {
+            if voice {
+                this.toggle_voice_playback(chat, message, file, false, duration, cx);
+            } else {
+                this.toggle_audio_playback(chat, message, file, duration, cx);
+            }
+        });
     }
 }

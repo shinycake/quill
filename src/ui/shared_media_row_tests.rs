@@ -1,8 +1,8 @@
-//! The Links tab of shared media in a real window (needs the
-//! `demo-capture` feature for gpui-kit's test support): a click on an
-//! address goes through the same safety check as a link in a chat.
+//! Shared-media rows in a real window (needs the `demo-capture` feature for
+//! gpui-kit's test support): a click on a Links address goes through the
+//! same safety check as a link in a chat, and a Music row plays in place.
 use crate::ui::app::QuillApp;
-use crate::ui::demos::shared_media::{link_message, text_link_message};
+use crate::ui::demos::shared_media::{link_message, tab_messages, text_link_message};
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
@@ -82,4 +82,43 @@ fn a_label_that_ends_the_address_still_asks(cx: &mut TestAppContext) {
         .read_with(vcx, |app, _| app.message_ui.open_link_confirm.clone())
         .expect("the Open this link? box");
     assert_eq!(confirm.url, url);
+}
+
+#[gpui_kit::test]
+fn a_music_row_plays_in_place_and_a_second_press_cancels(cx: &mut TestAppContext) {
+    use crate::ui::play_intent::PlayTarget;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| {
+        app.demo_fill_shared_media(
+            SharedMediaTab::Music,
+            tab_messages(SharedMediaTab::Music),
+            cx,
+        );
+    });
+    vcx.run_until_parked();
+    // Not downloaded: the press asks for the file and waits to play it.
+    click(vcx, "shared-media-item-220");
+    app.read_with(vcx, |app, _| {
+        let target = app
+            .playback
+            .intent
+            .as_ref()
+            .map(|intent| intent.target.clone());
+        assert!(
+            matches!(target, Some(PlayTarget::Audio { message, .. }) if message.0 == 220),
+            "{target:?}"
+        );
+    });
+    click(vcx, "shared-media-item-220");
+    app.read_with(vcx, |app, _| {
+        assert!(app.playback.intent.is_none(), "the second press cancels");
+        let session = app.session().expect("the demo session");
+        let file = app.playback.playing_audio;
+        assert_eq!(file, None);
+        assert!(
+            session.media.downloads.user_count() == 0,
+            "nothing downloads"
+        );
+    });
 }
