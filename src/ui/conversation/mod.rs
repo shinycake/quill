@@ -441,7 +441,14 @@ impl QuillApp {
         {
             return;
         }
+        // Before `viewMessages`, while the rows still count as unread: an
+        // incoming lone emoji plays its interaction effect as it is read.
+        let paused = quill::power_saving::on(quill::power_saving::Flag::EmojiChat);
         if let Some(live) = self.live.as_mut() {
+            let now_ms = quill::state::unix_ms_now();
+            let _ = live
+                .driver
+                .autoplay_emoji_effects(chat_id, &ids, paused, now_ms);
             // Recorded even when the send fails: the driver keeps the ids
             // queued for the next attempt, and re-reporting every frame
             // would only spin the render loop.
@@ -450,6 +457,9 @@ impl QuillApp {
             if queued {
                 self.notify_tick(crate::ui::app_slice::SliceKind::Conversation, cx);
             }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.autoplay_emoji_effects(chat_id, &ids, paused, rand::random());
+            self.history.reported_visible = Some((chat_id, ids));
         }
     }
 }
