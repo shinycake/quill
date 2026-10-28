@@ -18,14 +18,19 @@ pub(crate) struct HistoryUi {
     /// chrome changes; the `MessageScroller` renderer only builds
     /// elements for visible indices.
     pub(super) rows: Vec<HistoryRow>,
-    /// Row indices the history list rendered in the last frame (the
-    /// virtual list only builds on-screen rows plus a small overdraw).
-    /// Drained into `viewMessages` reports on the next render.
-    pub(super) rendered_rows: std::cell::RefCell<Vec<usize>>,
+    /// Each painted row's bounds and message ids, collected during the
+    /// list's paint (overdraw rows included); the history's own canvas
+    /// turns them into `seen`.
+    pub(super) painted_ids: std::rc::Rc<std::cell::RefCell<Vec<(Bounds<Pixels>, Vec<MessageId>)>>>,
+    /// Messages whose row's bottom edge was inside the viewport at the last
+    /// paint (tdesktop `HistoryInner` reads an unread message once its
+    /// bottom is shown), not the list's overdraw. Reported as
+    /// `viewMessages` on the next render.
+    pub(super) seen: std::rc::Rc<std::cell::RefCell<Option<(ChatId, Vec<MessageId>)>>>,
     /// Last `(chat, message ids)` reported as visible, to skip repeats.
     pub(super) reported_visible: Option<(ChatId, Vec<MessageId>)>,
-    /// Window activity at the last render; rows only prompt a visibility
-    /// report while the window is active.
+    /// Window activity at the last render (message effects play only
+    /// while it is active).
     pub(super) window_active: bool,
     /// kit Phase 3: per-render shared inputs for history rows (files,
     /// downloads, media roots) so visible-row rendering doesn't re-clone.
@@ -149,7 +154,8 @@ impl HistoryUi {
         Self {
             scroller: cx.new(|cx| MessageScrollerState::new(0, cx)),
             rows: Vec::new(),
-            rendered_rows: std::cell::RefCell::new(Vec::new()),
+            painted_ids: Default::default(),
+            seen: Default::default(),
             reported_visible: None,
             window_active: false,
             shared: HistoryShared::default(),
