@@ -229,6 +229,9 @@ pub enum EngineEvent {
         group_call_id: i32,
         levels: Vec<GroupAudioLevel>,
     },
+    /// The peer of a 1:1 call says its battery is low, or no longer is
+    /// (tgcalls' `remoteBatteryLevelIsLowUpdated`).
+    PeerBatteryLow { call_id: i32, is_low: bool },
 }
 
 pub type EngineEventCallback = Arc<dyn Fn(EngineEvent) + Send + Sync + 'static>;

@@ -179,3 +179,33 @@ fn peer_microphone_state_follows_the_engine_hook() {
     assert!(!muted(&driver));
     std::fs::remove_dir_all(dir).ok();
 }
+
+/// The peer's battery flag (an engine event) lands on the tracked 1:1
+/// call at the next poll, and only on that call; the driver redraws.
+#[test]
+fn peer_battery_low_follows_the_engine_event() {
+    use crate::calls::engine::EngineEvent;
+    let (dir, mut driver, handle, _sink, _seq) = ready_call_driver();
+    let low = |driver: &ConnectDriver<Arc<RecordingSender>>| {
+        driver
+            .session
+            .calls
+            .active_call
+            .as_ref()
+            .unwrap()
+            .remote_battery_low
+    };
+    assert!(!low(&driver));
+    let report = |call_id, is_low| EngineEvent::PeerBatteryLow { call_id, is_low };
+    handle.emit_engine_event(report(77, true));
+    assert!(driver.request_tick(std::time::Instant::now()));
+    assert!(low(&driver));
+    // Another call's report is dropped.
+    handle.emit_engine_event(report(78, false));
+    driver.request_tick(std::time::Instant::now());
+    assert!(low(&driver));
+    handle.emit_engine_event(report(77, false));
+    driver.request_tick(std::time::Instant::now());
+    assert!(!low(&driver));
+    std::fs::remove_dir_all(dir).ok();
+}

@@ -217,6 +217,7 @@ mod call_link_ui;
 mod call_panel;
 mod call_panel_backdrop;
 mod call_panel_devices;
+mod call_panel_notices;
 mod call_sounds;
 mod call_tones;
 mod call_ui;

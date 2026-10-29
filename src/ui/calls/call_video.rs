@@ -361,6 +361,7 @@ mod tests {
             remote_video,
             remote_screen,
             remote_audio_muted: false,
+            remote_battery_low: false,
         }
     }
 

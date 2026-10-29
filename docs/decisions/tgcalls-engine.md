@@ -323,3 +323,14 @@ Windows builds with MSVC like tdesktop (`scripts/build-tgcalls.sh` from
 MSYS2 bash with the MSVC environment inherited) in the quill-calls workflow.
 No package ships `libquill_calls` yet on any platform; the packages add it,
 beside `quill.exe` on Windows, before step 6.
+
+## Parity items on tgcalls
+
+- Peer battery (1:1): `remote_battery_low` becomes
+  `EngineEvent::PeerBatteryLow`, the driver keeps it on
+  `ActiveCall::remote_battery_low`, and the call window shows tdesktop's
+  "{user}'s battery level is low" pill over the buttons
+  (`calls_panel.cpp` `createRemoteLowBattery`), hidden while the
+  microphone-off line shows (`showRemoteLowBattery`). Quill never sends
+  its own battery state: tdesktop's `setIsLowBatteryLevel` is under
+  `#if 0`.

@@ -16,6 +16,7 @@
 use super::app::QuillApp;
 use super::call_panel_backdrop::connecting_arc;
 use super::call_panel_devices::{self as devices, DeviceMenuTarget};
+use super::call_panel_notices as notices;
 use super::calls::call_video::{CallPicture, CallWindowRoot};
 use super::chat_row::chat_avatar;
 use super::nested_click::SwallowPress;
@@ -30,6 +31,10 @@ use quill::lang::{keys, tr, tr_with};
 use quill::telegram::envelope::CallState;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+
+/// Where the round buttons' row ends, from the window's bottom: 8 px
+/// under it, then a 44 px disc, a 6 px gap and the 11 px label's line.
+const BUTTONS_TOP: f32 = 8. + 44. + 6. + 15.;
 
 /// How long an ended call's window lingers on "call ended".
 const ENDED_LINGER: Duration = Duration::from_millis(1600);
@@ -60,15 +65,12 @@ pub(super) struct CallSnap {
     emojis: Vec<String>,
     /// The peer's microphone is off (tdesktop `lng_call_microphone_off`).
     remote_muted: bool,
+    /// The peer's battery is low (tdesktop `lng_call_battery_level_low`).
+    remote_battery_low: bool,
     /// The peer's picture has a frame: it fills the window.
     video: bool,
     /// Your camera's preview has a frame.
     preview: bool,
-}
-
-/// tdesktop `lng_call_microphone_off`.
-pub(super) fn microphone_off_line(name: &str) -> String {
-    tr_with(keys::CALL_MICROPHONE_OFF, &[("user", name)])
 }
 
 /// tdesktop `Ui::FormatDurationText`: `m:ss`, or `h:mm:ss`.
@@ -160,6 +162,7 @@ impl QuillApp {
                 can_share_screen: false,
                 emojis: Vec::new(),
                 remote_muted: false,
+                remote_battery_low: false,
                 video: false,
                 preview: false,
             });
@@ -193,6 +196,7 @@ impl QuillApp {
                 .map(|r| r.emojis.clone())
                 .unwrap_or_default(),
             remote_muted: ready && call.remote_audio_muted,
+            remote_battery_low: ready && call.remote_battery_low,
             // The root made the players follow the call before this draw.
             video: self.call_picture_drawn(CallPicture::Remote),
             preview: self.call_picture_drawn(CallPicture::Local),
@@ -778,8 +782,13 @@ impl Render for CallPanel {
             div()
                 .text_size(px(12.))
                 .text_color(call_chrome::muted())
-                .child(microphone_off_line(&snap.name))
+                .child(notices::microphone_off_line(&snap.name))
         });
+
+        // tdesktop's low-battery notice over the buttons, while the
+        // microphone notice is not showing.
+        let battery_low = notices::battery_notice_shown(snap.remote_battery_low, snap.remote_muted)
+            .then(|| notices::battery_low_notice(&snap.name, BUTTONS_TOP));
 
         // The 4 emoji everyone in the call should see the same.
         let fingerprint = (!snap.emojis.is_empty()).then(|| {
@@ -902,6 +911,7 @@ impl Render for CallPanel {
             })
             .child(body)
             .children(fingerprint)
+            .children(battery_low)
             // tdesktop's pin-on-top control, in the corner under the title.
             .child(
                 super::window_control::pin_on_top_button(
@@ -935,14 +945,9 @@ impl Render for CallPanel {
 
 #[cfg(test)]
 mod tests {
-    use super::{call_status, duration_text, microphone_off_line};
+    use super::{call_status, duration_text};
     use quill::calls::engine::TransportState;
     use quill::telegram::envelope::CallState;
-
-    #[test]
-    fn peer_microphone_off_line_names_the_peer() {
-        assert_eq!(microphone_off_line("Zed"), "Zed's microphone is off");
-    }
 
     #[test]
     fn statuses_follow_tdesktop() {

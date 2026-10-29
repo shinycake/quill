@@ -52,6 +52,10 @@ pub struct ActiveCall {
     /// The peer's microphone is off (tdesktop `lng_call_microphone_off`),
     /// from the engine's MediaState signaling; `false` until it says so.
     pub remote_audio_muted: bool,
+    /// The peer's battery is low (tdesktop `RemoteBatteryState::Low`,
+    /// "{user}'s battery level is low"), from the engine; `false` until
+    /// it says so. Quill never sends its own battery state, as tdesktop.
+    pub remote_battery_low: bool,
 }
 
 /// Phase C1: summary of the most recently ended call, driving the

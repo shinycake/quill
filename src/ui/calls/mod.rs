@@ -674,6 +674,7 @@ impl QuillApp {
                     remote_video: quill::calls::engine::RemoteVideoState::Inactive,
                     remote_screen: quill::calls::engine::RemoteVideoState::Inactive,
                     remote_audio_muted: false,
+                    remote_battery_low: false,
                 });
             }
             self.connection.set_note(StatusNote::silent(tr(

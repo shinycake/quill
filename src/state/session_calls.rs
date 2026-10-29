@@ -101,6 +101,7 @@ impl Session {
             remote_video: RemoteVideoState::Inactive,
             remote_screen: RemoteVideoState::Inactive,
             remote_audio_muted: false,
+            remote_battery_low: false,
         });
         self.calls.summary = None;
         self.calls.error = None;

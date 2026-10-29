@@ -2,7 +2,7 @@
 //! `qc_p2p_callbacks` trampolines and the per-call context they read.
 //! `qc_p2p_destroy` returns only once no callback can run, and the engine
 //! keeps the context alive until then.
-use super::super::{CallbackShared, RemoteVideoState, TransportState};
+use super::super::{CallbackShared, EngineEvent, RemoteVideoState, TransportState};
 use crate::calls::live_video::{LiveFrame, LiveKey, LiveRotation};
 use crate::calls::stream_audio::StreamAudio;
 use crate::locks::LockExt;
@@ -30,10 +30,18 @@ impl CallContext {
             state: Some(on_state),
             signal_bars: None,
             remote_media_state: Some(on_remote_media),
-            remote_battery_low: None,
+            remote_battery_low: Some(on_remote_battery_low),
             signaling: Some(on_signaling),
             audio_out: Some(on_audio),
             remote_video: Some(on_remote_video),
+        }
+    }
+
+    /// Hands an event to the connect side's hook, which only queues it.
+    fn emit(&self, event: EngineEvent) {
+        let hook = self.shared.engine_event_hook.lock_or_recover().clone();
+        if let Some(hook) = hook {
+            hook(event);
         }
     }
 
@@ -113,6 +121,21 @@ unsafe extern "C" fn on_remote_media(user: *mut c_void, audio_active: i32, video
         if let Some(hook) = video {
             hook(call.call_id, remote_video_state(video_state));
         }
+    });
+}
+
+/// tdesktop's `remoteBatteryLevelIsLowUpdated`: the call panel shows
+/// "<name>'s battery level is low" while it is.
+unsafe extern "C" fn on_remote_battery_low(user: *mut c_void, is_low: i32) {
+    crate::thread_guard::ffi_boundary((), || {
+        // SAFETY: tgcalls passes back the `user` the engine registered.
+        let Some(call) = (unsafe { context(user) }) else {
+            return;
+        };
+        call.emit(EngineEvent::PeerBatteryLow {
+            call_id: call.call_id,
+            is_low: is_low != 0,
+        });
     });
 }
 
