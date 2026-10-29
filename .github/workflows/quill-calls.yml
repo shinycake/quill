@@ -28,7 +28,8 @@ jobs:
           - { target: linux-x86_64, runner: ubuntu-22.04, lib: libquill_calls.so }
           - { target: linux-aarch64, runner: ubuntu-22.04-arm, lib: libquill_calls.so }
           - { target: macos-arm64, runner: macos-14, lib: libquill_calls.dylib }
-          - { target: windows-x86_64, runner: windows-2022, lib: quill_calls.dll }
+          # windows-x86_64 (windows-2022, quill_calls.dll) joins once its MSVC
+          # build is proven in its own PR; the Windows steps below wait for it.
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     env:
