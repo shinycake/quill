@@ -422,6 +422,12 @@ impl QuillApp {
                 self.keep_stored_draft_text(chat_id, topic, left);
             }
         }
+        if is_open {
+            // `set_value` sends no change event: drop the sticker and
+            // animated-emoji suggestions the sent text held.
+            let text = self.composer.read(cx).value().to_string();
+            self.sync_composer_suggestions(&text, cx);
+        }
     }
 
     /// Cut the stored draft of a chat that is not on screen down to `text`.

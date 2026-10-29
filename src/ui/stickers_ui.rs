@@ -15,6 +15,12 @@ use quill::lang::{keys, tr, tr_with, trn};
 use quill::local_path::sandboxed_display_path;
 use quill::state::StickersPurpose;
 use quill::state::{RequestPurpose, StickerTab};
+use quill::sticker_suggest::suggest_emoji_for;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "sticker_suggest_send_tests.rs"]
+mod send_tests;
 
 impl QuillApp {
     pub(super) fn sync_sticker_suggestions(&mut self, text: &str, cx: &mut Context<Self>) {
@@ -55,9 +61,22 @@ impl QuillApp {
         self.notify_composer(cx);
     }
 
+    /// Whether suggestions held for `emoji` belong to the composer's text
+    /// now. Suggestions follow the field (tdesktop `updateStickersByEmoji`
+    /// runs on every field change, a clear included), and a clear such as
+    /// the one after Send sets the field without a change event.
+    fn composer_suggests(&self, emoji: Option<&str>, cx: &Context<Self>) -> bool {
+        let text = self.composer.read(cx).value();
+        emoji.is_some() && suggest_emoji_for(&text) == emoji
+    }
+
     pub(super) fn animated_emoji_suggestion(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let sticker = session.stickers.emoji.animated_emoji.as_ref()?;
+        let emoji = &session.stickers.emoji;
+        if !self.composer_suggests(emoji.animated_emoji_for.as_deref(), cx) {
+            return None;
+        }
+        let sticker = emoji.animated_emoji.as_ref()?;
         let row = div()
             .id("animated-emoji-suggestion")
             .flex()
@@ -89,7 +108,10 @@ impl QuillApp {
 
     pub(super) fn sticker_suggestions_row(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        if session.stickers.stickers.suggestions.is_empty() {
+        let stickers = &session.stickers.stickers;
+        if stickers.suggestions.is_empty()
+            || !self.composer_suggests(stickers.suggest_for.as_deref(), cx)
+        {
             return None;
         }
         let row = div()
