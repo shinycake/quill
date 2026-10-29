@@ -5296,6 +5296,31 @@ impl Window {
         Ok(())
     }
 
+    /// QUILL: how many color emoji glyphs this window's sprite atlas holds.
+    /// GPUI keeps every glyph it rasterized until the window closes.
+    pub fn emoji_glyph_count(&self) -> usize {
+        self.sprite_atlas.emoji_glyph_count()
+    }
+
+    /// QUILL: start dropping the color emoji glyphs this window no longer
+    /// draws. The atlas marks what frames ask for from here on, and the
+    /// next frame redraws every view, cached ones too, so each glyph on
+    /// screen gets marked. Call between frames; pass the result to
+    /// [`Window::sweep_emoji_glyphs`].
+    pub fn begin_emoji_glyph_sweep(&mut self) -> u64 {
+        let mark = self.sprite_atlas.next_use_mark();
+        self.refresh();
+        mark
+    }
+
+    /// QUILL: drop the color emoji glyphs no frame drew since
+    /// [`Window::begin_emoji_glyph_sweep`] returned `mark`; how many went.
+    /// Call once the frame that redrew everything has finished: before it,
+    /// a view replaying its cache may still show a glyph left unmarked.
+    pub fn sweep_emoji_glyphs(&mut self, mark: u64) -> usize {
+        self.sprite_atlas.remove_emoji_glyphs_unused_since(mark)
+    }
+
     /// Returns whether every frame of an image is present in the sprite atlas.
     #[cfg(any(test, feature = "test-support"))]
     pub fn has_image_atlas_entry(&self, data: &RenderImage) -> bool {

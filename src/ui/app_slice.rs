@@ -203,8 +203,9 @@ impl QuillApp {
     }
 
     /// Once nothing new has been shown for `image_budget::IDLE_AFTER`,
-    /// trim the image cache to its idle budget and drop the wallpaper
-    /// pictures no area shows. One waiting task at most; it sleeps past
+    /// trim the image cache to its idle budget, drop the wallpaper
+    /// pictures no area shows and sweep the emoji glyphs off screen
+    /// (`glyph_sweep`). One waiting task at most; it sleeps past
     /// every newer activity.
     pub(super) fn schedule_idle_image_trim(&mut self, cx: &mut Context<Self>) {
         if self.slices.idle_trim.is_some() || super::image_budget::idle_trim_due().is_none() {
@@ -222,6 +223,9 @@ impl QuillApp {
                         super::spoiler_fx::release_media_tile(None, cx);
                         super::wallpaper_cache::release_unshown(cx);
                     });
+                    if let Ok(Some(main)) = this.read_with(cx, |this, _| this.windows.main) {
+                        let _ = main.update(cx, |_, window, _| super::glyph_sweep::begin(window));
+                    }
                     break;
                 }
                 cx.background_executor().timer(due - now).await;

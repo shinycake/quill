@@ -51,6 +51,18 @@ impl PlatformAtlas for MetalAtlas {
     fn remove(&self, key: &AtlasKey) {
         self.0.lock().remove(key);
     }
+
+    fn next_use_mark(&self) -> u64 {
+        self.0.lock().next_use_mark()
+    }
+
+    fn emoji_glyph_count(&self) -> usize {
+        self.0.lock().emoji_glyph_count()
+    }
+
+    fn remove_emoji_glyphs_unused_since(&self, mark: u64) -> usize {
+        self.0.lock().remove_emoji_glyphs_unused_since(mark)
+    }
 }
 
 impl AtlasBackend for MetalAtlasTextures {

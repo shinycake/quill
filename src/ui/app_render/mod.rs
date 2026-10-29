@@ -51,6 +51,7 @@ impl Render for QuillApp {
         // show any more leave the atlas (`image_budget`).
         super::image_budget::begin_frame();
         super::image_budget::sweep(window, cx);
+        super::glyph_sweep::start_frame(window, cx);
         self.sync_emoji_style(cx);
         super::spoiler_fx::release_media_tile(Some(window), cx);
         let image_cache = self.slices.image_cache();

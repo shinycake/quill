@@ -575,6 +575,7 @@ impl QuillApp {
                 quill::wake::poke_on_activation();
             }
             this.frame.window_active.set(active);
+            super::glyph_sweep::window_activation(active);
             this.viewer_window_activation(window, cx);
             this.playback
                 .inline_videos
