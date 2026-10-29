@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 
 use super::app::QuillApp;
 use super::composer_suggest::{SuggestItem, suggest_items};
+use gpui_base::input::InputContent;
 use gpui_kit::component::input::{Rope, TextareaState};
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -216,7 +217,7 @@ impl QuillApp {
 
     /// The pointer moved over the field: hover the highlight under it,
     /// or close the strip when it is over plain text.
-    fn hover_emoji_word(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+    pub(super) fn hover_emoji_word(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
         let state = self.composer.read(cx);
         let under = self
             .composer_ui
@@ -234,7 +235,9 @@ impl QuillApp {
         if ui.hovered.as_ref().map(|(h, _)| h) == under.as_ref() {
             return;
         }
-        if under.is_none() && self.pointer_on_the_way(position, cx) {
+        // A bar asked for from the menu stays until another word is
+        // pointed at.
+        if under.is_none() && (ui.pinned || self.pointer_on_the_way(position, cx)) {
             return;
         }
         let hovered = under.map(|h| {
@@ -335,22 +338,22 @@ impl QuillApp {
         }
         // The word is not at the caret: put the caret back where it was,
         // shifted by the change in length if it was after the word.
+        let content = match item.custom.as_ref().and_then(|s| s.custom_emoji_id) {
+            Some(id) => self.custom_emoji_content(&item.insert, id),
+            None => InputContent::new(item.insert.clone()),
+        };
+        // The rich editor inserts a custom emoji as longer markup.
+        let inserted = content.text().len();
         let selection = self.composer.read(cx).selected_range();
         let shift = |at: usize| {
             if at >= h.range.end {
-                (at + item.insert.len()).saturating_sub(h.range.len())
+                (at + inserted).saturating_sub(h.range.len())
             } else {
                 at
             }
         };
         let selection = shift(selection.start)..shift(selection.end);
-        match item.custom.as_ref().and_then(|s| s.custom_emoji_id) {
-            Some(id) => {
-                let content = self.custom_emoji_content(&item.insert, id);
-                self.replace_composer_content(h.range.clone(), content, window, cx);
-            }
-            None => self.replace_composer_text(h.range.clone(), &item.insert, window, cx),
-        }
+        self.replace_composer_content(h.range.clone(), content, window, cx);
         self.composer.update(cx, |input, cx| {
             input.focus(window, cx);
             input.set_selected_range(selection, cx);

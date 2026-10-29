@@ -516,6 +516,7 @@ impl QuillApp {
             return;
         };
         ui.selected = None;
+        ui.bar.reset();
         let Some(item) = active.items.get(index) else {
             return;
         };

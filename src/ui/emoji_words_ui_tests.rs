@@ -298,7 +298,13 @@ fn suggest_emoji_opens_the_bar_for_a_word_that_is_not_lit(cx: &mut TestAppContex
     });
     assert!(pinned);
     assert_eq!(glyphs.first().map(String::as_str), Some("🍕"));
-    // The bar stays while the caret moves on, and picks into the word.
+    // The pointer coming back from the menu over plain text keeps it.
+    app.update(vcx, |app, cx| {
+        app.hover_emoji_word(gpui_kit::point(px(5.), px(5.)), cx)
+    });
+    let open = app.read_with(vcx, |app, _| app.composer_ui.emoji_words.hovered.is_some());
+    assert!(open, "a bar asked for stays open");
+    // It picks into the word.
     vcx.update(|window, cx| app.update(cx, |app, cx| app.pick_word_emoji(0, window, cx)));
     assert_eq!(text(&app, vcx), "two 🍕 please");
 }
