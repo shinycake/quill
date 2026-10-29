@@ -207,14 +207,15 @@ impl CallEngine for TgcallsEngine {
         if self.call(call_id)?.screen.is_some() {
             return Ok(());
         }
-        self.call_mut(call_id)?.media.camera = None;
-        self.apply_camera(call_id)?;
-        let call = self.call_mut(call_id)?;
+        // The source comes first, so a failure leaves the camera on.
         // SAFETY: returns a new external source; Quill keeps the reference
         // in `call.screen` until `release_screen`.
         let screen = unsafe { (api.qc_video_capture_external)(1) };
         let screen = NonNull::new(screen).ok_or(EngineError::NoScreenSource)?;
-        call.screen = Some(screen);
+        self.call_mut(call_id)?.screen = Some(screen);
+        self.call_mut(call_id)?.media.camera = None;
+        self.apply_camera(call_id)?;
+        let call = self.call_mut(call_id)?;
         call.media.screen_share_on = true;
         if let Some(handle) = call.handle {
             // SAFETY: both live; the call takes its own reference.
