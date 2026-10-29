@@ -57,6 +57,11 @@ pub struct ChatPrefs {
     /// default on): `:name` in the composer offers matching emoji.
     #[serde(default = "default_true")]
     pub suggest_emoji: bool,
+    /// Quill's own (default on): a few words in the composer that have an
+    /// emoji get a soft highlight, and pointing at one offers its emoji
+    /// (`emoji_words`). Only with `suggest_emoji` on.
+    #[serde(default = "default_true")]
+    pub highlight_emoji_words: bool,
     /// Telegram Desktop's "Replace emoji automatically" (`replaceEmoji`,
     /// default on): `:-)`, `<3` and `:name:` become emoji as you type.
     #[serde(default = "default_true")]
@@ -89,6 +94,7 @@ impl Default for ChatPrefs {
             // Telegram Desktop ships spellcheck on; match that.
             spellcheck_enabled: true,
             suggest_emoji: true,
+            highlight_emoji_words: true,
             replace_emoji: true,
             system_text_replace: true,
             profile_media_tabs_expanded: false,

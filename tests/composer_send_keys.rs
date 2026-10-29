@@ -120,6 +120,7 @@ fn chat_prefs_roundtrip_and_missing_file() {
         profile_media_tabs_expanded: true,
         disable_sharing_box_shown: 2,
         rich_paste_toast_hidden: true,
+        highlight_emoji_words: true,
     };
     save_chat_prefs(&paths, &prefs).unwrap();
     assert_eq!(load_chat_prefs(&paths), prefs);
