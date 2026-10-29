@@ -8,7 +8,7 @@
 
 use super::link::SharedStream;
 use super::server::code;
-use crate::single_instance::Endpoint;
+use crate::single_instance::{Connection, Endpoint};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, Write};
@@ -214,7 +214,7 @@ fn open_link(out: &Out) -> Result<Link, String> {
         CLIENT_NAME.get().map(String::as_str),
     )
     .map_err(|refused| refused.message())?;
-    let send = SharedStream::new(stream);
+    let send = SharedStream::new(Connection::new(stream));
     let recv = send.clone();
     let alive = Arc::new(AtomicBool::new(true));
     let pending: Pending = Arc::new(Mutex::new(HashMap::new()));

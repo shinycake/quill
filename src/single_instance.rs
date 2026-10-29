@@ -334,27 +334,59 @@ impl Drop for ClientSlot {
     }
 }
 
+/// One end of a connection. Dropping it first waits, on the dropping thread,
+/// until the peer has read everything written to it, so the close happens at
+/// once. On Windows a pipe dropped with unread data goes to interprocess'
+/// linger pool instead, whose one thread flushes such pipes in turn: a peer
+/// that is itself waiting for this end to close stalls every later close in
+/// the process, and every client waiting on one of those closes hangs.
+pub struct Connection(Stream);
+
+impl Connection {
+    pub fn new(stream: Stream) -> Self {
+        Self(stream)
+    }
+
+    pub fn stream(&self) -> &Stream {
+        &self.0
+    }
+}
+
+impl Drop for Connection {
+    fn drop(&mut self) {
+        // `&Stream`'s own flush is a no-op; the pipe's flush clears the
+        // unread mark that sends a dropped pipe to the linger pool.
+        #[cfg(windows)]
+        {
+            let Stream::NamedPipe(pipe) = &self.0;
+            let _ = pipe.inner().flush();
+        }
+    }
+}
+
 fn serve(stream: Stream, slot: ClientSlot, on_launch: &(dyn Fn(Vec<String>) + Send + Sync)) {
+    let connection = Connection::new(stream);
+    let stream = connection.stream();
     // Best effort: Windows named pipes refuse timeouts.
     let _ = stream.set_recv_timeout(Some(CLIENT_READ_TIMEOUT));
-    let Some(header) = read_header(&stream) else {
+    let Some(header) = read_header(stream) else {
         return;
     };
     let header = header.trim_end_matches('\r');
     if header == crate::agent::server::HEADER {
         // Agent connections stay open; they have a cap of their own.
         drop(slot);
-        crate::agent::server::serve(stream);
+        crate::agent::server::serve(connection);
         return;
     }
     if header != HEADER {
         return;
     }
-    let Some(args) = decode_args(&stream) else {
+    let Some(args) = decode_args(stream) else {
         return;
     };
     on_launch(args);
-    let mut out = &stream;
+    let mut out = stream;
     let _ = out.write_all(b"ok\n");
     let _ = out.flush();
 }

@@ -3,7 +3,7 @@
 //! `quill agent` ([`super::cli`]) both connect through here.
 
 use super::server::{self, HEADER, code};
-use crate::single_instance::Endpoint;
+use crate::single_instance::{Connection, Endpoint};
 use interprocess::local_socket::{Stream, prelude::*};
 use serde_json::{Value, json};
 use std::ffi::OsStr;
@@ -217,27 +217,27 @@ pub fn open(
 /// `&Stream` reads and writes, so clones of this handle replace interprocess'
 /// deprecated `split` halves.
 #[derive(Clone)]
-pub struct SharedStream(std::sync::Arc<Stream>);
+pub struct SharedStream(std::sync::Arc<Connection>);
 
 impl SharedStream {
-    pub fn new(stream: Stream) -> Self {
-        Self(std::sync::Arc::new(stream))
+    pub fn new(connection: Connection) -> Self {
+        Self(std::sync::Arc::new(connection))
     }
 }
 
 impl std::io::Read for SharedStream {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        (&*self.0).read(buf)
+        self.0.stream().read(buf)
     }
 }
 
 impl Write for SharedStream {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        (&*self.0).write(buf)
+        self.0.stream().write(buf)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        (&*self.0).flush()
+        self.0.stream().flush()
     }
 }
 
