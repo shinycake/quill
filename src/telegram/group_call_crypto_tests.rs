@@ -114,3 +114,148 @@ fn frame_answers_are_taken_and_ui_envelopes_pass() {
         r#"{"@type":"updateNewMessage","message":{"content":{"text":{"text":"quill-e2e:5"}}}}"#
     ));
 }
+
+/// A client that takes every request and never answers; it says when a
+/// request went out, and records the request log's hiding.
+struct Silent {
+    sent: Mutex<Option<mpsc::Sender<()>>>,
+    log: Mutex<Vec<bool>>,
+}
+
+impl Silent {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            sent: Mutex::new(None),
+            log: Mutex::new(Vec::new()),
+        })
+    }
+
+    fn log(&self) -> Vec<bool> {
+        crate::locks::lock_or_recover(&self.log).clone()
+    }
+}
+
+impl CryptoLink for Silent {
+    fn send(&self, _request: &str) -> bool {
+        if let Some(sent) = crate::locks::lock_or_recover(&self.sent).as_ref() {
+            let _ = sent.send(());
+        }
+        true
+    }
+
+    fn hide_request_log(&self, hide: bool) {
+        crate::locks::lock_or_recover(&self.log).push(hide);
+    }
+}
+
+#[test]
+fn unbinding_wakes_a_frame_waiting_on_tdlib() {
+    let link = Silent::new();
+    let (sent_tx, sent_rx) = mpsc::channel();
+    *crate::locks::lock_or_recover(&link.sent) = Some(sent_tx);
+    // No answer ever comes, and the wait would outlast the test run.
+    let crypto = Arc::new(GroupCallCrypto::with_timeout(
+        link,
+        Duration::from_secs(24 * 3600),
+    ));
+    crypto.bind(77);
+    let waiting = {
+        let crypto = crypto.clone();
+        std::thread::spawn(move || crypto.encrypt(&[1, 2], 0))
+    };
+    sent_rx.recv().expect("the frame went out");
+    crypto.unbind();
+    assert_eq!(waiting.join().expect("media thread"), None);
+    // Woken by the call's end: neither an answer nor a timeout.
+    assert_eq!(crypto.take_stats().round_trips, 0);
+}
+
+#[test]
+fn round_trips_timeouts_and_errors_are_counted() {
+    let crypto = GroupCallCrypto::new(Answering::new(false, false));
+    crypto.bind(77);
+    crypto.encrypt(&[1], 0);
+    crypto.decrypt(42, &[1]);
+    let stats = crypto.take_stats();
+    assert_eq!((stats.round_trips, stats.timeouts, stats.errors), (2, 0, 0));
+    assert!(stats.max_micros >= stats.avg_micros);
+    assert_eq!(crypto.take_stats().round_trips, 0, "a summary starts over");
+
+    let crypto = GroupCallCrypto::new(Answering::new(true, false));
+    crypto.bind(77);
+    crypto.encrypt(&[1], 0);
+    let crypto_refused = GroupCallCrypto::new(Answering::new(false, true));
+    crypto_refused.bind(77);
+    crypto_refused.encrypt(&[1], 0);
+    let failed = crypto.take_stats();
+    let refused = crypto_refused.take_stats();
+    assert_eq!((failed.round_trips, failed.errors), (1, 1));
+    assert_eq!((refused.round_trips, refused.errors), (1, 1));
+    assert_eq!((failed.avg_micros, failed.max_micros), (0, 0));
+
+    // An answer that can't come in time: a zero wait times out at once.
+    let crypto = GroupCallCrypto::with_timeout(Silent::new(), Duration::ZERO);
+    crypto.bind(77);
+    assert_eq!(crypto.encrypt(&[1], 0), None);
+    let stats = crypto.take_stats();
+    assert_eq!((stats.round_trips, stats.timeouts), (1, 1));
+    assert_eq!(
+        CryptoStats {
+            round_trips: 3,
+            timeouts: 1,
+            errors: 0,
+            avg_micros: 150,
+            max_micros: 200
+        }
+        .log_line(77),
+        "[call] group 77 e2e: 3 round trips, 1 timeouts, 0 errors, avg 150 us, max 200 us"
+    );
+}
+
+#[test]
+fn a_bound_call_hides_the_request_log_until_it_ends() {
+    let link = Silent::new();
+    let crypto = GroupCallCrypto::new(link.clone());
+    crypto.bind(77);
+    crypto.bind(77);
+    assert_eq!(link.log(), vec![true], "hidden once per call");
+    crypto.unbind();
+    crypto.unbind();
+    assert_eq!(link.log(), vec![true, false]);
+
+    // A call dropped while bound shows the log again too.
+    let link = Silent::new();
+    drop({
+        let crypto = GroupCallCrypto::new(link.clone());
+        crypto.bind(78);
+        crypto
+    });
+    assert_eq!(link.log(), vec![true, false]);
+}
+
+#[test]
+fn the_request_log_level_comes_back_once_no_call_hides_it() {
+    let gate = RequestLogGate::new();
+    let set = Mutex::new(Vec::new());
+    let record = |level| crate::locks::lock_or_recover(&set).push(level);
+    gate.hide(|| Some(2), record);
+    gate.hide(|| Some(99), record);
+    gate.show(record);
+    assert_eq!(
+        *crate::locks::lock_or_recover(&set),
+        vec![HIDDEN_REQUEST_LOG_LEVEL]
+    );
+    gate.show(record);
+    gate.show(record);
+    assert_eq!(
+        *crate::locks::lock_or_recover(&set),
+        vec![HIDDEN_REQUEST_LOG_LEVEL, 2]
+    );
+    // Unreadable: TDLib's own default comes back.
+    gate.hide(|| None, record);
+    gate.show(record);
+    assert_eq!(
+        crate::locks::lock_or_recover(&set).last().copied(),
+        Some(DEFAULT_REQUEST_LOG_LEVEL)
+    );
+}

@@ -300,10 +300,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }
             }
             EnvelopePayload::Error(_) => {
+                self.forget_conference_crypto();
                 if let Some(engine) = self.call_engine.as_deref_mut() {
                     let _ = engine.leave_group_call(PENDING_CONFERENCE_KEY);
                 }
-                self.forget_conference_crypto();
             }
             _ => {}
         }
@@ -321,6 +321,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// Unbinds the crypto (waking every frame waiting on TDLib), then
+    /// drops a join's instance still under the provisional key.
     fn forget_conference_crypto(&mut self) {
         if let Some(known) = self.conference_crypto.take() {
             known.crypto.unbind();

@@ -81,6 +81,7 @@ fn create_rich_message_with_ai_round_trips_blocks() {
         .session
         .messages
         .ai_composer_blocks
+        .take()
         .expect("blocks stored");
     assert_eq!(chat_id, ChatId(7));
     assert_eq!(note, "AI created the draft");
@@ -221,7 +222,12 @@ fn ai_flood_premium_error_surfaces_premium_line() {
     );
     let owned = copy_and_parse(&json, &seq, &dyn_sink).expect("parse error");
     driver.ingest(owned).expect("ingest error");
-    let err = driver.session.messages.ai_error.expect("AI error stored");
+    let err = driver
+        .session
+        .messages
+        .ai_error
+        .take()
+        .expect("AI error stored");
     assert!(err.contains("Premium"), "premium line surfaced, got: {err}");
     // Never applied as a success.
     assert!(driver.session.messages.ai_composer_text.is_none());

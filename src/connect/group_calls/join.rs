@@ -620,7 +620,10 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Phase C2g: drop the native transport and retained frames for one
     /// group call id. Unknown ids succeed (idempotent cleanup).
+    /// A conference call's crypto is unbound first: frames in flight are
+    /// answered at once instead of holding up the instance's destroy.
     pub(super) fn teardown_group_call_transport(&mut self, group_call_id: i32) {
+        self.forget_conference_call(group_call_id);
         self.drain_stream_feeder(group_call_id);
         if let Some(engine) = self.call_engine.as_deref_mut() {
             let _ = engine.leave_group_call(group_call_id);
@@ -628,7 +631,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.close_call_feeds(group_call_id);
         self.group_camera_state.remove(&group_call_id);
         self.group_mute_state.remove(&group_call_id);
-        self.forget_conference_call(group_call_id);
     }
 
     /// Phase C3a: `endGroupCall` (schema 1.8.67, :14461). Gated on
@@ -655,5 +657,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         // end also lands via the pump backstop.
         self.teardown_group_call_transport(group_call_id);
         Ok(extra)
+    }
+}
+
+/// The driver going away (its account switched or signed out, the app
+/// quitting) drops the engine and every instance with it: the crypto is
+/// unbound first, so no media thread waits on TDLib during those destroys.
+impl<S: JsonSender> Drop for ConnectDriver<S> {
+    fn drop(&mut self) {
+        if let Some(known) = self.conference_crypto.take() {
+            known.crypto.unbind();
+        }
     }
 }

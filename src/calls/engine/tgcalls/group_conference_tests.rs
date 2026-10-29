@@ -155,3 +155,44 @@ fn a_cancelled_media_channel_request_is_dropped() {
     assert!(conference.pending().is_empty());
     assert!(conference.set_owners(&owners(&[(500, 1)], true)).is_empty());
 }
+
+#[test]
+fn a_closed_conference_drops_frames_without_asking_its_crypto() {
+    let (context, crypto) = conference_context();
+    let data = [1u8, 2, 3];
+    let frame = qc_group_e2e_frame {
+        data: data.as_ptr(),
+        length: data.len(),
+        is_encrypt: 1,
+        user_id: 0,
+        unencrypted_prefix_size: 0,
+    };
+    context.conference.as_ref().expect("conference").close();
+    assert!(run(&context, &frame).is_empty());
+    assert_eq!(crypto.calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn an_answer_made_before_the_handle_is_sent_once_it_is_attached() {
+    let conference = Conference::new(Arc::new(Marking::default()));
+    conference.set_owners(&owners(&[(100, 7)], false));
+    let answer = conference.request(1, vec![100]).expect("known ssrc");
+    // No handle yet (still inside `qc_group_create`): kept, not lost.
+    assert_eq!(conference.deliver(1, &answer), None);
+    assert_eq!(conference.unsent(), vec![1]);
+    let mut handle = 0u8;
+    let handle = std::ptr::from_mut(&mut handle).cast::<qc_group>();
+    let sent = conference.attach(handle);
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].0, 1);
+    assert_eq!((sent[0].1[0].audio_ssrc, sent[0].1[0].user_id), (100, 7));
+    assert!(conference.unsent().is_empty());
+    // Attached: answers go straight to the instance.
+    assert_eq!(conference.deliver(2, &answer), Some(handle));
+    // Closed: nothing is kept or sent, and a late attach does nothing.
+    conference.close();
+    assert_eq!(conference.deliver(3, &answer), None);
+    assert!(conference.unsent().is_empty());
+    assert!(conference.attach(handle).is_empty());
+    assert_eq!(conference.deliver(4, &answer), None);
+}

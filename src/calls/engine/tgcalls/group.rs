@@ -75,7 +75,9 @@ fn create_instance(
     let handle = unsafe { (api.qc_group_create)(config.as_ptr(), &callbacks, video) };
     let handle = NonNull::new(handle)?;
     if let Some(conference) = context.conference.as_ref() {
-        conference.set_handle(handle.as_ptr());
+        for (id, channels) in conference.attach(handle.as_ptr()) {
+            conference.answer(api, id, &channels);
+        }
     }
     // SAFETY: a live instance, not called from one of its callbacks; the
     // payload is the caller's to free.
@@ -83,7 +85,7 @@ fn create_instance(
     match take_string(api, raw) {
         Some(payload) => Some((handle, payload)),
         None => {
-            forget_handle(context);
+            close_conference(context);
             // SAFETY: the instance made above, destroyed once.
             unsafe { (api.qc_group_destroy)(handle.as_ptr()) };
             None
@@ -91,10 +93,16 @@ fn create_instance(
     }
 }
 
-/// Nothing answers the instance any more: called before its destroy.
-fn forget_handle(context: &GroupContext) {
+/// Called before an instance's destroy: a conference call's frames are
+/// dropped from now on instead of going to TDLib (each would wait up to
+/// [`crate::telegram::group_call_crypto::FRAME_TIMEOUT`] while the destroy
+/// waits for it), and nothing answers the instance any more. Every
+/// destroy goes through here: leaving, a rejoin's fresh instance, a
+/// refused create, the presentation, and the engine's drop (the driver
+/// dropped, the account switched).
+fn close_conference(context: &GroupContext) {
     if let Some(conference) = context.conference.as_ref() {
-        conference.set_handle(std::ptr::null_mut());
+        conference.close();
     }
 }
 
@@ -143,7 +151,7 @@ fn stop_presentation(api: &Loader, call: &mut GroupCall) {
         return;
     };
     call.gate.set_screen(None);
-    forget_handle(&presentation.context);
+    close_conference(&presentation.context);
     // SAFETY: the presentation's live handle, destroyed once and never
     // from its own callback; then Quill's reference to its screen source,
     // which the gate no longer borrows. The context stays alive until
@@ -154,12 +162,13 @@ fn stop_presentation(api: &Loader, call: &mut GroupCall) {
     }
 }
 
-/// Ends the call in the library, its presentation first so screen capture
-/// stops before the call: no callback or feeder reaches it after.
+/// Ends the call in the library: a conference call's frames stop going
+/// to TDLib first, then the presentation goes so screen capture stops
+/// before the call: no callback or feeder reaches it after.
 pub(super) fn destroy_group(api: &Loader, mut call: GroupCall) {
+    close_conference(&call.context);
     stop_presentation(api, &mut call);
     call.gate.close();
-    forget_handle(&call.context);
     // SAFETY: a live instance destroyed once, never from its own callback
     // (the engine runs on the connect driver).
     unsafe { (api.qc_group_destroy)(call.handle.as_ptr()) };
