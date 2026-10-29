@@ -349,7 +349,8 @@ build_vcpkg_deps() {
   rm -rf "$DEPS/include/openssl"
   cp -R "$installed/include/openssl" "$DEPS/include/"
   cp "$installed/include/zlib.h" "$installed/include/zconf.h" "$DEPS/include/"
-  "$VCPKG_DIR/vcpkg.exe" list openssl zlib | tr -d '\r' > "$DEPS/vcpkg-versions.txt"
+  # `vcpkg list` takes one filter at most.
+  "$VCPKG_DIR/vcpkg.exe" list | tr -d '\r' | grep -E "^(openssl|zlib):$triplet" > "$DEPS/vcpkg-versions.txt"
   # Linked in statically, so their notices travel with the DLL.
   license openssl "$installed/share/openssl/copyright"
   license zlib "$installed/share/zlib/copyright"
