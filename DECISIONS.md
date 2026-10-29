@@ -3261,11 +3261,6 @@ orders of magnitude beyond it.
 
 ## Phase C2a — engine procurement (2026-09-26)
 
-> Superseded 2026-10-29: Quill's calls run on tgcalls, built from source into
-> `libquill_calls` (docs/decisions/tgcalls-engine.md). ntgcalls, its vendor
-> script and `crates/ntgcalls-sys` are deleted; the C2 entries below are
-> history.
-
 **Rationale.** The C2 spike's blocker ("needs a clang+WebRTC builder —
 beyond this sandbox") is dissolved: `pytgcalls/ntgcalls` v3.0.0 (released
 2026-09-25) publishes prebuilt shared libraries, including
