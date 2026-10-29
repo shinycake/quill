@@ -17,6 +17,10 @@ use quill::state::StickersPurpose;
 use quill::state::{RequestPurpose, StickerTab};
 use quill::sticker_suggest::suggest_emoji_for;
 
+#[cfg(all(test, feature = "demo-capture"))]
+#[path = "sticker_suggest_send_tests.rs"]
+mod send_tests;
+
 impl QuillApp {
     pub(super) fn sync_sticker_suggestions(&mut self, text: &str, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut()
