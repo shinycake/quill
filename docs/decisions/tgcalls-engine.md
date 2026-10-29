@@ -266,8 +266,11 @@ Shared code shaped by ntgcalls went too:
 ### Packaging
 
 `quill-calls.yml` is a reusable workflow: ci.yml (pushes) and release.yml
-run it before the Linux and macOS package jobs, which download its
-`quill-calls-<target>` artifact from the same run. The tg_owt and codec
+run it before the Linux, macOS and Windows package jobs, which download
+their `quill-calls-<target>` artifact from the same run. A package job
+runs when the workflow ends, whether or not every target built, so a
+failing Windows build fails only the Windows package (its artifact is
+missing) and the other packages still ship. The tg_owt and codec
 cache stays in that workflow.
 
 - Linux: `lib/libquill_calls.so` beside `libtdjson.so` (RUNPATH
@@ -278,20 +281,16 @@ cache stays in that workflow.
   links as `@rpath/<name>` copied beside it (the app's first FFmpeg
   files). The package job restores or builds the same FFmpeg as
   quill-calls.yml and loads the library from the bundle.
-- Both ship `licenses/quill-calls/` (the library's `SOURCES.txt` and
+- Windows: `quill_calls.dll` beside `quill.exe`, importing the FFmpeg
+  DLLs the zip already ships for video (same build, same cache key);
+  OpenSSL, zlib and the C runtime are linked in. `windows-package.ps1`
+  fails without it; `check-bundle-pe.ps1` requires it and resolves its
+  imports, and `check-bundle-load.ps1` loads it from the extracted zip.
+- All three ship `licenses/quill-calls/` (the library's `SOURCES.txt` and
   every part's notice). `release-lgpl-sources.sh` archives tgcalls at its
   pinned commit in place of ntgcalls and its FFmpeg and GLib.
 - `quill-calls-sys` finds the library in `lib/` beside the executable,
   in `Frameworks/`, or beside the executable on Windows.
-
-TODO(tgcalls-windows): Windows builds `quill_calls.dll` in another
-branch. Until it joins packaging, `windows-package.ps1` ships the zip
-without it (it copies `vendor/quill-calls/lib/quill_calls.dll` when one is
-there), the bundle checks treat it as optional, and Windows calls show as
-unavailable, as they do whenever the library is missing. When the DLL
-arrives: build it in quill-calls.yml, download it in package-windows.yml,
-and make it required in `windows-package.ps1`, `check-bundle-pe.ps1` and
-`check-bundle-load.ps1`.
 
 ## Build order
 
@@ -306,6 +305,5 @@ Then the parity items: conference calls, battery-low line, speaking levels for
 everyone in group calls, signal bars, the muted-speech hint.
 
 Windows builds with MSVC like tdesktop (`scripts/build-tgcalls.sh` from
-MSYS2 bash with the MSVC environment inherited) in the quill-calls workflow.
-No package ships `libquill_calls` yet on any platform; the packages add it,
-beside `quill.exe` on Windows, before step 6.
+MSYS2 bash with the MSVC environment inherited) in the quill-calls workflow
+and ships in the Windows zip from step 6 on.

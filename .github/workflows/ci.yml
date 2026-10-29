@@ -190,8 +190,10 @@ jobs:
   # with release.yml (docs/decisions/codex-release-pipeline.md); CI never passes
   # the Telegram credential secrets, so these builds embed nothing.
   # Linux: UI + native libs, relocatable package (docs/decisions/codex-linux-package.md).
-  # The call library (docs/decisions/tgcalls-engine.md) the Linux and macOS
-  # packages ship; they download its artifacts from this run.
+  # The call library (docs/decisions/tgcalls-engine.md) the Linux, macOS and
+  # Windows packages ship; they download its artifacts from this run. Each
+  # package waits for it but runs even when another target's build failed:
+  # it fails only if its own library is missing (download-artifact).
   quill-calls:
     name: quill-calls
     if: github.event_name == 'push'
@@ -199,7 +201,7 @@ jobs:
 
   linux-package:
     name: linux-package
-    if: github.event_name == 'push'
+    if: ${{ !cancelled() && github.event_name == 'push' }}
     needs: quill-calls
     uses: ./.github/workflows/package-linux.yml
 
@@ -233,14 +235,15 @@ jobs:
   # Windows zip (docs/decisions/codex-windows-package.md).
   windows:
     name: windows
-    if: github.event_name == 'push'
+    if: ${{ !cancelled() && github.event_name == 'push' }}
+    needs: quill-calls
     uses: ./.github/workflows/package-windows.yml
 
   # The release's Quill.app, on a GitHub-hosted arm64 runner (never the
   # personal Mac), so release packaging breaks show up before a tag does.
   macos-package:
     name: macos-package
-    if: github.event_name == 'push'
+    if: ${{ !cancelled() && github.event_name == 'push' }}
     needs: quill-calls
     uses: ./.github/workflows/package-macos.yml
 
