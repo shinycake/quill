@@ -16,6 +16,7 @@
 
 use super::{CeremonyMode, CeremonySheet};
 use crate::ui::app::QuillApp;
+use crate::ui::owned_image::OwnedImage;
 use crate::ui::shell::DialogKind;
 use gpui_kit::TestSupportExt;
 use gpui_kit::assets::IconName;
@@ -38,9 +39,8 @@ const QR_SCALE: u32 = 3;
 static LOGO_PNG: &[u8] = include_bytes!("../../../assets/icons/hicolor/128x128/apps/quill.png");
 
 /// The rendered QR code and its side in logical pixels.
-#[derive(Clone)]
 pub(super) struct CableQr {
-    image: Arc<RenderImage>,
+    image: OwnedImage,
     side: f32,
 }
 
@@ -58,9 +58,9 @@ pub(super) fn render_cable_qr(text: &str) -> Option<CableQr> {
         .build();
     let rgba = image::DynamicImage::ImageLuma8(luma).into_rgba8();
     Some(CableQr {
-        image: Arc::new(RenderImage::new(SmallVec::from_buf([image::Frame::new(
-            rgba,
-        )]))),
+        image: OwnedImage::new(Arc::new(RenderImage::new(SmallVec::from_buf([
+            image::Frame::new(rgba),
+        ])))),
         side: (module * modules) as f32,
     })
 }
@@ -83,7 +83,7 @@ fn logo() -> Arc<Image> {
 /// The code on its white card, the mark on a white rounded square in the
 /// middle (tdesktop `QrCenterImage`: radius a fifth of the side, the mark
 /// at 94%).
-fn qr_card(qr: &CableQr, label: SharedString) -> impl IntoElement {
+fn qr_card((image, side): (Arc<RenderImage>, f32), label: SharedString) -> impl IntoElement {
     let mark = QR_CENTER * 0.94;
     div().flex().justify_center().child(
         div()
@@ -97,10 +97,10 @@ fn qr_card(qr: &CableQr, label: SharedString) -> impl IntoElement {
             .child(
                 div()
                     .relative()
-                    .size(px(qr.side))
+                    .size(px(side))
                     .child(
-                        img(ImageSource::from(qr.image.clone()))
-                            .size(px(qr.side))
+                        img(ImageSource::from(image))
+                            .size(px(side))
                             .object_fit(ObjectFit::Contain),
                     )
                     .child(
@@ -164,7 +164,8 @@ impl QuillApp {
                     .passkeys
                     .ceremony
                     .as_ref()
-                    .and_then(|ui| ui.qr.clone())
+                    .and_then(|ui| ui.qr.as_ref())
+                    .map(|qr| (Arc::clone(&qr.image), qr.side))
                     .filter(|_| bluetooth);
                 let (title, about) = match mode {
                     CeremonyMode::Register => (
@@ -176,7 +177,7 @@ impl QuillApp {
                         keys::PASSKEY_CABLE_LOGIN_ABOUT,
                     ),
                 };
-                let body = match &qr {
+                let body = match qr {
                     Some(qr) => body
                         .child(description(tr(about).into(), cx))
                         .child(qr_card(qr, tr(about).into()))

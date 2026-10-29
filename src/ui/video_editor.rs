@@ -139,7 +139,7 @@ pub(super) struct VideoEditorDialog {
     /// The still frame (turned and mirrored like the edit) at the cover:
     /// the picture when the video can't play here, and the cover bubble.
     pub(super) preview: Option<PathBuf>,
-    pub(super) still: Option<Arc<RenderImage>>,
+    pub(super) still: Option<super::owned_image::OwnedImage>,
     /// A still is being cut; one more is wanted at this time after it.
     pub(super) still_busy: bool,
     pub(super) still_wanted: Option<i64>,
@@ -408,8 +408,8 @@ impl QuillApp {
                         if let Some(old) = editor.preview.replace(frame) {
                             let _ = std::fs::remove_file(old);
                         }
-                        if still.is_some() {
-                            editor.still = still;
+                        if let Some(still) = still {
+                            editor.still = Some(still.into());
                         }
                     }
                     Err(note) => editor.note = Some(note),

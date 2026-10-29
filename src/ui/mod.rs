@@ -104,6 +104,7 @@ mod nav_row;
 mod nested_click;
 mod new_contact;
 mod notify_state;
+mod owned_image;
 mod paragraph_cache;
 mod payments_state;
 mod peer_color_dialog;

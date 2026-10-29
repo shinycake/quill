@@ -82,7 +82,7 @@ impl QuillApp {
                     .send_box
                     .video_editor
                     .as_ref()
-                    .and_then(|editor| editor.still.clone());
+                    .and_then(|editor| editor.still.as_deref().cloned());
                 let sent = result.and_then(|()| {
                     let photo = ChosenPhoto {
                         input: ChatPhotoInput::Animation {

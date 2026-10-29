@@ -289,7 +289,7 @@ impl QuillApp {
         let picture = (width.max(1) as f32, height.max(1) as f32);
         // The player's picture, else the still (cut turned and mirrored).
         let player = editor.player.clone();
-        let still = editor.still.clone();
+        let still = editor.still.as_deref().cloned();
         let crop = CropArea::of(editor.edits.crop);
         let picture_cell = editor.motion.picture_bounds.clone();
         let crop_cell = editor.motion.crop_bounds.clone();

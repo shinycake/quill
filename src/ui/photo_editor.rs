@@ -7,6 +7,7 @@
 
 use super::app::QuillApp;
 use super::composer_sends::TrayItem;
+use super::owned_image::OwnedImage;
 use super::photo_edit::{CropRect, Placed, Stroke, flip, render, rotate_ccw};
 use super::photo_editor_items::ItemDrag;
 use crate::ui::status_note::StatusNote;
@@ -79,7 +80,7 @@ enum CropDrag {
 pub(super) struct PhotoEditor {
     pub(super) purpose: EditorPurpose,
     pub(super) working: RgbaImage,
-    preview: Arc<RenderImage>,
+    preview: OwnedImage,
     pub(super) crop: CropRect,
     pub(super) strokes: Vec<Stroke>,
     current: Option<Stroke>,
@@ -88,7 +89,7 @@ pub(super) struct PhotoEditor {
     size: usize,
     drag: Option<CropDrag>,
     /// Stickers and emoji on the photo, each with its display copy.
-    pub(super) placed: Vec<(Placed, Arc<RenderImage>)>,
+    pub(super) placed: Vec<(Placed, OwnedImage)>,
     pub(super) selected: Option<usize>,
     pub(super) item_drag: Option<ItemDrag>,
     /// Where the image was painted last frame, for mapping the pointer.
@@ -129,7 +130,7 @@ impl PhotoEditor {
     pub(super) fn new(purpose: EditorPurpose, working: RgbaImage) -> Self {
         Self {
             purpose,
-            preview: preview_of(&working),
+            preview: preview_of(&working).into(),
             working,
             crop: CropRect::FULL,
             strokes: Vec::new(),
@@ -167,12 +168,12 @@ impl PhotoEditor {
             .iter()
             .map(|(item, _)| {
                 let item = item.rotated_ccw(width, height);
-                let preview = preview_of(&item.image);
+                let preview = preview_of(&item.image).into();
                 (item, preview)
             })
             .collect();
         self.working = rotate_ccw(&self.working);
-        self.preview = preview_of(&self.working);
+        self.preview = preview_of(&self.working).into();
         self.crop = self.crop.rotated_ccw();
         self.strokes = self.strokes.iter().map(Stroke::rotated_ccw).collect();
     }
@@ -183,12 +184,12 @@ impl PhotoEditor {
             .iter()
             .map(|(item, _)| {
                 let item = item.flipped();
-                let preview = preview_of(&item.image);
+                let preview = preview_of(&item.image).into();
                 (item, preview)
             })
             .collect();
         self.working = flip(&self.working);
-        self.preview = preview_of(&self.working);
+        self.preview = preview_of(&self.working).into();
         self.crop = self.crop.flipped();
         self.strokes = self.strokes.iter().map(Stroke::flipped).collect();
     }
@@ -441,7 +442,7 @@ impl QuillApp {
         let items: Vec<((f32, f32, f32, f32), Arc<RenderImage>)> = editor
             .placed
             .iter()
-            .map(|(item, preview)| (editor.item_rect(item), preview.clone()))
+            .map(|(item, preview)| (editor.item_rect(item), Arc::clone(preview)))
             .collect();
         // Set mode: the picked image shows its handle while cropping too.
         let selected_item = editor.selected.filter(|_| {

@@ -99,7 +99,7 @@ pub(super) struct StagePress {
 #[derive(Default)]
 pub(super) struct EditorMotion {
     /// The strip's frames, `None` until each is cut.
-    pub(super) frames: Vec<Option<Arc<RenderImage>>>,
+    pub(super) frames: Vec<Option<super::owned_image::OwnedImage>>,
     /// The strip width the frames were cut for.
     frames_width: f32,
     frames_cancel: Option<Arc<AtomicBool>>,
@@ -201,7 +201,7 @@ impl QuillApp {
         let cancel = Arc::new(AtomicBool::new(false));
         motion.frames_cancel = Some(cancel.clone());
         motion.frames_width = strip;
-        motion.frames = vec![None; times.len()];
+        motion.frames = times.iter().map(|_| None).collect();
         let serial = editor.serial;
         let source = editor.source.clone();
         // Twice the strip's height, for HiDPI screens.
@@ -233,7 +233,7 @@ impl QuillApp {
                         return false;
                     };
                     if let Some(slot) = editor.motion.frames.get_mut(index) {
-                        *slot = frame;
+                        *slot = frame.map(Into::into);
                     }
                     cx.notify();
                     true
@@ -414,7 +414,12 @@ impl QuillApp {
         let scope = self.windows.scope;
         let bounds_cell = editor.motion.timeline_bounds.clone();
         let timeline = editor.timeline;
-        let frames = editor.motion.frames.clone();
+        let frames: Vec<Option<Arc<RenderImage>>> = editor
+            .motion
+            .frames
+            .iter()
+            .map(|frame| frame.as_deref().cloned())
+            .collect();
         let playback = editor.playback_ms;
         let dot = editor.motion.dot.value(Instant::now());
         let size_text = size_label(editor);
@@ -497,7 +502,7 @@ impl QuillApp {
     /// top of the whole layer.
     pub(super) fn video_editor_bubble(&self, editor: &VideoEditorDialog) -> Option<AnyElement> {
         let now = Instant::now();
-        let still = editor.still.clone()?;
+        let still = editor.still.as_deref().cloned()?;
         let shown = editor.motion.bubble.value(now);
         let capture = editor.motion.capture.map(|start| {
             ease_out_quint(now.duration_since(start).as_millis() as f32 / CAPTURE_MS as f32)

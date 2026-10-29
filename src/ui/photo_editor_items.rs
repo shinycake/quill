@@ -44,7 +44,7 @@ impl PhotoEditor {
                 center: (crop.x + crop.w / 2.0, crop.y + crop.h / 2.0),
                 width: crop.w / 3.0,
             },
-            preview,
+            preview.into(),
         ));
         self.selected = Some(self.placed.len() - 1);
         self.mode = EditorMode::Stickers;

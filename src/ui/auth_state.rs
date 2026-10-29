@@ -7,7 +7,6 @@ use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::telegram::envelope::AuthorizationState;
-use std::sync::Arc;
 
 pub(crate) struct AuthUi {
     pub(super) signin: super::signin_ui::SignInUi,
@@ -36,7 +35,7 @@ pub(crate) struct AuthUi {
     pub(super) terms_age_error: bool,
     /// Slice A1: decoded QR-login bitmap cached by link, rebuilt only when
     /// the link changes. The link itself is never logged.
-    pub(super) qr_login_cache: Option<(String, Arc<RenderImage>)>,
+    pub(super) qr_login_cache: Option<(String, super::owned_image::OwnedImage)>,
     pub(super) demo_state: AuthorizationState,
     /// Phase 1 (kit adoption): the note text a dismiss timer is already armed
     /// for. The permanent debug status bar is gone; `status_note` now shows

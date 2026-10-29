@@ -95,7 +95,7 @@ impl QuillApp {
         match image {
             Some(image) => {
                 self.viewer.orientation = target;
-                self.viewer.rotated = Some((path, target.code(), image));
+                self.viewer.rotated = Some((path, target.code(), image.into()));
             }
             None => self
                 .connection
