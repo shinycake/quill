@@ -18,11 +18,17 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SuggestKind {
     Hashtag,
+    /// `:name` typed at the caret.
     Emoji,
+    /// A whole word that is an emoji keyword: the composer holding just
+    /// that word (tdesktop `suggestExactFirstWord`), or a highlighted word.
+    EmojiWord,
 }
 
 /// A trigger found at the caret: `range` covers the trigger character and
 /// everything typed after it (`#tag` / `:smi`), `query` is the part after.
+/// For [`SuggestKind::EmojiWord`] there is no trigger character: `range`
+/// is the word and `query` the word itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SuggestQuery {
     pub kind: SuggestKind,
@@ -32,12 +38,10 @@ pub struct SuggestQuery {
 
 /// tdesktop stops scanning for `#` after 63 chars of tag.
 const HASHTAG_MAX: usize = 64;
-/// How far back from the caret a `:` may sit (tdesktop's emoji limit is
-/// the longest keyword; 32 covers every name we match).
-const EMOJI_QUERY_MAX: usize = 32;
-/// Fewest typed characters after `:` before emoji are suggested.
-pub const EMOJI_MIN_QUERY: usize = 2;
-/// How many emoji one query offers.
+/// How far back from the caret a `:` may sit, and the longest whole-word
+/// query (tdesktop's limit is the longest keyword of the loaded packs).
+pub const EMOJI_QUERY_MAX: usize = 32;
+/// How many catalog names one `:` query adds after the keyword matches.
 pub const EMOJI_LIMIT: usize = 10;
 /// How many recent hashtags one query offers.
 pub const HASHTAG_LIMIT: usize = 8;
@@ -47,10 +51,34 @@ fn is_tag_char(c: char) -> bool {
 }
 
 /// The trigger at `caret` (a byte offset), if any. `emoji` gates the `:`
-/// suggestions ("Suggest emoji replacements"). `#` wins over `:` only by
-/// position: whichever trigger is closest to the caret is the one found.
+/// and whole-word suggestions ("Suggest emoji replacements"). `#` wins
+/// over `:` only by position: whichever trigger is closest to the caret
+/// is the one found.
 pub fn detect(text: &str, caret: usize, emoji: bool) -> Option<SuggestQuery> {
-    hashtag_query(text, caret).or_else(|| emoji.then(|| emoji_query(text, caret)).flatten())
+    hashtag_query(text, caret).or_else(|| {
+        emoji
+            .then(|| emoji_query(text, caret).or_else(|| first_word_query(text, caret)))
+            .flatten()
+    })
+}
+
+/// tdesktop `getEmojiQuery`'s exact branch: the whole field is the
+/// query when the caret is at its end, it is one line without a `:`,
+/// does not start with a space and is no longer than a keyword.
+pub fn first_word_query(text: &str, caret: usize) -> Option<SuggestQuery> {
+    if caret != text.len()
+        || text.is_empty()
+        || text.starts_with(char::is_whitespace)
+        || text.contains([':', '\n'])
+        || text.chars().count() > EMOJI_QUERY_MAX
+    {
+        return None;
+    }
+    Some(SuggestQuery {
+        kind: SuggestKind::EmojiWord,
+        range: 0..caret,
+        query: text.to_string(),
+    })
 }
 
 /// `#tag` being typed at `caret`: letters, digits and `_` back to a `#`
@@ -94,7 +122,7 @@ pub fn hashtag_query(text: &str, caret: usize) -> Option<SuggestQuery> {
 /// `:name` being typed at `caret`. tdesktop's rules: the `:` must not
 /// follow a letter or digit (`http:`, `12:30`), must be followed by
 /// something that is not a space, and the name may hold single spaces
-/// ("thumbs up"). Quill also wants [`EMOJI_MIN_QUERY`] characters.
+/// ("thumbs up").
 pub fn emoji_query(text: &str, caret: usize) -> Option<SuggestQuery> {
     if !text.is_char_boundary(caret) {
         return None;
@@ -111,7 +139,7 @@ pub fn emoji_query(text: &str, caret: usize) -> Option<SuggestQuery> {
                 .chars()
                 .next_back()
                 .is_some_and(|p| p.is_alphanumeric())
-                || query.chars().count() < EMOJI_MIN_QUERY
+                || query.is_empty()
                 || query.starts_with(char::is_whitespace)
                 || !query.chars().next().is_some_and(char::is_alphanumeric)
                     && !query.starts_with(['+', '-'])
@@ -349,6 +377,22 @@ fn tokens(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// The catalog name of `emoji` (variation selectors aside), for labels.
+pub fn emoji_name(emoji: &str) -> Option<&'static str> {
+    use std::collections::HashMap;
+    use std::sync::OnceLock;
+    static NAMES: OnceLock<HashMap<String, &'static str>> = OnceLock::new();
+    NAMES
+        .get_or_init(|| {
+            index()
+                .iter()
+                .map(|item| (item.emoji.replace('\u{fe0f}', ""), item.name))
+                .collect()
+        })
+        .get(&emoji.replace('\u{fe0f}', ""))
+        .copied()
+}
+
 /// The emoji whose full name or shortcode is exactly `query` (`rocket`,
 /// `slight_smile`), for `:name:` replacement in the composer.
 pub fn exact_emoji(query: &str) -> Option<&'static str> {
@@ -471,8 +515,8 @@ mod tests {
         assert!(at_end("see http://ex").is_none());
         assert!(at_end("at 12:30").is_none());
         assert!(at_end("note:fi").is_none());
-        // Too short, or followed by space.
-        assert!(at_end(":s").is_none());
+        // One character is enough; a space right after is not.
+        assert_eq!(at_end(":D").unwrap().2, "D");
         assert!(at_end(": fire").is_none());
         assert!(at_end("x :").is_none());
         // Multi-word names, single spaces only.
@@ -484,6 +528,25 @@ mod tests {
         assert!(detect(":fire", 5, false).is_none());
         // The caret decides, not the end of the text.
         assert_eq!(emoji_query(":fire now", 5).unwrap().query, "fire");
+    }
+
+    #[test]
+    fn a_lone_word_is_an_exact_query() {
+        let (kind, range, query) = at_end("happy").unwrap();
+        assert_eq!(
+            (kind, range, query.as_str()),
+            (SuggestKind::EmojiWord, 0..5, "happy")
+        );
+        // The whole field, spaces included, while it is short.
+        assert_eq!(at_end("thumbs up").unwrap().2, "thumbs up");
+        // Caret not at the end, a second line, a leading space, a colon,
+        // or longer than any keyword: nothing.
+        assert!(detect("happy", 3, true).is_none());
+        assert!(at_end("hi\nthere").is_none());
+        assert!(at_end(" happy").is_none());
+        assert!(at_end("note: x").is_none());
+        assert!(at_end(&"a".repeat(33)).is_none());
+        assert!(detect("happy", 5, false).is_none());
     }
 
     #[test]

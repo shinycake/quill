@@ -170,11 +170,19 @@ impl Session {
                     self.set_live_bursts(stickers);
                 }
             }
+            StickersPayload::EmojiKeywords { keywords } => {
+                if let Some(pending) = pending.filter(|p| p.purpose == RequestPurpose::SearchEmojis)
+                {
+                    self.stickers
+                        .emoji
+                        .keyword_lookups
+                        .answered(pending.id, keywords);
+                }
+            }
             // Slice S10: emoji payloads — purpose-gated dispatch lives in emoji.rs.
             payload @ (StickersPayload::EmojiStatuses { .. }
             | StickersPayload::EmojiStatusCustomEmojis { .. }
             | StickersPayload::AnimatedEmoji { .. }
-            | StickersPayload::EmojiKeywords { .. }
             | StickersPayload::Emojis { .. }
             | StickersPayload::EmojiCategories { .. }) => {
                 self.dispatch_emoji_payload(pending.map(|p| p.purpose), payload.into());

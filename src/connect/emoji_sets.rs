@@ -443,6 +443,45 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
+    /// Ask TDLib's on-device keyword search (`searchEmojis`) for each
+    /// normalized query that has no answer yet, a few at a time; the
+    /// answers land in `keyword_lookups`. Cheap to call on every sync.
+    pub fn lookup_emoji_keywords<'a>(
+        &mut self,
+        queries: impl IntoIterator<Item = &'a str>,
+    ) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let requests = &self.session.requests;
+        self.session
+            .stickers
+            .emoji
+            .keyword_lookups
+            .retain_in_flight(|id| requests.get(id).is_some());
+        let locale = crate::emoji::system_locale();
+        for query in queries {
+            if !self.session.stickers.emoji.keyword_lookups.wants(query) {
+                continue;
+            }
+            let codes = crate::emoji::keyword_language_codes(query, locale.as_deref());
+            let extra = self.session.request(RequestPurpose::SearchEmojis, None);
+            if let Err(err) = self
+                .sender
+                .send_json(&crate::telegram::search_emojis(extra, query, &codes))
+            {
+                self.session.requests.take(extra);
+                return Err(err);
+            }
+            self.session
+                .stickers
+                .emoji
+                .keyword_lookups
+                .sent(extra, query.to_string());
+        }
+        Ok(())
+    }
+
     pub fn search_emoji_packs(
         &mut self,
         query: &str,

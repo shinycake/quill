@@ -136,15 +136,15 @@ pub fn get_custom_emoji_stickers(extra: RequestId, custom_emoji_ids: &[i64]) -> 
     .to_string()
 }
 
-/// Slice S10: `searchEmojis` (TDLib 1.8.67, line 14732) — keyword search for
-/// the emoji picker. `input_language_codes` is empty (server default), like
-/// S8's `searchStickers`. Response is `emojiKeywords`.
-pub fn search_emojis(extra: RequestId, text: &str) -> String {
+/// `searchEmojis` (td_api.tl:15780): prefix search of the emoji keyword
+/// packs of `language_codes`, done by TDLib on the device. Response is
+/// `emojiKeywords`.
+pub fn search_emojis(extra: RequestId, text: &str, language_codes: &[String]) -> String {
     json!({
         "@type": "searchEmojis",
         "@extra": extra.as_extra(),
         "text": text,
-        "input_language_codes": [],
+        "input_language_codes": language_codes,
     })
     .to_string()
 }
@@ -302,10 +302,10 @@ mod tests {
         assert_eq!(v["custom_emoji_ids"], serde_json::json!(["11", "22"]));
 
         let v: serde_json::Value =
-            serde_json::from_str(&search_emojis(RequestId(49), "fire")).unwrap();
+            serde_json::from_str(&search_emojis(RequestId(49), "fire", &["en".into()])).unwrap();
         assert_eq!(v["@type"], "searchEmojis");
         assert_eq!(v["text"], "fire");
-        assert_eq!(v["input_language_codes"], serde_json::json!([]));
+        assert_eq!(v["input_language_codes"], serde_json::json!(["en"]));
 
         let v: serde_json::Value =
             serde_json::from_str(&get_emoji_categories(RequestId(50))).unwrap();
