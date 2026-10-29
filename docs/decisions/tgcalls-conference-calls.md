@@ -41,14 +41,41 @@ How the chosen bridge works (`src/telegram/group_call_crypto.rs`):
 Why this is sound:
 
 - **No deadlock.** Media threads wait on TDLib, and TDLib's answers flow through the receive thread, which never waits on media threads. The driver thread is not involved.
-- **Bounded waits.** Each wait is capped. `qc_group_destroy` waits out callbacks in flight (`CallbackGuard`), so a teardown can take at most one frame timeout.
+- **Bounded waits.** Each wait is capped. `qc_group_destroy` waits out callbacks in flight (`CallbackGuard`), so a teardown must never wait on TDLib. Every teardown path disarms the frames first:
+  - `unbind` wakes every frame still waiting on TDLib (it drops their one-slot senders), and the driver unbinds before it leaves the call (`teardown_group_call_transport`), before a refused join's instance goes, and in its own `Drop`, which covers an account switch and quitting.
+  - Every destroy in the engine (leaving, a rejoin's fresh instance, a refused create, the presentation, the engine's drop) first closes the instance's conference context. A frame that reaches a closed context is dropped at once, without a request.
+  - The guard itself has a `closing` flag. `close()` sets it before it takes the unique lock, and `run()` checks it before the shared lock. glibc's rwlock prefers readers, and several media threads each hold the shared lock across a round trip, so without the flag `close()` could starve.
 - **Frames before the join are dropped.** TDLib queues frame requests until the join completes and answers `GROUPCALL_JOIN_MISSING` when not joined. Each error is a dropped frame. Quill does not even send a request until the join answer binds the call id (tdesktop `setCallId`, see below).
-- **The channel matches tdesktop.** The data channel is always `groupCallDataChannelMain`, as tdesktop's channel 0. The screen share instance shares the call's crypto.
+- **The channel matches tdesktop.** The data channel is always `groupCallDataChannelMain`, in both directions and for both instances. tdesktop's `EncryptDecrypt::callback` passes `CallChannelId(0)` to `call_encrypt` and `call_decrypt` alike, for its screencast instance too. TDLib maps `groupCallDataChannelMain` (and a null channel) to tde2e channel 0, and `groupCallDataChannelScreenSharing` to channel 1 (`GroupCallManager::encrypt_group_call_data`). A shared screen sent on channel 1 would be decrypted by tdesktop on channel 0. Incoming screencast frames arrive on the main instance, and tgcalls does not say which stream a frame belongs to, so channel 1 is never used. The screen share instance shares the call's crypto.
+- **A conference never runs in the clear.** `qc_group_create` returns NULL for `"e2e": true` without `callbacks.e2e`. The contract test checks it.
 - **Leaving stops the requests.** `unbind` (tdesktop `clearCallId`) runs on teardown, and later frames drop without a request.
 
 Each frame costs a JSON and base64 round trip through TDLib's client thread.
 That is the price of TDLib owning the key. Quill accepts it until TDLib
 offers a synchronous or in-process path.
+
+Each call counts its round trips, timeouts and errors, and the answered
+round trips' average and longest latency. When the call is unbound, one line
+goes to the always-on calls log (`logs/calls.log`):
+`[call] group <id> e2e: <n> round trips, <t> timeouts, <e> errors, avg <a> us, max <m> us`.
+
+### The frames stay out of TDLib's log
+
+Debug mode sets TDLib's verbosity to 4. TDLib writes every request and every
+answer under its `td_requests` log tag (`VLOG(td_requests)` in
+`td/telegram/Td.cpp`: "Receive request" and "Sending result for request"),
+whose level is INFO (3). So at verbosity 4, `tdlib.log` would hold every
+`encryptGroupCallData` request and every `decryptGroupCallData` answer: the
+call's plaintext.
+
+While a conference call is bound, Quill raises the tag's level out of reach:
+
+- `setLogTagVerbosityLevel("td_requests", 1024)`. A line is written only when the global verbosity reaches its tag's level, so "lower the verbosity" of a tag means raising this number.
+- The level before is read with `getLogTagVerbosityLevel` and put back when the last bound call is unbound or dropped. TDLib's tags are process-wide, so the calls of every account share one count (`RequestLogGate`).
+- It is done whether or not debug mode is on, so turning debug mode on during a call writes no frames either.
+
+While a conference call is on, TDLib's request log has no requests at all.
+Its other tags still log as usual.
 
 ## The C API (version 4)
 
@@ -73,6 +100,7 @@ tgcalls' `requestMediaChannelDescriptions` from the participants.
 - A request whose ssrcs are all known is answered at once.
 - Otherwise it waits until a participant update supplies the missing ssrcs, or until `loaded_all_participants`.
 - With every participant loaded, an unknown ssrc is answered unresolved, as tdesktop does.
+- A request can come while `qc_group_create` is still running, before the engine has the instance's handle. Its answer is kept and sent once the handle is attached, so it is never lost.
 
 The pump sends the owners to the engine on every tick
 (`set_group_ssrc_owners`), and the engine ignores an unchanged set.
@@ -97,9 +125,9 @@ A conference instance has chat id 0 and the Member role.
 | Accept an invitation | `joinGroupCall(inputGroupCallMessage)`. |
 | Join a link | `t.me/call/<slug>` asks "Join Group Call" (`lng_confcall_join_*`), then `joinGroupCall(inputGroupCallLink)`. |
 | Add People (caller) | Only for an established 1:1 call whose `callStateReady.is_group_call_supported` is true. Earlier, the toast `lng_call_error_add_not_started` shows. `createGroupCall` makes the conference with you in it. Once its `groupCall.invite_link` is known, the 1:1 call ends with `discardCall(invite_link)` and the picked people get `inviteGroupCallParticipant` (tdesktop `startedConferenceReady`: `finishConferenceInvitations`, then `destroyCurrentCall` with the slug). With "Create Call Link", the panel opens on the link instead. |
-| Add People (callee) | `callDiscardReasonUpgradeToGroupCall(invite_link)` joins the link (tdesktop `finishByMigration`). Neither side shows the 1:1 end screen. |
-| Incoming invitation | A fresh, incoming `messageGroupCall` that is not active and not missed rings in the call window: "Telegram Group Call", who already joined, Decline or Join. It stops when the message says you joined or missed it, when the message is deleted, or when you answer. One older than 90 s never rings. One that arrives during a call is declined (`declineIncomingConferenceInvites`). |
-| Rejoin | After `need_rejoin`, Quill sends `joinGroupCall` again with the call's link, or with how the call was first reached. The instance is rebuilt under the real id, with the same crypto. |
+| Add People (callee) | `callDiscardReasonUpgradeToGroupCall(invite_link)` joins the link (tdesktop `finishByMigration`). Neither side shows the 1:1 end screen. If the join can't go out or TDLib refuses it, the 1:1 call ends as failed: its end screen shows "Failed to connect" (tdesktop sets `State::Failed`, `lng_call_status_failed`). |
+| Incoming invitation | A fresh, incoming `messageGroupCall` that is not active and not missed rings in the call window: "Telegram Group Call", who already joined, Decline or Join. It stops when the message says you joined or missed it, when the message is deleted, or when you answer. One older than 90 s, or one that arrives during a call, never rings and is declined (`showConferenceInvite` calls `declineIncomingConferenceInvites` for both). |
+| Rejoin | After `need_rejoin`, Quill sends `joinGroupCall` again with the call's link, or with how the call was first reached. The instance is rebuilt under the real id, with the same crypto. Once the rejoins are spent (or the transport failed), the conference is dead: a new invitation or link replaces it without pressing Leave first. |
 | End | `endGroupCall` is gated on `is_owned` for a conference. |
 
 In the panel, a conference shows:
