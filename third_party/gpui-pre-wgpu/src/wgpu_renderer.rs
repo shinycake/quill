@@ -1326,7 +1326,10 @@ impl WgpuRenderer {
         let rows = usize::try_from(height)?;
         let mut pixels = Vec::with_capacity(row.saturating_mul(rows));
         {
-            let mapped = readback.slice(..).get_mapped_range();
+            let mapped = readback
+                .slice(..)
+                .get_mapped_range()
+                .map_err(|error| anyhow::anyhow!("reading the capture failed: {error}"))?;
             for chunk in mapped.chunks_exact(padded_row).take(rows) {
                 pixels.extend_from_slice(chunk.get(..row).unwrap_or_default());
             }
