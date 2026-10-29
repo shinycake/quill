@@ -137,6 +137,40 @@ fn a_lone_word_waits_and_starts_with_nothing_highlighted(cx: &mut TestAppContext
 }
 
 #[gpui_kit::test]
+fn enter_still_sends_under_a_lone_word_strip(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    answer(&app, vcx, "funny", &[("😂", "funny")]);
+    vcx.simulate_input("funny");
+    vcx.executor().advance_clock(Duration::from_millis(300));
+    vcx.run_until_parked();
+    assert!(shown(&app, vcx).is_some());
+    vcx.update(|window, cx| window.press("enter", cx));
+    assert_eq!(text(&app, vcx), "", "the word was sent, not replaced");
+}
+
+#[gpui_kit::test]
+fn a_new_list_keeps_the_highlighted_emoji(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.simulate_input("hot :fire");
+    // The catalog's names first; Right highlights the second.
+    let before = shown(&app, vcx).expect("catalog rows");
+    vcx.simulate_keystrokes("right");
+    let picked = before.1[1].clone();
+    // Keywords land and put another emoji in front.
+    answer(
+        &app,
+        vcx,
+        "fire",
+        &[("🧯", "fire"), (picked.as_str(), "fire")],
+    );
+    let after = shown(&app, vcx).expect("keyword rows");
+    let at = after.2.expect("still highlighted");
+    assert_eq!(after.1[at], picked);
+}
+
+#[gpui_kit::test]
 fn escape_keeps_the_strip_closed_for_that_query(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;

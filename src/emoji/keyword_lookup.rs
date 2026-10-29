@@ -15,15 +15,21 @@ use crate::telegram::envelope_emoji::EmojiKeyword;
 
 /// Lookups kept before the oldest half is forgotten.
 const ANSWER_CAP: usize = 2048;
-/// Lookups in flight at once; the rest are asked for on a later sync.
+/// Lookups in flight at once; the rest are asked for again when one
+/// answers.
 pub const IN_FLIGHT_CAP: usize = 8;
+/// Failed requests for one query before it is left alone for the session
+/// (offline, or the keyword pack would not load).
+const ATTEMPTS: u8 = 2;
 
 /// `searchEmojis` answers by lowercased query.
 #[derive(Debug, Clone, Default)]
 pub struct KeywordLookups {
     answers: HashMap<String, (u64, Vec<EmojiKeyword>)>,
     in_flight: HashMap<RequestId, String>,
-    /// Bumped on every answer, so readers can tell when to look again.
+    failures: HashMap<String, u8>,
+    /// Bumped on every answer or failure, so readers can tell when to
+    /// look again (and ask again for what the cap turned away).
     pub generation: u64,
 }
 
@@ -37,6 +43,7 @@ impl KeywordLookups {
     /// and room for one more.
     pub fn wants(&self, query: &str) -> bool {
         !self.answers.contains_key(query)
+            && self.failures.get(query).copied().unwrap_or(0) < ATTEMPTS
             && self.in_flight.len() < IN_FLIGHT_CAP
             && !self.in_flight.values().any(|q| q == query)
     }
@@ -45,7 +52,17 @@ impl KeywordLookups {
         self.in_flight.insert(id, query);
     }
 
-    /// An answer (or, with an empty list, a failure) for request `id`.
+    /// Request `id` failed: its slot frees and the query may be asked
+    /// again, up to [`ATTEMPTS`] times.
+    pub fn failed(&mut self, id: RequestId) {
+        let Some(query) = self.in_flight.remove(&id) else {
+            return;
+        };
+        *self.failures.entry(query).or_default() += 1;
+        self.generation += 1;
+    }
+
+    /// The answer for request `id`.
     pub fn answered(&mut self, id: RequestId, keywords: Vec<EmojiKeyword>) {
         let Some(query) = self.in_flight.remove(&id) else {
             return;
@@ -215,6 +232,19 @@ mod tests {
         assert!(!lookups.wants("other"));
         lookups.retain_in_flight(|id| id.0 < 100);
         assert!(lookups.wants("other"));
+    }
+
+    #[test]
+    fn a_failed_query_is_asked_again_a_bounded_number_of_times() {
+        let mut lookups = KeywordLookups::default();
+        lookups.sent(RequestId(1), "fire".into());
+        lookups.failed(RequestId(1));
+        assert!(lookups.answer("fire").is_none());
+        assert!(lookups.wants("fire"));
+        assert_eq!(lookups.generation, 1);
+        lookups.sent(RequestId(2), "fire".into());
+        lookups.failed(RequestId(2));
+        assert!(!lookups.wants("fire"));
     }
 
     #[test]

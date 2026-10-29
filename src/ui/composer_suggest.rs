@@ -13,7 +13,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::composer_doc::ComposerTag;
 use quill::emoji::keyword_lookup::{
-    keyword_emoji, normalize_query, prioritize_recent, push_unique,
+    keyword_emoji, normalize_query, prioritize_recent, push_unique, skip_exact_keyword,
 };
 use quill::lang::{keys, tr, tr_with};
 use quill::suggest::{
@@ -27,6 +27,9 @@ use std::time::Duration;
 const STRIP_VISIBLE: usize = 7;
 const TILE: f32 = 36.;
 const GAP: f32 = 4.;
+
+/// Emoji one strip holds; a one-letter `:` query can match hundreds.
+const MAX_ROWS: usize = 48;
 
 /// tdesktop `kShowExactDelay`: a lone word waits this long before its
 /// emoji show, so typing a first word does not flash the strip.
@@ -137,6 +140,7 @@ pub(super) fn suggest_items(
     list.retain(|emoji| !has_skin_tone(emoji));
     prioritize_recent(list, recent)
         .into_iter()
+        .take(MAX_ROWS)
         .map(|emoji| SuggestItem {
             name: emoji_name(&emoji).unwrap_or_default().to_string(),
             insert: emoji.clone(),
@@ -235,6 +239,7 @@ impl QuillApp {
                             let ui = &mut this.composer_ui.suggest;
                             if ui.query.as_ref() == Some(&waiting) {
                                 ui.word_ready = Some(waiting);
+                                this.ask_suggest_keywords();
                                 this.rebuild_suggest_menu(cx);
                             }
                         });
@@ -242,13 +247,31 @@ impl QuillApp {
                 }
             }
             ui.query = query;
-            if let Some((normalized, _)) = ui.query.as_ref().and_then(keyword_query)
-                && let Some(live) = self.live.as_mut()
-            {
-                let _ = live.driver.lookup_emoji_keywords([normalized.as_str()]);
-            }
+            self.ask_suggest_keywords();
         }
         self.rebuild_suggest_menu(cx);
+    }
+
+    /// Ask TDLib for the keywords of the query at the caret, unless they
+    /// are known or on the way. A lone word asks only once its delay ran
+    /// out, so typing a short message does not search every prefix.
+    fn ask_suggest_keywords(&mut self) {
+        let ui = &self.composer_ui.suggest;
+        let Some(query) = ui.query.as_ref() else {
+            return;
+        };
+        if query.kind == SuggestKind::EmojiWord && ui.word_ready.as_ref() != Some(query) {
+            return;
+        }
+        let Some((normalized, exact)) = keyword_query(query) else {
+            return;
+        };
+        if exact && skip_exact_keyword(&normalized) {
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.lookup_emoji_keywords([normalized.as_str()]);
+        }
     }
 
     /// The keyword answers changed since the popup was built: rebuild it.
@@ -258,6 +281,8 @@ impl QuillApp {
         if self.composer_ui.suggest.query.is_some()
             && generation != self.composer_ui.suggest.built_generation
         {
+            // A slot freed: a query the in-flight cap turned away goes now.
+            self.ask_suggest_keywords();
             self.rebuild_suggest_menu(cx);
         }
     }
@@ -296,10 +321,16 @@ impl QuillApp {
         let first = active
             .as_ref()
             .is_some_and(|a| a.query.kind != SuggestKind::EmojiWord);
-        ui.selected = match (&active, ui.selected) {
+        // A new list for the same query keeps the highlighted emoji, not
+        // its index, so Enter inserts what the user picked.
+        let kept = ui
+            .selected
+            .and_then(|at| ui.active.as_ref()?.items.get(at))
+            .and_then(|old| active.as_ref()?.items.iter().position(|i| i == old));
+        ui.selected = match (&active, kept) {
             (None, _) => None,
-            (Some(a), Some(at)) if at < a.items.len() => Some(at),
-            (Some(_), _) => first.then_some(0),
+            (Some(_), Some(at)) => Some(at),
+            (Some(_), None) => first.then_some(0),
         };
         if ui.active != active {
             ui.active = active;
@@ -432,7 +463,8 @@ impl QuillApp {
             return false;
         };
         let index = match self.composer_ui.suggest.selected {
-            Some(at) => at.min(active.items.len() - 1),
+            // `active` is never built without items.
+            Some(at) => at.min(active.items.len().saturating_sub(1)),
             None if tab => 0,
             None => return false,
         };

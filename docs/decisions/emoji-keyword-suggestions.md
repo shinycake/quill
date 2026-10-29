@@ -43,11 +43,19 @@ alias list, so `:happy` (no emoji is named "happy") found nothing.
   `emoji::keyword_language_codes` (script of the text, system language,
   English), as for the emoji panel's search.
 - `emoji::KeywordLookups` keeps the answers by query (up to 2048, the older
-  half forgotten past that), with at most 8 requests in flight. Errors are
-  stored as empty answers so a query is not retried on every keystroke.
+  half forgotten past that), with at most 8 requests in flight. A failed
+  request frees its slot and is not cached; a query is tried twice at most.
   Requests that will never answer are dropped from the flight list on the
-  next lookup. The popup is rebuilt when an answer's generation moves
-  (`refresh_suggest_menu`, an integer compare per frame).
+  next lookup. When an answer or failure moves the generation
+  (`refresh_suggest_menu`, an integer compare per frame), the popup is
+  rebuilt and the query at the caret is asked for again if the cap turned
+  it away.
+- A lone word is looked up only once its 300 ms delay has run out, and not
+  at all when `SkipExactKeyword` would drop it, so typing a short message
+  does not search every prefix.
+- The strip holds at most 48 emoji (a one-letter `:` query can match
+  hundreds). A new answer for the same query keeps the highlighted emoji,
+  not its index.
 - Ranking is `keyword_lookup::keyword_emoji` (TDLib's order is unspecified,
   so keywords are sorted), then catalog names for ASCII `:` queries, then
   `prioritize_recent` over the emoji panel's recent list. Skin-tone variants
@@ -66,6 +74,8 @@ alias list, so `:happy` (no emoji is named "happy") found nothing.
   has no per-emoji skin tone setting; skin-tone results are left out.
 - tdesktop appends matching custom emoji from installed emoji sets
   (`appendCustom`). Not done here; it is a follow-up.
+- tdesktop re-runs the query when a keyword pack refreshes. Quill keeps an
+  answer for the session.
 - A `:` query keeps Quill's character rules (letters, digits, `_`, `-`, `+`
   and single spaces). tdesktop takes any characters, but its prefix search
   finds nothing for the others anyway.

@@ -13,13 +13,9 @@ impl Session {
     ) {
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::EmojiAnimations) => self.stickers.animations.failed(),
-            // No keywords for that text: an empty answer, not asked again.
             Some(RequestPurpose::SearchEmojis) => {
                 if let Some(pending) = pending {
-                    self.stickers
-                        .emoji
-                        .keyword_lookups
-                        .answered(pending.id, Vec::new());
+                    self.stickers.emoji.keyword_lookups.failed(pending.id);
                 }
             }
             Some(RequestPurpose::Stickers(StickersPurpose::GetMessageEffect { effect_id })) => {

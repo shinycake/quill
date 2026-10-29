@@ -379,11 +379,18 @@ fn tokens(text: &str) -> Vec<String> {
 
 /// The catalog name of `emoji` (variation selectors aside), for labels.
 pub fn emoji_name(emoji: &str) -> Option<&'static str> {
-    let bare = emoji.replace('\u{fe0f}', "");
-    index()
-        .iter()
-        .find(|item| item.emoji.replace('\u{fe0f}', "") == bare)
-        .map(|item| item.name)
+    use std::collections::HashMap;
+    use std::sync::OnceLock;
+    static NAMES: OnceLock<HashMap<String, &'static str>> = OnceLock::new();
+    NAMES
+        .get_or_init(|| {
+            index()
+                .iter()
+                .map(|item| (item.emoji.replace('\u{fe0f}', ""), item.name))
+                .collect()
+        })
+        .get(&emoji.replace('\u{fe0f}', ""))
+        .copied()
 }
 
 /// The emoji whose full name or shortcode is exactly `query` (`rocket`,
