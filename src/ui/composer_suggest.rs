@@ -233,7 +233,7 @@ impl QuillApp {
                     ui.word_ready = Some(q.clone());
                 } else {
                     let waiting = q.clone();
-                    ui.word_timer = Some(cx.spawn(async move |this, cx| {
+                    let timer = self.spawn_scoped(cx, async move |this, cx| {
                         cx.background_executor().timer(SHOW_EXACT_DELAY).await;
                         let _ = this.update(cx, |this, cx| {
                             let ui = &mut this.composer_ui.suggest;
@@ -243,9 +243,11 @@ impl QuillApp {
                                 this.rebuild_suggest_menu(cx);
                             }
                         });
-                    }));
+                    });
+                    self.composer_ui.suggest.word_timer = Some(timer);
                 }
             }
+            let ui = &mut self.composer_ui.suggest;
             ui.query = query;
             self.ask_suggest_keywords();
         }
