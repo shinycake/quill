@@ -120,8 +120,28 @@ else()
 endif()
 list(TRANSFORM tgcalls_sources PREPEND ${tgcalls_loc}/)
 
-add_library(quill_calls SHARED
+set(quill_sources
+    src/audio.cpp
+    src/p2p.cpp
+    src/platform.cpp
     src/quill_calls.cpp
+    src/video.cpp
+    src/video_frame.cpp
+)
+if (APPLE)
+    list(APPEND quill_sources src/platform_darwin.mm src/video_devices_darwin.mm)
+    set(tgcalls_platform_interface ${tgcalls_loc}/platform/darwin/DarwinInterface.mm)
+else()
+    list(APPEND quill_sources src/platform_desktop.cpp src/video_devices_desktop.cpp)
+    set(tgcalls_platform_interface ${tgcalls_loc}/platform/tdesktop/DesktopInterface.cpp)
+endif()
+# src/platform.cpp wraps tgcalls' platform layer and defines
+# CreatePlatformInterface itself; tgcalls' definition is renamed.
+set_source_files_properties(${tgcalls_platform_interface} PROPERTIES
+    COMPILE_DEFINITIONS CreatePlatformInterface=CreateTgcallsPlatformInterface)
+
+add_library(quill_calls SHARED
+    ${quill_sources}
     ${tgcalls_sources}
 )
 

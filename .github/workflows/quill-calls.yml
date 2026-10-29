@@ -7,6 +7,7 @@ on:
     paths:
       - 'native/quill-calls/**'
       - 'scripts/build-tgcalls.sh'
+      - 'crates/quill-calls-sys/**'
       - 'scripts/build-ffmpeg.sh'
       - '.github/workflows/quill-calls.yml'
   push:
@@ -14,6 +15,7 @@ on:
     paths:
       - 'native/quill-calls/**'
       - 'scripts/build-tgcalls.sh'
+      - 'crates/quill-calls-sys/**'
       - 'scripts/build-ffmpeg.sh'
       - '.github/workflows/quill-calls.yml'
   workflow_call:
@@ -109,7 +111,7 @@ jobs:
           lib.qc_max_layer.restype = ctypes.c_int32
           versions = lib.qc_library_versions().decode().split("\n")
           print("api", lib.qc_api_version(), "max layer", lib.qc_max_layer(), "versions", versions)
-          assert lib.qc_api_version() == 1
+          assert lib.qc_api_version() == 2
           assert lib.qc_max_layer() >= 92, "tgcalls max layer"
           assert len(versions) >= 3 and all(versions), "tgcalls registered no protocol versions"
           EOF
@@ -127,6 +129,12 @@ jobs:
             exit 1
           fi
           echo "$syms"
+      - name: the Rust bindings against the library
+        run: |
+          # Exported here: macOS drops DYLD_* when it starts the step's bash.
+          export LD_LIBRARY_PATH="$PWD/vendor/ffmpeg/prefix/lib"
+          export DYLD_LIBRARY_PATH="$PWD/vendor/ffmpeg/prefix/lib${OPENSSL_ROOT_DIR:+:$OPENSSL_ROOT_DIR/lib}"
+          cargo test -p quill-calls-sys --locked
       - uses: actions/upload-artifact@v7
         with:
           name: quill-calls-${{ matrix.target }}
