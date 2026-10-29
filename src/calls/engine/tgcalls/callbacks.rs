@@ -28,7 +28,7 @@ impl CallContext {
         qc_p2p_callbacks {
             user: Arc::as_ptr(self).cast_mut().cast::<c_void>(),
             state: Some(on_state),
-            signal_bars: None,
+            signal_bars: Some(on_signal_bars),
             remote_media_state: Some(on_remote_media),
             remote_battery_low: Some(on_remote_battery_low),
             signaling: Some(on_signaling),
@@ -122,6 +122,26 @@ unsafe extern "C" fn on_remote_media(user: *mut c_void, audio_active: i32, video
             hook(call.call_id, remote_video_state(video_state));
         }
     });
+}
+
+/// tgcalls' `signalBarsUpdated`: 0 to 4 bars, for the call window's
+/// signal bars (tdesktop `Calls::SignalBars`).
+unsafe extern "C" fn on_signal_bars(user: *mut c_void, bars: i32) {
+    crate::thread_guard::ffi_boundary((), || {
+        // SAFETY: tgcalls passes back the `user` the engine registered.
+        let Some(call) = (unsafe { context(user) }) else {
+            return;
+        };
+        call.emit(EngineEvent::SignalBars {
+            call_id: call.call_id,
+            bars: signal_bar_count(bars),
+        });
+    });
+}
+
+/// tgcalls' bar count on tdesktop's 0 to 4 scale.
+pub(super) fn signal_bar_count(bars: i32) -> u8 {
+    u8::try_from(bars.clamp(0, 4)).unwrap_or(0)
 }
 
 /// tdesktop's `remoteBatteryLevelIsLowUpdated`: the call panel shows
@@ -298,6 +318,12 @@ mod tests {
         );
         assert_eq!(transport_state(QC_P2P_FAILED), Some(TransportState::Failed));
         assert_eq!(transport_state(42), None);
+    }
+
+    #[test]
+    fn signal_bars_stay_on_tdesktops_scale() {
+        let counts: Vec<u8> = [-1, 0, 2, 4, 9].into_iter().map(signal_bar_count).collect();
+        assert_eq!(counts, vec![0, 0, 2, 4, 4]);
     }
 
     #[test]

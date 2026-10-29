@@ -140,6 +140,7 @@ fn driver_group_call_participant_management_shapes_and_gates() {
         remote_screen: RemoteVideoState::Inactive,
         remote_audio_muted: false,
         remote_battery_low: false,
+        signal_bars: None,
     });
     assert_eq!(
         driver.accept_group_call_invitation(3, 42),

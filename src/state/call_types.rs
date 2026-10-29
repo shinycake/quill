@@ -56,6 +56,9 @@ pub struct ActiveCall {
     /// "{user}'s battery level is low"), from the engine; `false` until
     /// it says so. Quill never sends its own battery state, as tdesktop.
     pub remote_battery_low: bool,
+    /// The connection quality, 0 to 4 bars (tdesktop `Calls::SignalBars`),
+    /// from the engine; `None` until it reports.
+    pub signal_bars: Option<u8>,
 }
 
 /// Phase C1: summary of the most recently ended call, driving the

@@ -1,10 +1,98 @@
 //! What the 1:1 call window says about the peer's side of the call (kept
-//! out of `call_panel.rs` for its size): the microphone-off line and
-//! tdesktop's low-battery notice (`Calls::Panel::createRemoteLowBattery`).
+//! out of `call_panel.rs` for its size): the microphone-off line,
+//! tdesktop's low-battery notice (`Calls::Panel::createRemoteLowBattery`)
+//! and its signal bars (`Calls::SignalBars`).
 #![deny(clippy::indexing_slicing)]
 
 use gpui_kit::*;
+use quill::calls::engine::TransportState;
 use quill::lang::{keys, tr_with};
+use quill::state::ActiveCall;
+use quill::telegram::envelope::CallState;
+
+/// tdesktop `Call::kSignalBarCount`.
+const SIGNAL_BAR_COUNT: u8 = 4;
+
+/// The two looks of tdesktop's signal bars.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum BarsStyle {
+    /// `callPanelSignalBars`, beside the emoji in the call window.
+    Panel,
+    /// `callBarSignalBars`, in the main window's call bar.
+    Bar,
+}
+
+/// One bar set's geometry: bar width, gap, shortest and tallest bar.
+struct BarsMetrics {
+    width: f32,
+    skip: f32,
+    min: f32,
+    max: f32,
+}
+
+impl BarsStyle {
+    fn metrics(self) -> BarsMetrics {
+        match self {
+            BarsStyle::Panel => BarsMetrics {
+                width: 2.,
+                skip: 2.,
+                min: 4.,
+                max: 10.,
+            },
+            BarsStyle::Bar => BarsMetrics {
+                width: 3.,
+                skip: 1.,
+                min: 3.,
+                max: 12.,
+            },
+        }
+    }
+}
+
+/// The signal bars to show for `call`: tgcalls' count once the call is
+/// established (connected, or reconnecting after it was), nothing before.
+pub(super) fn shown_signal_bars(call: &ActiveCall) -> Option<u8> {
+    let established = matches!(call.state, CallState::Ready)
+        && matches!(
+            call.transport,
+            Some(TransportState::Connected | TransportState::Reconnecting)
+        );
+    call.signal_bars.filter(|_| established)
+}
+
+/// Bar `index`'s height (tdesktop: from `min` for the first to `max` for
+/// the last, evenly).
+fn bar_height(style: BarsStyle, index: u8) -> f32 {
+    let m = style.metrics();
+    m.min + (m.max - m.min) * f32::from(index) / f32::from(SIGNAL_BAR_COUNT - 1)
+}
+
+/// tdesktop `SignalBars::paintEvent`: four rounded bars growing left to
+/// right, bottom-aligned, in white; bars past `count` at half opacity.
+pub(super) fn signal_bars(count: u8, style: BarsStyle) -> impl IntoElement {
+    let m = style.metrics();
+    let left = match style {
+        // `callFingerprintSignalBarsSkip` and `callSignalBarsPadding`'s
+        // left between the emoji and the bars.
+        BarsStyle::Panel => 2. + 8.,
+        // Right after the mute button.
+        BarsStyle::Bar => 0.,
+    };
+    div()
+        .ml(px(left))
+        .h(px(m.max))
+        .flex()
+        .items_end()
+        .gap(px(m.skip))
+        .children((0..SIGNAL_BAR_COUNT).map(move |index| {
+            div()
+                .w(px(m.width))
+                .h(px(bar_height(style, index)))
+                .rounded(px(m.width / 2.))
+                .bg(white())
+                .opacity(if index < count { 1. } else { 0.5 })
+        }))
+}
 
 /// tdesktop `lng_call_microphone_off`.
 pub(super) fn microphone_off_line(name: &str) -> String {
@@ -108,11 +196,63 @@ fn battery_icon() -> impl IntoElement {
 
 #[cfg(test)]
 mod tests {
-    use super::{battery_low_line, battery_notice_shown, microphone_off_line};
+    use super::{
+        BarsStyle, bar_height, battery_low_line, battery_notice_shown, microphone_off_line,
+        shown_signal_bars,
+    };
+    use quill::calls::engine::{RemoteVideoState, TransportState};
+    use quill::state::ActiveCall;
+    use quill::telegram::envelope::CallState;
+
+    fn call(state: CallState, transport: Option<TransportState>, bars: Option<u8>) -> ActiveCall {
+        ActiveCall {
+            id: 7,
+            user_id: 11,
+            is_outgoing: true,
+            is_video: false,
+            state,
+            started_at: std::time::Instant::now(),
+            ready_at: None,
+            ready: None,
+            transport,
+            transport_error: None,
+            signaling_queue: Vec::new(),
+            signaling_dropped: 0,
+            muted: false,
+            camera_on: false,
+            screen_sharing: false,
+            remote_video: RemoteVideoState::Inactive,
+            remote_screen: RemoteVideoState::Inactive,
+            remote_audio_muted: false,
+            remote_battery_low: false,
+            signal_bars: bars,
+        }
+    }
+
+    #[test]
+    fn bars_show_only_once_the_call_is_established() {
+        use TransportState::*;
+        let ready = |transport, bars| shown_signal_bars(&call(CallState::Ready, transport, bars));
+        assert_eq!(ready(Some(Connected), Some(3)), Some(3));
+        assert_eq!(ready(Some(Reconnecting), Some(0)), Some(0));
+        assert_eq!(ready(Some(Connecting), Some(2)), None);
+        assert_eq!(ready(Some(Failed), Some(2)), None);
+        assert_eq!(ready(Some(Connected), None), None, "nothing reported yet");
+        let hanging = call(CallState::HangingUp, Some(Connected), Some(4));
+        assert_eq!(shown_signal_bars(&hanging), None);
+    }
 
     #[test]
     fn peer_microphone_off_line_names_the_peer() {
         assert_eq!(microphone_off_line("Zed"), "Zed's microphone is off");
+    }
+
+    #[test]
+    fn bars_grow_like_tdesktops() {
+        let panel: Vec<f32> = (0..4).map(|i| bar_height(BarsStyle::Panel, i)).collect();
+        assert_eq!(panel, vec![4., 6., 8., 10.]);
+        let bar: Vec<f32> = (0..4).map(|i| bar_height(BarsStyle::Bar, i)).collect();
+        assert_eq!(bar, vec![3., 6., 9., 12.]);
     }
 
     #[test]

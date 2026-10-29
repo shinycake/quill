@@ -134,6 +134,7 @@ pub(in crate::ui) fn seed_video_call(
         remote_screen,
         remote_audio_muted: false,
         remote_battery_low: std::env::var_os("QUILL_DEMO_BATTERY").is_some(),
+        signal_bars: Some(3),
     });
 }
 

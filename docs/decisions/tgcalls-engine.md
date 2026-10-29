@@ -334,3 +334,12 @@ beside `quill.exe` on Windows, before step 6.
   microphone-off line shows (`showRemoteLowBattery`). Quill never sends
   its own battery state: tdesktop's `setIsLowBatteryLevel` is under
   `#if 0`.
+- Signal bars (1:1): `signal_bars` becomes `EngineEvent::SignalBars`
+  (clamped to tdesktop's 0 to 4), kept on `ActiveCall::signal_bars`.
+  tdesktop's `SignalBars` widget is drawn beside the emoji fingerprint
+  (`callPanelSignalBars`: 2 px bars, 2 px apart, 4 to 10 px tall) and in
+  the main window's call bar after the mute button (`callBarSignalBars`:
+  3 px, 1 px apart, 3 to 12 px), with bars past the count at half
+  opacity. They show only once the call is established (Ready and
+  connected, or reconnecting after it was), as tdesktop's fingerprint
+  appears with the key.

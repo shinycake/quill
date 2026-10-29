@@ -159,8 +159,8 @@ pub(crate) fn stream_fetch_error(err: &TdError) -> StreamFetchError {
 }
 
 impl<S: JsonSender> ConnectDriver<S> {
-    /// Routes the engine's events (broadcast requests, a 1:1 peer's
-    /// battery) into the driver. The hooks run on engine threads: they only queue or store
+    /// Routes the engine's events (broadcast requests, a 1:1 call's
+    /// peer battery and signal bars) into the driver. The hooks run on engine threads: they only queue or store
     /// and never block. The queue never drops a request (see
     /// [`GroupCallStreams`]); a send only fails once the driver is gone.
     pub(crate) fn install_stream_hooks(&self, engine: &mut dyn CallEngine) {
@@ -361,6 +361,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.apply_peer_battery(*call_id, *is_low);
                 return;
             }
+            EngineEvent::SignalBars { call_id, bars } => {
+                self.apply_signal_bars(*call_id, *bars);
+                return;
+            }
         };
         let Self {
             session,
@@ -401,7 +405,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }
                 EngineEvent::BroadcastRequestCancelled { .. }
                 | EngineEvent::GroupAudioLevels { .. }
-                | EngineEvent::PeerBatteryLow { .. } => {}
+                | EngineEvent::PeerBatteryLow { .. }
+                | EngineEvent::SignalBars { .. } => {}
             }
             return;
         };
@@ -415,7 +420,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             EngineEvent::BroadcastRequestCancelled { request, .. } => {
                 feeder.on_cancel(request);
             }
-            EngineEvent::GroupAudioLevels { .. } | EngineEvent::PeerBatteryLow { .. } => {}
+            EngineEvent::GroupAudioLevels { .. }
+            | EngineEvent::PeerBatteryLow { .. }
+            | EngineEvent::SignalBars { .. } => {}
         }
     }
 

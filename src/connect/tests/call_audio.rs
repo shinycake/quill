@@ -209,3 +209,34 @@ fn peer_battery_low_follows_the_engine_event() {
     assert!(!low(&driver));
     std::fs::remove_dir_all(dir).ok();
 }
+
+/// The connection's signal bars (an engine event) land on the tracked
+/// 1:1 call; another call's are dropped.
+#[test]
+fn signal_bars_follow_the_engine_event() {
+    use crate::calls::engine::EngineEvent;
+    let (dir, mut driver, handle, _sink, _seq) = ready_call_driver();
+    let bars = |driver: &ConnectDriver<Arc<RecordingSender>>| {
+        driver
+            .session
+            .calls
+            .active_call
+            .as_ref()
+            .unwrap()
+            .signal_bars
+    };
+    assert_eq!(bars(&driver), None, "nothing until the engine reports");
+    handle.emit_engine_event(EngineEvent::SignalBars {
+        call_id: 77,
+        bars: 3,
+    });
+    assert!(driver.request_tick(std::time::Instant::now()));
+    assert_eq!(bars(&driver), Some(3));
+    handle.emit_engine_event(EngineEvent::SignalBars {
+        call_id: 78,
+        bars: 1,
+    });
+    driver.request_tick(std::time::Instant::now());
+    assert_eq!(bars(&driver), Some(3));
+    std::fs::remove_dir_all(dir).ok();
+}

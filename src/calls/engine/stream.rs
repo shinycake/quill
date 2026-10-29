@@ -232,6 +232,9 @@ pub enum EngineEvent {
     /// The peer of a 1:1 call says its battery is low, or no longer is
     /// (tgcalls' `remoteBatteryLevelIsLowUpdated`).
     PeerBatteryLow { call_id: i32, is_low: bool },
+    /// The connection quality of a 1:1 call, 0 to 4 bars (tgcalls'
+    /// `signalBarsUpdated`, tdesktop's `kSignalBarCount` scale).
+    SignalBars { call_id: i32, bars: u8 },
 }
 
 pub type EngineEventCallback = Arc<dyn Fn(EngineEvent) + Send + Sync + 'static>;

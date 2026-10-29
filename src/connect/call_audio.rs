@@ -235,6 +235,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// The connection quality, from the engine, onto the active 1:1 call;
+    /// a report for another call is dropped.
+    pub(crate) fn apply_signal_bars(&mut self, call_id: i32, bars: u8) {
+        if let Some(call) = self
+            .session
+            .calls
+            .active_call
+            .as_mut()
+            .filter(|call| call.id == call_id)
+        {
+            call.signal_bars = Some(bars);
+        }
+    }
+
     /// Run the level tap for the tracked group call and tell TDLib when
     /// your speaking state changes. Called from the driver pump.
     pub(crate) fn pump_call_audio(&mut self) -> Result<(), ConnectSendError> {
