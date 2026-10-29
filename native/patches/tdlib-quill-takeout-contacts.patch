@@ -91,7 +91,7 @@ index 0338ab53d..4654fa914 100644
  
    Td *td_;
 diff --git a/td/telegram/Requests.cpp b/td/telegram/Requests.cpp
-index 3737a7708..021600428 100644
+index a274410ab..cc4099cb6 100644
 --- a/td/telegram/Requests.cpp
 +++ b/td/telegram/Requests.cpp
 @@ -6681,6 +6681,18 @@ void Requests::on_request(uint64 id, const td_api::removeContacts &request) {
@@ -129,7 +129,7 @@ index 6a5a5b07f..d53461c12 100644
  
    void on_request(uint64 id, td_api::changeImportedContacts &request);
 diff --git a/td/telegram/UserManager.cpp b/td/telegram/UserManager.cpp
-index 1bb8035ee..1606d967f 100644
+index 58328b210..ec627df27 100644
 --- a/td/telegram/UserManager.cpp
 +++ b/td/telegram/UserManager.cpp
 @@ -118,6 +118,154 @@
@@ -287,7 +287,7 @@ index 1bb8035ee..1606d967f 100644
  class GetContactsQuery final : public Td::ResultHandler {
   public:
    void send(int64 hash) {
-@@ -8555,6 +8703,17 @@ void UserManager::on_deleted_contacts(const vector<UserId> &deleted_contact_user
+@@ -8552,6 +8700,17 @@ void UserManager::on_deleted_contacts(const vector<UserId> &deleted_contact_user
    }
  }
  

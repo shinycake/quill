@@ -9,7 +9,7 @@
 pub const GPUI_KIT_VERSION: &str = "0.8.1";
 
 /// Official TDLib git commit used as the schema/runtime baseline.
-pub const TDLIB_GIT_COMMIT: &str = "0e88653dcbf4e44c73cb655a05b58cd749a91169";
+pub const TDLIB_GIT_COMMIT: &str = "4c6377aa7386c39217878a9a56d581922ad37ca4";
 
 /// CMake `project(TDLib VERSION …)` at [`TDLIB_GIT_COMMIT`].
 pub const TDLIB_CMAKE_VERSION: &str = "1.8.69";
@@ -23,7 +23,7 @@ pub const TD_API_TL_SHA256: &str =
 pub const TD_API_TL_BYTES: usize = 1_216_190;
 
 /// Raw GitHub URL for the official schema at [`TDLIB_GIT_COMMIT`].
-pub const TD_API_TL_UPSTREAM_URL: &str = "https://raw.githubusercontent.com/tdlib/td/0e88653dcbf4e44c73cb655a05b58cd749a91169/td/generate/scheme/td_api.tl";
+pub const TD_API_TL_UPSTREAM_URL: &str = "https://raw.githubusercontent.com/tdlib/td/4c6377aa7386c39217878a9a56d581922ad37ca4/td/generate/scheme/td_api.tl";
 
 /// Relative path of the vendored schema.
 pub const TD_API_TL_PATH: &str = "schema/td_api.tl";
