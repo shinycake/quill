@@ -210,7 +210,7 @@ fn newly_shown(scope: Option<EntityId>, previous: Option<u64>) -> bool {
     }
 }
 
-fn note_activity() {
+pub(super) fn note_activity() {
     ACTIVITY.with(|activity| activity.set(Some(Instant::now())));
 }
 

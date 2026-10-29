@@ -14,6 +14,10 @@
 //! - Images stay under a byte budget; evicted ones are retired from the
 //!   sprite atlas through `image_budget`. Painting a ready image does no
 //!   pixel work and allocates no pixels.
+//! - Once Quill is idle, [`release_unshown`] drops the images no area
+//!   shows any more: each window size a resize went through (a full
+//!   history picture each), a wallpaper since turned or changed, a closed
+//!   dialog's preview and thumbnails.
 #![deny(clippy::indexing_slicing)]
 
 use super::image_budget;
@@ -214,11 +218,20 @@ impl Composite {
     }
 }
 
+/// One image made, by key: `None` for a wallpaper that cannot be drawn.
+struct Entry {
+    key: u64,
+    composite: Option<Composite>,
+    bytes: usize,
+    /// When and where it was last asked for to paint.
+    painted: image_budget::PaintStamp,
+}
+
 /// Images made so far (UI thread).
 #[derive(Default)]
 struct Cache {
-    /// Oldest first; `None` for a wallpaper that cannot be drawn.
-    entries: VecDeque<(u64, Option<Composite>, usize)>,
+    /// Oldest first.
+    entries: VecDeque<Entry>,
     bytes: usize,
     /// What each slot showed last (painted stretched while its next size
     /// renders, if it is still cached).
@@ -241,37 +254,85 @@ struct Fade {
 }
 
 impl Cache {
+    /// The image for `key`, to paint now.
     fn get(&mut self, key: u64) -> Option<Option<Composite>> {
-        let at = self.entries.iter().position(|(k, _, _)| *k == key)?;
-        let entry = self.entries.remove(at)?;
-        let value = entry.1.clone();
+        let at = self.entries.iter().position(|e| e.key == key)?;
+        let mut entry = self.entries.remove(at)?;
+        entry.painted = image_budget::paint_stamp();
+        let value = entry.composite.clone();
         self.entries.push_back(entry);
         Some(value)
     }
 
-    fn peek(&self, key: u64) -> Option<Composite> {
-        self.entries
-            .iter()
-            .find(|(k, _, _)| *k == key)
-            .and_then(|(_, c, _)| c.clone())
+    /// The image for `key`, if made, to paint now; its place in the order
+    /// stays.
+    fn peek(&mut self, key: u64) -> Option<Composite> {
+        let entry = self.entries.iter_mut().find(|e| e.key == key)?;
+        entry.painted = image_budget::paint_stamp();
+        entry.composite.clone()
     }
 
     fn insert(&mut self, key: u64, composite: Option<Composite>) {
         let bytes = composite
             .as_ref()
             .map_or(0, |c| c.size.0 as usize * c.size.1 as usize * 4);
-        self.entries.push_back((key, composite, bytes));
+        self.entries.push_back(Entry {
+            key,
+            composite,
+            bytes,
+            painted: image_budget::paint_stamp(),
+        });
         self.bytes += bytes;
         // Images on screen are looked up on every paint, so they sit at
         // the back; the newest one always stays.
         let mut retired = Vec::new();
         while self.bytes > BUDGET_BYTES && self.entries.len() > 1 {
-            if let Some((_, old, bytes)) = self.entries.pop_front() {
-                self.bytes -= bytes;
-                retired.extend(old.map(|c| c.image));
+            if let Some(old) = self.entries.pop_front() {
+                self.bytes -= old.bytes;
+                retired.extend(old.composite.map(|c| c.image));
             }
         }
         image_budget::retire_all(retired);
+    }
+
+    /// Take out the images no slot shows and no frame can still show.
+    /// A slot's current picture stays even when its window hasn't drawn
+    /// for a while (only the main window's frames are counted).
+    fn take_unshown(&mut self) -> Vec<Arc<RenderImage>> {
+        let shown: HashSet<u64> = self.shown.values().map(|s| s.key).collect();
+        let (keep, gone): (VecDeque<Entry>, VecDeque<Entry>) = std::mem::take(&mut self.entries)
+            .into_iter()
+            .partition(|e| shown.contains(&e.key) || image_budget::may_still_show(e.painted));
+        self.entries = keep;
+        self.bytes = self.entries.iter().map(|e| e.bytes).sum();
+        gone.into_iter()
+            .filter_map(|e| e.composite.map(|c| c.image))
+            .collect()
+    }
+}
+
+/// Quill went idle: drop the pictures no area shows any more (they render
+/// again if asked for). Runs between frames, so they leave every window's
+/// atlas now; one a crossfade still holds is retired instead.
+pub(super) fn release_unshown(cx: &mut App) {
+    let gone = CACHE.with(|cache| cache.borrow_mut().take_unshown());
+    if super::frame_clock::trace_ticks() && !gone.is_empty() {
+        let bytes: usize = gone
+            .iter()
+            .map(|image| image.as_bytes(0).map_or(0, <[u8]>::len))
+            .sum();
+        eprintln!(
+            "wallpaper idle release: {} pictures, {:.1} MB",
+            gone.len(),
+            bytes as f64 / 1048576.0
+        );
+    }
+    let (held, unheld): (Vec<_>, Vec<_>) = gone
+        .into_iter()
+        .partition(|image| Arc::strong_count(image) > 1);
+    image_budget::retire_all(held);
+    for image in unheld {
+        cx.drop_image(image, None);
     }
 }
 
@@ -364,7 +425,8 @@ pub(super) fn fade_layer(wallpaper: &Wallpaper) -> Option<AnyElement> {
 /// What a canvas paints this frame.
 pub(super) struct Lookup {
     pub composite: Option<Composite>,
-    /// A newer image is on its way; ask for another frame.
+    /// Ask for another frame: a newer image is on its way, or this one is
+    /// new.
     pub pending: bool,
     /// A crossfade started: the history must render its overlay.
     pub fade_started: bool,
@@ -378,7 +440,13 @@ fn lookup(wallpaper: &Wallpaper, slot: u64, thumb: bool, width: u32, height: u32
         identity: if thumb { key } else { wallpaper.identity() },
         area: (width, height),
     };
-    let ready = |cache: &mut Cache, composite: Option<Composite>| {
+    // `made`: the picture is new, which is activity for the idle trim
+    // (`release_unshown`); one more frame lets `QuillApp::render`
+    // schedule it.
+    let ready = |cache: &mut Cache, composite: Option<Composite>, made: bool| {
+        if made {
+            image_budget::note_activity();
+        }
         let (composite, fade_started) = if thumb {
             (composite, false)
         } else {
@@ -386,34 +454,35 @@ fn lookup(wallpaper: &Wallpaper, slot: u64, thumb: bool, width: u32, height: u32
         };
         Lookup {
             composite,
-            pending: fade_started,
+            pending: fade_started || made,
             fade_started,
         }
     };
     CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if let Some(found) = cache.get(key) {
-            return ready(&mut cache, found);
+            return ready(&mut cache, found, false);
         }
         let shared = shared();
         if !shared.threaded {
             let rendered = INLINE_SOURCES.with(|s| s.borrow_mut().render(wallpaper, width, height));
             let composite = rendered.and_then(|r| to_composite(r, width, height));
             cache.insert(key, composite.clone());
-            return ready(&mut cache, composite);
+            return ready(&mut cache, composite, true);
         }
         let mut board = shared.board.lock_or_recover();
         if let Some(result) = board.done.remove(&key) {
             drop(board);
             let composite = result.and_then(|r| to_composite(r, width, height));
             cache.insert(key, composite.clone());
-            return ready(&mut cache, composite);
+            return ready(&mut cache, composite, true);
         }
         // Thumbnails share a slot and never resize: no stale picture.
         let stale = if thumb {
             None
         } else {
-            cache.shown.get(&slot).and_then(|s| cache.peek(s.key))
+            let last = cache.shown.get(&slot).map(|s| s.key);
+            last.and_then(|key| cache.peek(key))
         };
         let not_before = if stale.is_some() {
             Instant::now() + SETTLE
@@ -524,9 +593,61 @@ pub(super) fn wallpaper_layer(
 
 #[cfg(test)]
 mod tests {
-    use super::{Board, Job, image_key};
+    use super::{Board, Cache, Composite, Job, Shown, image_key};
+    use crate::ui::image_budget::begin_frame;
     use crate::ui::wallpaper::Wallpaper;
+    use gpui_kit::RenderImage;
+    use std::sync::Arc;
     use std::time::{Duration, Instant};
+
+    fn composite(width: u32) -> Composite {
+        Composite {
+            image: Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
+                image::Frame::new(image::RgbaImage::new(width, 1)),
+            ]))),
+            area: (width, 1),
+            at: (0, 0),
+            size: (width, 1),
+        }
+    }
+
+    #[test]
+    fn once_idle_only_what_a_slot_shows_stays() {
+        let mut cache = Cache::default();
+        // A window resized through three widths, then a closed dialog's
+        // thumbnail; the history slot shows the last width.
+        for key in 1..=4 {
+            cache.insert(key, Some(composite(key as u32)));
+        }
+        let shown = Shown {
+            key: 3,
+            identity: 0,
+            area: (3, 1),
+        };
+        cache.shown.insert(7, shown);
+        begin_frame();
+        begin_frame();
+
+        let mut gone: Vec<u32> = cache
+            .take_unshown()
+            .iter()
+            .map(|image| image.size(0).width.0 as u32)
+            .collect();
+        gone.sort_unstable();
+        assert_eq!(gone, [1, 2, 4]);
+        assert_eq!(cache.entries.len(), 1);
+        assert_eq!(cache.bytes, 3 * 4);
+        assert!(cache.get(3).is_some());
+    }
+
+    #[test]
+    fn a_picture_painted_last_frame_stays() {
+        let mut cache = Cache::default();
+        begin_frame();
+        cache.insert(1, Some(composite(1)));
+        assert!(cache.take_unshown().is_empty());
+        assert_eq!(cache.entries.len(), 1);
+    }
 
     fn job(key: u64, slot: u64, delay_ms: u64) -> Job {
         Job {
