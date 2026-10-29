@@ -185,6 +185,12 @@ void AppendServer(std::vector<tgcalls::RtcServer> &list, const Server &server, c
 	}
 }
 
+// A timeout from TDLib's options, or `fallback` (the option's default) when
+// the config leaves it out.
+double MillisecondsOr(const json11::Json &value, double fallback) {
+	return value.is_number() ? value.number_value() : fallback;
+}
+
 int32_t VideoStateToC(tgcalls::VideoState state) {
 	switch (state) {
 	case tgcalls::VideoState::Active: return QC_VIDEO_ACTIVE;
@@ -251,8 +257,8 @@ qc_p2p *Create(const std::string &configJson, const qc_p2p_callbacks &callbacks,
 	auto descriptor = tgcalls::Descriptor{
 		.version = version,
 		.config = tgcalls::Config{
-			.initializationTimeout = json["connect_timeout_ms"].number_value() / 1000.,
-			.receiveTimeout = json["packet_timeout_ms"].number_value() / 1000.,
+			.initializationTimeout = MillisecondsOr(json["connect_timeout_ms"], 30000) / 1000.,
+			.receiveTimeout = MillisecondsOr(json["packet_timeout_ms"], 10000) / 1000.,
 			.dataSaving = tgcalls::DataSaving::Never,
 			.enableP2P = json["allow_p2p"].bool_value(),
 			.enableAEC = false,

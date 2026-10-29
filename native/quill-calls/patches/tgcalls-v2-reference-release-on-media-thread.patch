@@ -1,0 +1,28 @@
+diff --git a/tgcalls/v2/InstanceV2ReferenceImpl.cpp b/tgcalls/v2/InstanceV2ReferenceImpl.cpp
+index dbaf093..37d7819 100644
+--- a/tgcalls/v2/InstanceV2ReferenceImpl.cpp
++++ b/tgcalls/v2/InstanceV2ReferenceImpl.cpp
+@@ -1050,11 +1050,22 @@ public:
+             return;
+         }
+ 
+-        _threads->getWorkerThread()->PostTask([weak, call]() {
++        _threads->getWorkerThread()->PostTask([weak, call, threads = _threads]() {
+             auto strong = weak.lock();
+             if (!strong) {
+                 return;
+             }
++            // Drop this reference on the media thread: were it the last one,
++            // destroying the PeerConnection here would wait on the media
++            // thread while ~PeerConnection there waits on this thread.
++            struct ReleaseOnMediaThread {
++                const std::shared_ptr<Threads> &threads;
++                std::shared_ptr<InstanceV2ReferenceImplInternal> &strong;
++                ~ReleaseOnMediaThread() {
++                    threads->getMediaThread()->PostTask([strong = std::move(strong)] {
++                    });
++                }
++            } releaseOnMediaThread{threads, strong};
+             if (strong->_isStopped.load()) {
+                 return;
+             }

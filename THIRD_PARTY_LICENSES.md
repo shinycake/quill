@@ -12,7 +12,7 @@ license texts under `licenses/`.
 
 ## Overview
 
-- MIT License: 676
+- MIT License: 677
 - Apache License 2.0: 42
 - Unicode License v3: 24
 - ISC License: 22
@@ -11483,6 +11483,7 @@ SOFTWARE.
 
 Used by:
 - [ntgcalls-sys 0.1.0](https://github.com/shinycake/quill)
+- [quill-calls-sys 0.1.0](https://github.com/shinycake/quill)
 - [quill-webview-protocol 0.1.0](https://github.com/shinycake/quill)
 - [accesskit 0.24.1](https://github.com/AccessKit/accesskit)
 - [accesskit_atspi_common 0.19.1](https://github.com/AccessKit/accesskit)

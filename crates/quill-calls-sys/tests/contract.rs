@@ -80,14 +80,6 @@ fn library_contract() {
         assert!((qc.qc_p2p_create)(unknown.as_ptr(), &callbacks, std::ptr::null_mut()).is_null());
 
         for version in versions {
-            // tgcalls' InstanceV2ReferenceImpl (10.0.0, 11.0.0) can deadlock
-            // when torn down right after it starts: its last reference may
-            // drop on the worker thread, whose PeerConnection teardown waits
-            // on the media thread that waits on the worker. Follow-up in
-            // docs/decisions/tgcalls-engine.md.
-            if matches!(version, "10.0.0" | "11.0.0") {
-                continue;
-            }
             let good = CString::new(config(version, max_layer)).unwrap();
             let call = (qc.qc_p2p_create)(good.as_ptr(), &callbacks, std::ptr::null_mut());
             assert!(!call.is_null(), "version {version} was refused");

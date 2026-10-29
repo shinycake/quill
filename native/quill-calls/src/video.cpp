@@ -116,16 +116,19 @@ void qc_video_capture_set_preview(qc_video_capture *capture, qc_video_frame_fn p
 	if (!capture) {
 		return;
 	}
-	quill_calls::ClosePreview(capture);
+	// Held throughout, so concurrent calls neither leave a replaced guard
+	// open nor install a sink whose guard is no longer the current one.
+	std::lock_guard lock(capture->previewMutex);
+	if (capture->previewGuard) {
+		capture->previewGuard->close();
+		capture->previewGuard = nullptr;
+	}
 	if (!preview) {
 		capture->capture->setOutput(nullptr);
 		return;
 	}
 	auto guard = std::make_shared<quill_calls::CallbackGuard>();
-	{
-		std::lock_guard lock(capture->previewMutex);
-		capture->previewGuard = guard;
-	}
+	capture->previewGuard = guard;
 	capture->capture->setOutput(std::make_shared<quill_calls::CallbackSink>(
 		[=](const qc_video_frame &frame) {
 			guard->run([&] {
