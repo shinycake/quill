@@ -202,10 +202,12 @@ jobs:
         with:
           name: quill-windows-exe
           path: target/release
+      # A single-file artifact is stored at its root, so the download names
+      # the directory the package script reads tdjson.dll from.
       - uses: actions/download-artifact@v8
         with:
           name: quill-windows-native
-          path: .
+          path: native/prefix/bin
       - uses: actions/download-artifact@v8
         with:
           name: quill-windows-ffmpeg
