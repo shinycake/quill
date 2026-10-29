@@ -6,8 +6,8 @@
 #     quill-cli.exe              console front for `quill agent` (waits, passes the exit code on)
 #     quill-webview.exe          mini apps (WebView2; the Evergreen runtime ships with Windows 10/11)
 #     tdjson.dll                         TDLib, OpenSSL and zlib linked in statically
-#     quill_calls.dll                    calls (tgcalls behind Quill's C API, LGPL-3.0), when built;
-#                                        without it calls show as unavailable (docs/decisions/tgcalls-engine.md)
+#     quill_calls.dll                    calls (tgcalls behind Quill's C API, LGPL-3.0; imports the FFmpeg DLLs below)
+#     licenses/quill-calls/              its source pins (SOURCES.txt) and every part's notice
 #     quillvideo.dll av{codec,format,util,filter,device}-N.dll sw{scale,resample}-N.dll   in-process video (FFmpeg, LGPL-2.1+)
 #     ffmpeg.exe ffprobe.exe             the programs for video send/edit, photos, camera (same FFmpeg build, no libx264)
 #     licenses/ffmpeg/                   FFmpeg license texts + exact source and configure line
@@ -38,7 +38,7 @@ if ($videoDlls.Count -ne 8) { throw "expected quillvideo.dll and 7 FFmpeg DLLs i
 foreach ($exe in 'ffmpeg.exe', 'ffprobe.exe') {
     if (-not (Test-Path (Join-Path $ffmpeg "bin/$exe"))) { throw "missing $ffmpeg/bin/$exe" }
 }
-foreach ($f in @($bin, $cli, $webview, (Join-Path $tdDir 'tdjson.dll'))) {
+foreach ($f in @($bin, $cli, $webview, (Join-Path $tdDir 'tdjson.dll'), $callsDll, (Join-Path $callsDir 'share/SOURCES.txt'))) {
     if (-not (Test-Path $f)) { throw "missing input $f" }
 }
 
@@ -53,19 +53,14 @@ Copy-Item $bin (Join-Path $pkg 'quill.exe')
 Copy-Item $cli (Join-Path $pkg 'quill-cli.exe')
 Copy-Item $webview (Join-Path $pkg 'quill-webview.exe')
 Copy-Item (Join-Path $tdDir 'tdjson.dll') $pkg
-# The call library, beside quill.exe where quill-calls-sys looks for it.
-# TODO(tgcalls-windows): required once the Windows build of libquill_calls
-# joins the packaging (docs/decisions/tgcalls-engine.md); until then the
-# package ships without it and calls show as unavailable.
-if (Test-Path $callsDll) {
-    Copy-Item $callsDll (Join-Path $pkg 'quill_calls.dll')
-    $callsLic = Join-Path $pkg 'licenses/quill-calls'
-    New-Item -ItemType Directory -Force $callsLic | Out-Null
-    Copy-Item (Join-Path $callsDir 'share/SOURCES.txt') $callsLic
-    Copy-Item -Recurse (Join-Path $callsDir 'share/licenses') (Join-Path $callsLic 'licenses')
-} else {
-    Write-Warning "no $callsDll: packaging without calls"
-}
+# The call library, beside quill.exe where quill-calls-sys looks for it
+# (docs/decisions/tgcalls-engine.md). It imports the FFmpeg DLLs copied
+# below; OpenSSL, zlib and the C runtime are linked in.
+Copy-Item $callsDll (Join-Path $pkg 'quill_calls.dll')
+$callsLic = Join-Path $pkg 'licenses/quill-calls'
+New-Item -ItemType Directory -Force $callsLic | Out-Null
+Copy-Item (Join-Path $callsDir 'share/SOURCES.txt') $callsLic
+Copy-Item -Recurse (Join-Path $callsDir 'share/licenses') (Join-Path $callsLic 'licenses')
 # In-process video: the shim plus FFmpeg's DLLs, dynamically linked so they
 # stay replaceable (LGPL), with FFmpeg's license texts.
 foreach ($dll in $videoDlls) { Copy-Item $dll.FullName $pkg }
