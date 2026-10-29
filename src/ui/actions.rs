@@ -193,3 +193,27 @@ pub struct SpellingUnlearn {
 pub struct SpellingIgnore {
     pub word: String,
 }
+
+/// The composer's right-click "Suggest Emoji" for the word at the click
+/// (`emoji_words_menu`), built per menu; never bound to keys.
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = quill_ui, no_json)]
+pub struct EmojiWordSuggest {
+    /// Byte range of `word` in the draft when the menu opened.
+    pub start: usize,
+    pub end: usize,
+    pub word: String,
+}
+
+/// "Don't Suggest Emoji for This Word": the word (normalized) joins the
+/// list in Settings › Chats.
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = quill_ui, no_json)]
+pub struct EmojiWordBlock {
+    pub word: String,
+}
+
+/// "Turn Off Emoji Suggestions": words are no longer highlighted.
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = quill_ui, no_json)]
+pub struct EmojiWordsOff;

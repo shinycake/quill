@@ -3,19 +3,16 @@
 //!
 //! Telegram Desktop has no such feature. The closest one is iOS Messages'
 //! emoji replacement (iOS 10): with the emoji keyboard open, words that
-//! have an emoji turn orange and a tap offers them. That lights up every
-//! match at once and only on request; here the highlight is always there
-//! and has to stay rare, so a word must earn it (docs/decisions/
-//! emoji-word-highlights.md):
+//! have an emoji turn orange and a tap offers them. Here every word that is
+//! an emoji keyword lights up as soon as it is finished; a word the user
+//! does not want is turned off from its context menu and listed in
+//! Settings (docs/decisions/emoji-word-highlights.md):
 //!
 //! - it is finished: the caret or the selection is not touching it;
-//! - it is a plain word of [`MIN_WORD_CHARS`] letters or more, outside
-//!   code, links and mentions, not a [`COMMON_WORDS`] word;
-//! - it is a whole emoji keyword with at most [`MAX_EMOJI_PER_WORD`]
-//!   emoji: "pizza" has one, "face" has dozens and says nothing;
-//! - one word in [`WORDS_PER_HIGHLIGHT`] (at least one, never more than
-//!   [`MAX_HIGHLIGHTS`]), words lit before keeping their place, then the
-//!   most specific words.
+//! - it is a plain word outside code, links and mentions, and not one
+//!   tdesktop's `SkipExactKeyword` drops (most one- and two-letter words;
+//!   "ok" stays);
+//! - it is a whole emoji keyword.
 //!
 //! The lookups are TDLib's on-device keyword search, so nothing typed
 //! leaves the device. Pure, so it is unit tested.
@@ -23,34 +20,11 @@
 
 use std::ops::Range;
 
-use crate::emoji::keyword_lookup::{keyword_emoji, normalize_query};
+use crate::emoji::keyword_lookup::{keyword_emoji, normalize_query, skip_exact_keyword};
 use crate::telegram::envelope_emoji::EmojiKeyword;
 
-/// Shortest word that may be highlighted.
-pub const MIN_WORD_CHARS: usize = 3;
-/// A keyword with more emoji than this is too vague to offer.
-pub const MAX_EMOJI_PER_WORD: usize = 8;
-/// At most one highlight for this many words of the message.
-pub const WORDS_PER_HIGHLIGHT: usize = 6;
-/// Highlights in one message, however long.
-pub const MAX_HIGHLIGHTS: usize = 3;
 /// Only this much of a long draft is looked at.
 pub const SCAN_BYTES: usize = 4096;
-
-/// Words that are emoji keywords but almost never meant as one: articles,
-/// pronouns, helpers and the vaguest keywords.
-pub const COMMON_WORDS: &[&str] = &[
-    "about", "after", "again", "all", "also", "and", "any", "are", "back", "been", "before", "but",
-    "can", "come", "could", "day", "did", "does", "done", "down", "end", "even", "for", "from",
-    "get", "give", "going", "good", "got", "had", "has", "have", "her", "here", "him", "his",
-    "how", "into", "its", "just", "know", "last", "let", "like", "look", "made", "make", "man",
-    "many", "mark", "more", "most", "much", "need", "new", "next", "not", "now", "off", "one",
-    "only", "other", "our", "out", "over", "person", "put", "really", "right", "said", "same",
-    "say", "see", "she", "sign", "some", "soon", "still", "symbol", "take", "than", "that", "the",
-    "their", "them", "then", "there", "they", "thing", "think", "this", "time", "too", "top",
-    "two", "use", "very", "want", "was", "way", "well", "were", "what", "when", "where", "which",
-    "who", "why", "will", "with", "woman", "would", "yes", "you", "your",
-];
 
 /// A word worth a lookup: where it is and its normalized form.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,8 +46,8 @@ pub struct Highlight {
 pub const MAX_CANDIDATES: usize = 48;
 
 /// The words of `text` (bytes, `char` boundaries) that may be highlighted:
-/// letters only (an inner `'` or `-` is kept, "don't", "t-rex"), at
-/// least [`MIN_WORD_CHARS`], not touching `selection`, not overlapping
+/// letters and digits (an inner `'` or `-` is kept, "don't", "t-rex"),
+/// not dropped by [`skip_exact_keyword`], not touching `selection`, not overlapping
 /// `skip` (code, links, mentions), not part of a tag, mention, command,
 /// `:query`, link or path. At most [`MAX_CANDIDATES`], the nearest to the
 /// selection. Also the total word count, for the density limit.
@@ -99,11 +73,10 @@ pub fn candidates(
         let normalized = normalize_query(word);
         if touches_selection
             || marked
-            || word.chars().filter(|c| !is_mark(*c)).count() < MIN_WORD_CHARS
+            || skip_exact_keyword(&normalized)
             || !word
                 .chars()
-                .all(|c| c.is_alphabetic() || is_mark(c) || c == '\'' || c == '-')
-            || COMMON_WORDS.contains(&normalized.as_str())
+                .all(|c| c.is_alphanumeric() || is_mark(c) || c == '\'' || c == '-')
             || skip
                 .iter()
                 .any(|r| r.start < range.end && range.start < r.end)
@@ -128,51 +101,28 @@ pub fn candidates(
 }
 
 /// The highlights among `candidates`, given the keyword answers TDLib has
-/// sent (`answer` is `None` while one is on its way). A lone word gets
-/// none: the composer already offers its emoji above the field. Words
-/// that were lit before (`was_lit`) keep their place, so finishing a
-/// more specific word does not move a highlight the user has seen.
+/// sent (`answer` is `None` while one is on its way): every word that is a
+/// whole keyword. A lone word gets none: the composer already offers its
+/// emoji above the field.
 pub fn pick<'a>(
     candidates: &[Candidate],
     words: usize,
-    was_lit: impl Fn(&str) -> bool,
     answer: impl Fn(&str) -> Option<&'a [EmojiKeyword]>,
 ) -> Vec<Highlight> {
     if words < 2 {
         return Vec::new();
     }
-    let budget = (words / WORDS_PER_HIGHLIGHT).clamp(1, MAX_HIGHLIGHTS);
-    let mut scored: Vec<(bool, Highlight)> = candidates
+    candidates
         .iter()
         .filter_map(|c| {
             let emoji = keyword_emoji(&c.normalized, true, answer(&c.normalized)?);
-            (!emoji.is_empty() && emoji.len() <= MAX_EMOJI_PER_WORD).then(|| {
-                (
-                    !was_lit(&c.normalized),
-                    Highlight {
-                        range: c.range.clone(),
-                        normalized: c.normalized.clone(),
-                        emoji,
-                    },
-                )
+            (!emoji.is_empty()).then(|| Highlight {
+                range: c.range.clone(),
+                normalized: c.normalized.clone(),
+                emoji,
             })
         })
-        .collect();
-    // Lit before first; then fewest emoji, the most specific word;
-    // earlier wins a tie.
-    scored.sort_by_key(|(new, h)| (*new, h.emoji.len(), h.range.start));
-    let mut chosen: Vec<Highlight> = Vec::new();
-    for (_, h) in scored {
-        if chosen.len() == budget {
-            break;
-        }
-        // One word of the same text is enough ("pizza ... pizza").
-        if chosen.iter().all(|c| c.normalized != h.normalized) {
-            chosen.push(h);
-        }
-    }
-    chosen.sort_by_key(|h| h.range.start);
-    chosen
+        .collect()
 }
 
 /// A whitespace-delimited token and whether it is a tag, mention,
@@ -287,10 +237,14 @@ mod tests {
         // The word at the caret is still being typed.
         assert_eq!(words("eat pizza", 9), ["eat"]);
         assert_eq!(words("eat pizza ", 10), ["eat", "pizza"]);
-        // Short and common words, digits, tags, mentions, commands, paths.
+        // Tags, mentions, commands, `:queries`, paths and most one- and
+        // two-letter words are not; "ok" and common words are.
         assert_eq!(
-            words("I go to the #party with @friend /start a:b 3pm x ok", 0),
-            Vec::<&str>::new()
+            words(
+                "I go to the #party with @friend /start a:b x.y/z ok 100",
+                usize::MAX
+            ),
+            ["the", "with", "ok", "100"]
         );
         assert_eq!(
             words("don't t-rex rock'n", usize::MAX),
@@ -298,7 +252,10 @@ mod tests {
         );
         assert_eq!(words("Ünïcode Привет", usize::MAX), ["Ünïcode", "Привет"]);
         // A decomposed accent stays with its word.
-        assert_eq!(words("cafe\u{301} time", usize::MAX), ["cafe\u{301}"]);
+        assert_eq!(
+            words("cafe\u{301} time", usize::MAX),
+            ["cafe\u{301}", "time"]
+        );
         // A selection covers every word it touches, not only its end.
         let (found, _) = candidates("pizza and cake ", 0..9, &[]);
         let picked: Vec<&str> = found.iter().map(|c| c.normalized.as_str()).collect();
@@ -320,24 +277,6 @@ mod tests {
     }
 
     #[test]
-    fn a_lit_word_keeps_its_place() {
-        let pizza = [kw("🍕", "pizza")];
-        let cake = [kw("🍰", "cake"), kw("🎂", "cake")];
-        let lookup = |q: &str| match q {
-            "pizza" => Some(&pizza[..]),
-            "cake" => Some(&cake[..]),
-            _ => Some(&[][..]),
-        };
-        let text = "we had some cake and then the pizza ";
-        let (found, count) = candidates(text, text.len()..text.len(), &[]);
-        let fresh = pick(&found, count, |_| false, lookup);
-        assert_eq!(fresh[0].normalized, "pizza");
-        let kept = pick(&found, count, |w| w == "cake", lookup);
-        assert_eq!(kept.len(), 1);
-        assert_eq!(kept[0].normalized, "cake");
-    }
-
-    #[test]
     fn skipped_spans_hold_no_candidates() {
         let text = "see `pizza` here at pizza.com";
         let (found, count) = candidates(text, 0..0, &[4..11]);
@@ -346,60 +285,43 @@ mod tests {
     }
 
     #[test]
-    fn specific_words_win_and_density_is_capped() {
-        let text = "we ordered pizza and some cake at the party tonight friends ";
+    fn every_word_with_an_emoji_lights_up() {
+        let pizza = [kw("🍕", "pizza")];
+        let ok = [kw("🆗", "ok"), kw("👌", "ok")];
+        let funny: Vec<EmojiKeyword> = [
+            "😂", "🤣", "😆", "😹", "🙃", "😝", "🤪", "😜", "😛", "😁", "😄", "🤡",
+        ]
+        .iter()
+        .map(|e| kw(e, "funny"))
+        .collect();
+        // TDLib's prefix search: "pizzeria" is no "pizz" keyword.
+        let lookup = |q: &str| match q {
+            "pizza" => Some(&pizza[..]),
+            "ok" => Some(&ok[..]),
+            "funny" => Some(funny.as_slice()),
+            _ => Some(&[][..]),
+        };
+        let text = "ok that pizza was funny ";
         let (found, count) = candidates(text, text.len()..text.len(), &[]);
-        let answers = |q: &str| -> Option<Vec<EmojiKeyword>> {
-            match q {
-                "pizza" => Some(vec![kw("🍕", "pizza")]),
-                "cake" => Some(vec![kw("🍰", "cake"), kw("🎂", "cake")]),
-                "party" => Some(vec![
-                    kw("🎉", "party"),
-                    kw("🥳", "party"),
-                    kw("🎊", "party"),
-                ]),
-                "tonight" => Some(
-                    (0..20)
-                        .map(|n| kw(&char::from_u32(0x1F300 + n).unwrap().to_string(), "tonight"))
-                        .collect(),
-                ),
-                _ => Some(Vec::new()),
-            }
-        };
-        let store: Vec<(String, Vec<EmojiKeyword>)> = found
-            .iter()
-            .map(|c| (c.normalized.clone(), answers(&c.normalized).unwrap()))
-            .collect();
-        let lookup = |q: &str| {
-            store
-                .iter()
-                .find(|(k, _)| k == q)
-                .map(|(_, v)| v.as_slice())
-        };
-        let picked: Vec<&str> = pick(&found, count, |_| false, lookup)
+        let lit: Vec<&str> = pick(&found, count, lookup)
             .iter()
             .map(|h| &text[h.range.clone()])
             .collect();
-        // 11 words: one highlight for every six, the most specific.
-        assert_eq!(picked, ["pizza"]);
-        // "tonight" has too many emoji to ever show.
-        let long = "pizza cake party tonight ".repeat(10);
-        let (found, count) = candidates(&long, long.len()..long.len(), &[]);
-        let picked: Vec<String> = pick(&found, count, |_| false, lookup)
-            .into_iter()
-            .map(|h| h.normalized)
-            .collect();
-        assert_eq!(picked, ["pizza", "cake", "party"]);
+        assert_eq!(lit, ["ok", "pizza", "funny"]);
+        // A word twice lights twice.
+        let text = "pizza or pizza ";
+        let (found, count) = candidates(text, text.len()..text.len(), &[]);
+        assert_eq!(pick(&found, count, lookup).len(), 2);
     }
 
     #[test]
     fn a_lone_word_or_a_pending_answer_shows_nothing() {
         let one = [kw("🍕", "pizza")];
         let (found, count) = candidates("pizza ", 6..6, &[]);
-        assert!(pick(&found, count, |_| false, |_| Some(&one[..])).is_empty());
+        assert!(pick(&found, count, |_| Some(&one[..])).is_empty());
         let (found, count) = candidates("hot pizza ", 10..10, &[]);
-        assert!(pick(&found, count, |_| false, |_| None).is_empty());
-        assert_eq!(pick(&found, count, |_| false, |_| Some(&one[..])).len(), 1);
+        assert!(pick(&found, count, |_| None).is_empty());
+        assert_eq!(pick(&found, count, |_| Some(&one[..])).len(), 1);
     }
 
     #[test]

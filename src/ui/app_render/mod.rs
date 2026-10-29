@@ -3,16 +3,17 @@
 
 use super::actions::{
     AttachFile, CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow,
-    ComposerEditCodeLanguage, ComposerEditLink, ComposerPastePlain, DeleteSelection, FirstChat,
-    FocusComposer, FocusSidebar, FormatBlockQuote, FormatBold, FormatClear, FormatItalic,
-    FormatMonospace, FormatSpoiler, FormatStrikethrough, FormatUnderline, HistoryPageDown,
-    HistoryPageUp, HistoryToBottom, HistoryToTop, LastChat, LoadOlder, LockApp, MarkChatRead,
-    MinimizeWindow, NextChat, NextFolder, OpenArchive, OpenChatSearch, OpenContacts, OpenHelp,
-    OpenPinnedChat, OpenSavedMessages, OpenSearch, OpenSettings, OpenShortcuts, PrevChat,
-    PrevFolder, QuitApp, ReplyToNext, ReplyToPrevious, SelectionExtendNewer, SelectionExtendOlder,
-    SelectionFocusNewer, SelectionFocusOlder, ShowChatMenu, ShowChatPreview, SpellingIgnore,
-    SpellingLearn, SpellingReplace, SpellingUnlearn, StoryTogglePause, SubmitCode, SubmitPassword,
-    SubmitPhone, ToggleFullscreen, ToggleMessageSelection, ToggleSidebar, ToggleTheme, ViewerCopy,
+    ComposerEditCodeLanguage, ComposerEditLink, ComposerPastePlain, DeleteSelection,
+    EmojiWordBlock, EmojiWordSuggest, EmojiWordsOff, FirstChat, FocusComposer, FocusSidebar,
+    FormatBlockQuote, FormatBold, FormatClear, FormatItalic, FormatMonospace, FormatSpoiler,
+    FormatStrikethrough, FormatUnderline, HistoryPageDown, HistoryPageUp, HistoryToBottom,
+    HistoryToTop, LastChat, LoadOlder, LockApp, MarkChatRead, MinimizeWindow, NextChat, NextFolder,
+    OpenArchive, OpenChatSearch, OpenContacts, OpenHelp, OpenPinnedChat, OpenSavedMessages,
+    OpenSearch, OpenSettings, OpenShortcuts, PrevChat, PrevFolder, QuitApp, ReplyToNext,
+    ReplyToPrevious, SelectionExtendNewer, SelectionExtendOlder, SelectionFocusNewer,
+    SelectionFocusOlder, ShowChatMenu, ShowChatPreview, SpellingIgnore, SpellingLearn,
+    SpellingReplace, SpellingUnlearn, StoryTogglePause, SubmitCode, SubmitPassword, SubmitPhone,
+    ToggleFullscreen, ToggleMessageSelection, ToggleSidebar, ToggleTheme, ViewerCopy,
     ViewerFlipHorizontal, ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn,
     ViewerZoomOut, ViewerZoomReset, ZoomWindow,
 };
@@ -546,6 +547,15 @@ impl Render for QuillApp {
             }))
             .on_action(cx.listener(|this, action: &SpellingIgnore, _, cx| {
                 this.on_spelling_ignore(action, cx);
+            }))
+            .on_action(cx.listener(|this, action: &EmojiWordSuggest, _, cx| {
+                this.on_emoji_word_suggest(action, cx);
+            }))
+            .on_action(cx.listener(|this, action: &EmojiWordBlock, _, cx| {
+                this.on_emoji_word_block(action, cx);
+            }))
+            .on_action(cx.listener(|this, _: &EmojiWordsOff, _, cx| {
+                this.on_emoji_words_off(cx);
             }))
             .on_action(cx.listener(|this, _: &FormatBold, window, cx| {
                 this.run_composer_shortcut(ComposerShortcut::Bold, window, cx);

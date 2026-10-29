@@ -482,6 +482,46 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
+    /// The composer's emoji suggestions offer custom emoji from the
+    /// installed emoji sets (tdesktop `SuggestionsWidget::appendCustom`):
+    /// load the installed list when `list` (once per session, from the
+    /// caller) and the sets' contents. Loaded and loading sets are
+    /// skipped, so this is cheap to call whenever the strip is rebuilt.
+    pub fn ensure_suggestion_emoji_sets(&mut self, list: bool) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if list
+            && self.session.stickers.emoji.installed_sets.is_empty()
+            && !self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::GetInstalledEmojiSets)
+        {
+            let extra = self
+                .session
+                .request(RequestPurpose::GetInstalledEmojiSets, None);
+            if let Err(err) =
+                self.sender
+                    .send_json(&crate::telegram::requests_emoji::get_installed_emoji_sets(
+                        extra,
+                    ))
+            {
+                self.session.requests.take(extra);
+                return Err(err);
+            }
+        }
+        let ids: Vec<i64> = self
+            .session
+            .stickers
+            .emoji
+            .installed_sets
+            .iter()
+            .map(|set| set.id)
+            .collect();
+        self.ensure_library_sets(&ids)
+    }
+
     pub fn search_emoji_packs(
         &mut self,
         query: &str,

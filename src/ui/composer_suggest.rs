@@ -7,6 +7,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::emoji_bar::EmojiBarUi;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -19,17 +20,13 @@ use quill::lang::{keys, tr, tr_with};
 use quill::suggest::{
     EMOJI_LIMIT, RecentHashtags, SuggestKind, SuggestQuery, detect, emoji_name, search_emoji,
 };
+use quill::telegram::envelope::StickerItem;
 use quill::telegram::envelope_emoji::EmojiKeyword;
 use std::time::Duration;
 
-/// Emoji tiles shown before the strip scrolls (tdesktop
-/// `kMaxNonScrolledEmoji`), their size and the gap between them.
-pub(super) const STRIP_VISIBLE: usize = 7;
-pub(super) const TILE: f32 = 36.;
-pub(super) const GAP: f32 = 4.;
-
-/// Emoji one strip holds; a one-letter `:` query can match hundreds.
-const MAX_ROWS: usize = 48;
+/// Standard emoji one bar holds (its grid scrolls); a one-letter `:`
+/// query can match hundreds.
+const MAX_ROWS: usize = 120;
 
 /// tdesktop `kShowExactDelay`: a lone word waits this long before its
 /// emoji show, so typing a first word does not flash the strip.
@@ -44,6 +41,8 @@ pub(super) struct SuggestItem {
     pub glyph: String,
     /// Hashtag without `#`, or the emoji's name.
     pub name: String,
+    /// A custom emoji from an installed set (`glyph` is its emoji).
+    pub custom: Option<StickerItem>,
 }
 
 /// The popup currently offered for the text at the caret.
@@ -72,7 +71,9 @@ pub(super) struct SuggestUi {
     /// The lone word whose delay ran out.
     word_ready: Option<SuggestQuery>,
     word_timer: Option<Task<()>>,
-    pub strip_scroll: ScrollHandle,
+    /// Installed emoji sets with contents when `active` was built.
+    built_custom: usize,
+    pub bar: EmojiBarUi,
 }
 
 impl SuggestUi {
@@ -121,6 +122,7 @@ pub(super) fn suggest_items(
                 insert: format!("#{tag}"),
                 glyph: String::new(),
                 name: tag.to_string(),
+                custom: None,
             })
             .collect();
     }
@@ -145,54 +147,7 @@ pub(super) fn suggest_items(
             name: emoji_name(&emoji).unwrap_or_default().to_string(),
             insert: emoji.clone(),
             glyph: emoji,
-        })
-        .collect()
-}
-
-/// The emoji tiles of a suggestion strip; a press on one calls `pick`
-/// with its index (on press: the composer's blur would close the strip
-/// before a click could land).
-pub(super) fn emoji_tiles(
-    items: &[SuggestItem],
-    selected: Option<usize>,
-    id: &'static str,
-    cx: &mut Context<QuillApp>,
-    pick: fn(&mut QuillApp, usize, &mut Window, &mut Context<QuillApp>),
-) -> Vec<AnyElement> {
-    items
-        .iter()
-        .enumerate()
-        .map(|(index, item)| {
-            div()
-                .id((id, index as u64))
-                .flex_none()
-                .size(px(TILE))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded_md()
-                .text_size(px(22.))
-                .role(gpui_kit::Role::ListBoxOption)
-                .aria_label(if item.name.is_empty() {
-                    item.glyph.clone()
-                } else {
-                    item.name.clone()
-                })
-                .cursor_pointer()
-                .when(Some(index) == selected, |this| {
-                    this.bg(cx.theme().selection)
-                })
-                .hover(|style| style.bg(cx.theme().accent))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _, window, cx| {
-                        cx.stop_propagation();
-                        window.prevent_default();
-                        pick(this, index, window, cx);
-                    }),
-                )
-                .child(item.glyph.clone())
-                .into_any_element()
+            custom: None,
         })
         .collect()
 }
@@ -328,8 +283,10 @@ impl QuillApp {
     /// Called every frame; an integer compare while nothing is pending.
     pub(super) fn refresh_suggest_menu(&mut self, cx: &mut Context<Self>) {
         let generation = self.keyword_generation();
-        if self.composer_ui.suggest.query.is_some()
-            && generation != self.composer_ui.suggest.built_generation
+        let ui = &self.composer_ui.suggest;
+        if ui.query.is_some()
+            && (generation != ui.built_generation
+                || (ui.active.is_some() && self.custom_sets_loaded() != ui.built_custom))
         {
             // A slot freed: a query the in-flight cap turned away goes now.
             self.ask_suggest_keywords();
@@ -364,8 +321,16 @@ impl QuillApp {
                     items,
                 })
             });
+        let active = active.map(|mut active| {
+            if active.query.kind != SuggestKind::Hashtag {
+                active.items = self.with_custom_emoji(std::mem::take(&mut active.items));
+            }
+            active
+        });
+        let built_custom = self.custom_sets_loaded();
         let ui = &mut self.composer_ui.suggest;
         ui.built_generation = generation;
+        ui.built_custom = built_custom;
         // `:` and `#` queries highlight their first row
         // (`selectFirstResult`); a lone word starts with none.
         let first = active
@@ -383,8 +348,12 @@ impl QuillApp {
             (Some(_), None) => first.then_some(0),
         };
         if ui.active != active {
+            // A new query starts at the strip's start; more emoji for the
+            // same one (an answer, a set loaded) keep the view.
+            if ui.active.as_ref().map(|a| &a.query) != active.as_ref().map(|a| &a.query) {
+                ui.bar.reset();
+            }
             ui.active = active;
-            ui.strip_scroll.set_offset(point(px(0.), px(0.)));
             cx.notify();
         }
     }
@@ -459,6 +428,7 @@ impl QuillApp {
             ui.query = None;
             return false;
         };
+        ui.bar.reset();
         if remember {
             ui.dismissed = Some((
                 active.query.kind,
@@ -493,6 +463,12 @@ impl QuillApp {
             let at = ui.selected.unwrap_or(0) as i64 + i64::from(delta);
             Some(at.rem_euclid(rows as i64) as usize)
         } else {
+            // The open grid: Up and Down move a row.
+            let delta = if ui.bar.expanded && !horizontal {
+                delta * ui.bar.grid_columns() as i32
+            } else {
+                delta
+            };
             match step_selection(ui.selected, delta, rows) {
                 Some(next) => next,
                 None => return false,
@@ -500,7 +476,7 @@ impl QuillApp {
         };
         ui.selected = next;
         if let Some(at) = next {
-            ui.strip_scroll.scroll_to_item(at);
+            ui.bar.handle().scroll_to_item(at);
         }
         cx.notify();
         true
@@ -553,7 +529,13 @@ impl QuillApp {
             .get(active.query.range.start..caret)
             .unwrap_or_default()
             .to_string();
-        self.replace_composer_text(active.query.range.clone(), &insert, window, cx);
+        match item.custom.as_ref().and_then(|s| s.custom_emoji_id) {
+            Some(id) => {
+                let content = self.custom_emoji_content(&item.insert, id);
+                self.replace_composer_content(active.query.range.clone(), content, window, cx);
+            }
+            None => self.replace_composer_text(active.query.range.clone(), &insert, window, cx),
+        }
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
         let new_text = self.composer.read(cx).value().to_string();
@@ -650,27 +632,8 @@ impl QuillApp {
                 }
                 list
             }
-            SuggestKind::Emoji | SuggestKind::EmojiWord => {
-                let mut row = div()
-                    .id("suggest-strip")
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .max_w(px(STRIP_VISIBLE as f32 * (TILE + GAP)))
-                    .overflow_x_scroll()
-                    .track_scroll(&self.composer_ui.suggest.strip_scroll);
-                row = row.children(emoji_tiles(
-                    &active.items,
-                    selected,
-                    "suggest-item",
-                    cx,
-                    QuillApp::pick_suggest_index,
-                ));
-                panel
-                    .aria_label(tr(keys::Q_CHAT_EMOJI_SUGGESTIONS))
-                    .self_start()
-                    .child(row)
-            }
+            // Emoji show in the full-width bar (`emoji_bar`).
+            SuggestKind::Emoji | SuggestKind::EmojiWord => return None,
         }))
     }
 }

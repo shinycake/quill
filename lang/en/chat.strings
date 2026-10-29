@@ -279,6 +279,13 @@
 "qll_chat_editing_caption" = "Editing caption";
 "qll_chat_editing_message" = "Editing message";
 "qll_chat_emoji_suggestions" = "Emoji suggestions";
+"qll_chat_emoji_suggestions_expand" = "Show all emoji";
+"qll_chat_emoji_suggestions_collapse" = "Show fewer emoji";
+"qll_chat_emoji_word_suggest" = "Suggest Emoji";
+"qll_chat_emoji_word_block" = "Don't Suggest Emoji for This Word";
+"qll_chat_emoji_words_off" = "Turn Off Emoji Suggestions";
+"qll_chat_emoji_words_off_note" = "Emoji suggestions for words are off. You can turn them on again in Settings > Chats.";
+"qll_chat_emoji_word_none" = "No emoji for this word";
 "qll_chat_enlarge" = "Enlarge";
 "qll_chat_enter_a_link" = "Enter a link";
 "qll_chat_enter_a_valid_link" = "enter a valid link";

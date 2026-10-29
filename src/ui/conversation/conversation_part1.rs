@@ -348,6 +348,7 @@ impl QuillApp {
                         .child(
                             div()
                                 .id("composer-input-row")
+                                .relative()
                                 .flex()
                                 .items_end()
                                 .gap_2()
@@ -433,13 +434,9 @@ impl QuillApp {
                                         .when_some(self.spellcheck_underlines(cx), |wrap, lines| {
                                             wrap.child(lines)
                                         })
-                                        // Words that have an emoji, and the
-                                        // strip over the hovered one.
+                                        // Words that have an emoji.
                                         .when_some(self.emoji_word_highlights(cx), |wrap, wash| {
                                             wrap.child(wash)
-                                        })
-                                        .when_some(self.emoji_word_strip(cx), |wrap, strip| {
-                                            wrap.child(strip)
                                         }),
                                 )
                                 // Scheduled-messages button while the chat has
@@ -461,7 +458,10 @@ impl QuillApp {
                                 // while there's nothing to send, Send once
                                 // there is, Save when editing, the slow-mode
                                 // countdown while the chat is rate-limited.
-                                .child(self.composer_send_button(show_attach, sendable, cx)),
+                                .child(self.composer_send_button(show_attach, sendable, cx))
+                                // Emoji for `:word` or a pointed-at word,
+                                // as wide as the row.
+                                .when_some(self.emoji_bar_overlay(cx), |row, bar| row.child(bar)),
                         )
                         // M2: rich editor block bar + live block preview
                         // under the textarea while the editor is open.

@@ -2,6 +2,7 @@
 //! one offers, Esc, the setting. Over the `ready-chats` demo with the
 //! keyword answers put in the session by hand; nothing reaches Telegram.
 
+use crate::ui::actions::{EmojiWordBlock, EmojiWordSuggest};
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -10,6 +11,7 @@ use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Focusable, TestAppContext, VisualTestContext, px, size};
 use quill::ids::RequestId;
+use quill::lang::{keys, tr};
 use quill::telegram::envelope_emoji::EmojiKeyword;
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
@@ -105,10 +107,14 @@ fn finished_words_light_up_and_the_word_being_typed_waits(cx: &mut TestAppContex
     vcx.simulate_input("we got pizza");
     frame(vcx);
     assert!(lit(&app, vcx).is_empty(), "the caret is still on `pizza`");
-    vcx.simulate_input(" and cake for the party later tonight with all our friends ");
+    // The space finishes it: it lights at once, even in a short message.
+    vcx.simulate_input(" ");
     frame(vcx);
-    // 13 words: two highlights, the most specific words.
-    assert_eq!(lit(&app, vcx), ["pizza", "cake"]);
+    assert_eq!(lit(&app, vcx), ["pizza"]);
+    vcx.simulate_input("and cake for the party later tonight with all our friends ");
+    frame(vcx);
+    // Every word that has an emoji.
+    assert_eq!(lit(&app, vcx), ["pizza", "cake", "party"]);
 }
 
 #[gpui_kit::test]
@@ -147,7 +153,7 @@ fn a_selection_darkens_the_words_it_covers(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     vcx.simulate_input("we got pizza and cake for the party later tonight with friends ");
     frame(vcx);
-    assert_eq!(lit(&app, vcx), ["pizza", "cake"]);
+    assert_eq!(lit(&app, vcx), ["pizza", "cake", "party"]);
     // Select "pizza and cake": both may be about to change.
     vcx.update(|_, cx| {
         app.update(cx, |app, cx| {
@@ -210,4 +216,112 @@ fn the_setting_turns_the_highlights_off(cx: &mut TestAppContext) {
     });
     frame(vcx);
     assert!(lit(&app, vcx).is_empty());
+}
+
+#[gpui_kit::test]
+fn a_blocked_word_stops_lighting_and_the_rest_stay(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    // "taco" only here: the blocked list is saved to the test prefs file
+    // the other tests' windows read.
+    answer(&app, vcx, &[("taco", &["🌮"])]);
+    vcx.simulate_input("a taco and cake ");
+    frame(vcx);
+    assert_eq!(lit(&app, vcx), ["taco", "cake"]);
+    // Right-click on "taco" (the click puts the caret in it).
+    let offered = app.read_with(vcx, |app, cx| {
+        let text = app.composer.read(cx).value().to_string();
+        let block = EmojiWordBlock {
+            word: "taco".into(),
+        };
+        app.emoji_word_menu_entries(&text, 3..3)
+            .iter()
+            .any(|(_, action)| action.partial_eq(&block))
+    });
+    assert!(offered);
+    app.update(vcx, |app, cx| {
+        app.on_emoji_word_block(
+            &EmojiWordBlock {
+                word: "taco".into(),
+            },
+            cx,
+        )
+    });
+    frame(vcx);
+    assert_eq!(lit(&app, vcx), ["cake"]);
+    let blocked = app.read_with(vcx, |app, _| app.chat_prefs.emoji_word_blocklist.clone());
+    assert!(blocked.contains(&"taco".to_string()));
+}
+
+#[gpui_kit::test]
+fn suggest_emoji_opens_the_bar_for_a_word_that_is_not_lit(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    // "pizz" is no whole keyword, but a prefix of "pizza", as `:pizz`
+    // would find.
+    app.update(vcx, |app, _| {
+        let lookups = &mut app
+            .demo_session
+            .as_mut()
+            .expect("demo session")
+            .stickers
+            .emoji
+            .keyword_lookups;
+        let id = RequestId(900_000);
+        lookups.sent(id, "pizz".into());
+        let pizza = EmojiKeyword {
+            emoji: "🍕".into(),
+            keyword: "pizza".into(),
+        };
+        lookups.answered(id, vec![pizza]);
+    });
+    vcx.simulate_input("two pizz please");
+    frame(vcx);
+    assert!(lit(&app, vcx).is_empty());
+    app.update(vcx, |app, cx| {
+        let action = EmojiWordSuggest {
+            start: 4,
+            end: 8,
+            word: "pizz".into(),
+        };
+        app.on_emoji_word_suggest(&action, cx);
+    });
+    frame(vcx);
+    let (pinned, glyphs) = app.read_with(vcx, |app, _| {
+        let ui = &app.composer_ui.emoji_words;
+        let glyphs: Vec<String> = ui
+            .hovered
+            .iter()
+            .flat_map(|(_, items)| items.iter().map(|i| i.glyph.clone()))
+            .collect();
+        (ui.pinned, glyphs)
+    });
+    assert!(pinned);
+    assert_eq!(glyphs.first().map(String::as_str), Some("🍕"));
+    // The bar stays while the caret moves on, and picks into the word.
+    vcx.update(|window, cx| app.update(cx, |app, cx| app.pick_word_emoji(0, window, cx)));
+    assert_eq!(text(&app, vcx), "two 🍕 please");
+}
+
+#[gpui_kit::test]
+fn turning_suggestions_off_from_the_menu_says_where_to_turn_them_on(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.simulate_input("we got pizza and cake ");
+    frame(vcx);
+    app.update(vcx, |app, _| app.hover_highlight(0));
+    app.update(vcx, |app, cx| {
+        app.chat_prefs.highlight_emoji_words = false;
+        app.emoji_words_turned_off(cx);
+    });
+    frame(vcx);
+    assert!(lit(&app, vcx).is_empty());
+    let (hovered, note) = app.read_with(vcx, |app, _| {
+        (
+            app.composer_ui.emoji_words.hovered.is_some(),
+            app.connection.status_note().to_string(),
+        )
+    });
+    assert!(!hovered);
+    assert_eq!(note, tr(keys::Q_CHAT_EMOJI_WORDS_OFF_NOTE));
 }
