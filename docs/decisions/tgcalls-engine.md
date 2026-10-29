@@ -119,6 +119,61 @@ Where the build deliberately differs from tdesktop's:
   where they used OpenSSL and WebRTC statics already torn down (the contract
   test crashed about every other run).
 
+## Group calls (`qc_group_*`)
+
+- `qc_group_create` makes a `tgcalls::GroupInstanceCustomImpl` with the
+  descriptor Telegram Desktop builds in `GroupCall::tryCreateController`
+  (`calls_group_call.cpp`): Generic video content, VP8 first when the app
+  config asks (`confcall_prioritize_vp8`), and the same audio-level filter
+  that drops repeated levels of a muted microphone. `"presentation": true`
+  makes the screen-sharing instance of `tryCreateScreencast` instead:
+  Screencast content, no levels, no sound out, no media channel requests.
+  Sound goes through the same AudioBridge as 1:1 calls.
+- `qc_group_join_payload` blocks until tgcalls' `emitJoinPayload` delivers,
+  so Quill gets joinGroupCall's payload (and its audio ssrc) as a return
+  value. The join response, connection mode (none, RTC, broadcast with
+  tdesktop's `keepBroadcastIfWasEnabled = true` and the RTMP
+  `isUnifiedBroadcast` flag), mute, per-ssrc volume, removed ssrcs,
+  requested video channels (JSON from `groupCallParticipantVideoInfo` plus the participant's audio ssrc for lip sync) and
+  outgoing video (`qc_video_capture`) map one to one onto tgcalls.
+- Incoming video is per endpoint: `qc_group_add_incoming_video` hands
+  tgcalls a sink that calls `incoming_video` with the endpoint id and an
+  I420 picture; the library owns the sinks (tgcalls keeps weak pointers),
+  so removing one stops it.
+- tgcalls' requests (ssrc to participant, the stream's time, audio and video
+  stream parts) become callbacks with a request id; Quill answers each from
+  any thread with `qc_group_answer_*`. tgcalls' `cancel()` becomes
+  `request_cancelled`, and an answer to an id that is gone does nothing.
+  The time and part requests are wired for a presentation too, which
+  tdesktop leaves empty, so broadcast mode can never call an empty function.
+- `qc_group_destroy` is synchronous like `qc_p2p_destroy`: it closes the
+  callback guard, drops open requests, waits for `stop`, destroys the
+  instance (which itself waits on the media thread) and drains tgcalls'
+  threads.
+
+Left out on purpose: conference calls (`e2eEncryptDecrypt`, `isConference`;
+a later parity item), tgcalls' own noise suppression (Quill runs RNNoise
+before pushing audio), tgcalls' log file (logs go to `qc_set_log`), audio
+device selection (no devices in the library), `getStats` and the
+video-only media channel descriptions tdesktop never sends. Whether a group
+call connects is tested by hand; the contract test checks the payload, every
+setter and teardown for both flavours.
+
+### The engine side (`src/calls/engine/tgcalls/group.rs`)
+
+`TgcallsEngine` drives one `qc_group` per group call and a second one for
+its presentation, as tdesktop does. The join payload goes to
+`joinVideoChat` unchanged (it is the JSON TDLib forwards), and its `ssrc`
+becomes `audio_source_id`. A join answer with `"stream": true` sets
+broadcast mode (unified for `"rtmp": true`); any other answer sets RTC
+mode and then the answer, in tdesktop's order. Incoming video is routed by
+endpoint, so each `GroupVideoSource` says whether it is a screen. Requested
+qualities follow tdesktop's grid defaults and budget, since Quill does not
+report tile sizes. Speaker levels reach the engine event hook; the driver
+drops them until the speaking-levels parity item. Nobody answers media
+channel, time or part requests yet: a stream connects but gets no parts
+until the live-streams step.
+
 ## Build order
 
 1. Build pipeline and the version API (this doc's first PR).

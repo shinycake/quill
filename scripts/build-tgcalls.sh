@@ -23,6 +23,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEST="${QUILL_CALLS_DEST:-$ROOT/vendor/quill-calls}"
 WORK="${QUILL_CALLS_WORK:-$DEST/work}"
 DEPS="$WORK/deps"
+# The C API library's own build tree; separate trees let checkouts share $WORK.
+BUILD="${QUILL_CALLS_BUILD:-$WORK/quill-calls}"
 FFMPEG_PREFIX="${QUILL_FFMPEG_PREFIX:-$ROOT/vendor/ffmpeg/prefix}"
 JOBS="${JOBS:-$( (nproc || sysctl -n hw.ncpu) 2>/dev/null || echo 4)}"
 
@@ -250,7 +252,7 @@ for patch in "$ROOT"/native/quill-calls/patches/tgcalls-*.patch; do
   fi
 done
 
-cmake -S "$ROOT/native/quill-calls" -B "$WORK/quill-calls" -G Ninja \
+cmake -S "$ROOT/native/quill-calls" -B "$BUILD" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX="$DEST" \
   -DQUILL_CALLS_DEPS="$DEPS" \
@@ -259,8 +261,8 @@ cmake -S "$ROOT/native/quill-calls" -B "$WORK/quill-calls" -G Ninja \
   -DQUILL_CALLS_OPENSSL_INCLUDE="$OPENSSL_INCLUDE" \
   ${OPENSSL_ROOT_DIR:+-DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR"} \
   $([[ "$OS" == macos ]] && echo "-DCMAKE_OSX_ARCHITECTURES=$ARCH")
-cmake --build "$WORK/quill-calls" --parallel "$JOBS"
-cmake --install "$WORK/quill-calls"
+cmake --build "$BUILD" --parallel "$JOBS"
+cmake --install "$BUILD"
 
 mkdir -p "$DEST/share"
 cat > "$DEST/share/SOURCES.txt" <<EOF

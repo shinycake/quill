@@ -1,5 +1,7 @@
-//! The `CallEngine` trait for tgcalls: 1:1 calls. Group calls and streams
-//! are the next steps (docs/decisions/tgcalls-engine.md).
+//! The `CallEngine` trait for tgcalls: 1:1 calls here, group calls in
+//! `group.rs`. Live streams are the next step
+//! (docs/decisions/tgcalls-engine.md): the broadcast answers keep the
+//! trait's `Unavailable` defaults.
 use super::*;
 use crate::calls::stream_audio::watch::PlaybackHealth;
 use crate::locks::LockExt;
@@ -227,56 +229,97 @@ impl CallEngine for TgcallsEngine {
 
     fn create_group_call(
         &mut self,
-        _group_call_id: i32,
-        _chat_id: i64,
-        _role: GroupCallRole,
+        group_call_id: i32,
+        chat_id: i64,
+        role: GroupCallRole,
     ) -> Result<String, EngineError> {
-        Err(EngineError::Unavailable)
+        self.create_group(group_call_id, chat_id, role)
     }
 
     fn connect_group_call(
         &mut self,
-        _group_call_id: i32,
-        _answer_payload: &str,
-        _camera: Option<&str>,
+        group_call_id: i32,
+        answer_payload: &str,
+        camera: Option<&str>,
     ) -> Result<(), EngineError> {
-        Err(EngineError::Unavailable)
+        self.connect_group(group_call_id, answer_payload, camera)
     }
 
     fn sync_group_video(
         &mut self,
-        _group_call_id: i32,
-        _sources: &[GroupVideoSource],
+        group_call_id: i32,
+        sources: &[GroupVideoSource],
     ) -> Result<(), EngineError> {
-        Err(EngineError::Unavailable)
+        self.sync_group_videos(group_call_id, sources)
     }
 
     fn set_group_camera(
         &mut self,
-        _group_call_id: i32,
-        _camera: Option<&str>,
+        group_call_id: i32,
+        camera: Option<&str>,
     ) -> Result<(), EngineError> {
-        Err(EngineError::Unavailable)
+        self.set_group_camera_device(group_call_id, camera)
     }
 
-    fn start_screen_share(&mut self, _group_call_id: i32) -> Result<String, EngineError> {
-        Err(EngineError::Unavailable)
+    fn start_screen_share(&mut self, group_call_id: i32) -> Result<String, EngineError> {
+        self.start_presentation(group_call_id)
     }
 
     fn connect_screen_share(
         &mut self,
-        _group_call_id: i32,
-        _answer_payload: &str,
+        group_call_id: i32,
+        answer_payload: &str,
     ) -> Result<(), EngineError> {
-        Err(EngineError::Unavailable)
+        self.connect_presentation(group_call_id, answer_payload)
     }
 
-    fn stop_screen_share(&mut self, _group_call_id: i32) -> Result<(), EngineError> {
-        Ok(())
+    fn stop_screen_share(&mut self, group_call_id: i32) -> Result<(), EngineError> {
+        self.stop_group_presentation(group_call_id)
     }
 
-    fn presentation_active(&self, _group_call_id: i32) -> bool {
-        false
+    fn presentation_active(&self, group_call_id: i32) -> bool {
+        self.has_presentation(group_call_id)
+    }
+
+    fn set_group_muted(&mut self, group_call_id: i32, muted: bool) -> Result<(), EngineError> {
+        self.set_group_mute(group_call_id, muted)
+    }
+
+    fn set_group_playback(
+        &mut self,
+        group_call_id: i32,
+        speaker: Option<&str>,
+        muted: bool,
+    ) -> Result<(), EngineError> {
+        self.set_group_output(group_call_id, speaker, muted)
+    }
+
+    fn set_stream_volume(&mut self, volume: f32) {
+        self.set_streams_volume(volume);
+    }
+
+    fn stream_sound_health(&self, group_call_id: i32) -> Option<PlaybackHealth> {
+        self.group_stream_health(group_call_id)
+    }
+
+    fn use_device_playback(&mut self, group_call_id: i32) -> Result<(), EngineError> {
+        self.reopen_group_sound(group_call_id)
+    }
+
+    fn set_engine_event_callback(&mut self, callback: EngineEventCallback) {
+        set_hook(&self.callback.engine_event_hook, callback);
+    }
+
+    fn group_call_mode(&self, chat_id: i64) -> Option<GroupCallMode> {
+        self.connected_group_mode(chat_id)
+    }
+
+    fn set_stream_quality(&mut self, chat_id: i64, quality: StreamQuality) {
+        self.set_group_stream_quality(chat_id, quality);
+    }
+
+    fn stream_quality(&self, chat_id: i64) -> Option<StreamQuality> {
+        self.group_stream_quality(chat_id)
     }
 
     fn set_live_frame_callback(&mut self, callback: LiveFrameCallback) {
@@ -297,7 +340,8 @@ impl CallEngine for TgcallsEngine {
         self.open_sound(call_id)
     }
 
-    fn leave_group_call(&mut self, _group_call_id: i32) -> Result<(), EngineError> {
+    fn leave_group_call(&mut self, group_call_id: i32) -> Result<(), EngineError> {
+        self.leave_group(group_call_id);
         Ok(())
     }
 
@@ -305,8 +349,9 @@ impl CallEngine for TgcallsEngine {
         &mut self,
         target: CaptureTarget,
     ) -> Option<Arc<dyn ExternalFrameSender>> {
-        let CaptureTarget::Private(call_id) = target else {
-            return None;
+        let call_id = match target {
+            CaptureTarget::Private(call_id) => call_id,
+            CaptureTarget::Group(group_call_id) => return self.group_sender(group_call_id),
         };
         let call = self.calls.get(&call_id)?;
         call.handle?;

@@ -122,6 +122,7 @@ list(TRANSFORM tgcalls_sources PREPEND ${tgcalls_loc}/)
 
 set(quill_sources
     src/audio.cpp
+    src/group.cpp
     src/p2p.cpp
     src/platform.cpp
     src/quill_calls.cpp

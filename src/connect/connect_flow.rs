@@ -93,7 +93,13 @@ pub fn build_set_tdlib_parameters(
 pub(crate) fn group_video_sources(
     participants: &[ParsedGroupCallParticipant],
 ) -> Vec<GroupVideoSource> {
-    fn one(user_id: i64, info: &Option<GroupCallVideoInfo>, out: &mut Vec<GroupVideoSource>) {
+    fn one(
+        user_id: i64,
+        audio_ssrc: u32,
+        info: &Option<GroupCallVideoInfo>,
+        screen: bool,
+        out: &mut Vec<GroupVideoSource>,
+    ) {
         let Some(info) = info else { return };
         if info.is_paused || info.endpoint_id.is_empty() {
             return;
@@ -114,6 +120,8 @@ pub(crate) fn group_video_sources(
             user_id,
             endpoint: info.endpoint_id.clone(),
             ssrc_groups,
+            screen,
+            audio_ssrc,
         });
     }
 
@@ -125,10 +133,19 @@ pub(crate) fn group_video_sources(
         let MessageSender::User { user_id } = participant.participant_id else {
             continue;
         };
-        one(user_id, &participant.video_info, &mut sources);
+        let audio_ssrc = participant.audio_source_id.cast_unsigned();
         one(
             user_id,
+            audio_ssrc,
+            &participant.video_info,
+            false,
+            &mut sources,
+        );
+        one(
+            user_id,
+            audio_ssrc,
             &participant.screen_sharing_video_info,
+            true,
             &mut sources,
         );
     }

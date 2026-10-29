@@ -31,15 +31,20 @@ pub type RemoteVideoStateCallback = Arc<dyn Fn(i32, RemoteVideoState) + Send + S
 /// the remote `Microphone` source going idle or active).
 pub type RemoteAudioStateCallback = Arc<dyn Fn(i32, bool) + Send + Sync + 'static>;
 
-/// Phase C2g: extract the audio channel SSRC from ntgcalls' group join
-/// offer (a raw SDP offer per the ntgcalls API docs: `create(chatId)`
-/// "returns a WebRTC offer (SDP)"). TDLib's `groupCallJoinParameters`
-/// carries it as `audio_source_id` ("received from tgcalls",
-/// `schema/td_api.tl:7085`). The SSRC is the first `a=ssrc:` line of
-/// the audio `m=` section; 0 when absent (honest fallback — the join
-/// still goes out, only audio attribution is missing, and this slice
-/// has no group audio transport anyway).
+/// The audio ssrc a group join payload announces, for TDLib's
+/// `groupCallJoinParameters.audio_source_id` ("received from tgcalls",
+/// `schema/td_api.tl:7085`). tgcalls' payload is tdesktop's
+/// `GroupJoinPayload` JSON, whose `ssrc` is the audio ssrc as a signed
+/// 32-bit number. A raw SDP offer (a test engine's) is read too: the
+/// first `a=ssrc:` line of the audio `m=` section. 0 when absent (the
+/// join still goes out, only audio attribution is missing).
 pub fn group_offer_audio_source_id(offer: &str) -> i32 {
+    if let Ok(Value::Object(payload)) = serde_json::from_str::<Value>(offer) {
+        return payload
+            .get("ssrc")
+            .and_then(Value::as_i64)
+            .map_or(0, |ssrc| ssrc as i32);
+    }
     let mut in_audio = false;
     for line in offer.lines().map(str::trim) {
         if let Some(kind) = line.strip_prefix("m=") {
@@ -71,6 +76,13 @@ pub struct GroupVideoSource {
     pub user_id: i64,
     pub endpoint: String,
     pub ssrc_groups: Vec<GroupVideoSourceGroup>,
+    /// The participant's screen share (`screen_sharing_video_info`)
+    /// rather than their camera. ntgcalls tells them apart by track;
+    /// tgcalls only by endpoint.
+    pub screen: bool,
+    /// The participant's audio ssrc (`audio_source_id`), which tgcalls
+    /// syncs the video's playback to (lip sync).
+    pub audio_ssrc: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

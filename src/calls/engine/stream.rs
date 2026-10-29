@@ -197,10 +197,21 @@ impl BroadcastPartAnswer {
     }
 }
 
-/// Engine -> connect side: what ntgcalls asked for on one of its own
-/// threads. The native trampolines copy the request and hand it over
-/// without blocking.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One speaker's level in a group call (tgcalls' `GroupLevelUpdate`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GroupAudioLevel {
+    /// The participant's audio ssrc; 0 is your own microphone.
+    pub ssrc: u32,
+    /// 0 to 1.
+    pub level: f32,
+    /// The engine hears speech rather than noise.
+    pub voice: bool,
+}
+
+/// Engine -> connect side: what the engine asked for or reported on one
+/// of its own threads. The native trampolines copy the data and hand it
+/// over without blocking.
+#[derive(Debug, Clone, PartialEq)]
 pub enum EngineEvent {
     /// RTMP only: ntgcalls needs the stream's current time
     /// (`getGroupCallStreams`). MTProto streams use the server time
@@ -210,6 +221,13 @@ pub enum EngineEvent {
     BroadcastPartRequested {
         chat_id: i64,
         request: BroadcastPartRequest,
+    },
+    /// A batch of speaker levels in a group call (tgcalls only; a batch
+    /// of only your own level comes only when it changed, as in
+    /// tdesktop).
+    GroupAudioLevels {
+        group_call_id: i32,
+        levels: Vec<GroupAudioLevel>,
     },
 }
 

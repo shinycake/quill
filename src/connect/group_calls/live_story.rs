@@ -114,27 +114,32 @@ impl<S: JsonSender> ConnectDriver<S> {
             MessageSender::User { user_id } => user_id,
             MessageSender::Chat { chat_id } => chat_id,
         };
-        [&streamer.video_info, &streamer.screen_sharing_video_info]
-            .into_iter()
-            .flatten()
-            .filter(|info| !info.is_paused && !info.endpoint_id.is_empty())
-            .filter_map(|info| {
-                let ssrc_groups: Vec<crate::calls::engine::GroupVideoSourceGroup> = info
-                    .source_groups
-                    .iter()
-                    .filter(|group| !group.source_ids.is_empty())
-                    .map(|group| crate::calls::engine::GroupVideoSourceGroup {
-                        semantics: group.semantics.clone(),
-                        ssrcs: group.source_ids.clone(),
-                    })
-                    .collect();
-                (!ssrc_groups.is_empty()).then(|| GroupVideoSource {
-                    user_id: key,
-                    endpoint: info.endpoint_id.clone(),
-                    ssrc_groups,
+        [
+            (&streamer.video_info, false),
+            (&streamer.screen_sharing_video_info, true),
+        ]
+        .into_iter()
+        .filter_map(|(info, screen)| info.as_ref().map(|info| (info, screen)))
+        .filter(|(info, _)| !info.is_paused && !info.endpoint_id.is_empty())
+        .filter_map(|(info, screen)| {
+            let ssrc_groups: Vec<crate::calls::engine::GroupVideoSourceGroup> = info
+                .source_groups
+                .iter()
+                .filter(|group| !group.source_ids.is_empty())
+                .map(|group| crate::calls::engine::GroupVideoSourceGroup {
+                    semantics: group.semantics.clone(),
+                    ssrcs: group.source_ids.clone(),
                 })
+                .collect();
+            (!ssrc_groups.is_empty()).then(|| GroupVideoSource {
+                user_id: key,
+                endpoint: info.endpoint_id.clone(),
+                ssrc_groups,
+                screen,
+                audio_ssrc: streamer.audio_source_id.cast_unsigned(),
             })
-            .collect()
+        })
+        .collect()
     }
 
     /// A left click on the Stars button (or the box's Send): `stars` more

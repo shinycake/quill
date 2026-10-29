@@ -84,6 +84,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Err(err) = self.sender.send_json(&start_group_call_screen_sharing(
             extra,
             group_call_id,
+            crate::calls::engine::group_offer_audio_source_id(&offer),
             &offer,
         )) {
             self.session.requests.take(extra);

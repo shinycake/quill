@@ -321,6 +321,8 @@ fn emit_engine_event(shared: &CallbackShared, event: EngineEvent) {
     let chat_id = match &event {
         EngineEvent::BroadcastTimestampRequested { chat_id }
         | EngineEvent::BroadcastPartRequested { chat_id, .. } => *chat_id,
+        // ntgcalls reports no speaker levels.
+        EngineEvent::GroupAudioLevels { .. } => return,
     };
     if !shared
         .group_chat_to_call
