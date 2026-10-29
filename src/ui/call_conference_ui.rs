@@ -442,6 +442,41 @@ crate::ui::shell::register_dialogs! {
     ),
 }
 
+/// A conference call's encryption under its title (tdesktop
+/// `lng_confcall_e2e_badge_small` and the emoji it shows once verified):
+/// the four emoji every participant should see the same.
+pub(super) fn e2e_badge(call: &quill::state::ActiveGroupCall) -> Option<AnyElement> {
+    if !call.is_conference() {
+        return None;
+    }
+    let emojis = call
+        .verification
+        .as_ref()
+        .map(|state| state.emojis.clone())
+        .unwrap_or_default();
+    let tip: SharedString = tr(keys::CONFCALL_E2E_ABOUT).into();
+    let pill = div()
+        .id("conference-e2e")
+        .mt(px(4.))
+        .px(px(8.))
+        .py(px(2.))
+        .rounded_full()
+        .bg(crate::ui::app_theme::call_chrome::pill())
+        .flex()
+        .gap(px(4.))
+        .text_size(px(12.))
+        .text_color(crate::ui::app_theme::call_chrome::text())
+        .tooltip(move |window, cx| {
+            gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+        });
+    let pill = if emojis.is_empty() {
+        pill.child(tr(keys::CONFCALL_E2E_BADGE_SMALL))
+    } else {
+        pill.children(emojis.into_iter().map(|emoji| div().child(emoji)))
+    };
+    Some(pill.into_any_element())
+}
+
 /// tdesktop's `**bold**` count in "already joined", as on its panel.
 pub(super) fn joined_line_element(line: &str) -> Div {
     bold_marked(line)

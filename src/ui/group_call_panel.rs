@@ -156,7 +156,9 @@ impl QuillApp {
             quill::calls::audio_level::halo_reach(value)
         });
         let title = if call.title.is_empty() {
-            if call.is_video_chat {
+            if call.is_conference() {
+                tr(keys::CONFCALL_JOIN_TITLE)
+            } else if call.is_video_chat {
                 tr(keys::MENU_START_GROUP_CALL_OPTIONS)
             } else {
                 tr(keys::Q_AV_VOICE_CHAT_2)
@@ -297,6 +299,7 @@ impl QuillApp {
                     .text_color(call_chrome::group_muted())
                     .child(subtitle),
             )
+            .children(super::call_conference_ui::e2e_badge(&call))
             .child(
                 div()
                     .absolute()

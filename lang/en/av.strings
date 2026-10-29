@@ -18,6 +18,8 @@
 "lng_confcall_already_joined_three" = "{user}, {other} and {third} already joined this call.";
 "lng_confcall_already_joined_two" = "{user} and {other} already joined this call.";
 "lng_confcall_create_link" = "Create Call Link";
+"lng_confcall_e2e_about" = "These four emoji represent the call's encryption key. They must match for all participants and change when someone joins or leaves.";
+"lng_confcall_e2e_badge_small" = "E2E Encrypted";
 "lng_confcall_invite_already_user" = "{user} is already in the call.";
 "lng_confcall_join_button" = "Join Group Call";
 "lng_confcall_join_text" = "You are invited to join a Telegram Call.";
