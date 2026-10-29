@@ -1,6 +1,7 @@
 //! The UI half of the player: views of one clip share its frames and keep
-//! their own heads; a frame not drawn yet counts as late; a clip's size
-//! follows the window's scale.
+//! their own heads; a frame not drawn yet counts as late; every frame shown
+//! leaves the atlas; a clip's size follows the window's scale.
+use super::super::image_budget::{begin_frame, take_unshowable};
 use super::{ClipSpec, DISPLAY, HeadId, Player, ViewAsk};
 use quill::ids::FileId;
 use quill::sticker_playback::FitzType;
@@ -110,6 +111,32 @@ fn a_frame_not_drawn_in_time_keeps_the_last_one_up_and_counts_as_late() {
     assert_eq!(player.screen_stats().late, 1);
     player.settle();
     assert_eq!(shown(&player, &spec, head, PlayMode::Loop, t0 + ms(170)), 5);
+}
+
+/// A head that runs ahead of the drawn frames shows an earlier one. On a
+/// 120 Hz Mac that was most frames, and each such frame was retired twice
+/// and never left the atlas (20 MB a second for a chat of stickers).
+#[test]
+fn every_frame_a_late_head_showed_leaves_once_the_clip_stops() {
+    let (player, spec) = player(8);
+    let head = HeadId::of("late");
+    let t0 = Instant::now();
+    let mut showed = Vec::new();
+    for step in 0..24 {
+        let at = t0 + ms(167) * step;
+        let image = player
+            .frame(&spec, head, PlayMode::Loop, EDGE, false, at)
+            .expect("a frame");
+        showed.push(Arc::downgrade(&image));
+        player.settle();
+    }
+    assert!(player.screen_stats().late > 0, "the head ran ahead");
+    player.stop();
+    begin_frame();
+    begin_frame();
+    drop(take_unshowable());
+    let held = showed.iter().filter(|frame| frame.strong_count() > 0);
+    assert_eq!(held.count(), 0, "frames still held after the clip stopped");
 }
 
 #[test]

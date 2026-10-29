@@ -73,9 +73,9 @@ thread_local! {
     /// Each slice's last render frame, the last frame it was shown, and
     /// the render before the last one.
     static SLICES: RefCell<HashMap<EntityId, SliceFrames>> = RefCell::new(HashMap::new());
-    /// Quill-made images waiting to leave the atlas, with the frame they
-    /// were retired in.
-    static RETIRED: RefCell<Vec<(Arc<RenderImage>, u64)>> = const { RefCell::new(Vec::new()) };
+    /// Quill-made images waiting to leave the atlas, by image id, with the
+    /// frame they were last retired in.
+    static RETIRED: RefCell<HashMap<usize, (Arc<RenderImage>, u64)>> = RefCell::new(HashMap::new());
     /// When the cache last started showing an image it didn't show just
     /// before (scrolling, new content) or stopped showing one (another
     /// chat), and the activity the last idle trim covered.
@@ -263,37 +263,41 @@ fn retired_may_show(id: usize, at: u64, slices: &[(u64, Option<usize>)]) -> bool
 
 /// Hand images Quill made (and painted) to the atlas sweeper once their
 /// cache lets go of them: each is dropped from the atlas when no frame can
-/// show it and nothing else holds it.
+/// show it and nothing else holds it. Retiring an image again only moves
+/// its frame: two entries would each hold it, and it would never leave.
 pub(super) fn retire_all(images: impl IntoIterator<Item = Arc<RenderImage>>) {
     let now = frame();
     RETIRED.with(|retired| {
         retired
             .borrow_mut()
-            .extend(images.into_iter().map(|image| (image, now)));
+            .extend(images.into_iter().map(|image| (image.id.0, (image, now))));
     });
 }
 
 /// Drop retired images no frame can show any more from the atlas. Call at
 /// the start of a frame, before anything renders.
 pub(super) fn sweep(window: &mut Window, cx: &mut App) {
+    for image in take_unshowable() {
+        cx.drop_image(image, Some(&mut *window));
+    }
+}
+
+/// The retired images no frame can show any more and nothing else holds.
+pub(super) fn take_unshowable() -> Vec<Arc<RenderImage>> {
     let slices = replayable_slices();
-    let gone: Vec<Arc<RenderImage>> = RETIRED.with(|retired| {
-        let mut retired = retired.borrow_mut();
+    RETIRED.with(|retired| {
         let mut gone = Vec::new();
-        retired.retain(|(image, at)| {
+        retired.borrow_mut().retain(|id, (image, at)| {
             // Still held elsewhere (a cache that took it back, the chat
             // list's animation layer): it may be painted again.
-            if Arc::strong_count(image) > 1 || retired_may_show(image.id.0, *at, &slices) {
+            if Arc::strong_count(image) > 1 || retired_may_show(*id, *at, &slices) {
                 return true;
             }
             gone.push(image.clone());
             false
         });
         gone
-    });
-    for image in gone {
-        cx.drop_image(image, Some(&mut *window));
-    }
+    })
 }
 
 /// Hand the allocator's free pages back to the system once Quill goes
@@ -994,7 +998,28 @@ mod tests {
     };
     use super::{Fit, VariantPick, atlas_cost, bucket_edge, pick_variant, shorter_side_in_frame};
     use super::{next_image_id, note_departures, replayable_slices, retired_may_show};
-    use gpui_kit::EntityId;
+    use super::{retire_all, take_unshowable};
+    use gpui_kit::{EntityId, RenderImage};
+    use smallvec::SmallVec;
+    use std::sync::Arc;
+
+    /// Retiring an image twice (two caches let go of it, or one cache
+    /// did twice) still lets it leave: two entries held each other, and
+    /// animated sticker frames piled up at 20 MB a second.
+    #[test]
+    fn an_image_retired_twice_still_leaves() {
+        let frame = image::Frame::new(image::RgbaImage::new(2, 2));
+        let image = Arc::new(RenderImage::new(SmallVec::from_buf([frame])));
+        let gone = Arc::downgrade(&image);
+        retire_all([image.clone()]);
+        begin_frame();
+        retire_all([image]);
+        begin_frame();
+        assert!(take_unshowable().is_empty(), "last frame may still show it");
+        begin_frame();
+        drop(take_unshowable());
+        assert_eq!(gone.strong_count(), 0, "it left the atlas");
+    }
 
     /// The F1 leak: an inline video retires a picture every frame while
     /// only its animation layer redraws and the chat list replays a render
