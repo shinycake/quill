@@ -335,7 +335,17 @@ build_vcpkg_deps() {
     "$VCPKG_DIR/vcpkg.exe" install "openssl:$triplet" "zlib:$triplet" --clean-after-build)
   local installed="$VCPKG_DIR/installed/$triplet"
   mkdir -p "$DEPS/lib" "$DEPS/include"
-  cp "$installed/lib/libssl.lib" "$installed/lib/libcrypto.lib" "$installed/lib/zlib.lib" "$DEPS/lib/"
+  cp "$installed/lib/libssl.lib" "$installed/lib/libcrypto.lib" "$DEPS/lib/"
+  # The static zlib's file name differs between zlib and vcpkg versions
+  # (zlib.lib, zs.lib); its pkg-config file names it, and the link step
+  # takes it as zlib.lib.
+  local zlib_name zlib_lib
+  zlib_name="$(sed -n 's/^Libs:.*-l\([^ ]*\).*$/\1/p' "$installed/lib/pkgconfig/zlib.pc" | tr -d '\r')"
+  for zlib_lib in ${zlib_name:+"$zlib_name.lib"} zlib.lib zs.lib zlibstatic.lib; do
+    [[ -f "$installed/lib/$zlib_lib" ]] && break
+  done
+  [[ -f "$installed/lib/$zlib_lib" ]] || { echo "error: no zlib static library in $installed/lib:" >&2; ls "$installed/lib" >&2; exit 1; }
+  cp "$installed/lib/$zlib_lib" "$DEPS/lib/zlib.lib"
   rm -rf "$DEPS/include/openssl"
   cp -R "$installed/include/openssl" "$DEPS/include/"
   cp "$installed/include/zlib.h" "$installed/include/zconf.h" "$DEPS/include/"

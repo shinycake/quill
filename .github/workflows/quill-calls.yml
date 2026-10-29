@@ -185,14 +185,14 @@ jobs:
           export PATH="$PWD/vendor/ffmpeg/prefix/bin:$PATH"
           # MSVC's link.exe ahead of Git Bash's /usr/bin/link, which would
           # otherwise link the tests (msvc-dev-cmd's bash caveat).
-          [[ "$RUNNER_OS" == Windows ]] && export PATH="$(dirname "$(command -v cl)"):$PATH"
+          if [[ "$RUNNER_OS" == Windows ]]; then cldir="$(dirname "$(command -v cl)")"; export PATH="$cldir:$PATH"; fi
           cargo test -p quill-calls-sys --locked
       - name: the 1:1 engine against the library
         run: |
           export LD_LIBRARY_PATH="$PWD/vendor/ffmpeg/prefix/lib"
           export DYLD_LIBRARY_PATH="$PWD/vendor/ffmpeg/prefix/lib${OPENSSL_ROOT_DIR:+:$OPENSSL_ROOT_DIR/lib}"
           export PATH="$PWD/vendor/ffmpeg/prefix/bin:$PATH"
-          [[ "$RUNNER_OS" == Windows ]] && export PATH="$(dirname "$(command -v cl)"):$PATH"
+          if [[ "$RUNNER_OS" == Windows ]]; then cldir="$(dirname "$(command -v cl)")"; export PATH="$cldir:$PATH"; fi
           root="$PWD"
           [[ "$RUNNER_OS" == Windows ]] && root="$(cygpath -m "$PWD")"
           export QUILL_CALLS_LIB="$root/vendor/quill-calls/lib/${{ matrix.lib }}"
