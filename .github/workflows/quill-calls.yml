@@ -1,0 +1,128 @@
+name: quill-calls
+# Builds libquill_calls (tgcalls + tg_owt behind Quill's C API,
+# docs/decisions/tgcalls-engine.md) on every platform we ship, loads it, and
+# uploads it. Runs on PRs that touch it; the packaging workflows call it.
+on:
+  pull_request:
+    paths:
+      - 'native/quill-calls/**'
+      - 'scripts/build-tgcalls.sh'
+      - 'scripts/build-ffmpeg.sh'
+      - '.github/workflows/quill-calls.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'native/quill-calls/**'
+      - 'scripts/build-tgcalls.sh'
+      - 'scripts/build-ffmpeg.sh'
+      - '.github/workflows/quill-calls.yml'
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: quill-calls (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x86_64, runner: ubuntu-22.04, lib: libquill_calls.so }
+          - { target: linux-aarch64, runner: ubuntu-22.04-arm, lib: libquill_calls.so }
+          - { target: macos-arm64, runner: macos-14, lib: libquill_calls.dylib }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build git pkg-config nasm yasm \
+            zlib1g-dev libssl-dev libpulse-dev libasound2-dev \
+            libx11-dev libxcomposite-dev libxdamage-dev libxext-dev libxfixes-dev \
+            libxrandr-dev libxrender-dev libxtst-dev libdrm-dev libgbm-dev \
+            libepoxy-dev libglib2.0-dev libpipewire-0.3-dev
+      - name: macOS build dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew list ninja >/dev/null 2>&1 || brew install ninja
+          brew list nasm >/dev/null 2>&1 || brew install nasm
+          brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
+          echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+      - name: restore FFmpeg build
+        id: ffmpeg-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: vendor/ffmpeg/prefix
+          key: ffmpeg-${{ runner.os == 'macOS' && 'macos' || 'linux' }}-${{ runner.arch }}-${{ hashFiles('scripts/build-ffmpeg.sh', 'native/quillvideo/*') }}
+      - name: build FFmpeg
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build-ffmpeg.sh
+      - name: save FFmpeg build
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: vendor/ffmpeg/prefix
+          key: ffmpeg-${{ runner.os == 'macOS' && 'macos' || 'linux' }}-${{ runner.arch }}-${{ hashFiles('scripts/build-ffmpeg.sh', 'native/quillvideo/*') }}
+      # tg_owt and the codec libraries only change with the pins in the
+      # script, so cache them apart from the C API, which changes often.
+      - name: restore tg_owt and codecs
+        id: deps-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: vendor/quill-calls/work/deps
+          key: quill-calls-deps-${{ matrix.target }}-${{ hashFiles('scripts/build-tgcalls.sh') }}
+      - name: build libquill_calls
+        run: bash scripts/build-tgcalls.sh
+      - name: save tg_owt and codecs
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: vendor/quill-calls/work/deps
+          key: quill-calls-deps-${{ matrix.target }}-${{ hashFiles('scripts/build-tgcalls.sh') }}
+      - name: load the library and read its protocol versions
+        env:
+          # The packages ship FFmpeg next to the library; here it's in the prefix.
+          LD_LIBRARY_PATH: vendor/ffmpeg/prefix/lib
+          DYLD_LIBRARY_PATH: vendor/ffmpeg/prefix/lib
+        run: |
+          python3 - "vendor/quill-calls/lib/${{ matrix.lib }}" <<'EOF'
+          import ctypes, sys
+          lib = ctypes.CDLL(sys.argv[1])
+          lib.qc_api_version.restype = ctypes.c_uint32
+          lib.qc_library_versions.restype = ctypes.c_char_p
+          lib.qc_max_layer.restype = ctypes.c_int32
+          versions = lib.qc_library_versions().decode().split("\n")
+          print("api", lib.qc_api_version(), "max layer", lib.qc_max_layer(), "versions", versions)
+          assert lib.qc_api_version() == 1
+          assert lib.qc_max_layer() >= 92, "tgcalls max layer"
+          assert len(versions) >= 3 and all(versions), "tgcalls registered no protocol versions"
+          EOF
+      - name: exported symbols are only the C API
+        run: |
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            syms="$(nm -gU vendor/quill-calls/lib/${{ matrix.lib }} | awk '{print $NF}')"
+          else
+            syms="$(nm -D --defined-only vendor/quill-calls/lib/${{ matrix.lib }} | awk '{print $NF}')"
+          fi
+          other="$(echo "$syms" | grep -v -E '^_?qc_' || true)"
+          if [[ -n "$other" ]]; then
+            echo "$other" | head -20
+            echo "error: symbols other than qc_* are exported" >&2
+            exit 1
+          fi
+          echo "$syms"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: quill-calls-${{ matrix.target }}
+          path: |
+            vendor/quill-calls/lib/
+            vendor/quill-calls/include/
+            vendor/quill-calls/share/
+          if-no-files-found: error

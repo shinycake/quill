@@ -1,0 +1,5 @@
+/* Only Quill's C API leaves libquill_calls (Linux linker version script). */
+{
+  global: qc_*;
+  local: *;
+};
