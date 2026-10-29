@@ -135,6 +135,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub(crate) fn install_stream_hooks(&self, engine: &mut dyn CallEngine) {
         let events = self.group_call_streams.events_tx.clone();
         engine.set_engine_event_callback(Arc::new(move |event| {
+            // Everyone's speaking levels are a parity item still to come
+            // (docs/decisions/tgcalls-engine.md); until then they are not
+            // queued, so a level batch never wakes the driver.
+            if matches!(event, EngineEvent::GroupAudioLevels { .. }) {
+                return;
+            }
             if events.send(event).is_err() {
                 eprintln!("quill: stream request after the driver closed; ignored");
             }
@@ -335,6 +341,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let chat_id = match &event {
             EngineEvent::BroadcastTimestampRequested { chat_id }
             | EngineEvent::BroadcastPartRequested { chat_id, .. } => *chat_id,
+            EngineEvent::GroupAudioLevels { .. } => return,
         };
         let Self {
             session,
@@ -365,6 +372,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         data: Vec::new(),
                     },
                 ),
+                EngineEvent::GroupAudioLevels { .. } => {}
             }
             return;
         };
@@ -375,6 +383,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             EngineEvent::BroadcastPartRequested { request, .. } => {
                 feeder.on_part_request(request, now, &mut port);
             }
+            EngineEvent::GroupAudioLevels { .. } => {}
         }
     }
 

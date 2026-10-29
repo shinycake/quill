@@ -1,7 +1,8 @@
-//! `TgcallsEngine`: 1:1 calls on Telegram Desktop's own call library,
-//! tgcalls, loaded at runtime as `libquill_calls`
-//! (docs/decisions/tgcalls-engine.md). Group calls and streams come in the
-//! next steps; until then those methods report `Unavailable`.
+//! `TgcallsEngine`: 1:1 and group calls on Telegram Desktop's own call
+//! library, tgcalls, loaded at runtime as `libquill_calls`
+//! (docs/decisions/tgcalls-engine.md). Live streams (answering a
+//! broadcast's time and part requests) come in the next step; until then
+//! a stream connects but gets no parts.
 //!
 //! The library has no audio devices, as Telegram Desktop builds it: Quill's
 //! microphone capture pushes 10 ms frames in (the external frame sender),
@@ -19,6 +20,9 @@ mod call_engine;
 mod callbacks;
 mod config;
 mod devices;
+mod group;
+mod group_callbacks;
+mod group_config;
 mod sender;
 
 use callbacks::CallContext;
@@ -62,6 +66,10 @@ pub struct TgcallsEngine {
     api: &'static Loader,
     protocol: EngineProtocol,
     calls: HashMap<i32, P2pCall>,
+    /// Group calls, by TDLib group call id.
+    groups: HashMap<i32, group::GroupCall>,
+    /// The media viewer's volume, for the streams Quill plays.
+    stream_volume: f32,
     callback: Arc<CallbackShared>,
 }
 
@@ -88,6 +96,8 @@ impl TgcallsEngine {
                 library_versions: versions,
             },
             calls: HashMap::new(),
+            groups: HashMap::new(),
+            stream_volume: 1.0,
             callback: Arc::new(CallbackShared::new()),
         })
     }
@@ -214,6 +224,9 @@ impl Drop for TgcallsEngine {
         for call in self.calls.values_mut() {
             destroy(self.api, call);
         }
+        for (_, call) in self.groups.drain() {
+            group::destroy_group(self.api, call);
+        }
     }
 }
 
@@ -221,16 +234,22 @@ impl Drop for TgcallsEngine {
 fn debug_info(api: &Loader, handle: NonNull<qc_p2p>) -> String {
     // SAFETY: a live call; the string is the caller's to free.
     let raw = unsafe { (api.qc_p2p_debug_info)(handle.as_ptr()) };
+    take_string(api, raw).unwrap_or_default()
+}
+
+/// Copies and frees a string the library allocated for the caller;
+/// `None` for NULL.
+fn take_string(api: &Loader, raw: *mut std::ffi::c_char) -> Option<String> {
     if raw.is_null() {
-        return String::new();
+        return None;
     }
     // SAFETY: non-null and NUL-ended, freed once below.
-    let line = unsafe { CStr::from_ptr(raw) }
+    let text = unsafe { CStr::from_ptr(raw) }
         .to_string_lossy()
         .into_owned();
     // SAFETY: allocated by the library for the caller.
     unsafe { (api.qc_string_free)(raw) };
-    line
+    Some(text)
 }
 
 fn new_call(call_id: i32, shared: &Arc<CallbackShared>) -> P2pCall {

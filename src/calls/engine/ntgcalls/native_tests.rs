@@ -155,7 +155,9 @@ fn native_stream_connect_needs_no_capture_and_asks_for_parts() {
     eprintln!("first stream event: {event:?}");
     let request = match event {
         EngineEvent::BroadcastPartRequested { request, .. } => Some(request),
-        EngineEvent::BroadcastTimestampRequested { .. } => None,
+        EngineEvent::BroadcastTimestampRequested { .. } | EngineEvent::GroupAudioLevels { .. } => {
+            None
+        }
     }
     .expect("An MTProto stream asks for parts, not the time");
     assert_eq!(request.channel_id, 0, "the audio part comes first");

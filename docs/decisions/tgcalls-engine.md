@@ -159,6 +159,21 @@ video-only media channel descriptions tdesktop never sends. Whether a group
 call connects is tested by hand; the contract test checks the payload, every
 setter and teardown for both flavours.
 
+### The engine side (`src/calls/engine/tgcalls/group.rs`)
+
+`TgcallsEngine` drives one `qc_group` per group call and a second one for
+its presentation, as tdesktop does. The join payload goes to
+`joinVideoChat` unchanged (it is the JSON TDLib forwards), and its `ssrc`
+becomes `audio_source_id`. A join answer with `"stream": true` sets
+broadcast mode (unified for `"rtmp": true`); any other answer sets RTC
+mode and then the answer, in tdesktop's order. Incoming video is routed by
+endpoint, so each `GroupVideoSource` says whether it is a screen. Requested
+qualities follow tdesktop's grid defaults and budget, since Quill does not
+report tile sizes. Speaker levels reach the engine event hook; the driver
+drops them until the speaking-levels parity item. Nobody answers media
+channel, time or part requests yet: a stream connects but gets no parts
+until the live-streams step.
+
 ## Build order
 
 1. Build pipeline and the version API (this doc's first PR).

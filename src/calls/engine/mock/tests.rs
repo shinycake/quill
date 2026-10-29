@@ -19,6 +19,16 @@ fn group_offer_audio_source_id_parses_first_audio_ssrc() {
     assert_eq!(group_offer_audio_source_id(offer), 12345);
 }
 
+/// tgcalls' payload is tdesktop's `GroupJoinPayload` JSON: its `ssrc`
+/// is the audio ssrc, sent as a signed 32-bit number.
+#[test]
+fn group_offer_audio_source_id_reads_the_json_payload() {
+    let payload = r#"{"ufrag":"u","pwd":"p","fingerprints":[],"ssrc":-1234567,"ssrc-groups":[]}"#;
+    assert_eq!(group_offer_audio_source_id(payload), -1234567);
+    assert_eq!(group_offer_audio_source_id(r#"{"ssrc":42}"#), 42);
+    assert_eq!(group_offer_audio_source_id(r#"{"ufrag":"u"}"#), 0);
+}
+
 #[test]
 fn group_offer_audio_source_id_zero_without_audio_ssrc() {
     assert_eq!(

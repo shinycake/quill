@@ -170,41 +170,54 @@ pub(super) unsafe extern "C" fn on_local_video(user: *mut c_void, frame: *const 
 unsafe fn deliver_frame(user: *mut c_void, frame: *const qc_video_frame, local: bool) {
     crate::thread_guard::ffi_boundary((), || {
         // SAFETY: as the function's contract says.
-        let (Some(call), Some(frame)) = (unsafe { context(user) }, unsafe { frame.as_ref() })
-        else {
+        let Some(call) = (unsafe { context(user) }) else {
             return;
         };
-        // SAFETY: the library keeps the planes valid for this call.
-        let Some(planes) = (unsafe { i420_planes(frame) }) else {
-            return;
+        let key = LiveKey::Call {
+            call_id: call.call_id,
+            local,
+            screen: false,
         };
-        let (Ok(width), Ok(height)) = (u16::try_from(frame.width), u16::try_from(frame.height))
-        else {
-            return;
-        };
-        let seq = call.shared.frame_seq.fetch_add(1, Ordering::Relaxed);
-        let Some(picture) = LiveFrame::new(
-            seq,
-            width,
-            height,
-            live_rotation(frame.rotation),
-            planes,
-            std::time::Instant::now(),
-        ) else {
-            return;
-        };
-        let hook = call.shared.live_frame_hook.lock_or_recover().clone();
-        if let Some(hook) = hook {
-            hook(
-                LiveKey::Call {
-                    call_id: call.call_id,
-                    local,
-                    screen: false,
-                },
-                picture,
-            );
-        }
+        // SAFETY: as the function's contract says.
+        unsafe { send_picture(&call.shared, key, frame) };
     });
+}
+
+/// Hands one library picture to the live frame hook under `key`.
+///
+/// # Safety
+/// `frame` is null or a picture the library keeps valid for this call.
+pub(super) unsafe fn send_picture(
+    shared: &CallbackShared,
+    key: LiveKey,
+    frame: *const qc_video_frame,
+) {
+    // SAFETY: as the function's contract says.
+    let Some(frame) = (unsafe { frame.as_ref() }) else {
+        return;
+    };
+    // SAFETY: the library keeps the planes valid for this call.
+    let Some(planes) = (unsafe { i420_planes(frame) }) else {
+        return;
+    };
+    let (Ok(width), Ok(height)) = (u16::try_from(frame.width), u16::try_from(frame.height)) else {
+        return;
+    };
+    let seq = shared.frame_seq.fetch_add(1, Ordering::Relaxed);
+    let Some(picture) = LiveFrame::new(
+        seq,
+        width,
+        height,
+        live_rotation(frame.rotation),
+        planes,
+        std::time::Instant::now(),
+    ) else {
+        return;
+    };
+    let hook = shared.live_frame_hook.lock_or_recover().clone();
+    if let Some(hook) = hook {
+        hook(key, picture);
+    }
 }
 
 /// The picture's planes packed tightly (Y, then U, then V), as live feeds
