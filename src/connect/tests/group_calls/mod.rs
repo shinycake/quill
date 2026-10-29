@@ -13,6 +13,7 @@ use serde_json::Value;
 use std::sync::Arc;
 use std::time::Instant;
 
+mod conference;
 mod levels;
 mod link;
 mod no_engine;
@@ -107,46 +108,6 @@ fn driver_group_call_participant_management_shapes_and_gates() {
         .expect("volume 30000 clamps");
     assert_eq!(last_sent()["volume_level"], 20000);
 
-    // Accept: `joinGroupCall` with `inputGroupCallMessage`
-    // (schema line 5288: accept via joinGroupCall). Refuses while
-    // a 1:1 call is active.
-    driver
-        .accept_group_call_invitation(3, 42)
-        .expect("accept sends without an active call");
-    let sent = last_sent();
-    assert_eq!(sent["@type"], "joinGroupCall");
-    assert_eq!(sent["input_group_call"]["@type"], "inputGroupCallMessage");
-    assert_eq!(sent["input_group_call"]["chat_id"], 3);
-    assert_eq!(sent["input_group_call"]["message_id"], 42);
-    driver.session.calls.active_call = Some(ActiveCall {
-        id: 5,
-        user_id: 11,
-        is_outgoing: true,
-        is_video: false,
-        state: CallState::Pending {
-            is_created: true,
-            is_received: false,
-        },
-        started_at: std::time::Instant::now(),
-        ready_at: None,
-        ready: None,
-        transport: None,
-        transport_error: None,
-        signaling_queue: Vec::new(),
-        signaling_dropped: 0,
-        muted: false,
-        camera_on: false,
-        screen_sharing: false,
-        remote_video: RemoteVideoState::Inactive,
-        remote_screen: RemoteVideoState::Inactive,
-        remote_audio_muted: false,
-        remote_battery_low: false,
-        signal_bars: None,
-    });
-    assert_eq!(
-        driver.accept_group_call_invitation(3, 42),
-        Err(ConnectSendError::InvalidRequest)
-    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -414,41 +375,6 @@ fn driver_group_call_management_shapes_and_gates() {
         .start_video_chat(51, String::new(), 0)
         .expect("empty title falls back to chat title");
     assert_eq!(last_sent()["title"], "");
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-/// Phase C2f: `joinGroupCall` success (`groupCallInfo`, schema
-/// 1.8.67 :7190) triggers a `getGroupCall` fetch so the accepted
-/// call gets tracked; the join payload is stored like the
-/// `joinVideoChat` Text arm.
-#[test]
-fn driver_group_call_invitation_accept_starts_tracking() {
-    let (dir, recorder, mut driver, seq) = group_call_test_driver();
-    let sink = Arc::new(MemorySink::new());
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    driver
-        .accept_group_call_invitation(3, 42)
-        .expect("accept sends");
-    let sent: Value = serde_json::from_str(recorder.snapshot().last().unwrap()).unwrap();
-    let extra = sent["@extra"].as_str().unwrap().to_string();
-    driver
-            .ingest(
-                copy_and_parse(
-                    &format!(
-                        r#"{{"@type":"groupCallInfo","group_call_id":555,"join_payload":"payload-1","@extra":"{extra}"}}"#
-                    ),
-                    &seq,
-                    &dyn_sink,
-                )
-                .unwrap(),
-            )
-            .unwrap();
-    // The fetch queue is drained by `maybe_fetch_group_calls`
-    // during ingest — assert the `getGroupCall` went out.
-    let sent: Value = serde_json::from_str(recorder.snapshot().last().unwrap()).unwrap();
-    assert_eq!(sent["@type"], "getGroupCall");
-    assert_eq!(sent["group_call_id"], 555);
-    assert_eq!(driver.session.calls.group_call_error, None);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

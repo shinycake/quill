@@ -242,6 +242,11 @@ pub struct ActiveGroupCall {
     pub paid_message_star_count: i64,
     /// Live stories: who your comments are sent as.
     pub message_sender_id: Option<MessageSender>,
+    /// `groupCall.invite_link`: a conference call's link.
+    pub invite_link: String,
+    /// What a conference call keeps beyond its `groupCall` fields; `None`
+    /// for a video chat, or a conference this session didn't join.
+    pub conference: Option<ConferenceCall>,
 }
 
 /// stories-live-play: a pending "Join live" from the story viewer — the
@@ -336,6 +341,8 @@ impl ActiveGroupCall {
             viewer_count: 0,
             paid_message_star_count: 0,
             message_sender_id: None,
+            invite_link: String::new(),
+            conference: None,
         }
     }
 

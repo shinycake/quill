@@ -24,11 +24,10 @@ pub enum CallsPayload {
     /// `createVideoChat` answer. Correlated via `@extra` /
     /// `RequestPurpose::CreateVideoChat`.
     GroupCallId { id: i32 },
-    /// Phase C2f: `groupCallInfo` (schema 1.8.67, line 7190) — the
-    /// `joinGroupCall` answer (invitation acceptance). Correlated via
-    /// `@extra` / `RequestPurpose::JoinGroupCallInvitation`. The
-    /// `join_payload` is the tgcalls payload (stored, never consumed —
-    /// no media transport until Phase C2); `updateGroupCall` remains
+    /// `groupCallInfo` (schema 1.8.69, line 7798): the `joinGroupCall`
+    /// or `createGroupCall` answer for a conference call. Correlated via
+    /// `@extra` / `RequestPurpose::JoinConference`. `join_payload` is the
+    /// tgcalls answer the driver connects with; `updateGroupCall` remains
     /// the source of truth for join state.
     GroupCallInfo {
         group_call_id: i32,

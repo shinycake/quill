@@ -109,6 +109,12 @@ pub struct CallsState {
     /// it is no longer joined: a late joined update for it must not take
     /// the slot back.
     pub left_group_call: Option<i32>,
+    /// A conference call being joined or created, until its answer names
+    /// the call (`crate::state::conference`).
+    pub pending_conference: Option<PendingConference>,
+    /// The 1:1 call was taken into a conference call by the other side;
+    /// the driver joins it (`crate::state::conference`).
+    pub call_upgrade: Option<CallUpgrade>,
 }
 
 impl CallsState {
@@ -175,6 +181,8 @@ impl CallsState {
             call_link_confirm: None,
             call_link_after_leave: None,
             left_group_call: None,
+            pending_conference: None,
+            call_upgrade: None,
         }
     }
 }

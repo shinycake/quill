@@ -145,11 +145,11 @@ pub enum CallsPurpose {
     /// `updateGroupCallParticipant`. Failures are ignored: a missed
     /// speaking mark is not worth a banner.
     SetGroupCallParticipantIsSpeaking { group_call_id: i32 },
-    /// Phase C2f: `joinGroupCall` to accept a `messageGroupCall`
-    /// invitation (schema 1.8.67, line 5288: "Use joinGroupCall to
-    /// accept the call"). The joined call is tracked via
-    /// `updateGroupCall` like any other join.
-    JoinGroupCallInvitation,
+    /// `joinGroupCall` or `createGroupCall` for a conference call (an
+    /// invitation, a link, a rejoin, or a 1:1 call taken into a new one).
+    /// The `groupCallInfo` answer names the call and carries the tgcalls
+    /// answer (`Session::accept_conference_joined`).
+    JoinConference,
     /// Phase C2f: `declineGroupCallInvitation`. Response is `ok`.
     DeclineGroupCallInvitation { chat_id: i64, message_id: i64 },
     /// Stream mode: `getGroupCallStreams` or `getGroupCallStreamSegment`
@@ -167,5 +167,5 @@ flat_purposes!(Calls(CallsPurpose) {
     SearchCallMessages,
     DeleteAllCallMessages,
     SendCallLog,
-    JoinGroupCallInvitation,
+    JoinConference,
 });

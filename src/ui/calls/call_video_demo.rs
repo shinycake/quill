@@ -122,6 +122,7 @@ pub(in crate::ui) fn seed_video_call(
             servers: Vec::new(),
             allow_p2p: true,
             emojis: ["🐙", "🌵", "🎈", "🍋"].map(String::from).to_vec(),
+            is_group_call_supported: true,
         }),
         transport: Some(TransportState::Connected),
         transport_error: None,

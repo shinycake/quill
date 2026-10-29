@@ -403,19 +403,29 @@ impl<S: JsonSender> ConnectDriver<S> {
         if manual && let Some(call) = self.session.calls.group_call_mut(group_call_id) {
             call.rejoin_attempts = 0;
         }
-        let is_muted = match self.session.calls.group_call(group_call_id) {
+        let (is_muted, conference) = match self.session.calls.group_call(group_call_id) {
             Some(call)
                 if call.reconnecting
                     && call.rejoin_attempts < crate::state::MAX_GROUP_CALL_REJOIN_ATTEMPTS =>
             {
-                call.is_muted_self
+                (
+                    call.is_muted_self,
+                    call.is_conference().then(|| call.conference_input()),
+                )
             }
             _ => return Err(ConnectSendError::InvalidRequest),
         };
-        let extra = self.session.request(
-            RequestPurpose::Calls(CallsPurpose::JoinVideoChat { group_call_id }),
-            None,
-        );
+        // A conference call is rejoined by its link; without one known
+        // there is nothing to rejoin with.
+        if conference == Some(None) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = if conference.is_some() {
+            RequestPurpose::JoinConference
+        } else {
+            RequestPurpose::Calls(CallsPurpose::JoinVideoChat { group_call_id })
+        };
+        let extra = self.session.request(purpose, None);
         // Review fix: the new native context starts unconnected, and
         // `create_group_call` below replaces the old media entry — a
         // live presentation would be orphaned (still capturing on the
@@ -435,11 +445,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             // The leave stopped the presentation first (privacy order).
             orphaned_presentation = false;
         }
-        let params = self.group_join_params(group_call_id, is_muted);
-        if let Err(err) =
-            self.sender
-                .send_json(&self.group_join_request(extra, group_call_id, &params))
-        {
+        let json = match conference.flatten() {
+            Some(input) => self.conference_rejoin_request(extra, group_call_id, input, is_muted),
+            None => {
+                let params = self.group_join_params(group_call_id, is_muted);
+                self.group_join_request(extra, group_call_id, &params)
+            }
+        };
+        if let Err(err) = self.sender.send_json(&json) {
             self.session.requests.take(extra);
             // The attempt never went out: re-arm so the next ingest
             // retries instead of stranding the call.
@@ -615,16 +628,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.close_call_feeds(group_call_id);
         self.group_camera_state.remove(&group_call_id);
         self.group_mute_state.remove(&group_call_id);
+        self.forget_conference_call(group_call_id);
     }
 
     /// Phase C3a: `endGroupCall` (schema 1.8.67, :14461). Gated on
-    /// `groupCall.can_be_managed` (video chats).
+    /// `groupCall.can_be_managed` for a video chat, and on `is_owned` for
+    /// a conference call ("requires groupCall.is_owned for group calls").
     pub fn end_group_call(&mut self) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let group_call_id = match &self.session.calls.active_group_call {
-            Some(call) if call.can_be_managed => call.id,
+            Some(call) if call.can_be_managed || (call.is_conference() && call.is_owned) => call.id,
             _ => return Err(ConnectSendError::InvalidRequest),
         };
         let extra = self.session.request(

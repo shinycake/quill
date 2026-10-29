@@ -401,40 +401,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
-    /// Phase C2f: accept a `messageGroupCall` invitation via
-    /// `joinGroupCall` (schema 1.8.67, line 5288: "Use joinGroupCall
-    /// to accept the call"). Refuses while a 1:1 call is active, like
-    /// the chat-bound join; the joined call is tracked via
-    /// `updateGroupCall`.
-    pub fn accept_group_call_invitation(
-        &mut self,
-        chat_id: i64,
-        message_id: i64,
-    ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        if self.session.calls.active_call.is_some() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        let extra = self
-            .session
-            .request(RequestPurpose::JoinGroupCallInvitation, None);
-        let input = InputGroupCallRef::Message {
-            chat_id,
-            message_id,
-        };
-        let params = GroupCallJoinParams::honest_no_device();
-        if let Err(err) = self
-            .sender
-            .send_json(&join_group_call(extra, &input, &params))
-        {
-            self.session.requests.take(extra);
-            return Err(err);
-        }
-        Ok(extra)
-    }
-
     /// Phase C2f: `declineGroupCallInvitation` (schema 1.8.67,
     /// :14380) — declines (or cancels, for the sender) a
     /// `messageGroupCall` invitation.

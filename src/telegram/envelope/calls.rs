@@ -118,6 +118,9 @@ pub struct ReadyParams {
     /// `callStateReady.emojis` (schema 1.8.67, :7068): the 4-emoji
     /// E2E fingerprint, shown on the 1:1 call card.
     pub emojis: Vec<String>,
+    /// The other side can take this call into a conference call: tdesktop
+    /// shows "Add people" only then (`is_conference_supported`).
+    pub is_group_call_supported: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -321,6 +324,10 @@ pub(crate) fn parse_call(value: Option<&Value>) -> Option<ParsedCall> {
                         .collect()
                 })
                 .unwrap_or_default(),
+            is_group_call_supported: state
+                .get("is_group_call_supported")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         });
     Some(ParsedCall {
         id: value
@@ -393,6 +400,9 @@ pub struct ParsedGroupCall {
     /// `message_sender_id`: who your live story comments are sent as;
     /// `None` outside live stories.
     pub message_sender_id: Option<MessageSender>,
+    /// `invite_link`: a conference call's link (empty for a video chat,
+    /// or a call you may not share), joined with `inputGroupCallLink`.
+    pub invite_link: String,
 }
 
 pub(crate) fn parse_group_call(value: Option<&Value>) -> Option<ParsedGroupCall> {
@@ -526,6 +536,11 @@ pub(crate) fn parse_group_call(value: Option<&Value>) -> Option<ParsedGroupCall>
             .unwrap_or(0)
             .max(0),
         message_sender_id: parse_message_sender(value.get("message_sender_id")).ok(),
+        invite_link: value
+            .get("invite_link")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
     })
 }
 

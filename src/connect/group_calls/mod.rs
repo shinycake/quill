@@ -23,6 +23,8 @@ use crate::telegram::requests::{
 };
 
 mod admin;
+mod conference;
+pub(crate) use conference::ConferenceCrypto;
 mod controls;
 pub use controls::SelfMuteError;
 mod join;
@@ -71,6 +73,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !engine_available {
             return Ok(());
         }
+        self.sync_conference_ssrc_owners(group_call_id);
         // Finish the join handshake once the `joinVideoChat` answer is
         // stored on the tracked call.
         let join_answer = self

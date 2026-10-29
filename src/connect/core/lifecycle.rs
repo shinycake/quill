@@ -30,6 +30,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             live_feeds: Arc::new(Mutex::new(HashMap::new())),
             group_camera_state: HashMap::new(),
             group_mute_state: HashMap::new(),
+            conference_crypto: None,
             group_call_streams: Default::default(),
             group_levels: Default::default(),
             muted_hint: Default::default(),
