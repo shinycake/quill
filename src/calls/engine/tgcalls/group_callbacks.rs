@@ -18,7 +18,7 @@ use quill_calls_sys::{
 };
 use std::collections::HashMap;
 use std::ffi::{CStr, c_char, c_void};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Numbers every instance, so an answer meant for a replaced one (a
@@ -28,7 +28,9 @@ static NEXT_INSTANCE: AtomicU64 = AtomicU64::new(1);
 /// One group call's (or presentation's) view of the engine's hooks,
 /// handed to tgcalls as `user`.
 pub(super) struct GroupContext {
-    pub(super) group_call_id: i32,
+    /// TDLib's group call id; a conference call's changes once, when the
+    /// join answer names the call created under a provisional key.
+    group_call_id: AtomicI32,
     /// The chat the call is in: stream requests and pictures are keyed
     /// by it.
     pub(super) chat_id: i64,
@@ -41,6 +43,9 @@ pub(super) struct GroupContext {
     /// The endpoints whose pictures Quill takes and the feed each one
     /// goes to, by endpoint id.
     pub(super) endpoints: Mutex<HashMap<String, LiveKey>>,
+    /// A conference call's encryption and media channels; `None` for a
+    /// video chat or a stream.
+    pub(super) conference: Option<super::group_conference::Conference>,
 }
 
 impl GroupContext {
@@ -51,34 +56,54 @@ impl GroupContext {
         shared: &Arc<CallbackShared>,
     ) -> Self {
         Self {
-            group_call_id,
+            group_call_id: AtomicI32::new(group_call_id),
             chat_id,
             instance: NEXT_INSTANCE.fetch_add(1, Ordering::Relaxed),
             presentation,
             shared: Arc::clone(shared),
             sound: ArcSwapOption::empty(),
             endpoints: Mutex::new(HashMap::new()),
+            conference: None,
         }
+    }
+
+    /// The same context for a conference call: every frame goes through
+    /// `crypto`.
+    pub(super) fn conference(mut self, crypto: Arc<dyn crate::calls::engine::FrameCrypto>) -> Self {
+        self.conference = Some(super::group_conference::Conference::new(crypto));
+        self
+    }
+
+    pub(super) fn group_call_id(&self) -> i32 {
+        self.group_call_id.load(Ordering::SeqCst)
+    }
+
+    pub(super) fn set_group_call_id(&self, group_call_id: i32) {
+        self.group_call_id.store(group_call_id, Ordering::SeqCst);
     }
 
     /// The callbacks tdesktop wires for the instance: a presentation
     /// reports only its network state, the call also its levels, sound,
     /// videos and the stream's time and part requests. Media channel
-    /// requests stay unwired, so tgcalls accepts every ssrc as it comes
-    /// (docs/decisions/tgcalls-engine.md).
+    /// requests stay unwired outside a conference call, so tgcalls accepts
+    /// every ssrc as it comes (docs/decisions/tgcalls-engine.md); a
+    /// conference call needs each ssrc's sender to decrypt its frames
+    /// (docs/decisions/tgcalls-conference-calls.md).
     pub(super) fn callbacks(self: &Arc<Self>) -> qc_group_callbacks {
+        use super::group_conference::{on_e2e, on_media_channels};
         let call = !self.presentation;
+        let conference = self.conference.is_some();
         qc_group_callbacks {
             user: self.as_user(),
             network_state: Some(on_network_state),
             audio_levels: call.then_some(on_audio_levels as _),
             audio_out: call.then_some(on_audio as _),
             incoming_video: call.then_some(on_incoming_video as _),
-            request_media_channels: None,
+            request_media_channels: (call && conference).then_some(on_media_channels as _),
             request_current_time: call.then_some(on_current_time as _),
             request_broadcast_part: call.then_some(on_broadcast_part as _),
             request_cancelled: call.then_some(on_request_cancelled as _),
-            e2e: None,
+            e2e: conference.then_some(on_e2e as _),
         }
     }
 
@@ -106,7 +131,7 @@ impl GroupContext {
 /// # Safety
 /// `user` is the `GroupContext` the engine keeps alive past
 /// `qc_group_destroy` (or past clearing the preview), or null.
-unsafe fn context<'a>(user: *mut c_void) -> Option<&'a GroupContext> {
+pub(super) unsafe fn context<'a>(user: *mut c_void) -> Option<&'a GroupContext> {
     // SAFETY: as the function's contract says.
     unsafe { user.cast::<GroupContext>().cast_const().as_ref() }
 }
@@ -119,7 +144,7 @@ unsafe extern "C" fn on_network_state(user: *mut c_void, connected: i32, to_rtc:
         };
         crate::advanced::debug_mode::call_log(&format!(
             "[call] group {}{} tgcalls network connected {} to rtc {}",
-            call.group_call_id,
+            call.group_call_id(),
             if call.presentation { " screen" } else { "" },
             connected != 0,
             to_rtc != 0
@@ -143,7 +168,7 @@ unsafe extern "C" fn on_audio_levels(
         // SAFETY: the library hands `count` levels at `levels` for this call.
         let levels = unsafe { std::slice::from_raw_parts(levels, count) };
         call.emit(EngineEvent::GroupAudioLevels {
-            group_call_id: call.group_call_id,
+            group_call_id: call.group_call_id(),
             levels: levels.iter().map(level).collect(),
         });
     });
@@ -195,6 +220,13 @@ unsafe extern "C" fn on_request_cancelled(user: *mut c_void, request_id: u64) {
         let Some(call) = (unsafe { context(user) }) else {
             return;
         };
+        if call
+            .conference
+            .as_ref()
+            .is_some_and(|conference| conference.cancel(request_id))
+        {
+            return;
+        }
         call.emit(EngineEvent::BroadcastRequestCancelled {
             chat_id: call.chat_id,
             request: call.request(request_id),
@@ -288,7 +320,7 @@ pub(super) unsafe extern "C" fn on_local_video(user: *mut c_void, frame: *const 
             return;
         };
         let key = LiveKey::Local {
-            call_id: call.group_call_id,
+            call_id: call.group_call_id(),
         };
         // SAFETY: the library keeps the picture valid for this call.
         unsafe { send_picture(&call.shared, key, frame) };

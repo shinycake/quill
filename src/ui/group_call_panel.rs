@@ -846,6 +846,7 @@ mod tests {
         ParsedGroupCallParticipant {
             participant_id: MessageSender::User { user_id: 1 },
             audio_source_id: 0,
+            screen_sharing_audio_source_id: 0,
             is_current_user: true,
             is_speaking: false,
             is_hand_raised: hand,

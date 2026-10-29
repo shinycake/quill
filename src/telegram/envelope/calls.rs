@@ -659,6 +659,9 @@ pub(crate) fn parse_group_call_video_info(value: Option<&Value>) -> Option<Group
 pub struct ParsedGroupCallParticipant {
     pub participant_id: MessageSender,
     pub audio_source_id: i32,
+    /// The audio ssrc of the participant's shared screen (0 without one):
+    /// a conference call decrypts its frames as the participant's.
+    pub screen_sharing_audio_source_id: i32,
     pub is_current_user: bool,
     pub is_speaking: bool,
     pub is_hand_raised: bool,
@@ -691,6 +694,11 @@ pub(crate) fn parse_group_call_participant(
         participant_id: parse_message_sender(value.get("participant_id")).ok()?,
         audio_source_id: value
             .get("audio_source_id")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .sat_i32(),
+        screen_sharing_audio_source_id: value
+            .get("screen_sharing_audio_source_id")
             .and_then(Value::as_i64)
             .unwrap_or(0)
             .sat_i32(),

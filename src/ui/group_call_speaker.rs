@@ -239,6 +239,7 @@ mod tests {
         let mut p = ParsedGroupCallParticipant {
             participant_id: MessageSender::User { user_id: 9 },
             audio_source_id: 99,
+            screen_sharing_audio_source_id: 0,
             is_current_user: false,
             is_speaking: false,
             is_hand_raised: false,

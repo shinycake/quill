@@ -154,6 +154,7 @@ fn participant(user_id: i64, me: bool) -> ParsedGroupCallParticipant {
     ParsedGroupCallParticipant {
         participant_id: MessageSender::User { user_id },
         audio_source_id: 0,
+        screen_sharing_audio_source_id: 0,
         is_current_user: me,
         is_speaking: !me,
         is_hand_raised: false,

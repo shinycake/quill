@@ -1,6 +1,7 @@
 //! The call-engine abstraction, the tgcalls engine (`libquill_calls`,
 //! loaded at runtime) and the mock engine tests drive.
 mod api;
+mod conference;
 mod external;
 mod mock;
 mod stream;
@@ -9,6 +10,7 @@ mod tgcalls;
 mod types;
 
 pub use api::*;
+pub use conference::*;
 pub use external::*;
 pub use mock::*;
 pub use stream::*;
