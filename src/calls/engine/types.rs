@@ -80,6 +80,9 @@ pub struct GroupVideoSource {
     /// rather than their camera. ntgcalls tells them apart by track;
     /// tgcalls only by endpoint.
     pub screen: bool,
+    /// The participant's audio ssrc (`audio_source_id`), which tgcalls
+    /// syncs the video's playback to (lip sync).
+    pub audio_ssrc: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

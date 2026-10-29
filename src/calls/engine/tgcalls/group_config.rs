@@ -11,18 +11,22 @@ use serde_json::{Value, json};
 const FULL_AS_MEDIUMS: usize = 4;
 const MAX_MEDIUMS: usize = 16;
 
-/// How the `joinVideoChat` answer connects, as tdesktop reads it: a
-/// `"stream": true` answer is a broadcast (an RTMP one when `"rtmp"` is
-/// true too), anything else, a malformed answer included, is RTC.
+/// How the `joinVideoChat` answer connects: `"rtmp": true` is an RTMP
+/// broadcast, `"stream": true` an MTProto one, anything else (a malformed
+/// answer included) RTC. An RTMP answer is a broadcast with or without
+/// `"stream"`, as `GroupCallMode::from_join_answer` reads it on the
+/// connect side.
 pub(super) fn join_mode(answer: &str) -> GroupCallMode {
     let Ok(Value::Object(fields)) = serde_json::from_str::<Value>(answer) else {
         return GroupCallMode::Rtc;
     };
     let flag = |key: &str| fields.get(key).and_then(Value::as_bool) == Some(true);
-    match (flag("stream"), flag("rtmp")) {
-        (true, true) => GroupCallMode::Rtmp,
-        (true, false) => GroupCallMode::Stream,
-        (false, _) => GroupCallMode::Rtc,
+    if flag("rtmp") {
+        GroupCallMode::Rtmp
+    } else if flag("stream") {
+        GroupCallMode::Stream
+    } else {
+        GroupCallMode::Rtc
     }
 }
 
@@ -61,14 +65,15 @@ pub(super) fn requested_videos(sources: &[GroupVideoSource]) -> Vec<RequestedVid
         .collect()
 }
 
-/// `qc_group_set_requested_video`'s JSON for `sources`. tgcalls does not
-/// use a video's audio ssrc, so 0 stands in for it.
+/// `qc_group_set_requested_video`'s JSON for `sources`. Each video names
+/// its participant's audio ssrc, which tgcalls syncs it to, as tdesktop's
+/// `.audioSsrc = participant->ssrc`.
 pub(super) fn requested_video_json(sources: &[GroupVideoSource]) -> String {
     let channels: Vec<Value> = requested_videos(sources)
         .iter()
         .map(|video| {
             json!({
-                "audio_ssrc": 0,
+                "audio_ssrc": video.source.audio_ssrc,
                 "user_id": video.source.user_id,
                 "endpoint": video.source.endpoint,
                 "ssrc_groups": video.source.ssrc_groups.iter().map(|group| json!({
@@ -97,6 +102,7 @@ mod tests {
                 ssrcs: vec![1, 2, 3],
             }],
             screen,
+            audio_ssrc: 7000 + u32::try_from(index).unwrap(),
         }
     }
 
@@ -114,10 +120,8 @@ mod tests {
             GroupCallMode::Rtmp
         );
         assert_eq!(join_mode(r#"{"stream":true}"#), GroupCallMode::Stream);
-        assert_eq!(
-            join_mode(r#"{"stream":false,"rtmp":true}"#),
-            GroupCallMode::Rtc
-        );
+        assert_eq!(join_mode(r#"{"rtmp":true}"#), GroupCallMode::Rtmp);
+        assert_eq!(join_mode(r#"{"stream":false}"#), GroupCallMode::Rtc);
         assert_eq!(join_mode(r#"{"transport":{}}"#), GroupCallMode::Rtc);
         assert_eq!(join_mode("not json"), GroupCallMode::Rtc);
     }
@@ -172,7 +176,7 @@ mod tests {
         let channel = &json[0];
         assert_eq!(channel["endpoint"], "endpoint-0");
         assert_eq!(channel["user_id"], 100);
-        assert_eq!(channel["audio_ssrc"], 0);
+        assert_eq!(channel["audio_ssrc"], 7000);
         assert_eq!(channel["ssrc_groups"][0]["semantics"], "SIM");
         assert_eq!(channel["ssrc_groups"][0]["ssrcs"], json!([1, 2, 3]));
         assert_eq!(channel["max_quality"], QC_GROUP_QUALITY_FULL);

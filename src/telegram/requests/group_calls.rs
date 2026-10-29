@@ -308,19 +308,20 @@ pub fn end_group_call(extra: RequestId, group_call_id: i32) -> String {
 /// payload:string = Text;`
 /// "Starts screen sharing in a group call". The `payload` is the
 /// presentation offer from `ntg_init_presentation`; the returned `Text`
-/// is the answer for `ntg_connect(..., is_presentation=true)`. No
-/// separate screen audio source exists in this slice (`audio_source_id`
-/// is 0).
+/// is the answer for `ntg_connect(..., is_presentation=true)`.
+/// `audio_source_id` is the presentation's own audio ssrc from the
+/// offer (0 when the engine announces none).
 pub fn start_group_call_screen_sharing(
     extra: RequestId,
     group_call_id: i32,
+    audio_source_id: i32,
     payload: &str,
 ) -> String {
     json!({
         "@type": "startGroupCallScreenSharing",
         "@extra": extra.as_extra(),
         "group_call_id": group_call_id,
-        "audio_source_id": 0,
+        "audio_source_id": audio_source_id,
         "payload": payload,
     })
     .to_string()

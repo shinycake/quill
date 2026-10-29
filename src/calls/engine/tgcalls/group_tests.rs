@@ -27,6 +27,7 @@ fn source(user_id: i64, endpoint: &str, screen: bool) -> GroupVideoSource {
             ssrcs: vec![10, 11, 12],
         }],
         screen,
+        audio_ssrc: 0,
     }
 }
 

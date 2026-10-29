@@ -136,6 +136,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 endpoint: info.endpoint_id.clone(),
                 ssrc_groups,
                 screen,
+                audio_ssrc: streamer.audio_source_id.cast_unsigned(),
             })
         })
         .collect()

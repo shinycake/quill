@@ -134,7 +134,7 @@ Where the build deliberately differs from tdesktop's:
   value. The join response, connection mode (none, RTC, broadcast with
   tdesktop's `keepBroadcastIfWasEnabled = true` and the RTMP
   `isUnifiedBroadcast` flag), mute, per-ssrc volume, removed ssrcs,
-  requested video channels (JSON from `groupCallParticipantVideoInfo`) and
+  requested video channels (JSON from `groupCallParticipantVideoInfo` plus the participant's audio ssrc for lip sync) and
   outgoing video (`qc_video_capture`) map one to one onto tgcalls.
 - Incoming video is per endpoint: `qc_group_add_incoming_video` hands
   tgcalls a sink that calls `incoming_video` with the endpoint id and an
