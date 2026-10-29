@@ -9,8 +9,8 @@
 //! the player's watchers (the controls) at most every 100 ms.
 //!
 //! A surface (AVPlayer on macOS, NV12 on Windows) can't be rounded by GPUI, so corners
-//! over a surface are cut by painting the background color over the
-//! corner outsides (`inline_video::corner_mask`); images round themselves.
+//! over a surface are cut by painting the background color over each
+//! corner's outside (`inline_video::corner_mask`); images round themselves.
 //!
 //! A live player (`backend_live`) is redrawn by its feed when a frame
 //! lands; the element only records the view it is drawn in and asks the
@@ -258,24 +258,36 @@ fn paint_corner_mask(
     window: &mut Window,
 ) {
     let points = |value: Pixels| f32::from(value).round().max(0.0) as u32;
-    let width = points(bounds.size.width);
-    let height = points(bounds.size.height);
-    if width == 0 || height == 0 {
+    let tile = (points(bounds.size.width), points(bounds.size.height));
+    if tile.0 == 0 || tile.1 == 0 {
         return;
     }
-    let mask = super::super::inline_video::corner_mask(
-        width,
-        height,
-        [
-            points(radii.top_left),
-            points(radii.top_right),
-            points(radii.bottom_right),
-            points(radii.bottom_left),
-        ],
-        colors,
-    );
-    // A failed paint leaves square corners; nothing else depends on it.
-    let _ = window.paint_image(bounds, bounds, Corners::default(), mask, 0, false);
+    let radii = [
+        radii.top_left,
+        radii.top_right,
+        radii.bottom_right,
+        radii.bottom_left,
+    ];
+    for (corner, (radius, color)) in radii.into_iter().zip(colors).enumerate() {
+        let radius = points(radius);
+        if radius == 0 {
+            continue;
+        }
+        let (w, h) = super::super::inline_video::corner_mask_size(radius, tile);
+        let extent = size(px(w as f32 / 2.0), px(h as f32 / 2.0));
+        let x = match corner {
+            0 | 3 => bounds.left(),
+            _ => bounds.right() - extent.width,
+        };
+        let y = match corner {
+            0 | 1 => bounds.top(),
+            _ => bounds.bottom() - extent.height,
+        };
+        let at = Bounds::new(point(x, y), extent);
+        let mask = super::super::inline_video::corner_mask(corner, radius, tile, color);
+        // A failed paint leaves a square corner; nothing else depends on it.
+        let _ = window.paint_image(at, at, Corners::default(), mask, 0, false);
+    }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
