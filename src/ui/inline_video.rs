@@ -485,7 +485,9 @@ pub(super) fn corner_mask(
     use std::sync::Arc;
     type Key = (usize, u32, (u32, u32), [u8; 4]);
     thread_local! {
-        static MASKS: RefCell<Lru<Key, Arc<RenderImage>>> = RefCell::new(Lru::new(32));
+        /// Up to four corners for each tile shape on screen (bubble
+        /// media, round videos, video avatars, each corner a few KB).
+        static MASKS: RefCell<Lru<Key, Arc<RenderImage>>> = RefCell::new(Lru::new(128));
     }
     let channel = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
     let rgba = Rgba::from(color);
