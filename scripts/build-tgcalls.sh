@@ -90,7 +90,39 @@ if [[ "$OS" == windows ]]; then
   }
   # MSVC's directory first: MSYS2's /usr/bin has a link.exe of its own.
   PATH="$(dirname "$(command -v cl)"):$PATH"
-  for tool in cmake ninja nasm make msbuild lib dumpbin; do
+  # libvpx's solution is built by Visual Studio's MSBuild, which libvpx's
+  # makefile looks up by name. vcvars lists its directory, but a lookup of
+  # "msbuild" from MSYS2 bash misses it there, and the Windows directory has
+  # an older .NET Framework MSBuild that can't build VS 2022 projects. So
+  # find Visual Studio's own (VSINSTALLDIR, else vswhere), put its directory
+  # first and name it exactly as it is spelled (MSBUILD_TOOL below).
+  msbuild_dir=""
+  vs_dirs=()
+  [[ -n "${VSINSTALLDIR:-}" ]] && vs_dirs+=("$(cygpath -u "$VSINSTALLDIR")")
+  vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+  if [[ -x "$vswhere" ]]; then
+    while IFS= read -r dir; do
+      [[ -n "$dir" ]] && vs_dirs+=("$(cygpath -u "$dir")")
+    done < <(MSYS2_ARG_CONV_EXCL='*' "$vswhere" -latest -products '*' \
+      -requires Microsoft.Component.MSBuild -property installationPath | tr -d '\r')
+  fi
+  for dir in ${vs_dirs[@]+"${vs_dirs[@]}"}; do
+    if [[ -f "$dir/MSBuild/Current/Bin/amd64/MSBuild.exe" ]]; then
+      msbuild_dir="$dir/MSBuild/Current/Bin/amd64"
+      break
+    fi
+  done
+  [[ -n "$msbuild_dir" ]] || {
+    echo "error: Visual Studio's MSBuild.exe not found (VSINSTALLDIR or vswhere)" >&2
+    exit 2
+  }
+  PATH="$msbuild_dir:$PATH"
+  # The SDK's rc and mt, which CMake's MSVC links use, by the same route.
+  if [[ -n "${WindowsSdkVerBinPath:-}" ]]; then
+    sdk_bin="$(cygpath -u "$WindowsSdkVerBinPath")"
+    PATH="${sdk_bin%/}/x64:$PATH"
+  fi
+  for tool in cmake ninja nasm make MSBuild.exe which lib dumpbin rc mt; do
     command -v "$tool" >/dev/null || { echo "error: $tool not found on PATH" >&2; exit 2; }
   done
   VCPKG_DIR="$(winpath "${VCPKG_INSTALLATION_ROOT:-C:/vcpkg}")"
@@ -199,13 +231,16 @@ build_libvpx() {
     # tdesktop's patches/build_libvpx_win.sh: a Visual Studio 2022 solution
     # that make drives through msbuild, with the static runtime, and the
     # patches of tdesktop's that a Windows x64 build needs. make install
-    # copies the headers; the library is taken from msbuild's output.
+    # copies the headers; the library is taken from msbuild's output. The
+    # makefile skips the solution, without failing, when it can't find
+    # MSBUILD_TOOL; the cp below then fails.
     apply_patches libvpx "$ROOT"/native/quill-calls/patches/libvpx-win-*.patch
     (cd "$WORK/libvpx" && ./configure --prefix="$DEPS" --target=x86_64-win64-vs17 --as=nasm \
       --enable-static-msvcrt \
       --disable-examples --disable-unit-tests --disable-tools --disable-docs \
       --enable-vp8 --enable-vp9 --enable-webm-io --size-limit=4096x4096 \
-      && make -j"$JOBS" && make install)
+      && make -j"$JOBS" MSBUILD_TOOL=MSBuild.exe \
+      && make install MSBUILD_TOOL=MSBuild.exe)
     cp "$WORK/libvpx/x64/Release/vpxmt.lib" "$DEPS/lib/vpx.lib"
     license libvpx "$WORK/libvpx/LICENSE" "$WORK/libvpx/PATENTS"
     stamp libvpx "$key"
@@ -285,14 +320,37 @@ build_vcpkg_deps() {
   local key triplet=x64-windows-static
   key="vcpkg-$(git -c safe.directory="*" -C "$VCPKG_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
   built openssl "$key" libcrypto.lib && built zlib "$key" zlib.lib && return
-  "$VCPKG_DIR/vcpkg.exe" install "openssl:$triplet" "zlib:$triplet" --clean-after-build
+  # Without MSYS2's directories on PATH: OpenSSL's Configure refuses MSYS2's
+  # perl for MSVC targets, and vcpkg sets up the MSVC tools itself.
+  local dir native_path=()
+  local -a dirs
+  IFS=: read -r -a dirs <<<"$PATH"
+  for dir in "${dirs[@]}"; do
+    case "$dir" in
+      /usr/*|/bin|/ucrt64/*|/mingw*|/clang*|/opt/*) ;;
+      *) native_path+=("$dir") ;;
+    esac
+  done
+  (IFS=:; PATH="${native_path[*]}" \
+    "$VCPKG_DIR/vcpkg.exe" install "openssl:$triplet" "zlib:$triplet" --clean-after-build)
   local installed="$VCPKG_DIR/installed/$triplet"
   mkdir -p "$DEPS/lib" "$DEPS/include"
-  cp "$installed/lib/libssl.lib" "$installed/lib/libcrypto.lib" "$installed/lib/zlib.lib" "$DEPS/lib/"
+  cp "$installed/lib/libssl.lib" "$installed/lib/libcrypto.lib" "$DEPS/lib/"
+  # The static zlib's file name differs between zlib and vcpkg versions
+  # (zlib.lib, zs.lib); its pkg-config file names it, and the link step
+  # takes it as zlib.lib.
+  local zlib_name zlib_lib
+  zlib_name="$(sed -n 's/^Libs:.*-l\([^ ]*\).*$/\1/p' "$installed/lib/pkgconfig/zlib.pc" | tr -d '\r')"
+  for zlib_lib in ${zlib_name:+"$zlib_name.lib"} zlib.lib zs.lib zlibstatic.lib; do
+    [[ -f "$installed/lib/$zlib_lib" ]] && break
+  done
+  [[ -f "$installed/lib/$zlib_lib" ]] || { echo "error: no zlib static library in $installed/lib:" >&2; ls "$installed/lib" >&2; exit 1; }
+  cp "$installed/lib/$zlib_lib" "$DEPS/lib/zlib.lib"
   rm -rf "$DEPS/include/openssl"
   cp -R "$installed/include/openssl" "$DEPS/include/"
   cp "$installed/include/zlib.h" "$installed/include/zconf.h" "$DEPS/include/"
-  "$VCPKG_DIR/vcpkg.exe" list openssl zlib | tr -d '\r' > "$DEPS/vcpkg-versions.txt"
+  # `vcpkg list` takes one filter at most.
+  "$VCPKG_DIR/vcpkg.exe" list | tr -d '\r' | grep -E "^(openssl|zlib):$triplet" > "$DEPS/vcpkg-versions.txt"
   # Linked in statically, so their notices travel with the DLL.
   license openssl "$installed/share/openssl/copyright"
   license zlib "$installed/share/zlib/copyright"
