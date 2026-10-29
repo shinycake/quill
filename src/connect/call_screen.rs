@@ -21,8 +21,8 @@
 //! computer plays and the call microphone (`call_capture`) mixes it into
 //! its frames. It stops with the share, or when the box is cleared.
 //!
-//! Builds without a screen backend (Linux until its slice) never start
-//! this: ntgcalls' desktop capture runs as before.
+//! Builds without a screen backend never start this, and calls there
+//! cannot share a screen.
 
 use super::*;
 use crate::calls::capture::feeder::VIDEO_SINK_FRAMES;
@@ -110,8 +110,8 @@ impl CallScreen {
         self.opener = Some(opener);
     }
 
-    /// Whether Quill captures the shared screen itself (and so shows its
-    /// own chooser) instead of ntgcalls' desktop capture. Unit tests
+    /// Whether Quill captures the shared screen (and so shows its own
+    /// chooser). Unit tests
     /// never reach the real screen: there only an injected capture
     /// turns it on.
     pub fn enabled(&self) -> bool {

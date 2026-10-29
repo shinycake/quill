@@ -239,7 +239,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             );
             eprintln!("quill: warning: {line}");
             crate::advanced::debug_mode::debug_log(&line);
-            if let Err(err) = engine.use_device_playback(group_call_id) {
+            if let Err(err) = engine.reopen_stream_sound(group_call_id) {
                 eprintln!(
                     "quill: stream sound fallback for group call {group_call_id} failed: {err}"
                 );
@@ -303,22 +303,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             .feeders
             .insert(chat_id, StreamFeeder::new(group_call_id, chat_id, mode));
         self.open_stream_feed(chat_id);
-    }
-
-    /// `ntg_connect` refused the stream: a fatal join error shown as the
-    /// Unsupported state. The mode comes from the join answer (the native
-    /// call never got one), and the native call is stopped so no context
-    /// is left connected without a feeder.
-    pub(super) fn mark_stream_unsupported(&mut self, group_call_id: i32, answer: &str) {
-        if let Some(engine) = self.call_engine.as_deref_mut() {
-            let _ = engine.leave_group_call(group_call_id);
-        }
-        if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
-            call.stream_mode = GroupCallMode::from_join_answer(answer);
-            call.stream = StreamState::Unsupported;
-            // Not retried on every pump: the Join button can try again.
-            call.join_payload.clear();
-        }
     }
 
     /// The call is leaving, ending or rejoining: answer the feeder's
@@ -527,7 +511,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             let Some(call) = self.session.calls.group_call_mut(group_call_id) else {
                 continue;
             };
-            if !call.stream_mode.is_stream() || call.stream == StreamState::Unsupported {
+            if !call.stream_mode.is_stream() {
                 continue;
             }
             let Some(feeder) = self

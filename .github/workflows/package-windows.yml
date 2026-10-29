@@ -1,7 +1,9 @@
 name: package-windows
 # Reusable: the Windows zip (docs/decisions/codex-windows-package.md).
 # windows-build: the UI release binary + core tests. windows-native: TDLib
-# (static OpenSSL/zlib/CRT) from source, ntgcalls prebuilt. windows-ffmpeg
+# (static OpenSSL/zlib/CRT) from source. The call library (quill_calls.dll)
+# is not built for Windows yet: the zip ships without it and calls show as
+# unavailable (docs/decisions/tgcalls-engine.md). windows-ffmpeg
 # builds in parallel. windows-package: assemble, check and smoke
 # the zip. Everything links the C runtime statically or uses the OS Universal
 # CRT, so no VC++ runtime DLL ships (docs/decisions/codex-release-pipeline.md).
@@ -118,15 +120,11 @@ jobs:
         with:
           path: native/prefix
           key: tdlib-windows-mt-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib-windows.ps1', 'scripts/windows-common.ps1', 'native/patches/*') }}
-      - name: vendor ntgcalls (checksum pinned)
-        shell: bash
-        run: bash scripts/vendor-ntgcalls.sh
       - uses: actions/upload-artifact@v7
         with:
           name: quill-windows-native
           path: |
             native/prefix/bin/tdjson.dll
-            vendor/ntgcalls/lib/Release/ntgcalls.dll
           retention-days: 3
           if-no-files-found: error
 

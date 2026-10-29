@@ -2,7 +2,7 @@
 //! per 1:1 call picture.
 //!
 //! The engine hook pushes decoded I420 planes into a [`LiveSource`] on an
-//! ntgcalls thread; the UI holds the matching [`LiveSink`] in a live
+//! engine thread; the UI holds the matching [`LiveSink`] in a live
 //! player (`ui/video_player/backend_live.rs`). Nothing is converted here.
 //!
 //! A stream's feed exists only while its feeder runs, so a picture that
@@ -94,7 +94,7 @@ fn stream_feed_change(state: StreamState) -> Option<Result<LiveState, LiveEnd>> 
         StreamState::Live => Some(Ok(LiveState::Active)),
         StreamState::NoStream => Some(Ok(LiveState::Inactive)),
         StreamState::Ended => Some(Err(LiveEnd::Over)),
-        StreamState::Connecting | StreamState::Unsupported => None,
+        StreamState::Connecting => None,
     }
 }
 
@@ -302,6 +302,5 @@ mod tests {
             Some(Err(LiveEnd::Over))
         );
         assert_eq!(stream_feed_change(StreamState::Connecting), None);
-        assert_eq!(stream_feed_change(StreamState::Unsupported), None);
     }
 }

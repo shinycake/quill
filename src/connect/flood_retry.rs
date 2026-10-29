@@ -72,7 +72,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// never got an answer so their dedupe guards and spinners clear.
     /// Returns whether the UI should redraw.
     pub fn request_tick(&mut self, now: Instant) -> bool {
-        // Stream-mode calls: answer what ntgcalls queued since the last poll.
+        // Stream-mode calls: answer what the engine queued since the last poll.
         let mut changed = self.pump_group_call_streams(now);
         // 1:1 calls: what the engine reported between Telegram updates.
         changed |= self.pump_call_engine_reports();

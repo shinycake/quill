@@ -52,7 +52,7 @@ impl Session {
             }
             // Phase C2g: `joinVideoChat` returns `text` — the tgcalls
             // join answer, stored on the tracked call and consumed by
-            // the driver pump (`ntg_connect`).
+            // the driver pump (`CallEngine::connect_group_call`).
             // `startGroupCallScreenSharing` returns `text` — the
             // presentation answer, consumed by the driver pump.
             AuthPayload::Countries { countries } => {

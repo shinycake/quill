@@ -1,9 +1,4 @@
 use super::*;
-use ntgcalls_sys::NTG_STREAM_STATUS_IDLING;
-use ntgcalls_sys::{
-    NTG_STREAM_DEVICE_CAMERA, NTG_STREAM_DEVICE_SCREEN, NTG_STREAM_MODE_CAPTURE,
-    NTG_STREAM_MODE_PLAYBACK, NTG_STREAM_STATUS_ACTIVE, NTG_STREAM_STATUS_PAUSED,
-};
 
 /// Phase C2g: the audio SSRC is the first `a=ssrc:` line of the
 /// audio `m=` section; video sections are ignored, and 0 is the
@@ -351,30 +346,6 @@ fn mock_frame_callback_plumbing() {
     assert_eq!(second[0].1.width, 2);
 }
 
-/// Phase C2j: P2P frame acceptance — local preview, peer camera, and
-/// peer screen share reach the app; anything else is dropped.
-#[test]
-fn p2p_frame_kind_accepts_screen_share() {
-    assert_eq!(
-        p2p_frame_kind(NTG_STREAM_MODE_CAPTURE, NTG_STREAM_DEVICE_CAMERA),
-        Some(false)
-    );
-    assert_eq!(
-        p2p_frame_kind(NTG_STREAM_MODE_PLAYBACK, NTG_STREAM_DEVICE_CAMERA),
-        Some(false)
-    );
-    assert_eq!(
-        p2p_frame_kind(NTG_STREAM_MODE_PLAYBACK, NTG_STREAM_DEVICE_SCREEN),
-        Some(true)
-    );
-    // Capture-side screen frames and unknown kinds never reach a tile.
-    assert_eq!(
-        p2p_frame_kind(NTG_STREAM_MODE_CAPTURE, NTG_STREAM_DEVICE_SCREEN),
-        None
-    );
-    assert_eq!(p2p_frame_kind(999, 999), None);
-}
-
 /// Phase C2j: validates peer screen-share state delivery ordering.
 #[test]
 fn mock_remote_screen_state_emission() {
@@ -421,25 +392,6 @@ fn mock_remote_video_state_emission() {
     );
 }
 
-/// Phase C2e: validates the ntg -> app mapping mirrors TGX VideoState.
-#[test]
-fn remote_video_state_mapping() {
-    assert_eq!(
-        remote_video_state_from(NTG_STREAM_STATUS_ACTIVE),
-        RemoteVideoState::Active
-    );
-    assert_eq!(
-        remote_video_state_from(NTG_STREAM_STATUS_PAUSED),
-        RemoteVideoState::Paused
-    );
-    assert_eq!(
-        remote_video_state_from(NTG_STREAM_STATUS_IDLING),
-        RemoteVideoState::Inactive
-    );
-}
-
-/// The camera a call sends from: the menu pick while it is listed, else
-/// the first camera; nothing without a camera.
 #[test]
 fn pick_camera_prefers_the_listed_pick() {
     let device = |id: &str, kind| MediaDevice {

@@ -38,8 +38,7 @@ pub struct ActiveCall {
     pub camera_on: bool,
     /// Phase C2i: local screen-share send intent (UI toggle). The
     /// engine picks it up through `set_screen_share_enabled`; screen
-    /// share replaces the camera (ntgcalls forbids camera+screen in
-    /// Capture mode).
+    /// share replaces the camera (a 1:1 call has one video track).
     pub screen_sharing: bool,
     /// Phase C2e: peer camera state from the engine hook; `Inactive`
     /// until the first state callback arrives.
@@ -163,7 +162,7 @@ pub struct ActiveGroupCall {
     /// handshake.
     pub join_payload: String,
     /// Phase C2g: whether the native group transport handshake has
-    /// completed (`ntg_connect` with the `joinVideoChat` answer). False
+    /// completed (`connect_group_call` with the `joinVideoChat` answer). False
     /// when the join went out with the honest no-device params (no
     /// engine) or while the answer is still in flight.
     pub transport_ready: bool,
@@ -222,7 +221,7 @@ pub struct ActiveGroupCall {
     /// The options request was sent (once per tracked call).
     pub join_as_requested: bool,
     /// How the joined call carries media, from the engine after the
-    /// native connect (`ntg_get_connection_mode`). Stream modes get their
+    /// native connect (`CallEngine::group_call_mode`). Stream modes get their
     /// segments from TDLib (`calls::engine::StreamFeeder`).
     pub stream_mode: crate::calls::engine::GroupCallMode,
     /// What a stream-mode call shows: connecting, nobody broadcasting,

@@ -951,7 +951,6 @@
 "qll_ops_storage_by_chat" = "Storage by chat";
 "qll_ops_storage_usage" = "Storage usage";
 "qll_ops_stream_join_failed" = "Couldn't join the live stream.";
-"qll_ops_stream_unsupported" = "Live stream playback is not available in this build.";
 "qll_ops_submit_an_appeal" = "Submit an Appeal";
 "qll_ops_submit_rating" = "Submit rating";
 "qll_ops_subscribe_to_telegram_premium_to" = "Subscribe to Telegram Premium to be able to comment on behalf of your channels in group chats.";

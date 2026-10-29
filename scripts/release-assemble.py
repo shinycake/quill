@@ -279,8 +279,8 @@ updater installs into an existing Linux package. `latest.json` is a machine-read
 ## Source code and licenses
 
 Quill is MIT-licensed; the source is this tag. Each package lists its
-third-party components in `THIRD_PARTY.md`. The LGPL libraries it ships (FFmpeg,
-ntgcalls and the FFmpeg/GLib inside ntgcalls) are attached as `quill-source-*`
+third-party components in `THIRD_PARTY.md`. The LGPL libraries it ships (FFmpeg
+and the tgcalls inside libquill_calls) are attached as `quill-source-*`
 archives; `LGPL-SOURCES.txt` has the exact upstream URLs and commits and a
 written offer for the corresponding source.
 

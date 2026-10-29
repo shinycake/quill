@@ -1,7 +1,9 @@
 name: package-linux
 # Reusable: builds the UI plus native libs and assembles the relocatable Linux
 # package (docs/decisions/codex-linux-package.md). Called by ci.yml (no
-# credentials) and release.yml (credentials embedded only when asked).
+# credentials) and release.yml (credentials embedded only when asked). The
+# caller runs quill-calls.yml first: this job ships the libquill_calls it
+# uploaded in the same run.
 on:
   workflow_call:
     inputs:
@@ -59,7 +61,8 @@ jobs:
             zlib1g-dev libssl-dev libgtk-3-dev libxkbcommon-dev libxkbcommon-x11-dev \
             libwebkit2gtk-4.1-dev libsoup-3.0-dev \
             libwayland-dev libxcb1-dev libx11-xcb-dev libxcb-xkb-dev libfontconfig-dev \
-            libfreetype-dev libasound2-dev libpulse-dev libvulkan-dev libdbus-1-dev libclang-dev nasm
+            libfreetype-dev libasound2-dev libpulse-dev libvulkan-dev libdbus-1-dev libclang-dev nasm \
+            libxcomposite1 libxdamage1 libxrandr2 libxtst6
       - name: restore TDLib build
         id: tdlib-cache
         uses: actions/cache/restore@v6
@@ -96,8 +99,13 @@ jobs:
           key: ffmpeg-linux-${{ runner.arch }}-${{ hashFiles('scripts/build-ffmpeg.sh', 'native/quillvideo/*') }}
       - name: decoder tests against the built FFmpeg
         run: QUILL_REQUIRE_VIDEO_LIB=1 QUILL_VIDEO_LIB="$PWD/vendor/ffmpeg/prefix/lib/libquillvideo.so" cargo test --no-default-features --locked --lib video_decode -- --nocapture
-      - name: vendor ntgcalls (checksum pinned)
-        run: bash scripts/vendor-ntgcalls.sh
+      # The call library (docs/decisions/tgcalls-engine.md), built against
+      # this same FFmpeg by quill-calls.yml earlier in the run.
+      - name: download libquill_calls
+        uses: actions/download-artifact@v8
+        with:
+          name: quill-calls-linux-${{ matrix.arch }}
+          path: vendor/quill-calls
       # The secrets reach only this step, as compile-time env read by
       # option_env! (src/credentials.rs). GitHub masks them in the log; nothing
       # here prints them.

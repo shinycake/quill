@@ -13,7 +13,6 @@ Sources (KEY):
   crates           cargo update --dry-run (compatible) + newer majors (crates.io)
   native:ffmpeg    scripts/build-ffmpeg.sh TAG vs FFmpeg tags
   native:thorvg    third_party/thorvg/VERSION tag vs thorvg/thorvg releases
-  native:ntgcalls  scripts/vendor-ntgcalls.sh vs pytgcalls/ntgcalls releases
   native:rust      rust-toolchain.toml vs rust-lang/rust latest release
   actions          `uses:` refs in .github/workflows vs each action's latest release
 
@@ -321,19 +320,6 @@ def src_thorvg():
     )
 
 
-def src_ntgcalls():
-    pinned = re.search(r'^NTGCALLS_VERSION="(v[^"]+)"', read("scripts/vendor-ntgcalls.sh"), re.M).group(1)
-    rel = newest_release("pytgcalls/ntgcalls")
-    if not rel or vtuple(rel[0]) <= vtuple(pinned):
-        print(f"ntgcalls: pinned {pinned}, latest {rel[0] if rel else 'none'}")
-        return None
-    return native_issue(
-        "native:ntgcalls", "ntgcalls", pinned, rel[0], rel[1], "scripts/vendor-ntgcalls.sh",
-        "- Update the per-asset SHA-256 values in the same script and the LGPL source notes check "
-        "(`scripts/release-lgpl-sources.sh`).\n",
-    )
-
-
 def src_rust():
     pinned = re.search(r'channel\s*=\s*"([0-9.]+)"', read("rust-toolchain.toml")).group(1)
     rel = newest_release("rust-lang/rust")
@@ -397,7 +383,6 @@ SOURCES = {
     "crates": src_crates,
     "native:ffmpeg": src_ffmpeg,
     "native:thorvg": src_thorvg,
-    "native:ntgcalls": src_ntgcalls,
     "native:rust": src_rust,
     "actions": src_actions,
 }

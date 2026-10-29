@@ -1,12 +1,7 @@
 //! Call-engine shared types: callbacks, media descriptions, errors.
 use super::*;
-use crate::calls::stream_audio::StreamAudio;
 use crate::locks::LockExt;
-use arc_swap::ArcSwap;
-use ntgcalls_sys::ntg_rtc_server;
 use serde_json::{Value, json};
-use std::collections::{HashMap, HashSet};
-use std::ffi::CString;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 
@@ -27,8 +22,7 @@ pub enum RemoteVideoState {
 pub type RemoteVideoStateCallback = Arc<dyn Fn(i32, RemoteVideoState) + Send + Sync + 'static>;
 
 /// The peer's microphone in a 1:1 call: `(call id, muted)`, from the
-/// MediaState signaling message (ntgcalls `p2p_call.cpp` reports it as
-/// the remote `Microphone` source going idle or active).
+/// MediaState signaling message (tgcalls' `remoteMediaStateUpdated`).
 pub type RemoteAudioStateCallback = Arc<dyn Fn(i32, bool) + Send + Sync + 'static>;
 
 /// The audio ssrc a group join payload announces, for TDLib's
@@ -63,8 +57,8 @@ pub fn group_offer_audio_source_id(offer: &str) -> i32 {
 
 /// Phase C2g: one participant video channel to subscribe to, built from
 /// TDLib's `groupCallParticipantVideoInfo` (schema 1.8.67, line 7163).
-/// `endpoint` + `ssrc_groups` feed `ntg_add_incoming_video` verbatim;
-/// frames are attributed back to `user_id` by ssrc.
+/// tgcalls subscribes by `endpoint` and routes its pictures back to
+/// `user_id` by endpoint.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupVideoSourceGroup {
     pub semantics: String,
@@ -77,8 +71,8 @@ pub struct GroupVideoSource {
     pub endpoint: String,
     pub ssrc_groups: Vec<GroupVideoSourceGroup>,
     /// The participant's screen share (`screen_sharing_video_info`)
-    /// rather than their camera. ntgcalls tells them apart by track;
-    /// tgcalls only by endpoint.
+    /// rather than their camera; tgcalls tells them apart only by
+    /// endpoint.
     pub screen: bool,
     /// The participant's audio ssrc (`audio_source_id`), which tgcalls
     /// syncs the video's playback to (lip sync).
@@ -177,6 +171,20 @@ pub struct MediaDevice {
     pub kind: MediaDeviceKind,
 }
 
+/// The camera a call sends from: the one picked in the call menu while
+/// the engine still lists it, else the first camera listed. `None` when
+/// there is no camera (the engine opens only a listed device, by its id).
+pub fn pick_camera(selected: Option<&str>, devices: &[MediaDevice]) -> Option<String> {
+    let mut cameras = devices
+        .iter()
+        .filter(|device| device.kind == MediaDeviceKind::Camera);
+    let first = cameras.clone().next();
+    cameras
+        .find(|device| Some(device.id.as_str()) == selected)
+        .or(first)
+        .map(|device| device.id.clone())
+}
+
 /// Phase C2b: safe call-engine failure surface.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EngineError {
@@ -199,24 +207,9 @@ pub enum EngineError {
     NoCamera,
 }
 
-impl EngineError {
-    /// `ntg_connect` refused the stream the call joined
-    /// (`NTG_ERR_RTMP_STREAMING_UNSUPPORTED`). A fatal join error: the
-    /// call shows the Unsupported state instead of a picture. The same
-    /// code from any other operation is an ordinary engine error.
-    pub fn is_stream_unsupported(&self) -> bool {
-        matches!(
-            self,
-            EngineError::Engine {
-                op: "ntg_connect",
-                code: ntgcalls_sys::NTG_ERR_RTMP_STREAMING_UNSUPPORTED,
-            }
-        )
-    }
-}
-
+/// The hooks the driver installs, shared with the engine's native
+/// callbacks.
 pub(crate) struct CallbackShared {
-    pub(crate) user_to_call: Mutex<HashMap<i64, i32>>,
     pub(crate) hook: Mutex<Option<SignalingEmittedCallback>>,
     pub(crate) transport_hook: Mutex<Option<TransportStateCallback>>,
     pub(crate) remote_video_hook: Mutex<Option<RemoteVideoStateCallback>>,
@@ -224,72 +217,26 @@ pub(crate) struct CallbackShared {
     pub(crate) remote_screen_hook: Mutex<Option<RemoteVideoStateCallback>>,
     /// The peer's 1:1 microphone on/off hook.
     pub(crate) remote_audio_hook: Mutex<Option<RemoteAudioStateCallback>>,
-    /// Peers (by user id) whose 1:1 screen share is on. A 1:1 call has
-    /// one video track, as in tgcalls: a shared screen arrives on it as
-    /// camera frames, and only the MediaState says it is a screen.
-    pub(crate) peer_screencasting: Mutex<HashSet<i64>>,
     pub(crate) frame_seq: AtomicU64,
-    /// Phase C2g: group-call callback routing: native `chat_id` -> the
-    /// TDLib group call id the driver assigned, and the ssrc map that
-    /// attributes incoming frames to participants.
-    pub(crate) group_chat_to_call: Mutex<HashMap<i64, i32>>,
-    pub(crate) group_video_ssrc_to_user: Mutex<HashMap<(i64, u32), i64>>,
-    /// Chats whose group call runs in stream mode: their frames go to the
-    /// stream slot instead of the ssrc lookup.
-    pub(crate) stream_chats: Mutex<HashSet<i64>>,
-    /// Broadcast time and part requests (stream mode).
+    /// Broadcast time and part requests (stream mode), speaker levels.
     pub(crate) engine_event_hook: Mutex<Option<EngineEventCallback>>,
-    /// ntgcalls' open part requests by the request id Quill gave them.
-    pub(crate) ntg_parts: Mutex<super::native::NtgPartRequests>,
     /// Every decoded picture (group-call tracks, streams, 1:1 calls), as
     /// I420 planes.
     pub(crate) live_frame_hook: Mutex<Option<LiveFrameCallback>>,
-    pub(crate) stream_audio: ArcSwap<HashMap<i64, Arc<StreamAudio>>>,
 }
 
 impl CallbackShared {
-    /// Drop a group call's callback routing: the chat-to-call entry and
-    /// every video ssrc attributed in that chat. Runs when the call ends,
-    /// whatever the native stop returned.
-    pub(crate) fn forget_group(&self, chat_id: i64) {
-        self.group_chat_to_call.lock_or_recover().remove(&chat_id);
-        self.group_video_ssrc_to_user
-            .lock_or_recover()
-            .retain(|(chat, _), _| *chat != chat_id);
-        self.stream_chats.lock_or_recover().remove(&chat_id);
-        self.ntg_parts.lock_or_recover().forget_chat(chat_id);
-        self.route_stream_audio(chat_id, None);
-    }
-
-    pub(crate) fn route_stream_audio(&self, chat_id: i64, audio: Option<Arc<StreamAudio>>) {
-        self.stream_audio.rcu(|routes| {
-            let mut routes = HashMap::clone(routes);
-            match audio.clone() {
-                Some(audio) => routes.insert(chat_id, audio),
-                None => routes.remove(&chat_id),
-            };
-            routes
-        });
-    }
-
-    /// Empty routing with no hooks installed.
+    /// No hooks installed.
     pub(crate) fn new() -> Self {
         Self {
-            user_to_call: Mutex::new(HashMap::new()),
             hook: Mutex::new(None),
             transport_hook: Mutex::new(None),
             remote_video_hook: Mutex::new(None),
             remote_screen_hook: Mutex::new(None),
             remote_audio_hook: Mutex::new(None),
-            peer_screencasting: Mutex::new(HashSet::new()),
             frame_seq: AtomicU64::new(0),
-            group_chat_to_call: Mutex::new(HashMap::new()),
-            group_video_ssrc_to_user: Mutex::new(HashMap::new()),
-            stream_chats: Mutex::new(HashSet::new()),
             engine_event_hook: Mutex::new(None),
-            ntg_parts: Mutex::new(super::native::NtgPartRequests::default()),
             live_frame_hook: Mutex::new(None),
-            stream_audio: ArcSwap::from_pointee(HashMap::new()),
         }
     }
 }
@@ -303,9 +250,8 @@ pub(crate) struct CallMediaConfig {
     /// The camera being sent, by device id; `None` while it is off.
     pub(crate) camera: Option<String>,
     /// Phase C2i: screen-share send intent for the 1:1 call. When on,
-    /// `set_media_sources` issues the desktop capture instead of the
-    /// camera — ntgcalls rejects mixing both in Capture mode
-    /// (`stream_manager.cpp:69`, v3.0.0).
+    /// the call sends the screen instead of the camera: a 1:1 call has
+    /// one video track.
     pub(crate) screen_share_on: bool,
 }
 
@@ -335,128 +281,8 @@ pub enum GroupCallRole {
     Viewer,
 }
 
-/// Phase C2g: retained per-group-call media state for the ntgcalls
-/// group transport (keyed by TDLib group call id).
-#[derive(Clone, Default)]
-pub(crate) struct GroupCallMedia {
-    pub(crate) chat_id: i64,
-    pub(crate) role: GroupCallRole,
-    /// Your microphone is muted in this group call.
-    pub(crate) muted: bool,
-    /// The camera being sent, by device id; `None` while it is off.
-    pub(crate) camera: Option<String>,
-    /// endpoint -> full source, mirroring the engine's subscriptions.
-    /// Storing the source (not just the user id) lets resubscription
-    /// drop only one endpoint's ssrcs and detect changed ssrc groups.
-    pub(crate) endpoints: HashMap<String, GroupVideoSource>,
-    /// (chat_id, ssrc) -> user id; attributed to incoming frames.
-    pub(crate) ssrc_to_user: HashMap<(i64, u32), i64>,
-    pub(crate) connected: bool,
-    pub(crate) screen_sharing: bool,
-    /// Phase C2g: `ntg_init_presentation` ran but the answer handshake
-    /// has not connected yet. Tracked so the driver can reconcile and
-    /// stop a stray presentation after a failed handshake.
-    pub(crate) presentation_initialized: bool,
-    /// How the connected call carries media (`ntg_get_connection_mode`).
-    pub(crate) mode: GroupCallMode,
-    /// Last quality the stream tile reported (stream mode only).
-    pub(crate) stream_quality: Option<StreamQuality>,
-    /// The output device for the call's sound; `None` is the default.
-    pub(crate) speaker: Option<String>,
-    pub(crate) playback_muted: bool,
-    pub(crate) forced_device_playback: bool,
-}
-
-pub(crate) struct NativeRtcServers {
-    pub(crate) raw: Vec<ntg_rtc_server>,
-    _strings: Vec<[CString; 4]>,
-    _peer_tags: Vec<Vec<u8>>,
-}
-
-impl NativeRtcServers {
-    pub(crate) fn new(servers: &[RtcServer]) -> Result<Self, EngineError> {
-        let mut strings = Vec::with_capacity(servers.len());
-        let mut peer_tags = Vec::with_capacity(servers.len());
-        for server in servers {
-            strings.push([
-                native_string(&server.ipv4)?,
-                native_string(&server.ipv6)?,
-                native_string(&server.username)?,
-                native_string(&server.password)?,
-            ]);
-            peer_tags.push(server.peer_tag.clone());
-        }
-        let raw = servers
-            .iter()
-            .zip(&strings)
-            .zip(&peer_tags)
-            .map(
-                |((server, [ipv4, ipv6, username, password]), peer_tag)| ntg_rtc_server {
-                    id: server.id,
-                    ipv4: ipv4.as_ptr().cast_mut(),
-                    ipv6: ipv6.as_ptr().cast_mut(),
-                    port: server.port,
-                    username: username.as_ptr().cast_mut(),
-                    password: password.as_ptr().cast_mut(),
-                    turn: server.turn,
-                    stun: server.stun,
-                    tcp: server.tcp,
-                    peer_tag: peer_tag.as_ptr().cast_mut(),
-                    peer_tag_len: peer_tag.len(),
-                },
-            )
-            .collect();
-        Ok(Self {
-            raw,
-            _strings: strings,
-            _peer_tags: peer_tags,
-        })
-    }
-}
-
-/// Stores `hook` in a callback slot of the ntgcalls state shared with its
-/// native callbacks.
+/// Stores `hook` in a callback slot of the state shared with the
+/// engine's native callbacks.
 pub(crate) fn set_hook<T>(slot: &std::sync::Mutex<Option<T>>, hook: T) {
     *slot.lock_or_recover() = Some(hook);
-}
-
-#[cfg(test)]
-mod callback_tests {
-    use super::CallbackShared;
-
-    fn shared() -> CallbackShared {
-        CallbackShared::new()
-    }
-
-    #[test]
-    fn forget_group_clears_only_that_chats_routing() {
-        let shared = shared();
-        shared
-            .group_chat_to_call
-            .lock()
-            .unwrap()
-            .extend([(1, 10), (2, 20)]);
-        shared.group_video_ssrc_to_user.lock().unwrap().extend([
-            ((1, 100), 5),
-            ((1, 101), 6),
-            ((2, 200), 7),
-        ]);
-        shared.forget_group(1);
-        let chats = shared.group_chat_to_call.lock().unwrap();
-        assert_eq!(chats.len(), 1);
-        assert!(chats.contains_key(&2));
-        let ssrcs = shared.group_video_ssrc_to_user.lock().unwrap();
-        assert_eq!(ssrcs.len(), 1);
-        assert_eq!(ssrcs.get(&(2, 200)), Some(&7));
-    }
-
-    #[test]
-    fn forget_group_clears_the_stream_chat() {
-        let shared = shared();
-        shared.stream_chats.lock().unwrap().extend([1, 2]);
-        shared.forget_group(1);
-        let chats = shared.stream_chats.lock().unwrap();
-        assert!(!chats.contains(&1));
-        assert!(chats.contains(&2));
-    }
 }

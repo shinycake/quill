@@ -61,7 +61,8 @@ the level tap opened the microphone a second time to measure your level.
   microphone descriptions.
 - **`QUILL_CALL_CAPTURE=native`** keeps ntgcalls' device source (and the
   level tap's own device open) for debugging. Builds without the `ui`
-  feature have no cpal and always use it.
+  feature have no cpal and always use it. Removed on 2026-10-29 with ntgcalls: the
+  tgcalls library opens no microphone (docs/decisions/tgcalls-engine.md).
 - **Driver** (`src/connect/call_capture.rs`): `pump_call_capture` runs
   before the level pump. It opens the chosen microphone while a 1:1 call has
   a transport (connecting, connected or reconnecting) or while you are

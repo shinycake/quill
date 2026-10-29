@@ -132,9 +132,16 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "Quill $version, tag v$version, credentials: $credentials, draft release: $publish"
 
+  # The call library the Linux and macOS packages ship (their jobs download
+  # it from this run).
+  quill-calls:
+    name: quill-calls
+    needs: prepare
+    uses: ./.github/workflows/quill-calls.yml
+
   linux:
     name: linux
-    needs: prepare
+    needs: [prepare, quill-calls]
     uses: ./.github/workflows/package-linux.yml
     with:
       version: ${{ needs.prepare.outputs.version }}
@@ -156,7 +163,7 @@ jobs:
 
   macos:
     name: macos
-    needs: prepare
+    needs: [prepare, quill-calls]
     uses: ./.github/workflows/package-macos.yml
     with:
       version: ${{ needs.prepare.outputs.version }}
@@ -167,8 +174,8 @@ jobs:
       MACOS_SIGNING_P12: ${{ secrets.MACOS_SIGNING_P12 }}
       MACOS_SIGNING_P12_PASSWORD: ${{ secrets.MACOS_SIGNING_P12_PASSWORD }}
 
-  # Corresponding source for the shipped LGPL libraries (FFmpeg, ntgcalls and
-  # the FFmpeg/GLib inside ntgcalls).
+  # Corresponding source for the shipped LGPL libraries (FFmpeg and the
+  # tgcalls inside libquill_calls).
   sources:
     name: lgpl-sources
     needs: prepare

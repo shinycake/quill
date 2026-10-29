@@ -66,7 +66,7 @@ item that needs it. The reason is reviewed like code.
 ## Lints (phased)
 
 The lints live in the root `Cargo.toml` under `[workspace.lints.clippy]`, and
-every first-party crate (the root package, `crates/ntgcalls-sys`,
+every first-party crate (the root package, `crates/quill-calls-sys`,
 `crates/webview-protocol`, `crates/webview-host`) inherits them with
 `[lints] workspace = true`. The vendored `third_party/` crates are not
 workspace members and do not get them. A phase starts only when its sites are

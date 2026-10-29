@@ -12,8 +12,8 @@
 //! microphone's controls and mixed into its frames
 //! (`calls::capture::system_audio`).
 //!
-//! `QUILL_CALL_CAPTURE=native` turns this off: ntgcalls opens the device
-//! itself, as before (`calls::engine::external_capture_enabled`).
+//! Builds without the UI feature have no capture backend
+//! (`calls::engine::external_capture_enabled`).
 
 use super::*;
 use crate::calls::capture::feeder::AUDIO_SINK_FRAMES;

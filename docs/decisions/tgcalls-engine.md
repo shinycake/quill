@@ -58,7 +58,7 @@ Everything matches Telegram Desktop at `dev` f985723b (26 Oct 2026):
 - FFmpeg and OpenSSL 3 are linked dynamically against the copies Quill
   already bundles. FFmpeg is new in the macOS bundle; it is needed by
   tg_owt's H.264 decoder and tgcalls' stream parts.
-- `libquill_calls` is loaded at runtime like ntgcalls today, which keeps
+- `libquill_calls` is loaded at runtime, as ntgcalls was, which keeps
   tgcalls' LGPL-3.0 terms met the same way: users can rebuild and replace it
   (`vendor/quill-calls/share/SOURCES.txt` names every source).
   `vendor/quill-calls/share/licenses/` carries the notices each part asks
@@ -222,6 +222,63 @@ Known gaps, kept on purpose for now:
   little later but does not stall.
 - Requests queued by an instance a rejoin replaced still reach TDLib
   once; their answers are dropped by instance id.
+
+## The switch (step 6)
+
+The app loads `TgcallsEngine` (`connect/live.rs`) and preloads its library
+off the UI thread (`preload_tgcalls`, `ui/early_connect.rs`). There is no
+other engine and no switch back; tests drive the mock engine.
+
+Deleted with ntgcalls: `crates/ntgcalls-sys`, `src/calls/engine/ntgcalls/`,
+the ntgcalls trampolines in `engine/native.rs`, `scripts/vendor-ntgcalls.sh`,
+its CI and packaging steps, its license files and its deps-watch source.
+Shared code shaped by ntgcalls went too:
+
+- `CallbackShared` keeps only the driver's hooks; the per-chat routing
+  tables (and `NtgPartRequests`) were ntgcalls' callback demultiplexing.
+- `GroupCallMode::from_native`, `StreamQuality::from_native`,
+  `BroadcastPartStatus::to_native` and `group_video_target` mapped
+  ntgcalls' enums.
+- `StreamState::Unsupported` and `EngineError::is_stream_unsupported`:
+  only ntgcalls refused a stream (`NTG_ERR_RTMP_STREAMING_UNSUPPORTED`).
+- The story-stream key yield: ntgcalls keyed a group call by chat id and
+  a 1:1 call by user id, so a live story and a call with its poster could
+  not coexist. tgcalls instances are independent; both keep running.
+- `QUILL_CALL_CAPTURE=native` and `QUILL_STREAM_AUDIO_DEVICE=1` left the
+  microphone or the sound to ntgcalls' devices. The library has none, so
+  Quill always captures and plays. The sound self-healing step now
+  reopens Quill's output (`reopen_stream_sound`, `reopen_call_sound`)
+  instead of moving to a device output that no longer exists.
+
+### Packaging
+
+`quill-calls.yml` is a reusable workflow: ci.yml (pushes) and release.yml
+run it before the Linux and macOS package jobs, which download its
+`quill-calls-<target>` artifact from the same run. The tg_owt and codec
+cache stays in that workflow.
+
+- Linux: `lib/libquill_calls.so` beside `libtdjson.so` (RUNPATH
+  `$ORIGIN`), linking the package's FFmpeg and OpenSSL;
+  `check-bundle-elf.sh` and `check-bundle-dlopen.py` check it.
+- macOS: `Contents/Frameworks/libquill_calls.dylib`, id
+  `@rpath/libquill_calls.dylib`, with the FFmpeg dylibs and OpenSSL it
+  links as `@rpath/<name>` copied beside it (the app's first FFmpeg
+  files). The package job restores or builds the same FFmpeg as
+  quill-calls.yml and loads the library from the bundle.
+- Both ship `licenses/quill-calls/` (the library's `SOURCES.txt` and
+  every part's notice). `release-lgpl-sources.sh` archives tgcalls at its
+  pinned commit in place of ntgcalls and its FFmpeg and GLib.
+- `quill-calls-sys` finds the library in `lib/` beside the executable,
+  in `Frameworks/`, or beside the executable on Windows.
+
+TODO(tgcalls-windows): Windows builds `quill_calls.dll` in another
+branch. Until it joins packaging, `windows-package.ps1` ships the zip
+without it (it copies `vendor/quill-calls/lib/quill_calls.dll` when one is
+there), the bundle checks treat it as optional, and Windows calls show as
+unavailable, as they do whenever the library is missing. When the DLL
+arrives: build it in quill-calls.yml, download it in package-windows.yml,
+and make it required in `windows-package.ps1`, `check-bundle-pe.ps1` and
+`check-bundle-load.ps1`.
 
 ## Build order
 

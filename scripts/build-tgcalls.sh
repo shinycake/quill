@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build libquill_calls: Telegram's call engine (tgcalls, LGPL-3.0) on
 # Telegram's WebRTC fork (tg_owt, BSD-3), behind Quill's own C API
-# (native/quill-calls). It replaces the prebuilt ntgcalls library
+# (native/quill-calls), the library Quill's calls run on
 # (docs/decisions/tgcalls-engine.md).
 #
 # Everything is built from source at the commits and tags Telegram Desktop

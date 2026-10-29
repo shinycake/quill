@@ -842,14 +842,13 @@ impl QuillApp {
 
 /// The label over the picture: nobody is broadcasting (the admin text
 /// when the call knows its RTMP server URL, as tdesktop's
-/// `rtmpInfo().url`), or this build cannot play the stream.
+/// `rtmpInfo().url`).
 fn stream_label(facts: &StreamFacts, chat_name: &str) -> Option<String> {
     match facts.stream {
         StreamState::NoStream if facts.server_known => {
             Some(tr(keys::GROUP_CALL_NO_STREAM_ADMIN).to_string())
         }
         StreamState::NoStream => Some(tr_with(keys::GROUP_CALL_NO_STREAM, &[("group", chat_name)])),
-        StreamState::Unsupported => Some(tr(keys::Q_OPS_STREAM_UNSUPPORTED).to_string()),
         StreamState::Connecting | StreamState::Live | StreamState::Ended => None,
     }
 }

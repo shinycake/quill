@@ -46,7 +46,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             "[call] {call_id} sound: {reason:?} after connecting (frames {}, peak {}); playing on the device",
             health.frames, health.peak
         ));
-        if let Err(err) = engine.use_device_call_sound(call_id) {
+        if let Err(err) = engine.reopen_call_sound(call_id) {
             call_log(&format!(
                 "[call] {call_id} sound: device fallback failed: {err}"
             ));

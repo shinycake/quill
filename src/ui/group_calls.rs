@@ -247,9 +247,8 @@ impl QuillApp {
 
     /// Phase C2g: start/stop group-call screen sharing (live only).
     /// The driver runs the presentation handshake
-    /// (`ntg_init_presentation` + `startGroupCallScreenSharing`);
-    /// stopping pairs `endGroupCallScreenSharing` with
-    /// `ntg_stop_presentation`.
+    /// (the engine's presentation payload + `startGroupCallScreenSharing`);
+    /// stopping pairs `endGroupCallScreenSharing` with the engine's stop.
     ///
     /// Where Quill captures the screen itself, starting opens the chooser
     /// first (tdesktop `chooseShareScreenSource`); the menu's Stop Sharing

@@ -10,8 +10,8 @@ use cpal::{
 };
 use std::sync::Arc;
 
-/// ntgcalls' own device playback runs at 48 kHz; the output does too when
-/// the device offers it.
+/// The call library's sound is 48 kHz; the output runs at it too when the
+/// device offers it.
 const PREFERRED_RATE: u32 = 48_000;
 
 pub(super) struct Output {
@@ -58,8 +58,8 @@ impl Output {
     }
 }
 
-/// The output named `name` as ntgcalls lists speakers, or the system
-/// default (no name, ntgcalls' default entry, or no device by that name).
+/// The output named `name` as the engine lists speakers, or the system
+/// default (no name, the default entry, or no device by that name).
 fn find_output(host: &cpal::Host, name: Option<&str>) -> Option<cpal::Device> {
     if let Some(name) = name
         && let RequestedInput::Named(wanted) = requested_input(name, cfg!(windows))

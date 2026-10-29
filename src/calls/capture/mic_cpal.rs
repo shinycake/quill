@@ -127,7 +127,7 @@ fn find_input(host: &cpal::Host, name: Option<&str>) -> Option<cpal::Device> {
 }
 
 /// The device's default format, at 48 kHz when the device offers it (no
-/// resampling then), as ntgcalls' own device module does.
+/// resampling then), the rate the call library takes.
 fn input_config(device: &cpal::Device) -> Result<SupportedStreamConfig, CaptureError> {
     let default = device
         .default_input_config()

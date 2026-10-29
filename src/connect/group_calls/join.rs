@@ -91,8 +91,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// on the tracked call and consumed by the driver pump to finish the
     /// native handshake.
     /// Phase C2g: the native group transport is created first so the
-    /// join carries the real tgcalls offer (`ntg_create_call`) as its
-    /// payload, with `audio_source_id` parsed from the offer SDP. When
+    /// join carries the real tgcalls join payload as its payload, with
+    /// `audio_source_id` read from it. When
     /// no engine is available (or the offer fails), the join still goes
     /// out with the honest no-device params — signaling-only, as before.
     pub fn join_video_chat(&mut self, group_call_id: i32) -> Result<RequestId, ConnectSendError> {
@@ -417,9 +417,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .is_some_and(|engine| engine.presentation_active(group_call_id));
         // A stream's pending parts are answered, then the old native call
         // stops, before the fresh context replaces it. Without the stop
-        // ntgcalls keeps the old connection for the chat: the new offer
-        // fails and the old stream keeps asking for parts that nobody
-        // serves. The new connect starts a new feeder.
+        // the old instance keeps asking for parts that nobody serves. The
+        // new connect starts a new feeder.
         self.drain_stream_feeder(group_call_id);
         if let Some(engine) = self.call_engine.as_deref_mut()
             && engine.leave_group_call(group_call_id).is_ok()
@@ -505,11 +504,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         } else {
             GroupCallRole::Member
         };
-        if role == GroupCallRole::Member
-            && let Some(chat_id) = chat_id
-        {
-            self.yield_story_stream_key(chat_id);
-        }
         let offer = match (chat_id, self.call_engine.as_deref_mut()) {
             (Some(chat_id), Some(engine)) if engine.is_available() => {
                 let offer = engine.create_group_call(group_call_id, chat_id, role);

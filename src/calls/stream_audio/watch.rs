@@ -1,7 +1,6 @@
 //! The self-healing rule: a stream that plays through Quill but sends no
-//! sound within 5 s of going live, or whose output stops, goes back to
-//! ntgcalls' own device playback, once. A wrong assumption about external
-//! playback must never leave a stream silent.
+//! sound within 5 s of going live, or whose output stops, gets its output
+//! reopened, once.
 #![deny(clippy::indexing_slicing)]
 
 use crate::calls::engine::StreamState;

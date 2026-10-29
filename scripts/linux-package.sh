@@ -6,11 +6,12 @@
 #     quill                      RUNPATH $ORIGIN/lib
 #     quill-webview              RUNPATH $ORIGIN/lib  (mini apps; needs the system's WebKitGTK 4.1)
 #     lib/libtdjson.so           RUNPATH $ORIGIN
-#     lib/libntgcalls.so         RUNPATH $ORIGIN
+#     lib/libquill_calls.so      RUNPATH $ORIGIN  (calls: tgcalls behind Quill's C API, LGPL-3.0)
 #     lib/libquillvideo.so       RUNPATH $ORIGIN  (in-process video, native/quillvideo)
 #     lib/libav{codec,format,util,filter,device}.so.N, libsw{scale,resample}.so.N   FFmpeg, LGPL-2.1+
 #     ffmpeg, ffprobe            RUNPATH $ORIGIN/lib  (same FFmpeg build, no libx264; video send/edit, photos, camera)
 #     licenses/ffmpeg/           FFmpeg license texts + exact source and configure line
+#     licenses/quill-calls/      libquill_calls' source pins and its parts' notices
 #     lib/libssl.so.3, libcrypto.so.3   (bundled OpenSSL, see decision doc)
 #     share/applications/org.shinycake.quill.desktop, share/icons/hicolor/<size>/apps/quill.png
 #     install.sh, README.txt, LICENSE, THIRD_PARTY.md, THIRD_PARTY_LICENSES.md
@@ -20,7 +21,7 @@
 #   QUILL_BIN            release binary            (default target/release/quill)
 #   QUILL_WEBVIEW_BIN    mini-app helper           (default target/release/quill-webview)
 #   QUILL_TDJSON_PATH    libtdjson.so              (default native/prefix/lib/libtdjson.so)
-#   QUILL_NTGCALLS_LIB   libntgcalls.so            (default vendor/ntgcalls/lib/libntgcalls.so)
+#   QUILL_CALLS_DIR      scripts/build-tgcalls.sh  (default vendor/quill-calls)
 #   QUILL_FFMPEG_PREFIX  scripts/build-ffmpeg.sh   (default vendor/ffmpeg/prefix)
 #   OUT                  output directory          (default dist/linux)
 # Requires patchelf, readelf, ldd, tar.
@@ -36,11 +37,11 @@ done
 BIN="${QUILL_BIN:-target/release/quill}"
 WEBVIEW_BIN="${QUILL_WEBVIEW_BIN:-target/release/quill-webview}"
 TDJSON="${QUILL_TDJSON_PATH:-native/prefix/lib/libtdjson.so}"
-NTGCALLS="${QUILL_NTGCALLS_LIB:-vendor/ntgcalls/lib/libntgcalls.so}"
+CALLS="${QUILL_CALLS_DIR:-vendor/quill-calls}"
 FFMPEG="${QUILL_FFMPEG_PREFIX:-vendor/ffmpeg/prefix}"
 QUILLVIDEO="$FFMPEG/lib/libquillvideo.so"
 OUT="${OUT:-dist/linux}"
-for f in "$BIN" "$WEBVIEW_BIN" "$TDJSON" "$NTGCALLS" "$QUILLVIDEO" "$FFMPEG/bin/ffmpeg" "$FFMPEG/bin/ffprobe"; do
+for f in "$BIN" "$WEBVIEW_BIN" "$TDJSON" "$CALLS/lib/libquill_calls.so" "$CALLS/share/SOURCES.txt" "$QUILLVIDEO" "$FFMPEG/bin/ffmpeg" "$FFMPEG/bin/ffprobe"; do
   [[ -f "$f" ]] || { echo "error: missing input $f" >&2; exit 2; }
 done
 
@@ -56,7 +57,8 @@ install -m 755 "$BIN" "$PKG/quill"
 install -m 755 "$WEBVIEW_BIN" "$PKG/quill-webview"
 # cp -L: tdjson installs may be symlink chains; ship the real file under the name the loader opens.
 install -m 755 "$(readlink -f "$TDJSON")" "$PKG/lib/libtdjson.so"
-install -m 755 "$(readlink -f "$NTGCALLS")" "$PKG/lib/libntgcalls.so"
+# quill-calls-sys looks for the call library in lib/ beside the executable.
+install -m 755 "$(readlink -f "$CALLS/lib/libquill_calls.so")" "$PKG/lib/libquill_calls.so"
 # In-process video: the shim plus FFmpeg's shared libraries under their
 # sonames (dynamic linking keeps FFmpeg replaceable, as the LGPL asks).
 install -m 755 "$(readlink -f "$QUILLVIDEO")" "$PKG/lib/libquillvideo.so"
@@ -73,6 +75,10 @@ install -m 755 "$FFMPEG/bin/ffmpeg" "$PKG/ffmpeg"
 install -m 755 "$FFMPEG/bin/ffprobe" "$PKG/ffprobe"
 mkdir -p "$PKG/licenses/ffmpeg"
 install -m 644 "$FFMPEG"/share/quillvideo/* "$PKG/licenses/ffmpeg/"
+mkdir -p "$PKG/licenses/quill-calls"
+install -m 644 "$CALLS/share/SOURCES.txt" "$PKG/licenses/quill-calls/SOURCES.txt"
+cp -R "$CALLS/share/licenses" "$PKG/licenses/quill-calls/licenses"
+chmod -R u=rwX,go=rX "$PKG/licenses/quill-calls"
 
 # Bundle OpenSSL: libssl.so.3 / libcrypto.so.3 as resolved for the shipped
 # libraries (libtdjson needs them; libssl in turn needs libcrypto).
@@ -96,9 +102,9 @@ vendor_openssl() {
 }
 vendor_openssl
 
-# Only drop symbols from libraries we built ourselves; the prebuilt ntgcalls and
-# distro OpenSSL are left as shipped.
-strip --strip-unneeded "$PKG/lib/libtdjson.so" \
+# Only drop symbols from libraries we built ourselves; the distro OpenSSL is
+# left as shipped.
+strip --strip-unneeded "$PKG/lib/libtdjson.so" "$PKG/lib/libquill_calls.so" \
   "$PKG"/lib/libquillvideo.so "$PKG"/lib/libav*.so.* "$PKG"/lib/libsw*.so.* \
   "$PKG/ffmpeg" "$PKG/ffprobe" || true
 

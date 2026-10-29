@@ -1,7 +1,7 @@
 //! Explicit updates: verify first, hand off after exit, retain rollback.
 //!
 //! Every platform installs the whole release package, so the bundled TDLib,
-//! ntgcalls, FFmpeg and OpenSSL libraries never go stale next to a new
+//! call, FFmpeg and OpenSSL libraries never go stale next to a new
 //! executable. Linux stages the package beside the install directory and
 //! swaps the directories; macOS does the same with the app bundle, after a
 //! strict code-signature check (`macos.rs`); Windows renames each running

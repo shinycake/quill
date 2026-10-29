@@ -5,7 +5,7 @@
 //!
 //! TDLib applies the level for everyone only when you manage the call;
 //! otherwise the server keeps it for you. Quill's own playback does not
-//! follow it: ntgcalls mixes the call's audio itself and has no gain per
+//! follow it: the call library mixes the call's audio itself and has no gain per
 //! source (see `docs/decisions/video-player-live-ui.md`).
 #![deny(clippy::indexing_slicing)]
 

@@ -1,5 +1,5 @@
 //! Native crash handlers, like tdesktop's `core/crash_reports.cpp`: a crash
-//! in native code (TDLib, ntgcalls, FFmpeg, AppKit, a GPU driver) never
+//! in native code (TDLib, tgcalls, FFmpeg, AppKit, a GPU driver) never
 //! reaches the Rust panic hook, so these handlers leave a report of their
 //! own.
 //!

@@ -40,7 +40,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return;
         };
-        self.yield_story_stream_key(user_id);
         let Some(engine) = self.call_engine.as_deref_mut() else {
             return;
         };
@@ -264,8 +263,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// transport the intent is only stored (it applies on connect).
     /// Turning it on re-reads the device list and fails with `NoCamera`
     /// when there is none.
-    /// Phase C2i: enabling the camera clears the screen-share intent —
-    /// ntgcalls forbids camera+screen in Capture mode.
+    /// Phase C2i: enabling the camera clears the screen-share intent: a
+    /// 1:1 call has one video track.
     pub fn set_call_camera(&mut self, call_id: i32, enabled: bool) -> Result<(), EngineError> {
         if !self
             .session
@@ -308,7 +307,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// session flag; without a connected transport the intent is only
     /// stored (it applies on connect, mirroring the pre-transport
     /// mute in `pump_call_engine`). Enabling clears the camera intent
-    /// — ntgcalls forbids camera+screen in Capture mode. Rejected
+    /// (a 1:1 call has one video track). Rejected
     /// without an enumerated screen source
     /// (`call_screen_source_available`) when *enabling*; stopping
     /// needs no source (a vanished display must not trap the user in
@@ -413,11 +412,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.reconnect_attempts = 0;
         }
 
-        if let Some((_, user_id, _, _)) = &active_call_after
-            && tracked_call_id != active_call_before
-        {
-            self.yield_story_stream_key(*user_id);
-        }
         if let Some((call_id, user_id, is_outgoing, _)) = &active_call_after
             && Some(*call_id) != active_call_before
             && let Some(engine) = self.call_engine.as_deref_mut()

@@ -64,5 +64,5 @@ allow = [
 ]
 
 [licenses.private]
-# Quill's own crates (quill, ntgcalls-sys) are MIT and unpublished.
+# Quill's own crates (quill, quill-calls-sys) are MIT and unpublished.
 ignore = true

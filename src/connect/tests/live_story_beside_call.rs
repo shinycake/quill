@@ -209,8 +209,7 @@ fn a_failed_story_leave_does_not_reach_the_call_overlay() {
     assert!(h.driver.session.calls.group_call_error.is_none());
 }
 
-/// A 1:1 call with the story's poster (user 7, whose private chat is 7):
-/// ntgcalls would key both connections by 7.
+/// A 1:1 call with the story's poster (user 7, whose private chat is 7).
 const POSTER_CALL: &str = r#"{"@type":"updateCall","call":{"@type":"call","id":78,"unique_id":"98","user_id":7,"is_outgoing":true,"is_video":false,"state":{"@type":"callStatePending","is_created":true,"is_received":false}}}"#;
 
 fn with_engine(h: &mut Harness) -> MockEngine {
@@ -230,40 +229,34 @@ fn story_failed(h: &Harness) -> bool {
 }
 
 #[test]
-fn a_call_first_keeps_its_key_and_the_story_shows_failed() {
+fn a_story_opened_during_a_call_with_its_poster_plays_beside_it() {
     let mut h = harness();
     let handle = with_engine(&mut h);
     h.ingest(POSTER_CALL);
     assert_eq!(handle.started_calls().len(), 1);
     open_story(&mut h);
-    assert!(story_failed(&h), "the story's connection could not be made");
+    h.ingest(&LIVE_CALL.replace("JOINED", "true"));
+    assert!(!story_failed(&h));
     let call = h.driver.session.calls.active_call.as_ref();
     assert!(call.is_some_and(|call| call.transport_error.is_none()));
     assert!(handle.group_leaves().is_empty());
 }
 
 #[test]
-fn a_call_after_the_story_takes_its_key_and_the_story_shows_failed() {
+fn a_call_with_the_poster_leaves_the_story_playing() {
     let mut h = harness();
     let handle = with_engine(&mut h);
     open_story(&mut h);
     h.ingest(&LIVE_CALL.replace("JOINED", "true"));
-    assert!(!story_failed(&h));
     h.ingest(POSTER_CALL);
-    assert_eq!(
-        handle.group_leaves(),
-        vec![4242],
-        "the story's transport goes"
+    assert!(
+        handle.group_leaves().is_empty(),
+        "the story's transport stays"
     );
-    assert!(story_failed(&h), "the viewer shows it failed");
-    assert_eq!(handle.started_calls().len(), 1, "the call gets its key");
+    assert!(!story_failed(&h));
+    assert_eq!(handle.started_calls().len(), 1);
     let call = h.driver.session.calls.active_call.as_ref();
     assert!(call.is_some_and(|call| call.transport_error.is_none()));
-    // Retry leaves the failed slot and joins afresh.
-    h.driver.join_live_story(ChatId(7), 6).unwrap();
-    assert_eq!(h.sent("leaveGroupCall"), 1);
-    assert_eq!(story_id(&h), None);
-    assert!(h.driver.session.stories.live.is_some());
 }
 
 #[test]

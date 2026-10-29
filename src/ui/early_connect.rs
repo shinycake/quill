@@ -43,7 +43,7 @@ pub fn begin(credentials: Option<TelegramCredentials>) {
     let spawned = quill::thread_guard::spawn_guarded("quill-early-connect", move || {
         let _ = done.send(prepare(credentials));
         // After the send: the client must not wait for the call engine.
-        quill::calls::engine::preload_ntgcalls();
+        quill::calls::engine::preload_tgcalls();
     });
     if spawned.is_ok() {
         FIRST.with(|first| *first.borrow_mut() = Some(First::Preparing(early)));

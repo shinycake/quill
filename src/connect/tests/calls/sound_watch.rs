@@ -21,12 +21,12 @@ fn a_connected_call_without_sound_goes_back_to_the_device_once() {
     let start = Instant::now();
     driver.request_tick(start);
     driver.request_tick(start + Duration::from_millis(4_999));
-    assert!(handle.device_call_sounds().is_empty());
+    assert!(handle.call_sound_reopens().is_empty());
     driver.request_tick(start + NO_SOUND_LIMIT);
-    assert_eq!(handle.device_call_sounds(), vec![77]);
+    assert_eq!(handle.call_sound_reopens(), vec![77]);
     handle.set_call_sound(77, PlaybackHealth::default());
     driver.request_tick(start + NO_SOUND_LIMIT * 3);
-    assert_eq!(handle.device_call_sounds(), vec![77], "once");
+    assert_eq!(handle.call_sound_reopens(), vec![77], "once");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -44,7 +44,7 @@ fn a_call_with_sound_stays_on_quills_output() {
     let start = Instant::now();
     driver.request_tick(start);
     driver.request_tick(start + Duration::from_secs(60));
-    assert!(handle.device_call_sounds().is_empty());
+    assert!(handle.call_sound_reopens().is_empty());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -56,13 +56,13 @@ fn the_clock_waits_for_the_call_to_connect() {
     let start = Instant::now();
     driver.request_tick(start);
     driver.request_tick(start + Duration::from_secs(30));
-    assert!(handle.device_call_sounds().is_empty(), "still connecting");
+    assert!(handle.call_sound_reopens().is_empty(), "still connecting");
     handle.emit_transport_state(77, TransportState::Connected);
     let connected = start + Duration::from_secs(31);
     driver.request_tick(connected);
-    assert!(handle.device_call_sounds().is_empty());
+    assert!(handle.call_sound_reopens().is_empty());
     driver.request_tick(connected + NO_SOUND_LIMIT);
-    assert_eq!(handle.device_call_sounds(), vec![77]);
+    assert_eq!(handle.call_sound_reopens(), vec![77]);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -78,6 +78,6 @@ fn a_stopped_output_goes_back_to_the_device_at_once() {
         },
     );
     driver.request_tick(Instant::now());
-    assert_eq!(handle.device_call_sounds(), vec![77]);
+    assert_eq!(handle.call_sound_reopens(), vec![77]);
     let _ = std::fs::remove_dir_all(&dir);
 }

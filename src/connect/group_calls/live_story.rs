@@ -17,9 +17,6 @@ use crate::telegram::requests::{
     send_live_story_comment, set_live_story_message_sender,
 };
 
-/// Why the story stream stopped when a real call took its native key.
-const STORY_KEY_TAKEN: &str = "another call needs this stream's connection";
-
 impl<S: JsonSender> ConnectDriver<S> {
     fn live_story_request(
         &mut self,
@@ -401,27 +398,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         self.send_json_request(extra, &leave_group_call(extra, group_call_id))
             .map(|_| ())
-    }
-
-    /// ntgcalls keys a connection by chat id and a 1:1 call by the
-    /// peer's user id, so the story's stream can hold the key a real call
-    /// needs (the peer's own story, or the channel of the video chat you
-    /// join). The real call wins: the story's transport goes and its slot
-    /// is marked failed, which the viewer shows with Retry.
-    pub(crate) fn yield_story_stream_key(&mut self, key: i64) {
-        let Some(group_call_id) = self.session.calls.story_stream.as_ref().map(|call| call.id)
-        else {
-            return;
-        };
-        if self.group_call_chat_id(group_call_id) != Some(key) {
-            return;
-        }
-        self.teardown_group_call_transport(group_call_id);
-        if let Some(call) = self.session.calls.story_stream.as_mut() {
-            call.transport_ready = false;
-            call.join_payload.clear();
-            call.transport_error = Some(STORY_KEY_TAKEN.to_string());
-        }
     }
 
     /// The feed the live story's picture comes from: the stream feed of

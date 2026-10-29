@@ -25,8 +25,8 @@ impl ExternalFrameSender for MockFrameSender {
     ) -> Result<(), EngineError> {
         if !external_frame_valid(device, data.len(), meta) {
             return Err(EngineError::Engine {
-                op: "ntg_send_external_frame",
-                code: -206,
+                op: "qc_external_frame",
+                code: -1,
             });
         }
         let mut inner = self.inner.lock_or_recover();

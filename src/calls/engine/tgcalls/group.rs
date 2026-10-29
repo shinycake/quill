@@ -53,10 +53,6 @@ struct Presentation {
     connected: bool,
 }
 
-fn text(op: &'static str, value: &str) -> Result<CString, EngineError> {
-    CString::new(value).map_err(|_| EngineError::Engine { op, code: -1 })
-}
-
 /// A new instance and its join payload; `None` (logged) when tgcalls
 /// refuses it.
 fn create_instance(

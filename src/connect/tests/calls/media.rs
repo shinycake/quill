@@ -212,7 +212,7 @@ fn set_call_camera_gates_engine_on_transport() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// ntgcalls opens only a named camera: turning it off and on again
+/// The engine opens only a named camera: turning it off and on again
 /// names it each time, and a camera plugged in mid-call is found.
 #[test]
 fn the_camera_always_goes_out_by_id() {
@@ -312,8 +312,8 @@ fn set_call_screen_share_gates_engine_on_transport() {
             .unwrap()
             .screen_sharing
     );
-    // Phase C2i: screen share clears the camera intent (ntgcalls
-    // forbids camera+screen in Capture mode).
+    // Phase C2i: screen share clears the camera intent (a 1:1 call has
+    // one video track).
     assert!(!driver.session.calls.active_call.as_ref().unwrap().camera_on);
     // Transport connected: the pre-transport screen-share intent
     // applies on connect (pump_call_engine forwards it), then the

@@ -6,7 +6,6 @@ use crate::calls::engine::{
     BroadcastChannel, BroadcastPartRequest, BroadcastPartStatus, BroadcastRequestId, EngineEvent,
     GroupCallMode, StreamQuality, StreamState,
 };
-use ntgcalls_sys::NTG_ERR_RTMP_STREAMING_UNSUPPORTED;
 use std::time::Instant;
 
 fn group_call_json(participant_count: i32, need_rejoin: bool) -> String {
@@ -504,9 +503,9 @@ fn tile_width_reports_quality_only_on_bucket_change() {
 }
 
 #[test]
-fn unsupported_stream_is_a_join_error_not_a_crash() {
+fn a_refused_stream_connect_is_a_join_error_not_a_crash() {
     let (dir, mut driver, _recorder, handle, sink, seq) = ready_group_call_driver();
-    handle.fail_next_group_connect(NTG_ERR_RTMP_STREAMING_UNSUPPORTED);
+    handle.fail_next_group_connect(-1);
     let extra = driver.join_video_chat(555).expect("join tracked call");
     ingest_call_json(
         &mut driver,
@@ -517,10 +516,6 @@ fn unsupported_stream_is_a_join_error_not_a_crash() {
             extra.0
         ),
     );
-    assert_eq!(
-        stream_state(&driver),
-        (GroupCallMode::Rtmp, StreamState::Unsupported)
-    );
     let call = driver
         .session
         .calls
@@ -529,23 +524,8 @@ fn unsupported_stream_is_a_join_error_not_a_crash() {
         .expect("call");
     assert!(!call.transport_ready);
     assert!(call.transport_error.is_some());
-    // No native call is left connected without a feeder.
-    assert_eq!(handle.group_leaves(), vec![555]);
+    assert_ne!(call.stream, StreamState::Live);
     let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn unsupported_code_from_another_operation_is_an_ordinary_error() {
-    let err = crate::calls::engine::EngineError::Engine {
-        op: "ntg_set_stream_sources",
-        code: NTG_ERR_RTMP_STREAMING_UNSUPPORTED,
-    };
-    assert!(!err.is_stream_unsupported());
-    let err = crate::calls::engine::EngineError::Engine {
-        op: "ntg_connect",
-        code: NTG_ERR_RTMP_STREAMING_UNSUPPORTED,
-    };
-    assert!(err.is_stream_unsupported());
 }
 
 fn planes() -> LiveFrame {
@@ -573,7 +553,7 @@ fn a_picture_after_leaving_does_not_bring_the_feed_back() {
         .expect("feed");
     driver.leave_group_call().expect("leave");
     assert_eq!(sink.snapshot().end, Some(LiveEnd::Left));
-    // ntgcalls can still deliver a frame between the drain and the stop.
+    // The engine can still deliver a frame between the drain and the stop.
     handle.emit_live_frame(LiveKey::Stream { chat_id: 51 }, planes());
     assert!(driver.live_sink(LiveKey::Stream { chat_id: 51 }).is_none());
     assert!(sink.take().is_none());
