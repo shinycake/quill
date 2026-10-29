@@ -220,3 +220,41 @@ fn the_invite_toast_names_one_person_and_counts_more() {
         conference_invite_toast(&results, name).starts_with("You're calling **2 people** to join.")
     );
 }
+
+#[test]
+fn server_results_never_repeat_a_contact_the_query_left_out() {
+    let mut session = seeded();
+    session
+        .calls
+        .add_people_search
+        .begin("da", RequestId(7), RequestId(8));
+    // "Noa Peretz" is a contact who doesn't match "da" (the server matched
+    // something else of hers): she isn't added below the matches.
+    session
+        .calls
+        .add_people_search
+        .accept(RequestId(8), &[ChatId(PEER), ChatId(50)]);
+    let view = session.add_people_view(PEER, &[], &[], "da");
+    assert_eq!(ids(&view.rows), [51, 52, 50]);
+    assert_eq!(view.global, Vec::new());
+}
+
+#[test]
+fn the_other_side_is_listed_already_in_even_when_not_a_contact() {
+    let mut session = seeded();
+    session.users_state.contacts = Some(vec![50, 51]);
+    let view = session.add_people_view(PEER, &[], &[], "");
+    assert_eq!(ids(&view.rows), [PEER, 51, 50]);
+    let peer = view.rows.first().expect("peer row");
+    assert!(peer.already_in && peer.checked);
+    assert_eq!(view.first_pickable(), Some(51));
+    // The query filters them like anyone else.
+    assert_eq!(
+        ids(&session.add_people_view(PEER, &[], &[], "noa").rows),
+        [PEER]
+    );
+    assert_eq!(
+        ids(&session.add_people_view(PEER, &[], &[], "dan").rows),
+        [51, 50]
+    );
+}

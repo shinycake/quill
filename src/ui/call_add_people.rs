@@ -27,8 +27,9 @@ use quill::telegram::envelope::CallState;
 const USERPIC: f32 = 36.;
 
 /// The open box.
-#[derive(Default)]
 pub(super) struct AddPeopleBox {
+    /// The 1:1 call the box is over: it closes when that call ends.
+    call_id: i32,
     /// Everyone checked, in the order they were picked.
     pub(super) picked: Vec<i64>,
     /// People checked from a search result, latest first: they stay at
@@ -42,12 +43,23 @@ pub(super) struct AddPeopleBox {
 }
 
 impl AddPeopleBox {
+    /// A fresh box over the call `call_id`: nothing picked, no search.
+    pub(super) fn new(call_id: i32) -> Self {
+        Self {
+            call_id,
+            picked: Vec::new(),
+            promoted: Vec::new(),
+            search: None,
+            initial_query: String::new(),
+        }
+    }
+
     /// A box whose search field starts with `query` (screenshot demos).
     #[cfg(feature = "demo-capture")]
-    pub(super) fn with_query(query: String) -> Self {
+    pub(super) fn with_query(call_id: i32, query: String) -> Self {
         Self {
             initial_query: query,
-            ..Self::default()
+            ..Self::new(call_id)
         }
     }
 }
@@ -58,20 +70,42 @@ impl QuillApp {
         let established = self
             .session()
             .and_then(|session| session.calls.active_call.as_ref())
-            .is_some_and(|call| matches!(call.state, CallState::Ready));
-        if !established {
+            .filter(|call| matches!(call.state, CallState::Ready))
+            .map(|call| call.id);
+        let Some(call_id) = established else {
             self.connection
                 .set_note(StatusNote::info(tr(keys::CALL_ERROR_ADD_NOT_STARTED)));
             cx.notify();
             return;
-        }
-        self.calls.add_people = Some(AddPeopleBox::default());
+        };
+        self.calls.add_people = Some(AddPeopleBox::new(call_id));
         if let Some(live) = self.live.as_mut()
             && live.driver.session.users_state.contacts.is_none()
         {
             let _ = live.driver.fetch_contacts();
         }
         cx.notify();
+    }
+
+    /// The box's call ended (or was replaced): the box goes with it, its
+    /// field and picks never reused (called as the call window follows
+    /// the call).
+    pub(super) fn close_stale_call_add_people(&mut self) {
+        let current = self
+            .session()
+            .and_then(|session| session.calls.active_call.as_ref())
+            .map(|call| call.id);
+        let stale = self
+            .calls
+            .add_people
+            .as_ref()
+            .is_some_and(|open| Some(open.call_id) != current);
+        if stale {
+            self.calls.add_people = None;
+            if let Some(live) = self.live.as_mut() {
+                let _ = live.driver.search_add_people("");
+            }
+        }
     }
 
     fn close_call_add_people(&mut self, cx: &mut Context<Self>) {
@@ -96,7 +130,12 @@ impl QuillApp {
     fn call_add_people_view(&self, cx: &App) -> Option<AddPeopleView> {
         let open = self.calls.add_people.as_ref()?;
         let session = self.session()?;
-        let peer = session.calls.active_call.as_ref()?.user_id;
+        let peer = session
+            .calls
+            .active_call
+            .as_ref()
+            .filter(|call| call.id == open.call_id)?
+            .user_id;
         Some(session.add_people_view(
             peer,
             &open.picked,

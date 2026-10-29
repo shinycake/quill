@@ -127,11 +127,12 @@ impl QuillApp {
     /// dismisses it.
     pub(super) fn conference_invite_toast(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
+        let current = session.calls.active_group_call.as_ref()?.id;
         let results = session
             .calls
             .invite_results
             .as_ref()
-            .filter(|r| r.is_done())?;
+            .filter(|r| r.is_done() && r.group_call_id == current)?;
         let text = quill::state::conference_invite_toast(results, |user_id| {
             session
                 .user(user_id)

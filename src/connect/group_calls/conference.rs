@@ -411,9 +411,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .filter(|call| !call.invite_link.is_empty())
             .and_then(|call| {
                 let upgrade = call.conference.as_ref()?.upgrade.clone()?;
-                Some((call.invite_link.clone(), upgrade))
+                Some((call.id, call.invite_link.clone(), upgrade))
             });
-        let Some((invite_link, upgrade)) = ready else {
+        let Some((group_call_id, invite_link, upgrade)) = ready else {
             return Ok(());
         };
         if let Some(conference) = self
@@ -439,7 +439,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         }
         if !upgrade.invite.is_empty() {
-            self.session.calls.invite_results = Some(invites);
+            self.session.calls.invite_results = Some(invites.for_call(group_call_id));
         }
         let still_in_call = self
             .session
@@ -465,13 +465,13 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// empty query clears the search; answers of an older query are
     /// dropped by the reducer.
     pub fn search_add_people(&mut self, query: &str) -> Result<(), ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
         let query = query.trim();
         if query.is_empty() {
             self.session.calls.add_people_search.clear();
             return Ok(());
+        }
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
         }
         if self.session.calls.add_people_search.query == query {
             return Ok(());

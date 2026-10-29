@@ -127,3 +127,40 @@ fn typing_filters_the_contacts_and_the_server_people_follow(cx: &mut TestAppCont
     });
     assert_eq!(picked, Some(vec![4510, 4520]));
 }
+
+#[gpui_kit::test]
+fn the_box_goes_with_its_call(cx: &mut TestAppContext) {
+    let (app, mut call) = open_box(cx);
+    let call = &mut call;
+    call.simulate_input("da");
+    app.update(call, |app, cx| app.toggle_first_call_add_person(cx));
+    frames(call);
+    // The call ends: the box, its field and its picks are gone.
+    app.update(call, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.calls.active_call = None;
+        }
+        app.sync_call_window(cx);
+    });
+    let open = app.read_with(call, |app, _| app.calls.add_people.is_some());
+    assert!(!open);
+    // A new call's box starts empty.
+    app.update(call, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
+                app.demo_ui.sink.clone();
+            crate::ui::calls::call_video_demo::seed_video_call(
+                session,
+                false,
+                &sink,
+                &app.demo_ui.seq,
+            );
+        }
+        app.open_call_add_people(cx);
+    });
+    let fresh = app.read_with(call, |app, cx| {
+        let open = app.calls.add_people.as_ref().expect("the box");
+        (open.picked.is_empty(), app.call_add_people_query(cx))
+    });
+    assert_eq!(fresh, (true, String::new()));
+}

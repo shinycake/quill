@@ -7,7 +7,7 @@
 //! with `QUILL_DEMO_CAPTURE_WINDOWS=1`.
 #![deny(clippy::indexing_slicing)]
 
-use super::call_video_demo::{PEER, seed_video_call};
+use super::call_video_demo::{CALL, PEER, seed_video_call};
 use crate::ui::app::QuillApp;
 use crate::ui::call_add_people::AddPeopleBox;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
@@ -77,7 +77,7 @@ impl QuillApp {
             }
             seed_people(session, &query, &sink, &self.demo_ui.seq);
         }
-        self.calls.add_people = Some(AddPeopleBox::with_query(query));
+        self.calls.add_people = Some(AddPeopleBox::with_query(CALL, query));
         cx.notify();
     }
 }

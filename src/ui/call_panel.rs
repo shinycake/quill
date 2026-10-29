@@ -229,6 +229,7 @@ impl QuillApp {
     /// for a new call (and comes to the front when one rings in), stays
     /// shut if you closed it, and lingers briefly on "call ended".
     pub(super) fn sync_call_window(&mut self, cx: &mut Context<Self>) {
+        self.close_stale_call_add_people();
         let (call_id, incoming, ended, busy) = match self.session() {
             Some(session) => match (&session.calls.active_call, &session.calls.summary) {
                 (Some(call), _) => (

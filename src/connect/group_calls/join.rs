@@ -596,6 +596,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         self.session.calls.left_group_call = Some(group_call_id);
+        self.session.calls.invite_results = None;
         // Phase C2g: tear the native group transport down eagerly; the
         // pump's before/after backstop covers server-driven ends.
         self.teardown_group_call_transport(group_call_id);
@@ -653,6 +654,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         self.session.calls.left_group_call = Some(group_call_id);
+        self.session.calls.invite_results = None;
         // Phase C2g: same native teardown as leaving; the server-driven
         // end also lands via the pump backstop.
         self.teardown_group_call_transport(group_call_id);

@@ -75,7 +75,8 @@ impl Session {
     /// The "Add People" box for the call with `peer`: `picked` are the
     /// people checked so far, `promoted` the ones checked from a search
     /// result, latest first, which stay at the top of the list (tdesktop
-    /// `prependRowFromSearchResult`).
+    /// `prependRowFromSearchResult`). `peer` is listed, checked and
+    /// disabled, even when not a contact.
     pub fn add_people_view(
         &self,
         peer: i64,
@@ -96,18 +97,33 @@ impl Session {
             .into_iter()
             .filter(|contact| self.can_add_to_call(contact.user_id))
             .collect();
-        let mut rows: Vec<AddPeopleRow> = promoted
+        // Outside your contacts but in the list: the other side, already
+        // in the call, then the people picked from a search.
+        let mut extra: Vec<i64> = Vec::new();
+        for user_id in std::iter::once(&peer).chain(promoted) {
+            if !contacts.iter().any(|c| c.user_id == *user_id)
+                && !extra.contains(user_id)
+                && self.can_add_to_call(*user_id)
+            {
+                extra.push(*user_id);
+            }
+        }
+        // Everyone the list holds, matching the query or not: the
+        // server's results never repeat them (tdesktop `appendSearchRow`).
+        let listed = |user_id: i64| {
+            extra.contains(&user_id) || contacts.iter().any(|c| c.user_id == user_id)
+        };
+        let mut rows: Vec<AddPeopleRow> = extra
             .iter()
-            .filter(|user_id| !contacts.iter().any(|c| c.user_id == **user_id))
             .filter_map(|user_id| self.users.get(user_id))
-            .filter(|user| self.can_add_to_call(user.id))
             .map(|user| (user.id, user.display_name(), user.status.display()))
             .filter(|(user_id, name, _)| self.person_matches(*user_id, name, query))
             .map(|(user_id, name, status)| row(user_id, name, status))
             .collect();
         let matching: Vec<ContactRow> = contacts
-            .into_iter()
+            .iter()
             .filter(|contact| self.person_matches(contact.user_id, &contact.name, query))
+            .cloned()
             .collect();
         rows.extend(
             arrange(&matching, SortMode::Online, "")
@@ -119,7 +135,7 @@ impl Session {
                 .map(|contact| row(contact.user_id, contact.name, contact.status_text)),
         );
         let search = &self.calls.add_people_search;
-        let mut global = Vec::new();
+        let mut global: Vec<AddPeopleRow> = Vec::new();
         if !query.is_empty() && search.query == query {
             for chat_id in search.local.iter().chain(search.server.iter()) {
                 let Some(user) = self
@@ -128,8 +144,10 @@ impl Session {
                 else {
                     continue;
                 };
-                let shown = |rows: &[AddPeopleRow]| rows.iter().any(|r| r.user_id == user.id);
-                if self.can_add_to_call(user.id) && !shown(&rows) && !shown(&global) {
+                if self.can_add_to_call(user.id)
+                    && !listed(user.id)
+                    && !global.iter().any(|r| r.user_id == user.id)
+                {
                     global.push(row(user.id, user.display_name(), user.status.display()));
                 }
             }
@@ -178,6 +196,8 @@ impl Session {
 /// went (tdesktop `InviteResult`, toasted by `Panel::migrationInviteUsers`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ConferenceInviteResults {
+    /// The conference the invitations went into.
+    pub group_call_id: i32,
     /// Sent and not answered yet: the request and whom it invites.
     pending: Vec<(RequestId, i64)>,
     pub invited: Vec<i64>,
@@ -188,6 +208,14 @@ pub struct ConferenceInviteResults {
 }
 
 impl ConferenceInviteResults {
+    /// The results, for invitations into `group_call_id`.
+    pub(crate) fn for_call(self, group_call_id: i32) -> Self {
+        Self {
+            group_call_id,
+            ..self
+        }
+    }
+
     /// An invitation went out.
     pub(crate) fn sent(&mut self, request: RequestId, user_id: i64) {
         self.pending.push((request, user_id));
