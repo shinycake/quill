@@ -182,8 +182,8 @@ broadcast mode (unified for `"rtmp": true`); any other answer sets RTC
 mode and then the answer, in tdesktop's order. Incoming video is routed by
 endpoint, so each `GroupVideoSource` says whether it is a screen. Requested
 qualities follow tdesktop's grid defaults and budget, since Quill does not
-report tile sizes. Speaker levels reach the engine event hook; the driver
-drops them until the speaking-levels parity item. Media channel requests
+report tile sizes. Speaker levels reach the engine event hook and drive every
+member row (see "Parity items on tgcalls"). Media channel requests
 stay unwired: tgcalls then accepts every ssrc as it comes, which a stream
 never needs (its parts carry no ssrcs) and an RTC call plays the same.
 
@@ -343,3 +343,29 @@ beside `quill.exe` on Windows, before step 6.
   opacity. They show only once the call is established (Ready and
   connected, or reconnecting after it was), as tdesktop's fingerprint
   appears with the key.
+- Speaking levels (group calls): `EngineEvent::GroupAudioLevels` batches
+  (tgcalls' 100 ms level timer) go through `LevelGate` in the engine
+  hook, which drops a batch unless some ssrc in it is above tdesktop's
+  `kSpeakLevelThreshold` or was within the kept-for window, so silence
+  never wakes the driver or the UI. The driver
+  (`connect/group_calls/levels.rs`, rules in `calls/speaker_levels.rs`)
+  maps ssrc 0 to your own audio source and ignores your level while you
+  are muted (`GroupCall::audioLevelsUpdated`), keeps tdesktop's last-spoke
+  times (`applyLastSpoke`: sounding for 1,500 ms after sound, speaking
+  while there was voice too, forgotten after 2 s), and tells TDLib when
+  another participant starts or stops speaking with
+  `setGroupCallParticipantIsSpeaking(audio_source)`; that is how TDLib
+  orders recent speakers and loads participants it does not know, the
+  job of tdesktop's `resolveParticipants`. Your own speaking still goes
+  through `call_audio`. The poll loop's deadline includes the next state
+  that runs out on its own. Only a change of sounding or speaking asks
+  for a redraw; while a row sounds the window requests 30 fps frame
+  clock ticks and eases each row toward the newest level over
+  `kLevelDuration`. The row draws tdesktop's two blobs (`RowBlobs`: radii
+  27 to 29 px, the minor one at 0.9, scaled from 0.605 with the level, at
+  0.5 and 0.2 opacity, fading in and out over `kBlobsEnterDuration`) and
+  scales the userpic from 0.8 with the level; green while speaking, blue
+  for sound, red for someone you muted. Power saving for calls holds them
+  at rest. The blobs are round discs, not tdesktop's wobbling shapes, and
+  a participant's screen-sharing audio ssrc is not mapped (TDLib's
+  `screen_sharing_audio_source_id` is not parsed yet).

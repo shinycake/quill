@@ -26,6 +26,7 @@ mod admin;
 mod controls;
 pub use controls::SelfMuteError;
 mod join;
+pub(crate) mod levels;
 mod link;
 pub(crate) mod live_feeds;
 mod live_story;

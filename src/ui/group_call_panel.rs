@@ -219,11 +219,13 @@ impl QuillApp {
                 .child(div().text_size(px(14.)).child(tr(keys::GROUP_CALL_INVITE)))
         });
 
+        let now = std::time::Instant::now();
         let rows: Vec<AnyElement> = call
             .participants
             .iter()
-            .map(|participant| self.group_member_row(&call, participant, self_speaking, cx))
+            .map(|participant| self.group_member_row(&call, participant, self_speaking, now, cx))
             .collect();
+        self.tick_group_member_speakers(now, cx);
 
         let members = div()
             .id("group-call-members")

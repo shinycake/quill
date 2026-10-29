@@ -13,5 +13,6 @@ pub mod ptt;
 pub mod ptt_global;
 pub mod rtmp_start;
 pub mod share_links;
+pub mod speaker_levels;
 pub mod stream_audio;
 pub mod tile_pin;

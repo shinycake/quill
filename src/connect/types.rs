@@ -278,6 +278,9 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) group_mute_state: HashMap<i32, bool>,
     /// Stream-mode group calls: broadcast requests, feeders, pictures.
     pub(crate) group_call_streams: super::group_calls::stream::GroupCallStreams,
+    /// Everyone's speaking levels in the joined group call
+    /// (`group_calls/levels.rs`).
+    pub(crate) group_levels: super::group_calls::levels::GroupLevels,
     /// Phase C2e: selected camera device id; `None` means the engine
     /// default. No devices are fabricated, so this can legitimately be
     /// unset.

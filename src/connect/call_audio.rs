@@ -327,7 +327,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .or(self.call_audio.error.as_deref())
     }
 
-    fn send_speaking(
+    pub(crate) fn send_speaking(
         &mut self,
         group_call_id: i32,
         audio_source: i32,

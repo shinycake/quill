@@ -127,10 +127,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .next_pending_bot_expiry_ms()
             .map(|at| Duration::from_millis(at.saturating_sub(now_ms)));
-        match (retry, bot) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        }
+        // A group call row whose sounding or speaking runs out.
+        let levels = self.group_levels_deadline(now);
+        [retry, bot, levels].into_iter().flatten().min()
     }
 
     /// The "Couldn't load messages · Retry" action: clear the failure and

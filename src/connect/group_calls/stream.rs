@@ -9,6 +9,7 @@ use crate::calls::engine::{
     GroupCallMode, ReplyOutcome, SegmentFetch, StreamFeeder, StreamFetchError, StreamPort,
     StreamQualityTracker, StreamReply, StreamState,
 };
+use crate::calls::speaker_levels::LevelGate;
 use crate::calls::stream_audio::gain::clamp_volume;
 use crate::calls::stream_audio::watch::PlaybackWatch;
 use crate::state::Session;
@@ -165,12 +166,16 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// [`GroupCallStreams`]); a send only fails once the driver is gone.
     pub(crate) fn install_stream_hooks(&self, engine: &mut dyn CallEngine) {
         let events = self.group_call_streams.events_tx.clone();
+        let gate = Mutex::new(LevelGate::default());
+        let clock = Instant::now();
         engine.set_engine_event_callback(Arc::new(move |event| {
-            // Everyone's speaking levels are a parity item still to come
-            // (docs/decisions/tgcalls-engine.md); until then they are not
-            // queued, so a level batch never wakes the driver.
-            if matches!(event, EngineEvent::GroupAudioLevels { .. }) {
-                return;
+            // Levels come every 100 ms: a batch that cannot change what
+            // the window shows never wakes the driver.
+            if let EngineEvent::GroupAudioLevels { levels, .. } = &event {
+                let now_ms = u64::try_from(clock.elapsed().as_millis()).unwrap_or(u64::MAX);
+                if !gate.lock_or_recover().admit(levels, now_ms) {
+                    return;
+                }
             }
             if events.send(event).is_err() {
                 eprintln!("quill: stream request after the driver closed; ignored");
@@ -333,14 +338,28 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    /// Per poll: answer the broadcast requests the engine queued. Returns
-    /// whether anything was handled.
+    /// Per poll: answer the broadcast requests the engine queued and
+    /// apply its level batches. Returns whether to redraw: a request
+    /// handled, or a row that started or stopped sounding (a level alone
+    /// is drawn by the window's own frame clock).
     pub(crate) fn pump_group_call_streams(&mut self, now: Instant) -> bool {
         let mut handled = false;
+        let mut levels_changed = false;
         for _ in 0..EVENTS_PER_TICK {
             let Some(event) = self.group_call_streams.next_event() else {
                 break;
             };
+            if let EngineEvent::GroupAudioLevels {
+                group_call_id,
+                levels,
+            } = &event
+            {
+                // A send failure leaves the speaking change for later.
+                levels_changed |= self
+                    .apply_group_levels(*group_call_id, levels, now)
+                    .unwrap_or(true);
+                continue;
+            }
             handled = true;
             self.handle_engine_event(event, now);
         }
@@ -348,7 +367,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.sync_stream_state();
         }
         self.watch_stream_sound(now);
-        handled
+        levels_changed |= self.tick_group_levels(now);
+        handled || levels_changed
     }
 
     fn handle_engine_event(&mut self, event: EngineEvent, now: Instant) {

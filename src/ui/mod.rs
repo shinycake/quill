@@ -346,6 +346,7 @@ mod group_call_members;
 mod group_call_panel;
 mod group_call_settings;
 mod group_call_share;
+mod group_call_speaker;
 mod group_call_stage_volume;
 mod group_call_stream_boxes;
 mod group_call_stream_layout;
