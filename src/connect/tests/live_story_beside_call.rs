@@ -280,3 +280,69 @@ fn spent_rejoins_show_on_the_story() {
     }
     assert!(story_failed(&h));
 }
+
+/// A live story posted by the Team chat (-100), whose voice chat is 555.
+const TEAM_STORY: &str = r#"{"@type":"story","id":6,"poster_chat_id":-100,"date":1700000000,"content":{"@type":"storyContentLive","group_call_id":4242,"is_rtmp_stream":false},"caption":{"@type":"formattedText","text":"","entities":[]}}"#;
+
+fn open_team_story(h: &mut Harness) {
+    h.ingest(TEAM_STORY);
+    h.driver
+        .join_live_story(ChatId(-100), 6)
+        .expect("the story is looked up");
+    h.ingest(&LIVE_CALL.replace("JOINED", "false"));
+}
+
+/// Stream pictures, mode and quality are keyed by chat: the same chat's
+/// story and call would share them, so the call you join wins.
+#[test]
+fn joining_the_story_chats_call_stops_the_story() {
+    let mut h = harness();
+    let handle = with_engine(&mut h);
+    add_team_chat(&mut h);
+    open_team_story(&mut h);
+    h.ingest(&LIVE_CALL.replace("JOINED", "true"));
+    assert_eq!(h.sent("joinLiveStory"), 1);
+    assert!(!story_failed(&h));
+    h.ingest(&video_chat(true, false));
+    h.driver.join_video_chat(555).expect("the call joins");
+    assert_eq!(handle.group_leaves(), vec![4242], "the story's media goes");
+    assert!(story_failed(&h), "the viewer shows it failed, with Retry");
+    assert_eq!(
+        handle.group_offers().last(),
+        Some(&(555, -100)),
+        "the call gets the chat's stream"
+    );
+    assert_eq!(h.sent("joinVideoChat"), 1);
+}
+
+#[test]
+fn a_story_of_the_chat_youre_in_a_call_with_does_not_join() {
+    let mut h = harness();
+    let handle = with_engine(&mut h);
+    add_team_chat(&mut h);
+    h.ingest(&video_chat(true, false));
+    h.driver.join_video_chat(555).expect("the call joins");
+    h.ingest(&video_chat(true, true));
+    open_team_story(&mut h);
+    assert_eq!(h.sent("joinLiveStory"), 0, "no join goes out");
+    assert!(story_failed(&h));
+    assert!(
+        handle.group_offers().iter().all(|(id, _)| *id != 4242),
+        "no engine instance for the story"
+    );
+    assert!(handle.group_leaves().is_empty(), "the call stays");
+    assert_eq!(current_id(&h), Some(555));
+}
+
+#[test]
+fn a_story_of_another_chat_keeps_playing_beside_the_call() {
+    let mut h = harness();
+    let handle = with_engine(&mut h);
+    add_team_chat(&mut h);
+    open_story(&mut h);
+    h.ingest(&LIVE_CALL.replace("JOINED", "true"));
+    h.ingest(&video_chat(true, false));
+    h.driver.join_video_chat(555).expect("the call joins");
+    assert!(handle.group_leaves().is_empty());
+    assert!(!story_failed(&h));
+}

@@ -262,9 +262,15 @@ Shared code shaped by ntgcalls went too:
   ntgcalls' enums.
 - `StreamState::Unsupported` and `EngineError::is_stream_unsupported`:
   only ntgcalls refused a stream (`NTG_ERR_RTMP_STREAMING_UNSUPPORTED`).
-- The story-stream key yield: ntgcalls keyed a group call by chat id and
-  a 1:1 call by user id, so a live story and a call with its poster could
-  not coexist. tgcalls instances are independent; both keep running.
+- The story-stream key yield for 1:1 calls: ntgcalls keyed a group call
+  by chat id and a 1:1 call by user id, so a live story and a call with
+  its poster could not coexist. tgcalls instances are independent; both
+  keep running. The yield stays for a group call in the story's own chat
+  (`yield_story_stream_to_chat`, `refuse_story_stream_in_member_chat`):
+  a stream's picture (`LiveKey::Stream`), mode and quality are still
+  keyed by chat id, so a channel's live story and the same channel's
+  stream joined as a member would share them. The call you join wins and
+  the story shows failed, with Retry.
 - `QUILL_CALL_CAPTURE=native` and `QUILL_STREAM_AUDIO_DEVICE=1` left the
   microphone or the sound to ntgcalls' devices. The library has none, so
   Quill always captures and plays. The sound self-healing step now

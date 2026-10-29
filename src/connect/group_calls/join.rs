@@ -285,7 +285,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .is_some_and(|call| call.id == intent.group_call_id && !call.is_joined);
         if ready {
             self.session.calls.pending_live_story_join = None;
-            self.join_story_stream(intent.group_call_id)?;
+            if !self.refuse_story_stream_in_member_chat(intent.group_call_id) {
+                self.join_story_stream(intent.group_call_id)?;
+            }
             return Ok(());
         }
         // The `getGroupCall` request finished without producing a
@@ -511,6 +513,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         } else {
             GroupCallRole::Member
         };
+        if role == GroupCallRole::Member
+            && let Some(chat_id) = chat_id
+        {
+            self.yield_story_stream_to_chat(chat_id);
+        }
         let offer = match (chat_id, self.call_engine.as_deref_mut()) {
             (Some(chat_id), Some(engine)) if engine.is_available() => {
                 let offer = engine.create_group_call(group_call_id, chat_id, role);

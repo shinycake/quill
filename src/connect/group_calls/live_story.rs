@@ -17,6 +17,10 @@ use crate::telegram::requests::{
     send_live_story_comment, set_live_story_message_sender,
 };
 
+/// Why the story stream stopped, or never started: a call you are in for
+/// the same chat holds the chat's stream.
+const STORY_CHAT_TAKEN: &str = "a call in this chat is using its stream";
+
 impl<S: JsonSender> ConnectDriver<S> {
     fn live_story_request(
         &mut self,
@@ -398,6 +402,67 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         self.send_json_request(extra, &leave_group_call(extra, group_call_id))
             .map(|_| ())
+    }
+
+    /// Whether a group call you joined (or are joining) belongs to
+    /// `chat_id`, other than the live story's own.
+    fn member_call_in_chat(&self, chat_id: i64) -> bool {
+        let story = self.session.calls.story_stream.as_ref().map(|call| call.id);
+        self.session
+            .calls
+            .active_group_call
+            .as_ref()
+            .is_some_and(|call| {
+                Some(call.id) != story && self.group_call_chat_id(call.id) == Some(chat_id)
+            })
+            && self.session.group_call_joined_or_joining(None)
+    }
+
+    /// A stream's picture (`LiveKey::Stream`), mode and quality are keyed
+    /// by chat id, in the engine and in the UI, so a channel's live story
+    /// and the same channel's live stream joined as a member would share
+    /// them. The call you join wins, as tdesktop's group call takes over
+    /// from a video stream: the story's transport goes and its slot is
+    /// marked failed, which the viewer shows with Retry. Called before a
+    /// member join of a call in `chat_id`; a story in another chat, and
+    /// any 1:1 call, play beside it.
+    pub(crate) fn yield_story_stream_to_chat(&mut self, chat_id: i64) {
+        let Some(group_call_id) = self.session.calls.story_stream.as_ref().map(|call| call.id)
+        else {
+            return;
+        };
+        if self.group_call_chat_id(group_call_id) != Some(chat_id) {
+            return;
+        }
+        self.teardown_group_call_transport(group_call_id);
+        if let Some(call) = self.session.calls.story_stream.as_mut() {
+            call.transport_ready = false;
+            call.join_payload.clear();
+            call.transport_error = Some(STORY_CHAT_TAKEN.to_string());
+        }
+    }
+
+    /// The other half of [`Self::yield_story_stream_to_chat`]: a story
+    /// opened while you are in a call of its chat does not join (no
+    /// `joinLiveStory`, no engine instance) and shows failed. Returns
+    /// whether it was refused.
+    pub(crate) fn refuse_story_stream_in_member_chat(&mut self, group_call_id: i32) -> bool {
+        let Some(chat_id) = self.group_call_chat_id(group_call_id) else {
+            return false;
+        };
+        if !self.member_call_in_chat(chat_id) {
+            return false;
+        }
+        if let Some(call) = self
+            .session
+            .calls
+            .story_stream
+            .as_mut()
+            .filter(|call| call.id == group_call_id)
+        {
+            call.transport_error = Some(STORY_CHAT_TAKEN.to_string());
+        }
+        true
     }
 
     /// The feed the live story's picture comes from: the stream feed of
