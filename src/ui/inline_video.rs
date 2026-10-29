@@ -465,75 +465,66 @@ impl QuillApp {
     }
 }
 
-/// An image of `color` the size of a `width` x `height` tile with each
-/// corner's outside cut away in an anti-aliased quarter circle of its radius
-/// (`[top-left, top-right, bottom-right, bottom-left]`, in points): laid
-/// over a native video surface, which GPUI can't clip, it rounds the video
-/// to match the bubble. Rendered at twice the size for Retina edges.
+/// The outside of one rounded corner of a `tile` (width, height in points),
+/// filled with `color`: `corner` is 0 to 3 (top-left, top-right,
+/// bottom-right, bottom-left) and `radius` is in points. Laid over a native
+/// video surface, which GPUI can't clip, the four of them round the video to
+/// match the bubble. Each covers only its corner's `radius` square (at most
+/// a quarter of the tile), rendered at twice the size for Retina edges, so
+/// one small image serves every tile with that radius: a mask of the whole
+/// tile cost MBs for each tile size and window width.
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub(super) fn corner_mask(
-    width: u32,
-    height: u32,
-    radii: [u32; 4],
-    colors: [Hsla; 4],
+    corner: usize,
+    radius: u32,
+    tile: (u32, u32),
+    color: Hsla,
 ) -> std::sync::Arc<RenderImage> {
     use super::lru::Lru;
     use std::cell::RefCell;
     use std::sync::Arc;
-    type Key = (u32, u32, [u32; 4], [[u8; 4]; 4]);
+    type Key = (usize, u32, (u32, u32), [u8; 4]);
     thread_local! {
         static MASKS: RefCell<Lru<Key, Arc<RenderImage>>> = RefCell::new(Lru::new(32));
     }
     let channel = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
-    let bgra = colors.map(|color| {
-        let rgba = Rgba::from(color);
-        [
-            channel(rgba.b),
-            channel(rgba.g),
-            channel(rgba.r),
-            channel(rgba.a),
-        ]
-    });
-    let key = (width, height, radii, bgra);
+    let rgba = Rgba::from(color);
+    let bgra = [
+        channel(rgba.b),
+        channel(rgba.g),
+        channel(rgba.r),
+        channel(rgba.a),
+    ];
+    // Device pixels: the radius square, cut at the middle of the tile.
+    let size = corner_mask_size(radius, tile);
+    let key = (corner, radius, size, bgra);
     if let Some(hit) = MASKS.with(|masks| masks.borrow_mut().get(&key)) {
         return hit;
     }
-    let build = || {
-        let (w, h) = (width * 2, height * 2);
-        let mut image = image::RgbaImage::new(w.max(1), h.max(1));
-        for (x, y, pixel) in image.enumerate_pixels_mut() {
-            let px = x as f32 + 0.5;
-            let py = y as f32 + 0.5;
-            let left = px < w as f32 / 2.0;
-            let top = py < h as f32 / 2.0;
-            let corner = match (top, left) {
-                (true, true) => 0,
-                (true, false) => 1,
-                (false, false) => 2,
-                (false, true) => 3,
-            };
-            let (Some(&corner_radius), Some(&color)) = (radii.get(corner), bgra.get(corner)) else {
-                continue;
-            };
-            let radius = corner_radius as f32 * 2.0;
-            // Distance from this corner's edges.
-            let dx = if left { px } else { w as f32 - px };
-            let dy = if top { py } else { h as f32 - py };
-            let cover = if dx >= radius || dy >= radius {
-                0.0
-            } else {
-                let ox = radius - dx;
-                let oy = radius - dy;
-                ((ox * ox + oy * oy).sqrt() - radius + 0.5).clamp(0.0, 1.0)
-            };
-            let alpha = (f32::from(color[3]) * cover).round() as u8;
-            *pixel = image::Rgba([color[0], color[1], color[2], alpha]);
-        }
-        Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
-            image::Frame::new(image),
-        ])))
-    };
-    let image = build();
+    let (w, h) = size;
+    let left = corner == 0 || corner == 3;
+    let top = corner < 2;
+    let radius = radius as f32 * 2.0;
+    let mut image = image::RgbaImage::new(w.max(1), h.max(1));
+    for (x, y, pixel) in image.enumerate_pixels_mut() {
+        let px = x as f32 + 0.5;
+        let py = y as f32 + 0.5;
+        // Distance from this corner's edges.
+        let dx = if left { px } else { w as f32 - px };
+        let dy = if top { py } else { h as f32 - py };
+        let cover = if dx >= radius || dy >= radius {
+            0.0
+        } else {
+            let ox = radius - dx;
+            let oy = radius - dy;
+            ((ox * ox + oy * oy).sqrt() - radius + 0.5).clamp(0.0, 1.0)
+        };
+        let alpha = (f32::from(bgra[3]) * cover).round() as u8;
+        *pixel = image::Rgba([bgra[0], bgra[1], bgra[2], alpha]);
+    }
+    let image = Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
+        image::Frame::new(image),
+    ])));
     MASKS.with(|masks| {
         if let Some(old) = masks.borrow_mut().insert(key, image.clone()) {
             super::image_budget::retire_all([old]);
@@ -542,9 +533,20 @@ pub(super) fn corner_mask(
     image
 }
 
+/// The device-pixel size of a [`corner_mask`]: its radius square at twice
+/// the size, no more than half the tile.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+pub(super) fn corner_mask_size(radius: u32, tile: (u32, u32)) -> (u32, u32) {
+    (
+        radius.saturating_mul(2).min(tile.0),
+        radius.saturating_mul(2).min(tile.1),
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{INLINE_MAX_EDGE, InlineTile, corner_mask};
+    use super::{INLINE_MAX_EDGE, InlineTile, corner_mask, corner_mask_size};
+    use std::sync::Arc;
 
     #[test]
     fn clips_decode_at_their_tile_size_in_device_pixels() {
@@ -664,26 +666,41 @@ mod tests {
     }
 
     #[test]
-    fn corner_mask_cuts_only_the_corner_outsides() {
-        let colors = [
-            gpui_kit::white(),
-            gpui_kit::white(),
-            gpui_kit::black(),
-            gpui_kit::white(),
-        ];
-        let mask = corner_mask(40, 30, [10, 0, 10, 0], colors);
+    fn corner_masks_cut_only_the_corner_outsides() {
+        // The top-left corner of a 40 x 30 pt tile, radius 10: a 20 px square.
+        let mask = corner_mask(0, 10, (40, 30), gpui_kit::white());
         let bytes = mask.as_bytes(0).expect("one frame");
-        let alpha = |x: usize, y: usize| bytes[(y * 80 + x) * 4 + 3];
-        // Rounded corners keep the backdrop at the extreme pixel; the square
-        // ones and the middle show the video.
-        assert_eq!(alpha(0, 0), 255);
-        assert_eq!(alpha(79, 59), 255);
-        assert_eq!(alpha(79, 0), 0);
-        assert_eq!(alpha(0, 59), 0);
-        assert_eq!(alpha(40, 30), 0);
-        // Straight BGRA: each corner keeps its own color.
+        assert_eq!(bytes.len(), 20 * 20 * 4);
+        let alpha = |bytes: &[u8], x: usize, y: usize| bytes[(y * 20 + x) * 4 + 3];
+        assert_eq!(
+            alpha(bytes, 0, 0),
+            255,
+            "the extreme pixel keeps the backdrop"
+        );
+        assert_eq!(alpha(bytes, 19, 19), 0, "inside the curve shows the video");
+        // Straight BGRA in the corner's own color.
         assert_eq!(&bytes[0..3], &[255, 255, 255]);
-        let br = (59 * 80 + 79) * 4;
+        // The bottom-right corner is cut from the other side.
+        let mask = corner_mask(2, 10, (40, 30), gpui_kit::black());
+        let bytes = mask.as_bytes(0).expect("one frame");
+        assert_eq!(alpha(bytes, 19, 19), 255);
+        assert_eq!(alpha(bytes, 0, 0), 0);
+        let br = (19 * 20 + 19) * 4;
         assert_eq!(&bytes[br..br + 3], &[0, 0, 0]);
+    }
+
+    /// A mask of the whole tile cost several MB for each tile size and
+    /// window width (32 of them were kept); a corner costs a few KB and
+    /// serves every tile with its radius.
+    #[test]
+    fn a_corner_mask_does_not_grow_with_the_tile() {
+        let small = corner_mask(1, 12, (200, 120), gpui_kit::white());
+        let large = corner_mask(1, 12, (430, 242), gpui_kit::white());
+        assert!(Arc::ptr_eq(&small, &large), "one mask serves both tiles");
+        assert_eq!(small.as_bytes(0).map(<[u8]>::len), Some(24 * 24 * 4));
+        // A round video message: each corner is a quarter of the circle.
+        assert_eq!(corner_mask_size(120, (240, 240)), (240, 240));
+        // A radius larger than the tile is cut at its middle.
+        assert_eq!(corner_mask_size(30, (40, 20)), (40, 20));
     }
 }
