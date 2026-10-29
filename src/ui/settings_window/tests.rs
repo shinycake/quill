@@ -243,7 +243,11 @@ fn esc_clears_the_search_before_leaving_settings(cx: &mut TestAppContext) {
         cx.notify();
     });
     frames(vcx);
-    vcx.simulate_keystrokes("cmd-f");
+    vcx.simulate_keystrokes(if cfg!(target_os = "macos") {
+        "cmd-f"
+    } else {
+        "ctrl-f"
+    });
     vcx.simulate_input("notif");
     frames(vcx);
     assert!(shown(vcx, "settings-search-results"));
@@ -268,7 +272,11 @@ fn a_narrow_window_shows_results_in_place_of_the_list(cx: &mut TestAppContext) {
         cx.notify();
     });
     frames(vcx);
-    vcx.simulate_keystrokes("cmd-f");
+    vcx.simulate_keystrokes(if cfg!(target_os = "macos") {
+        "cmd-f"
+    } else {
+        "ctrl-f"
+    });
     vcx.simulate_input("language");
     frames(vcx);
     assert!(shown(vcx, "settings-search-results"));

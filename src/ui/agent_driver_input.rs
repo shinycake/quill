@@ -212,13 +212,16 @@ fn clicks(position: Point<Pixels>, button: MouseButton, count: u32) -> Vec<Platf
     events
 }
 
+/// `cmd` is the platform's primary modifier: Cmd on macOS, Ctrl elsewhere,
+/// where Quill binds no Super chords (`keybindings::primary!`).
 fn keystroke(chord: &KeyChord) -> Keystroke {
+    let mac = cfg!(target_os = "macos");
     Keystroke {
         modifiers: Modifiers {
-            control: chord.ctrl,
+            control: chord.ctrl || (chord.cmd && !mac),
             alt: chord.alt,
             shift: chord.shift,
-            platform: chord.cmd,
+            platform: chord.cmd && mac,
             function: chord.function,
         },
         key: chord.key.clone(),

@@ -15,6 +15,7 @@ use super::actions::{
     ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn, ViewerZoomOut,
     ViewerZoomReset,
 };
+use super::actions::{HideApp, HideOtherApps};
 use super::host_os::HOST_OS;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -22,10 +23,10 @@ use quill::lang::{keys, tr, tr_with};
 use quill::settings::CustomKeybinding;
 
 /// The platform's primary modifier plus a key, as a keystroke literal:
-/// `cmd-` on macOS, `ctrl-` elsewhere (GPUI's `secondary`). The composer
-/// formatting shortcuts use only this, as Telegram Desktop does (Qt maps
-/// `ctrl` to Cmd on macOS), so Linux and Windows get Ctrl and macOS keeps
-/// Ctrl+B and friends for text-field editing.
+/// `cmd-` on macOS, `ctrl-` elsewhere (GPUI's `secondary`). Every app
+/// shortcut uses only this, as Telegram Desktop does (Qt maps `ctrl` to Cmd
+/// on macOS): macOS keeps Ctrl+K, Ctrl+F and friends for text editing, and
+/// Linux and Windows leave the Super key to the desktop.
 macro_rules! primary {
     ($key:literal) => {
         if cfg!(target_os = "macos") {
@@ -107,12 +108,12 @@ pub const REBINDABLE_ACTIONS: &[RebindableAction] = &[
         label: keys::Q_PREFS_FOCUS_CHAT_LIST,
         // Cmd/Ctrl+1..8 open the pinned chats (tdesktop), so focusing the
         // list moved to the Alt variant.
-        defaults: &["cmd-alt-1", "ctrl-alt-1"],
+        defaults: &[primary!("alt-1")],
     },
     RebindableAction {
         id: "focus-composer",
         label: keys::Q_PREFS_FOCUS_COMPOSER,
-        defaults: &["cmd-shift-l", "ctrl-shift-l"],
+        defaults: &[primary!("shift-l")],
     },
     RebindableAction {
         id: "toggle-sidebar",
@@ -138,22 +139,22 @@ pub const REBINDABLE_ACTIONS: &[RebindableAction] = &[
     RebindableAction {
         id: "open-search",
         label: keys::Q_PREFS_SEARCH,
-        defaults: &["cmd-k", "ctrl-k"],
+        defaults: &[primary!("k")],
     },
     RebindableAction {
         id: "open-chat-search",
         label: keys::Q_PREFS_SEARCH_IN_CHAT,
-        defaults: &["cmd-f", "ctrl-f"],
+        defaults: &[primary!("f")],
     },
     RebindableAction {
         id: "chat-search-newer",
         label: keys::Q_PREFS_NEXT_SEARCH_RESULT,
-        defaults: &["cmd-g", "ctrl-g"],
+        defaults: &[primary!("g")],
     },
     RebindableAction {
         id: "chat-search-older",
         label: keys::Q_PREFS_PREVIOUS_SEARCH_RESULT,
-        defaults: &["cmd-shift-g", "ctrl-shift-g"],
+        defaults: &[primary!("shift-g")],
     },
     RebindableAction {
         id: "cancel-search",
@@ -387,28 +388,43 @@ fn composer_bindings() -> Vec<KeyBinding> {
 /// Fixed bindings: window chrome and app lifecycle — not rebindable.
 fn fixed_bindings() -> Vec<KeyBinding> {
     vec![
-        KeyBinding::new("cmd-q", QuitApp, None),
-        KeyBinding::new("ctrl-q", QuitApp, None),
+        KeyBinding::new(primary!("q"), QuitApp, None),
         // kit Phase 7: window-chrome shortcuts (HIG: Cmd+W close, Cmd+M
-        // minimize; F11 / Cmd+Ctrl+F fullscreen).
-        KeyBinding::new("cmd-,", OpenSettings, None),
-        KeyBinding::new("ctrl-,", OpenSettings, None),
-        KeyBinding::new("cmd-w", CloseWindow, None),
-        KeyBinding::new("ctrl-w", CloseWindow, None),
+        // minimize; Cmd+Ctrl+F / F11 fullscreen).
+        KeyBinding::new(primary!(","), OpenSettings, None),
+        KeyBinding::new(primary!("w"), CloseWindow, None),
         // Local passcode: Ctrl/Cmd+L as in tdesktop (Focus composer moved to
         // the Shift variant).
-        KeyBinding::new("cmd-l", LockApp, None),
-        KeyBinding::new("ctrl-l", LockApp, None),
-        KeyBinding::new("cmd-m", MinimizeWindow, None),
-        KeyBinding::new("ctrl-m", MinimizeWindow, None),
-        KeyBinding::new("f11", ToggleFullscreen, None),
+        KeyBinding::new(primary!("l"), LockApp, None),
+        KeyBinding::new(primary!("m"), MinimizeWindow, None),
+        #[cfg(target_os = "macos")]
         KeyBinding::new("cmd-ctrl-f", ToggleFullscreen, None),
+        #[cfg(not(target_os = "macos"))]
+        KeyBinding::new("f11", ToggleFullscreen, None),
     ]
+    .into_iter()
+    .chain(app_menu_bindings())
+    .collect()
+}
+
+/// The macOS app menu's Hide Quill (Cmd+H) and Hide Others (Cmd+Opt+H).
+/// GPUI gives AppKit's standard commands no default chord, so without these
+/// the keys did nothing.
+fn app_menu_bindings() -> Vec<KeyBinding> {
+    if cfg!(target_os = "macos") {
+        vec![
+            KeyBinding::new("cmd-h", HideApp, None),
+            KeyBinding::new("cmd-alt-h", HideOtherApps, None),
+        ]
+    } else {
+        Vec::new()
+    }
 }
 
 fn default_bindings() -> Vec<KeyBinding> {
     let mut bindings: Vec<KeyBinding> =
         shortcut_rows().into_iter().map(|row| row.binding).collect();
+    bindings.extend(app_menu_bindings());
     bindings.extend(composer_scoped_bindings());
     bindings.extend(super::chat_list_keys::chat_list_bindings());
     bindings
@@ -441,7 +457,7 @@ fn fixed_keystrokes() -> Vec<Keystroke> {
 pub enum KeybindingConflict {
     /// The string does not parse as a keystroke.
     Invalid,
-    /// Reserved by quit, close, minimize, or fullscreen.
+    /// Reserved by quit, close, minimize, hide, or fullscreen.
     FixedChrome,
     /// Already the live chord of another rebindable action.
     Rebindable { other_label: &'static str },
@@ -780,8 +796,8 @@ mod tests {
     #[cfg(feature = "demo-capture")]
     fn reference_table_matches_resolved_defaults() {
         let defaults = default_bindings();
-        // macOS adds ⌃⌘F first, for the Window menu's Toggle Full Screen.
-        let expected = if cfg!(target_os = "macos") { 108 } else { 107 };
+        // macOS adds Hide and Hide Others.
+        let expected = if cfg!(target_os = "macos") { 98 } else { 96 };
         assert_eq!(defaults.len(), expected);
         for row in resolve_keybindings(&[]) {
             for chord in row.live {
@@ -800,24 +816,16 @@ mod tests {
     #[cfg(feature = "demo-capture")]
     fn ctrl_l_locks_and_shift_variant_focuses_the_composer() {
         let lock = super::LockApp.name();
-        let mut chords: Vec<String> = default_bindings()
+        let chords: Vec<String> = default_bindings()
             .iter()
             .filter(|binding| binding.action().name() == lock)
             .map(|binding| binding.keystrokes()[0].inner().unparse(HOST_OS))
             .collect();
-        chords.sort();
-        // GPUI spells Cmd `super` off macOS: compare in its own spelling.
-        let mut expected: Vec<String> = ["cmd-l", "ctrl-l"]
-            .iter()
-            .map(|chord| {
-                Keystroke::parse_with_os(chord, HOST_OS)
-                    .unwrap()
-                    .unparse(HOST_OS)
-            })
-            .collect();
-        expected.sort();
-        assert_eq!(chords, expected);
-        assert!(binding_for("focus-composer", "ctrl-shift-l").is_some());
+        let expected = Keystroke::parse_with_os(&primary("l"), HOST_OS)
+            .unwrap()
+            .unparse(HOST_OS);
+        assert_eq!(chords, vec![expected]);
+        assert!(binding_for("focus-composer", &primary("shift-l")).is_some());
     }
 
     #[test]
@@ -914,23 +922,24 @@ mod tests {
     #[test]
     #[cfg(feature = "demo-capture")]
     fn custom_keystroke_on_fixed_keystroke_is_rejected() {
-        // Mirrors apply_custom_bindings' collision rule: a custom "cmd-q"
+        // Mirrors apply_custom_bindings' collision rule: a custom Cmd/Ctrl+Q
         // for Search must not shadow the fixed Quit binding.
         let fixed = fixed_keystrokes();
-        let kb = binding_for("open-search", "cmd-q").unwrap();
+        let kb = binding_for("open-search", &primary("q")).unwrap();
         assert!(kb.keystrokes().iter().any(|k| fixed.contains(k.inner())));
-        let ok = binding_for("open-search", "ctrl-k").unwrap();
+        let ok = binding_for("open-search", "ctrl-alt-k").unwrap();
         assert!(!ok.keystrokes().iter().any(|k| fixed.contains(k.inner())));
-        for reserved in [
-            "cmd-q",
-            "ctrl-q",
-            "cmd-w",
-            "ctrl-w",
-            "cmd-m",
-            "ctrl-m",
-            "f11",
-            "cmd-ctrl-f",
-        ] {
+        let platform: &[&str] = if cfg!(target_os = "macos") {
+            &["cmd-ctrl-f", "cmd-h", "cmd-alt-h"]
+        } else {
+            &["f11"]
+        };
+        let reserved = ["q", "w", "m", "l", ","].map(primary);
+        for reserved in reserved
+            .iter()
+            .map(String::as_str)
+            .chain(platform.iter().copied())
+        {
             assert_eq!(
                 keybinding_conflict("open-search", reserved, &[]),
                 Some(KeybindingConflict::FixedChrome),
@@ -939,21 +948,64 @@ mod tests {
         }
     }
 
+    /// Each platform's shortcuts use its own primary modifier only: macOS
+    /// keeps Ctrl+letter for Cocoa text editing (Ctrl+A/E/F/B/K/…), and
+    /// Linux and Windows leave Super chords to the desktop.
+    #[test]
+    fn shortcuts_leave_the_other_platforms_modifier_alone() {
+        let mut bindings = default_bindings();
+        bindings.extend(super::fixed_bindings());
+        bindings.extend(composer_bindings());
+        let defaults = REBINDABLE_ACTIONS
+            .iter()
+            .flat_map(|ra| ra.defaults)
+            .map(|chord| Keystroke::parse_with_os(chord, HOST_OS).unwrap());
+        let chords: Vec<Keystroke> = bindings
+            .iter()
+            .flat_map(|b| b.keystrokes().iter().map(|k| k.inner().clone()))
+            .chain(defaults)
+            .collect();
+        for ks in chords {
+            let chord = ks.unparse(HOST_OS);
+            if cfg!(target_os = "macos") {
+                let ctrl_letter = ks.modifiers.control
+                    && !ks.modifiers.platform
+                    && ks.key.len() == 1
+                    && ks.key.chars().all(|c| c.is_ascii_alphabetic());
+                assert!(!ctrl_letter, "{chord} takes a Cocoa text key");
+            } else {
+                assert!(!ks.modifiers.platform, "{chord} takes a Super chord");
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn cmd_h_hides_and_cmd_alt_h_hides_others() {
+        assert_eq!(resolve("cmd-h", &[]).as_deref(), Some("quill_ui::HideApp"));
+        assert_eq!(
+            resolve("cmd-alt-h", &["Workspace", "QuillComposer", "Input"]).as_deref(),
+            Some("quill_ui::HideOtherApps")
+        );
+        assert_eq!(
+            resolve("cmd-h", &["Workspace", "QuillComposer", "Input"]).as_deref(),
+            Some("quill_ui::HideApp")
+        );
+    }
+
     #[test]
     fn rebindable_conflict_blocks_a_shared_live_chord() {
-        // ctrl-shift-l is still Focus composer's live default.
+        let focus = primary("shift-l");
+        // Cmd/Ctrl+Shift+L is still Focus composer's live default.
         assert_eq!(
-            keybinding_conflict("open-search", "ctrl-shift-l", &[]),
+            keybinding_conflict("open-search", &focus, &[]),
             Some(KeybindingConflict::Rebindable {
                 other_label: "Focus composer",
             })
         );
-        // Moving Focus composer off ctrl-shift-l frees it. The new chord is taken.
+        // Moving Focus composer off it frees it. The new chord is taken.
         let moved = vec![custom("focus-composer", "ctrl-alt-9")];
-        assert_eq!(
-            keybinding_conflict("open-search", "ctrl-shift-l", &moved),
-            None
-        );
+        assert_eq!(keybinding_conflict("open-search", &focus, &moved), None);
         assert_eq!(
             keybinding_conflict("open-search", "ctrl-alt-9", &moved),
             Some(KeybindingConflict::Rebindable {
@@ -961,10 +1013,7 @@ mod tests {
             })
         );
         // An action may keep its own default.
-        assert_eq!(
-            keybinding_conflict("focus-composer", "ctrl-shift-l", &[]),
-            None
-        );
+        assert_eq!(keybinding_conflict("focus-composer", &focus, &[]), None);
         assert_eq!(
             keybinding_conflict("open-search", "not-a-keystroke-%%%", &[]),
             Some(KeybindingConflict::Invalid)
@@ -973,23 +1022,24 @@ mod tests {
 
     #[test]
     fn rejected_chords_are_not_reported_as_live() {
+        let quit = primary("q");
         let customs = vec![
-            custom("focus-composer", "ctrl-k"),
-            custom("open-search", "cmd-q"),
-            custom("format-bold", "ctrl-k"),
+            custom("focus-composer", "ctrl-alt-k"),
+            custom("open-search", &quit),
+            custom("format-bold", "ctrl-alt-k"),
         ];
         let resolved = resolve_keybindings(&customs);
         let focus = resolved
             .iter()
             .find(|row| row.id == "focus-composer")
             .unwrap();
-        assert_eq!(focus.live, vec!["ctrl-k".to_string()]);
+        assert_eq!(focus.live, vec!["ctrl-alt-k".to_string()]);
         assert_eq!(focus.rejected, None);
 
         let search = resolved.iter().find(|row| row.id == "open-search").unwrap();
         assert_eq!(search.rejected, Some(KeybindingConflict::FixedChrome));
-        assert_eq!(search.live, vec!["cmd-k".to_string()]);
-        assert!(!search.live.iter().any(|chord| chord == "cmd-q"));
+        assert_eq!(search.live, vec![primary("k")]);
+        assert!(!search.live.contains(&quit));
 
         let bold = resolved.iter().find(|row| row.id == "format-bold").unwrap();
         assert_eq!(
@@ -999,19 +1049,19 @@ mod tests {
             })
         );
         assert_eq!(bold.live, vec![primary("b")]);
-        assert!(!bold.live.iter().any(|chord| chord == "ctrl-k"));
+        assert!(!bold.live.iter().any(|chord| chord == "ctrl-alt-k"));
 
-        let message = conflict_message("cmd-q", &KeybindingConflict::FixedChrome);
-        assert!(message.contains("cmd-q"));
+        let message = conflict_message(&quit, &KeybindingConflict::FixedChrome);
+        assert!(message.contains(&quit));
         assert!(message.contains("not applied"));
     }
 
     #[test]
     fn resolved_live_chords_do_not_overlap() {
         let customs = vec![
-            custom("open-search", "cmd-q"),
-            custom("focus-composer", "ctrl-k"),
-            custom("format-bold", "ctrl-k"),
+            custom("open-search", &primary("q")),
+            custom("focus-composer", "ctrl-alt-k"),
+            custom("format-bold", "ctrl-alt-k"),
             custom("format-italic", &primary("b")),
         ];
         let resolved = resolve_keybindings(&customs);
@@ -1071,6 +1121,7 @@ mod tests {
             ("enter", false, false),
             ("q", true, false),
             ("w", true, false),
+            ("h", true, false),
         ] {
             assert_eq!(
                 context_menu_captures_key(&Keystroke {
@@ -1249,7 +1300,7 @@ mod tests {
         }
         // Focus chat list moved off Cmd/Ctrl+1 to make room.
         assert_eq!(
-            resolve("ctrl-alt-1", &[]).as_deref(),
+            resolve(&primary("alt-1"), &[]).as_deref(),
             Some("quill_ui::FocusSidebar")
         );
     }

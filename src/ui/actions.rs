@@ -28,6 +28,11 @@ actions!(
         MinimizeWindow,
         /// kit Phase 7: zoom (maximize/restore) the window (Window menu).
         ZoomWindow,
+        /// macOS app menu: Hide Quill (Cmd+H), Hide Others (Cmd+Opt+H) and
+        /// Show All, the standard AppKit commands.
+        HideApp,
+        HideOtherApps,
+        ShowAllApps,
         /// kit Phase 7: toggle fullscreen (F11 / Cmd+Ctrl+F, View menu).
         ToggleFullscreen,
         /// kit Phase 8: flip the whole app between light and dark
