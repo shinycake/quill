@@ -27,19 +27,13 @@ pub(super) fn row<A: Action>(
 }
 
 /// Every keybinding the app registers, in reference-dialog order. Rows that
-/// share a label (e.g. `cmd-q` / `ctrl-q`) render as one entry with both
-/// chips.
+/// share a label (e.g. the Next chat chords) render as one entry with all
+/// their chips.
 pub fn shortcut_rows() -> Vec<ShortcutRow> {
     let mut rows = vec![
         // General.
         row(
-            "cmd-q",
-            tr(keys::Q_PREFS_QUIT_QUILL),
-            tr(keys::Q_PREFS_GENERAL),
-            QuitApp,
-        ),
-        row(
-            "ctrl-q",
+            primary!("q"),
             tr(keys::Q_PREFS_QUIT_QUILL),
             tr(keys::Q_PREFS_GENERAL),
             QuitApp,
@@ -47,43 +41,26 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
         // kit Phase 7: window-chrome shortcuts (HIG: Cmd+W close, Cmd+M
         // minimize; F11 / Cmd+Ctrl+F fullscreen).
         row(
-            "cmd-l",
+            primary!("l"),
             tr(keys::Q_PREFS_LOCK_QUILL),
             tr(keys::Q_PREFS_GENERAL),
             LockApp,
         ),
         row(
-            "ctrl-l",
-            tr(keys::Q_PREFS_LOCK_QUILL),
-            tr(keys::Q_PREFS_GENERAL),
-            LockApp,
-        ),
-        row(
-            "cmd-w",
+            primary!("w"),
             tr(keys::Q_PREFS_CLOSE_WINDOW),
             tr(keys::Q_PREFS_GENERAL),
             CloseWindow,
         ),
         row(
-            "ctrl-w",
-            tr(keys::Q_PREFS_CLOSE_WINDOW),
-            tr(keys::Q_PREFS_GENERAL),
-            CloseWindow,
-        ),
-        row(
-            "cmd-m",
+            primary!("m"),
             tr(keys::Q_PREFS_MINIMIZE_WINDOW),
             tr(keys::Q_PREFS_GENERAL),
             MinimizeWindow,
         ),
-        row(
-            "ctrl-m",
-            tr(keys::Q_PREFS_MINIMIZE_WINDOW),
-            tr(keys::Q_PREFS_GENERAL),
-            MinimizeWindow,
-        ),
-        // A menu item shows its action's first binding: the macOS Window
-        // menu's "Toggle Full Screen" reads ⌃⌘F, as in Telegram Desktop.
+        // macOS's own full-screen chord (the Window menu's "Toggle Full
+        // Screen" reads ⌃⌘F, as in Telegram Desktop); F11 elsewhere, since
+        // macOS keeps F11 for Show Desktop.
         #[cfg(target_os = "macos")]
         row(
             "cmd-ctrl-f",
@@ -91,6 +68,7 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
             tr(keys::Q_PREFS_GENERAL),
             ToggleFullscreen,
         ),
+        #[cfg(not(target_os = "macos"))]
         row(
             "f11",
             tr(keys::Q_PREFS_TOGGLE_FULLSCREEN),
@@ -104,12 +82,6 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
             ReopenClosedWindow,
         ),
         row(
-            "cmd-ctrl-f",
-            tr(keys::Q_PREFS_TOGGLE_FULLSCREEN),
-            tr(keys::Q_PREFS_GENERAL),
-            ToggleFullscreen,
-        ),
-        row(
             SIDEBAR_CHORD,
             tr(keys::Q_PREFS_TOGGLE_SIDEBAR),
             tr(keys::Q_PREFS_GENERAL),
@@ -117,25 +89,13 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
         ),
         // Navigation.
         row(
-            "cmd-alt-1",
+            primary!("alt-1"),
             tr(keys::Q_PREFS_FOCUS_CHAT_LIST),
             tr(keys::Q_PREFS_NAVIGATION),
             FocusSidebar,
         ),
         row(
-            "ctrl-alt-1",
-            tr(keys::Q_PREFS_FOCUS_CHAT_LIST),
-            tr(keys::Q_PREFS_NAVIGATION),
-            FocusSidebar,
-        ),
-        row(
-            "cmd-shift-l",
-            tr(keys::Q_PREFS_FOCUS_MESSAGE_COMPOSER),
-            tr(keys::Q_PREFS_NAVIGATION),
-            FocusComposer,
-        ),
-        row(
-            "ctrl-shift-l",
+            primary!("shift-l"),
             tr(keys::Q_PREFS_FOCUS_MESSAGE_COMPOSER),
             tr(keys::Q_PREFS_NAVIGATION),
             FocusComposer,
@@ -184,49 +144,25 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
         ),
         // Search.
         row(
-            "cmd-k",
+            primary!("k"),
             tr(keys::Q_PREFS_QUICK_SWITCH_CHATS),
             tr(keys::Q_PREFS_SEARCH),
             OpenSearch,
         ),
         row(
-            "ctrl-k",
-            tr(keys::Q_PREFS_QUICK_SWITCH_CHATS),
-            tr(keys::Q_PREFS_SEARCH),
-            OpenSearch,
-        ),
-        row(
-            "cmd-f",
+            primary!("f"),
             tr(keys::Q_PREFS_FIND_IN_CHAT),
             tr(keys::Q_PREFS_SEARCH),
             OpenChatSearch,
         ),
         row(
-            "ctrl-f",
-            tr(keys::Q_PREFS_FIND_IN_CHAT),
-            tr(keys::Q_PREFS_SEARCH),
-            OpenChatSearch,
-        ),
-        row(
-            "cmd-g",
+            primary!("g"),
             tr(keys::Q_PREFS_NEXT_SEARCH_RESULT),
             tr(keys::Q_PREFS_SEARCH),
             ChatSearchNewer,
         ),
         row(
-            "ctrl-g",
-            tr(keys::Q_PREFS_NEXT_SEARCH_RESULT),
-            tr(keys::Q_PREFS_SEARCH),
-            ChatSearchNewer,
-        ),
-        row(
-            "cmd-shift-g",
-            tr(keys::Q_PREFS_PREVIOUS_SEARCH_RESULT),
-            tr(keys::Q_PREFS_SEARCH),
-            ChatSearchOlder,
-        ),
-        row(
-            "ctrl-shift-g",
+            primary!("shift-g"),
             tr(keys::Q_PREFS_PREVIOUS_SEARCH_RESULT),
             tr(keys::Q_PREFS_SEARCH),
             ChatSearchOlder,

@@ -279,6 +279,22 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new("cmd-left", MoveHome, Some(CONTEXT)),
         #[cfg(target_os = "macos")]
         KeyBinding::new("ctrl-e", MoveEnd, Some(CONTEXT)),
+        // The rest of Cocoa's standard Ctrl text keys (macOS
+        // StandardKeyBinding.dict), which every native text field honors.
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("ctrl-f", MoveRight, Some(CONTEXT)),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("ctrl-b", MoveLeft, Some(CONTEXT)),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("ctrl-n", MoveDown, Some(CONTEXT)),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("ctrl-p", MoveUp, Some(CONTEXT)),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("ctrl-d", Delete, Some(CONTEXT)),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("ctrl-h", Backspace, Some(CONTEXT)),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("ctrl-k", DeleteToEndOfLine, Some(CONTEXT)),
         #[cfg(target_os = "macos")]
         KeyBinding::new("cmd-right", MoveEnd, Some(CONTEXT)),
         #[cfg(target_os = "macos")]

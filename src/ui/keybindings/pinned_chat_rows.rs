@@ -4,6 +4,10 @@ use super::*;
 use crate::ui::actions::ComposerEditDate;
 #[cfg(not(target_os = "macos"))]
 use crate::ui::actions::ZoomWindow;
+#[cfg(target_os = "macos")]
+use crate::ui::actions::{HideApp, HideOtherApps, ShowAllApps};
+#[cfg(target_os = "macos")]
+use quill::lang::tr_with;
 use quill::lang::{keys, tr};
 
 /// Cmd/Ctrl+1..8: the Nth pinned chat of the list on screen
@@ -249,10 +253,21 @@ pub(in crate::ui) fn app_menus_with(
     );
     let mut menus = Vec::new();
     // HIG: on macOS Quit lives in the app menu, not File.
+    // The standard AppKit app menu: GPUI builds the menu bar from data, so
+    // Services and the Hide commands exist only when listed here.
     #[cfg(target_os = "macos")]
     menus.push(Menu::new("Quill").items([
         MenuItem::action(tr(keys::Q_PREFS_SETTINGS), OpenSettings),
         MenuItem::action(tr(keys::Q_PREFS_LOCK_QUILL), LockApp),
+        MenuItem::separator(),
+        MenuItem::os_submenu(tr(keys::MAC_MENU_SERVICES), SystemMenuType::Services),
+        MenuItem::separator(),
+        MenuItem::action(
+            tr_with(keys::MAC_MENU_HIDE_TELEGRAM, &[("telegram", "Quill")]),
+            HideApp,
+        ),
+        MenuItem::action(tr(keys::MAC_MENU_HIDE_OTHERS), HideOtherApps),
+        MenuItem::action(tr(keys::MAC_MENU_SHOW_ALL), ShowAllApps),
         MenuItem::separator(),
         MenuItem::action(tr(keys::Q_PREFS_QUIT_QUILL), QuitApp),
     ]));
@@ -285,15 +300,21 @@ pub(in crate::ui) fn app_menus_with(
 /// kit Phase 7: install the app menus — native on macOS, kit `AppMenuBar`
 /// data on Linux/Windows. Call once after `gpui_kit::init` + `bind_keys`.
 pub fn setup_app_menus(cx: &mut App) {
+    #[cfg(target_os = "macos")]
+    {
+        cx.on_action(|_: &HideApp, cx| cx.hide());
+        cx.on_action(|_: &HideOtherApps, cx| cx.hide_other_apps());
+        cx.on_action(|_: &ShowAllApps, cx| cx.unhide_other_apps());
+    }
     let owned: Vec<OwnedMenu> = app_menus().into_iter().map(Menu::owned).collect();
     cx.set_menus(app_menus());
     GlobalState::global_mut(cx).set_app_menus(owned);
 }
 
 // Context menus own typing and chat shortcuts; native focus traversal and
-// activation still work, as do macOS window commands.
+// activation still work, as do macOS app and window commands.
 pub(in crate::ui) fn context_menu_captures_key(key: &Keystroke) -> bool {
-    if key.modifiers.platform && matches!(key.key.as_str(), "q" | "w" | "m") {
+    if key.modifiers.platform && matches!(key.key.as_str(), "q" | "w" | "m" | "h") {
         return false;
     }
     if !key.modifiers.control

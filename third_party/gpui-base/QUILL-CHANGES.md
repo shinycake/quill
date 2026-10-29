@@ -117,3 +117,13 @@ Added in 2026 for Agent access's UI driver. GPUI's `Element::a11y_tag`
 by the wrappers that forward `a11y_role`: `test_support.rs`,
 `focus_trap.rs` and `a11y_disabled.rs`. Without it a tagged `div` that
 passes through `.test_support()` or a focus trap lost its tag.
+
+## Cocoa Ctrl text keys on macOS
+
+`src/input/base/state.rs`: the input binds the rest of macOS's standard
+Ctrl text keys next to the existing Ctrl+A / Ctrl+E: Ctrl+F / B / N / P move
+the caret, Ctrl+D deletes forward, Ctrl+H deletes back, Ctrl+K deletes to the
+end of the line. GPUI hands a key to AppKit's text system only when no
+binding matches, and then drops the command, so a field had none of these
+unless the keymap names them. Background:
+`docs/decisions/native-macos-shortcuts.md`.

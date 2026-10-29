@@ -56,7 +56,11 @@
 "lng_launch_exe_dont_ask" = "Don't ask me again";
 "lng_launch_svg_warning" = "Opening this file can potentially expose your IP address to its creator. Continue?";
 "lng_mac_menu_copy" = "Copy";
+"lng_mac_menu_hide_others" = "Hide Others";
+"lng_mac_menu_hide_telegram" = "Hide {telegram}";
 "lng_mac_menu_select_all" = "Select All";
+"lng_mac_menu_services" = "Services";
+"lng_mac_menu_show_all" = "Show All";
 "lng_media_type_groups" = "Groups";
 "lng_menu_contacts" = "Contacts";
 "lng_months#one" = "{count} month";
