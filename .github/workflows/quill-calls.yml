@@ -8,6 +8,7 @@ on:
       - 'native/quill-calls/**'
       - 'scripts/build-tgcalls.sh'
       - 'crates/quill-calls-sys/**'
+      - 'src/calls/engine/tgcalls/**'
       - 'scripts/build-ffmpeg.sh'
       - '.github/workflows/quill-calls.yml'
   push:
@@ -16,6 +17,7 @@ on:
       - 'native/quill-calls/**'
       - 'scripts/build-tgcalls.sh'
       - 'crates/quill-calls-sys/**'
+      - 'src/calls/engine/tgcalls/**'
       - 'scripts/build-ffmpeg.sh'
       - '.github/workflows/quill-calls.yml'
   workflow_call:
@@ -135,6 +137,12 @@ jobs:
           export LD_LIBRARY_PATH="$PWD/vendor/ffmpeg/prefix/lib"
           export DYLD_LIBRARY_PATH="$PWD/vendor/ffmpeg/prefix/lib${OPENSSL_ROOT_DIR:+:$OPENSSL_ROOT_DIR/lib}"
           cargo test -p quill-calls-sys --locked
+      - name: the 1:1 engine against the library
+        run: |
+          export LD_LIBRARY_PATH="$PWD/vendor/ffmpeg/prefix/lib"
+          export DYLD_LIBRARY_PATH="$PWD/vendor/ffmpeg/prefix/lib${OPENSSL_ROOT_DIR:+:$OPENSSL_ROOT_DIR/lib}"
+          export QUILL_CALLS_LIB="$PWD/vendor/quill-calls/lib/${{ matrix.lib }}"
+          cargo test --no-default-features --lib --locked calls::engine::tgcalls
       - uses: actions/upload-artifact@v7
         with:
           name: quill-calls-${{ matrix.target }}

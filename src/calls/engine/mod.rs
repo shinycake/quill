@@ -6,6 +6,7 @@ mod native;
 mod ntgcalls;
 mod stream;
 mod stream_feeder;
+mod tgcalls;
 mod types;
 
 pub use api::*;
@@ -15,6 +16,7 @@ pub use native::*;
 pub use ntgcalls::*;
 pub use stream::*;
 pub use stream_feeder::*;
+pub use tgcalls::{TgcallsEngine, preload_tgcalls};
 pub use types::*;
 
 /// Group-call and stream frames go to live feeds as planes.

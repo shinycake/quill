@@ -7086,6 +7086,7 @@ dependencies = [
  "pretty_assertions",
  "qrcode",
  "quill",
+ "quill-calls-sys",
  "quill-webview-protocol",
  "rand 0.10.3",
  "raw-window-handle",
