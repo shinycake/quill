@@ -198,8 +198,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.group_call_streams.volume
     }
 
-    /// Whether Quill plays group call `group_call_id`'s stream itself, so
-    /// its volume can change (device playback has mute only).
+    /// Whether Quill has an output open for group call `group_call_id`'s
+    /// stream, so its volume can change (without one there is mute only).
     pub fn stream_has_volume(&self, group_call_id: i32) -> bool {
         self.call_engine
             .as_deref()
@@ -235,13 +235,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                 continue;
             };
             let line = format!(
-                "stream sound: falling back to device playback for group call {group_call_id} ({reason:?})"
+                "stream sound: reopening the output for group call {group_call_id} ({reason:?})"
             );
             eprintln!("quill: warning: {line}");
             crate::advanced::debug_mode::debug_log(&line);
             if let Err(err) = engine.reopen_stream_sound(group_call_id) {
                 eprintln!(
-                    "quill: stream sound fallback for group call {group_call_id} failed: {err}"
+                    "quill: reopening the stream sound output for group call {group_call_id} failed: {err}"
                 );
             }
         }

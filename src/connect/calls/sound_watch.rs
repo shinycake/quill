@@ -1,7 +1,7 @@
 //! The 1:1 call's sound watch, the stream one's rule
 //! (`calls::stream_audio::watch`) applied to a call: a connected call
 //! whose sound plays through Quill but brings no frames within 5 s, or
-//! whose output stops, goes back to the device's output, once. What the
+//! whose output stops, gets Quill's output reopened, once. What the
 //! watch saw goes to the call log either way, so a silent call can be
 //! told apart from a silent output afterwards.
 use super::*;
@@ -43,12 +43,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return;
         };
         call_log(&format!(
-            "[call] {call_id} sound: {reason:?} after connecting (frames {}, peak {}); playing on the device",
+            "[call] {call_id} sound: {reason:?} after connecting (frames {}, peak {}); reopening the output",
             health.frames, health.peak
         ));
         if let Err(err) = engine.reopen_call_sound(call_id) {
             call_log(&format!(
-                "[call] {call_id} sound: device fallback failed: {err}"
+                "[call] {call_id} sound: reopening the output failed: {err}"
             ));
         }
     }
@@ -70,7 +70,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 "[call] {call_id} ended: {} sound frames, peak {}, output failed {}",
                 health.frames, health.peak, health.output_failed
             ),
-            (None, true) => format!("[call] {call_id} ended: sound on the device"),
+            (None, true) => format!("[call] {call_id} ended: no sound output open"),
             (None, false) => return,
         };
         call_log(&line);
