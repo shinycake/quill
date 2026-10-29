@@ -171,7 +171,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .is_some_and(|call| call.is_joined)
         {
-            let _ = self.leave_group_call();
+            // Only a step before the new join: its `ok` must not clear the
+            // new call when both are the same conference.
+            if let Ok(leave) = self.leave_group_call() {
+                self.session.requests.take(leave);
+            }
         }
         if self.session.calls.active_group_call.is_some() {
             self.drop_group_call_locally();

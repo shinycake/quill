@@ -345,6 +345,38 @@ fn a_dead_conference_gives_way_to_a_new_join() {
 }
 
 #[test]
+fn rejoining_a_dead_conference_survives_the_old_leaves_ok() {
+    let mut harness = conference_driver();
+    let request = harness
+        .1
+        .accept_group_call_invitation(3, 42)
+        .expect("accept sends");
+    let extra: Value =
+        serde_json::from_str(&serde_json::to_string(&request.as_extra()).unwrap()).unwrap();
+    feed(&mut harness, &answer(&extra, 555));
+    let call = harness.1.session.calls.active_group_call.as_mut().unwrap();
+    call.is_joined = true;
+    call.reconnecting = true;
+    call.rejoin_attempts = crate::state::MAX_GROUP_CALL_REJOIN_ATTEMPTS;
+    // The same conference again, by its link.
+    harness
+        .1
+        .join_conference_link("https://t.me/call/same".into())
+        .expect("join sends");
+    let leave = sent_request(&harness.2, "leaveGroupCall");
+    let join = sent_request(&harness.2, "joinGroupCall");
+    feed(&mut harness, &answer(&join["@extra"], 555));
+    feed(
+        &mut harness,
+        &format!(r#"{{"@type":"ok","@extra":{}}}"#, leave["@extra"]),
+    );
+    let tracked = harness.1.session.calls.active_group_call.as_ref();
+    assert_eq!(tracked.map(|call| call.id), Some(555));
+    assert_eq!(bound_call(&harness.1).map(|(id, _)| id), Some(555));
+    let _ = std::fs::remove_dir_all(&harness.0);
+}
+
+#[test]
 fn a_dropped_conference_rejoins_by_its_link_under_its_id() {
     let mut harness = conference_driver();
     let request = harness
