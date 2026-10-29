@@ -115,6 +115,9 @@ pub struct CallsState {
     /// The 1:1 call was taken into a conference call by the other side;
     /// the driver joins it (`crate::state::conference`).
     pub call_upgrade: Option<CallUpgrade>,
+    /// A conference call invitation ringing now
+    /// (`crate::state::conference_invite`).
+    pub conference_invite: Option<ConferenceInvite>,
 }
 
 impl CallsState {
@@ -183,6 +186,7 @@ impl CallsState {
             left_group_call: None,
             pending_conference: None,
             call_upgrade: None,
+            conference_invite: None,
         }
     }
 }

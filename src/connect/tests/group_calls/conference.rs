@@ -326,3 +326,34 @@ fn the_engine_learns_who_sends_each_audio_source() {
     assert_eq!(last.owner(1234), Some(41));
     let _ = std::fs::remove_dir_all(&harness.0);
 }
+
+#[test]
+fn an_invitation_during_a_call_is_declined_and_one_accepted_stops_ringing() {
+    let invitation = |id: i64| {
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":41,"sender_id":{{"@type":"messageSenderUser","user_id":41}},"is_outgoing":false,"date":{},"content":{{"@type":"messageGroupCall","unique_id":"77","is_active":false,"was_missed":false,"is_video":false,"duration":0,"other_participant_ids":[]}}}}}}"#,
+            crate::local_time::now_unix()
+        )
+    };
+    let mut harness = conference_driver();
+    feed(&mut harness, &invitation(90));
+    assert!(harness.1.session.calls.conference_invite.is_some());
+    harness
+        .1
+        .accept_group_call_invitation(41, 90)
+        .expect("accept sends");
+    assert_eq!(harness.1.session.calls.conference_invite, None);
+    let _ = std::fs::remove_dir_all(&harness.0);
+
+    let mut harness = conference_driver();
+    feed(
+        &mut harness,
+        &one_to_one(r#"{"@type":"callStatePending","is_created":true,"is_received":true}"#),
+    );
+    feed(&mut harness, &invitation(91));
+    let decline = sent_request(&harness.2, "declineGroupCallInvitation");
+    assert_eq!(decline["chat_id"], 41);
+    assert_eq!(decline["message_id"], 91);
+    assert_eq!(harness.1.session.calls.conference_invite, None);
+    let _ = std::fs::remove_dir_all(&harness.0);
+}

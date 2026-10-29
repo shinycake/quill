@@ -43,13 +43,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: i64,
         message_id: i64,
     ) -> Result<RequestId, ConnectSendError> {
-        self.join_conference(
+        let joined = self.join_conference(
             ConferenceOrigin::Invitation {
                 chat_id,
                 message_id,
             },
             false,
-        )
+        )?;
+        self.session.forget_conference_invite(
+            crate::ids::ChatId(chat_id),
+            &[crate::ids::MessageId(message_id)],
+        );
+        Ok(joined)
     }
 
     /// Join a conference call by its link (`internalLinkTypeGroupCall`).
@@ -348,6 +353,16 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `callDiscardReasonUpgradeToGroupCall`, joins by the link
     /// (`finishByMigration`).
     pub(crate) fn maybe_continue_conference(&mut self) -> Result<(), ConnectSendError> {
+        // An invitation that came in while you were in a call is declined
+        // (tdesktop `declineIncomingConferenceInvites`).
+        if let Some(invite) = self
+            .session
+            .calls
+            .conference_invite
+            .take_if(|invite| invite.busy)
+        {
+            let _ = self.decline_group_call_invitation(invite.chat_id.0, invite.message_id.0);
+        }
         if let Some(upgrade) = self.session.calls.call_upgrade.take()
             && let Err(err) = self.join_conference(
                 ConferenceOrigin::Link {

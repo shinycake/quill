@@ -408,6 +408,7 @@ impl Session {
         {
             slot.content = content.clone();
         }
+        self.note_conference_invite_content(chat_id, message_id, &content);
         let loaded = self.edit_loaded_message(chat_id, message_id, |message| {
             message.content = content.clone();
         });
@@ -441,6 +442,7 @@ impl Session {
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply_update_new_message(&mut self, message: ParsedMessage) {
+        self.note_conference_invite(&message, crate::local_time::now_unix());
         if !message.is_outgoing {
             self.messages
                 .pending_bot_messages

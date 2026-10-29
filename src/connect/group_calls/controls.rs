@@ -426,6 +426,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.forget_conference_invite(
+            crate::ids::ChatId(chat_id),
+            &[crate::ids::MessageId(message_id)],
+        );
         Ok(extra)
     }
 }
