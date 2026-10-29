@@ -109,6 +109,19 @@ pub struct CallsState {
     /// it is no longer joined: a late joined update for it must not take
     /// the slot back.
     pub left_group_call: Option<i32>,
+    /// A conference call being joined or created, until its answer names
+    /// the call (`crate::state::conference`).
+    pub pending_conference: Option<PendingConference>,
+    /// The 1:1 call was taken into a conference call by the other side;
+    /// the driver joins it (`crate::state::conference`).
+    pub call_upgrade: Option<CallUpgrade>,
+    /// A conference call invitation ringing now
+    /// (`crate::state::conference_invite`).
+    pub conference_invite: Option<ConferenceInvite>,
+    /// Invitations to decline at once, never shown: they came in while
+    /// you were in a call, or are older than the ring timeout (tdesktop
+    /// `declineIncomingConferenceInvites`). The driver drains them.
+    pub conference_invite_declines: Vec<(ChatId, MessageId)>,
 }
 
 impl CallsState {
@@ -175,6 +188,10 @@ impl CallsState {
             call_link_confirm: None,
             call_link_after_leave: None,
             left_group_call: None,
+            pending_conference: None,
+            call_upgrade: None,
+            conference_invite: None,
+            conference_invite_declines: Vec::new(),
         }
     }
 }

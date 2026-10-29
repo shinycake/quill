@@ -42,6 +42,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.absorb_flood(&owned.envelope, std::time::Instant::now()) {
             return Ok(());
         }
+        // A conference join's answer renames its engine instance before
+        // the reducer tracks the call under that id.
+        self.note_conference_answer(&owned.envelope);
         let was_ready = matches!(self.session.auth, AuthorizationState::Ready);
         let active_call_before = self.session.calls.active_call.as_ref().map(|call| call.id);
         let group_calls_before = self.session.calls.group_call_ids();
@@ -879,6 +882,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Phase C2f: a dropped group call (`need_rejoin`) auto-rejoins
         // with the C2d attempt discipline (max 3).
         let _ = self.maybe_auto_rejoin_group_call();
+        // A conference made from a 1:1 call ends that call with its link
+        // and invites the people picked; the other side follows the link.
+        let _ = self.maybe_continue_conference();
         if archive_catalog_changed {
             drop(
                 self.session

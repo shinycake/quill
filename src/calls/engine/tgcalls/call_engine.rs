@@ -233,7 +233,24 @@ impl CallEngine for TgcallsEngine {
         chat_id: i64,
         role: GroupCallRole,
     ) -> Result<String, EngineError> {
-        self.create_group(group_call_id, chat_id, role)
+        self.create_group(group_call_id, chat_id, role, None)
+    }
+
+    fn create_conference_call(
+        &mut self,
+        key: i32,
+        crypto: Arc<dyn FrameCrypto>,
+    ) -> Result<String, EngineError> {
+        // A conference call is in no chat: no stream is ever keyed by it.
+        self.create_group(key, 0, GroupCallRole::Member, Some(crypto))
+    }
+
+    fn rekey_group_call(&mut self, from: i32, to: i32) -> Result<(), EngineError> {
+        self.rekey_group(from, to)
+    }
+
+    fn set_group_ssrc_owners(&mut self, group_call_id: i32, owners: &SsrcOwners) {
+        self.set_ssrc_owners(group_call_id, owners);
     }
 
     fn connect_group_call(

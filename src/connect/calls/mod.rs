@@ -11,9 +11,10 @@ use crate::state::RequestPurpose;
 use crate::telegram::envelope::{CallState, ReadyParams};
 use crate::telegram::requests::{
     CallPrivacySetting, PrivacyWho, accept_call_with_protocol, create_call_with_protocol,
-    delete_all_call_messages, discard_call as discard_call_request, get_user_privacy_setting_rules,
-    search_call_messages, send_call_debug_information, send_call_log, send_call_rating_detail,
-    send_call_signaling_data, set_user_privacy_setting_rules,
+    delete_all_call_messages, discard_call as discard_call_request, discard_call_into_conference,
+    get_user_privacy_setting_rules, search_call_messages, send_call_debug_information,
+    send_call_log, send_call_rating_detail, send_call_signaling_data,
+    set_user_privacy_setting_rules,
 };
 use std::sync::Arc;
 

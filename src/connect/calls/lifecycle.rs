@@ -82,6 +82,15 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `HangingUp` optimistically; the discard states arrive as
     /// `updateCall`. `duration` is the connected time in seconds.
     pub fn discard_call(&mut self) -> Result<RequestId, ConnectSendError> {
+        self.discard_call_with_link("")
+    }
+
+    /// Hang up, handing the other side `invite_link` when the call was
+    /// taken into a conference call (empty otherwise).
+    pub(crate) fn discard_call_with_link(
+        &mut self,
+        invite_link: &str,
+    ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -90,10 +99,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             None => return Err(ConnectSendError::InvalidRequest),
         };
         let extra = self.session.request(RequestPurpose::DiscardCall, None);
-        if let Err(err) = self.sender.send_json(&discard_call_request(
+        if let Err(err) = self.sender.send_json(&discard_call_into_conference(
             extra,
             call_id,
             false,
+            invite_link,
             duration_secs,
             is_video,
         )) {

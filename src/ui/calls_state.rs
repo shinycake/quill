@@ -47,6 +47,12 @@ pub(crate) struct CallUi {
     /// Settings > Calls: the microphone test and its level meter
     /// (`ui::call_audio_ui`), `Some` while testing.
     pub(super) mic_test: Option<super::call_audio_ui::MicTest>,
+    /// "Add People" over the call window: the people picked so far
+    /// (`ui::call_conference_ui`), `Some` while the box is open.
+    pub(super) add_people: Option<Vec<i64>>,
+    /// A conference call's link waiting on "Join Group Call"
+    /// (`ui::call_conference_ui`).
+    pub(super) conference_link: Option<String>,
 }
 
 impl CallUi {
@@ -78,6 +84,8 @@ impl CallUi {
             history_asked: Default::default(),
             dialing: None,
             mic_test: None,
+            add_people: None,
+            conference_link: None,
         }
     }
 }

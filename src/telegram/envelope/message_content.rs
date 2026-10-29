@@ -43,13 +43,17 @@ pub enum MessageContent {
     /// `schema/td_api.tl:5288`) — a group call not bound to a chat.
     /// Incoming, not active, not missed: an invitation the user can
     /// accept (`joinGroupCall`) or decline
-    /// (`declineGroupCallInvitation`). `other_participant_ids` is not
-    /// kept (the row only needs the invitation state).
+    /// (`declineGroupCallInvitation`). `other_participants` are the users
+    /// among `other_participant_ids` (a conference call has no channels),
+    /// for "already joined" on the invitation screen.
     GroupCallInvitation {
         unique_id: i64,
         is_active: bool,
         was_missed: bool,
         is_video: bool,
+        /// Seconds in the call, once it was left.
+        duration: i32,
+        other_participants: Vec<i64>,
     },
     /// Phase C2i: `messageCall` (TDLib 1.8.67,
     /// `schema/td_api.tl:5277`) — a 1:1 call entry in chat history.
@@ -566,6 +570,23 @@ pub(crate) fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<Parse
                     .get("is_video")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
+                duration: value
+                    .get("duration")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0)
+                    .sat_i32(),
+                other_participants: value
+                    .get("other_participant_ids")
+                    .and_then(Value::as_array)
+                    .map(|ids| {
+                        ids.iter()
+                            .filter_map(|id| match super::parse_message_sender(Some(id)) {
+                                Ok(MessageSender::User { user_id }) => Some(user_id),
+                                _ => None,
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
             },
             Vec::new(),
         ),

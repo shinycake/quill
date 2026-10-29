@@ -698,6 +698,8 @@ fn message_group_call_parses_invitation_state() {
                     is_active: false,
                     was_missed: false,
                     is_video: true,
+                    duration: 0,
+                    other_participants: Vec::new(),
                 }
             );
             assert_eq!(message.content.preview(), "📹 Video chat invitation");

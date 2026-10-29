@@ -18,7 +18,7 @@ use std::path::PathBuf;
 mod loader;
 pub use loader::*;
 
-pub const QC_API_VERSION: u32 = 3;
+pub const QC_API_VERSION: u32 = 4;
 
 pub const QC_LOG_VERBOSE: i32 = 0;
 pub const QC_LOG_INFO: i32 = 1;
@@ -128,6 +128,19 @@ pub struct qc_group_broadcast_part {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
+pub struct qc_group_e2e_frame {
+    pub data: *const u8,
+    pub length: usize,
+    pub is_encrypt: i32,
+    pub user_id: i64,
+    pub unencrypted_prefix_size: i32,
+}
+
+pub type qc_group_e2e_result_fn =
+    unsafe extern "C" fn(result: *mut c_void, data: *const u8, length: usize);
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
 pub struct qc_group_callbacks {
     pub user: *mut c_void,
     pub network_state:
@@ -155,6 +168,14 @@ pub struct qc_group_callbacks {
         ),
     >,
     pub request_cancelled: Option<unsafe extern "C" fn(user: *mut c_void, request_id: u64)>,
+    pub e2e: Option<
+        unsafe extern "C" fn(
+            user: *mut c_void,
+            frame: *const qc_group_e2e_frame,
+            set_result: qc_group_e2e_result_fn,
+            result: *mut c_void,
+        ),
+    >,
 }
 
 /// Native sidecar name, using Rust's platform library naming convention.

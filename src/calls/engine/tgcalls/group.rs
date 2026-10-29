@@ -18,6 +18,8 @@ use std::ffi::CString;
 pub(super) struct GroupCall {
     chat_id: i64,
     role: GroupCallRole,
+    /// A conference call's encryption, shared with its presentation.
+    crypto: Option<Arc<dyn FrameCrypto>>,
     context: Arc<GroupContext>,
     handle: NonNull<qc_group>,
     /// Feeder threads' way in; cleared before the handles go away.
@@ -46,7 +48,7 @@ pub(super) struct GroupCall {
 /// The screen-sharing instance beside a call (tdesktop's `_screenInstance`).
 struct Presentation {
     /// What the instance's callbacks read; outlives `qc_group_destroy`.
-    _context: Arc<GroupContext>,
+    context: Arc<GroupContext>,
     handle: NonNull<qc_group>,
     /// The external screencast source Quill's screen capture feeds.
     screen: NonNull<qc_video_capture>,
@@ -60,10 +62,11 @@ fn create_instance(
     context: &Arc<GroupContext>,
     video: *mut qc_video_capture,
 ) -> Option<(NonNull<qc_group>, String)> {
-    let config = if context.presentation {
-        c"{\"presentation\":true}"
-    } else {
-        c"{\"presentation\":false}"
+    let config = match (context.presentation, context.conference.is_some()) {
+        (false, false) => c"{\"presentation\":false}",
+        (true, false) => c"{\"presentation\":true}",
+        (false, true) => c"{\"presentation\":false,\"e2e\":true}",
+        (true, true) => c"{\"presentation\":true,\"e2e\":true}",
     };
     let callbacks = context.callbacks();
     // SAFETY: NUL-ended config; the context behind `callbacks.user` lives
@@ -71,16 +74,35 @@ fn create_instance(
     // its own reference to `video` (or none for NULL).
     let handle = unsafe { (api.qc_group_create)(config.as_ptr(), &callbacks, video) };
     let handle = NonNull::new(handle)?;
+    if let Some(conference) = context.conference.as_ref() {
+        for (id, channels) in conference.attach(handle.as_ptr()) {
+            conference.answer(api, id, &channels);
+        }
+    }
     // SAFETY: a live instance, not called from one of its callbacks; the
     // payload is the caller's to free.
     let raw = unsafe { (api.qc_group_join_payload)(handle.as_ptr(), std::ptr::null_mut()) };
     match take_string(api, raw) {
         Some(payload) => Some((handle, payload)),
         None => {
+            close_conference(context);
             // SAFETY: the instance made above, destroyed once.
             unsafe { (api.qc_group_destroy)(handle.as_ptr()) };
             None
         }
+    }
+}
+
+/// Called before an instance's destroy: a conference call's frames are
+/// dropped from now on instead of going to TDLib (each would wait up to
+/// [`crate::telegram::group_call_crypto::FRAME_TIMEOUT`] while the destroy
+/// waits for it), and nothing answers the instance any more. Every
+/// destroy goes through here: leaving, a rejoin's fresh instance, a
+/// refused create, the presentation, and the engine's drop (the driver
+/// dropped, the account switched).
+fn close_conference(context: &GroupContext) {
+    if let Some(conference) = context.conference.as_ref() {
+        conference.close();
     }
 }
 
@@ -129,6 +151,7 @@ fn stop_presentation(api: &Loader, call: &mut GroupCall) {
         return;
     };
     call.gate.set_screen(None);
+    close_conference(&presentation.context);
     // SAFETY: the presentation's live handle, destroyed once and never
     // from its own callback; then Quill's reference to its screen source,
     // which the gate no longer borrows. The context stays alive until
@@ -139,9 +162,11 @@ fn stop_presentation(api: &Loader, call: &mut GroupCall) {
     }
 }
 
-/// Ends the call in the library, its presentation first so screen capture
-/// stops before the call: no callback or feeder reaches it after.
+/// Ends the call in the library: a conference call's frames stop going
+/// to TDLib first, then the presentation goes so screen capture stops
+/// before the call: no callback or feeder reaches it after.
 pub(super) fn destroy_group(api: &Loader, mut call: GroupCall) {
+    close_conference(&call.context);
     stop_presentation(api, &mut call);
     call.gate.close();
     // SAFETY: a live instance destroyed once, never from its own callback
@@ -173,16 +198,16 @@ impl TgcallsEngine {
         group_call_id: i32,
         chat_id: i64,
         role: GroupCallRole,
+        crypto: Option<Arc<dyn FrameCrypto>>,
     ) -> Result<String, EngineError> {
         if let Some(old) = self.groups.remove(&group_call_id) {
             destroy_group(self.api, old);
         }
-        let context = Arc::new(GroupContext::new(
-            group_call_id,
-            chat_id,
-            false,
-            &self.callback,
-        ));
+        let mut context = GroupContext::new(group_call_id, chat_id, false, &self.callback);
+        if let Some(crypto) = crypto.as_ref() {
+            context = context.conference(Arc::clone(crypto));
+        }
+        let context = Arc::new(context);
         let (handle, payload) = create_instance(self.api, &context, std::ptr::null_mut()).ok_or(
             EngineError::Engine {
                 op: "qc_group_create",
@@ -197,6 +222,7 @@ impl TgcallsEngine {
             GroupCall {
                 chat_id,
                 role,
+                crypto,
                 context,
                 handle,
                 gate: Arc::new(sender::Gate::default()),
@@ -504,12 +530,11 @@ impl TgcallsEngine {
         // SAFETY: returns a new external screencast source owned here.
         let screen = unsafe { (api.qc_video_capture_external)(1) };
         let screen = NonNull::new(screen).ok_or(EngineError::NoScreenSource)?;
-        let context = Arc::new(GroupContext::new(
-            group_call_id,
-            call.chat_id,
-            true,
-            &shared,
-        ));
+        let mut context = GroupContext::new(group_call_id, call.chat_id, true, &shared);
+        if let Some(crypto) = call.crypto.as_ref() {
+            context = context.conference(Arc::clone(crypto));
+        }
+        let context = Arc::new(context);
         let Some((handle, payload)) = create_instance(api, &context, screen.as_ptr()) else {
             // SAFETY: Quill's only reference to the source made above.
             unsafe { (api.qc_video_capture_free)(screen.as_ptr()) };
@@ -519,7 +544,7 @@ impl TgcallsEngine {
             });
         };
         call.presentation = Some(Presentation {
-            _context: context,
+            context,
             handle,
             screen,
             connected: false,
@@ -564,6 +589,46 @@ impl TgcallsEngine {
         self.groups
             .get(&group_call_id)
             .is_some_and(|call| call.presentation.is_some())
+    }
+
+    /// A conference call created under a provisional key before the join
+    /// answer named it: from here on it is `to`. Pictures route by the new
+    /// id from the next video sync.
+    pub(super) fn rekey_group(&mut self, from: i32, to: i32) -> Result<(), EngineError> {
+        if from == to {
+            return self.group(from).map(|_| ());
+        }
+        let mut call = self
+            .groups
+            .remove(&from)
+            .ok_or(EngineError::NoSuchCall(from))?;
+        if let Some(old) = self.groups.remove(&to) {
+            destroy_group(self.api, old);
+        }
+        call.context.set_group_call_id(to);
+        if let Some(presentation) = call.presentation.as_ref() {
+            presentation.context.set_group_call_id(to);
+        }
+        call.requested_video = None;
+        crate::advanced::debug_mode::call_log(&format!("[call] group {from} is call {to}"));
+        self.groups.insert(to, call);
+        Ok(())
+    }
+
+    /// Who sends each audio ssrc of a conference call: the media channel
+    /// requests waiting on them are answered.
+    pub(super) fn set_ssrc_owners(&mut self, group_call_id: i32, owners: &SsrcOwners) {
+        let api = self.api;
+        let Some(conference) = self
+            .groups
+            .get(&group_call_id)
+            .and_then(|call| call.context.conference.as_ref())
+        else {
+            return;
+        };
+        for (id, channels) in conference.set_owners(owners) {
+            conference.answer(api, id, &channels);
+        }
     }
 
     pub(super) fn leave_group(&mut self, group_call_id: i32) {

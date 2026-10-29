@@ -21,6 +21,7 @@ mod config;
 mod devices;
 mod group;
 mod group_callbacks;
+mod group_conference;
 mod group_config;
 mod sender;
 

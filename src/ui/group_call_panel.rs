@@ -156,7 +156,9 @@ impl QuillApp {
             quill::calls::audio_level::halo_reach(value)
         });
         let title = if call.title.is_empty() {
-            if call.is_video_chat {
+            if call.is_conference() {
+                tr(keys::CONFCALL_JOIN_TITLE)
+            } else if call.is_video_chat {
                 tr(keys::MENU_START_GROUP_CALL_OPTIONS)
             } else {
                 tr(keys::Q_AV_VOICE_CHAT_2)
@@ -297,6 +299,7 @@ impl QuillApp {
                     .text_color(call_chrome::group_muted())
                     .child(subtitle),
             )
+            .children(super::call_conference_ui::e2e_badge(&call))
             .child(
                 div()
                     .absolute()
@@ -337,24 +340,27 @@ impl QuillApp {
                 .child(tr(keys::Q_AV_CONNECTION_LOST_CLICK_TO_REJOIN))
         });
 
-        let invite = (self.group_call.invite_open && !self.account.passcode.locked).then(|| {
-            div()
-                .absolute()
-                .inset_0()
-                .bg(call_chrome::scrim())
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .w(px(340.))
-                        .max_h(relative(0.85))
-                        .rounded(px(12.))
-                        .bg(cx.theme().background)
-                        .p(px(12.))
-                        .child(self.group_call_invite_panel(&call, cx)),
-                )
-        });
+        // A conference made with "Create Call Link" opens on its link.
+        let link_open = call.conference.as_ref().is_some_and(|c| c.link_open);
+        let invite = ((self.group_call.invite_open || link_open) && !self.account.passcode.locked)
+            .then(|| {
+                div()
+                    .absolute()
+                    .inset_0()
+                    .bg(call_chrome::scrim())
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        div()
+                            .w(px(340.))
+                            .max_h(relative(0.85))
+                            .rounded(px(12.))
+                            .bg(cx.theme().background)
+                            .p(px(12.))
+                            .child(self.group_call_invite_panel(&call, cx)),
+                    )
+            });
 
         // Rename (`setVideoChatTitle`).
         let rename = self.group_call_rename_overlay(tr(keys::Q_AV_EDIT_TITLE).into(), cx);
@@ -846,6 +852,7 @@ mod tests {
         ParsedGroupCallParticipant {
             participant_id: MessageSender::User { user_id: 1 },
             audio_source_id: 0,
+            screen_sharing_audio_source_id: 0,
             is_current_user: true,
             is_speaking: false,
             is_hand_raised: hand,

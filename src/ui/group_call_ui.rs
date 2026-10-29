@@ -187,7 +187,11 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .font_semibold()
-                            .child(tr(keys::Q_AV_INVITE_TO_VOICE_CHAT)),
+                            .child(if call.is_conference() {
+                                tr(keys::GROUP_CALL_INVITE_CONF)
+                            } else {
+                                tr(keys::Q_AV_INVITE_TO_VOICE_CHAT)
+                            }),
                     )
                     .child(
                         Button::new("group-call-invite-close")
@@ -197,10 +201,12 @@ impl QuillApp {
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.group_call.invite_open = false;
+                                this.close_conference_link();
                                 cx.notify();
                             })),
                     ),
-            );
+            )
+            .children(self.conference_link_row(call, cx));
         let contacts = self
             .session()
             .and_then(|s| s.users_state.contacts.clone())
@@ -250,23 +256,17 @@ impl QuillApp {
         panel
     }
 
-    /// Phase C2f: `messageGroupCall` invitation service row (schema
-    /// 1.8.67, line 5288). Incoming and pending: Accept / Decline.
-    /// Anything else (own sent, missed, active) is a neutral service
-    /// notice — TDLib updates refresh the row when the call starts or
-    /// ends. Free function: `session_history_row` is not a method.
+    /// `messageGroupCall`: a conference call's entry in the chat (schema
+    /// 1.8.69). Incoming, not joined and not missed: Join / Decline.
+    /// Anything else reads as tdesktop's group call entries ("Outgoing
+    /// group call", "Missed group call", ...); TDLib updates refresh the
+    /// row when it is joined or missed.
     pub(super) fn group_call_invitation_row(
         message: &HistoryMessage,
         is_active: bool,
         was_missed: bool,
-        is_video: bool,
         cx: &mut Context<QuillApp>,
     ) -> impl IntoElement {
-        let kind = if is_video {
-            tr(keys::Q_AV_VIDEO_CHAT)
-        } else {
-            tr(keys::Q_AV_VOICE_CHAT)
-        };
         let mut inner = div().flex().flex_col().items_center().gap_2();
         if !message.is_outgoing && !is_active && !was_missed {
             let chat_id = message.chat_id;
@@ -276,7 +276,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .font_semibold()
-                        .child(tr_with(keys::Q_AV_INCOMING_INVITATION, &[("kind", kind)])),
+                        .child(tr(keys::CALL_GROUP_INCOMING)),
                 )
                 .child(
                     div()
@@ -284,7 +284,7 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             Button::new(format!("gc-invite-accept-{}", message_id.0))
-                                .label(tr(keys::CALL_ACCEPT))
+                                .label(tr(keys::GROUP_CALL_JOIN))
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.accept_group_call_invitation(chat_id, message_id, cx);
                                 })),
@@ -299,9 +299,13 @@ impl QuillApp {
                         ),
                 );
         } else {
-            let state = if was_missed {
-                tr(keys::Q_AV_MISSED)
-            } else if is_active {
+            let label = match (message.is_outgoing, was_missed) {
+                (true, true) => tr(keys::CALL_GROUP_DECLINED),
+                (true, false) => tr(keys::CALL_GROUP_OUTGOING),
+                (false, true) => tr(keys::CALL_GROUP_MISSED),
+                (false, false) => tr(keys::CALL_GROUP_INCOMING),
+            };
+            let state = if is_active && !was_missed {
                 tr(keys::Q_AV_IN_PROGRESS)
             } else {
                 ""
@@ -310,10 +314,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(tr_with(
-                        keys::Q_AV_INVITATION,
-                        &[("kind", kind), ("state", state)],
-                    )),
+                    .child(format!("{label}{state}")),
             );
         }
         div()

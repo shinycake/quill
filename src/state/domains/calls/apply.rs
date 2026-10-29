@@ -38,23 +38,17 @@ impl Session {
                 }
                 self.calls.group_call_error = None;
             }
-            // Phase C2f: `groupCallInfo` — the `joinGroupCall`
-            // answer to invitation acceptance. Queue a `getGroupCall`
-            // fetch so tracking starts even if the `updateGroupCall`
-            // is delayed; the update remains the source of truth for
-            // `is_joined`. Store the tgcalls join payload like the
-            // `joinVideoChat` Text arm does.
+            // `groupCallInfo`: the answer to a conference join or create.
+            // The call is tracked at once with its tgcalls answer and
+            // fetched in full; `updateGroupCall` stays the source of truth
+            // for `is_joined`.
             CallsPayload::GroupCallInfo {
                 group_call_id,
                 join_payload,
             } => {
-                if let Some(RequestPurpose::JoinGroupCallInvitation) = pending.map(|p| p.purpose) {
-                    if !self.calls.group_call_fetch_queue.contains(&group_call_id) {
-                        self.calls.group_call_fetch_queue.push(group_call_id);
-                    }
-                    self.set_group_call_join_payload(group_call_id, join_payload);
+                if let Some(RequestPurpose::JoinConference) = pending.map(|p| p.purpose) {
+                    self.accept_conference_joined(extra, group_call_id, join_payload);
                 }
-                self.calls.group_call_error = None;
             }
             // Phase C3a: group-call signaling (schema 1.8.67, lines
             // 10819 / 10824 / 10830 / 10836 / 10576). `updateGroupCall`

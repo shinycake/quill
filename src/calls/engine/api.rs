@@ -72,6 +72,36 @@ pub trait CallEngine {
         role: GroupCallRole,
     ) -> Result<String, EngineError>;
 
+    /// app -> engine; create a conference call's instance (an end-to-end
+    /// encrypted group call not bound to a chat, tdesktop
+    /// `GroupCall::conference()`) under `key`, every frame going through
+    /// `crypto`, and return the join payload `createGroupCall` or
+    /// `joinGroupCall` carries. A join learns the call's TDLib id only
+    /// from its answer, so `key` may be provisional
+    /// ([`CallEngine::rekey_group_call`]). A rejoin replaces the instance.
+    fn create_conference_call(
+        &mut self,
+        key: i32,
+        crypto: std::sync::Arc<dyn FrameCrypto>,
+    ) -> Result<String, EngineError> {
+        let _ = (key, crypto);
+        Err(EngineError::Unavailable)
+    }
+
+    /// app -> engine; the call created under `from` is TDLib's group call
+    /// `to` from now on. An instance already under `to` is replaced.
+    fn rekey_group_call(&mut self, from: i32, to: i32) -> Result<(), EngineError> {
+        let _ = (from, to);
+        Err(EngineError::Unavailable)
+    }
+
+    /// app -> engine; who sends each audio ssrc in conference call
+    /// `group_call_id`, from its participants: the engine needs each
+    /// frame's sender to decrypt it. Other calls ignore it.
+    fn set_group_ssrc_owners(&mut self, group_call_id: i32, owners: &SsrcOwners) {
+        let _ = (group_call_id, owners);
+    }
+
     /// Phase C2g: app -> engine; finish the group handshake with the
     /// `joinVideoChat` answer, then issue capture sources, sending
     /// `camera` (a device id) when one is given. Idempotent per group

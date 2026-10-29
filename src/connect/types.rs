@@ -276,6 +276,9 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) group_camera_state: HashMap<i32, Option<String>>,
     /// Microphone mute state the group-call engine last applied, per call.
     pub(crate) group_mute_state: HashMap<i32, bool>,
+    /// The conference call's frame encryption and the engine key it is
+    /// under (`group_calls::conference`).
+    pub(crate) conference_crypto: Option<super::group_calls::ConferenceCrypto>,
     /// Stream-mode group calls: broadcast requests, feeders, pictures.
     pub(crate) group_call_streams: super::group_calls::stream::GroupCallStreams,
     /// Everyone's speaking levels in the joined group call

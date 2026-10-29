@@ -151,7 +151,11 @@ impl Session {
         );
         summary.final_transport = active.transport;
         summary.muted = active.muted;
-        self.calls.summary = Some(summary);
+        // A call taken into a conference call goes on there, with no end
+        // screen (tdesktop's panel migrates).
+        if !self.note_call_migration(call, &summary) {
+            self.calls.summary = Some(summary);
+        }
         // The active call ended on its own — a still-open swap prompt
         // is moot (the incoming call now flows through the normal
         // incoming path). A queued post-swap accept survives: the
@@ -505,6 +509,7 @@ impl Session {
 
 fn apply_group_call_fields(tracked: &mut ActiveGroupCall, group_call: &ParsedGroupCall) {
     tracked.title = group_call.title.clone();
+    tracked.invite_link = group_call.invite_link.clone();
     tracked.is_video_chat = group_call.is_video_chat;
     tracked.is_live_story = group_call.is_live_story;
     tracked.is_rtmp_stream = group_call.is_rtmp_stream;

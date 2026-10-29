@@ -70,6 +70,10 @@ struct MockInner {
     broadcast_parts: Vec<(i64, BroadcastPartAnswer)>,
     /// External frames pushed through `external_frame_sender`.
     external_frames: Vec<MockExternalFrame>,
+    /// Conference calls by key, with the encryption each was given.
+    conferences: Vec<(i32, Arc<dyn FrameCrypto>)>,
+    rekeys: Vec<(i32, i32)>,
+    ssrc_owners: Vec<(i32, SsrcOwners)>,
 }
 
 /// Phase C2b: deterministic in-memory engine used by driver tests.
@@ -157,6 +161,19 @@ impl MockEngine {
 
     pub fn group_roles(&self) -> Vec<(i32, GroupCallRole)> {
         self.inner.lock_or_recover().group_roles.clone()
+    }
+
+    /// Conference calls made, by their current key.
+    pub fn conferences(&self) -> Vec<(i32, Arc<dyn FrameCrypto>)> {
+        self.inner.lock_or_recover().conferences.clone()
+    }
+
+    pub fn rekeys(&self) -> Vec<(i32, i32)> {
+        self.inner.lock_or_recover().rekeys.clone()
+    }
+
+    pub fn ssrc_owners(&self) -> Vec<(i32, SsrcOwners)> {
+        self.inner.lock_or_recover().ssrc_owners.clone()
     }
 
     pub fn group_connects(&self) -> Vec<(i32, String, Option<String>)> {
@@ -511,6 +528,49 @@ impl CallEngine for MockEngine {
         Ok(format!("mock-group-offer-{group_call_id}"))
     }
 
+    fn create_conference_call(
+        &mut self,
+        key: i32,
+        crypto: Arc<dyn FrameCrypto>,
+    ) -> Result<String, EngineError> {
+        let mut inner = self.inner.lock_or_recover();
+        if !inner.available {
+            return Err(EngineError::Unavailable);
+        }
+        inner.group_offers.push((key, 0));
+        inner.group_roles.push((key, GroupCallRole::Member));
+        inner.conferences.retain(|(old, _)| *old != key);
+        inner.conferences.push((key, crypto));
+        Ok(format!("mock-conference-offer-{key}"))
+    }
+
+    fn rekey_group_call(&mut self, from: i32, to: i32) -> Result<(), EngineError> {
+        let mut inner = self.inner.lock_or_recover();
+        if !inner.conferences.iter().any(|(key, _)| *key == from) {
+            return Err(EngineError::NoSuchCall(from));
+        }
+        inner.conferences.retain(|(key, _)| *key != to);
+        for (key, _) in inner.conferences.iter_mut() {
+            if *key == from {
+                *key = to;
+            }
+        }
+        for (id, _) in inner.group_offers.iter_mut() {
+            if *id == from {
+                *id = to;
+            }
+        }
+        inner.rekeys.push((from, to));
+        Ok(())
+    }
+
+    fn set_group_ssrc_owners(&mut self, group_call_id: i32, owners: &SsrcOwners) {
+        let mut inner = self.inner.lock_or_recover();
+        if inner.ssrc_owners.last() != Some(&(group_call_id, owners.clone())) {
+            inner.ssrc_owners.push((group_call_id, owners.clone()));
+        }
+    }
+
     fn connect_group_call(
         &mut self,
         group_call_id: i32,
@@ -757,6 +817,7 @@ impl CallEngine for MockEngine {
             return Err(EngineError::Unavailable);
         }
         inner.group_leaves.push(group_call_id);
+        inner.conferences.retain(|(key, _)| *key != group_call_id);
         let chat_id = inner
             .group_offers
             .iter()

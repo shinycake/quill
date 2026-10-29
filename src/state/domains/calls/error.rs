@@ -107,6 +107,28 @@ impl Session {
                     join_as.answer = Some(Err(()));
                 }
             }
+            // A conference join or create: nothing is tracked yet. A failed
+            // rejoin re-arms `reconnecting`, as for a video chat.
+            Some(RequestPurpose::JoinConference) => {
+                if let Some(pending) = self.conference_join_failed(extra) {
+                    match pending.follows {
+                        Some(ended) => self.conference_follow_failed(ended),
+                        None => {
+                            self.calls.group_call_error =
+                                Some(call_request_error_line(err, "Could not join the call"));
+                        }
+                    }
+                } else if let Some(call) = self.calls.active_group_call.as_mut()
+                    && call.is_conference()
+                    && call.rejoin_attempts > 0
+                {
+                    call.reconnecting = true;
+                    if call.rejoin_attempts >= crate::state::MAX_GROUP_CALL_REJOIN_ATTEMPTS {
+                        self.calls.group_call_error =
+                            Some("Reconnect attempts exhausted.".to_string());
+                    }
+                }
+            }
             Some(RequestPurpose::Calls(CallsPurpose::JoinVideoChat { group_call_id })) => {
                 // Phase C2f: a failed rejoin re-arms
                 // `reconnecting` so the driver's auto-rejoin
@@ -205,7 +227,6 @@ impl Session {
                 | RequestPurpose::Calls(CallsPurpose::InviteVideoChatParticipants { .. })
                 | RequestPurpose::Calls(CallsPurpose::BanGroupCallParticipants { .. })
                 | RequestPurpose::Calls(CallsPurpose::SetGroupCallParticipantVolumeLevel { .. })
-                | RequestPurpose::JoinGroupCallInvitation
                 | RequestPurpose::Calls(CallsPurpose::DeclineGroupCallInvitation { .. }),
             ) => {
                 self.calls.group_call_error =

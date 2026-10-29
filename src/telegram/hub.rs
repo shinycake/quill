@@ -388,6 +388,11 @@ fn receive_one(
     let Some(json) = source(RECEIVE_TIMEOUT_SECS) else {
         return;
     };
+    // A conference call's frame answers go to the call thread waiting on
+    // them, before anything else looks at the envelope.
+    if crate::telegram::group_call_crypto::intercept(&json) {
+        return;
+    }
     // Answers to agent requests go to the agent, never to an account's session.
     if crate::agent::td::intercept(&json) {
         return;

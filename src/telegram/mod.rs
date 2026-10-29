@@ -6,6 +6,7 @@ pub mod envelope_emoji;
 pub mod envelope_interaction;
 pub mod envelope_story;
 pub mod ffi;
+pub mod group_call_crypto;
 pub mod hub;
 pub mod name_accent;
 pub mod profile_accent;

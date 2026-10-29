@@ -299,3 +299,53 @@ fn unknown_group_calls_are_refused_and_leave_succeeds() {
     assert!(!engine.presentation_active(9));
     assert!(engine.leave_group_call(9).is_ok());
 }
+
+/// Drops every frame: nothing here encrypts for real.
+struct Refusing;
+
+impl FrameCrypto for Refusing {
+    fn encrypt(&self, _frame: &[u8], _unencrypted_prefix: i32) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn decrypt(&self, _sender_user_id: i64, _frame: &[u8]) -> Option<Vec<u8>> {
+        None
+    }
+}
+
+#[test]
+fn a_conference_call_is_made_renamed_joined_and_left() {
+    let Some(mut engine) = engine() else { return };
+    let payload = engine
+        .create_conference_call(-1, Arc::new(Refusing))
+        .unwrap();
+    assert_ne!(group_offer_audio_source_id(&payload), 0);
+    // The join answer names the call.
+    assert_eq!(
+        engine.rekey_group_call(-2, 8),
+        Err(EngineError::NoSuchCall(-2))
+    );
+    engine.rekey_group_call(-1, 8).unwrap();
+    assert!(!engine.groups.contains_key(&-1));
+    assert_eq!(engine.groups[&8].context.group_call_id(), 8);
+    let owners = SsrcOwners {
+        owners: vec![(100, 42)],
+        complete: true,
+    };
+    engine.set_group_ssrc_owners(8, &owners);
+    engine.connect_group_call(8, RTC_ANSWER, None).unwrap();
+    let sender = engine
+        .external_frame_sender(CaptureTarget::Group(8))
+        .unwrap();
+    microphone(&sender).unwrap();
+    // The presentation is encrypted too.
+    engine.start_screen_share(8).unwrap();
+    assert!(
+        engine.groups[&8]
+            .presentation
+            .as_ref()
+            .is_some_and(|presentation| presentation.context.conference.is_some())
+    );
+    engine.leave_group_call(8).unwrap();
+    assert_eq!(microphone(&sender), Err(EngineError::Unavailable));
+}

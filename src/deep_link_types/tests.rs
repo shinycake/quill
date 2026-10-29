@@ -553,3 +553,15 @@ fn login_codes_come_from_the_two_link_forms_only() {
         assert_eq!(login_code_from_link(bad), None, "{bad}");
     }
 }
+
+#[test]
+fn a_call_link_asks_to_join_the_conference() {
+    assert_eq!(
+        route_of(
+            json!({"@type": "internalLinkTypeGroupCall", "invite_link": "https://t.me/call/abc"})
+        ),
+        LinkRoute::Ui(DeepLinkUi::ConferenceCall {
+            link: "https://t.me/call/abc".into()
+        })
+    );
+}

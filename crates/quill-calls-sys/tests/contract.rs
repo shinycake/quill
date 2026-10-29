@@ -1,7 +1,8 @@
 //! The bindings against the real library: every symbol resolves, the
 //! versions TDLib needs are there, a bad config is refused and a good one
-//! makes a call that is torn down; a group call and its presentation give a
-//! join payload, take every setting and are torn down. Nothing here waits on the network or a
+//! makes a call that is torn down; a group call and its presentation, plain
+//! or end-to-end encrypted, give a join payload, take every setting and are
+//! torn down. Nothing here waits on the network or a
 //! clock; whether two calls actually connect is left to manual testing.
 //!
 //! Skips when libquill_calls hasn't been built (scripts/build-tgcalls.sh).
@@ -145,6 +146,15 @@ unsafe extern "C" fn on_part(user: *mut c_void, _id: u64, _part: *const qc_group
     Seen::record(user);
 }
 
+unsafe extern "C" fn on_e2e(
+    user: *mut c_void,
+    _frame: *const qc_group_e2e_frame,
+    _set_result: qc_group_e2e_result_fn,
+    _result: *mut c_void,
+) {
+    Seen::record(user);
+}
+
 fn group_callbacks(seen: &Seen) -> qc_group_callbacks {
     qc_group_callbacks {
         user: std::ptr::from_ref(seen).cast_mut().cast::<c_void>(),
@@ -156,6 +166,7 @@ fn group_callbacks(seen: &Seen) -> qc_group_callbacks {
         request_current_time: Some(on_request),
         request_broadcast_part: Some(on_part),
         request_cancelled: Some(on_request),
+        e2e: Some(on_e2e),
     }
 }
 
@@ -181,11 +192,27 @@ fn group_contract() {
         let bad = CString::new("[").unwrap();
         assert!((qc.qc_group_create)(bad.as_ptr(), &callbacks, std::ptr::null_mut()).is_null());
 
+        // A conference call without the callback that encrypts its frames
+        // is refused: it never runs in the clear.
+        let clear = qc_group_callbacks {
+            e2e: None,
+            ..group_callbacks(&seen)
+        };
         for presentation in [false, true] {
+            let e2e =
+                CString::new(format!(r#"{{"presentation":{presentation},"e2e":true}}"#)).unwrap();
+            assert!(
+                (qc.qc_group_create)(e2e.as_ptr(), &clear, std::ptr::null_mut()).is_null(),
+                "presentation {presentation} ran in the clear"
+            );
+        }
+
+        // Video chats and conference calls, each with its presentation.
+        for (presentation, e2e) in [(false, false), (true, false), (false, true), (true, true)] {
             let seen = Seen::default();
             let callbacks = group_callbacks(&seen);
             let config = CString::new(format!(
-                r#"{{"presentation":{presentation},"prioritize_vp8":false}}"#
+                r#"{{"presentation":{presentation},"prioritize_vp8":false,"e2e":{e2e}}}"#
             ))
             .unwrap();
             let video = (qc.qc_video_capture_external)(i32::from(presentation));

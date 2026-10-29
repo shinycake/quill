@@ -74,6 +74,10 @@ impl QuillApp {
                 }
             }
             DeepLinkUi::FolderInvite { link } => self.open_folder_invite(link, cx),
+            DeepLinkUi::ConferenceCall { link } => {
+                self.calls.conference_link = Some(link);
+                cx.notify();
+            }
             DeepLinkUi::Background { name } => self.open_background_link(name, cx),
             DeepLinkUi::TextCompositionStyle { name } => {
                 self.open_ai_style_preview(name, window, cx);

@@ -186,6 +186,16 @@ std::optional<std::vector<tgcalls::VideoChannelDescription>> ParseRequestedVideo
 	return result;
 }
 
+// qc_group_e2e_result_fn: `result` is the frame tgcalls gets back.
+void SetE2eResult(void *result, const uint8_t *data, size_t length) {
+	auto &frame = *static_cast<std::vector<uint8_t>*>(result);
+	if (data && length) {
+		frame.assign(data, data + length);
+	} else {
+		frame.clear();
+	}
+}
+
 } // namespace
 } // namespace quill_calls
 
@@ -213,6 +223,12 @@ qc_group *Create(const std::string &configJson, const qc_group_callbacks &callba
 		return nullptr;
 	}
 	const auto presentation = json["presentation"].bool_value();
+	// A conference call's frames are never sent in the clear: without the
+	// callback that encrypts them there is no instance at all.
+	if (json["e2e"].bool_value() && !callbacks.e2e) {
+		RTC_LOG(LS_ERROR) << "quill_calls: an e2e group call needs callbacks.e2e";
+		return nullptr;
+	}
 
 	auto result = std::make_unique<qc_group>();
 	const auto guard = result->guard = std::make_shared<CallbackGuard>();
@@ -341,6 +357,25 @@ qc_group *Create(const std::string &configJson, const qc_group_callbacks &callba
 				return std::make_shared<Task<tgcalls::RequestMediaChannelDescriptionTask>>(weakRequests, id);
 			};
 		}
+	}
+
+	if (json["e2e"].bool_value()) {
+		// tdesktop's TdE2E::EncryptDecrypt::callback: an empty frame is
+		// one tgcalls drops, which is also what a closed guard gives.
+		descriptor.e2eEncryptDecrypt = [=](const std::vector<uint8_t> &data, int64_t userId, bool isEncrypt, int32_t unencryptedPrefixSize) {
+			auto result = std::vector<uint8_t>();
+			const auto frame = qc_group_e2e_frame{
+				.data = data.data(),
+				.length = data.size(),
+				.is_encrypt = isEncrypt ? 1 : 0,
+				.user_id = userId,
+				.unencrypted_prefix_size = unencryptedPrefixSize,
+			};
+			guard->run([&] {
+				c.e2e(c.user, &frame, SetE2eResult, &result);
+			});
+			return result;
+		};
 	}
 
 	result->instance = std::make_unique<tgcalls::GroupInstanceCustomImpl>(std::move(descriptor));
