@@ -274,11 +274,12 @@ impl IDirectManipulationViewportEventHandler_Impl for DirectManipulationEventHan
         {
             self.pending_events
                 .borrow_mut()
-                .push(PlatformInput::ScrollWheel(ScrollWheelEvent {
+                .push(PlatformInput::Scroll(ScrollEvent {
                     position: self.mouse_position(),
                     delta: ScrollDelta::Pixels(point(px(0.0), px(0.0))),
                     modifiers: current_modifiers(),
                     touch_phase: TouchPhase::Ended,
+                    source: ScrollSource::Pointer,
                 }));
         }
 
