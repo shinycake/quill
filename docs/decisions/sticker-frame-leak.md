@@ -43,17 +43,41 @@ At 1x on Linux the frames were ready in time; at 2x
 
 ## Fix
 
-- `Player::frame` records the index of the frame it actually shows, so `ask`
-  keeps a shown frame out of the stale set and it is retired once, when it
-  stops showing.
+- `Player::frame` records the index of the frame it actually shows. `ask`
+  still drops that frame from `ready` once no head wants it, but no longer
+  retires it while it is on screen; it is retired once, when it stops
+  showing.
 - `image_budget` keeps retired images by image id. Retiring an image that is
-  already waiting only moves its frame. Any other double retirement (a clip
-  that closes while its shown frame is also ready, two caches letting go of
-  one image) can no longer pin an image.
+  already waiting only moves its frame to the later one, which keeps it at
+  least as long as either retirement would. Any other double retirement can
+  no longer pin an image. One was there too: `trim` and `stop` retire both
+  `ready` and `shown`, which hold the same frame most of the time, so every
+  clip that closed (a chat switch, 5 s off screen) lost one frame for good.
+  The id key fixes that case on its own.
+
+## Measured after the fix
+
+Same Mac, release demo-capture builds of 0b5ee7b2c (base) and the fix,
+alternating, a fresh launch per run. Kept is footprint after the idle minus
+launch idle.
+
+| Run | Base kept | Fix kept |
+| --- | --- | --- |
+| One 60 fps sticker 40 s, 30 s idle, round 1 | +161 MB | +2.8 MB |
+| Same, round 2 | +81 MB | +8.4 MB |
+| Animated history, GIF and sticker tabs 60 s, 90 s idle, round 1 | +1086 MB (peak 1220) | +0.9 MB (peak 139) |
+| Same, round 2 | +1092 MB (peak 1228) | +4.4 MB (peak 145) |
+
+Late frames were as common with the fix as without (about 41% of shown
+frames in the animated history), so the fix runs took the same path. In
+base, kept memory followed the late count, about 1.25 MB per late frame for
+the single sticker. The sticker still animates in captures of the fix build.
 
 ## Tests
 
 - `image_budget::tests::an_image_retired_twice_still_leaves`
 - `sticker_player::tests::every_frame_a_late_head_showed_leaves_once_the_clip_stops`
 
-Both fail with the old code (the image stays held) and pass now.
+Both check that every frame comes back from the sweep (so it leaves the
+atlas) and that nothing holds it after. Both fail with the old code and pass
+now.

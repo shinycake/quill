@@ -1010,15 +1010,16 @@ mod tests {
     fn an_image_retired_twice_still_leaves() {
         let frame = image::Frame::new(image::RgbaImage::new(2, 2));
         let image = Arc::new(RenderImage::new(SmallVec::from_buf([frame])));
-        let gone = Arc::downgrade(&image);
+        let (id, held) = (image.id, Arc::downgrade(&image));
         retire_all([image.clone()]);
         begin_frame();
         retire_all([image]);
         begin_frame();
         assert!(take_unshowable().is_empty(), "last frame may still show it");
         begin_frame();
-        drop(take_unshowable());
-        assert_eq!(gone.strong_count(), 0, "it left the atlas");
+        let left: Vec<_> = take_unshowable().iter().map(|image| image.id).collect();
+        assert_eq!(left, [id], "it leaves the atlas once");
+        assert_eq!(held.strong_count(), 0, "and nothing holds it");
     }
 
     /// The F1 leak: an inline video retires a picture every frame while

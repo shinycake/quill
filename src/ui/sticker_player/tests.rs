@@ -127,15 +127,17 @@ fn every_frame_a_late_head_showed_leaves_once_the_clip_stops() {
         let image = player
             .frame(&spec, head, PlayMode::Loop, EDGE, false, at)
             .expect("a frame");
-        showed.push(Arc::downgrade(&image));
+        showed.push((image.id, Arc::downgrade(&image)));
         player.settle();
     }
     assert!(player.screen_stats().late > 0, "the head ran ahead");
     player.stop();
     begin_frame();
     begin_frame();
-    drop(take_unshowable());
-    let held = showed.iter().filter(|frame| frame.strong_count() > 0);
+    let left: Vec<_> = take_unshowable().iter().map(|image| image.id).collect();
+    let kept = showed.iter().filter(|(id, _)| !left.contains(id));
+    assert_eq!(kept.count(), 0, "shown frames that never left the atlas");
+    let held = showed.iter().filter(|(_, frame)| frame.strong_count() > 0);
     assert_eq!(held.count(), 0, "frames still held after the clip stopped");
 }
 
