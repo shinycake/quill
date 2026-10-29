@@ -78,6 +78,7 @@ impl GroupContext {
             request_current_time: call.then_some(on_current_time as _),
             request_broadcast_part: call.then_some(on_broadcast_part as _),
             request_cancelled: call.then_some(on_request_cancelled as _),
+            e2e: None,
         }
     }
 

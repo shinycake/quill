@@ -33,7 +33,7 @@ extern "C" {
 #endif
 
 /* Bumped on every incompatible change; the loader refuses a mismatch. */
-#define QC_API_VERSION 3
+#define QC_API_VERSION 4
 
 QC_EXPORT uint32_t qc_api_version(void);
 
@@ -300,6 +300,29 @@ typedef struct qc_group_broadcast_part {
 	int32_t video_quality;
 } qc_group_broadcast_part;
 
+/*
+ * One frame of a conference call (an end-to-end encrypted group call) for
+ * callbacks.e2e: tgcalls' e2eEncryptDecrypt, which Telegram Desktop answers
+ * with tde2e's call_encrypt and call_decrypt.
+ */
+typedef struct qc_group_e2e_frame {
+	const uint8_t *data;
+	size_t length;
+	/* 1 to encrypt an outgoing frame, 0 to decrypt an incoming one. */
+	int32_t is_encrypt;
+	/* Decrypting: the Telegram user id of the participant who sent it. */
+	int64_t user_id;
+	/* Encrypting: how many bytes at the start stay in the clear. */
+	int32_t unencrypted_prefix_size;
+} qc_group_e2e_frame;
+
+/*
+ * Hands callbacks.e2e's answer back to the library, which copies it. Call
+ * it at most once, before the callback returns, with the `result` the
+ * callback was given.
+ */
+typedef void (*qc_group_e2e_result_fn)(void *result, const uint8_t *data, size_t length);
+
 typedef struct qc_group_callbacks {
 	void *user;
 	/*
@@ -324,7 +347,9 @@ typedef struct qc_group_callbacks {
 	 * tgcalls heard ssrcs it doesn't know: answer with
 	 * qc_group_answer_media_channels (tdesktop resolves them to
 	 * participants, loading them when needed). NULL lets tgcalls accept
-	 * every ssrc without knowing who it is. Not called for a presentation.
+	 * every ssrc without knowing who it is, which a conference call can't
+	 * do: callbacks.e2e needs the sender of every frame it decrypts. Not
+	 * called for a presentation.
 	 */
 	void (*request_media_channels)(void *user, uint64_t request_id, const uint32_t *ssrcs, size_t count);
 	/*
@@ -341,6 +366,15 @@ typedef struct qc_group_callbacks {
 	 * stop loading it. An answer after this is ignored.
 	 */
 	void (*request_cancelled)(void *user, uint64_t request_id);
+	/*
+	 * A conference call's frame to encrypt or decrypt, only for an
+	 * instance created with "e2e": true. Synchronous, as tgcalls wants
+	 * it: the transformed frame goes to `set_result(result, ...)` before
+	 * the callback returns. A frame with no result is dropped, as tdesktop
+	 * drops a frame tde2e refuses. Runs on tgcalls' media threads for
+	 * every audio and video frame, so it must answer fast.
+	 */
+	void (*e2e)(void *user, const qc_group_e2e_frame *frame, qc_group_e2e_result_fn set_result, void *result);
 } qc_group_callbacks;
 
 /*
@@ -350,7 +384,10 @@ typedef struct qc_group_callbacks {
  *   "presentation": false,     true makes the screen-sharing instance
  *                              (tdesktop's _screenInstance): screencast video,
  *                              no levels, sound or media channel requests
- *   "prioritize_vp8": false    app config confcall_prioritize_vp8
+ *   "prioritize_vp8": false,   app config confcall_prioritize_vp8
+ *   "e2e": false               a conference call: every frame goes through
+ *                              callbacks.e2e (tdesktop's e2eEncryptDecrypt,
+ *                              set for both the call and its presentation)
  * }
  * `video` is the source to send (NULL for none); a presentation sends an
  * external screencast source. The instance starts in QC_GROUP_MODE_NONE
