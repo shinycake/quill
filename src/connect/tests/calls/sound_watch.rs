@@ -15,7 +15,7 @@ fn connected_call() -> (
 }
 
 #[test]
-fn a_connected_call_without_sound_goes_back_to_the_device_once() {
+fn a_connected_call_without_sound_reopens_its_output_once() {
     let (dir, mut driver, handle) = connected_call();
     handle.set_call_sound(77, PlaybackHealth::default());
     let start = Instant::now();
@@ -24,7 +24,6 @@ fn a_connected_call_without_sound_goes_back_to_the_device_once() {
     assert!(handle.call_sound_reopens().is_empty());
     driver.request_tick(start + NO_SOUND_LIMIT);
     assert_eq!(handle.call_sound_reopens(), vec![77]);
-    handle.set_call_sound(77, PlaybackHealth::default());
     driver.request_tick(start + NO_SOUND_LIMIT * 3);
     assert_eq!(handle.call_sound_reopens(), vec![77], "once");
     let _ = std::fs::remove_dir_all(&dir);
@@ -67,7 +66,7 @@ fn the_clock_waits_for_the_call_to_connect() {
 }
 
 #[test]
-fn a_stopped_output_goes_back_to_the_device_at_once() {
+fn a_stopped_output_is_reopened_at_once() {
     let (dir, mut driver, handle) = connected_call();
     handle.set_call_sound(
         77,

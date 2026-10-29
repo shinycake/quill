@@ -707,9 +707,13 @@ impl CallEngine for MockEngine {
             .copied()
     }
 
+    /// As the tgcalls engine: a new output replaces the old one, so the
+    /// stream keeps a (fresh) health and its volume.
     fn reopen_stream_sound(&mut self, group_call_id: i32) -> Result<(), EngineError> {
         let mut inner = self.inner.lock_or_recover();
-        inner.stream_sound.remove(&group_call_id);
+        if let Some(health) = inner.stream_sound.get_mut(&group_call_id) {
+            *health = Default::default();
+        }
         inner.stream_sound_reopens.push(group_call_id);
         Ok(())
     }
@@ -725,9 +729,12 @@ impl CallEngine for MockEngine {
             .copied()
     }
 
+    /// As the tgcalls engine: a new output replaces the old one.
     fn reopen_call_sound(&mut self, call_id: i32) -> Result<(), EngineError> {
         let mut inner = self.inner.lock_or_recover();
-        inner.call_sound.remove(&call_id);
+        if let Some(health) = inner.call_sound.get_mut(&call_id) {
+            *health = Default::default();
+        }
         inner.call_sound_reopens.push(call_id);
         Ok(())
     }
