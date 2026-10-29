@@ -1,10 +1,14 @@
 use crate::calls::engine::{
-    BroadcastPartAnswer, BroadcastPartRequest, BroadcastPartStatus, FeederState, MAX_PENDING_PARTS,
-    ReplyOutcome, SegmentFetch, StreamChannel, StreamFeeder, StreamFetchError, StreamPort,
-    StreamQuality, StreamQualityTracker, StreamReply, StreamState,
+    BroadcastChannel, BroadcastPartAnswer, BroadcastPartRequest, BroadcastPartStatus,
+    BroadcastRequestId, FeederState, GroupCallMode, MAX_PENDING_PARTS, ReplyOutcome, SegmentFetch,
+    StreamChannel, StreamFeeder, StreamFetchError, StreamPort, StreamQuality, StreamQualityTracker,
+    StreamReply, StreamState,
 };
 use crate::ids::RequestId;
 use std::time::{Duration, Instant};
+
+/// The server's clock in these tests.
+const SERVER_NOW_MS: i64 = 1_700_000_042_750;
 
 #[derive(Default)]
 struct FakePort {
@@ -12,7 +16,7 @@ struct FakePort {
     fail_sends: bool,
     streams_requests: Vec<i32>,
     segment_requests: Vec<(RequestId, SegmentFetch)>,
-    timestamps: Vec<(i64, i64)>,
+    times: Vec<(i64, BroadcastRequestId, i64)>,
     parts: Vec<(i64, BroadcastPartAnswer)>,
 }
 
@@ -23,6 +27,17 @@ impl FakePort {
         }
         self.next_id += 1;
         Some(RequestId(self.next_id))
+    }
+
+    /// The answered time per request, in order.
+    fn time_answers(&self) -> Vec<(u64, i64)> {
+        self.times
+            .iter()
+            .map(|(chat, request, time)| {
+                assert_eq!(*chat, 51);
+                (request.id, *time)
+            })
+            .collect()
     }
 }
 
@@ -39,8 +54,12 @@ impl StreamPort for FakePort {
         Some(id)
     }
 
-    fn answer_timestamp(&mut self, chat_id: i64, timestamp_ms: i64) {
-        self.timestamps.push((chat_id, timestamp_ms));
+    fn server_time_ms(&self) -> i64 {
+        SERVER_NOW_MS
+    }
+
+    fn answer_time(&mut self, chat_id: i64, request: BroadcastRequestId, timestamp_ms: i64) {
+        self.times.push((chat_id, request, timestamp_ms));
     }
 
     fn answer_part(&mut self, chat_id: i64, answer: BroadcastPartAnswer) {
@@ -48,20 +67,35 @@ impl StreamPort for FakePort {
     }
 }
 
-fn part(segment_id: i64, quality: Option<StreamQuality>) -> BroadcastPartRequest {
+fn engine_id(id: u64) -> BroadcastRequestId {
+    BroadcastRequestId { instance: 7, id }
+}
+
+fn video(segment: i64, quality: StreamQuality) -> BroadcastPartRequest {
     BroadcastPartRequest {
-        segment_id,
-        part_id: 0,
-        limit: 131_072,
-        timestamp: 1_700_000_000_000 + segment_id * 1000,
-        quality_update: false,
-        channel_id: 1,
-        quality,
+        timestamp_ms: 1_700_000_000_000 + segment * 1000,
+        duration_ms: 1000,
+        channel: BroadcastChannel::Video {
+            channel_id: 1,
+            quality,
+        },
+    }
+}
+
+fn audio(segment: i64) -> BroadcastPartRequest {
+    BroadcastPartRequest {
+        timestamp_ms: 1_700_000_000_000 + segment * 1000,
+        duration_ms: 1000,
+        channel: BroadcastChannel::Audio,
     }
 }
 
 fn feeder() -> StreamFeeder {
-    StreamFeeder::new(555, 51)
+    StreamFeeder::new(555, 51, GroupCallMode::Rtmp)
+}
+
+fn ask(feeder: &mut StreamFeeder, port: &mut FakePort, id: u64, part: BroadcastPartRequest) {
+    feeder.on_part_request(engine_id(id), part, Instant::now(), port);
 }
 
 fn last_part(port: &FakePort) -> &BroadcastPartAnswer {
@@ -69,10 +103,10 @@ fn last_part(port: &FakePort) -> &BroadcastPartAnswer {
 }
 
 #[test]
-fn timestamp_request_answers_the_first_channels_time_offset() {
+fn an_rtmp_time_request_answers_the_first_channels_time_offset() {
     let mut port = FakePort::default();
     let mut feeder = feeder();
-    feeder.on_timestamp_request(&mut port);
+    feeder.on_time_request(engine_id(1), &mut port);
     assert_eq!(port.streams_requests, vec![555]);
     assert_eq!(feeder.state(), FeederState::Syncing);
     assert_eq!(feeder.stream_state(), StreamState::Connecting);
@@ -95,7 +129,7 @@ fn timestamp_request_answers_the_first_channels_time_offset() {
         &mut port,
     );
     assert_eq!(outcome, ReplyOutcome::Handled);
-    assert_eq!(port.timestamps, vec![(51, 1_700_000_123_456)]);
+    assert_eq!(port.time_answers(), vec![(1, 1_700_000_123_456)]);
     // A stream exists, but it is Live only from its first segment on.
     assert_eq!(feeder.stream_state(), StreamState::Connecting);
     assert_eq!(feeder.channels().len(), 2);
@@ -103,22 +137,33 @@ fn timestamp_request_answers_the_first_channels_time_offset() {
 }
 
 #[test]
+fn other_streams_get_the_servers_time_at_once() {
+    for mode in [GroupCallMode::Stream, GroupCallMode::Rtc] {
+        let mut port = FakePort::default();
+        let mut feeder = StreamFeeder::new(555, 51, mode);
+        feeder.on_time_request(engine_id(4), &mut port);
+        assert!(port.streams_requests.is_empty(), "{mode:?}");
+        assert_eq!(port.time_answers(), vec![(4, SERVER_NOW_MS)], "{mode:?}");
+    }
+}
+
+#[test]
 fn empty_stream_list_answers_zero_and_shows_no_stream() {
     let mut port = FakePort::default();
     let mut feeder = feeder();
-    feeder.on_timestamp_request(&mut port);
+    feeder.on_time_request(engine_id(1), &mut port);
     feeder.on_reply(
         RequestId(1),
         StreamReply::Streams(&[]),
         Instant::now(),
         &mut port,
     );
-    assert_eq!(port.timestamps, vec![(51, 0)]);
+    assert_eq!(port.time_answers(), vec![(1, 0)]);
     assert_eq!(feeder.state(), FeederState::NoStream);
     assert_eq!(feeder.stream_state(), StreamState::NoStream);
-    // ntgcalls asks again a second after a 0; each ask is a fresh
+    // tgcalls asks again a second after a 0; each ask is a fresh
     // `getGroupCallStreams`, so the stream is picked up once it starts.
-    feeder.on_timestamp_request(&mut port);
+    feeder.on_time_request(engine_id(2), &mut port);
     assert_eq!(port.streams_requests.len(), 2);
     let live = [StreamChannel {
         channel_id: 1,
@@ -132,15 +177,15 @@ fn empty_stream_list_answers_zero_and_shows_no_stream() {
         &mut port,
     );
     assert_eq!(feeder.stream_state(), StreamState::Connecting);
-    assert_eq!(port.timestamps.last(), Some(&(51, 5_000)));
+    assert_eq!(port.time_answers().last(), Some(&(2, 5_000)));
 }
 
 #[test]
-fn timestamp_requests_share_one_streams_request() {
+fn time_requests_share_one_streams_request() {
     let mut port = FakePort::default();
     let mut feeder = feeder();
-    feeder.on_timestamp_request(&mut port);
-    feeder.on_timestamp_request(&mut port);
+    feeder.on_time_request(engine_id(1), &mut port);
+    feeder.on_time_request(engine_id(2), &mut port);
     assert_eq!(port.streams_requests.len(), 1);
     feeder.on_reply(
         RequestId(1),
@@ -148,7 +193,24 @@ fn timestamp_requests_share_one_streams_request() {
         Instant::now(),
         &mut port,
     );
-    assert_eq!(port.timestamps, vec![(51, 0), (51, 0)]);
+    assert_eq!(port.time_answers(), vec![(1, 0), (2, 0)]);
+}
+
+#[test]
+fn a_cancelled_time_request_is_not_answered() {
+    let mut port = FakePort::default();
+    let mut feeder = feeder();
+    feeder.on_time_request(engine_id(1), &mut port);
+    feeder.on_time_request(engine_id(2), &mut port);
+    assert!(feeder.on_cancel(engine_id(1)));
+    assert!(!feeder.on_cancel(engine_id(1)), "cancelled once");
+    feeder.on_reply(
+        RequestId(1),
+        StreamReply::Streams(&[]),
+        Instant::now(),
+        &mut port,
+    );
+    assert_eq!(port.time_answers(), vec![(2, 0)]);
 }
 
 #[test]
@@ -158,15 +220,15 @@ fn failed_streams_send_answers_zero() {
         ..FakePort::default()
     };
     let mut feeder = feeder();
-    feeder.on_timestamp_request(&mut port);
-    assert_eq!(port.timestamps, vec![(51, 0)]);
+    feeder.on_time_request(engine_id(3), &mut port);
+    assert_eq!(port.time_answers(), vec![(3, 0)]);
 }
 
 #[test]
 fn streams_membership_error_answers_zero_and_rejoins() {
     let mut port = FakePort::default();
     let mut feeder = feeder();
-    feeder.on_timestamp_request(&mut port);
+    feeder.on_time_request(engine_id(1), &mut port);
     let outcome = feeder.on_reply(
         RequestId(1),
         StreamReply::Error(StreamFetchError::RejoinNeeded),
@@ -174,22 +236,22 @@ fn streams_membership_error_answers_zero_and_rejoins() {
         &mut port,
     );
     assert_eq!(outcome, ReplyOutcome::Rejoin);
-    assert_eq!(port.timestamps, vec![(51, 0)]);
+    assert_eq!(port.time_answers(), vec![(1, 0)]);
     assert_eq!(feeder.state(), FeederState::Failed);
 }
 
 #[test]
-fn part_request_fetches_the_segment_at_scale_zero() {
+fn a_video_part_fetches_its_channel_and_quality() {
     let mut port = FakePort::default();
     let mut feeder = feeder();
-    let request = part(7, Some(StreamQuality::Full));
-    feeder.on_part_request(request, Instant::now(), &mut port);
+    let part = video(7, StreamQuality::Full);
+    ask(&mut feeder, &mut port, 1, part);
     let (_, fetch) = port.segment_requests.first().expect("segment request");
     assert_eq!(
         *fetch,
         SegmentFetch {
             group_call_id: 555,
-            time_offset: request.timestamp,
+            time_offset: part.timestamp_ms,
             scale: 0,
             channel_id: 1,
             quality: Some(StreamQuality::Full),
@@ -199,32 +261,58 @@ fn part_request_fetches_the_segment_at_scale_zero() {
 }
 
 #[test]
-fn parts_keep_the_quality_ntgcalls_asked_for() {
+fn channels_qualities_and_scales_follow_the_request() {
     let mut port = FakePort::default();
     let mut feeder = feeder();
-    feeder.on_part_request(
-        part(1, Some(StreamQuality::Full)),
-        Instant::now(),
-        &mut port,
-    );
-    feeder.on_part_request(part(2, None), Instant::now(), &mut port);
-    let mut update = part(3, Some(StreamQuality::Medium));
-    update.quality_update = true;
-    feeder.on_part_request(update, Instant::now(), &mut port);
-    let qualities: Vec<_> = port
+    ask(&mut feeder, &mut port, 1, audio(1));
+    let mut thumbnail = video(2, StreamQuality::Thumbnail);
+    thumbnail.channel = BroadcastChannel::Video {
+        channel_id: 3,
+        quality: StreamQuality::Thumbnail,
+    };
+    thumbnail.duration_ms = 250;
+    ask(&mut feeder, &mut port, 2, thumbnail);
+    let mut medium = video(3, StreamQuality::Medium);
+    medium.duration_ms = 500;
+    ask(&mut feeder, &mut port, 3, medium);
+    let fetched: Vec<_> = port
         .segment_requests
         .iter()
-        .map(|(_, fetch)| fetch.quality)
+        .map(|(_, fetch)| (fetch.channel_id, fetch.quality, fetch.scale))
         .collect();
     assert_eq!(
-        qualities,
+        fetched,
         vec![
-            Some(StreamQuality::Full),
-            // Audio parts carry no video quality.
-            None,
-            Some(StreamQuality::Medium),
+            // Audio parts carry no video fields.
+            (0, None, 0),
+            (3, Some(StreamQuality::Thumbnail), 2),
+            (1, Some(StreamQuality::Medium), 1),
         ]
     );
+}
+
+#[test]
+fn a_part_for_now_loads_the_servers_current_second() {
+    let mut port = FakePort::default();
+    let mut feeder = feeder();
+    let mut part = audio(0);
+    part.timestamp_ms = 0;
+    ask(&mut feeder, &mut port, 1, part);
+    let (id, fetch) = *port.segment_requests.first().expect("segment request");
+    assert_eq!(fetch.time_offset, 1_700_000_042_000);
+    feeder.on_reply(id, StreamReply::Data("AQID"), Instant::now(), &mut port);
+    assert_eq!(last_part(&port).timestamp_ms, 1_700_000_042_000);
+}
+
+#[test]
+fn an_unknown_duration_answers_resync_needed_without_a_fetch() {
+    let mut port = FakePort::default();
+    let mut feeder = feeder();
+    let mut part = audio(1);
+    part.duration_ms = 2000;
+    ask(&mut feeder, &mut port, 1, part);
+    assert!(port.segment_requests.is_empty());
+    assert_eq!(last_part(&port).status, BroadcastPartStatus::ResyncNeeded);
 }
 
 #[test]
@@ -232,10 +320,8 @@ fn data_answers_success_with_the_decoded_bytes() {
     let mut port = FakePort::default();
     let mut feeder = feeder();
     let start = Instant::now();
-    let mut request = part(4, Some(StreamQuality::Full));
-    request.part_id = 2;
-    request.quality_update = true;
-    feeder.on_part_request(request, start, &mut port);
+    let part = video(4, StreamQuality::Full);
+    feeder.on_part_request(engine_id(9), part, start, &mut port);
     let (id, _) = *port.segment_requests.first().expect("segment request");
     // "AQID" is base64 for [1, 2, 3].
     let outcome = feeder.on_reply(
@@ -248,10 +334,10 @@ fn data_answers_success_with_the_decoded_bytes() {
     assert_eq!(
         last_part(&port),
         &BroadcastPartAnswer {
-            segment_id: 4,
-            part_id: 2,
+            request: engine_id(9),
             status: BroadcastPartStatus::Success,
-            quality_update: true,
+            timestamp_ms: part.timestamp_ms,
+            response_time: SERVER_NOW_MS as f64 / 1000.0,
             data: vec![1, 2, 3],
         }
     );
@@ -260,10 +346,28 @@ fn data_answers_success_with_the_decoded_bytes() {
 }
 
 #[test]
+fn a_cancelled_part_is_forgotten_and_its_reply_dropped() {
+    let mut port = FakePort::default();
+    let mut feeder = feeder();
+    ask(&mut feeder, &mut port, 1, audio(1));
+    ask(&mut feeder, &mut port, 2, audio(2));
+    let (first, _) = port.segment_requests[0];
+    assert!(feeder.on_cancel(engine_id(1)));
+    assert_eq!(feeder.pending_parts(), 1);
+    assert!(!feeder.owns(first));
+    let outcome = feeder.on_reply(first, StreamReply::Data("AQID"), Instant::now(), &mut port);
+    assert_eq!(outcome, ReplyOutcome::NotMine);
+    assert!(port.parts.is_empty());
+    // A request from another instance with the same id is not this one.
+    assert!(!feeder.on_cancel(BroadcastRequestId { instance: 8, id: 2 }));
+    assert_eq!(feeder.pending_parts(), 1);
+}
+
+#[test]
 fn bad_base64_answers_resync_needed() {
     let mut port = FakePort::default();
     let mut feeder = feeder();
-    feeder.on_part_request(part(4, None), Instant::now(), &mut port);
+    ask(&mut feeder, &mut port, 1, audio(4));
     let (id, _) = *port.segment_requests.first().expect("segment request");
     feeder.on_reply(
         id,
@@ -279,7 +383,7 @@ fn bad_base64_answers_resync_needed() {
 fn empty_data_is_still_a_success() {
     let mut port = FakePort::default();
     let mut feeder = feeder();
-    feeder.on_part_request(part(4, None), Instant::now(), &mut port);
+    ask(&mut feeder, &mut port, 1, audio(4));
     let (id, _) = *port.segment_requests.first().expect("segment request");
     feeder.on_reply(id, StreamReply::Data(""), Instant::now(), &mut port);
     assert_eq!(last_part(&port).status, BroadcastPartStatus::Success);
@@ -290,8 +394,8 @@ fn empty_data_is_still_a_success() {
 fn the_first_successful_segment_makes_the_stream_live() {
     let mut port = FakePort::default();
     let mut feeder = feeder();
-    feeder.on_part_request(part(1, None), Instant::now(), &mut port);
-    feeder.on_part_request(part(2, None), Instant::now(), &mut port);
+    ask(&mut feeder, &mut port, 1, audio(1));
+    ask(&mut feeder, &mut port, 2, audio(2));
     let (first, _) = port.segment_requests[0];
     let (second, _) = port.segment_requests[1];
     feeder.on_reply(
@@ -309,7 +413,7 @@ fn the_first_successful_segment_makes_the_stream_live() {
 fn call_invalid_counts_as_left() {
     let mut port = FakePort::default();
     let mut feeder = feeder();
-    feeder.on_part_request(part(1, None), Instant::now(), &mut port);
+    ask(&mut feeder, &mut port, 1, audio(1));
     let (id, _) = *port.segment_requests.first().expect("segment request");
     let outcome = feeder.on_reply(
         id,
@@ -321,8 +425,8 @@ fn call_invalid_counts_as_left() {
     assert_eq!(last_part(&port).status, BroadcastPartStatus::ResyncNeeded);
     assert_eq!(feeder.stream_state(), StreamState::Ended);
 
-    let mut feeder = super::StreamFeeder::new(555, 51);
-    feeder.on_timestamp_request(&mut port);
+    let mut feeder = StreamFeeder::new(555, 51, GroupCallMode::Rtmp);
+    feeder.on_time_request(engine_id(5), &mut port);
     let outcome = feeder.on_reply(
         RequestId(port.next_id),
         StreamReply::Error(StreamFetchError::CallLeft),
@@ -330,7 +434,7 @@ fn call_invalid_counts_as_left() {
         &mut port,
     );
     assert_eq!(outcome, ReplyOutcome::Left);
-    assert_eq!(port.timestamps.last(), Some(&(51, 0)));
+    assert_eq!(port.time_answers().last(), Some(&(5, 0)));
 }
 
 #[test]
@@ -365,11 +469,16 @@ fn part_errors_map_like_tdesktop() {
     for (error, status, outcome) in cases {
         let mut port = FakePort::default();
         let mut feeder = feeder();
-        feeder.on_part_request(part(1, None), Instant::now(), &mut port);
+        ask(&mut feeder, &mut port, 1, audio(1));
         let (id, _) = *port.segment_requests.first().expect("segment request");
         let got = feeder.on_reply(id, StreamReply::Error(error), Instant::now(), &mut port);
         assert_eq!(got, outcome, "{error:?}");
         assert_eq!(last_part(&port).status, status, "{error:?}");
+        // Every answer carries the server's time for tgcalls' resync.
+        assert_eq!(
+            last_part(&port).response_time,
+            SERVER_NOW_MS as f64 / 1000.0
+        );
     }
 }
 
@@ -378,13 +487,18 @@ fn parts_over_the_pending_cap_answer_not_ready() {
     let mut port = FakePort::default();
     let mut feeder = feeder();
     for segment in 0..MAX_PENDING_PARTS {
-        feeder.on_part_request(part(segment as i64, None), Instant::now(), &mut port);
+        ask(
+            &mut feeder,
+            &mut port,
+            segment as u64,
+            audio(segment as i64),
+        );
     }
     assert_eq!(port.segment_requests.len(), MAX_PENDING_PARTS);
     assert!(port.parts.is_empty());
-    feeder.on_part_request(part(99, None), Instant::now(), &mut port);
+    ask(&mut feeder, &mut port, 99, audio(99));
     assert_eq!(port.segment_requests.len(), MAX_PENDING_PARTS);
-    assert_eq!(last_part(&port).segment_id, 99);
+    assert_eq!(last_part(&port).request, engine_id(99));
     assert_eq!(last_part(&port).status, BroadcastPartStatus::NotReady);
 }
 
@@ -395,7 +509,7 @@ fn failed_segment_send_answers_not_ready() {
         ..FakePort::default()
     };
     let mut feeder = feeder();
-    feeder.on_part_request(part(3, None), Instant::now(), &mut port);
+    ask(&mut feeder, &mut port, 1, audio(3));
     assert_eq!(last_part(&port).status, BroadcastPartStatus::NotReady);
     assert_eq!(feeder.pending_parts(), 0);
 }
@@ -405,13 +519,13 @@ fn drain_answers_every_pending_part_resync_needed() {
     let mut port = FakePort::default();
     let mut feeder = feeder();
     for segment in [5, 3, 4] {
-        feeder.on_part_request(part(segment, None), Instant::now(), &mut port);
+        ask(&mut feeder, &mut port, segment as u64, audio(segment));
     }
     feeder.drain(&mut port);
     let answered: Vec<_> = port
         .parts
         .iter()
-        .map(|(chat, answer)| (*chat, answer.segment_id, answer.status))
+        .map(|(chat, answer)| (*chat, answer.request.id, answer.status))
         .collect();
     assert_eq!(
         answered,
@@ -435,7 +549,7 @@ fn unknown_request_ids_are_ignored() {
         &mut port,
     );
     assert_eq!(outcome, ReplyOutcome::NotMine);
-    assert!(port.parts.is_empty() && port.timestamps.is_empty());
+    assert!(port.parts.is_empty() && port.times.is_empty());
     assert!(!feeder.owns(RequestId(404)));
 }
 

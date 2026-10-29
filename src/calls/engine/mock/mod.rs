@@ -69,7 +69,7 @@ struct MockInner {
     device_playbacks: Vec<i32>,
     call_sound: HashMap<i32, crate::calls::stream_audio::watch::PlaybackHealth>,
     device_call_sounds: Vec<i32>,
-    broadcast_timestamps: Vec<(i64, i64)>,
+    broadcast_times: Vec<(i64, BroadcastRequestId, i64)>,
     broadcast_parts: Vec<(i64, BroadcastPartAnswer)>,
     /// External frames pushed through `external_frame_sender`.
     external_frames: Vec<MockExternalFrame>,
@@ -258,8 +258,9 @@ impl MockEngine {
         self.inner.lock_or_recover().stream_qualities.clone()
     }
 
-    pub fn broadcast_timestamps(&self) -> Vec<(i64, i64)> {
-        self.inner.lock_or_recover().broadcast_timestamps.clone()
+    /// `(chat, request, timestamp)` per time answer.
+    pub fn broadcast_times(&self) -> Vec<(i64, BroadcastRequestId, i64)> {
+        self.inner.lock_or_recover().broadcast_times.clone()
     }
 
     pub fn broadcast_parts(&self) -> Vec<(i64, BroadcastPartAnswer)> {
@@ -600,19 +601,20 @@ impl CallEngine for MockEngine {
             .map(|(_, quality)| *quality)
     }
 
-    fn send_broadcast_timestamp(
+    fn answer_broadcast_time(
         &mut self,
         chat_id: i64,
+        request: BroadcastRequestId,
         timestamp_ms: i64,
     ) -> Result<(), EngineError> {
         self.inner
             .lock_or_recover()
-            .broadcast_timestamps
-            .push((chat_id, timestamp_ms));
+            .broadcast_times
+            .push((chat_id, request, timestamp_ms));
         Ok(())
     }
 
-    fn send_broadcast_part(
+    fn answer_broadcast_part(
         &mut self,
         chat_id: i64,
         answer: &BroadcastPartAnswer,

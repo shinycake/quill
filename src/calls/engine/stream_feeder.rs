@@ -1,30 +1,38 @@
-//! `StreamFeeder`: answers ntgcalls' broadcast requests for one
+//! `StreamFeeder`: answers the engine's broadcast requests for one
 //! stream-mode group call with TDLib, as tdesktop's `GroupCall` does with
 //! `phone.getGroupCallStreamChannels` and `upload.getFile`
-//! (`calls/group/calls_group_call.cpp`, `requestCurrentTimeStart` and
-//! `LoadPartTask`).
+//! (`calls/group/calls_group_call.cpp`: `requestCurrentTimeStart`,
+//! `broadcastPartStart`, `LoadPartTask`).
 //!
 //! The feeder is plain logic: it owns no sender and no engine. The connect
 //! side passes a [`StreamPort`] that sends the TDLib requests and the
-//! native answers, so the loop is tested without a network or ntgcalls.
+//! engine's answers and knows the server's time, so the loop is tested
+//! without a network or an engine.
 //!
-//! - Timestamp request → `getGroupCallStreams`; the first channel's
-//!   `time_offset` is the answer, an empty list answers 0 and marks
-//!   NoStream. ntgcalls asks again on its own one second after a 0
-//!   (`mtproto_stream.cpp`, `send_broadcast_timestamp`), which is the
-//!   polling tdesktop gets from tgcalls too, so the feeder keeps no timer.
-//! - Part request → `getGroupCallStreamSegment` (scale 0, the request's
-//!   channel and quality, exactly as ntgcalls asked); `data` → SUCCESS,
-//!   and the first SUCCESS makes the stream Live.
-//! - Errors: flood and `TIME_TOO_BIG` → NOT_READY; `GROUPCALL_JOIN_MISSING`
-//!   / `GROUPCALL_FORBIDDEN` → NOT_READY plus a rejoin; `GROUPCALL_INVALID`
-//!   → RESYNC_NEEDED and the call counts as left (TDLib's
-//!   `on_group_call_left`); anything else → RESYNC_NEEDED. A missing or
-//!   badly encoded `data` is RESYNC_NEEDED as well.
+//! - Time request: for an RTMP stream, `getGroupCallStreams`; the first
+//!   channel's `time_offset` is the answer, an empty list answers 0 and
+//!   marks NoStream. Every waiting request shares one `getGroupCallStreams`.
+//!   Other streams are answered at once with the server's time
+//!   (tdesktop's `approximateServerTimeInMs`). tgcalls asks again on its
+//!   own one second after a 0, so the feeder keeps no timer.
+//! - Part request → `getGroupCallStreamSegment` at the scale for the
+//!   part's duration, its channel and quality (`BroadcastChannel`); a
+//!   request for "now" (timestamp 0) loads the server's current second, as
+//!   `LoadPartTask` does. `data` → Success, and the first Success makes
+//!   the stream Live.
+//! - Errors: flood and `TIME_TOO_BIG` → NotReady; `GROUPCALL_JOIN_MISSING`
+//!   / `GROUPCALL_FORBIDDEN` → NotReady plus a rejoin; `GROUPCALL_INVALID`
+//!   → ResyncNeeded and the call counts as left (TDLib's
+//!   `on_group_call_left`); anything else → ResyncNeeded. A missing or
+//!   badly encoded `data` is ResyncNeeded as well. Every answer carries
+//!   the server's time as its response time.
+//! - Cancelled requests are forgotten (tdesktop's `broadcastPartCancel`
+//!   and `requestCurrentTimeCancel`); TDLib has no way to cancel a request,
+//!   so its late reply is dropped.
 //! - At most [`MAX_PENDING_PARTS`] parts are in flight; more answer
-//!   NOT_READY at once. Dropping the feeder ([`StreamFeeder::drain`])
-//!   answers every pending part RESYNC_NEEDED so ntgcalls never waits on
-//!   a request that will not come back.
+//!   NotReady at once. [`StreamFeeder::drain`] answers every pending part
+//!   ResyncNeeded so the engine never waits on a request that will not
+//!   come back.
 use super::*;
 use crate::ids::RequestId;
 use base64::Engine;
@@ -33,18 +41,13 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 /// Segment parts in flight at once, a guard against a runaway rather than
-/// a limit a healthy stream meets. ntgcalls keeps at most three segments
-/// pending (a 2000 ms buffer of 1000 ms segments, `mtproto_stream.hpp`),
-/// each with one audio or unified part plus one part per subscribed
-/// video endpoint, and a quality update per ready video segment. 16
-/// covers three segments with four video endpoints and a quality update;
-/// a part over the cap answers NOT_READY and ntgcalls asks again 100 ms
-/// later. The feeder holds request metadata only: segment bytes are
-/// handed to ntgcalls as soon as TDLib returns them.
+/// a limit a healthy stream meets: tgcalls keeps a short buffer of
+/// segments pending, each with one audio or unified part plus one part
+/// per video channel, and a quality update per shown video. tdesktop has
+/// no cap. A part over it answers NotReady, which tgcalls asks again
+/// 100 ms later. The feeder holds request metadata only: segment bytes
+/// are handed to the engine as soon as TDLib returns them.
 pub const MAX_PENDING_PARTS: usize = 16;
-
-/// tdesktop only ever asks for scale 0: one-second segments.
-pub const SEGMENT_SCALE: i32 = 0;
 
 /// One channel from `groupCallStreams`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,8 +65,7 @@ pub struct SegmentFetch {
     pub time_offset: i64,
     pub scale: i32,
     pub channel_id: i32,
-    /// `None` for audio parts: TDLib then picks the worst quality, which
-    /// is what an audio channel ignores anyway.
+    /// `None` for audio parts: no video fields, as tdesktop sends them.
     pub quality: Option<StreamQuality>,
 }
 
@@ -95,7 +97,7 @@ pub enum StreamReply<'a> {
 /// What the connect side must do after a reply.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplyOutcome {
-    /// The request id is not one of this feeder's.
+    /// The request id is not one of this feeder's (or was cancelled).
     NotMine,
     Handled,
     /// The call must be rejoined (`join.rs`).
@@ -111,9 +113,11 @@ pub trait StreamPort {
     fn request_streams(&mut self, group_call_id: i32) -> Option<RequestId>;
     /// Sends `getGroupCallStreamSegment`; `None` when the send failed.
     fn request_segment(&mut self, fetch: &SegmentFetch) -> Option<RequestId>;
-    /// `ntg_send_broadcast_timestamp`.
-    fn answer_timestamp(&mut self, chat_id: i64, timestamp_ms: i64);
-    /// `ntg_send_broadcast_part`.
+    /// The server's Unix time in ms, as well as Quill knows it.
+    fn server_time_ms(&self) -> i64;
+    /// `CallEngine::answer_broadcast_time`.
+    fn answer_time(&mut self, chat_id: i64, request: BroadcastRequestId, timestamp_ms: i64);
+    /// `CallEngine::answer_broadcast_part`.
     fn answer_part(&mut self, chat_id: i64, answer: BroadcastPartAnswer);
 }
 
@@ -134,7 +138,9 @@ pub enum FeederState {
 
 #[derive(Debug, Clone, Copy)]
 struct PendingPart {
-    request: BroadcastPartRequest,
+    request: BroadcastRequestId,
+    /// The part being loaded, in server ms.
+    timestamp_ms: i64,
     requested_at: Instant,
 }
 
@@ -143,26 +149,29 @@ struct PendingPart {
 pub struct StreamFeeder {
     group_call_id: i32,
     chat_id: i64,
+    /// An RTMP stream asks TDLib for its time; others use the server's.
+    rtmp: bool,
     channels: Vec<StreamChannel>,
     pending: HashMap<RequestId, PendingPart>,
-    /// The `getGroupCallStreams` in flight and how many timestamp requests
+    /// The `getGroupCallStreams` in flight and the time requests that
     /// wait for it (tdesktop answers every waiter with one request).
     streams_request: Option<RequestId>,
-    timestamp_waiters: u32,
+    time_waiters: Vec<BroadcastRequestId>,
     state: FeederState,
     last_timestamp_ms: i64,
     trace: bool,
 }
 
 impl StreamFeeder {
-    pub fn new(group_call_id: i32, chat_id: i64) -> Self {
+    pub fn new(group_call_id: i32, chat_id: i64, mode: GroupCallMode) -> Self {
         Self {
             group_call_id,
             chat_id,
+            rtmp: mode == GroupCallMode::Rtmp,
             channels: Vec::new(),
             pending: HashMap::new(),
             streams_request: None,
-            timestamp_waiters: 0,
+            time_waiters: Vec::new(),
             state: FeederState::Idle,
             last_timestamp_ms: 0,
             trace: trace_stream(),
@@ -205,14 +214,19 @@ impl StreamFeeder {
         }
     }
 
-    /// Whether `id` is one of this feeder's requests.
+    /// Whether `id` is one of this feeder's TDLib requests.
     pub fn owns(&self, id: RequestId) -> bool {
         self.streams_request == Some(id) || self.pending.contains_key(&id)
     }
 
-    /// ntgcalls asked for the stream's current time.
-    pub fn on_timestamp_request(&mut self, port: &mut impl StreamPort) {
-        self.timestamp_waiters = self.timestamp_waiters.saturating_add(1);
+    /// The engine asked for the stream's current time.
+    pub fn on_time_request(&mut self, request: BroadcastRequestId, port: &mut impl StreamPort) {
+        if !self.rtmp {
+            let now = port.server_time_ms();
+            port.answer_time(self.chat_id, request, now);
+            return;
+        }
+        self.time_waiters.push(request);
         if self.streams_request.is_some() {
             return;
         }
@@ -221,46 +235,64 @@ impl StreamFeeder {
         }
         match port.request_streams(self.group_call_id) {
             Some(id) => self.streams_request = Some(id),
-            // The send failed: answer 0 so ntgcalls asks again in a second.
-            None => self.answer_timestamp_waiters(0, port),
+            // The send failed: answer 0 so the engine asks again in a second.
+            None => self.answer_time_waiters(0, port),
         }
     }
 
-    /// ntgcalls asked for a segment part.
+    /// The engine asked for a stream part.
     pub fn on_part_request(
         &mut self,
-        request: BroadcastPartRequest,
+        request: BroadcastRequestId,
+        part: BroadcastPartRequest,
         now: Instant,
         port: &mut impl StreamPort,
     ) {
+        // `LoadPartTask`: a part for "now" is the server's current second.
+        let timestamp_ms = if part.timestamp_ms != 0 {
+            part.timestamp_ms
+        } else {
+            port.server_time_ms() / 1000 * 1000
+        };
+        let pending = PendingPart {
+            request,
+            timestamp_ms,
+            requested_at: now,
+        };
         if self.pending.len() >= MAX_PENDING_PARTS {
             self.answer(
                 port,
-                &request,
+                &pending,
                 BroadcastPartStatus::NotReady,
                 Vec::new(),
                 None,
             );
             return;
         }
-        // The quality ntgcalls asked for, unchanged. For RTMP it always
-        // asks Full for the unified channel, as tgcalls does for tdesktop;
-        // for an MTProto stream it picks each endpoint's quality itself
-        // (camera Medium, screen Full) and asks for `quality_update` parts
-        // when that changes. Other RTMP qualities are not verified against
-        // the server, so the tile size does not override them.
-        let quality = request.quality;
+        // tdesktop stops on a duration it does not know; a resync asks
+        // the engine to start over instead.
+        let Some(scale) = part.scale() else {
+            self.answer(
+                port,
+                &pending,
+                BroadcastPartStatus::ResyncNeeded,
+                Vec::new(),
+                None,
+            );
+            return;
+        };
+        let (channel_id, quality) = part.channel.segment_channel();
         let fetch = SegmentFetch {
             group_call_id: self.group_call_id,
-            time_offset: request.timestamp,
-            scale: SEGMENT_SCALE,
-            channel_id: request.channel_id,
+            time_offset: timestamp_ms,
+            scale,
+            channel_id,
             quality,
         };
         let Some(id) = port.request_segment(&fetch) else {
             self.answer(
                 port,
-                &request,
+                &pending,
                 BroadcastPartStatus::NotReady,
                 Vec::new(),
                 None,
@@ -271,20 +303,24 @@ impl StreamFeeder {
             eprintln!(
                 "VS,{},req,{},{},{},{},{}",
                 self.chat_id,
-                request.segment_id,
-                request.part_id,
-                request.channel_id,
+                request.id,
+                channel_id,
                 quality.map_or("none", StreamQuality::td_type),
-                request.timestamp,
+                scale,
+                timestamp_ms,
             );
         }
-        self.pending.insert(
-            id,
-            PendingPart {
-                request,
-                requested_at: now,
-            },
-        );
+        self.pending.insert(id, pending);
+    }
+
+    /// The engine no longer wants `request`. Returns whether it was one
+    /// of this feeder's.
+    pub fn on_cancel(&mut self, request: BroadcastRequestId) -> bool {
+        let waiters = self.time_waiters.len();
+        self.time_waiters.retain(|waiter| *waiter != request);
+        let parts = self.pending.len();
+        self.pending.retain(|_, part| part.request != request);
+        waiters != self.time_waiters.len() || parts != self.pending.len()
     }
 
     /// A TDLib answer arrived for `id`.
@@ -335,26 +371,26 @@ impl StreamFeeder {
         {
             self.state = FeederState::Streaming;
         }
-        self.answer(port, &part.request, status, data, elapsed);
+        self.answer(port, &part, status, data, elapsed);
         outcome
     }
 
     /// The call is leaving or being replaced: answer every pending part
-    /// RESYNC_NEEDED before the native call stops.
+    /// ResyncNeeded before the native call stops.
     pub fn drain(&mut self, port: &mut impl StreamPort) {
         let mut pending: Vec<PendingPart> = self.pending.drain().map(|(_, part)| part).collect();
-        pending.sort_by_key(|part| (part.request.segment_id, part.request.part_id));
+        pending.sort_by_key(|part| (part.timestamp_ms, part.request));
         for part in pending {
             self.answer(
                 port,
-                &part.request,
+                &part,
                 BroadcastPartStatus::ResyncNeeded,
                 Vec::new(),
                 None,
             );
         }
         self.streams_request = None;
-        self.timestamp_waiters = 0;
+        self.time_waiters.clear();
     }
 
     fn on_streams_reply(
@@ -373,11 +409,11 @@ impl StreamFeeder {
                         if matches!(self.state, FeederState::Idle | FeederState::NoStream) {
                             self.state = FeederState::Syncing;
                         }
-                        self.answer_timestamp_waiters(first.time_offset, port);
+                        self.answer_time_waiters(first.time_offset, port);
                     }
                     None => {
                         self.state = FeederState::NoStream;
-                        self.answer_timestamp_waiters(0, port);
+                        self.answer_time_waiters(0, port);
                     }
                 }
                 ReplyOutcome::Handled
@@ -385,7 +421,7 @@ impl StreamFeeder {
             StreamReply::Error(error) => {
                 // tdesktop answers 0 on any failure and rejoins on the two
                 // membership errors; TDLib counts GROUPCALL_INVALID as left.
-                self.answer_timestamp_waiters(0, port);
+                self.answer_time_waiters(0, port);
                 match error {
                     StreamFetchError::RejoinNeeded => {
                         self.state = FeederState::Failed;
@@ -401,46 +437,48 @@ impl StreamFeeder {
                 }
             }
             StreamReply::Data(_) => {
-                self.answer_timestamp_waiters(0, port);
+                self.answer_time_waiters(0, port);
                 ReplyOutcome::Handled
             }
         }
     }
 
-    fn answer_timestamp_waiters(&mut self, timestamp_ms: i64, port: &mut impl StreamPort) {
-        let waiters = std::mem::take(&mut self.timestamp_waiters).max(1);
-        for _ in 0..waiters {
-            port.answer_timestamp(self.chat_id, timestamp_ms);
+    fn answer_time_waiters(&mut self, timestamp_ms: i64, port: &mut impl StreamPort) {
+        for request in std::mem::take(&mut self.time_waiters) {
+            port.answer_time(self.chat_id, request, timestamp_ms);
         }
     }
 
     fn answer(
         &self,
         port: &mut impl StreamPort,
-        request: &BroadcastPartRequest,
+        part: &PendingPart,
         status: BroadcastPartStatus,
         data: Vec<u8>,
         elapsed: Option<std::time::Duration>,
     ) {
         if self.trace {
             eprintln!(
-                "VS,{},ans,{},{},{:?},{},{}",
+                "VS,{},ans,{},{:?},{},{}",
                 self.chat_id,
-                request.segment_id,
-                request.part_id,
+                part.request.id,
                 status,
                 elapsed.map_or(-1, |elapsed| i64::try_from(elapsed.as_millis())
                     .unwrap_or(i64::MAX)),
                 data.len(),
             );
         }
+        // tdesktop answers with the reply's server time
+        // (`TimestampFromMsgId`); TDLib does not pass that on, so it is
+        // the server's time as Quill knows it now.
+        let response_time = port.server_time_ms() as f64 / 1000.0;
         port.answer_part(
             self.chat_id,
             BroadcastPartAnswer {
-                segment_id: request.segment_id,
-                part_id: request.part_id,
+                request: part.request,
                 status,
-                quality_update: request.quality_update,
+                timestamp_ms: part.timestamp_ms,
+                response_time,
                 data,
             },
         );
@@ -479,11 +517,11 @@ impl StreamQualityTracker {
 }
 
 /// `QUILL_TRACE_VIDEO=1` also traces stream segments on stderr:
-/// `VS,<chat>,req,<segment>,<part>,<channel>,<quality>,<timestamp_ms>` when
-/// a segment is asked of TDLib and
-/// `VS,<chat>,ans,<segment>,<part>,<status>,<elapsed_ms>,<bytes>` when
-/// ntgcalls gets its answer (`elapsed_ms` is -1 for answers that never
-/// went to TDLib).
+/// `VS,<chat>,req,<request>,<channel>,<quality>,<scale>,<timestamp_ms>`
+/// when a segment is asked of TDLib and
+/// `VS,<chat>,ans,<request>,<status>,<elapsed_ms>,<bytes>` when the
+/// engine gets its answer (`elapsed_ms` is -1 for answers that never went
+/// to TDLib).
 fn trace_stream() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("QUILL_TRACE_VIDEO").is_some())

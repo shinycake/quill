@@ -1,10 +1,10 @@
 //! Driver tests: stream-mode group calls (RTMP live streams) — the
-//! broadcast requests from ntgcalls go to TDLib through the recording
-//! sender and the answers back to the engine.
+//! engine's broadcast requests go to TDLib through the recording sender
+//! and the answers back to the engine.
 use super::*;
 use crate::calls::engine::{
-    BroadcastPartRequest, BroadcastPartStatus, EngineEvent, GroupCallMode, StreamQuality,
-    StreamState,
+    BroadcastChannel, BroadcastPartRequest, BroadcastPartStatus, BroadcastRequestId, EngineEvent,
+    GroupCallMode, StreamQuality, StreamState,
 };
 use ntgcalls_sys::NTG_ERR_RTMP_STREAMING_UNSUPPORTED;
 use std::time::Instant;
@@ -39,28 +39,50 @@ fn extra_of(request: &Value) -> String {
         .to_string()
 }
 
-fn part(segment_id: i64) -> BroadcastPartRequest {
+fn engine_id(id: u64) -> BroadcastRequestId {
+    BroadcastRequestId { instance: 1, id }
+}
+
+/// The unified part of segment `segment`, as tgcalls asks an RTMP stream.
+fn part(segment: i64) -> BroadcastPartRequest {
     BroadcastPartRequest {
-        segment_id,
-        part_id: 0,
-        limit: 131_072,
-        timestamp: 1_700_000_000_000 + segment_id * 1000,
-        quality_update: false,
-        channel_id: 1,
-        quality: Some(StreamQuality::Full),
+        timestamp_ms: 1_700_000_000_000 + segment * 1000,
+        duration_ms: 1000,
+        channel: BroadcastChannel::Video {
+            channel_id: 1,
+            quality: StreamQuality::Full,
+        },
     }
 }
 
+/// Asks for segment `segment`'s part, with the segment as its request id.
 fn request_part(
     driver: &mut ConnectDriver<Arc<RecordingSender>>,
     handle: &MockEngine,
-    segment_id: i64,
+    segment: i64,
 ) {
     handle.emit_engine_event(EngineEvent::BroadcastPartRequested {
         chat_id: 51,
-        request: part(segment_id),
+        request: engine_id(segment as u64),
+        part: part(segment),
     });
     driver.request_tick(Instant::now());
+}
+
+fn ask_time(handle: &MockEngine, id: u64) {
+    handle.emit_engine_event(EngineEvent::BroadcastTimeRequested {
+        chat_id: 51,
+        request: engine_id(id),
+    });
+}
+
+/// `(chat, request id, time)` per time answer.
+fn times(handle: &MockEngine) -> Vec<(i64, u64, i64)> {
+    handle
+        .broadcast_times()
+        .into_iter()
+        .map(|(chat, request, time)| (chat, request.id, time))
+        .collect()
 }
 
 fn stream_state(driver: &ConnectDriver<Arc<RecordingSender>>) -> (GroupCallMode, StreamState) {
@@ -77,7 +99,7 @@ fn stream_state(driver: &ConnectDriver<Arc<RecordingSender>>) -> (GroupCallMode,
 fn an_engine_stream_request_wakes_the_poll_loop() {
     let (dir, _driver, _recorder, handle, ..) = joined_stream_call(GroupCallMode::Rtmp);
     let seen = crate::wake::UPDATES.epoch();
-    handle.emit_engine_event(EngineEvent::BroadcastTimestampRequested { chat_id: 51 });
+    ask_time(&handle, 1);
     assert!(
         crate::wake::UPDATES.epoch() != seen,
         "the hook must poke so the request is not left for the idle sleep"
@@ -98,7 +120,7 @@ fn connect_records_the_stream_mode() {
 #[test]
 fn timestamp_request_asks_tdlib_and_answers_the_engine() {
     let (dir, mut driver, recorder, handle, sink, seq) = joined_stream_call(GroupCallMode::Rtmp);
-    handle.emit_engine_event(EngineEvent::BroadcastTimestampRequested { chat_id: 51 });
+    ask_time(&handle, 1);
     assert!(driver.request_tick(Instant::now()));
     let request = sent_request(&recorder, "getGroupCallStreams");
     assert_eq!(request["group_call_id"], 555);
@@ -111,7 +133,7 @@ fn timestamp_request_asks_tdlib_and_answers_the_engine() {
             extra_of(&request)
         ),
     );
-    assert_eq!(handle.broadcast_timestamps(), vec![(51, 1_700_000_123_456)]);
+    assert_eq!(times(&handle), vec![(51, 1, 1_700_000_123_456)]);
     // Live comes with the first segment, not the stream list.
     assert_eq!(stream_state(&driver).1, StreamState::Connecting);
     let _ = std::fs::remove_dir_all(&dir);
@@ -120,7 +142,7 @@ fn timestamp_request_asks_tdlib_and_answers_the_engine() {
 #[test]
 fn empty_stream_list_shows_no_stream() {
     let (dir, mut driver, recorder, handle, sink, seq) = joined_stream_call(GroupCallMode::Rtmp);
-    handle.emit_engine_event(EngineEvent::BroadcastTimestampRequested { chat_id: 51 });
+    ask_time(&handle, 1);
     driver.request_tick(Instant::now());
     let request = sent_request(&recorder, "getGroupCallStreams");
     ingest_call_json(
@@ -132,8 +154,77 @@ fn empty_stream_list_shows_no_stream() {
             extra_of(&request)
         ),
     );
-    assert_eq!(handle.broadcast_timestamps(), vec![(51, 0)]);
+    assert_eq!(times(&handle), vec![(51, 1, 0)]);
     assert_eq!(stream_state(&driver).1, StreamState::NoStream);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_mtproto_stream_gets_the_servers_time_without_asking_tdlib() {
+    let (dir, mut driver, recorder, handle, sink, seq) = joined_stream_call(GroupCallMode::Stream);
+    // TDLib says the server is an hour ahead of this machine.
+    let local_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("after 1970")
+        .as_millis() as i64;
+    let server_s = local_ms / 1000 + 3600;
+    ingest_call_json(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"updateOption","name":"unix_time","value":{{"@type":"optionValueInteger","value":"{server_s}"}}}}"#
+        ),
+    );
+    ask_time(&handle, 9);
+    driver.request_tick(Instant::now());
+    assert!(
+        !recorder
+            .snapshot()
+            .iter()
+            .any(|json| json.contains("getGroupCallStreams"))
+    );
+    let answered = times(&handle);
+    let (chat, id, time) = *answered.first().expect("a time answer");
+    assert_eq!((chat, id), (51, 9));
+    // The server's clock, not this machine's: well past local time.
+    assert!(
+        time >= server_s * 1000 && time >= local_ms + 3_000_000,
+        "{time}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_cancelled_part_is_not_answered() {
+    let (dir, mut driver, recorder, handle, sink, seq) = joined_stream_call(GroupCallMode::Rtmp);
+    request_part(&mut driver, &handle, 3);
+    let request = sent_request(&recorder, "getGroupCallStreamSegment");
+    handle.emit_engine_event(EngineEvent::BroadcastRequestCancelled {
+        chat_id: 51,
+        request: engine_id(3),
+    });
+    driver.request_tick(Instant::now());
+    ingest_call_json(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"data","data":"AQID","@extra":"{}"}}"#,
+            extra_of(&request)
+        ),
+    );
+    assert!(handle.broadcast_parts().is_empty());
+    // The late reply never reaches the reducer either.
+    assert!(
+        driver
+            .session
+            .requests
+            .get(crate::ids::RequestId(
+                extra_of(&request).parse().expect("numeric extra")
+            ))
+            .is_none()
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -162,7 +253,8 @@ fn part_request_sends_the_segment_request_and_data_answers_success() {
     let parts = handle.broadcast_parts();
     let (chat_id, answer) = parts.first().expect("part answer");
     assert_eq!(*chat_id, 51);
-    assert_eq!(answer.segment_id, 3);
+    assert_eq!(answer.request, engine_id(3));
+    assert_eq!(answer.timestamp_ms, 1_700_000_003_000);
     assert_eq!(answer.status, BroadcastPartStatus::Success);
     assert_eq!(answer.data, vec![1, 2, 3]);
     assert_eq!(stream_state(&driver).1, StreamState::Live);
@@ -321,11 +413,12 @@ fn data_without_bytes_answers_resync_needed() {
 fn every_queued_request_is_answered() {
     let (dir, mut driver, recorder, handle, ..) = joined_stream_call(GroupCallMode::Rtmp);
     // Far more than one tick handles and more than the old bounded queue
-    // held: none may be dropped, since ntgcalls never asks again.
+    // held: none may be dropped, since the engine never asks again.
     for segment in 0..600 {
         handle.emit_engine_event(EngineEvent::BroadcastPartRequested {
             chat_id: 51,
-            request: part(segment),
+            request: engine_id(segment as u64),
+            part: part(segment),
         });
     }
     for _ in 0..20 {
@@ -351,7 +444,7 @@ fn leaving_answers_pending_parts_resync_needed_before_the_stop() {
     let statuses: Vec<_> = handle
         .broadcast_parts()
         .iter()
-        .map(|(_, answer)| (answer.segment_id, answer.status))
+        .map(|(_, answer)| (answer.request.id, answer.status))
         .collect();
     assert_eq!(
         statuses,
@@ -372,9 +465,9 @@ fn requests_for_a_call_without_a_feeder_are_answered_at_once() {
         GroupCallMode::Rtc,
         "an RTC call has no feeder"
     );
-    handle.emit_engine_event(EngineEvent::BroadcastTimestampRequested { chat_id: 51 });
+    ask_time(&handle, 1);
     request_part(&mut driver, &handle, 4);
-    assert_eq!(handle.broadcast_timestamps(), vec![(51, 0)]);
+    assert_eq!(times(&handle), vec![(51, 1, 0)]);
     assert_eq!(
         handle.broadcast_parts().last().map(|(_, a)| a.status),
         Some(BroadcastPartStatus::ResyncNeeded)
@@ -399,8 +492,8 @@ fn tile_width_reports_quality_only_on_bucket_change() {
         handle.stream_qualities(),
         vec![(51, StreamQuality::Full), (51, StreamQuality::Thumbnail)]
     );
-    // The tile's quality is recorded, but the request keeps what ntgcalls
-    // asked for (Full for RTMP, as tgcalls asks for tdesktop).
+    // The tile's quality is recorded, but the request keeps what the
+    // engine asked for (Full for RTMP, as tgcalls asks for tdesktop).
     request_part(&mut driver, &handle, 2);
     let request = sent_request(&recorder, "getGroupCallStreamSegment");
     assert_eq!(

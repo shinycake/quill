@@ -35,6 +35,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // the 429 and the request stays pending.
         // Stream segments: the feeder answers ntgcalls before the reducer
         // (and the flood retry, which would delay a live segment) sees it.
+        self.note_server_time(&owned.envelope);
         if self.absorb_stream_answer(&owned.envelope, std::time::Instant::now()) {
             return Ok(());
         }

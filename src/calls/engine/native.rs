@@ -12,6 +12,7 @@ use ntgcalls_sys::{
     ntg_remote_source, ntg_segment_part_request, ntg_stream_device, ntg_stream_mode,
     ntg_stream_status, ntg_video_rotation,
 };
+use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_void};
 use std::ptr::null_mut;
 use std::sync::atomic::Ordering;
@@ -270,6 +271,62 @@ pub(crate) fn live_rotation(rotation: ntg_video_rotation) -> LiveRotation {
     }
 }
 
+/// ntgcalls names a part by segment and part id, the engine trait by a
+/// request id: the parts ntgcalls asked for and not yet answered, by the
+/// id Quill gave them. ntgcalls has no cancel, so a part stays until its
+/// answer or until its chat's call ends.
+#[derive(Debug, Default)]
+pub(crate) struct NtgPartRequests {
+    next_id: u64,
+    open: HashMap<u64, NtgPart>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NtgPart {
+    pub(crate) chat_id: i64,
+    pub(crate) segment_id: i64,
+    pub(crate) part_id: i32,
+    pub(crate) quality_update: bool,
+}
+
+impl NtgPartRequests {
+    /// A new request id; `part` is kept for its answer when given.
+    pub(crate) fn open(&mut self, part: Option<NtgPart>) -> BroadcastRequestId {
+        self.next_id = self.next_id.wrapping_add(1);
+        if let Some(part) = part {
+            self.open.insert(self.next_id, part);
+        }
+        BroadcastRequestId {
+            instance: 0,
+            id: self.next_id,
+        }
+    }
+
+    pub(crate) fn take(&mut self, request: BroadcastRequestId) -> Option<NtgPart> {
+        self.open.remove(&request.id)
+    }
+
+    pub(crate) fn forget_chat(&mut self, chat_id: i64) {
+        self.open.retain(|_, part| part.chat_id != chat_id);
+    }
+}
+
+/// ntgcalls' part request as the engine trait asks it: ntgcalls loads
+/// one-second segments, and a part without a quality is the audio one.
+pub(crate) fn ntg_part_request(request: &ntg_segment_part_request) -> BroadcastPartRequest {
+    BroadcastPartRequest {
+        timestamp_ms: request.timestamp,
+        duration_ms: 1000,
+        channel: match StreamQuality::from_native(request.quality) {
+            None => BroadcastChannel::Audio,
+            Some(quality) => BroadcastChannel::Video {
+                channel_id: request.channel_id,
+                quality,
+            },
+        },
+    }
+}
+
 /// Stream mode (RTMP only): ntgcalls needs the stream's current time. The
 /// request is handed to the connect side and answered later with
 /// `ntg_send_broadcast_timestamp`; nothing blocks this ntgcalls thread.
@@ -285,7 +342,11 @@ pub(crate) unsafe extern "C" fn broadcast_timestamp_trampoline(
         // SAFETY: registration passes an Arc-owned `CallbackShared` pointer and
         // Drop unregisters the callback before releasing the Arc.
         let shared = unsafe { &*user_data.cast::<CallbackShared>() };
-        emit_engine_event(shared, EngineEvent::BroadcastTimestampRequested { chat_id });
+        let request = shared.ntg_parts.lock_or_recover().open(None);
+        emit_engine_event(
+            shared,
+            EngineEvent::BroadcastTimeRequested { chat_id, request },
+        );
     })
 }
 
@@ -305,11 +366,18 @@ pub(crate) unsafe extern "C" fn broadcast_part_trampoline(
         // SAFETY: registration passes an Arc-owned `CallbackShared` pointer and
         // Drop unregisters the callback before releasing the Arc.
         let shared = unsafe { &*user_data.cast::<CallbackShared>() };
+        let id = shared.ntg_parts.lock_or_recover().open(Some(NtgPart {
+            chat_id,
+            segment_id: request.segment_id,
+            part_id: request.part_id,
+            quality_update: request.quality_update,
+        }));
         emit_engine_event(
             shared,
             EngineEvent::BroadcastPartRequested {
                 chat_id,
-                request: BroadcastPartRequest::from_native(&request),
+                request: id,
+                part: ntg_part_request(&request),
             },
         );
     })
@@ -319,8 +387,9 @@ pub(crate) unsafe extern "C" fn broadcast_part_trampoline(
 /// it). Events for chats with no group call are dropped.
 fn emit_engine_event(shared: &CallbackShared, event: EngineEvent) {
     let chat_id = match &event {
-        EngineEvent::BroadcastTimestampRequested { chat_id }
-        | EngineEvent::BroadcastPartRequested { chat_id, .. } => *chat_id,
+        EngineEvent::BroadcastTimeRequested { chat_id, .. }
+        | EngineEvent::BroadcastPartRequested { chat_id, .. }
+        | EngineEvent::BroadcastRequestCancelled { chat_id, .. } => *chat_id,
         // ntgcalls reports no speaker levels.
         EngineEvent::GroupAudioLevels { .. } => return,
     };

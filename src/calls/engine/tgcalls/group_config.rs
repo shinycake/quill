@@ -2,7 +2,7 @@
 //! builds it (calls_group_call.cpp): how a join answer connects
 //! (`ParseJoinResponse`), and which participant videos to receive at what
 //! quality (`GroupCall::updateRequestedVideoChannels`).
-use super::super::{GroupCallMode, GroupVideoSource};
+use super::super::{GroupCallMode, GroupVideoSource, StreamQuality};
 use quill_calls_sys::{QC_GROUP_QUALITY_FULL, QC_GROUP_QUALITY_MEDIUM, QC_GROUP_QUALITY_THUMBNAIL};
 use serde_json::{Value, json};
 
@@ -10,6 +10,19 @@ use serde_json::{Value, json};
 /// and at most sixteen Medium ones are asked for.
 const FULL_AS_MEDIUMS: usize = 4;
 const MAX_MEDIUMS: usize = 16;
+
+/// The endpoint of an RTMP stream's video (tdesktop's
+/// `Data::RtmpEndpointId`, the one tgcalls delivers unified parts to).
+pub(super) const RTMP_ENDPOINT: &str = "unified";
+
+/// The least quality to ask of an RTMP stream's video: Full while its
+/// tile is Full, as tdesktop asks, else whatever tgcalls can get.
+pub(super) fn unified_min_quality(tile: Option<StreamQuality>) -> i32 {
+    match tile {
+        Some(StreamQuality::Full) => QC_GROUP_QUALITY_FULL,
+        Some(StreamQuality::Medium | StreamQuality::Thumbnail) | None => QC_GROUP_QUALITY_THUMBNAIL,
+    }
+}
 
 /// How the `joinVideoChat` answer connects: `"rtmp": true` is an RTMP
 /// broadcast, `"stream": true` an MTProto one, anything else (a malformed
@@ -65,11 +78,13 @@ pub(super) fn requested_videos(sources: &[GroupVideoSource]) -> Vec<RequestedVid
         .collect()
 }
 
-/// `qc_group_set_requested_video`'s JSON for `sources`. Each video names
-/// its participant's audio ssrc, which tgcalls syncs it to, as tdesktop's
-/// `.audioSsrc = participant->ssrc`.
-pub(super) fn requested_video_json(sources: &[GroupVideoSource]) -> String {
-    let channels: Vec<Value> = requested_videos(sources)
+/// `qc_group_set_requested_video`'s JSON for `sources`, and for an RTMP
+/// stream's unified video at least at `unified` quality (up to Full, as
+/// tdesktop asks for it). Each video names its participant's audio ssrc,
+/// which tgcalls syncs it to, as tdesktop's `.audioSsrc =
+/// participant->ssrc`; the unified video has none.
+pub(super) fn requested_video_json(sources: &[GroupVideoSource], unified: Option<i32>) -> String {
+    let mut channels: Vec<Value> = requested_videos(sources)
         .iter()
         .map(|video| {
             json!({
@@ -85,6 +100,13 @@ pub(super) fn requested_video_json(sources: &[GroupVideoSource]) -> String {
             })
         })
         .collect();
+    if let Some(min_quality) = unified {
+        channels.push(json!({
+            "endpoint": RTMP_ENDPOINT,
+            "min_quality": min_quality,
+            "max_quality": QC_GROUP_QUALITY_FULL,
+        }));
+    }
     Value::Array(channels).to_string()
 }
 
@@ -172,7 +194,8 @@ mod tests {
 
     #[test]
     fn the_json_carries_each_video() {
-        let json: Value = serde_json::from_str(&requested_video_json(&[source(0, true)])).unwrap();
+        let json: Value =
+            serde_json::from_str(&requested_video_json(&[source(0, true)], None)).unwrap();
         let channel = &json[0];
         assert_eq!(channel["endpoint"], "endpoint-0");
         assert_eq!(channel["user_id"], 100);
@@ -180,6 +203,31 @@ mod tests {
         assert_eq!(channel["ssrc_groups"][0]["semantics"], "SIM");
         assert_eq!(channel["ssrc_groups"][0]["ssrcs"], json!([1, 2, 3]));
         assert_eq!(channel["max_quality"], QC_GROUP_QUALITY_FULL);
-        assert_eq!(requested_video_json(&[]), "[]");
+        assert_eq!(requested_video_json(&[], None), "[]");
+    }
+
+    #[test]
+    fn an_rtmp_stream_asks_for_its_unified_video() {
+        let json: Value =
+            serde_json::from_str(&requested_video_json(&[], Some(QC_GROUP_QUALITY_FULL))).unwrap();
+        assert_eq!(
+            json,
+            json!([{
+                "endpoint": "unified",
+                "min_quality": QC_GROUP_QUALITY_FULL,
+                "max_quality": QC_GROUP_QUALITY_FULL,
+            }])
+        );
+        assert_eq!(
+            unified_min_quality(Some(StreamQuality::Full)),
+            QC_GROUP_QUALITY_FULL
+        );
+        for tile in [
+            None,
+            Some(StreamQuality::Medium),
+            Some(StreamQuality::Thumbnail),
+        ] {
+            assert_eq!(unified_min_quality(tile), QC_GROUP_QUALITY_THUMBNAIL);
+        }
     }
 }

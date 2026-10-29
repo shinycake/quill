@@ -476,9 +476,10 @@ impl CallEngine for NtgcallsEngine {
             .and_then(|media| media.stream_quality)
     }
 
-    fn send_broadcast_timestamp(
+    fn answer_broadcast_time(
         &mut self,
         chat_id: i64,
+        _request: BroadcastRequestId,
         timestamp_ms: i64,
     ) -> Result<(), EngineError> {
         let instance = self.instance.ok_or(EngineError::NullInstance)?;
@@ -496,12 +497,21 @@ impl CallEngine for NtgcallsEngine {
         }
     }
 
-    fn send_broadcast_part(
+    fn answer_broadcast_part(
         &mut self,
         chat_id: i64,
         answer: &BroadcastPartAnswer,
     ) -> Result<(), EngineError> {
         let instance = self.instance.ok_or(EngineError::NullInstance)?;
+        // A part whose call ended is no longer asked for.
+        let Some(part) = self
+            .callback
+            .ntg_parts
+            .lock_or_recover()
+            .take(answer.request)
+        else {
+            return Ok(());
+        };
         let data = answer.native_data_ptr();
         // SAFETY: the instance is live and `data` is null with length 0 or
         // points to `answer.data` (dangling but non-null when empty, read
@@ -511,10 +521,10 @@ impl CallEngine for NtgcallsEngine {
             (self.api.ntg_send_broadcast_part)(
                 instance.as_ptr(),
                 chat_id,
-                answer.segment_id,
-                answer.part_id,
+                part.segment_id,
+                part.part_id,
                 answer.status.to_native(),
-                answer.quality_update,
+                part.quality_update,
                 data,
                 answer.native_data_len(),
             )

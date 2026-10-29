@@ -3,45 +3,57 @@
 //! they read. `qc_group_destroy` returns only once no callback can run,
 //! and the engine keeps the context alive until then (and past clearing
 //! the camera preview).
-use super::super::{CallbackShared, EngineEvent, GroupAudioLevel};
+use super::super::{
+    BroadcastChannel, BroadcastPartRequest, BroadcastRequestId, CallbackShared, EngineEvent,
+    GroupAudioLevel, StreamQuality,
+};
 use super::callbacks::send_picture;
 use crate::calls::live_video::LiveKey;
 use crate::calls::stream_audio::StreamAudio;
 use crate::locks::LockExt;
 use arc_swap::ArcSwapOption;
-use quill_calls_sys::{qc_group_callbacks, qc_group_level, qc_video_frame};
+use quill_calls_sys::{
+    QC_GROUP_QUALITY_FULL, QC_GROUP_QUALITY_MEDIUM, qc_group_broadcast_part, qc_group_callbacks,
+    qc_group_level, qc_video_frame,
+};
 use std::collections::HashMap;
 use std::ffi::{CStr, c_char, c_void};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-/// Who sends an incoming video endpoint: the participant, and whether it
-/// is their screen rather than their camera.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct EndpointOwner {
-    pub(super) user_id: i64,
-    pub(super) screen: bool,
-}
+/// Numbers every instance, so an answer meant for a replaced one (a
+/// rejoin starts its request ids over) never reaches its successor.
+static NEXT_INSTANCE: AtomicU64 = AtomicU64::new(1);
 
 /// One group call's (or presentation's) view of the engine's hooks,
 /// handed to tgcalls as `user`.
 pub(super) struct GroupContext {
     pub(super) group_call_id: i32,
+    /// The chat the call is in: stream requests and pictures are keyed
+    /// by it.
+    pub(super) chat_id: i64,
+    /// This instance's number in its broadcast request ids.
+    pub(super) instance: u64,
     pub(super) presentation: bool,
     pub(super) shared: Arc<CallbackShared>,
     /// Where the call's sound goes; `None` drops it (no output open).
     pub(super) sound: ArcSwapOption<StreamAudio>,
-    /// The endpoints whose pictures Quill takes, by endpoint id.
-    pub(super) endpoints: Mutex<HashMap<String, EndpointOwner>>,
+    /// The endpoints whose pictures Quill takes and the feed each one
+    /// goes to, by endpoint id.
+    pub(super) endpoints: Mutex<HashMap<String, LiveKey>>,
 }
 
 impl GroupContext {
     pub(super) fn new(
         group_call_id: i32,
+        chat_id: i64,
         presentation: bool,
         shared: &Arc<CallbackShared>,
     ) -> Self {
         Self {
             group_call_id,
+            chat_id,
+            instance: NEXT_INSTANCE.fetch_add(1, Ordering::Relaxed),
             presentation,
             shared: Arc::clone(shared),
             sound: ArcSwapOption::empty(),
@@ -50,10 +62,10 @@ impl GroupContext {
     }
 
     /// The callbacks tdesktop wires for the instance: a presentation
-    /// reports only its network state. Nobody answers media channel,
-    /// time or stream part requests yet (live streams are the next
-    /// step), so tgcalls accepts every ssrc as it comes and a broadcast
-    /// waits for parts.
+    /// reports only its network state, the call also its levels, sound,
+    /// videos and the stream's time and part requests. Media channel
+    /// requests stay unwired, so tgcalls accepts every ssrc as it comes
+    /// (docs/decisions/tgcalls-engine.md).
     pub(super) fn callbacks(self: &Arc<Self>) -> qc_group_callbacks {
         let call = !self.presentation;
         qc_group_callbacks {
@@ -63,9 +75,24 @@ impl GroupContext {
             audio_out: call.then_some(on_audio as _),
             incoming_video: call.then_some(on_incoming_video as _),
             request_media_channels: None,
-            request_current_time: None,
-            request_broadcast_part: None,
-            request_cancelled: None,
+            request_current_time: call.then_some(on_current_time as _),
+            request_broadcast_part: call.then_some(on_broadcast_part as _),
+            request_cancelled: call.then_some(on_request_cancelled as _),
+        }
+    }
+
+    fn request(&self, id: u64) -> BroadcastRequestId {
+        BroadcastRequestId {
+            instance: self.instance,
+            id,
+        }
+    }
+
+    /// Hands an event to the connect side's hook, which only queues it.
+    fn emit(&self, event: EngineEvent) {
+        let hook = self.shared.engine_event_hook.lock_or_recover().clone();
+        if let Some(hook) = hook {
+            hook(event);
         }
     }
 
@@ -114,14 +141,86 @@ unsafe extern "C" fn on_audio_levels(
         }
         // SAFETY: the library hands `count` levels at `levels` for this call.
         let levels = unsafe { std::slice::from_raw_parts(levels, count) };
-        let hook = call.shared.engine_event_hook.lock_or_recover().clone();
-        if let Some(hook) = hook {
-            hook(EngineEvent::GroupAudioLevels {
-                group_call_id: call.group_call_id,
-                levels: levels.iter().map(level).collect(),
-            });
-        }
+        call.emit(EngineEvent::GroupAudioLevels {
+            group_call_id: call.group_call_id,
+            levels: levels.iter().map(level).collect(),
+        });
     });
+}
+
+/// tgcalls' `requestCurrentTime`: answered with
+/// `qc_group_answer_current_time` by the connect side.
+unsafe extern "C" fn on_current_time(user: *mut c_void, request_id: u64) {
+    crate::thread_guard::ffi_boundary((), || {
+        // SAFETY: tgcalls passes back the `user` the engine registered.
+        let Some(call) = (unsafe { context(user) }) else {
+            return;
+        };
+        call.emit(EngineEvent::BroadcastTimeRequested {
+            chat_id: call.chat_id,
+            request: call.request(request_id),
+        });
+    });
+}
+
+/// tgcalls' `requestAudioBroadcastPart` and `requestVideoBroadcastPart`:
+/// answered with `qc_group_answer_broadcast_part`.
+unsafe extern "C" fn on_broadcast_part(
+    user: *mut c_void,
+    request_id: u64,
+    part: *const qc_group_broadcast_part,
+) {
+    crate::thread_guard::ffi_boundary((), || {
+        // SAFETY: tgcalls passes back the `user` the engine registered.
+        let Some(call) = (unsafe { context(user) }) else {
+            return;
+        };
+        // SAFETY: the library hands a part valid for this call, or null.
+        let Some(part) = (unsafe { part.as_ref() }) else {
+            return;
+        };
+        call.emit(EngineEvent::BroadcastPartRequested {
+            chat_id: call.chat_id,
+            request: call.request(request_id),
+            part: part_request(part),
+        });
+    });
+}
+
+/// tgcalls' `cancel()` of an open request.
+unsafe extern "C" fn on_request_cancelled(user: *mut c_void, request_id: u64) {
+    crate::thread_guard::ffi_boundary((), || {
+        // SAFETY: tgcalls passes back the `user` the engine registered.
+        let Some(call) = (unsafe { context(user) }) else {
+            return;
+        };
+        call.emit(EngineEvent::BroadcastRequestCancelled {
+            chat_id: call.chat_id,
+            request: call.request(request_id),
+        });
+    });
+}
+
+/// The part tgcalls asks for, with its `QC_GROUP_QUALITY_*` read as
+/// tdesktop reads tgcalls' quality (anything else is Thumbnail).
+pub(super) fn part_request(part: &qc_group_broadcast_part) -> BroadcastPartRequest {
+    let channel = if part.is_video == 0 {
+        BroadcastChannel::Audio
+    } else {
+        BroadcastChannel::Video {
+            channel_id: part.video_channel,
+            quality: match part.video_quality {
+                QC_GROUP_QUALITY_FULL => StreamQuality::Full,
+                QC_GROUP_QUALITY_MEDIUM => StreamQuality::Medium,
+                _ => StreamQuality::Thumbnail,
+            },
+        }
+    };
+    BroadcastPartRequest {
+        timestamp_ms: part.timestamp_ms,
+        duration_ms: part.duration_ms,
+        channel,
+    }
 }
 
 fn level(native: &qc_group_level) -> GroupAudioLevel {
@@ -170,13 +269,8 @@ unsafe extern "C" fn on_incoming_video(
             return;
         };
         // An endpoint dropped since the picture left tgcalls has no tile.
-        let Some(owner) = call.endpoints.lock_or_recover().get(endpoint).copied() else {
+        let Some(key) = call.endpoints.lock_or_recover().get(endpoint).copied() else {
             return;
-        };
-        let key = LiveKey::Video {
-            call_id: call.group_call_id,
-            user_id: owner.user_id,
-            screen: owner.screen,
         };
         // SAFETY: the library keeps the picture valid for this call.
         unsafe { send_picture(&call.shared, key, frame) };
@@ -236,10 +330,11 @@ mod tests {
     fn pictures_go_to_the_endpoints_owner_and_the_self_tile() {
         let shared = Arc::new(CallbackShared::new());
         let seen = recorder(&shared);
-        let context = Arc::new(GroupContext::new(7, false, &shared));
+        let context = Arc::new(GroupContext::new(7, -70, false, &shared));
         context.endpoints.lock().unwrap().insert(
             "screen-42".to_owned(),
-            EndpointOwner {
+            LiveKey::Video {
+                call_id: 7,
                 user_id: 42,
                 screen: true,
             },
@@ -269,15 +364,140 @@ mod tests {
     }
 
     #[test]
-    fn levels_reach_the_engine_event_hook() {
+    fn the_unified_stream_goes_to_the_chats_stream_feed() {
         let shared = Arc::new(CallbackShared::new());
+        let seen = recorder(&shared);
+        let context = Arc::new(GroupContext::new(7, -70, false, &shared));
+        context
+            .endpoints
+            .lock()
+            .unwrap()
+            .insert("unified".to_owned(), LiveKey::Stream { chat_id: -70 });
+        let planes = vec![128u8; 4 * 2 * 3 / 2];
+        let frame = picture(4, 2, &planes);
+        // SAFETY: as above.
+        unsafe { on_incoming_video(context.as_user(), c"unified".as_ptr(), &frame) };
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![LiveKey::Stream { chat_id: -70 }]
+        );
+    }
+
+    fn events(shared: &CallbackShared) -> Arc<Mutex<Vec<EngineEvent>>> {
         let events = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&events);
         set_hook(
             &shared.engine_event_hook,
             Arc::new(move |event| sink.lock().unwrap().push(event)) as _,
         );
-        let context = Arc::new(GroupContext::new(7, false, &shared));
+        events
+    }
+
+    #[test]
+    fn stream_requests_reach_the_hook_with_the_instances_id() {
+        let shared = Arc::new(CallbackShared::new());
+        let events = events(&shared);
+        let context = Arc::new(GroupContext::new(7, -70, false, &shared));
+        let other = Arc::new(GroupContext::new(7, -70, false, &shared));
+        assert_ne!(
+            context.instance, other.instance,
+            "each instance has its own"
+        );
+        let audio = qc_group_broadcast_part {
+            timestamp_ms: 1_700_000_000_000,
+            duration_ms: 1000,
+            is_video: 0,
+            video_channel: 0,
+            video_quality: 0,
+        };
+        let unified = qc_group_broadcast_part {
+            timestamp_ms: 0,
+            duration_ms: 500,
+            is_video: 1,
+            video_channel: 1,
+            video_quality: QC_GROUP_QUALITY_FULL,
+        };
+        // SAFETY: the context and the parts outlive the calls.
+        unsafe {
+            on_current_time(context.as_user(), 1);
+            on_broadcast_part(context.as_user(), 2, &audio);
+            on_broadcast_part(context.as_user(), 3, &unified);
+            on_broadcast_part(context.as_user(), 4, std::ptr::null());
+            on_request_cancelled(context.as_user(), 2);
+        }
+        let id = |id| BroadcastRequestId {
+            instance: context.instance,
+            id,
+        };
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec![
+                EngineEvent::BroadcastTimeRequested {
+                    chat_id: -70,
+                    request: id(1),
+                },
+                EngineEvent::BroadcastPartRequested {
+                    chat_id: -70,
+                    request: id(2),
+                    part: BroadcastPartRequest {
+                        timestamp_ms: 1_700_000_000_000,
+                        duration_ms: 1000,
+                        channel: BroadcastChannel::Audio,
+                    },
+                },
+                EngineEvent::BroadcastPartRequested {
+                    chat_id: -70,
+                    request: id(3),
+                    part: BroadcastPartRequest {
+                        timestamp_ms: 0,
+                        duration_ms: 500,
+                        channel: BroadcastChannel::Video {
+                            channel_id: 1,
+                            quality: StreamQuality::Full,
+                        },
+                    },
+                },
+                EngineEvent::BroadcastRequestCancelled {
+                    chat_id: -70,
+                    request: id(2),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn video_qualities_map_like_tgcalls() {
+        let part = |quality| qc_group_broadcast_part {
+            timestamp_ms: 5,
+            duration_ms: 1000,
+            is_video: 1,
+            video_channel: 2,
+            video_quality: quality,
+        };
+        let qualities: Vec<_> = [0, QC_GROUP_QUALITY_MEDIUM, QC_GROUP_QUALITY_FULL, 9]
+            .into_iter()
+            .map(|quality| part_request(&part(quality)).channel)
+            .collect();
+        let video = |quality| BroadcastChannel::Video {
+            channel_id: 2,
+            quality,
+        };
+        assert_eq!(
+            qualities,
+            vec![
+                video(StreamQuality::Thumbnail),
+                video(StreamQuality::Medium),
+                video(StreamQuality::Full),
+                video(StreamQuality::Thumbnail),
+            ]
+        );
+    }
+
+    #[test]
+    fn levels_reach_the_engine_event_hook() {
+        let shared = Arc::new(CallbackShared::new());
+        let events = events(&shared);
+        let context = Arc::new(GroupContext::new(7, -70, false, &shared));
         let levels = [
             qc_group_level {
                 ssrc: 0,
@@ -315,13 +535,18 @@ mod tests {
     #[test]
     fn a_presentation_reports_only_its_network() {
         let shared = Arc::new(CallbackShared::new());
-        let screen = Arc::new(GroupContext::new(7, true, &shared)).callbacks();
+        let screen = Arc::new(GroupContext::new(7, -70, true, &shared)).callbacks();
         assert!(screen.network_state.is_some());
         assert!(screen.audio_levels.is_none());
         assert!(screen.audio_out.is_none());
         assert!(screen.incoming_video.is_none());
-        let call = Arc::new(GroupContext::new(7, false, &shared)).callbacks();
+        assert!(screen.request_current_time.is_none());
+        assert!(screen.request_broadcast_part.is_none());
+        let call = Arc::new(GroupContext::new(7, -70, false, &shared)).callbacks();
         assert!(call.audio_levels.is_some() && call.audio_out.is_some());
+        assert!(call.request_current_time.is_some());
+        assert!(call.request_broadcast_part.is_some());
+        assert!(call.request_cancelled.is_some());
         assert!(call.request_media_channels.is_none());
     }
 }

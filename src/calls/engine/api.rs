@@ -198,9 +198,9 @@ pub trait CallEngine {
         Ok(())
     }
 
-    /// Stream mode: engine -> app; register the hook receiving ntgcalls'
-    /// broadcast timestamp and part requests. The hook runs on an ntgcalls
-    /// thread and must only queue the event.
+    /// Engine -> app; register the hook receiving the engine's broadcast
+    /// time and part requests, their cancellations and speaker levels.
+    /// The hook runs on an engine thread and must only queue the event.
     fn set_engine_event_callback(&mut self, callback: EngineEventCallback) {
         let _ = callback;
     }
@@ -220,9 +220,10 @@ pub trait CallEngine {
         None
     }
 
-    /// Stream mode: the quality the stream tile needs (from its size). The
-    /// connect side reads it back with `stream_quality` for the next part
-    /// request; ntgcalls asks for quality-update parts itself.
+    /// Stream mode: the quality the stream tile needs (from its size). An
+    /// RTMP stream's unified video is asked for at least at Full when the
+    /// tile is Full, as tdesktop asks for it; the engine picks the
+    /// quality of every other part itself.
     fn set_stream_quality(&mut self, chat_id: i64, quality: StreamQuality) {
         let _ = (chat_id, quality);
     }
@@ -233,19 +234,23 @@ pub trait CallEngine {
         None
     }
 
-    /// Stream mode: answer a timestamp request
-    /// (`ntg_send_broadcast_timestamp`); 0 means "no stream yet".
-    fn send_broadcast_timestamp(
+    /// Stream mode: answer a time request with the stream's current
+    /// server time in ms; 0 means "no stream yet" and the engine asks
+    /// again a second later. An answer to a request that is gone (its
+    /// instance replaced, or cancelled) does nothing.
+    fn answer_broadcast_time(
         &mut self,
         chat_id: i64,
+        request: BroadcastRequestId,
         timestamp_ms: i64,
     ) -> Result<(), EngineError> {
-        let _ = (chat_id, timestamp_ms);
+        let _ = (chat_id, request, timestamp_ms);
         Err(EngineError::Unavailable)
     }
 
-    /// Stream mode: answer a part request (`ntg_send_broadcast_part`).
-    fn send_broadcast_part(
+    /// Stream mode: answer a part request. An answer to a request that
+    /// is gone does nothing.
+    fn answer_broadcast_part(
         &mut self,
         chat_id: i64,
         answer: &BroadcastPartAnswer,
