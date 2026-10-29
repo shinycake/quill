@@ -209,6 +209,20 @@ An RTMP stream also asks for tdesktop's `RtmpEndpointId` (`"unified"`)
 video, at least Full while the stream tile is Full, and every picture of
 a stream goes to its chat's stream feed.
 
+Known gaps, kept on purpose for now:
+
+- A stream shows one picture: the RTMP feed alone, otherwise one
+  speaker's screen (or, without one, the first camera). Asking for every
+  endpoint would send all of them to the one stream feed.
+- Server time comes from TDLib's `unix_time` option, whole seconds
+  measured when the driver reads the update, so MTProto time answers can
+  be up to about a second off. tdesktop gets milliseconds from the join
+  reply's message id, which TDLib does not pass on. A time that runs
+  early is answered `TIME_TOO_BIG` and retried, so a stream starts a
+  little later but does not stall.
+- Requests queued by an instance a rejoin replaced still reach TDLib
+  once; their answers are dropped by instance id.
+
 ## Build order
 
 1. Build pipeline and the version API (this doc's first PR).

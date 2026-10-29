@@ -236,7 +236,7 @@ fn a_stream_is_received_only() {
 }
 
 #[test]
-fn an_mtproto_streams_videos_all_go_to_the_stream() {
+fn an_mtproto_stream_shows_one_video_on_the_stream() {
     let Some(mut engine) = engine() else { return };
     engine
         .create_group_call(7, -700, GroupCallRole::Viewer)
@@ -252,6 +252,18 @@ fn an_mtproto_streams_videos_all_go_to_the_stream() {
     assert_eq!(outputs(&engine, 7), vec!["camera-42"]);
     let route = engine.groups[&7].context.endpoints.lock().unwrap()["camera-42"];
     assert_eq!(route, LiveKey::Stream { chat_id: -700 });
+    // Two cameras and a screen: only the screen is asked for.
+    engine
+        .sync_group_video(
+            7,
+            &[
+                source(42, "camera-42", false),
+                source(43, "camera-43", false),
+                source(42, "screen-42", true),
+            ],
+        )
+        .unwrap();
+    assert_eq!(outputs(&engine, 7), vec!["screen-42"]);
     engine.leave_group_call(7).unwrap();
 }
 

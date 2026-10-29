@@ -375,14 +375,28 @@ impl TgcallsEngine {
         let call = self.group_mut(group_call_id)?;
         let unified = (call.connected && call.mode == GroupCallMode::Rtmp)
             .then(|| unified_min_quality(call.stream_quality));
-        let requested = requested_video_json(sources, unified);
         if call.video_sources != sources {
             call.video_sources = sources.to_vec();
         }
+        let stream = call.connected && call.mode.is_stream();
+        // A stream shows one picture: the RTMP feed alone, or one speaker
+        // (their screen first), so the feed never flips between people.
+        let chosen: Vec<GroupVideoSource> = match (stream, unified.is_some()) {
+            (false, _) => sources.to_vec(),
+            (true, true) => Vec::new(),
+            (true, false) => sources
+                .iter()
+                .find(|source| source.screen)
+                .or_else(|| sources.first())
+                .into_iter()
+                .cloned()
+                .collect(),
+        };
+        let sources = chosen.as_slice();
+        let requested = requested_video_json(sources, unified);
         if call.requested_video.as_deref() == Some(requested.as_str()) {
             return Ok(());
         }
-        let stream = call.connected && call.mode.is_stream();
         let key = |source: &GroupVideoSource| {
             if stream {
                 LiveKey::Stream {
