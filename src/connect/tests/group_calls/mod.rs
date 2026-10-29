@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 mod link;
+mod no_engine;
 mod rtmp_start;
 mod share_links;
 mod stream;
@@ -455,6 +456,7 @@ fn driver_group_call_invitation_accept_starts_tracking() {
 #[test]
 fn driver_auto_rejoin_group_call_discipline() {
     let (dir, recorder, mut driver, seq) = group_call_test_driver();
+    driver.set_call_engine(Box::new(crate::calls::engine::MockEngine::new()));
     let sink = Arc::new(MemorySink::new());
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let join_sends = || {

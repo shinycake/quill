@@ -877,6 +877,7 @@ mod camera_note_tests;
 mod clock_notify_tests;
 pub(super) mod demo_feed;
 mod dial;
+pub(in crate::ui) use dial::join_error_note;
 #[cfg(feature = "demo-capture")]
 mod history_demo;
 pub(super) mod live_pip;

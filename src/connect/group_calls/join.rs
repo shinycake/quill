@@ -92,12 +92,16 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// native handshake.
     /// Phase C2g: the native group transport is created first so the
     /// join carries the real tgcalls join payload as its payload, with
-    /// `audio_source_id` read from it. When
-    /// no engine is available (or the offer fails), the join still goes
-    /// out with the honest no-device params — signaling-only, as before.
+    /// `audio_source_id` read from it. Without an engine nothing is sent
+    /// (`CallsUnavailable`): a join would show you in the call while you
+    /// hear and see nothing. When the offer fails, the join still goes out
+    /// with the honest no-device params.
     pub fn join_video_chat(&mut self, group_call_id: i32) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.has_call_engine() {
+            return Err(ConnectSendError::CallsUnavailable);
         }
         // Never join while a 1:1 call is active. A tracked group call is
         // fine to join when it is the same call and not yet joined (the
@@ -391,6 +395,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        if !self.has_call_engine() {
+            return Err(ConnectSendError::CallsUnavailable);
+        }
         if manual && let Some(call) = self.session.calls.group_call_mut(group_call_id) {
             call.rejoin_attempts = 0;
         }
@@ -481,8 +488,8 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Phase C2g: build `joinVideoChat` params for a (re)join. Creates
     /// the native group context first so the payload is the real tgcalls
-    /// offer; degrades to the honest no-device params when no engine is
-    /// available or the offer fails (the join is never blocked).
+    /// offer; degrades to the honest no-device params when the offer
+    /// fails. The joins that call this refuse first without an engine.
     fn group_join_params(&mut self, group_call_id: i32, is_muted: bool) -> GroupCallJoinParams {
         let is_my_video_enabled = self
             .session

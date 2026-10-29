@@ -78,7 +78,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.call_engine = Some(engine);
     }
 
-    /// Phase C2c: whether a call engine is installed at all.
+    /// Phase C2c: whether a call engine is installed and available
+    /// (libquill_calls loaded). Without one no call of any kind is joined.
     pub fn has_call_engine(&self) -> bool {
         self.call_engine
             .as_ref()
@@ -155,14 +156,6 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Phase C2g: group-call alias of `call_screen_source_available`.
     pub fn group_call_screen_source_available(&self) -> bool {
         self.call_screen_source_available()
-    }
-
-    /// Phase C2g: whether the native call engine is installed and
-    /// available, for honest group-call audio/video state copy.
-    pub fn group_call_engine_available(&self) -> bool {
-        self.call_engine
-            .as_ref()
-            .is_some_and(|engine| engine.is_available())
     }
 
     /// Phase C2b: advertise the engine's protocol only when an engine is

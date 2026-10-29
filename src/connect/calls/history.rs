@@ -96,7 +96,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                     // diagnostics upload; categorized as invalid request.
                     ConnectSendError::CaptionTooLong { .. }
                     | ConnectSendError::TextTooLong { .. }
-                    | ConnectSendError::AgentDriving => {
+                    | ConnectSendError::AgentDriving
+                    | ConnectSendError::CallsUnavailable => {
                         "Could not upload diagnostics: invalid request".into()
                     }
                 });

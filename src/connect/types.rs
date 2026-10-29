@@ -222,6 +222,10 @@ pub enum ConnectSendError {
     /// The agent UI driver was injecting input and the request is not one
     /// the window may send for an agent (`agent::ui_driver::guard`).
     AgentDriving,
+    /// No call engine (libquill_calls did not load): a voice chat, live
+    /// stream or live story is not joined, since nothing would play or
+    /// send. The UI says calls are unavailable, as for a 1:1 call.
+    CallsUnavailable,
 }
 
 /// MED4: outcome of an Instant View open attempt (TGX

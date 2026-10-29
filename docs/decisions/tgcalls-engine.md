@@ -242,6 +242,14 @@ The app loads `TgcallsEngine` (`connect/live.rs`) and preloads its library
 off the UI thread (`preload_tgcalls`, `ui/early_connect.rs`). There is no
 other engine and no switch back; tests drive the mock engine.
 
+Without an engine (the library did not load) no call is joined: a 1:1
+call, a voice chat, a live stream and a live story all say "Calls are
+unavailable" (`ConnectSendError::CallsUnavailable` from
+`join_video_chat`, `rejoin_group_call` and `join_live_story`, and the UI's
+`refuse_without_call_engine` before it asks anything). Before the switch
+a group join went out signaling-only, and you sat in a call you could
+neither hear nor see.
+
 Deleted with ntgcalls: `crates/ntgcalls-sys`, `src/calls/engine/ntgcalls/`,
 the ntgcalls trampolines in `engine/native.rs`, `scripts/vendor-ntgcalls.sh`,
 its CI and packaging steps, its license files and its deps-watch source.

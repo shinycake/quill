@@ -3,9 +3,40 @@
 use super::super::app::QuillApp;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
-use quill::lang::{keys, tr};
+use quill::connect::ConnectSendError;
+use quill::lang::{Key, keys, tr};
+
+/// The note for a call join that did not go out: without the call library
+/// it is the same "calls are unavailable" a 1:1 call shows, else
+/// `fallback`.
+pub(in crate::ui) fn join_error_note(err: ConnectSendError, fallback: Key) -> StatusNote {
+    match err {
+        ConnectSendError::CallsUnavailable => {
+            StatusNote::error(tr(keys::Q_OPS_CALLS_ARE_UNAVAILABLE_THE_AUDIO))
+        }
+        _ => StatusNote::error(tr(fallback)),
+    }
+}
 
 impl QuillApp {
+    /// With a live connection but no call engine (libquill_calls did not
+    /// load), says calls are unavailable and returns true: nothing would
+    /// play or send, so no call of any kind starts or is joined.
+    pub(in crate::ui) fn refuse_without_call_engine(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self
+            .live
+            .as_ref()
+            .is_some_and(|live| !live.driver.has_call_engine())
+        {
+            return false;
+        }
+        self.connection.set_note(StatusNote::error(tr(
+            keys::Q_OPS_CALLS_ARE_UNAVAILABLE_THE_AUDIO,
+        )));
+        cx.notify();
+        true
+    }
+
     /// Phase C1b: `createCall` from a user profile. `is_video: true`
     /// starts video-call *signaling* — media transport is still Phase
     /// C2, so the call carries no audio or video and the UI says so.
@@ -23,15 +54,7 @@ impl QuillApp {
         is_video: bool,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .live
-            .as_ref()
-            .is_some_and(|live| !live.driver.has_call_engine())
-        {
-            self.connection.set_note(StatusNote::error(tr(
-                keys::Q_OPS_CALLS_ARE_UNAVAILABLE_THE_AUDIO,
-            )));
-            cx.notify();
+        if self.refuse_without_call_engine(cx) {
             return;
         }
         // Refuse offline before the confirm dialog — a call can't be
