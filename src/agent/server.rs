@@ -8,6 +8,7 @@
 //! several requests in flight at once.
 
 use super::access;
+use crate::single_instance::Connection;
 use interprocess::local_socket::{Stream, prelude::*};
 use serde_json::{Value, json};
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -184,8 +185,9 @@ fn authenticate(stream: &Stream) -> Result<(Value, String), (Value, i64, &'stati
 }
 
 /// Serve one agent connection whose header line was already read.
-pub fn serve(stream: Stream) {
-    let mut out = &stream;
+pub fn serve(connection: Connection) {
+    let stream = connection.stream();
+    let mut out = stream;
     if !access::enabled() {
         let _ = write_line(
             &mut out,
@@ -193,7 +195,7 @@ pub fn serve(stream: Stream) {
         );
         return;
     }
-    if !same_user(&stream) {
+    if !same_user(stream) {
         return;
     }
     let Some(waiting) = Slot::take(&UNAUTHENTICATED, MAX_UNAUTHENTICATED) else {
@@ -201,7 +203,7 @@ pub fn serve(stream: Stream) {
     };
     let generation = access::generation();
     let _ = stream.set_recv_timeout(Some(AUTH_TIMEOUT));
-    let (auth_id, agent) = match authenticate(&stream) {
+    let (auth_id, agent) = match authenticate(stream) {
         Ok(found) => found,
         Err((id, code, message)) => {
             let _ = write_line(&mut out, &error_line(&id, code, message));
@@ -243,7 +245,7 @@ pub fn serve(stream: Stream) {
         id: presence.id(),
     };
     let _ = stream.set_recv_timeout(Some(IDLE_CHECK));
-    let recv = super::link::SharedStream::new(stream);
+    let recv = super::link::SharedStream::new(connection);
     let send = Arc::new(Mutex::new(recv.clone()));
     let in_flight = Arc::new(AtomicUsize::new(0));
     let watching = Arc::new(AtomicU64::new(0));
