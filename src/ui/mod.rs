@@ -142,6 +142,9 @@ mod spell_state;
 mod start_files_state;
 mod start_files_ui;
 pub(crate) mod startup_failure;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod sticker_suggest_send_tests;
 mod stickers_manager;
 mod stories_state;
 mod synthetic;
