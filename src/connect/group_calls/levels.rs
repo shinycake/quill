@@ -116,7 +116,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             return changed;
         };
         let now_ms = self.group_levels.ms(now);
-        // Tell TDLib before an ssrc can be forgotten.
+        // Tell TDLib before an ssrc can be forgotten; a failed send stays
+        // pending for the next poll.
         let _ = self.tell_speaking(call_id, my_ssrc, now_ms);
         changed |= self.group_levels.levels.expire(now_ms);
         changed
@@ -135,21 +136,30 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// `setGroupCallParticipantIsSpeaking` for every other participant
-    /// whose speaking changed; your own goes through `call_audio`.
+    /// whose speaking changed; your own goes through `call_audio`. A
+    /// change stays pending until it was sent, so a failed send is
+    /// retried on the next batch or poll.
     fn tell_speaking(
         &mut self,
         call_id: i32,
         my_ssrc: u32,
         now_ms: u64,
     ) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Ok(());
+        }
         let changes = self
             .group_levels
             .levels
-            .take_speaking_changes(now_ms, |ssrc| ssrc != my_ssrc);
+            .speaking_changes(now_ms, |ssrc| ssrc != my_ssrc);
+        let mut failed = None;
         for (ssrc, speaking) in changes {
-            self.send_speaking(call_id, audio_source_of(ssrc), speaking)?;
+            match self.send_speaking(call_id, audio_source_of(ssrc), speaking) {
+                Ok(()) => self.group_levels.levels.mark_told(ssrc, speaking),
+                Err(err) => failed = Some(err),
+            }
         }
-        Ok(())
+        failed.map_or(Ok(()), Err)
     }
 
     /// What the row of the participant with `audio_source_id` shows at

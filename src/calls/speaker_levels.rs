@@ -151,8 +151,11 @@ impl SpeakerLevels {
     /// `checkLastSpoke`). Returns whether any stopped sounding or
     /// speaking since the last report.
     pub fn expire(&mut self, now_ms: u64) -> bool {
-        self.by_ssrc
-            .retain(|_, spoke| spoke.anything_ms + KEEP_IN_LIST_MS >= now_ms);
+        // One TDLib still thinks is speaking stays until it is told
+        // otherwise.
+        self.by_ssrc.retain(|_, spoke| {
+            spoke.anything_ms + KEEP_IN_LIST_MS >= now_ms || spoke.told_speaking
+        });
         self.refresh(now_ms)
     }
 
@@ -166,26 +169,28 @@ impl SpeakerLevels {
         true
     }
 
-    /// The speaking changes TDLib has not been told about, now marked
-    /// told. Only ssrcs `tell` accepts are reported (the driver leaves out
-    /// your own, which `call_audio` reports).
-    pub fn take_speaking_changes(
-        &mut self,
-        now_ms: u64,
-        tell: impl Fn(u32) -> bool,
-    ) -> SpeakingChanges {
-        let mut changes = Vec::new();
-        for (ssrc, spoke) in &mut self.by_ssrc {
-            let speaking = spoke.speaking(now_ms);
-            if speaking != spoke.told_speaking && tell(*ssrc) {
-                spoke.told_speaking = speaking;
-                changes.push((*ssrc, speaking));
-            }
-        }
-        // Forgotten ssrcs were silent past the kept-for window, and told
-        // `false` on the check before they went.
+    /// The speaking changes TDLib has not been told about. Only ssrcs
+    /// `tell` accepts are reported (the driver leaves out your own, which
+    /// `call_audio` reports). Each stays pending until `mark_told`.
+    pub fn speaking_changes(&self, now_ms: u64, tell: impl Fn(u32) -> bool) -> SpeakingChanges {
+        let mut changes: SpeakingChanges = self
+            .by_ssrc
+            .iter()
+            .filter_map(|(ssrc, spoke)| {
+                let speaking = spoke.speaking(now_ms);
+                (speaking != spoke.told_speaking && tell(*ssrc)).then_some((*ssrc, speaking))
+            })
+            .collect();
+        // `expire` keeps an ssrc until TDLib was told it stopped.
         changes.sort_unstable_by_key(|(ssrc, _)| *ssrc);
         changes
+    }
+
+    /// TDLib was sent `speaking` for `ssrc`.
+    pub fn mark_told(&mut self, ssrc: u32, speaking: bool) {
+        if let Some(spoke) = self.by_ssrc.get_mut(&ssrc) {
+            spoke.told_speaking = speaking;
+        }
     }
 
     /// What `ssrc`'s row shows at `now_ms`.
@@ -330,14 +335,19 @@ mod tests {
         let mut levels = SpeakerLevels::default();
         levels.apply(&[level(7, 0.8, true), level(5, 0.8, true)], 0);
         let tell_all = |_| true;
+        let changes = levels.speaking_changes(0, tell_all);
+        assert_eq!(changes, vec![(5, true), (7, true)]);
+        levels.mark_told(5, true);
         assert_eq!(
-            levels.take_speaking_changes(0, tell_all),
-            vec![(5, true), (7, true)]
+            levels.speaking_changes(100, tell_all),
+            vec![(7, true)],
+            "an unsent change stays pending"
         );
-        assert!(levels.take_speaking_changes(100, tell_all).is_empty());
+        levels.mark_told(7, true);
+        assert!(levels.speaking_changes(100, tell_all).is_empty());
         let later = SOUND_STATUS_KEPT_MS + 1;
         assert_eq!(
-            levels.take_speaking_changes(later, |ssrc| ssrc != 5),
+            levels.speaking_changes(later, |ssrc| ssrc != 5),
             vec![(7, false)],
             "your own ssrc is left to call_audio"
         );

@@ -64,6 +64,10 @@ pub struct MutedSpeechHint {
     showing: bool,
     /// Unmuted or closed: not again in this call.
     done: bool,
+    /// Whether the microphone was live at the last update: only a change
+    /// to live ends the hint, never the state the call joined in
+    /// (tdesktop `mutedValue() | rpl::skip(1)`).
+    was_live: Option<bool>,
 }
 
 impl MutedSpeechHint {
@@ -79,9 +83,11 @@ impl MutedSpeechHint {
                 ..Self::default()
             };
         }
-        if call.is_some_and(|call| call.live) {
+        let live = call.map(|call| call.live);
+        if self.was_live == Some(false) && live == Some(true) {
             self.done = true;
         }
+        self.was_live = live;
         // Not ready, muted by an admin, unmuted or closed: stop listening
         // (an admin's mute keeps `done` as it was, tdesktop's
         // `StickedTooltipHide::Unavailable`).
@@ -215,6 +221,19 @@ mod tests {
         assert!(hint.showing());
         assert!(hint.dismiss());
         assert_eq!(run(&mut hint, next, 0.9, 9100, 12_000), None);
+    }
+
+    #[test]
+    fn joining_unmuted_does_not_end_it() {
+        let mut hint = MutedSpeechHint::default();
+        let live = HintCall {
+            muted: false,
+            live: true,
+            ..MUTED
+        };
+        hint.update(Some(live), None, 0);
+        hint.update(Some(MUTED), None, 100);
+        assert_eq!(run(&mut hint, MUTED, 0.5, 200, 3000), Some(1600));
     }
 
     #[test]
