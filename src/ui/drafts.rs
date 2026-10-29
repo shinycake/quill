@@ -384,7 +384,7 @@ impl QuillApp {
         let text = self.composer.read(cx).value().to_string();
         self.composer_ui.prev_text = text.clone();
         self.sync_spellcheck(&text, cx);
-        self.sync_suggest_menu(cx);
+        self.sync_suggest_menu(false, cx);
     }
 
     pub(super) fn sync_composer_typing(&mut self, text: &str) {

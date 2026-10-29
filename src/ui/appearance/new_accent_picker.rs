@@ -601,7 +601,7 @@ impl QuillApp {
                     .accessibility_label(tr(keys::Q_PREFS_SUGGEST_EMOJI_REPLACEMENTS))
                     .on_click(cx.listener(|this, &on, _, cx| {
                         this.set_chat_prefs(cx, |c| c.suggest_emoji = on);
-                        this.sync_suggest_menu(cx);
+                        this.sync_suggest_menu(false, cx);
                     })),
             );
         // tdesktop "Replace emoji automatically" (`replaceEmoji`).

@@ -5,12 +5,14 @@ use crate::telegram::envelope::StickersPayload;
 use crate::telegram::envelope::{
     EnvelopePayload, MessageContent, ParsedFile, StickerItem, StickerSetInfo,
 };
-use crate::telegram::envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusItem};
+use crate::telegram::envelope_emoji::{EmojiCategory, EmojiStatusItem};
 use crate::text::TextEntityKind;
 use std::collections::{HashMap, HashSet};
 
 mod custom_stickers;
 pub use custom_stickers::CustomEmojiStickers;
+pub mod keyword_lookup;
+pub use keyword_lookup::KeywordLookups;
 
 /// Most resolved custom emoji kept in `EmojiPanel::custom_emoji_stickers`.
 pub const CUSTOM_EMOJI_CACHE_CAP: usize = 4000;
@@ -78,8 +80,8 @@ pub struct EmojiPanel {
     pub animated_emoji_for: Option<String>,
     /// Slice S10: last `getCustomEmojiStickers` answer.
     pub custom_emoji_stickers: CustomEmojiStickers,
-    /// Slice S10: `searchEmojis` results for the picker.
-    pub keyword_results: Vec<EmojiKeyword>,
+    /// `searchEmojis` answers for the composer's emoji suggestions.
+    pub keyword_lookups: KeywordLookups,
     /// B11: `getKeywordEmojis` answer for the panel's emoji search.
     pub keyword_emojis: Vec<String>,
     /// Slice S10: `getEmojiCategories` rows for the picker.
@@ -318,9 +320,6 @@ impl Session {
             EnvelopePayload::Stickers(StickersPayload::AnimatedEmoji { sticker, files }) => {
                 self.accept_animated_emoji(purpose, sticker, files);
             }
-            EnvelopePayload::Stickers(StickersPayload::EmojiKeywords { keywords }) => {
-                self.accept_emoji_keywords(purpose, keywords);
-            }
             EnvelopePayload::Stickers(StickersPayload::Emojis { emojis }) => {
                 if purpose == Some(RequestPurpose::GetKeywordEmojis) {
                     self.stickers.emoji.keyword_emojis = emojis;
@@ -371,17 +370,6 @@ impl Session {
         if purpose == Some(RequestPurpose::GetAnimatedEmoji) {
             self.remember_files(&files);
             self.stickers.emoji.animated_emoji = sticker;
-        }
-    }
-
-    /// Slice S10: store `emojiKeywords` under `SearchEmojis`.
-    pub fn accept_emoji_keywords(
-        &mut self,
-        purpose: Option<RequestPurpose>,
-        keywords: Vec<EmojiKeyword>,
-    ) {
-        if purpose == Some(RequestPurpose::SearchEmojis) {
-            self.stickers.emoji.keyword_results = keywords;
         }
     }
 

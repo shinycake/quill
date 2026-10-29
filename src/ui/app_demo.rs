@@ -434,7 +434,7 @@ impl QuillApp {
                 "tab" => menu_app
                     .update(cx, |this, cx| {
                         this.pick_mention_selection(window, cx)
-                            || this.pick_suggest_selection(window, cx)
+                            || this.pick_suggest_selection(true, window, cx)
                             || this.insert_command_menu_selection(window, cx)
                     })
                     .unwrap_or(false),

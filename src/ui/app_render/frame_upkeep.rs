@@ -26,6 +26,8 @@ impl QuillApp {
         self.restore_draft_if_pending(window, cx);
         self.adopt_remote_draft(window, cx);
         self.sync_composer_placeholder(window, cx);
+        // Emoji keywords for the `:` popup arrived.
+        self.refresh_suggest_menu(cx);
         // The chat windows open at the last run come back once the
         // account is ready (`chat_window::saved`).
         self.restore_chat_windows(window, cx);

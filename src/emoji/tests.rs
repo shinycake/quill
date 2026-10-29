@@ -317,8 +317,13 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
     assert_eq!(with_purpose.stickers.emoji.custom_emoji_stickers.len(), 1);
     assert!(with_purpose.stickers.stickers.favorites.is_empty());
 
-    // searchEmojis answers land under SearchEmojis.
+    // searchEmojis answers land in the keyword lookups.
     let extra = with_purpose.request(RequestPurpose::SearchEmojis, None);
+    with_purpose
+        .stickers
+        .emoji
+        .keyword_lookups
+        .sent(extra, "fire".into());
     apply_json(
         &mut with_purpose,
         &seq,
@@ -328,11 +333,9 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.emoji.keyword_results.len(), 1);
-    assert_eq!(
-        with_purpose.stickers.emoji.keyword_results[0].keyword,
-        "fire"
-    );
+    let lookups = &with_purpose.stickers.emoji.keyword_lookups;
+    assert_eq!(lookups.generation, 1);
+    assert_eq!(lookups.answer("fire").map(<[_]>::len), Some(1));
 
     // getEmojiCategories answers land under GetEmojiCategories.
     let extra = with_purpose.request(RequestPurpose::GetEmojiCategories, None);

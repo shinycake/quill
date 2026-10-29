@@ -104,7 +104,7 @@ impl QuillApp {
             _ => {
                 self.sync_command_menu(cx);
                 self.sync_mention_menu(cx);
-                self.sync_suggest_menu(cx);
+                self.sync_suggest_menu(true, cx);
                 self.sync_inline_mode(cx);
                 // codex:spellcheck-native: shift underlines with
                 // the edit and debounce a background re-check.
@@ -122,7 +122,7 @@ impl QuillApp {
                     // Enter was consumed by the inline results.
                 } else if self.pick_mention_selection(window, cx) {
                     // Enter completed the highlighted mention.
-                } else if self.pick_suggest_selection(window, cx) {
+                } else if self.pick_suggest_selection(false, window, cx) {
                     // Enter inserted the highlighted hashtag/emoji.
                 } else if self.pick_command_menu_selection(window, cx) {
                     // Enter was consumed by the open menu.
