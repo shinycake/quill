@@ -34,6 +34,13 @@ pub trait JsonSender: Send {
     fn take_refused_answers(&self) -> Vec<String> {
         Vec::new()
     }
+
+    /// Where a conference call's frame requests go
+    /// ([`crate::telegram::group_call_crypto`]); `None` when this sender
+    /// can't carry them, and a conference call is refused.
+    fn crypto_link(&self) -> Option<Arc<dyn crate::telegram::group_call_crypto::CryptoLink>> {
+        None
+    }
 }
 
 /// The agent UI driver's screen in front of a sender
@@ -185,6 +192,10 @@ impl JsonSender for RecordingSender {
         Some(&self.guard)
     }
 
+    fn crypto_link(&self) -> Option<Arc<dyn crate::telegram::group_call_crypto::CryptoLink>> {
+        Some(Arc::new(crate::telegram::group_call_crypto::RefusingLink))
+    }
+
     fn take_retained(&self, extra: RequestId) -> Option<String> {
         self.stash.take(extra)
     }
@@ -213,6 +224,10 @@ impl JsonSender for Arc<RecordingSender> {
 
     fn paid_guard(&self) -> Option<&crate::paid_messages_guard::PaidGuard> {
         (**self).paid_guard()
+    }
+
+    fn crypto_link(&self) -> Option<Arc<dyn crate::telegram::group_call_crypto::CryptoLink>> {
+        (**self).crypto_link()
     }
 
     fn take_refused_answers(&self) -> Vec<String> {
@@ -287,6 +302,12 @@ impl JsonSender for LiveSender {
 
     fn take_refused_answers(&self) -> Vec<String> {
         self.agent.take_answers()
+    }
+
+    fn crypto_link(&self) -> Option<Arc<dyn crate::telegram::group_call_crypto::CryptoLink>> {
+        Some(Arc::new(
+            crate::telegram::group_call_crypto::TdCryptoLink::new(self.api.clone(), self.client_id),
+        ))
     }
 }
 

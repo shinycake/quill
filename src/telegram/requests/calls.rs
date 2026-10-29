@@ -93,12 +93,26 @@ pub fn discard_call(
     duration_secs: i32,
     is_video: bool,
 ) -> String {
+    discard_call_into_conference(extra, call_id, is_disconnected, "", duration_secs, is_video)
+}
+
+/// `discardCall` with `invite_link`: "If the call was upgraded to a group
+/// call, then the link to the group call" (tdesktop hangs up with the
+/// conference's slug, `migrateConferenceInfo`). The other side follows it.
+pub fn discard_call_into_conference(
+    extra: RequestId,
+    call_id: i32,
+    is_disconnected: bool,
+    invite_link: &str,
+    duration_secs: i32,
+    is_video: bool,
+) -> String {
     json!({
         "@type": "discardCall",
         "@extra": extra.as_extra(),
         "call_id": call_id,
         "is_disconnected": is_disconnected,
-        "invite_link": "",
+        "invite_link": invite_link,
         "duration": duration_secs,
         "is_video": is_video,
         "connection_id": 0,

@@ -58,6 +58,16 @@ impl CryptoLink for TdCryptoLink {
     }
 }
 
+/// A client that takes no frame requests: a test sender's, where no call
+/// carries media.
+pub struct RefusingLink;
+
+impl CryptoLink for RefusingLink {
+    fn send(&self, _request: &str) -> bool {
+        false
+    }
+}
+
 /// What a waiting media thread gets: the frame, or `None` for TDLib's
 /// error (the call isn't joined yet, a frame that fails to decrypt).
 type Answer = Option<Vec<u8>>;
