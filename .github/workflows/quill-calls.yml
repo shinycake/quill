@@ -2,8 +2,7 @@ name: quill-calls
 # Builds libquill_calls (tgcalls + tg_owt behind Quill's C API,
 # docs/decisions/tgcalls-engine.md) on every platform we ship, loads it, and
 # uploads it. Runs on PRs that touch it; ci.yml and release.yml call it
-# before the Linux, macOS and Windows packages, which ship the uploaded
-# library.
+# before the Linux and macOS packages, which ship the uploaded library.
 on:
   pull_request:
     paths:

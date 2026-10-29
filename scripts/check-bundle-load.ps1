@@ -1,4 +1,4 @@
-# Load tdjson/quill_calls/quillvideo from the package and assert the FFmpeg DLLs mapped
+# Load tdjson/quill_calls (when shipped)/quillvideo from the package and assert the FFmpeg DLLs mapped
 # into this process came from the package directory, and that no OpenSSL/zlib DLL was
 # loaded at all (tdjson.dll links them statically).
 # Run with the package directory's DLLs not on PATH.   pwsh scripts/check-bundle-load.ps1 <dir>
@@ -7,6 +7,9 @@ $ErrorActionPreference = 'Stop'
 $Dir = (Resolve-Path $Dir).Path
 foreach ($name in 'tdjson.dll', 'quill_calls.dll', 'quillvideo.dll') {
     $path = Join-Path $Dir $name
+    # TODO(tgcalls-windows): quill_calls.dll is optional until the Windows
+    # build joins the packaging (docs/decisions/tgcalls-engine.md).
+    if ($name -eq 'quill_calls.dll' -and -not (Test-Path $path)) { Write-Host "no $name (calls unavailable)"; continue }
     $handle = [System.Runtime.InteropServices.NativeLibrary]::Load($path)
     Write-Host "loaded $name"
     if ($name -eq 'tdjson.dll') {

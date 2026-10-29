@@ -7,7 +7,7 @@ param([Parameter(Mandatory)][string]$Dir)
 . "$PSScriptRoot/windows-common.ps1"
 $Dir = (Resolve-Path $Dir).Path
 
-foreach ($required in 'quill.exe', 'quill-cli.exe', 'quill-webview.exe', 'tdjson.dll', 'quill_calls.dll', 'quillvideo.dll', 'ffmpeg.exe', 'ffprobe.exe') {
+foreach ($required in 'quill.exe', 'quill-cli.exe', 'quill-webview.exe', 'tdjson.dll', 'quillvideo.dll', 'ffmpeg.exe', 'ffprobe.exe') {
     if (-not (Test-Path (Join-Path $Dir $required))) { throw "package is missing $required" }
 }
 

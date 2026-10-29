@@ -3,7 +3,8 @@ Quill for Windows (x86_64)
 Unzip this folder anywhere and run quill.exe. Keep the DLLs next to it:
 
   tdjson.dll                         Telegram Database Library (TDLib; OpenSSL and zlib built in)
-  quill_calls.dll                    calls (Telegram's tgcalls, LGPL-3.0; licenses\quill-calls)
+  quill_calls.dll                    calls (Telegram's tgcalls, LGPL-3.0; licenses\quill-calls),
+                                     when this build includes it
   quillvideo.dll, av*.dll, sw*.dll   video playback (FFmpeg, LGPL-2.1+; licenses\ffmpeg)
   ffmpeg.exe, ffprobe.exe            sending and editing videos, photo resizing, round videos,
                                      the profile photo camera (the same FFmpeg build; licenses\ffmpeg)
