@@ -192,6 +192,21 @@ fn group_contract() {
         let bad = CString::new("[").unwrap();
         assert!((qc.qc_group_create)(bad.as_ptr(), &callbacks, std::ptr::null_mut()).is_null());
 
+        // A conference call without the callback that encrypts its frames
+        // is refused: it never runs in the clear.
+        let clear = qc_group_callbacks {
+            e2e: None,
+            ..group_callbacks(&seen)
+        };
+        for presentation in [false, true] {
+            let e2e =
+                CString::new(format!(r#"{{"presentation":{presentation},"e2e":true}}"#)).unwrap();
+            assert!(
+                (qc.qc_group_create)(e2e.as_ptr(), &clear, std::ptr::null_mut()).is_null(),
+                "presentation {presentation} ran in the clear"
+            );
+        }
+
         // Video chats and conference calls, each with its presentation.
         for (presentation, e2e) in [(false, false), (true, false), (false, true), (true, true)] {
             let seen = Seen::default();

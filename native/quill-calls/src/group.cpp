@@ -223,6 +223,12 @@ qc_group *Create(const std::string &configJson, const qc_group_callbacks &callba
 		return nullptr;
 	}
 	const auto presentation = json["presentation"].bool_value();
+	// A conference call's frames are never sent in the clear: without the
+	// callback that encrypts them there is no instance at all.
+	if (json["e2e"].bool_value() && !callbacks.e2e) {
+		RTC_LOG(LS_ERROR) << "quill_calls: an e2e group call needs callbacks.e2e";
+		return nullptr;
+	}
 
 	auto result = std::make_unique<qc_group>();
 	const auto guard = result->guard = std::make_shared<CallbackGuard>();
@@ -353,7 +359,7 @@ qc_group *Create(const std::string &configJson, const qc_group_callbacks &callba
 		}
 	}
 
-	if (json["e2e"].bool_value() && c.e2e) {
+	if (json["e2e"].bool_value()) {
 		// tdesktop's TdE2E::EncryptDecrypt::callback: an empty frame is
 		// one tgcalls drops, which is also what a closed guard gives.
 		descriptor.e2eEncryptDecrypt = [=](const std::vector<uint8_t> &data, int64_t userId, bool isEncrypt, int32_t unencryptedPrefixSize) {

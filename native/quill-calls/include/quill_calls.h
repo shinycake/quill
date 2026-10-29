@@ -392,7 +392,8 @@ typedef struct qc_group_callbacks {
  * `video` is the source to send (NULL for none); a presentation sends an
  * external screencast source. The instance starts in QC_GROUP_MODE_NONE
  * with no connection until qc_group_set_connection_mode. Returns NULL and
- * logs the reason for a malformed config.
+ * logs the reason for a malformed config, and for "e2e": true without
+ * callbacks.e2e (a conference call never runs in the clear).
  */
 QC_EXPORT qc_group *qc_group_create(const char *config_json, const qc_group_callbacks *callbacks, qc_video_capture *video);
 
