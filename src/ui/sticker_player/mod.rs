@@ -318,28 +318,34 @@ impl Player {
                         _ => head_state.advance(now, mode, timeline, high_rate),
                     };
                     pick.and_then(|pick| {
-                        let exact = clip.ready.get(&pick.index).cloned();
+                        let exact = clip
+                            .ready
+                            .get(&pick.index)
+                            .map(|image| (pick.index, image.clone()));
                         if exact.is_some() {
                             head_state.start(now);
                         } else if head_state.started() {
                             inner.stats.late += 1;
                         }
-                        let image = exact
+                        // A late head shows an earlier frame: `shown` keeps that
+                        // frame's own index, so `ask` never retires it as stale
+                        // while it is up.
+                        let found = exact
                             .or_else(|| {
                                 clip.ready
                                     .range(..pick.index)
                                     .next_back()
-                                    .map(|(_, i)| i.clone())
+                                    .map(|(index, image)| (*index, image.clone()))
                             })
-                            .or_else(|| clip.shown.as_ref().map(|(_, i)| i.clone()));
+                            .or_else(|| clip.shown.clone());
                         clip.wants.retain(|(h, ..)| *h != head);
                         clip.wants.push((head, pick.index, pick.ahead, now));
-                        let image = image?;
+                        let (index, image) = found?;
                         if clip
                             .shown
                             .as_ref()
                             .is_none_or(|(_, s)| !Arc::ptr_eq(s, &image))
-                            && let Some((_, old)) = clip.shown.replace((pick.index, image.clone()))
+                            && let Some((_, old)) = clip.shown.replace((index, image.clone()))
                             && !clip.ready.values().any(|r| Arc::ptr_eq(r, &old))
                         {
                             retired.push(old);
