@@ -5,8 +5,8 @@
 use super::*;
 use crate::telegram::envelope::ParsedMessage;
 
-/// tdesktop ignores an invitation older than the server's call ring
-/// timeout (`callRingTimeoutMs`, 90 s by default) and declines it.
+/// tdesktop declines an invitation older than the server's call ring
+/// timeout (`callRingTimeoutMs`, 90 s by default) instead of ringing.
 pub const CONFERENCE_INVITE_RING_SECS: i64 = 90;
 
 /// The invitation ringing now.
@@ -19,14 +19,12 @@ pub struct ConferenceInvite {
     pub is_video: bool,
     /// Some of the people already in the call.
     pub others: Vec<i64>,
-    /// Arrived while you were in a call: declined at once (tdesktop
-    /// `declineIncomingConferenceInvites`), never shown.
-    pub busy: bool,
 }
 
 impl Session {
     /// `updateNewMessage`: an incoming invitation starts ringing, unless
-    /// it is too old.
+    /// you are in a call or it is too old, when it is declined (tdesktop
+    /// `showConferenceInvite`).
     pub(crate) fn note_conference_invite(&mut self, message: &ParsedMessage, now_unix: i64) {
         let MessageContent::GroupCallInvitation {
             is_active: false,
@@ -41,10 +39,7 @@ impl Session {
         let Some(MessageSender::User { user_id }) = message.sender else {
             return;
         };
-        if message.is_outgoing
-            || Some(user_id) == self.my_user_id
-            || i64::from(message.date) + CONFERENCE_INVITE_RING_SECS < now_unix
-        {
+        if message.is_outgoing || Some(user_id) == self.my_user_id {
             return;
         }
         let busy = self.calls.active_call.is_some()
@@ -54,6 +49,13 @@ impl Session {
                 .active_group_call
                 .as_ref()
                 .is_some_and(|call| call.is_joined);
+        let too_old = i64::from(message.date) + CONFERENCE_INVITE_RING_SECS < now_unix;
+        if busy || too_old {
+            self.calls
+                .conference_invite_declines
+                .push((message.chat_id, message.id));
+            return;
+        }
         self.calls.conference_invite = Some(ConferenceInvite {
             chat_id: message.chat_id,
             message_id: message.id,
@@ -64,7 +66,6 @@ impl Session {
                 .copied()
                 .filter(|other| *other != user_id)
                 .collect(),
-            busy,
         });
     }
 

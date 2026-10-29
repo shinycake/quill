@@ -271,6 +271,59 @@ fn the_other_side_of_an_upgraded_call_joins_by_its_link() {
     assert_eq!(join["input_group_call"]["@type"], "inputGroupCallLink");
     assert_eq!(join["input_group_call"]["link"], "https://t.me/call/xyz");
     assert!(harness.1.session.calls.pending_conference.is_some());
+
+    // The link's join fails: the 1:1 call ends as failed, on its end
+    // screen (tdesktop `finishByMigration`).
+    let extra = join["@extra"].clone();
+    feed(
+        &mut harness,
+        &format!(
+            r#"{{"@type":"error","code":400,"message":"GROUPCALL_INVALID","@extra":{extra}}}"#
+        ),
+    );
+    let summary = harness
+        .1
+        .session
+        .calls
+        .summary
+        .as_ref()
+        .expect("end screen");
+    assert_eq!(summary.call_id, 5);
+    assert_eq!(summary.end_line, crate::state::CONFERENCE_FOLLOW_FAILED);
+    assert!(harness.1.session.calls.pending_conference.is_none());
+    let _ = std::fs::remove_dir_all(&harness.0);
+}
+
+#[test]
+fn a_dead_conference_gives_way_to_a_new_join() {
+    let mut harness = conference_driver();
+    let request = harness
+        .1
+        .accept_group_call_invitation(3, 42)
+        .expect("accept sends");
+    let extra = serde_json::to_string(&request.as_extra()).unwrap();
+    let extra: Value = serde_json::from_str(&extra).unwrap();
+    feed(&mut harness, &answer(&extra, 555));
+    // A live conference refuses another join.
+    assert_eq!(
+        harness
+            .1
+            .join_conference_link("https://t.me/call/new".into()),
+        Err(ConnectSendError::InvalidRequest)
+    );
+    // Its rejoins are spent: the new link replaces it.
+    let call = harness.1.session.calls.active_group_call.as_mut().unwrap();
+    call.reconnecting = true;
+    call.rejoin_attempts = crate::state::MAX_GROUP_CALL_REJOIN_ATTEMPTS;
+    harness
+        .1
+        .join_conference_link("https://t.me/call/new".into())
+        .expect("join sends");
+    let join = sent_request(&harness.2, "joinGroupCall");
+    assert_eq!(join["input_group_call"]["link"], "https://t.me/call/new");
+    assert!(harness.1.session.calls.active_group_call.is_none());
+    assert!(harness.3.group_leaves().contains(&555));
+    assert_eq!(bound_call(&harness.1), Some((-1, None)));
     let _ = std::fs::remove_dir_all(&harness.0);
 }
 
@@ -354,6 +407,22 @@ fn an_invitation_during_a_call_is_declined_and_one_accepted_stops_ringing() {
     let decline = sent_request(&harness.2, "declineGroupCallInvitation");
     assert_eq!(decline["chat_id"], 41);
     assert_eq!(decline["message_id"], 91);
+    assert_eq!(harness.1.session.calls.conference_invite, None);
+    let _ = std::fs::remove_dir_all(&harness.0);
+}
+
+#[test]
+fn an_invitation_older_than_the_ring_timeout_is_declined() {
+    let date = crate::local_time::now_unix() - crate::state::CONFERENCE_INVITE_RING_SECS - 1;
+    let mut harness = conference_driver();
+    feed(
+        &mut harness,
+        &format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":92,"chat_id":41,"sender_id":{{"@type":"messageSenderUser","user_id":41}},"is_outgoing":false,"date":{date},"content":{{"@type":"messageGroupCall","unique_id":"77","is_active":false,"was_missed":false,"is_video":false,"duration":0,"other_participant_ids":[]}}}}}}"#
+        ),
+    );
+    let decline = sent_request(&harness.2, "declineGroupCallInvitation");
+    assert_eq!(decline["message_id"], 92);
     assert_eq!(harness.1.session.calls.conference_invite, None);
     let _ = std::fs::remove_dir_all(&harness.0);
 }

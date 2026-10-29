@@ -153,7 +153,7 @@ impl Session {
         summary.muted = active.muted;
         // A call taken into a conference call goes on there, with no end
         // screen (tdesktop's panel migrates).
-        if !self.note_call_migration(call, active.muted) {
+        if !self.note_call_migration(call, &summary) {
             self.calls.summary = Some(summary);
         }
         // The active call ended on its own — a still-open swap prompt

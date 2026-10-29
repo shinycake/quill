@@ -135,13 +135,10 @@ fn a_call_taken_into_a_conference_is_followed_without_an_end_screen() {
     );
     assert!(session.calls.active_call.is_none());
     assert!(session.calls.summary.is_none());
-    assert_eq!(
-        session.calls.call_upgrade,
-        Some(CallUpgrade {
-            invite_link: "https://t.me/call/abc".into(),
-            muted: false,
-        })
-    );
+    let upgrade = session.calls.call_upgrade.clone().expect("followed");
+    assert_eq!(upgrade.invite_link, "https://t.me/call/abc");
+    assert!(!upgrade.muted);
+    assert_eq!(upgrade.ended.call_id, 5);
 }
 
 #[test]
@@ -159,4 +156,43 @@ fn a_call_hung_up_shows_its_end_screen() {
     );
     assert!(session.calls.summary.is_some());
     assert_eq!(session.calls.call_upgrade, None);
+}
+
+#[test]
+fn a_failed_follow_of_the_other_sides_conference_shows_the_failed_call() {
+    let mut session = session();
+    apply(
+        &mut session,
+        &call_update(r#"{"@type":"callStatePending","is_created":true,"is_received":true}"#),
+    );
+    apply(
+        &mut session,
+        &call_update(
+            r#"{"@type":"callStateDiscarded","reason":{"@type":"callDiscardReasonUpgradeToGroupCall","invite_link":"https://t.me/call/abc"},"need_rating":false,"need_debug_information":false,"need_log":false}"#,
+        ),
+    );
+    let upgrade = session.calls.call_upgrade.take().expect("followed");
+    let extra = session.request(RequestPurpose::Calls(CallsPurpose::JoinConference), None);
+    session.begin_conference(
+        extra,
+        ConferenceOrigin::Link {
+            link: upgrade.invite_link,
+        },
+        upgrade.muted,
+    );
+    if let Some(pending) = session.calls.pending_conference.as_mut() {
+        pending.follows = Some(upgrade.ended);
+    }
+    apply(
+        &mut session,
+        &format!(
+            r#"{{"@type":"error","code":400,"message":"GROUPCALL_INVALID","@extra":{}}}"#,
+            serde_json::to_string(&extra.as_extra()).expect("extra")
+        ),
+    );
+    let summary = session.calls.summary.as_ref().expect("end screen");
+    assert_eq!(summary.call_id, 5);
+    assert_eq!(summary.end_line, CONFERENCE_FOLLOW_FAILED);
+    assert!(session.calls.group_call_error.is_none());
+    assert!(session.calls.active_group_call.is_none());
 }

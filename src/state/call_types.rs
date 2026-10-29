@@ -64,7 +64,7 @@ pub struct ActiveCall {
 /// Phase C1: summary of the most recently ended call, driving the
 /// call-end screen and the optional 1–5 rating card
 /// (`callStateDiscarded.need_rating`, schema 1.8.67, line 7081).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallSummary {
     pub call_id: i32,
     pub user_id: i64,

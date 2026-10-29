@@ -110,9 +110,14 @@ impl Session {
             // A conference join or create: nothing is tracked yet. A failed
             // rejoin re-arms `reconnecting`, as for a video chat.
             Some(RequestPurpose::JoinConference) => {
-                if self.conference_join_failed(extra) {
-                    self.calls.group_call_error =
-                        Some(call_request_error_line(err, "Could not join the call"));
+                if let Some(pending) = self.conference_join_failed(extra) {
+                    match pending.follows {
+                        Some(ended) => self.conference_follow_failed(ended),
+                        None => {
+                            self.calls.group_call_error =
+                                Some(call_request_error_line(err, "Could not join the call"));
+                        }
+                    }
                 } else if let Some(call) = self.calls.active_group_call.as_mut()
                     && call.is_conference()
                     && call.rejoin_attempts > 0

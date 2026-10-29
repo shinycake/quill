@@ -113,7 +113,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// the request carries its tgcalls offer. Refused without an engine
     /// (no media would flow), while another join is in flight, while you
     /// are in a group call, and during a 1:1 call unless it is the one
-    /// being taken into the conference.
+    /// being taken into the conference. A conference whose rejoins are
+    /// spent (or whose transport failed) is dead and gives way to the new
+    /// join, as a call only looked at does.
     fn join_conference(
         &mut self,
         origin: ConferenceOrigin,
@@ -131,7 +133,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .calls
                 .active_group_call
                 .as_ref()
-                .is_some_and(|call| call.is_joined || call.is_conference())
+                .is_some_and(|call| {
+                    (call.is_joined || call.is_conference())
+                        && !(call.is_conference() && call.join_failed())
+                })
         {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -154,7 +159,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(link) = self.sender.crypto_link() else {
             return Err(ConnectSendError::CallsUnavailable);
         };
-        // A call only looked at gives way (tdesktop's single current call).
+        // A call only looked at, or a dead conference, gives way
+        // (tdesktop's single current call).
         if self.session.calls.active_group_call.is_some() {
             self.drop_group_call_locally();
         }
@@ -355,27 +361,31 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `callDiscardReasonUpgradeToGroupCall`, joins by the link
     /// (`finishByMigration`).
     pub(crate) fn maybe_continue_conference(&mut self) -> Result<(), ConnectSendError> {
-        // An invitation that came in while you were in a call is declined
-        // (tdesktop `declineIncomingConferenceInvites`).
-        if let Some(invite) = self
-            .session
-            .calls
-            .conference_invite
-            .take_if(|invite| invite.busy)
+        // An invitation that came in while you were in a call, or too old
+        // to ring, is declined (tdesktop `declineIncomingConferenceInvites`).
+        for (chat_id, message_id) in
+            std::mem::take(&mut self.session.calls.conference_invite_declines)
         {
-            let _ = self.decline_group_call_invitation(invite.chat_id.0, invite.message_id.0);
+            let _ = self.decline_group_call_invitation(chat_id.0, message_id.0);
         }
-        if let Some(upgrade) = self.session.calls.call_upgrade.take()
-            && let Err(err) = self.join_conference(
+        // Following the other side into its conference: a join that
+        // can't go out, or fails later (`error.rs`), ends the 1:1 call as
+        // failed, with its end screen (tdesktop `finishByMigration`).
+        if let Some(upgrade) = self.session.calls.call_upgrade.take() {
+            let joined = self.join_conference(
                 ConferenceOrigin::Link {
                     link: upgrade.invite_link,
                 },
                 upgrade.muted,
-            )
-        {
-            // Already in a conference (the side that made it), or no
-            // engine: the 1:1 call simply ended.
-            let _ = err;
+            );
+            match joined {
+                Ok(_) => {
+                    if let Some(pending) = self.session.calls.pending_conference.as_mut() {
+                        pending.follows = Some(upgrade.ended);
+                    }
+                }
+                Err(_) => self.session.conference_follow_failed(upgrade.ended),
+            }
         }
         let ready = self
             .session

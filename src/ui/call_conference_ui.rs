@@ -30,11 +30,7 @@ const CONTACTS_SHOWN: usize = 30;
 /// The call window's key for a ringing invitation: never a call id (those
 /// are positive), and stable for the invitation's message.
 pub(super) fn ringing_invite_key(session: &Session) -> Option<i32> {
-    let invite = session
-        .calls
-        .conference_invite
-        .as_ref()
-        .filter(|invite| !invite.busy)?;
+    let invite = session.calls.conference_invite.as_ref()?;
     let server_id = (invite.message_id.0 >> 20) & 0x3fff_ffff;
     Some(-i32::try_from(server_id).unwrap_or(0) - 1)
 }
@@ -73,11 +69,7 @@ impl QuillApp {
     /// The call window for the ringing invitation.
     pub(super) fn conference_invite_snapshot(&mut self) -> Option<CallSnap> {
         let session = self.session()?;
-        let invite = session
-            .calls
-            .conference_invite
-            .clone()
-            .filter(|invite| !invite.busy)?;
+        let invite = session.calls.conference_invite.clone()?;
         let photo = session.user_photo_path(invite.user_id).and_then(|path| {
             quill::local_path::sandboxed_display_path(path, &self.media_display_roots())
         });

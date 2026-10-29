@@ -70,15 +70,25 @@ pub struct PendingConference {
     pub request: RequestId,
     pub origin: ConferenceOrigin,
     pub muted: bool,
+    /// The 1:1 call the other side took into this conference: its end
+    /// screen, shown if the join fails (tdesktop `finishByMigration`
+    /// fails the 1:1 call).
+    pub follows: Option<CallSummary>,
 }
 
 /// The other side took the 1:1 call into a conference call: its link,
-/// for the driver to join with, and the microphone state to keep.
+/// for the driver to join with, the microphone state to keep, and the
+/// 1:1 call's end screen, held back unless following the link fails.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallUpgrade {
     pub invite_link: String,
     pub muted: bool,
+    pub ended: CallSummary,
 }
+
+/// The end line of a 1:1 call whose conference could not be followed
+/// (tdesktop `State::Failed`, `lng_call_status_failed`).
+pub const CONFERENCE_FOLLOW_FAILED: &str = "Failed to connect";
 
 /// What a tracked conference call keeps beside its `groupCall` fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,6 +128,7 @@ impl Session {
             request,
             origin,
             muted,
+            follows: None,
         });
         self.calls.group_call_error = None;
     }
@@ -170,7 +181,7 @@ impl Session {
     /// screen. The side that didn't make the conference follows its link
     /// ([`CallsState::call_upgrade`], tdesktop `finishByMigration`); the
     /// side that did is already in it.
-    pub(crate) fn note_call_migration(&mut self, call: &ParsedCall, muted: bool) -> bool {
+    pub(crate) fn note_call_migration(&mut self, call: &ParsedCall, ended: &CallSummary) -> bool {
         let migrated_here = self
             .calls
             .active_group_call
@@ -192,17 +203,31 @@ impl Session {
         }
         self.calls.call_upgrade = Some(CallUpgrade {
             invite_link: invite_link.clone(),
-            muted,
+            muted: ended.muted,
+            ended: ended.clone(),
         });
         true
     }
 
-    /// A conference join or create failed: nothing is tracked.
-    pub(crate) fn conference_join_failed(&mut self, extra: Option<RequestId>) -> bool {
+    /// A conference join or create failed: nothing is tracked. The
+    /// failed join is returned when it was ours.
+    pub(crate) fn conference_join_failed(
+        &mut self,
+        extra: Option<RequestId>,
+    ) -> Option<PendingConference> {
         self.calls
             .pending_conference
             .take_if(|pending| Some(pending.request) == extra)
-            .is_some()
+    }
+
+    /// Following the other side into the conference failed: the 1:1 call
+    /// ends as failed, with its end screen (tdesktop `finishByMigration`,
+    /// `setState(State::Failed)`).
+    pub fn conference_follow_failed(&mut self, ended: CallSummary) {
+        self.calls.summary = Some(CallSummary {
+            end_line: CONFERENCE_FOLLOW_FAILED.to_string(),
+            ..ended
+        });
     }
 }
 

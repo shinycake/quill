@@ -118,6 +118,10 @@ pub struct CallsState {
     /// A conference call invitation ringing now
     /// (`crate::state::conference_invite`).
     pub conference_invite: Option<ConferenceInvite>,
+    /// Invitations to decline at once, never shown: they came in while
+    /// you were in a call, or are older than the ring timeout (tdesktop
+    /// `declineIncomingConferenceInvites`). The driver drains them.
+    pub conference_invite_declines: Vec<(ChatId, MessageId)>,
 }
 
 impl CallsState {
@@ -187,6 +191,7 @@ impl CallsState {
             pending_conference: None,
             call_upgrade: None,
             conference_invite: None,
+            conference_invite_declines: Vec::new(),
         }
     }
 }

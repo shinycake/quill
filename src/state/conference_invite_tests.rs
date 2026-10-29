@@ -37,7 +37,6 @@ fn a_fresh_invitation_rings_until_it_is_joined() {
             user_id: 41,
             is_video: true,
             others: vec![42],
-            busy: false,
         })
     );
     apply(
@@ -48,16 +47,30 @@ fn a_fresh_invitation_rings_until_it_is_joined() {
 }
 
 #[test]
-fn old_joined_or_missed_invitations_do_not_ring() {
+fn joined_or_missed_invitations_do_not_ring() {
     let mut session = session();
     let now = crate::local_time::now_unix();
+    apply(&mut session, &invitation(now, true, false));
+    apply(&mut session, &invitation(now, false, true));
+    assert_eq!(session.calls.conference_invite, None);
+    assert!(session.calls.conference_invite_declines.is_empty());
+}
+
+#[test]
+fn an_invitation_older_than_the_ring_timeout_is_declined_not_rung() {
+    let mut session = session();
+    let now = crate::local_time::now_unix();
+    apply(&mut session, &invitation(now, false, false));
+    let ringing = session.calls.conference_invite.clone();
     apply(
         &mut session,
         &invitation(now - CONFERENCE_INVITE_RING_SECS - 1, false, false),
     );
-    apply(&mut session, &invitation(now, true, false));
-    apply(&mut session, &invitation(now, false, true));
-    assert_eq!(session.calls.conference_invite, None);
+    assert_eq!(session.calls.conference_invite, ringing);
+    assert_eq!(
+        session.calls.conference_invite_declines,
+        vec![(ChatId(41), MessageId(90))]
+    );
 }
 
 #[test]
