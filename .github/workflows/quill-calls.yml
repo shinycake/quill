@@ -77,7 +77,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: vendor/quill-calls/work/deps
-          key: quill-calls-deps-${{ matrix.target }}-${{ hashFiles('scripts/build-tgcalls.sh') }}
+          key: quill-calls-deps-${{ matrix.target }}-${{ hashFiles('scripts/build-tgcalls.sh', 'scripts/build-ffmpeg.sh') }}
       - name: build libquill_calls
         run: bash scripts/build-tgcalls.sh
       - name: save tg_owt and codecs
@@ -85,7 +85,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: vendor/quill-calls/work/deps
-          key: quill-calls-deps-${{ matrix.target }}-${{ hashFiles('scripts/build-tgcalls.sh') }}
+          key: quill-calls-deps-${{ matrix.target }}-${{ hashFiles('scripts/build-tgcalls.sh', 'scripts/build-ffmpeg.sh') }}
       - name: load the library and read its protocol versions
         env:
           # The packages ship FFmpeg next to the library; here it's in the prefix.

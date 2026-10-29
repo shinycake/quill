@@ -61,6 +61,24 @@ Everything matches Telegram Desktop at `dev` f985723b (26 Oct 2026):
 - `libquill_calls` is loaded at runtime like ntgcalls today, which keeps
   tgcalls' LGPL-3.0 terms met the same way: users can rebuild and replace it
   (`vendor/quill-calls/share/SOURCES.txt` names every source).
+  `vendor/quill-calls/share/licenses/` carries the notices each part asks
+  to ship with its binaries.
+- The library finds FFmpeg and OpenSSL next to itself (`@loader_path`,
+  `$ORIGIN`). On macOS it links Homebrew's OpenSSL and the FFmpeg prefix by
+  their install names, so packaging rewrites those to `@rpath` when it
+  bundles them (the switch-over PR).
+
+Where the build deliberately differs from tdesktop's:
+
+- tg_owt is linked in non-packaged mode on Linux too, where tdesktop's
+  Linux build uses the packaged one; one copy of every codec is simpler to
+  ship and keeps the exported surface to `qc_*`.
+- PipeWire 0.3.62's headers are fetched for tg_owt's camera code (the
+  version tdesktop's build image uses) because Ubuntu 22.04's are too old.
+- rnnoise is the desktop-app fork tdesktop uses; OpenH264 is built with its
+  makefile rather than meson; tdesktop's libvpx patches (desktop-app/patches
+  `libvpx/`) are not applied: they fix its MSVC and Windows-on-Arm builds
+  and let `SDKROOT` pick the macOS SDK, none of which this build needs.
 
 ## Build order
 

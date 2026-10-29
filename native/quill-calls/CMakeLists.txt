@@ -199,7 +199,11 @@ if (APPLE)
     )
     # Everything we link statically stays private; only qc_* is exported.
     target_link_options(quill_calls PRIVATE "-Wl,-exported_symbol,_qc_*")
-    set_target_properties(quill_calls PROPERTIES INSTALL_NAME_DIR "@rpath")
+    # FFmpeg ships next to the library, so it is found from there.
+    set_target_properties(quill_calls PROPERTIES
+        INSTALL_NAME_DIR "@rpath"
+        INSTALL_RPATH "@loader_path"
+        BUILD_WITH_INSTALL_RPATH ON)
 else()
     find_package(Threads REQUIRED)
     # tg_owt's X11 and portal (GLib) capture code, as tdesktop links it on

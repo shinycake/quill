@@ -66,7 +66,7 @@ mkdir -p "$WORK" "$DEPS"
 export CFLAGS="${CFLAGS:-} -fPIC -O2"
 export CXXFLAGS="${CXXFLAGS:-} -fPIC -O2"
 if [[ "$OS" == macos ]]; then
-  export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}"
+  export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-14.0}"
 fi
 
 # fetch <dir> <url> <commit>: shallow checkout of one pinned commit, verified.
@@ -88,10 +88,26 @@ fetch() {
   fi
 }
 
-# Each dependency is skipped when its library is already in $DEPS, so a
-# rerun after a failure resumes where it stopped.
+# Each dependency writes a stamp naming what it was built from once it is
+# installed, and is skipped while that stamp still matches: a rerun after a
+# failure resumes where it stopped, and a changed pin rebuilds.
+# STAMP_LAYOUT changes when what a build leaves in $DEPS changes.
+STAMP_LAYOUT=2
+built() { [[ "$(cat "$DEPS/.stamp-$1" 2>/dev/null)" == "$STAMP_LAYOUT $2" ]]; }
+stamp() { printf '%s\n' "$STAMP_LAYOUT $2" > "$DEPS/.stamp-$1"; }
+
+# license <name> <file>...: keeps the notices a part asks to travel with it
+# in binary form. They live in $DEPS so a cached build still has them.
+license() {
+  local name="$1"
+  shift
+  rm -rf "$DEPS/licenses/$name"
+  mkdir -p "$DEPS/licenses/$name"
+  cp "$@" "$DEPS/licenses/$name/"
+}
+
 build_opus() {
-  [[ -f "$DEPS/lib/libopus.a" ]] && return
+  built opus "$OPUS_COMMIT" && return
   fetch opus https://github.com/xiph/opus.git "$OPUS_COMMIT"
   cmake -S "$WORK/opus" -B "$WORK/opus/out" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$DEPS" \
@@ -99,10 +115,12 @@ build_opus() {
     -DOPUS_BUILD_PROGRAMS=OFF -DOPUS_BUILD_TESTING=OFF
   cmake --build "$WORK/opus/out" --parallel "$JOBS"
   cmake --install "$WORK/opus/out"
+  license opus "$WORK/opus/COPYING"
+  stamp opus "$OPUS_COMMIT"
 }
 
 build_libvpx() {
-  [[ -f "$DEPS/lib/libvpx.a" ]] && return
+  built libvpx "$LIBVPX_COMMIT" && return
   fetch libvpx https://github.com/webmproject/libvpx.git "$LIBVPX_COMMIT"
   local target=()
   if [[ "$OS" == macos ]]; then
@@ -113,19 +131,23 @@ build_libvpx() {
     --disable-examples --disable-unit-tests --disable-tools --disable-docs \
     --enable-vp8 --enable-vp9 --enable-webm-io --size-limit=4096x4096 \
     && make -j"$JOBS" && make install)
+  license libvpx "$WORK/libvpx/LICENSE" "$WORK/libvpx/PATENTS"
+  stamp libvpx "$LIBVPX_COMMIT"
 }
 
 build_openh264() {
-  [[ -f "$DEPS/lib/libopenh264.a" ]] && return
+  built openh264 "$OPENH264_COMMIT" && return
   fetch openh264 https://github.com/cisco/openh264.git "$OPENH264_COMMIT"
   local arch=()
   [[ "$ARCH" == arm64 ]] && arch=(ARCH="$([[ $OS == macos ]] && echo arm64 || echo aarch64)")
   make -C "$WORK/openh264" -j"$JOBS" PREFIX="$DEPS" ${arch[@]+"${arch[@]}"} \
     CFLAGS_OPT=-O2 install-static
+  license openh264 "$WORK/openh264/LICENSE"
+  stamp openh264 "$OPENH264_COMMIT"
 }
 
 build_mozjpeg() {
-  [[ -f "$DEPS/lib/libjpeg.a" ]] && return
+  built mozjpeg "$MOZJPEG_COMMIT" && return
   fetch mozjpeg https://github.com/mozilla/mozjpeg.git "$MOZJPEG_COMMIT"
   cmake -S "$WORK/mozjpeg" -B "$WORK/mozjpeg/out" -G Ninja \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release \
@@ -134,10 +156,12 @@ build_mozjpeg() {
     -DWITH_JPEG8=ON -DENABLE_SHARED=OFF -DPNG_SUPPORTED=OFF -DWITH_TURBOJPEG=OFF
   cmake --build "$WORK/mozjpeg/out" --parallel "$JOBS"
   cmake --install "$WORK/mozjpeg/out"
+  license mozjpeg "$WORK/mozjpeg/LICENSE.md"
+  stamp mozjpeg "$MOZJPEG_COMMIT"
 }
 
 build_rnnoise() {
-  [[ -f "$DEPS/lib/librnnoise.a" ]] && return
+  built rnnoise "$RNNOISE_COMMIT" && return
   fetch rnnoise https://github.com/desktop-app/rnnoise.git "$RNNOISE_COMMIT"
   cmake -S "$WORK/rnnoise" -B "$WORK/rnnoise/out" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON
@@ -145,10 +169,12 @@ build_rnnoise() {
   mkdir -p "$DEPS/lib" "$DEPS/include"
   cp "$WORK/rnnoise/out/librnnoise.a" "$DEPS/lib/"
   cp "$WORK/rnnoise/include/rnnoise.h" "$DEPS/include/"
+  license rnnoise "$WORK/rnnoise/COPYING"
+  stamp rnnoise "$RNNOISE_COMMIT"
 }
 
 build_tg_owt() {
-  [[ -f "$DEPS/lib/libtg_owt.a" ]] && return
+  built tg_owt "$TG_OWT_KEY" && return
   fetch tg_owt https://github.com/desktop-app/tg_owt.git "$TG_OWT_COMMIT"
   git -C "$WORK/tg_owt" submodule update -q --init --recursive --depth 1
   if [[ "$OS" == linux ]]; then
@@ -182,7 +208,21 @@ build_tg_owt() {
     ${extra[@]+"${extra[@]}"}
   cmake --build "$WORK/tg_owt/out" --parallel "$JOBS"
   cmake --install "$WORK/tg_owt/out"
+  local owt="$WORK/tg_owt"
+  license tg_owt "$owt/LICENSE" "$owt/src/PATENTS"
+  license abseil-cpp "$owt/src/third_party/abseil-cpp/LICENSE"
+  license crc32c "$owt/src/third_party/crc32c/src/LICENSE"
+  license libsrtp "$owt/src/third_party/libsrtp/LICENSE"
+  license libyuv "$owt/src/third_party/libyuv/LICENSE" "$owt/src/third_party/libyuv/PATENTS"
+  license pffft "$owt/src/third_party/pffft/LICENSE"
+  if [[ "$OS" == linux ]]; then
+    license pipewire "$owt/src/third_party/pipewire/COPYING"
+  fi
+  stamp tg_owt "$TG_OWT_KEY"
 }
+
+# tg_owt compiles against FFmpeg's headers, so a new FFmpeg rebuilds it.
+TG_OWT_KEY="$TG_OWT_COMMIT pipewire-$PIPEWIRE_COMMIT ffmpeg-$(cat "$FFMPEG_PREFIX"/include/libav*/version*.h | shasum -a 256 | cut -c1-16)"
 
 build_opus
 build_libvpx
@@ -215,8 +255,15 @@ openh264 https://github.com/cisco/openh264             $OPENH264_TAG ($OPENH264_
 mozjpeg  https://github.com/mozilla/mozjpeg            $MOZJPEG_TAG ($MOZJPEG_COMMIT)
 rnnoise  https://github.com/desktop-app/rnnoise        $RNNOISE_COMMIT
 pipewire https://github.com/PipeWire/pipewire        $PIPEWIRE_TAG ($PIPEWIRE_COMMIT), headers only, Linux
-quill-calls (the C API)  native/quill-calls in https://github.com/shinycake/quill
+quill-calls (the C API)  native/quill-calls in https://github.com/shinycake/quill  $(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)
 EOF
+
+# The licenses the library's parts ask to travel with it in binary form:
+# tgcalls' LGPL-3.0 (with the GPL-3.0 it extends) and the BSD, MIT and
+# Apache notices of tg_owt, the libraries tg_owt carries and the codecs.
+license tgcalls "$WORK/tgcalls/LICENSE" "$ROOT/licenses/GPL-3.0.txt"
+rm -rf "$DEST/share/licenses"
+cp -R "$DEPS/licenses" "$DEST/share/licenses"
 
 LIB="$DEST/lib/libquill_calls.$([[ $OS == macos ]] && echo dylib || echo so)"
 [[ -f "$LIB" ]] || { echo "error: $LIB was not built" >&2; exit 1; }
