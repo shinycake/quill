@@ -156,6 +156,13 @@ pub enum CallsPurpose {
     /// for the stream feeder. The driver takes the answer (`groupCallStreams`,
     /// `data` or an error) before the reducer sees it.
     GroupCallStream { group_call_id: i32 },
+    /// "Add People" search: `searchChatsOnServer` for the typed query
+    /// (tdesktop's `contacts.search` `my_results`). Response is `chats`;
+    /// stored in `CallsState::add_people_search`.
+    SearchAddPeopleOnServer,
+    /// "Add People" search: `searchPublicChats` (`contacts.search`
+    /// `results`, the people outside your chats). Response is `chats`.
+    SearchAddPeoplePublic,
 }
 
 flat_purposes!(Calls(CallsPurpose) {
@@ -168,4 +175,6 @@ flat_purposes!(Calls(CallsPurpose) {
     DeleteAllCallMessages,
     SendCallLog,
     JoinConference,
+    SearchAddPeopleOnServer,
+    SearchAddPeoplePublic,
 });

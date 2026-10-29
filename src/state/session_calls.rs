@@ -140,6 +140,8 @@ impl Session {
         let Some(active) = self.calls.active_call.take() else {
             return;
         };
+        // "Add People" closes with its call: its search goes too.
+        self.calls.add_people_search = ShareSearch::default();
         let duration_secs = active
             .ready_at
             .map(|t| t.elapsed().as_secs() as i64)
@@ -221,6 +223,7 @@ impl Session {
                 .is_some_and(|c| c.id == group_call.id)
             {
                 self.calls.active_group_call = None;
+                self.calls.invite_results = None;
                 self.diagnostics.record(Diagnostic {
                     category: "group_call",
                     type_name: Some("updateGroupCall".to_string()),
@@ -457,6 +460,7 @@ impl Session {
     pub fn leave_group_call_local(&mut self) {
         self.calls.active_group_call = None;
         self.calls.call_link = None;
+        self.calls.invite_results = None;
     }
 
     /// Set the tracked self-mute flag (what the mute button shows and the

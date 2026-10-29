@@ -2,6 +2,7 @@
 //! invitation, a 1:1 call taken into a conference, following the other
 //! side's upgrade, rejoining, and the engine's frame crypto and ssrc owners.
 use super::*;
+use crate::ids::RequestId;
 use crate::state::ConferenceInput;
 
 type Harness = (
@@ -473,5 +474,233 @@ fn an_invitation_older_than_the_ring_timeout_is_declined() {
     let decline = sent_request(&harness.2, "declineGroupCallInvitation");
     assert_eq!(decline["message_id"], 92);
     assert_eq!(harness.1.session.calls.conference_invite, None);
+    let _ = std::fs::remove_dir_all(&harness.0);
+}
+
+fn user_json(id: i64, first: &str, last: &str) -> String {
+    format!(
+        r#"{{"@type":"updateUser","user":{{"@type":"user","id":{id},"first_name":"{first}","last_name":"{last}","usernames":null,"phone_number":"","status":{{"@type":"userStatusRecently"}},"profile_photo":null,"is_contact":false,"is_mutual_contact":false,"is_close_friend":false,"is_verified":false,"is_premium":false,"is_scam":false,"is_fake":false,"type":{{"@type":"userTypeRegular"}}}}}}"#
+    )
+}
+
+fn private_chat_json(id: i64, title: &str) -> String {
+    format!(
+        r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"{title}","type":{{"@type":"chatTypePrivate","user_id":{id}}},"unread_count":0}}}}"#
+    )
+}
+
+fn chats_answer(request: &Value, ids: &[i64]) -> String {
+    let extra = request["@extra"].as_str().unwrap_or_default();
+    format!(
+        r#"{{"@type":"chats","@extra":"{extra}","total_count":{},"chat_ids":{ids:?}}}"#,
+        ids.len()
+    )
+}
+
+#[test]
+fn add_people_searches_the_server_and_lists_people_outside_your_contacts() {
+    let mut harness = conference_driver();
+    feed(&mut harness, &user_json(41, "Noa", "Peretz"));
+    feed(&mut harness, &user_json(50, "Dana", "Levi"));
+    harness.1.session.users_state.contacts = Some(vec![41, 50]);
+    harness.1.search_add_people("  da ").expect("search sends");
+    let mine = sent_request(&harness.2, "searchChatsOnServer");
+    let public = sent_request(&harness.2, "searchPublicChats");
+    assert_eq!(mine["query"], "da");
+    assert_eq!(mine["limit"], 5);
+    assert_eq!(public["query"], "da");
+    // The same query again sends nothing.
+    harness.1.search_add_people("da").expect("unchanged");
+    assert_eq!(sent_count(&harness.2, "searchPublicChats"), 1);
+    feed(&mut harness, &user_json(60, "Daria", "Shalev"));
+    feed(&mut harness, &private_chat_json(60, "Daria Shalev"));
+    feed(&mut harness, &private_chat_json(50, "Dana Levi"));
+    feed(&mut harness, &chats_answer(&mine, &[50]));
+    feed(&mut harness, &chats_answer(&public, &[60]));
+    let view = harness.1.session.add_people_view(41, &[], &[], "da");
+    let ids = |rows: &[crate::state::AddPeopleRow]| -> Vec<i64> {
+        rows.iter().map(|row| row.user_id).collect()
+    };
+    assert_eq!(ids(&view.rows), [50]);
+    assert_eq!(ids(&view.global), [60]);
+    // A newer query's answers replace them; an older answer is dropped.
+    harness.1.search_add_people("dar").expect("search sends");
+    feed(&mut harness, &chats_answer(&public, &[50]));
+    let view = harness.1.session.add_people_view(41, &[], &[], "dar");
+    assert!(view.global.is_empty());
+    // A failed search ends it: nobody found.
+    let public = sent_request(&harness.2, "searchPublicChats");
+    let mine = sent_request(&harness.2, "searchChatsOnServer");
+    for request in [&mine, &public] {
+        let extra = request["@extra"].as_str().unwrap_or_default();
+        feed(
+            &mut harness,
+            &format!(
+                r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"QUERY_TOO_SHORT"}}"#
+            ),
+        );
+    }
+    let view = harness.1.session.add_people_view(41, &[], &[], "dar");
+    assert_eq!(view.empty, Some(crate::state::AddPeopleEmpty::NoResults));
+    // Clearing the field forgets the search.
+    harness.1.search_add_people("").expect("cleared");
+    assert!(harness.1.session.calls.add_people_search.query.is_empty());
+    let _ = std::fs::remove_dir_all(&harness.0);
+}
+
+#[test]
+fn add_people_invitations_end_in_one_toast() {
+    let mut harness = conference_driver();
+    feed(
+        &mut harness,
+        &one_to_one(r#"{"@type":"callStatePending","is_created":true,"is_received":true}"#),
+    );
+    feed(&mut harness, &one_to_one(READY_SUPPORTING_CONFERENCE));
+    let request = harness
+        .1
+        .upgrade_call_to_conference(vec![42, 43], false)
+        .expect("create sends");
+    let extra: Value = serde_json::to_value(request.as_extra()).unwrap();
+    feed(&mut harness, &answer(&extra, 600));
+    feed(
+        &mut harness,
+        &conference_update(600, "https://t.me/call/xyz", false),
+    );
+    let invites: Vec<Value> = harness
+        .2
+        .snapshot()
+        .iter()
+        .map(|json| serde_json::from_str::<Value>(json).unwrap())
+        .filter(|value| value["@type"] == "inviteGroupCallParticipant")
+        .collect();
+    assert_eq!(invites.len(), 2);
+    let extra_of = |at: usize| {
+        invites
+            .get(at)
+            .and_then(|value| value["@extra"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    feed(
+        &mut harness,
+        &format!(
+            r#"{{"@type":"inviteGroupCallParticipantResultSuccess","chat_id":42,"message_id":7,"@extra":"{}"}}"#,
+            extra_of(0)
+        ),
+    );
+    let results = harness
+        .1
+        .session
+        .calls
+        .invite_results
+        .clone()
+        .expect("results");
+    assert!(!results.is_done());
+    feed(
+        &mut harness,
+        &format!(
+            r#"{{"@type":"inviteGroupCallParticipantResultUserPrivacyRestricted","@extra":"{}"}}"#,
+            extra_of(1)
+        ),
+    );
+    let results = harness
+        .1
+        .session
+        .calls
+        .invite_results
+        .clone()
+        .expect("results");
+    assert!(results.is_done());
+    assert_eq!(results.invited, [42]);
+    assert_eq!(results.privacy_restricted, [43]);
+    // The toast tells instead of the voice chat error line.
+    assert_eq!(harness.1.session.calls.group_call_error, None);
+    let _ = std::fs::remove_dir_all(&harness.0);
+}
+
+fn invited_into(harness: &mut Harness, group_call_id: i32) {
+    let mut results = crate::state::ConferenceInviteResults::default();
+    results.invited.push(42);
+    harness.1.session.calls.invite_results = Some(results.for_call(group_call_id));
+}
+
+#[test]
+fn the_invite_toast_goes_with_its_conference_and_the_account() {
+    let mut harness = conference_driver();
+    let request = harness
+        .1
+        .join_conference_link("https://t.me/call/xyz".into())
+        .expect("join sends");
+    let extra: Value = serde_json::to_value(request.as_extra()).unwrap();
+    feed(&mut harness, &answer(&extra, 600));
+    feed(
+        &mut harness,
+        &conference_update(600, "https://t.me/call/xyz", false),
+    );
+    // Leaving drops it.
+    invited_into(&mut harness, 600);
+    harness.1.leave_group_call().expect("leave sends");
+    assert_eq!(harness.1.session.calls.invite_results, None);
+    // The server ending the call drops it.
+    invited_into(&mut harness, 600);
+    harness.1.session.calls.left_group_call = None;
+    feed(
+        &mut harness,
+        &conference_update(600, "https://t.me/call/xyz", false)
+            .replace(r#""is_active":true"#, r#""is_active":false"#),
+    );
+    assert!(harness.1.session.calls.active_group_call.is_none());
+    assert_eq!(harness.1.session.calls.invite_results, None);
+    // Dropping the call locally drops it.
+    invited_into(&mut harness, 600);
+    harness.1.drop_group_call_locally();
+    assert_eq!(harness.1.session.calls.invite_results, None);
+    // Logging out drops it, and the box's search.
+    invited_into(&mut harness, 600);
+    harness
+        .1
+        .session
+        .calls
+        .add_people_search
+        .begin("da", RequestId(1), RequestId(2));
+    feed(
+        &mut harness,
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateLoggingOut"}}"#,
+    );
+    assert_eq!(harness.1.session.calls.invite_results, None);
+    assert!(harness.1.session.calls.add_people_search.query.is_empty());
+    let _ = std::fs::remove_dir_all(&harness.0);
+}
+
+#[test]
+fn ending_the_search_works_offline_and_ends_with_the_call() {
+    // No authorization yet: a query can't go out, but clearing works.
+    let (dir, mut driver, _recorder, sink, seq) = call_driver();
+    driver
+        .session
+        .calls
+        .add_people_search
+        .begin("da", RequestId(1), RequestId(2));
+    assert_eq!(
+        driver.search_add_people("dan"),
+        Err(ConnectSendError::InvalidRequest)
+    );
+    assert_eq!(driver.search_add_people(""), Ok(()));
+    assert!(driver.session.calls.add_people_search.query.is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+    drop((sink, seq));
+
+    // The 1:1 call ending forgets the box's search.
+    let mut harness = conference_driver();
+    feed(&mut harness, &one_to_one(READY_SUPPORTING_CONFERENCE));
+    harness.1.search_add_people("da").expect("search sends");
+    feed(
+        &mut harness,
+        &one_to_one(
+            r#"{"@type":"callStateDiscarded","reason":{"@type":"callDiscardReasonHungUp"},"need_rating":false,"need_debug_information":false,"need_log":false}"#,
+        ),
+    );
+    assert!(harness.1.session.calls.active_call.is_none());
+    assert!(harness.1.session.calls.add_people_search.query.is_empty());
     let _ = std::fs::remove_dir_all(&harness.0);
 }

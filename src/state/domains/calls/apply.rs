@@ -163,7 +163,13 @@ impl Session {
             // variants surface honestly via `group_call_error` (shown
             // on the group-call overlay).
             CallsPayload::InviteGroupCallParticipantResult(result) => {
-                if matches!(
+                // One of "Add People"'s invitations: its toast tells.
+                if let Some(results) = self.calls.invite_results.as_mut()
+                    && let Some(pending) = pending
+                    && results.owns(Some(pending.id))
+                {
+                    results.answered(pending.id, Some(result));
+                } else if matches!(
                     pending.map(|p| p.purpose),
                     Some(RequestPurpose::Calls(
                         CallsPurpose::InviteGroupCallParticipant { .. }

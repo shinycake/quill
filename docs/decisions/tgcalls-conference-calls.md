@@ -125,6 +125,8 @@ A conference instance has chat id 0 and the Member role.
 | Accept an invitation | `joinGroupCall(inputGroupCallMessage)`. |
 | Join a link | `t.me/call/<slug>` asks "Join Group Call" (`lng_confcall_join_*`), then `joinGroupCall(inputGroupCallLink)`. |
 | Add People (caller) | Only for an established 1:1 call whose `callStateReady.is_group_call_supported` is true. Earlier, the toast `lng_call_error_add_not_started` shows. `createGroupCall` makes the conference with you in it. Once its `groupCall.invite_link` is known, the 1:1 call ends with `discardCall(invite_link)` and the picked people get `inviteGroupCallParticipant` (tdesktop `startedConferenceReady`: `finishConferenceInvitations`, then `destroyCurrentCall` with the slug). With "Create Call Link", the panel opens on the link instead. |
+| The Add People box | tdesktop's `ConfInviteController`, a contacts box searched by `PeerListGlobalSearchController`. It lists every contact by last seen; the other side is checked and disabled. The search field at the top filters the contacts as you type: every query word must start a word of the name or username. The same query goes to `searchChatsOnServer` and `searchPublicChats` (TDLib's halves of `contacts.search`), whose people outside the filtered contacts follow them. While a query is typed, "Create Call Link" hides. The empty texts are tdesktop's: `lng_contacts_loading`, `lng_contacts_not_found`, `lng_blocked_list_not_found`. Picks survive the filtering, and someone picked from the server's results moves to the top of the list (`prependRowFromSearchResult`). Enter toggles the first person. The list is `Session::add_people_view`. |
+| Invite results | Once every `inviteGroupCallParticipant` has answered, the conference panel shows one toast (tdesktop `ComposeInviteResultToast`): "You're calling ... to join", "... is already in the call", "... was banned from the call", "Couldn't call ... to join" (which tdesktop also uses for a privacy refusal). A single person is named and more are counted. |
 | Add People (callee) | `callDiscardReasonUpgradeToGroupCall(invite_link)` joins the link (tdesktop `finishByMigration`). Neither side shows the 1:1 end screen. If the join can't go out or TDLib refuses it, the 1:1 call ends as failed: its end screen shows "Failed to connect" (tdesktop sets `State::Failed`, `lng_call_status_failed`). |
 | Incoming invitation | A fresh, incoming `messageGroupCall` that is not active and not missed rings in the call window: "Telegram Group Call", who already joined, Decline or Join. It stops when the message says you joined or missed it, when the message is deleted, or when you answer. One older than 90 s, or one that arrives during a call, never rings and is declined (`showConferenceInvite` calls `declineIncomingConferenceInvites` for both). |
 | Rejoin | After `need_rejoin`, Quill sends `joinGroupCall` again with the call's link, or with how the call was first reached. The instance is rebuilt under the real id, with the same crypto. Once the rejoins are spent (or the transport failed), the conference is dead: a new invitation or link replaces it without pressing Leave first. |
@@ -148,9 +150,13 @@ In the panel, a conference shows:
 - **Speed.** Every frame pays a JSON and base64 round trip through TDLib, as described above. CPU use with many video participants is not measured.
 - **Camera carry-over.** tdesktop moves the 1:1 call's camera, or screen, into the conference. Quill starts the conference with the camera off, so you turn it on in the panel.
 - **The invite box is simpler than tdesktop's.**
-  - It lists the first 30 contacts with no search.
+  - The search field is a plain field. tdesktop's multi-select also shows the people you picked as chips.
+  - The server search goes out on every change of the query. tdesktop waits 0.9 s (`AutoSearchTimeout`) and caches each query's answer.
+  - The name search doesn't fold accents or transliterate Russian names, as tdesktop's `fillNames` does.
+  - While the search is still out with no match yet, the box says "Loading…". tdesktop draws placeholder rows.
   - It has no per-person video invite: invites go out with `is_video` false.
-  - It doesn't show the `lng_confcall_invite_*` result toasts (privacy, already in, banned). A failed invite shows the existing group call error.
+  - It doesn't check the conference size limit (`lng_group_call_invite_limit`).
+  - The invite results toast stays until you click it. tdesktop's toast hides by itself.
 - **The invitation screen.** It names who already joined in text, without their photos. It plays no ring sound and posts no system notification, unlike a 1:1 call.
 - **The link confirmation.** It doesn't preview the call's participants. tdesktop fetches them first.
 - **Link revocation and creation.**

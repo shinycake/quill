@@ -5,12 +5,12 @@
 //! conference's link (tdesktop `startOrJoinConferenceCall`).
 use super::*;
 use crate::state::{
-    ActiveGroupCall, ConferenceInput, ConferenceOrigin, ConferenceUpgrade,
+    ActiveGroupCall, ConferenceInput, ConferenceInviteResults, ConferenceOrigin, ConferenceUpgrade,
     MAX_GROUP_CALL_REJOIN_ATTEMPTS,
 };
 use crate::telegram::envelope::{CallState, CallsPayload, Envelope, EnvelopePayload};
 use crate::telegram::group_call_crypto::GroupCallCrypto;
-use crate::telegram::requests::create_group_call;
+use crate::telegram::requests::{create_group_call, search_chats_on_server, search_public_chats};
 use std::sync::Arc;
 
 /// The engine key of a conference call whose join hasn't answered yet:
@@ -411,9 +411,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .filter(|call| !call.invite_link.is_empty())
             .and_then(|call| {
                 let upgrade = call.conference.as_ref()?.upgrade.clone()?;
-                Some((call.invite_link.clone(), upgrade))
+                Some((call.id, call.invite_link.clone(), upgrade))
             });
-        let Some((invite_link, upgrade)) = ready else {
+        let Some((group_call_id, invite_link, upgrade)) = ready else {
             return Ok(());
         };
         if let Some(conference) = self
@@ -428,10 +428,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             conference.link_open = upgrade.share_link && upgrade.invite.is_empty();
         }
         let mut result = Ok(());
-        for user_id in upgrade.invite {
-            if let Err(err) = self.invite_group_call_participant(user_id) {
-                result = Err(err);
+        let mut invites = ConferenceInviteResults::default();
+        for user_id in &upgrade.invite {
+            match self.invite_group_call_participant(*user_id) {
+                Ok(request) => invites.sent(request, *user_id),
+                Err(err) => {
+                    invites.failed.push(*user_id);
+                    result = Err(err);
+                }
             }
+        }
+        if !upgrade.invite.is_empty() {
+            self.session.calls.invite_results = Some(invites.for_call(group_call_id));
         }
         let still_in_call = self
             .session
@@ -441,6 +449,55 @@ impl<S: JsonSender> ConnectDriver<S> {
             .is_some_and(|call| call.id == upgrade.call_id);
         if still_in_call && let Err(err) = self.discard_call_with_link(&invite_link) {
             result = Err(err);
+        }
+        result
+    }
+}
+
+/// People asked of `searchChatsOnServer` (tdesktop `SearchPeopleLimit`).
+const ADD_PEOPLE_SEARCH_LIMIT: i32 = 5;
+
+impl<S: JsonSender> ConnectDriver<S> {
+    /// The "Add People" box's query changed: the server's people for it
+    /// (tdesktop `PeerListGlobalSearchController`, whose `contacts.search`
+    /// TDLib splits into `searchChatsOnServer` and `searchPublicChats`).
+    /// The contacts are filtered locally (`Session::add_people_view`). An
+    /// empty query clears the search; answers of an older query are
+    /// dropped by the reducer.
+    pub fn search_add_people(&mut self, query: &str) -> Result<(), ConnectSendError> {
+        let query = query.trim();
+        if query.is_empty() {
+            self.session.calls.add_people_search.clear();
+            return Ok(());
+        }
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.calls.add_people_search.query == query {
+            return Ok(());
+        }
+        let mine = self
+            .session
+            .request(RequestPurpose::SearchAddPeopleOnServer, None);
+        let public = self
+            .session
+            .request(RequestPurpose::SearchAddPeoplePublic, None);
+        self.session
+            .calls
+            .add_people_search
+            .begin(query, mine, public);
+        let result = self
+            .sender
+            .send_json(&search_chats_on_server(
+                mine,
+                query,
+                ADD_PEOPLE_SEARCH_LIMIT,
+            ))
+            .and_then(|()| self.sender.send_json(&search_public_chats(public, query)));
+        if result.is_err() {
+            self.session.requests.take(mine);
+            self.session.requests.take(public);
+            self.session.calls.add_people_search.clear();
         }
         result
     }

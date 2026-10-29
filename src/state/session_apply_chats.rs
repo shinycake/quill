@@ -704,6 +704,14 @@ impl Session {
         {
             self.messages.share_search.accept(pending.id, &chat_ids);
         }
+        if let Some(pending) = pending
+            && matches!(
+                pending.purpose,
+                RequestPurpose::SearchAddPeopleOnServer | RequestPurpose::SearchAddPeoplePublic
+            )
+        {
+            self.calls.add_people_search.accept(pending.id, &chat_ids);
+        }
         // `getTopChats`: not tied to a query generation, only to the strip.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTopChats) {
             if !self.search.search.top_chats_disabled {

@@ -1,8 +1,7 @@
 //! Conference calls in the call window (docs/decisions/tgcalls-conference-calls.md):
 //! - "Add People" in an established 1:1 call opens tdesktop's invite box
-//!   (`Group::PrepareInviteBox`): the other side is already in, contacts
-//!   are picked, or "Create Call Link" makes the conference with only its
-//!   link; either way the call moves into a new conference call.
+//!   (`ui::call_add_people`); either way the call moves into a new
+//!   conference call.
 //! - An incoming conference invitation rings in the call window as
 //!   tdesktop's `conferenceInvite()` call does: "Telegram Group Call",
 //!   who else joined, Decline or Join.
@@ -14,18 +13,12 @@ use super::link_info_boxes::finish;
 use super::screen_chooser::bold_marked;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
-use gpui_base::{Disableable, StyledExt};
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with, trn_with};
 use quill::state::Session;
-use quill::telegram::envelope::CallState;
-
-/// Contacts offered in the box, as the group call invite picker offers.
-const CONTACTS_SHOWN: usize = 30;
 
 /// The call window's key for a ringing invitation: never a call id (those
 /// are positive), and stable for the invitation's message.
@@ -129,166 +122,47 @@ impl QuillApp {
         self.decline_group_call_invitation(invite.chat_id, invite.message_id, cx);
     }
 
-    /// "Add People" (tdesktop `Panel::addPeople`): only once connected.
-    pub(super) fn open_call_add_people(&mut self, cx: &mut Context<Self>) {
-        let established = self
-            .session()
-            .and_then(|session| session.calls.active_call.as_ref())
-            .is_some_and(|call| matches!(call.state, CallState::Ready));
-        if !established {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::CALL_ERROR_ADD_NOT_STARTED)));
-            cx.notify();
-            return;
-        }
-        self.calls.add_people = Some(Vec::new());
-        if let Some(live) = self.live.as_mut()
-            && live.driver.session.users_state.contacts.is_none()
-        {
-            let _ = live.driver.fetch_contacts();
-        }
-        cx.notify();
-    }
-
-    fn toggle_call_add_person(&mut self, user_id: i64, cx: &mut Context<Self>) {
-        if let Some(picked) = self.calls.add_people.as_mut() {
-            if let Some(at) = picked.iter().position(|id| *id == user_id) {
-                picked.remove(at);
-            } else {
-                picked.push(user_id);
-            }
-        }
-        cx.notify();
-    }
-
-    /// The box's Invite, or "Create Call Link" with nobody picked: the
-    /// call moves into a new conference call.
-    fn finish_call_add_people(&mut self, share_link: bool, cx: &mut Context<Self>) {
-        let Some(picked) = self.calls.add_people.take() else {
-            return;
-        };
-        let invite = if share_link { Vec::new() } else { picked };
-        if let Some(live) = self.live.as_mut() {
-            if live
-                .driver
-                .upgrade_call_to_conference(invite, share_link)
-                .is_err()
-            {
-                self.connection.set_note(StatusNote::error(tr(
-                    keys::Q_AV_COULDNT_JOIN_THE_VOICE_CHAT,
-                )));
-            }
-        } else {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_AV_VOICE_CHATS_NEED_A_LIVE)));
-        }
-        cx.notify();
-    }
-
-    /// The "Add People" box over the call window.
-    pub(super) fn call_add_people_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let picked = self.calls.add_people.as_ref()?;
+    /// The toast with how "Add People"'s invitations went, once all have
+    /// answered (tdesktop `Panel::migrationInviteUsers`); a click
+    /// dismisses it.
+    pub(super) fn conference_invite_toast(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let peer = session.calls.active_call.as_ref()?.user_id;
-        let contacts: Vec<i64> = session
-            .users_state
-            .contacts
-            .clone()
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|user_id| *user_id != peer)
-            .take(CONTACTS_SHOWN)
-            .collect();
-        let mut rows = div()
-            .id("call-add-people-rows")
-            .flex()
-            .flex_col()
-            .gap_1()
-            .max_h(px(240.))
-            .overflow_y_scroll()
-            // The other side is in the call already (tdesktop `alreadyIn`).
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(tr_with(
-                        keys::CONFCALL_INVITE_ALREADY_USER,
-                        &[("user", &self.user_name(peer))],
-                    )),
-            );
-        for user_id in contacts {
-            let checked = picked.contains(&user_id);
-            rows = rows.child(
-                Checkbox::new(("call-add-person", user_id as u64))
-                    .label(self.user_name(user_id))
-                    .checked(checked)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.toggle_call_add_person(user_id, cx);
-                    })),
-            );
+        let current = session.calls.active_group_call.as_ref()?.id;
+        let results = session
+            .calls
+            .invite_results
+            .as_ref()
+            .filter(|r| r.is_done() && r.group_call_id == current)?;
+        let text = quill::state::conference_invite_toast(results, |user_id| {
+            session
+                .user(user_id)
+                .map(|user| user.first_name.clone())
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| self.user_name(user_id))
+        });
+        if text.is_empty() {
+            return None;
         }
-        let none_picked = picked.is_empty();
         Some(
             div()
-                .id("call-add-people")
-                .absolute()
-                .inset_0()
-                .bg(cx.theme().overlay)
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .w(px(340.))
-                        .rounded(cx.theme().radius_lg)
-                        .border_1()
-                        .border_color(cx.theme().border)
-                        .bg(cx.theme().background)
-                        .text_color(cx.theme().foreground)
-                        .p_4()
-                        .flex()
-                        .flex_col()
-                        .gap_3()
-                        .child(
-                            div()
-                                .text_base()
-                                .font_semibold()
-                                .child(tr(keys::GROUP_CALL_INVITE_CONF)),
-                        )
-                        .child(
-                            Button::new("call-add-people-link")
-                                .label(tr(keys::CONFCALL_CREATE_LINK))
-                                .ghost()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.finish_call_add_people(true, cx);
-                                })),
-                        )
-                        .child(rows)
-                        .child(
-                            div()
-                                .flex()
-                                .justify_end()
-                                .gap_2()
-                                .child(
-                                    Button::new("call-add-people-cancel")
-                                        .label(tr(keys::CANCEL))
-                                        .ghost()
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.calls.add_people = None;
-                                            cx.notify();
-                                        })),
-                                )
-                                .child(
-                                    Button::new("call-add-people-invite")
-                                        .label(tr(keys::GROUP_CALL_INVITE_CONF))
-                                        .primary()
-                                        .disabled(none_picked)
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.finish_call_add_people(false, cx);
-                                        })),
-                                ),
-                        ),
-                )
+                .id("conference-invite-toast")
+                .mx(px(16.))
+                .mb(px(8.))
+                .p(px(10.))
+                .rounded(px(10.))
+                // tdesktop `toastBg`: black at 0xb2.
+                .bg(hsla(0., 0., 0., 0xb2 as f32 / 255.))
+                .text_size(px(13.))
+                .cursor_pointer()
+                .on_click(cx.listener(|this, _, _, cx| {
+                    if let Some(live) = this.live.as_mut() {
+                        live.driver.session.calls.invite_results = None;
+                    } else if let Some(session) = this.demo_session.as_mut() {
+                        session.calls.invite_results = None;
+                    }
+                    cx.notify();
+                }))
+                .child(bold_marked(&text))
                 .into_any_element(),
         )
     }
