@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/ntgcalls-sys", "crates/webview-protocol", "crates/webview-host"]
+members = [".", "crates/ntgcalls-sys", "crates/quill-calls-sys", "crates/webview-protocol", "crates/webview-host"]
 resolver = "2"
 
 # Never crash (docs/contributing/panic-safety.md, phases A and B). Test code is
