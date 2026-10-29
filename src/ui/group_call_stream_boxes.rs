@@ -4,9 +4,8 @@
 //! - The "…" menu for managers (`FillMenu`, calls_group_menu.cpp): edit
 //!   the title (channel wording), start or stop recording, Settings, and
 //!   "End Live Stream". Screen sharing is left out: an RTMP connection
-//!   cannot capture (ntgcalls `RTMPStreamingUnsupported`), which is
-//!   tdesktop's `videoIsWorking` being false. Viewers get the Settings
-//!   button instead.
+//!   cannot capture, which is tdesktop's `videoIsWorking` being false.
+//!   Viewers get the Settings button instead.
 //! - Settings (`SettingsBox`, calls_group_settings.cpp, RTMP branch):
 //!   Speakers, Share Invite Link for a channel with a username, the
 //!   Server URL and Stream Key with their copy buttons and the "…" Revoke

@@ -1,7 +1,7 @@
 //! From a capture backend to the engine: a bounded sink that never blocks
 //! the capture callback (a full sink drops its oldest frame), and a
 //! feeder thread per call that drains it into the call's external source
-//! (`ExternalFrameSender`, `ntg_send_external_frame`) with capture
+//! (`ExternalFrameSender`) with capture
 //! timestamps mapped to Unix milliseconds.
 #![deny(clippy::indexing_slicing)]
 
@@ -117,7 +117,7 @@ impl<T> FrameSink<T> {
 /// A frame the feeder can hand to the engine.
 pub trait FeedFrame: Send + 'static {
     const DEVICE: ExternalDevice;
-    /// The bytes ntgcalls takes (PCM s16le, or I420).
+    /// The bytes the engine takes (PCM s16le, or I420).
     fn write_bytes(&self, out: &mut Vec<u8>);
     /// Width and height for video; zero for audio.
     fn size(&self) -> (u16, u16);
@@ -374,8 +374,8 @@ mod tests {
         ) -> Result<(), EngineError> {
             if self.fail.load(Ordering::Relaxed) {
                 return Err(EngineError::Engine {
-                    op: "ntg_send_external_frame",
-                    code: -206,
+                    op: "qc_external_frame",
+                    code: -1,
                 });
             }
             self.frames
@@ -531,7 +531,7 @@ mod tests {
             feeder
                 .stats()
                 .last_error()
-                .is_some_and(|err| err.contains("ntg_send_external_frame"))
+                .is_some_and(|err| err.contains("qc_external_frame"))
         );
     }
 }

@@ -61,7 +61,9 @@ pub(super) fn harness() -> Harness {
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
     let recorder = Arc::new(RecordingSender::new());
     let session = Session::new(AccountKey::primary(), sink.clone());
-    let driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    // A live story only joins with a call engine to play it.
+    driver.set_call_engine(Box::new(crate::calls::engine::MockEngine::new()));
     let mut h = Harness {
         driver,
         recorder,

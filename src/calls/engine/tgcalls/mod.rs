@@ -1,8 +1,7 @@
 //! `TgcallsEngine`: 1:1 and group calls on Telegram Desktop's own call
 //! library, tgcalls, loaded at runtime as `libquill_calls`
-//! (docs/decisions/tgcalls-engine.md). Live streams (answering a
-//! broadcast's time and part requests) come in the next step; until then
-//! a stream connects but gets no parts.
+//! (docs/decisions/tgcalls-engine.md), and live streams in broadcast
+//! mode, whose time and part requests the driver answers.
 //!
 //! The library has no audio devices, as Telegram Desktop builds it: Quill's
 //! microphone capture pushes 10 ms frames in (the external frame sender),
@@ -12,7 +11,7 @@ use crate::calls::stream_audio::StreamPlayer;
 use arc_swap::ArcSwapOption;
 use quill_calls_sys::{Loader, qc_p2p, qc_video_capture};
 use std::collections::HashMap;
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::ptr::NonNull;
 use std::sync::{Arc, OnceLock};
 
@@ -38,6 +37,11 @@ fn library() -> Result<&'static Loader, EngineError> {
             crate::advanced::debug_mode::call_log(&format!("[call] tgcalls: {err}"));
             EngineError::Unavailable
         })
+}
+
+/// `value` as a C string; a NUL inside fails `op`.
+fn text(op: &'static str, value: &str) -> Result<CString, EngineError> {
+    CString::new(value).map_err(|_| EngineError::Engine { op, code: -1 })
 }
 
 /// Load the library off the UI thread, ahead of the first engine.
@@ -143,12 +147,12 @@ impl TgcallsEngine {
         let wanted = call.media.camera.clone();
         match (wanted, call.camera) {
             (Some(device), Some(capture)) => {
-                let device = native_string(&device)?;
+                let device = text("qc_video_capture_switch_camera", &device)?;
                 // SAFETY: `capture` is Quill's live reference.
                 unsafe { (api.qc_video_capture_switch_camera)(capture.as_ptr(), device.as_ptr()) };
             }
             (Some(device), None) => {
-                let device = native_string(&device)?;
+                let device = text("qc_video_capture_camera", &device)?;
                 // SAFETY: a NUL-ended id; the library returns a new source.
                 let capture = unsafe { (api.qc_video_capture_camera)(device.as_ptr()) };
                 let capture = NonNull::new(capture).ok_or(EngineError::NoCamera)?;

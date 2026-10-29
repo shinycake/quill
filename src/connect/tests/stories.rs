@@ -740,6 +740,7 @@ fn driver_join_live_story_two_step_and_gates() {
     let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
     let seq = AtomicU64::new(0);
     seed_ready_alice(&mut driver, &seq, &dyn_sink);
+    driver.set_call_engine(Box::new(crate::calls::engine::MockEngine::new()));
 
     // Unknown story: rejected.
     assert_eq!(
@@ -801,8 +802,8 @@ fn driver_join_live_story_two_step_and_gates() {
     );
 
     // The `groupCall` answer creates the unjoined tracker; the pump then
-    // issues `joinLiveStory` for the pending live-story join (the no-device
-    // fallback params — no call engine in tests).
+    // issues `joinLiveStory` for the pending live-story join (with the
+    // mock engine's payload).
     driver
         .ingest(
             copy_and_parse(

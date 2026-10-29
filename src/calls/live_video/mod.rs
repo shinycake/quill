@@ -1,7 +1,7 @@
 //! Pushed video frames: streams, live stories, video chat tiles and 1:1
 //! calls.
 //!
-//! ntgcalls hands decoded I420 planes to the engine thread. A [`LiveSource`]
+//! tgcalls hands decoded I420 planes to the engine thread. A [`LiveSource`]
 //! (the engine side, `Send`) keeps only the newest one in a single slot
 //! under a mutex; a later frame replaces one the UI has not shown yet, and
 //! the replaced count is kept for the trace. The UI side, a [`LiveSink`],
@@ -24,7 +24,7 @@ use crate::locks::LockExt;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-/// How the sender turned the picture (ntgcalls `frame_data.rotation`).
+/// How the sender turned the picture (WebRTC's `VideoRotation`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum LiveRotation {
     #[default]
@@ -41,7 +41,7 @@ impl LiveRotation {
     }
 }
 
-/// One decoded frame as ntgcalls delivered it: I420 planes (Y `w × h`,
+/// One decoded frame as the engine delivered it: I420 planes (Y `w × h`,
 /// then U and V `⌈w/2⌉ × ⌈h/2⌉`), not yet turned.
 #[derive(Debug, PartialEq, Eq)]
 pub struct LiveFrame {

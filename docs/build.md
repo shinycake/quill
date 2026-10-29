@@ -54,24 +54,23 @@ cargo test --no-default-features
 cargo build --features ui --release
 ```
 
-On macOS, `bash scripts/macos-package-smoke.sh` copies the binary into `dist/Quill.app`. Nested `libtdjson` is included only when `QUILL_TDJSON_PATH` points at a locally built library (see `docs/native-bundle.md`); its OpenSSL dylibs are bundled automatically and `scripts/check-bundle-macho.sh` fails the step if anything references a non-system absolute path. `QUILL_BIN=<path>` skips the cargo build and packages an existing binary.
+On macOS, `bash scripts/macos-package-smoke.sh` copies the binary into `dist/Quill.app`. Nested `libtdjson` is included only when `QUILL_TDJSON_PATH` points at a locally built library (see `docs/native-bundle.md`); its OpenSSL dylibs are bundled automatically and `scripts/check-bundle-macho.sh` fails the step if anything references a non-system absolute path. `QUILL_BIN=<path>` skips the cargo build and packages an existing binary. With `vendor/quill-calls/lib/libquill_calls.dylib` (`scripts/build-tgcalls.sh`) the script also ships the call library in `Contents/Frameworks`, with the FFmpeg dylibs (`vendor/ffmpeg/prefix`) and OpenSSL (`OPENSSL_ROOT_DIR`) it links.
 
 ## Linux package
 
-`bash scripts/linux-package.sh` (after `cargo build --release --features ui`, `scripts/build-tdlib.sh`, `scripts/vendor-ntgcalls.sh`) writes `dist/linux/quill-linux-<arch>/` and `quill-linux-<arch>-bundle.tar.gz` (`x86_64` or `aarch64`, the build machine's CPU): `quill` plus `lib/` (tdjson, ntgcalls, bundled OpenSSL 3), RUNPATH `$ORIGIN/lib`, a `.desktop` file, icon, `install.sh` and a README. `scripts/check-bundle-elf.sh <dir>` fails if any ELF needs a library that is neither bundled nor an allowed system library. Needs `patchelf`. The CI `linux-package` job runs all of this and uploads the tarball. Details: `docs/decisions/codex-linux-package.md`.
+`bash scripts/linux-package.sh` (after `cargo build --release --features ui`, `scripts/build-tdlib.sh`, `scripts/build-ffmpeg.sh`, `scripts/build-tgcalls.sh`) writes `dist/linux/quill-linux-<arch>/` and `quill-linux-<arch>-bundle.tar.gz` (`x86_64` or `aarch64`, the build machine's CPU): `quill` plus `lib/` (tdjson, the call library libquill_calls, FFmpeg, bundled OpenSSL 3), RUNPATH `$ORIGIN/lib`, a `.desktop` file, icon, `install.sh` and a README. `scripts/check-bundle-elf.sh <dir>` fails if any ELF needs a library that is neither bundled nor an allowed system library. Needs `patchelf`. The CI `linux-package` job runs all of this with the libquill_calls the `quill-calls` workflow built earlier in the run, and uploads the tarball. Details: `docs/decisions/codex-linux-package.md`.
 
 ## Windows package
 
-Needs Visual Studio 2022 Build Tools (C++ workload, run from a developer prompt so `dumpbin`/`cmake` are on `PATH`), Rust 1.99.1 (`x86_64-pc-windows-msvc`), Git for Windows (bash, for the ntgcalls vendor step), and vcpkg. In order:
+Needs Visual Studio 2022 Build Tools (C++ workload, run from a developer prompt so `dumpbin`/`cmake` are on `PATH`), Rust 1.99.1 (`x86_64-pc-windows-msvc`), and vcpkg. In order:
 
 ```powershell
 cargo build --release --features ui
 pwsh scripts/build-tdlib-windows.ps1     # vcpkg openssl/zlib/gperf + tdjson.dll -> native/prefix/bin
-bash scripts/vendor-ntgcalls.sh          # prebuilt ntgcalls.dll, SHA-256 pinned
 pwsh scripts/windows-package.ps1         # -> dist/windows/quill-windows-x86_64{,.zip}
 ```
 
-The package is a flat directory: `quill.exe` plus the DLLs beside it. Everything links the VC++ runtime statically (`.cargo/config.toml` sets `+crt-static`; TDLib and the ThorVG sticker renderer build with `/MT`, OpenSSL and zlib are linked into `tdjson.dll`), so no `vcruntime`/`msvcp` DLL ships. `scripts/check-bundle-pe.ps1 <dir>` fails if a DLL imports anything that is neither bundled nor a Windows system DLL. For a developer run without packaging, set `QUILL_TDJSON_PATH`, `QUILL_NTGCALLS_LIB` to the DLL paths. The CI jobs `windows-build`, `windows-native` and `windows-package` run all of this (not required checks). Details: `docs/decisions/codex-windows-package.md`.
+The package is a flat directory: `quill.exe` plus the DLLs beside it. Everything links the VC++ runtime statically (`.cargo/config.toml` sets `+crt-static`; TDLib and the ThorVG sticker renderer build with `/MT`, OpenSSL and zlib are linked into `tdjson.dll`), so no `vcruntime`/`msvcp` DLL ships. `scripts/check-bundle-pe.ps1 <dir>` fails if a DLL imports anything that is neither bundled nor a Windows system DLL. The call library is not built for Windows yet, so the package ships without `quill_calls.dll` and calls show as unavailable (docs/decisions/tgcalls-engine.md); with one at `vendor/quill-calls/lib/quill_calls.dll` the script ships it. For a developer run without packaging, set `QUILL_TDJSON_PATH` and `QUILL_CALLS_LIB` to the DLL paths. The CI jobs `windows-build`, `windows-native` and `windows-package` run all of this (not required checks). Details: `docs/decisions/codex-windows-package.md`.
 
 ## Troubleshooting
 

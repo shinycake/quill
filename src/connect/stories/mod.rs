@@ -109,6 +109,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // Nothing would play the stream: no fetch, no join.
+        if !self.has_call_engine() {
+            return Err(ConnectSendError::CallsUnavailable);
+        }
         let group_call_id = match self.session.stories.stories.get(&(chat_id.0, story_id)) {
             Some(story) => match story.content {
                 StoryContentView::Live { group_call_id, .. } => group_call_id,

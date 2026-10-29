@@ -1,7 +1,6 @@
-//! External capture sources: Quill captures the microphone (and, in a
-//! later slice, the screen) itself and hands ntgcalls ready frames
-//! through `ntg_send_external_frame` (`ntgcalls.h`), instead of letting
-//! ntgcalls open the devices. Design: `docs/decisions/call-capture.md`.
+//! External capture sources: Quill captures the microphone and the screen
+//! itself and hands the engine ready frames; the call library opens no
+//! audio device and no screen. Design: `docs/decisions/call-capture.md`.
 //!
 //! The engine lives on the connect-driver thread, but frames arrive on
 //! capture threads every 10 ms, so the engine hands out a `Send` sender
@@ -9,9 +8,8 @@
 //! drives without touching the driver.
 use super::EngineError;
 
-/// Microphone frames: PCM s16le, 48 kHz mono, 10 ms. ntgcalls reads one
-/// frame as `frame_size / (2 * channel_count)` samples
-/// (`audio_streamer.cpp`), so every frame is exactly this long.
+/// Microphone frames: PCM s16le, 48 kHz mono, 10 ms: the library's audio
+/// device module takes exactly one 10 ms frame at a time.
 pub const EXTERNAL_AUDIO_RATE: u32 = 48_000;
 /// Samples per external microphone frame (10 ms at 48 kHz).
 pub const EXTERNAL_AUDIO_FRAME_SAMPLES: usize = 480;
@@ -35,7 +33,7 @@ pub enum ExternalDevice {
     Screen,
 }
 
-/// Per-frame data ntgcalls takes beside the bytes (`ntg_frame_data`).
+/// Per-frame data the engine takes beside the bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ExternalFrameMeta {
     /// Unix milliseconds of the capture moment.
@@ -56,7 +54,7 @@ pub trait ExternalFrameSender: Send + Sync {
     ) -> Result<(), EngineError>;
 }
 
-/// Whether frame bytes have the length ntgcalls expects: exactly one
+/// Whether frame bytes have the length the engine expects: exactly one
 /// 10 ms microphone frame, or one I420 picture (`w*h*3/2`, even sizes).
 pub fn external_frame_valid(device: ExternalDevice, len: usize, meta: ExternalFrameMeta) -> bool {
     match device {
@@ -74,26 +72,14 @@ pub fn external_frame_valid(device: ExternalDevice, len: usize, meta: ExternalFr
     }
 }
 
-/// Whether calls capture the microphone in Quill (external source) or
-/// let ntgcalls open the device itself. `QUILL_CALL_CAPTURE=native` is
-/// the debugging fallback; builds without the UI feature have no capture
-/// backend and always use ntgcalls' device source.
+/// Whether calls capture the microphone: builds without the UI feature
+/// have no capture backend, so their calls send no sound.
 pub fn external_capture_enabled() -> bool {
-    external_capture_from(
-        cfg!(feature = "ui"),
-        std::env::var("QUILL_CALL_CAPTURE").ok().as_deref(),
-    )
+    cfg!(feature = "ui")
 }
 
-/// [`external_capture_enabled`] for a given build and `QUILL_CALL_CAPTURE`.
-pub fn external_capture_from(has_backend: bool, env: Option<&str>) -> bool {
-    has_backend && !env.is_some_and(|value| value.trim().eq_ignore_ascii_case("native"))
-}
-
-/// Whether screen sharing sends Quill's own capture (an external screen
-/// source) instead of ntgcalls' desktop capture: only where Quill has a
-/// screen backend (macOS, Windows and Linux, `calls::capture::screen`), and not
-/// under `QUILL_CALL_CAPTURE=native`.
+/// Whether calls can send a screen: only where Quill has a screen backend
+/// (macOS, Windows and Linux, `calls::capture::screen`).
 pub fn external_screen_capture_enabled() -> bool {
     external_capture_enabled()
         && cfg!(all(
@@ -112,16 +98,6 @@ mod tests {
         assert!(external_frame_valid(ExternalDevice::Microphone, 960, meta));
         assert!(!external_frame_valid(ExternalDevice::Microphone, 958, meta));
         assert!(!external_frame_valid(ExternalDevice::Microphone, 0, meta));
-    }
-
-    #[test]
-    fn native_fallback_only_on_request_or_without_a_backend() {
-        assert!(external_capture_from(true, None));
-        assert!(external_capture_from(true, Some("")));
-        assert!(external_capture_from(true, Some("external")));
-        assert!(!external_capture_from(true, Some("native")));
-        assert!(!external_capture_from(true, Some(" Native ")));
-        assert!(!external_capture_from(false, None));
     }
 
     #[test]

@@ -58,7 +58,7 @@ Everything matches Telegram Desktop at `dev` f985723b (26 Oct 2026):
 - FFmpeg and OpenSSL 3 are linked dynamically against the copies Quill
   already bundles. FFmpeg is new in the macOS bundle; it is needed by
   tg_owt's H.264 decoder and tgcalls' stream parts.
-- `libquill_calls` is loaded at runtime like ntgcalls today, which keeps
+- `libquill_calls` is loaded at runtime, as ntgcalls was, which keeps
   tgcalls' LGPL-3.0 terms met the same way: users can rebuild and replace it
   (`vendor/quill-calls/share/SOURCES.txt` names every source).
   `vendor/quill-calls/share/licenses/` carries the notices each part asks
@@ -66,6 +66,9 @@ Everything matches Telegram Desktop at `dev` f985723b (26 Oct 2026):
 - The library finds FFmpeg and OpenSSL next to itself (`@loader_path`,
   `$ORIGIN`). On macOS the build script rewrites their absolute install
   names to `@rpath/<name>` and re-signs, and fails if any build path is left.
+  On Windows OpenSSL is linked in, and the Rust loader opens
+  `quill_calls.dll` with `LOAD_WITH_ALTERED_SEARCH_PATH`, so FFmpeg's DLLs
+  are found beside it first.
 
 Where the build deliberately differs from tdesktop's:
 
@@ -75,9 +78,19 @@ Where the build deliberately differs from tdesktop's:
 - PipeWire 0.3.62's headers are fetched for tg_owt's camera code (the
   version tdesktop's build image uses) because Ubuntu 22.04's are too old.
 - rnnoise is the desktop-app fork tdesktop uses; OpenH264 is built with its
-  makefile rather than meson; tdesktop's libvpx patches (desktop-app/patches
-  `libvpx/`) are not applied: they fix its MSVC and Windows-on-Arm builds
-  and let `SDKROOT` pick the macOS SDK, none of which this build needs.
+  makefile rather than meson (its MSVC makefile on Windows); of tdesktop's
+  libvpx patches (desktop-app/patches `libvpx/`) only the three a Windows
+  x64 build needs are applied, on Windows: no forced `/GL`, parallel
+  compiles, and the NASM 3 fix (`native/quill-calls/patches/libvpx-win-*`).
+  The others fix Windows-on-Arm and let `SDKROOT` pick the macOS SDK.
+- Windows: everything is MSVC with the static C runtime (`/MT`), as in
+  tdesktop's win64 build, but FFmpeg stays the shared MinGW build Quill
+  already ships (tdesktop links a static MSVC FFmpeg); the build script
+  makes MSVC import libraries from the DLLs' exports. OpenSSL 3 and zlib
+  are static from vcpkg (`x64-windows-static`, as TDLib's Windows build
+  takes them) rather than built from tdesktop's pins. rnnoise is built
+  with an empty `RNNOISE_EXPORT`, so its functions are not exported from
+  `quill_calls.dll`.
 - tgcalls carries Quill's patches from `native/quill-calls/patches/`,
   applied after the checkout. `tgcalls-v2-reference-release-on-media-thread`
   fixes a deadlock in `InstanceV2ReferenceImpl` (10.0.0, 11.0.0) when a call
@@ -223,6 +236,77 @@ Known gaps, kept on purpose for now:
 - Requests queued by an instance a rejoin replaced still reach TDLib
   once; their answers are dropped by instance id.
 
+## The switch (step 6)
+
+The app loads `TgcallsEngine` (`connect/live.rs`) and preloads its library
+off the UI thread (`preload_tgcalls`, `ui/early_connect.rs`). There is no
+other engine and no switch back; tests drive the mock engine.
+
+Without an engine (the library did not load) no call is joined: a 1:1
+call, a voice chat, a live stream and a live story all say "Calls are
+unavailable" (`ConnectSendError::CallsUnavailable` from
+`join_video_chat`, `rejoin_group_call` and `join_live_story`, and the UI's
+`refuse_without_call_engine` before it asks anything). Before the switch
+a group join went out signaling-only, and you sat in a call you could
+neither hear nor see.
+
+Deleted with ntgcalls: `crates/ntgcalls-sys`, `src/calls/engine/ntgcalls/`,
+the ntgcalls trampolines in `engine/native.rs`, `scripts/vendor-ntgcalls.sh`,
+its CI and packaging steps, its license files and its deps-watch source.
+Shared code shaped by ntgcalls went too:
+
+- `CallbackShared` keeps only the driver's hooks; the per-chat routing
+  tables (and `NtgPartRequests`) were ntgcalls' callback demultiplexing.
+- `GroupCallMode::from_native`, `StreamQuality::from_native`,
+  `BroadcastPartStatus::to_native` and `group_video_target` mapped
+  ntgcalls' enums.
+- `StreamState::Unsupported` and `EngineError::is_stream_unsupported`:
+  only ntgcalls refused a stream (`NTG_ERR_RTMP_STREAMING_UNSUPPORTED`).
+- The story-stream key yield for 1:1 calls: ntgcalls keyed a group call
+  by chat id and a 1:1 call by user id, so a live story and a call with
+  its poster could not coexist. tgcalls instances are independent; both
+  keep running. The yield stays for a group call in the story's own chat
+  (`yield_story_stream_to_chat`, `refuse_story_stream_in_member_chat`):
+  a stream's picture (`LiveKey::Stream`), mode and quality are still
+  keyed by chat id, so a channel's live story and the same channel's
+  stream joined as a member would share them. The call you join wins and
+  the story shows failed, with Retry.
+- `QUILL_CALL_CAPTURE=native` and `QUILL_STREAM_AUDIO_DEVICE=1` left the
+  microphone or the sound to ntgcalls' devices. The library has none, so
+  Quill always captures and plays. The sound self-healing step now
+  reopens Quill's output (`reopen_stream_sound`, `reopen_call_sound`)
+  instead of moving to a device output that no longer exists.
+
+### Packaging
+
+`quill-calls.yml` is a reusable workflow: ci.yml (pushes) and release.yml
+run it before the Linux and macOS package jobs, which download its
+`quill-calls-<target>` artifact from the same run. The tg_owt and codec
+cache stays in that workflow.
+
+- Linux: `lib/libquill_calls.so` beside `libtdjson.so` (RUNPATH
+  `$ORIGIN`), linking the package's FFmpeg and OpenSSL;
+  `check-bundle-elf.sh` and `check-bundle-dlopen.py` check it.
+- macOS: `Contents/Frameworks/libquill_calls.dylib`, id
+  `@rpath/libquill_calls.dylib`, with the FFmpeg dylibs and OpenSSL it
+  links as `@rpath/<name>` copied beside it (the app's first FFmpeg
+  files). The package job restores or builds the same FFmpeg as
+  quill-calls.yml and loads the library from the bundle.
+- Both ship `licenses/quill-calls/` (the library's `SOURCES.txt` and
+  every part's notice). `release-lgpl-sources.sh` archives tgcalls at its
+  pinned commit in place of ntgcalls and its FFmpeg and GLib.
+- `quill-calls-sys` finds the library in `lib/` beside the executable,
+  in `Frameworks/`, or beside the executable on Windows.
+
+TODO(tgcalls-windows): Windows builds `quill_calls.dll` in another
+branch. Until it joins packaging, `windows-package.ps1` ships the zip
+without it (it copies `vendor/quill-calls/lib/quill_calls.dll` when one is
+there), the bundle checks treat it as optional, and Windows calls show as
+unavailable, as they do whenever the library is missing. When the DLL
+arrives: build it in quill-calls.yml, download it in package-windows.yml,
+and make it required in `windows-package.ps1`, `check-bundle-pe.ps1` and
+`check-bundle-load.ps1`.
+
 ## Build order
 
 1. Build pipeline and the version API (this doc's first PR).
@@ -235,4 +319,7 @@ Known gaps, kept on purpose for now:
 Then the parity items: conference calls, battery-low line, speaking levels for
 everyone in group calls, signal bars, the muted-speech hint.
 
-Windows builds with MSVC like tdesktop and joins the pipeline before step 6.
+Windows builds with MSVC like tdesktop (`scripts/build-tgcalls.sh` from
+MSYS2 bash with the MSVC environment inherited) in the quill-calls workflow.
+No package ships `libquill_calls` yet on any platform; the packages add it,
+beside `quill.exe` on Windows, before step 6.

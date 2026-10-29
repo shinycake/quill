@@ -17,7 +17,7 @@
 //!   there is no chooser: the share button starts or stops sharing.
 //!
 //! Only builds with a screen backend (`calls::capture::screen`) show it.
-//! Elsewhere the share buttons keep ntgcalls' own desktop capture.
+//! Elsewhere calls cannot share a screen.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;

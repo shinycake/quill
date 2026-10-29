@@ -179,7 +179,7 @@ impl LiveConnect {
         if self.driver.has_call_engine() {
             return;
         }
-        match crate::calls::engine::NtgcallsEngine::load() {
+        match crate::calls::engine::TgcallsEngine::load() {
             Ok(engine) => {
                 self.driver.set_call_engine(Box::new(engine));
                 self.driver.start_engine_for_tracked_call();

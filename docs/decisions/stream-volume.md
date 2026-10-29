@@ -47,8 +47,10 @@ source:
 
 ## Self-healing
 
-A stream that plays through Quill falls back to ntgcalls' device
-playback, once per join, when either of these happens:
+A stream that plays through Quill gets its output reopened, once per
+join, when either of these happens (with ntgcalls this fell back to its
+device playback; the tgcalls engine has no device output, see
+docs/decisions/tgcalls-engine.md):
 
 - the stream has been live for 5 s and no playback chunk has arrived
   (the clock starts when the stream state turns Live, because nothing
@@ -56,18 +58,19 @@ playback, once per join, when either of these happens:
 - the output device stops with an error.
 
 The driver checks on every poll. It prints
-`quill: warning: stream sound: falling back to device playback for group call <id> (<reason>)`
-to the terminal and the debug log, and the slider goes away (device
-playback has no volume, so mute is the only control again).
-`QUILL_STREAM_AUDIO_DEVICE=1` skips Quill's output and always uses
-device playback.
+`quill: warning: stream sound: reopening the output for group call <id> (<reason>)`
+to the terminal and the debug log. The new output keeps the volume, so
+the slider stays.
+Removed with ntgcalls: `QUILL_STREAM_AUDIO_DEVICE=1`, which skipped
+Quill's output and always used device playback. Quill always plays the
+stream itself now.
 
 The clock clears once sound arrives, so an output reopened after a
 speaker change gets its own 5 s.
 
-A stream with video and no audio track sends no playback chunks, so it
-falls back after 5 s and loses the slider. Nothing is lost but the
-control: there is no sound to set.
+A stream with video and no audio track sends no playback chunks, so its
+output is reopened after 5 s. Nothing changes for the viewer: there is
+no sound to set.
 
 On Linux, ntgcalls names speakers its own way and cpal lists ALSA
 names, which may not match. When they differ, the output opens on the
@@ -129,14 +132,14 @@ To verify, Idan runs a release build signed as usual:
    follows in 5 % steps.
 6. Check that the terminal and, with debug mode on (`--debug`),
    `logs/quill-debug.log` have no
-   `stream sound: falling back` line.
-7. Quit, start with `QUILL_STREAM_AUDIO_DEVICE=1`, join again. Sound
-   plays, and there is no slider, only mute.
+   `stream sound: reopening the output` line.
+7. Removed: the `QUILL_STREAM_AUDIO_DEVICE=1` step. The variable went
+   with ntgcalls and does nothing now.
 8. Optional: unplug or switch the output device while the stream plays.
-   Sound continues on device playback, and the log has one
-   `falling back` line with `OutputFailed`.
+   Sound continues on a reopened output, and the log has one
+   `reopening the output` line with `OutputFailed`.
 
 Also unchecked: clock drift between the stream and the output over a
 long stream (the ring drops or pads, so it would show as rare clicks),
 cpal device names on Linux (ALSA) and Windows matching ntgcalls'
-speaker names, a video-only stream falling back after 5 s, and devices that do not take 48 kHz.
+speaker names, a video-only stream reopening its output after 5 s, and devices that do not take 48 kHz.

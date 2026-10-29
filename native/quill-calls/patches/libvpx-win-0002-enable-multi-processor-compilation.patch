@@ -1,0 +1,15 @@
+Telegram Desktop's libvpx build patch (desktop-app/patches libvpx/0002), Windows only:
+compile each Visual Studio project's files in parallel.
+
+diff --git a/build/make/gen_msvs_vcxproj.sh b/build/make/gen_msvs_vcxproj.sh
+index 0e4313e56..4f8eba245 100755
+--- a/build/make/gen_msvs_vcxproj.sh
++++ b/build/make/gen_msvs_vcxproj.sh
+@@ -441,6 +441,7 @@ generate_vcxproj() {
+                 tag_content CompileAsWinRT false
+                 tag_content PrecompiledHeader NotUsing
+                 tag_content SDLCheck false
++                tag_content MultiProcessorCompilation true
+             fi
+             close_tag ClCompile
+             case "$proj_kind" in

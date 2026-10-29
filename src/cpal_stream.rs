@@ -8,7 +8,7 @@
 //!   and refused real-time priority through the error callback while the
 //!   stream keeps running; only the rest end it.
 //! - [`downmix_into`]: any sample format to mono `f32`.
-//! - [`requested_input`]: an ntgcalls device name as a cpal device choice.
+//! - [`requested_input`]: an engine device name as a cpal device choice.
 //!
 //! Design: `docs/decisions/cpal-0-18-rodio-0-23.md`. The tests are in
 //! `src/ui/audio/cpal_stream_tests.rs`, in the app target: CI runs the
@@ -182,7 +182,7 @@ where
     }));
 }
 
-/// Which microphone an ntgcalls device name asks for.
+/// Which microphone an engine device name asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestedInput<'a> {
     /// The system default input.
@@ -191,8 +191,8 @@ pub enum RequestedInput<'a> {
     Named(&'a str),
 }
 
-/// What `engine_name`, a microphone name from ntgcalls' device list, asks
-/// cpal for. On Windows ntgcalls lists WebRTC's Core Audio names: first
+/// What `engine_name`, a microphone name from the engine's device list, asks
+/// cpal for. On Windows WebRTC lists Core Audio names: first
 /// `Default - <name>` and `Communication - <name>` for the two default
 /// roles, then every device by its `FriendlyName`, which is also the name
 /// cpal 0.18 reports. `Communication - <name>` asks for that device by

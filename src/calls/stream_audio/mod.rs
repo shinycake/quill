@@ -1,13 +1,10 @@
-//! A call's sound played by Quill instead of ntgcalls: stream-mode calls
-//! (channel live streams and live stories), so they can have a volume,
-//! and 1:1 calls, so Quill sees whether the other side's sound arrives.
-//! Video chats keep ntgcalls' device output.
+//! A call's sound played by Quill: the call library has no audio devices
+//! (as Telegram Desktop builds tgcalls), so every call's sound comes out
+//! here, and streams get a volume.
 //!
-//! ntgcalls v3.0.3 hands the decoded audio of an external playback
-//! writer to the frames callback (`stream_manager.cpp`,
-//! `setup_audio_playback_callbacks`): one 10 ms frame per source, signed
-//! 16-bit native-endian PCM, interleaved, at the description's rate and
-//! channel count (`AudioReceiver::resample_frame`). The frames are mixed
+//! The library hands over the call's decoded sound in 10 ms frames of
+//! signed 16-bit native-endian PCM, interleaved, at the format's rate and
+//! channel count. The frames are mixed
 //! into a [`ring::SampleRing`], and the output (`output`, UI builds)
 //! plays them at the [`gain::Gain`].
 //!
@@ -34,7 +31,7 @@ const PLAYOUT_PRIME_MS: u32 = 60;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PcmFormat {
     pub rate: u32,
-    /// 1 or 2: ntgcalls converts only between mono and stereo.
+    /// 1 or 2.
     pub channels: u8,
 }
 
@@ -92,7 +89,7 @@ impl StreamAudio {
         self.format.interleaved_samples(PLAYOUT_PRIME_MS)
     }
 
-    /// Runs on ntgcalls' audio thread every 10 ms, so it never
+    /// Runs on the engine's audio thread every 10 ms, so it never
     /// allocates: the batch is mixed sample by sample into the ring.
     pub fn push_frames<'a, I>(&self, frames: I)
     where
@@ -143,20 +140,6 @@ fn mixed_sample<'a>(frames: impl Iterator<Item = &'a [u8]>, index: usize) -> i16
     sum.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16
 }
 
-/// Whether Quill plays streams and 1:1 calls itself.
-/// `QUILL_STREAM_AUDIO_DEVICE=1` leaves them on ntgcalls' device output;
-/// builds without the UI feature have no output and always do.
-pub fn quill_plays_streams() -> bool {
-    plays_streams_from(
-        cfg!(feature = "ui"),
-        std::env::var("QUILL_STREAM_AUDIO_DEVICE").ok().as_deref(),
-    )
-}
-
-pub fn plays_streams_from(has_output: bool, env: Option<&str>) -> bool {
-    has_output && env.map(str::trim) != Some("1")
-}
-
 /// A stream's sound playing on an output device. Dropping it closes the
 /// device.
 pub struct StreamPlayer {
@@ -166,7 +149,7 @@ pub struct StreamPlayer {
 }
 
 impl StreamPlayer {
-    /// Open the output named `device` (an ntgcalls speaker name; `None`
+    /// Open the output named `device` (a speaker name as the engine lists it; `None`
     /// or an unknown name is the system default) at `volume`.
     pub fn open(device: Option<&str>, volume: f32, muted: bool) -> Result<Self, String> {
         #[cfg(feature = "ui")]
@@ -191,7 +174,7 @@ impl StreamPlayer {
 
 #[cfg(test)]
 mod tests {
-    use super::{PcmFormat, StreamAudio, plays_streams_from};
+    use super::{PcmFormat, StreamAudio};
 
     fn bytes(samples: &[i16]) -> Vec<u8> {
         samples.iter().flat_map(|s| s.to_ne_bytes()).collect()
@@ -273,14 +256,5 @@ mod tests {
         let len = audio.ring().len();
         assert!(len <= format.interleaved_samples(200), "{len}");
         assert!(len >= format.interleaved_samples(180), "{len}");
-    }
-
-    #[test]
-    fn the_env_switch_forces_device_playback() {
-        assert!(plays_streams_from(true, None));
-        assert!(plays_streams_from(true, Some("0")));
-        assert!(!plays_streams_from(true, Some("1")));
-        assert!(!plays_streams_from(true, Some(" 1 ")));
-        assert!(!plays_streams_from(false, None));
     }
 }

@@ -307,8 +307,8 @@ pub fn end_group_call(extra: RequestId, group_call_id: i32) -> String {
 /// `startGroupCallScreenSharing group_call_id:int32 audio_source_id:int32
 /// payload:string = Text;`
 /// "Starts screen sharing in a group call". The `payload` is the
-/// presentation offer from `ntg_init_presentation`; the returned `Text`
-/// is the answer for `ntg_connect(..., is_presentation=true)`.
+/// presentation instance's join payload; the returned `Text` is its
+/// answer, for `CallEngine::connect_screen_share`.
 /// `audio_source_id` is the presentation's own audio ssrc from the
 /// offer (0 when the engine announces none).
 pub fn start_group_call_screen_sharing(

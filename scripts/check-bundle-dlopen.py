@@ -14,7 +14,7 @@ def main() -> int:
     pkg = os.path.realpath(sys.argv[1])
     lib_dir = os.path.join(pkg, "lib")
     failures = []
-    for name in ("libtdjson.so", "libntgcalls.so", "libquillvideo.so"):
+    for name in ("libtdjson.so", "libquill_calls.so", "libquillvideo.so"):
         path = os.path.join(lib_dir, name)
         try:
             ctypes.CDLL(path)
@@ -22,7 +22,8 @@ def main() -> int:
             failures.append(f"{name}: dlopen failed: {error}")
     with open("/proc/self/maps") as maps:
         mapped = {line.split()[-1] for line in maps if line.strip().endswith(".so") or ".so." in line}
-    # OpenSSL (tdjson) and FFmpeg (quillvideo) must come from the package.
+    # OpenSSL (tdjson, quill_calls) and FFmpeg (quillvideo, quill_calls) must
+    # come from the package.
     ffmpeg = sorted({os.path.basename(p) for p in mapped if os.path.basename(p).startswith(("libav", "libsw"))})
     if len(ffmpeg) != 5:
         failures.append(f"expected 5 FFmpeg libraries mapped, got {ffmpeg}")

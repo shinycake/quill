@@ -32,6 +32,7 @@ impl UserError for ConnectSendError {
                 &[("limit", &limit.to_string())],
             ),
             Self::AgentDriving => tr(keys::Q_NOTES_AGENT_DRIVING).to_string(),
+            Self::CallsUnavailable => tr(keys::Q_OPS_CALLS_ARE_UNAVAILABLE_THE_AUDIO).to_string(),
         }
     }
 

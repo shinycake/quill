@@ -1,6 +1,5 @@
-//! Call media capture owned by Quill: the microphone (and, from the
-//! screen-capture slice on, the screen) is captured here and handed to
-//! ntgcalls as external frames, so Quill can process it first (noise
+//! Call media capture owned by Quill: the microphone and the screen are
+//! captured here and handed to the call engine as external frames, so Quill can process it first (noise
 //! suppression) and read its level without a second device open.
 //!
 //! - `denoise`: 10 ms framing, RNNoise (`nnnoiseless`), mute, level.
@@ -145,7 +144,7 @@ impl MicControls {
     }
 
     /// Muted captures keep running and send silence, so unmuting is
-    /// instant and ntgcalls' external source never runs dry.
+    /// instant and the engine's external source never runs dry.
     pub fn muted(&self) -> bool {
         self.muted.load(Ordering::Relaxed)
     }

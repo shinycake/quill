@@ -88,7 +88,7 @@ jobs:
       - name: test cfg form
         run: "! grep -rn 'cfg(all(test' src crates --include='*.rs'"
       - name: clippy (UI)
-        run: cargo clippy --features demo-capture --all-targets --locked -p quill -p ntgcalls-sys -p quill-webview-protocol -- -D warnings
+        run: cargo clippy --features demo-capture --all-targets --locked -p quill -p quill-calls-sys -p quill-webview-protocol -- -D warnings
       # The vendored X11 / Windows GPUI backends only build on their own OS;
       # their shared idle-frame decision is std-only and tested standalone.
       - name: tests (vendored GPUI frame idle)
@@ -190,9 +190,17 @@ jobs:
   # with release.yml (docs/decisions/codex-release-pipeline.md); CI never passes
   # the Telegram credential secrets, so these builds embed nothing.
   # Linux: UI + native libs, relocatable package (docs/decisions/codex-linux-package.md).
+  # The call library (docs/decisions/tgcalls-engine.md) the Linux and macOS
+  # packages ship; they download its artifacts from this run.
+  quill-calls:
+    name: quill-calls
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/quill-calls.yml
+
   linux-package:
     name: linux-package
     if: github.event_name == 'push'
+    needs: quill-calls
     uses: ./.github/workflows/package-linux.yml
 
   # Launch smoke on Windows (docs/decisions/ci-launch-smoke.md): the real window
@@ -233,6 +241,7 @@ jobs:
   macos-package:
     name: macos-package
     if: github.event_name == 'push'
+    needs: quill-calls
     uses: ./.github/workflows/package-macos.yml
 
   # Packaging runs on pushes to main only; PRs get the Linux check. The macOS UI

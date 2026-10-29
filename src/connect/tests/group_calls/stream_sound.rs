@@ -50,31 +50,33 @@ fn the_volume_reaches_the_engine_once_per_change() {
 #[test]
 fn only_a_stream_quill_plays_has_a_volume() {
     let (dir, driver, _recorder, handle, ..) = joined_stream();
-    assert!(!driver.stream_has_volume(555), "device playback: mute only");
+    assert!(!driver.stream_has_volume(555), "no output open: mute only");
     handle.set_stream_sound(555, SILENT);
     assert!(driver.stream_has_volume(555));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
-fn a_live_stream_without_sound_falls_back_after_five_seconds_once() {
+fn a_live_stream_without_sound_reopens_its_output_after_five_seconds_once() {
     let (dir, mut driver, _recorder, handle, ..) = joined_stream();
     handle.set_stream_sound(555, SILENT);
     let start = Instant::now();
     driver.request_tick(start);
     driver.request_tick(start + Duration::from_secs(30));
-    assert!(handle.device_playbacks().is_empty());
+    assert!(handle.stream_sound_reopens().is_empty());
     set_stream_state(&mut driver, StreamState::Live);
     let live = start + Duration::from_secs(31);
     driver.request_tick(live);
     driver.request_tick(live + Duration::from_millis(4_999));
-    assert!(handle.device_playbacks().is_empty());
+    assert!(handle.stream_sound_reopens().is_empty());
     driver.request_tick(live + NO_SOUND_LIMIT);
-    assert_eq!(handle.device_playbacks(), vec![555]);
-    assert!(!driver.stream_has_volume(555), "the slider goes with it");
-    handle.set_stream_sound(555, SILENT);
+    assert_eq!(handle.stream_sound_reopens(), vec![555]);
+    assert!(
+        driver.stream_has_volume(555),
+        "a new output replaces the old one: the slider stays"
+    );
     driver.request_tick(live + NO_SOUND_LIMIT * 4);
-    assert_eq!(handle.device_playbacks(), vec![555], "once");
+    assert_eq!(handle.stream_sound_reopens(), vec![555], "once");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -93,7 +95,7 @@ fn a_stream_with_sound_stays_on_quills_output() {
     let start = Instant::now();
     driver.request_tick(start);
     driver.request_tick(start + Duration::from_secs(60));
-    assert!(handle.device_playbacks().is_empty());
+    assert!(handle.stream_sound_reopens().is_empty());
     assert!(driver.stream_has_volume(555));
     let _ = std::fs::remove_dir_all(&dir);
 }

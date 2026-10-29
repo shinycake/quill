@@ -277,8 +277,8 @@ impl QuillApp {
             );
         }
         // Phase C2i: local screen-share send state — the engine sends
-        // the desktop track instead of the camera (ntgcalls no-mix
-        // rule); the flag is the tracked toggle intent.
+        // the screen instead of the camera (one video track); the flag
+        // is the tracked toggle intent.
         let show_screen_share_note =
             call.screen_sharing && matches!(call.state, CallState::Ready | CallState::Unknown(_));
         if show_screen_share_note {

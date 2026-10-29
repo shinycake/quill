@@ -6,13 +6,13 @@ features on the shipped targets (macOS arm64, Linux x86_64/arm64, Windows x86_64
 Build-only and dev-only crates are excluded. Do not edit by hand.
 
 Native libraries shipped next to the binary (TDLib, OpenSSL, zlib, FFmpeg,
-ntgcalls, the Visual C++ runtime), the C++ code compiled into it (ThorVG with
-RapidJSON) and bundled data files are listed in `THIRD_PARTY.md`, with their
-license texts under `licenses/`.
+the call library libquill_calls, the Visual C++ runtime), the C++ code
+compiled into it (ThorVG with RapidJSON) and bundled data files are listed in
+`THIRD_PARTY.md`, with their license texts under `licenses/`.
 
 ## Overview
 
-- MIT License: 677
+- MIT License: 676
 - Apache License 2.0: 42
 - Unicode License v3: 24
 - ISC License: 22
@@ -11482,7 +11482,6 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [ntgcalls-sys 0.1.0](https://github.com/shinycake/quill)
 - [quill-calls-sys 0.1.0](https://github.com/shinycake/quill)
 - [quill-webview-protocol 0.1.0](https://github.com/shinycake/quill)
 - [accesskit 0.24.1](https://github.com/AccessKit/accesskit)

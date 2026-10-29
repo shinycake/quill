@@ -585,9 +585,8 @@ pub(crate) fn parse_group_call_message(value: Option<&Value>) -> Option<ParsedGr
 /// `groupCallVideoSourceGroup semantics:string source_ids:vector<int32>
 /// = GroupCallVideoSourceGroup;`
 /// The `source_ids` are the RTP synchronization sources of one video
-/// channel; ntgcalls' `ntg_add_incoming_video` subscribes by endpoint +
-/// these groups, and incoming frames are attributed to the participant
-/// by matching `ntg_frame.ssrc` against them.
+/// channel; the engine subscribes to the channel's endpoint with these
+/// groups and routes its pictures to the participant by endpoint.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupCallVideoSourceGroup {
     pub semantics: String,
@@ -678,8 +677,7 @@ pub struct ParsedGroupCallParticipant {
     pub screen_sharing_enabled: bool,
     /// Phase C2g: the parsed `video_info` / `screen_sharing_video_info`
     /// channels; `None` matches the `*_enabled` flags above. The engine
-    /// subscribes to `video_info` endpoints via
-    /// `ntg_add_incoming_video`.
+    /// subscribes to `video_info` endpoints.
     pub video_info: Option<GroupCallVideoInfo>,
     pub screen_sharing_video_info: Option<GroupCallVideoInfo>,
 }

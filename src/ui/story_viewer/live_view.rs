@@ -22,7 +22,6 @@ use crate::ui::video_player::controls::{
 use crate::ui::video_player::{VideoPlayer, follow_live_slot, video_frame};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::slider::SliderState;
-use quill::calls::engine::StreamState;
 use quill::calls::live_video::LiveSink;
 use quill::lang::{trn, trn_with};
 use quill::premium_hub::group_digits;
@@ -151,7 +150,6 @@ impl QuillApp {
     fn live_story_overlay(
         &mut self,
         player: Option<&VideoPlayer>,
-        unsupported: bool,
         row_id: u64,
         cx: &mut Context<Self>,
     ) -> Option<PictureOverlay> {
@@ -161,7 +159,7 @@ impl QuillApp {
             .is_some_and(ActiveGroupCall::join_failed);
         let input = LiveInput {
             state: player.map(VideoPlayer::state),
-            idle: unsupported,
+            idle: false,
             failed,
         };
         let now = cx.background_executor().now();
@@ -236,7 +234,6 @@ impl QuillApp {
             .story_stream
             .as_ref()
             .filter(|call| call.id == live.group_call_id);
-        let unsupported = call.is_some_and(|call| call.stream == StreamState::Unsupported);
         let levels = session.live_levels();
         let now = unix_ms_now() / 1000;
         let now = i64::try_from(now).unwrap_or(i64::MAX);
@@ -299,20 +296,7 @@ impl QuillApp {
                         .corner_radii(Corners::all(px(6.)), hsla(0., 0., 0., 0.)),
                 )
         });
-        let overlay = self.live_story_overlay(player.as_ref(), unsupported, key as u64, cx);
-        let unsupported_label = unsupported.then(|| {
-            div()
-                .absolute()
-                .inset_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .px(px(24.))
-                .text_sm()
-                .text_center()
-                .text_color(chrome::fg())
-                .child(tr(keys::Q_LIVE_STORY_UNSUPPORTED))
-        });
+        let overlay = self.live_story_overlay(player.as_ref(), key as u64, cx);
         Some(
             div()
                 .id(("live-story-frame", key as u64))
@@ -329,7 +313,6 @@ impl QuillApp {
                 .children(backdrop)
                 .children(tile)
                 .children(overlay)
-                .children(unsupported_label)
                 .child(
                     div()
                         .absolute()

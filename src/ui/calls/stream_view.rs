@@ -79,20 +79,14 @@ impl QuillApp {
             .session()
             .and_then(|s| s.chat_photo_path(quill::ids::ChatId(chat_id)))
             .is_some();
-        let idle = !facts.joined
-            || matches!(
-                facts.stream,
-                StreamState::NoStream | StreamState::Unsupported
-            );
+        let idle = !facts.joined || facts.stream == StreamState::NoStream;
         let failure = self
             .session()
             .and_then(|s| s.calls.active_group_call.as_ref())
             // The stream's own connect failed: the error is shared with
             // later failures (a screen share, a video subscribe) once the
-            // transport is up, and an unsupported stream has its label.
-            .filter(|call| {
-                call.is_joined && !call.transport_ready && call.stream != StreamState::Unsupported
-            })
+            // transport is up.
+            .filter(|call| call.is_joined && !call.transport_ready)
             .and_then(|call| call.transport_error.clone());
         let stream = &mut self.group_call.stream;
         follow_live_slot(&mut stream.player, sink.as_ref(), cx);

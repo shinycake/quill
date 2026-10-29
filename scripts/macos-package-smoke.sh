@@ -75,9 +75,44 @@ if [[ -n "${QUILL_TDJSON_PATH:-}" && -f "${QUILL_TDJSON_PATH}" ]]; then
   fi
 fi
 
-NTG_LIB="${QUILL_NTGCALLS_LIB:-$ROOT/vendor/ntgcalls/lib/libntgcalls.dylib}"
-if [[ -f "$NTG_LIB" ]]; then
-  cp "$NTG_LIB" "$DIST/Contents/Frameworks/libntgcalls.dylib"
+# The call library (scripts/build-tgcalls.sh, docs/decisions/tgcalls-engine.md).
+# It links FFmpeg and OpenSSL as @rpath/<name> and finds them through its
+# @loader_path rpath, so each goes into Frameworks beside it: FFmpeg from the
+# prefix it was built against, OpenSSL from OPENSSL_ROOT_DIR (Homebrew's
+# openssl@3 by default, the one tdjson links too). quill-calls-sys looks for
+# the library in Frameworks.
+CALLS_DIR="${QUILL_CALLS_DIR:-$ROOT/vendor/quill-calls}"
+FFMPEG_PREFIX="${QUILL_FFMPEG_PREFIX:-$ROOT/vendor/ffmpeg/prefix}"
+OPENSSL_DIR="${OPENSSL_ROOT_DIR:-$(brew --prefix openssl@3 2>/dev/null || true)}"
+CALLS_LIB="$CALLS_DIR/lib/libquill_calls.dylib"
+if [[ -f "$CALLS_LIB" ]]; then
+  FW="$DIST/Contents/Frameworks"
+  cp -L "$CALLS_LIB" "$FW/libquill_calls.dylib"
+  chmod u+w "$FW/libquill_calls.dylib"
+  install_name_tool -id @rpath/libquill_calls.dylib "$FW/libquill_calls.dylib"
+  while IFS= read -r dep; do
+    name="${dep#@rpath/}"
+    [[ "$dep" == @rpath/* && "$name" != libquill_calls.dylib && ! -f "$FW/$name" ]] || continue
+    if [[ -f "$FFMPEG_PREFIX/lib/$name" ]]; then
+      src="$FFMPEG_PREFIX/lib/$name"
+    elif [[ -n "$OPENSSL_DIR" && -f "$OPENSSL_DIR/lib/$name" ]]; then
+      src="$OPENSSL_DIR/lib/$name"
+    else
+      echo "error: libquill_calls.dylib needs $name, found in neither $FFMPEG_PREFIX/lib nor OpenSSL" >&2
+      exit 1
+    fi
+    cp -L "$src" "$FW/$name"
+    chmod u+w "$FW/$name"
+    install_name_tool -id "@rpath/$name" "$FW/$name"
+    echo "  bundled $src -> Frameworks/$name (for libquill_calls)"
+  done < <(otool -L "$FW/libquill_calls.dylib" | tail -n +2 | sed -E 's/^[[:space:]]+//; s/ \(compatibility version.*$//')
+  mkdir -p "$DIST/Contents/Resources/licenses/quill-calls" "$DIST/Contents/Resources/licenses/ffmpeg"
+  cp "$CALLS_DIR/share/SOURCES.txt" "$DIST/Contents/Resources/licenses/quill-calls/SOURCES.txt"
+  cp -R "$CALLS_DIR/share/licenses" "$DIST/Contents/Resources/licenses/quill-calls/licenses"
+  if [[ -d "$FFMPEG_PREFIX/share/quillvideo" ]]; then
+    cp "$FFMPEG_PREFIX"/share/quillvideo/* "$DIST/Contents/Resources/licenses/ffmpeg/"
+  fi
+  chmod -R u=rwX,go=rX "$DIST/Contents/Resources/licenses/quill-calls" "$DIST/Contents/Resources/licenses/ffmpeg"
 fi
 
 # Bundle every non-system dylib the bundled libraries link (OpenSSL for tdjson,

@@ -98,7 +98,10 @@ impl QuillApp {
             self.connection
                 .set_note(match live.driver.join_live_story(chat_id, story_id) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_JOINING_LIVE_STORY)),
-                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_JOIN_THE_LIVE)),
+                    Err(err) => crate::ui::calls::join_error_note(
+                        err,
+                        keys::Q_MEDIA_COULD_NOT_JOIN_THE_LIVE,
+                    ),
                 });
         } else if self.demo_session.is_some() {
             self.connection.set_note(StatusNote::silent(tr(

@@ -1,9 +1,4 @@
 use super::*;
-use ntgcalls_sys::{
-    NTG_VIDEO_ROTATION_VIDEO_ROTATION_0, NTG_VIDEO_ROTATION_VIDEO_ROTATION_90,
-    NTG_VIDEO_ROTATION_VIDEO_ROTATION_180, NTG_VIDEO_ROTATION_VIDEO_ROTATION_270,
-    ntg_video_rotation,
-};
 
 /// Phase C2e: I420 planar byte size: Y (w*h) + U (cw*ch) + V (cw*ch).
 fn i420_frame_size(width: u16, height: u16) -> usize {
@@ -12,17 +7,12 @@ fn i420_frame_size(width: u16, height: u16) -> usize {
     w * h + 2 * cw * ch
 }
 
-/// The engine's former conversion (`engine::native::i420_to_rgba`, gone
+/// The engine's former conversion (`i420_to_rgba`, gone
 /// since every feed carries I420 planes), kept as the colour and rotation
 /// oracle: an I420 frame to RGBA8 with BT.601 full-range math,
 /// then apply the frame rotation. Returns `None` on invalid input so we
 /// never render garbage bytes.
-fn i420_to_rgba(
-    width: u16,
-    height: u16,
-    yuv: &[u8],
-    rotation: ntg_video_rotation,
-) -> Option<Vec<u8>> {
+fn i420_to_rgba(width: u16, height: u16, yuv: &[u8], rotation: LiveRotation) -> Option<Vec<u8>> {
     if width == 0 || height == 0 || yuv.len() != i420_frame_size(width, height) {
         return None;
     }
@@ -54,18 +44,18 @@ fn i420_to_rgba(
         }
     }
     Some(match rotation {
-        NTG_VIDEO_ROTATION_VIDEO_ROTATION_90
-        | NTG_VIDEO_ROTATION_VIDEO_ROTATION_180
-        | NTG_VIDEO_ROTATION_VIDEO_ROTATION_270 => rotate_rgba(&rgba, w, h, rotation),
+        LiveRotation::R90 | LiveRotation::R180 | LiveRotation::R270 => {
+            rotate_rgba(&rgba, w, h, rotation)
+        }
         _ => rgba,
     })
 }
 
 /// Phase C2e: rotate an RGBA8 buffer (row-major, `w` x `h`) by the given
 /// frame rotation; 90/270 swap the dimensions.
-fn rotate_rgba(src: &[u8], w: usize, h: usize, rotation: ntg_video_rotation) -> Vec<u8> {
+fn rotate_rgba(src: &[u8], w: usize, h: usize, rotation: LiveRotation) -> Vec<u8> {
     let (dw, dh) = match rotation {
-        NTG_VIDEO_ROTATION_VIDEO_ROTATION_90 | NTG_VIDEO_ROTATION_VIDEO_ROTATION_270 => (h, w),
+        LiveRotation::R90 | LiveRotation::R270 => (h, w),
         _ => (w, h),
     };
     let mut dst = vec![0u8; src.len()];
@@ -73,9 +63,9 @@ fn rotate_rgba(src: &[u8], w: usize, h: usize, rotation: ntg_video_rotation) -> 
         for x in 0..w {
             let (dx, dy) = match rotation {
                 // 90° clockwise: the left column lands on top.
-                NTG_VIDEO_ROTATION_VIDEO_ROTATION_90 => (h - 1 - y, x),
-                NTG_VIDEO_ROTATION_VIDEO_ROTATION_180 => (w - 1 - x, h - 1 - y),
-                NTG_VIDEO_ROTATION_VIDEO_ROTATION_270 => (y, w - 1 - x),
+                LiveRotation::R90 => (h - 1 - y, x),
+                LiveRotation::R180 => (w - 1 - x, h - 1 - y),
+                LiveRotation::R270 => (y, w - 1 - x),
                 _ => (x, y),
             };
             let src_off = (y * w + x) * 4;
@@ -98,37 +88,22 @@ fn rotate_rgba(src: &[u8], w: usize, h: usize, rotation: ntg_video_rotation) -> 
 /// Y=64, U=128, V=255 gives R = 64 + 1.402*127 ~ 242.
 #[test]
 fn i420_to_rgba_known_pixels() {
-    let white = i420_to_rgba(
-        2,
-        2,
-        &[235, 235, 235, 235, 128, 128],
-        NTG_VIDEO_ROTATION_VIDEO_ROTATION_0,
-    )
-    .expect("valid 2x2 frame");
+    let white = i420_to_rgba(2, 2, &[235, 235, 235, 235, 128, 128], LiveRotation::None)
+        .expect("valid 2x2 frame");
     assert_eq!(white.len(), 16);
     let (pixels, _) = white.as_chunks::<4>();
     for pixel in pixels {
         assert_pixel_close(pixel, &[235, 235, 235, 255]);
     }
-    let black = i420_to_rgba(
-        2,
-        2,
-        &[16, 16, 16, 16, 128, 128],
-        NTG_VIDEO_ROTATION_VIDEO_ROTATION_0,
-    )
-    .expect("valid 2x2 frame");
+    let black = i420_to_rgba(2, 2, &[16, 16, 16, 16, 128, 128], LiveRotation::None)
+        .expect("valid 2x2 frame");
     let (pixels, _) = black.as_chunks::<4>();
     for pixel in pixels {
         assert_pixel_close(pixel, &[16, 16, 16, 255]);
     }
     // I420 planes: Y(2x2) then U(1x1) then V(1x1).
-    let saturated = i420_to_rgba(
-        2,
-        2,
-        &[64, 64, 64, 64, 128, 255],
-        NTG_VIDEO_ROTATION_VIDEO_ROTATION_0,
-    )
-    .expect("valid 2x2 frame");
+    let saturated = i420_to_rgba(2, 2, &[64, 64, 64, 64, 128, 255], LiveRotation::None)
+        .expect("valid 2x2 frame");
     let (pixels, _) = saturated.as_chunks::<4>();
     for pixel in pixels {
         assert_pixel_close(pixel, &[242, 0, 64, 255]);
@@ -148,35 +123,18 @@ fn assert_pixel_close(actual: &[u8], expected: &[u8; 4]) {
 /// Phase C2e: validates we never render garbage bytes.
 #[test]
 fn i420_to_rgba_rejects_bad_sizes() {
-    assert_eq!(
-        i420_to_rgba(2, 2, &[0; 5], NTG_VIDEO_ROTATION_VIDEO_ROTATION_0),
-        None
-    );
-    assert_eq!(
-        i420_to_rgba(2, 2, &[0; 7], NTG_VIDEO_ROTATION_VIDEO_ROTATION_0),
-        None
-    );
-    assert_eq!(
-        i420_to_rgba(0, 2, &[], NTG_VIDEO_ROTATION_VIDEO_ROTATION_0),
-        None
-    );
-    assert_eq!(
-        i420_to_rgba(2, 0, &[], NTG_VIDEO_ROTATION_VIDEO_ROTATION_0),
-        None
-    );
+    assert_eq!(i420_to_rgba(2, 2, &[0; 5], LiveRotation::None), None);
+    assert_eq!(i420_to_rgba(2, 2, &[0; 7], LiveRotation::None), None);
+    assert_eq!(i420_to_rgba(0, 2, &[], LiveRotation::None), None);
+    assert_eq!(i420_to_rgba(2, 0, &[], LiveRotation::None), None);
 }
 
 /// Phase C2e: validates rotation handling. 2x1 with distinct pixels,
 /// rotated 90° clockwise, becomes 1x2 with the left column on top.
 #[test]
 fn i420_to_rgba_rotation_90() {
-    let rgba = i420_to_rgba(
-        2,
-        1,
-        &[235, 16, 128, 128],
-        NTG_VIDEO_ROTATION_VIDEO_ROTATION_90,
-    )
-    .expect("valid 2x1 frame");
+    let rgba =
+        i420_to_rgba(2, 1, &[235, 16, 128, 128], LiveRotation::R90).expect("valid 2x1 frame");
     assert_eq!(
         rgba,
         vec![235, 235, 235, 255, 16, 16, 16, 255],
@@ -219,24 +177,18 @@ fn bgra_matches_the_engine_conversion_pixel_for_pixel() {
     for (w, h) in [(64u16, 36u16), (17, 9), (2, 2), (1, 1)] {
         let planes = gradient(w, h);
         let frame = I420::new(&planes, w, h).expect("a frame");
-        let expected = swap_to_bgra(
-            i420_to_rgba(w, h, &planes, NTG_VIDEO_ROTATION_VIDEO_ROTATION_0).expect("rgba"),
-        );
+        let expected = swap_to_bgra(i420_to_rgba(w, h, &planes, LiveRotation::None).expect("rgba"));
         assert_eq!(i420_to_bgra(&frame).expect("bgra"), expected, "{w}x{h}");
     }
 }
 
 #[test]
 fn turned_planes_match_the_engine_turning_rgba() {
-    let cases = [
-        (LiveRotation::R90, NTG_VIDEO_ROTATION_VIDEO_ROTATION_90),
-        (LiveRotation::R180, NTG_VIDEO_ROTATION_VIDEO_ROTATION_180),
-        (LiveRotation::R270, NTG_VIDEO_ROTATION_VIDEO_ROTATION_270),
-    ];
+    let cases = [LiveRotation::R90, LiveRotation::R180, LiveRotation::R270];
     let (w, h) = (24u16, 10u16);
     let planes = gradient(w, h);
     let frame = I420::new(&planes, w, h).expect("a frame");
-    for (rotation, native) in cases {
+    for rotation in cases {
         let (turned, tw, th) = rotate_planes(&frame, rotation).expect("turned");
         assert_eq!(
             (tw, th),
@@ -247,7 +199,7 @@ fn turned_planes_match_the_engine_turning_rgba() {
             }
         );
         let turned = I420::new(&turned, tw, th).expect("a turned frame");
-        let expected = swap_to_bgra(i420_to_rgba(w, h, &planes, native).expect("rgba"));
+        let expected = swap_to_bgra(i420_to_rgba(w, h, &planes, rotation).expect("rgba"));
         assert_eq!(
             i420_to_bgra(&turned).expect("bgra"),
             expected,
@@ -424,19 +376,14 @@ fn median_us(runs: usize, mut work: impl FnMut()) -> u128 {
 fn measure_1080p_frame_costs() {
     use std::hint::black_box;
     let (w, h) = (1920u16, 1080u16);
-    let ntgcalls = gradient(w, h);
+    let decoded = gradient(w, h);
     let runs = 61;
-    // Engine thread, before: copy out of ntgcalls, then I420 to RGBA.
+    // Engine thread, before: copy out of the engine, then I420 to RGBA.
     let old_engine = median_us(runs, || {
-        let bytes = black_box(&ntgcalls).to_vec();
-        black_box(i420_to_rgba(
-            w,
-            h,
-            &bytes,
-            NTG_VIDEO_ROTATION_VIDEO_ROTATION_0,
-        ));
+        let bytes = black_box(&decoded).to_vec();
+        black_box(i420_to_rgba(w, h, &bytes, LiveRotation::None));
     });
-    let rgba = i420_to_rgba(w, h, &ntgcalls, NTG_VIDEO_ROTATION_VIDEO_ROTATION_0).expect("rgba");
+    let rgba = i420_to_rgba(w, h, &decoded, LiveRotation::None).expect("rgba");
     // UI side, before (the former `stream_picture::frame_image`, gone with
     // the live backend): clone and swap to BGRA.
     let old_ui = median_us(runs, || {
@@ -448,9 +395,9 @@ fn measure_1080p_frame_costs() {
     });
     // Engine thread, after: the copy only.
     let new_engine = median_us(runs, || {
-        black_box(black_box(&ntgcalls).to_vec());
+        black_box(black_box(&decoded).to_vec());
     });
-    let frame = I420::new(&ntgcalls, w, h).expect("frame");
+    let frame = I420::new(&decoded, w, h).expect("frame");
     // Background executor, after, macOS: into an NV12 buffer (a pool
     // buffer's rows are 64-byte aligned).
     let stride = usize::from(w).next_multiple_of(64);
@@ -484,15 +431,9 @@ fn measure_1080p_frame_costs() {
     });
     let tile_planes = gradient(tw, th);
     let old_tile_engine = median_us(runs, || {
-        black_box(i420_to_rgba(
-            tw,
-            th,
-            &tile_planes,
-            NTG_VIDEO_ROTATION_VIDEO_ROTATION_0,
-        ));
+        black_box(i420_to_rgba(tw, th, &tile_planes, LiveRotation::None));
     });
-    let tile_rgba =
-        i420_to_rgba(tw, th, &tile_planes, NTG_VIDEO_ROTATION_VIDEO_ROTATION_0).expect("rgba");
+    let tile_rgba = i420_to_rgba(tw, th, &tile_planes, LiveRotation::None).expect("rgba");
     let old_tile_ui = median_us(runs, || {
         let mut bgra = black_box(&tile_rgba).clone();
         for pixel in bgra.as_chunks_mut::<4>().0 {
@@ -508,7 +449,7 @@ fn measure_1080p_frame_costs() {
     });
     eprintln!("MEASURE 1080p paused picture (90 px, blurred): {paused} us");
     let mb = |bytes: usize| bytes as f64 / 1e6;
-    let (planes, picture) = (ntgcalls.len(), rgba.len());
+    let (planes, picture) = (decoded.len(), rgba.len());
     eprintln!("MEASURE 1080p before: engine {old_engine} us, UI {old_ui} us");
     eprintln!(
         "MEASURE 1080p after: engine {new_engine} us, nv12 {new_nv12} us, bgra {new_bgra} us"

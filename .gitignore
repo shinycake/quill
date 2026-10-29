@@ -15,7 +15,8 @@ credentials.json
 .vscode
 quill.local.env
 
-# ntgcalls prebuilt engine (125MB .so) — procured by scripts/vendor-ntgcalls.sh, NEVER committed
+# Native build outputs (FFmpeg from scripts/build-ffmpeg.sh, the call library
+# from scripts/build-tgcalls.sh) and their work trees, NEVER committed
 vendor/
 
 # Quill account data — live session state and keys must never be committed.
@@ -29,5 +30,5 @@ db.sqlite-wal
 db.sqlite-shm
 .claude/worktrees/
 # Vendored crate sources that the crate itself names `vendor/` (not the
-# ntgcalls engine above).
+# native build outputs above).
 !third_party/*/vendor/

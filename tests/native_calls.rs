@@ -1,5 +1,5 @@
-//! Opt-in checks of the actual sidecar. Never contacts Telegram or captures media.
-use quill::calls::engine::{CallEngine, MediaDeviceKind, NtgcallsEngine};
+//! Opt-in checks of the real call engine (`libquill_calls`). Never contacts Telegram or captures media.
+use quill::calls::engine::{CallEngine, MediaDeviceKind, TgcallsEngine};
 
 #[test]
 fn native_protocol_and_device_enumeration() {
@@ -7,7 +7,7 @@ fn native_protocol_and_device_enumeration() {
         eprintln!("SKIP: set QUILL_VERIFY_NATIVE_CALLS=1 to check the native sidecar");
         return;
     }
-    let engine = NtgcallsEngine::load().expect("Native call engine must load");
+    let engine = TgcallsEngine::load().expect("Native call engine must load");
     let protocol = engine.protocol();
     assert!(protocol.min_layer > 0 && protocol.min_layer <= protocol.max_layer);
     assert!(!protocol.library_versions.is_empty());
@@ -31,7 +31,7 @@ fn native_p2p_creation_and_teardown() {
     if std::env::var_os("QUILL_VERIFY_NATIVE_CALLS").is_none() {
         return;
     }
-    let mut engine = NtgcallsEngine::load().expect("Native call engine must load");
+    let mut engine = TgcallsEngine::load().expect("Native call engine must load");
     // A local native transport only: no TDLib request, connection, or media sources.
     for call_id in [1, 2] {
         engine

@@ -150,7 +150,7 @@ impl LevelSource for SharedLevel {
     }
 }
 
-/// The peer's microphone on/off (ntgcalls' remote Microphone source)
+/// The peer's microphone on/off (the engine's remote audio state)
 /// lands on the tracked 1:1 call through the driver pump, and only on
 /// that call.
 #[test]

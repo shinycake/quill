@@ -5,7 +5,8 @@
 //! clock; whether two calls actually connect is left to manual testing.
 //!
 //! Skips when libquill_calls hasn't been built (scripts/build-tgcalls.sh).
-//! FFmpeg must be on the loader path (LD_LIBRARY_PATH / DYLD_LIBRARY_PATH).
+//! FFmpeg must be on the loader path (LD_LIBRARY_PATH / DYLD_LIBRARY_PATH,
+//! or PATH or beside the DLL on Windows).
 
 use quill_calls_sys::*;
 use std::ffi::{CStr, CString, c_void};

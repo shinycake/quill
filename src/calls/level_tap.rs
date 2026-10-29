@@ -5,8 +5,7 @@
 //! During a call the call's own capture stream feeds the level
 //! (`connect::call_audio`), so no second device open happens. The tap
 //! opens the device by itself for the Settings > Calls microphone test,
-//! and for calls under `QUILL_CALL_CAPTURE=native`, where ntgcalls holds
-//! the microphone and hands Quill no samples. CoreAudio, WASAPI (shared
+//! and for a group call whose own capture is not running. CoreAudio, WASAPI (shared
 //! mode) and PulseAudio / PipeWire share a capture device between
 //! clients; a raw ALSA `hw:` device may refuse, in which case the tap
 //! reports an error.

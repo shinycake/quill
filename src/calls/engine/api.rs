@@ -1,13 +1,8 @@
 //! The `CallEngine` trait: the app-facing call-engine interface.
 use super::*;
 
-/// Phase C2b: 1:1 engine lifecycle and bidirectional signaling.
-///
-/// There is deliberately no `connect_ready` method in this slice. Transport
-/// connect (`ntg_skip_exchange` + `ntg_connect_p2p` + stream sources) is C2c:
-/// `P2PCall::connect()` starts real default-device audio I/O, an unverifiable
-/// production side effect. The engine queues inbound signaling until C2c
-/// connects it.
+/// Phase C2b: 1:1 engine lifecycle and bidirectional signaling. The
+/// engine queues inbound signaling until `connect` creates the call.
 pub trait CallEngine {
     /// Phase C2b: app -> engine; create the engine-side call keyed by
     /// Telegram user id.
@@ -22,7 +17,7 @@ pub trait CallEngine {
     fn accept_call(&mut self, call_id: i32) -> Result<(), EngineError>;
 
     /// Phase C2b: app -> engine; feed TDLib `updateNewCallSignalingData`
-    /// (`schema/td_api.tl:10862`) to `ntg_send_signaling_data`.
+    /// (`schema/td_api.tl:10862`) to the engine's call.
     fn send_signaling_data(&mut self, call_id: i32, data: &[u8]) -> Result<(), EngineError>;
 
     /// Phase C2b: engine -> app; route emitted bytes to the registered hook.
@@ -54,22 +49,19 @@ pub trait CallEngine {
     }
 
     /// Phase C2e: app -> engine; send `camera` (an enumerated device id)
-    /// or, for `None`, turn the camera off. ntgcalls opens only a named
+    /// or, for `None`, turn the camera off. The engine opens only a named
     /// device, so there is no "default camera" here: the driver picks one.
     fn set_camera(&mut self, call_id: i32, camera: Option<&str>) -> Result<(), EngineError>;
 
-    /// Phase C2i: app -> engine; toggle 1:1 screen-share send by
-    /// re-issuing capture sources with the desktop description
-    /// (`NTG_MEDIA_SOURCE_DESKTOP`, NULL input = default display).
-    /// Enabling clears the camera intent — ntgcalls rejects
-    /// camera+screen in Capture mode (`stream_manager.cpp:69`,
-    /// v3.0.0), so screen share replaces the camera. Disabling leaves
-    /// the camera off; the user re-enables it explicitly. A failed
-    /// issuance restores the retained config.
+    /// Phase C2i: app -> engine; toggle 1:1 screen-share send. A 1:1
+    /// call has one video track, so enabling sends the screen instead of
+    /// the camera and clears the camera intent. Disabling leaves the
+    /// camera off; the user re-enables it explicitly. A failed switch
+    /// restores the retained config.
     fn set_screen_share_enabled(&mut self, call_id: i32, enabled: bool) -> Result<(), EngineError>;
 
-    /// Phase C2g: app -> engine; create the ntgcalls group context keyed
-    /// by TDLib chat id and return the WebRTC offer that `joinVideoChat`
+    /// Phase C2g: app -> engine; create the group call instance for the
+    /// TDLib chat id and return the join payload that `joinVideoChat`
     /// carries as its `payload` (`schema/td_api.tl:14292`). The answer
     /// (`Text` response) goes back through `connect_group_call`. A
     /// `Viewer` context opens no capture source.
@@ -110,8 +102,8 @@ pub trait CallEngine {
         camera: Option<&str>,
     ) -> Result<(), EngineError>;
 
-    /// Phase C2g: app -> engine; begin screen sharing: `ntg_init_presentation`
-    /// returns the offer that `startGroupCallScreenSharing`
+    /// Phase C2g: app -> engine; begin screen sharing: the presentation
+    /// instance returns the payload that `startGroupCallScreenSharing`
     /// (`schema/td_api.tl:14303`) carries as its `payload`.
     fn start_screen_share(&mut self, group_call_id: i32) -> Result<String, EngineError>;
 
@@ -124,8 +116,8 @@ pub trait CallEngine {
         answer_payload: &str,
     ) -> Result<(), EngineError>;
 
-    /// Phase C2g: app -> engine; stop the presentation transport
-    /// (`ntg_stop_presentation`); pair with `endGroupCallScreenSharing`
+    /// Phase C2g: app -> engine; stop the presentation transport; pair
+    /// with `endGroupCallScreenSharing`
     /// (`schema/td_api.tl:14309`).
     fn stop_screen_share(&mut self, group_call_id: i32) -> Result<(), EngineError>;
 
@@ -135,9 +127,8 @@ pub trait CallEngine {
     /// leaves a stray native presentation.
     fn presentation_active(&self, group_call_id: i32) -> bool;
 
-    /// app -> engine; mute or unmute your microphone in a group call
-    /// (`ntg_mute` / `ntg_unmute` on its chat). Kept for the next
-    /// connect when the transport isn't up yet.
+    /// app -> engine; mute or unmute your microphone in a group call.
+    /// Kept for the next connect when the transport isn't up yet.
     fn set_group_muted(&mut self, group_call_id: i32, muted: bool) -> Result<(), EngineError> {
         let _ = (group_call_id, muted);
         Ok(())
@@ -163,9 +154,9 @@ pub trait CallEngine {
         let _ = volume;
     }
 
-    /// How the stream in group call `group_call_id` plays through the
-    /// engine's own output; `None` when the engine does not play it
-    /// (not a stream, device playback, no output), so it has no volume.
+    /// How the stream in group call `group_call_id` plays through Quill's
+    /// output; `None` when nothing plays it (not a stream, no output), so
+    /// it has no volume.
     fn stream_sound_health(
         &self,
         group_call_id: i32,
@@ -174,15 +165,15 @@ pub trait CallEngine {
         None
     }
 
-    /// app -> engine; the self-healing fallback: play the stream in
-    /// `group_call_id` on the device from now on.
-    fn use_device_playback(&mut self, group_call_id: i32) -> Result<(), EngineError> {
+    /// app -> engine; the self-healing step: reopen the output the stream
+    /// in `group_call_id` plays on.
+    fn reopen_stream_sound(&mut self, group_call_id: i32) -> Result<(), EngineError> {
         let _ = group_call_id;
         Ok(())
     }
 
-    /// How 1:1 call `call_id`'s sound plays through the engine's own
-    /// output; `None` when it plays on the device.
+    /// How 1:1 call `call_id`'s sound plays through Quill's output;
+    /// `None` when no output is open.
     fn call_sound_health(
         &self,
         call_id: i32,
@@ -191,9 +182,9 @@ pub trait CallEngine {
         None
     }
 
-    /// app -> engine; the self-healing fallback: play 1:1 call
-    /// `call_id` on the device from now on.
-    fn use_device_call_sound(&mut self, call_id: i32) -> Result<(), EngineError> {
+    /// app -> engine; the self-healing step: reopen the output 1:1 call
+    /// `call_id` plays on.
+    fn reopen_call_sound(&mut self, call_id: i32) -> Result<(), EngineError> {
         let _ = call_id;
         Ok(())
     }
@@ -212,9 +203,8 @@ pub trait CallEngine {
         let _ = callback;
     }
 
-    /// How the connected group call in `chat_id` carries media, read with
-    /// `ntg_get_connection_mode` after `ntg_connect`. `None` when no
-    /// connected call uses that chat.
+    /// How the connected group call in `chat_id` carries media, as its
+    /// join answer set it. `None` when no connected call uses that chat.
     fn group_call_mode(&self, chat_id: i64) -> Option<GroupCallMode> {
         let _ = chat_id;
         None
@@ -259,8 +249,8 @@ pub trait CallEngine {
         Err(EngineError::Unavailable)
     }
 
-    /// Phase C2g: app -> engine; tear down the group transport
-    /// (`ntg_stop` on the chat id). Unknown group call ids succeed.
+    /// Phase C2g: app -> engine; tear down the group transport. Unknown
+    /// group call ids succeed.
     fn leave_group_call(&mut self, group_call_id: i32) -> Result<(), EngineError>;
 
     fn connect(&mut self, call_id: i32, params: &ConnectParams) -> Result<(), EngineError>;
@@ -283,7 +273,7 @@ pub trait CallEngine {
     /// feeder thread (`calls::capture`). `None` until the call's sources
     /// are issued (1:1 connected, group transport connected) or when the
     /// engine has no external sources. Frames sent before the sources
-    /// exist are rejected by ntgcalls, so callers wait for `Some`.
+    /// exist are rejected by the engine, so callers wait for `Some`.
     fn external_frame_sender(
         &mut self,
         target: CaptureTarget,
@@ -293,7 +283,7 @@ pub trait CallEngine {
     }
 
     /// app -> engine; push one frame into `target`'s external source
-    /// (`ntg_send_external_frame`). The feeder uses the sender from
+    /// The feeder uses the sender from
     /// [`Self::external_frame_sender`] directly; this is the one-shot form.
     fn send_external_frame(
         &mut self,

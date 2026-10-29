@@ -34,7 +34,7 @@ pub fn binary_asset_name() -> String {
 
 /// The release asset the in-app updater downloads: the whole package users
 /// download too (the Linux tarball, the Windows zip, the macOS `Quill.app`
-/// zip), so the bundled TDLib, ntgcalls, FFmpeg and OpenSSL libraries always
+/// zip), so the bundled TDLib, call, FFmpeg and OpenSSL libraries always
 /// match the new executable. Other platforms have no package.
 pub fn update_asset_name() -> String {
     let name = binary_asset_name();

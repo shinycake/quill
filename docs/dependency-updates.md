@@ -24,7 +24,6 @@ Updates are found by a weekly watch, filed as issues, and integrated in small PR
 | `crates` | `cargo update --dry-run`, newer majors via the crates.io API | `Cargo.lock`, the resolved direct deps of every workspace member |
 | `native:ffmpeg` | FFmpeg release tags | `TAG` in `scripts/build-ffmpeg.sh` |
 | `native:thorvg` | thorvg/thorvg releases | `tag` in `third_party/thorvg/VERSION` |
-| `native:ntgcalls` | pytgcalls/ntgcalls releases | `NTGCALLS_VERSION` in `scripts/vendor-ntgcalls.sh` |
 | `native:rust` | rust-lang/rust releases | `rust-toolchain.toml` |
 | `actions` | latest release of every action in `.github/workflows` | `uses:` refs |
 
@@ -93,9 +92,10 @@ the `=` pinned crates. Updates there are deliberate and visually verified.
   the release notes for C API changes (`src/sticker_playback/thorvg.rs` declares
   the functions it calls) and for new threading or allocator behavior
   (docs/decisions/thorvg-sticker-renderer.md lists what Quill relies on).
-- **ntgcalls**: change `NTGCALLS_VERSION` and the per-asset checksums in
-  `scripts/vendor-ntgcalls.sh`; check the calls smoke path and
-  `scripts/release-lgpl-sources.sh`.
+- **tgcalls** (not watched: it follows Telegram Desktop): change the pins in
+  `scripts/build-tgcalls.sh` to the ones tdesktop's `dev` uses, check that
+  Quill's patches in `native/quill-calls/patches` still apply, and run the
+  quill-calls workflow (docs/decisions/tgcalls-engine.md).
 - **Rust toolchain**: `rust-toolchain.toml`, fix new clippy lints, gate.
 - **GitHub Actions**: bump the `uses:` ref; for SHA-pinned actions update the SHA and
   its `# vN` comment together. Run `actionlint`.

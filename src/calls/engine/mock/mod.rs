@@ -40,9 +40,6 @@ struct MockInner {
     /// Phase C2g: group transport recording for driver tests.
     group_offers: Vec<(i32, i64)>,
     group_roles: Vec<(i32, GroupCallRole)>,
-    /// The native key each live group call holds (ntgcalls keys group
-    /// calls by chat id and 1:1 calls by the peer's user id).
-    group_keys: HashMap<i32, i64>,
     group_connects: Vec<(i32, String, Option<String>)>,
     group_video_syncs: Vec<(i32, Vec<GroupVideoSource>)>,
     group_camera_changes: Vec<(i32, Option<String>)>,
@@ -66,9 +63,9 @@ struct MockInner {
     group_playbacks: Vec<(i32, Option<String>, bool)>,
     stream_sound: HashMap<i32, crate::calls::stream_audio::watch::PlaybackHealth>,
     stream_volumes: Vec<f32>,
-    device_playbacks: Vec<i32>,
+    stream_sound_reopens: Vec<i32>,
     call_sound: HashMap<i32, crate::calls::stream_audio::watch::PlaybackHealth>,
-    device_call_sounds: Vec<i32>,
+    call_sound_reopens: Vec<i32>,
     broadcast_times: Vec<(i64, BroadcastRequestId, i64)>,
     broadcast_parts: Vec<(i64, BroadcastPartAnswer)>,
     /// External frames pushed through `external_frame_sender`.
@@ -210,8 +207,7 @@ impl MockEngine {
             .insert(chat_id, mode);
     }
 
-    /// Test-only: the next `connect_group_call` fails with `code`
-    /// (e.g. `NTG_ERR_RTMP_STREAMING_UNSUPPORTED`).
+    /// Test-only: the next `connect_group_call` fails with `code`.
     pub fn fail_next_group_connect(&self, code: i32) {
         self.inner.lock_or_recover().fail_group_connect = Some(code);
     }
@@ -242,16 +238,16 @@ impl MockEngine {
             .insert(call_id, health);
     }
 
-    pub fn device_call_sounds(&self) -> Vec<i32> {
-        self.inner.lock_or_recover().device_call_sounds.clone()
+    pub fn call_sound_reopens(&self) -> Vec<i32> {
+        self.inner.lock_or_recover().call_sound_reopens.clone()
     }
 
     pub fn stream_volumes(&self) -> Vec<f32> {
         self.inner.lock_or_recover().stream_volumes.clone()
     }
 
-    pub fn device_playbacks(&self) -> Vec<i32> {
-        self.inner.lock_or_recover().device_playbacks.clone()
+    pub fn stream_sound_reopens(&self) -> Vec<i32> {
+        self.inner.lock_or_recover().stream_sound_reopens.clone()
     }
 
     pub fn stream_qualities(&self) -> Vec<(i64, StreamQuality)> {
@@ -348,12 +344,6 @@ impl CallEngine for MockEngine {
         }
         if inner.calls.contains_key(&call_id) {
             return Ok(());
-        }
-        if inner.group_keys.values().any(|key| *key == user_id) {
-            return Err(EngineError::Engine {
-                op: "ntg_create_p2p_call",
-                code: ntgcalls_sys::NTG_ERR_CONNECTION,
-            });
         }
         inner.calls.insert(call_id, (user_id, is_outgoing));
         inner.started_calls.push((call_id, user_id, is_outgoing));
@@ -516,18 +506,6 @@ impl CallEngine for MockEngine {
         if !inner.available {
             return Err(EngineError::Unavailable);
         }
-        let taken = inner
-            .group_keys
-            .iter()
-            .any(|(id, key)| *id != group_call_id && *key == chat_id)
-            || inner.calls.values().any(|(user_id, _)| *user_id == chat_id);
-        if taken {
-            return Err(EngineError::Engine {
-                op: "ntg_create_call",
-                code: ntgcalls_sys::NTG_ERR_CONNECTION,
-            });
-        }
-        inner.group_keys.insert(group_call_id, chat_id);
         inner.group_offers.push((group_call_id, chat_id));
         inner.group_roles.push((group_call_id, role));
         Ok(format!("mock-group-offer-{group_call_id}"))
@@ -545,7 +523,7 @@ impl CallEngine for MockEngine {
         }
         if let Some(code) = inner.fail_group_connect.take() {
             return Err(EngineError::Engine {
-                op: "ntg_connect",
+                op: "qc_group_set_join_response",
                 code,
             });
         }
@@ -729,10 +707,14 @@ impl CallEngine for MockEngine {
             .copied()
     }
 
-    fn use_device_playback(&mut self, group_call_id: i32) -> Result<(), EngineError> {
+    /// As the tgcalls engine: a new output replaces the old one, so the
+    /// stream keeps a (fresh) health and its volume.
+    fn reopen_stream_sound(&mut self, group_call_id: i32) -> Result<(), EngineError> {
         let mut inner = self.inner.lock_or_recover();
-        inner.stream_sound.remove(&group_call_id);
-        inner.device_playbacks.push(group_call_id);
+        if let Some(health) = inner.stream_sound.get_mut(&group_call_id) {
+            *health = Default::default();
+        }
+        inner.stream_sound_reopens.push(group_call_id);
         Ok(())
     }
 
@@ -747,10 +729,13 @@ impl CallEngine for MockEngine {
             .copied()
     }
 
-    fn use_device_call_sound(&mut self, call_id: i32) -> Result<(), EngineError> {
+    /// As the tgcalls engine: a new output replaces the old one.
+    fn reopen_call_sound(&mut self, call_id: i32) -> Result<(), EngineError> {
         let mut inner = self.inner.lock_or_recover();
-        inner.call_sound.remove(&call_id);
-        inner.device_call_sounds.push(call_id);
+        if let Some(health) = inner.call_sound.get_mut(&call_id) {
+            *health = Default::default();
+        }
+        inner.call_sound_reopens.push(call_id);
         Ok(())
     }
 
@@ -772,7 +757,6 @@ impl CallEngine for MockEngine {
             return Err(EngineError::Unavailable);
         }
         inner.group_leaves.push(group_call_id);
-        inner.group_keys.remove(&group_call_id);
         let chat_id = inner
             .group_offers
             .iter()

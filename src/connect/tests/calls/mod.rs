@@ -35,6 +35,7 @@ fn join_video_chat_guard_allows_tracked_unjoined_call() {
     let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
     let seq = AtomicU64::new(0);
     seed_ready_alice(&mut driver, &seq, &dyn_sink);
+    driver.set_call_engine(Box::new(MockEngine::new()));
 
     // No tracked call: rejected.
     assert_invalid(driver.join_video_chat(555));

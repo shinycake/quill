@@ -19,6 +19,11 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Without the call library nothing would play or send: say so, as
+        // a 1:1 call does, instead of joining a silent call.
+        if self.refuse_without_call_engine(cx) {
+            return;
+        }
         let group_call_id = self
             .session()
             .and_then(|s| s.chats.get(&chat_id.0))
@@ -84,11 +89,13 @@ impl QuillApp {
             }
         }
         if let Some(live) = self.live.as_mut() {
-            let sent = live.driver.join_video_chat(id).is_ok();
-            self.connection.set_note(if sent {
-                StatusNote::silent(tr(keys::Q_AV_JOINING_VOICE_CHAT))
-            } else {
-                StatusNote::error(tr(keys::Q_AV_COULDNT_JOIN_THE_VOICE_CHAT))
+            let result = live.driver.join_video_chat(id);
+            let sent = result.is_ok();
+            self.connection.set_note(match result {
+                Ok(_) => StatusNote::silent(tr(keys::Q_AV_JOINING_VOICE_CHAT)),
+                Err(err) => {
+                    super::calls::join_error_note(err, keys::Q_AV_COULDNT_JOIN_THE_VOICE_CHAT)
+                }
             });
             sent
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -128,7 +135,9 @@ impl QuillApp {
             self.connection
                 .set_note(match live.driver.rejoin_group_call(true) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_AV_REJOINING_VOICE_CHAT)),
-                    Err(_) => StatusNote::error(tr(keys::Q_AV_COULDNT_REJOIN_THE_VOICE_CHAT)),
+                    Err(err) => {
+                        super::calls::join_error_note(err, keys::Q_AV_COULDNT_REJOIN_THE_VOICE_CHAT)
+                    }
                 });
         } else if let Some(session) = self.demo_session.as_mut() {
             session.clear_group_call_reconnecting();
@@ -247,9 +256,8 @@ impl QuillApp {
 
     /// Phase C2g: start/stop group-call screen sharing (live only).
     /// The driver runs the presentation handshake
-    /// (`ntg_init_presentation` + `startGroupCallScreenSharing`);
-    /// stopping pairs `endGroupCallScreenSharing` with
-    /// `ntg_stop_presentation`.
+    /// (the engine's presentation payload + `startGroupCallScreenSharing`);
+    /// stopping pairs `endGroupCallScreenSharing` with the engine's stop.
     ///
     /// Where Quill captures the screen itself, starting opens the chooser
     /// first (tdesktop `chooseShareScreenSource`); the menu's Stop Sharing

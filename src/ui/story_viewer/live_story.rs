@@ -90,9 +90,11 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        if live.driver.join_live_story(chat_id, story_id).is_err() {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_JOIN_THE_LIVE)));
+        if let Err(err) = live.driver.join_live_story(chat_id, story_id) {
+            self.connection.set_note(crate::ui::calls::join_error_note(
+                err,
+                keys::Q_MEDIA_COULD_NOT_JOIN_THE_LIVE,
+            ));
         }
         cx.notify();
     }

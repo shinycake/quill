@@ -1,18 +1,10 @@
 name: quill-calls
 # Builds libquill_calls (tgcalls + tg_owt behind Quill's C API,
 # docs/decisions/tgcalls-engine.md) on every platform we ship, loads it, and
-# uploads it. Runs on PRs that touch it; the packaging workflows call it.
+# uploads it. Runs on PRs that touch it; ci.yml and release.yml call it
+# before the Linux and macOS packages, which ship the uploaded library.
 on:
   pull_request:
-    paths:
-      - 'native/quill-calls/**'
-      - 'scripts/build-tgcalls.sh'
-      - 'crates/quill-calls-sys/**'
-      - 'src/calls/engine/tgcalls/**'
-      - 'scripts/build-ffmpeg.sh'
-      - '.github/workflows/quill-calls.yml'
-  push:
-    branches: [main]
     paths:
       - 'native/quill-calls/**'
       - 'scripts/build-tgcalls.sh'
@@ -36,10 +28,16 @@ jobs:
           - { target: linux-x86_64, runner: ubuntu-22.04, lib: libquill_calls.so }
           - { target: linux-aarch64, runner: ubuntu-22.04-arm, lib: libquill_calls.so }
           - { target: macos-arm64, runner: macos-14, lib: libquill_calls.dylib }
+          # windows-x86_64 (windows-2022, quill_calls.dll) joins once its MSVC
+          # build is proven in its own PR; the Windows steps below wait for it.
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     env:
       MACOSX_DEPLOYMENT_TARGET: '14.0'
+    defaults:
+      run:
+        # Git Bash on Windows; the MSYS2 steps say so themselves.
+        shell: bash
     steps:
       - uses: actions/checkout@v7
       - name: Linux build dependencies
@@ -59,21 +57,44 @@ jobs:
           brew list nasm >/dev/null 2>&1 || brew install nasm
           brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
           echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+      # MSYS2 UCRT64 builds FFmpeg as package-windows does (MinGW, shared),
+      # and gives the MSVC build make, perl and nasm (tdesktop's msys64 stage).
+      - name: Windows build dependencies
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            git make diffutils perl
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-nasm
+            mingw-w64-ucrt-x86_64-zlib
+      # The same key as package-windows' FFmpeg, so either job's build serves both.
       - name: restore FFmpeg build
         id: ffmpeg-cache
         uses: actions/cache/restore@v6
         with:
           path: vendor/ffmpeg/prefix
-          key: ffmpeg-${{ runner.os == 'macOS' && 'macos' || 'linux' }}-${{ runner.arch }}-${{ hashFiles('scripts/build-ffmpeg.sh', 'native/quillvideo/*') }}
+          key: ffmpeg-${{ runner.os == 'macOS' && 'macos' || runner.os == 'Windows' && 'windows' || 'linux' }}-${{ runner.arch }}-${{ hashFiles('scripts/build-ffmpeg.sh', 'native/quillvideo/*') }}
       - name: build FFmpeg
-        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
+        run: bash scripts/build-ffmpeg.sh
+      - name: build FFmpeg (MSYS2 UCRT64)
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        shell: msys2 {0}
         run: bash scripts/build-ffmpeg.sh
       - name: save FFmpeg build
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: vendor/ffmpeg/prefix
-          key: ffmpeg-${{ runner.os == 'macOS' && 'macos' || 'linux' }}-${{ runner.arch }}-${{ hashFiles('scripts/build-ffmpeg.sh', 'native/quillvideo/*') }}
+          key: ffmpeg-${{ runner.os == 'macOS' && 'macos' || runner.os == 'Windows' && 'windows' || 'linux' }}-${{ runner.arch }}-${{ hashFiles('scripts/build-ffmpeg.sh', 'native/quillvideo/*') }}
+      # After FFmpeg, whose MinGW build must not see MSVC's tools.
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+        with:
+          arch: x64
       # tg_owt and the codec libraries only change with the pins in the
       # script, so cache them apart from the C API, which changes often.
       - name: restore tg_owt and codecs
@@ -81,21 +102,30 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: vendor/quill-calls/work/deps
-          key: quill-calls-deps-${{ matrix.target }}-${{ hashFiles('scripts/build-tgcalls.sh', 'scripts/build-ffmpeg.sh') }}
+          key: quill-calls-deps-${{ matrix.target }}-${{ hashFiles('scripts/build-tgcalls.sh', 'scripts/build-ffmpeg.sh', 'native/quill-calls/patches/libvpx-*') }}
       - name: build libquill_calls
+        if: runner.os != 'Windows'
+        run: bash scripts/build-tgcalls.sh
+      # MSYS2 bash with the MSVC environment from msvc-dev-cmd on its PATH.
+      - name: build quill_calls.dll (MSVC)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        env:
+          MSYS2_PATH_TYPE: inherit
         run: bash scripts/build-tgcalls.sh
       - name: save tg_owt and codecs
         if: steps.deps-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: vendor/quill-calls/work/deps
-          key: quill-calls-deps-${{ matrix.target }}-${{ hashFiles('scripts/build-tgcalls.sh', 'scripts/build-ffmpeg.sh') }}
+          key: quill-calls-deps-${{ matrix.target }}-${{ hashFiles('scripts/build-tgcalls.sh', 'scripts/build-ffmpeg.sh', 'native/quill-calls/patches/libvpx-*') }}
       - name: load the library and read its protocol versions
         env:
           # The packages ship FFmpeg next to the library; here it's in the prefix.
           LD_LIBRARY_PATH: vendor/ffmpeg/prefix/lib
         run: |
           lib="vendor/quill-calls/lib/${{ matrix.lib }}"
+          python=python3
           if [[ "$RUNNER_OS" == macOS ]]; then
             # Lay it out as the app bundle does, FFmpeg and OpenSSL beside the
             # library, so loading proves its @loader_path rpath finds them.
@@ -104,8 +134,17 @@ jobs:
             cp -L "$lib" vendor/ffmpeg/prefix/lib/*.dylib \
               "$OPENSSL_ROOT_DIR"/lib/libssl.3.dylib "$OPENSSL_ROOT_DIR"/lib/libcrypto.3.dylib "$dir/"
             lib="$dir/${{ matrix.lib }}"
+          elif [[ "$RUNNER_OS" == Windows ]]; then
+            # As the Windows package lays it out: FFmpeg's DLLs beside it
+            # (OpenSSL is linked in). Python loads a DLL's imports from the
+            # DLL's own directory, not from PATH.
+            dir="$(cygpath -u "$RUNNER_TEMP")/quill-calls"
+            mkdir -p "$dir"
+            cp "$lib" vendor/ffmpeg/prefix/bin/*.dll "$dir/"
+            lib="$(cygpath -w "$dir/${{ matrix.lib }}")"
+            python=python
           fi
-          python3 - "$lib" <<'EOF'
+          "$python" - "$lib" <<'EOF'
           import ctypes, sys
           lib = ctypes.CDLL(sys.argv[1])
           lib.qc_api_version.restype = ctypes.c_uint32
@@ -121,6 +160,11 @@ jobs:
         run: |
           if [[ "$RUNNER_OS" == macOS ]]; then
             syms="$(nm -gU vendor/quill-calls/lib/${{ matrix.lib }} | awk '{print $NF}')"
+          elif [[ "$RUNNER_OS" == Windows ]]; then
+            # The "ordinal hint RVA name" rows of the export table.
+            syms="$(dumpbin -nologo -exports vendor/quill-calls/lib/${{ matrix.lib }} | tr -d '\r' \
+              | awk 'NF == 4 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9A-Fa-f]+$/ && length($3) == 8 { print $4 }')"
+            grep -qx qc_api_version <<<"$syms" || { echo "error: qc_api_version is not exported" >&2; exit 1; }
           else
             syms="$(nm -D --defined-only vendor/quill-calls/lib/${{ matrix.lib }} | awk '{print $NF}')"
           fi
@@ -136,12 +180,17 @@ jobs:
           # Exported here: macOS drops DYLD_* when it starts the step's bash.
           export LD_LIBRARY_PATH="$PWD/vendor/ffmpeg/prefix/lib"
           export DYLD_LIBRARY_PATH="$PWD/vendor/ffmpeg/prefix/lib${OPENSSL_ROOT_DIR:+:$OPENSSL_ROOT_DIR/lib}"
+          # Windows: FFmpeg's DLLs; OpenSSL is linked into quill_calls.dll.
+          export PATH="$PWD/vendor/ffmpeg/prefix/bin:$PATH"
           cargo test -p quill-calls-sys --locked
       - name: the 1:1 engine against the library
         run: |
           export LD_LIBRARY_PATH="$PWD/vendor/ffmpeg/prefix/lib"
           export DYLD_LIBRARY_PATH="$PWD/vendor/ffmpeg/prefix/lib${OPENSSL_ROOT_DIR:+:$OPENSSL_ROOT_DIR/lib}"
-          export QUILL_CALLS_LIB="$PWD/vendor/quill-calls/lib/${{ matrix.lib }}"
+          export PATH="$PWD/vendor/ffmpeg/prefix/bin:$PATH"
+          root="$PWD"
+          [[ "$RUNNER_OS" == Windows ]] && root="$(cygpath -m "$PWD")"
+          export QUILL_CALLS_LIB="$root/vendor/quill-calls/lib/${{ matrix.lib }}"
           cargo test --no-default-features --lib --locked calls::engine::tgcalls
       - uses: actions/upload-artifact@v7
         with:

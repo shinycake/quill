@@ -55,7 +55,7 @@ pub enum CallsPurpose {
     EndGroupCall { group_call_id: i32 },
     /// Phase C2g: `startGroupCallScreenSharing` (schema 1.8.67, :14303).
     /// Response is `text` — the presentation answer for
-    /// `ntg_connect(..., is_presentation=true)`.
+    /// `CallEngine::connect_screen_share`.
     StartGroupCallScreenSharing { group_call_id: i32 },
     /// Phase C2g: `endGroupCallScreenSharing` (schema 1.8.67, :14309).
     /// Response is `ok`.

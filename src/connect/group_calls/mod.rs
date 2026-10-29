@@ -35,7 +35,7 @@ pub(crate) mod stream;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase C2g: native group-call transport lifecycle, after every
-    /// reducer update. Finishes the `ntg_connect` handshake once the join answer arrives,
+    /// reducer update. Finishes the connect handshake once the join answer arrives,
     /// keeps the outgoing camera and the incoming video subscriptions in
     /// sync with the tracked participants, finishes the presentation
     /// handshake, and tears the transport down when a tracked call goes
@@ -107,10 +107,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }
             }
             let connected = result.is_ok();
-            let unsupported = result
-                .as_ref()
-                .err()
-                .is_some_and(|err| err.is_stream_unsupported());
             if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
                 match result {
                     Ok(()) => {
@@ -123,9 +119,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }
             }
             self.note_stream_rtmp_info(group_call_id, &answer);
-            if unsupported {
-                self.mark_stream_unsupported(group_call_id, &answer);
-            }
             if connected {
                 self.start_stream_feeder(group_call_id);
                 self.group_camera_state.insert(group_call_id, camera);

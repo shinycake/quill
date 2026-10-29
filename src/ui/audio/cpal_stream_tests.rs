@@ -180,7 +180,7 @@ fn engine_names_elsewhere_are_taken_as_they_are() {
 
 #[test]
 fn device_names_match_exactly_or_ignoring_case() {
-    // cpal 0.18 on Windows reports the FriendlyName, as ntgcalls lists it.
+    // cpal 0.18 on Windows reports the FriendlyName, as the engine lists it.
     assert!(device_name_matches(
         "Microphone (Realtek(R) Audio)",
         "Microphone (Realtek(R) Audio)"

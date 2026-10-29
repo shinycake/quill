@@ -5,10 +5,8 @@
 //! participant and sends the speaking action to the server).
 //!
 //! The level comes from the call's own microphone stream
-//! (`call_capture`), so nothing opens the device twice. Under
-//! `QUILL_CALL_CAPTURE=native` ntgcalls holds the microphone and hands
-//! Quill no samples, so the tap opens the default input device beside
-//! it, as before. tdesktop's remote levels
+//! (`call_capture`), so nothing opens the device twice. Without that
+//! stream the tap opens the default input device itself. tdesktop's remote levels
 //! come from tgcalls per ssrc; Quill has no such signal, so other
 //! participants' speaking state stays TDLib's `is_speaking`.
 
@@ -88,7 +86,7 @@ impl CallAudio {
     }
 
     /// Open the level source: an injected one, the call capture's level
-    /// (`capture`), or the default microphone (native capture).
+    /// (`capture`), or the default microphone (no call capture).
     fn open(&mut self, capture: Option<Arc<LevelCell>>) {
         if self.source.is_some() {
             return;
@@ -148,8 +146,7 @@ impl LevelSource for CaptureLevel {
 
 #[cfg(feature = "ui")]
 fn open_microphone() -> Result<Box<dyn LevelSource>, String> {
-    // Native capture only: ntgcalls processes nothing here, so the tap
-    // measures the raw microphone.
+    // No call capture: the tap measures the raw microphone.
     crate::calls::level_tap::LevelTap::open_default()
         .map(|tap| Box::new(tap) as Box<dyn LevelSource>)
 }

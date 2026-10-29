@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/ntgcalls-sys", "crates/quill-calls-sys", "crates/webview-protocol", "crates/webview-host"]
+members = [".", "crates/quill-calls-sys", "crates/webview-protocol", "crates/webview-host"]
 resolver = "2"
 
 # Never crash (docs/contributing/panic-safety.md, phases A and B). Test code is
@@ -103,7 +103,6 @@ moxcms = { version = "0.8", optional = true }
 jxl-oxide = { version = "0.12", optional = true, default-features = false, features = ["rayon", "moxcms"] }
 libloading = "0.9"
 libc = "0.2"
-ntgcalls-sys = { path = "crates/ntgcalls-sys" }
 quill-calls-sys = { path = "crates/quill-calls-sys" }
 qrcode = { version = "0.14", optional = true, default-features = false, features = ["image"] }
 rand = "0.10"
@@ -125,7 +124,7 @@ opus-decoder = { version = "0.1", optional = true }
 # through) and a pure-Rust Opus encoder, muxed with `ogg`. No external binary.
 cpal = { version = "0.18", optional = true, default-features = false }
 # Call noise suppression (docs/decisions/call-capture.md): RNNoise ported to
-# Rust, run on Quill's own 10 ms microphone frames before ntgcalls encodes
+# Rust, run on Quill's own 10 ms microphone frames before tgcalls encodes
 # them. Pure Rust; the library only, not its command-line tool.
 nnnoiseless = { version = "0.5.2", default-features = false }
 rusty-opus = { version = "1", optional = true }
@@ -296,7 +295,7 @@ strip = "debuginfo"
 
 # Local iteration: keep only line tables in the top crate and strip debuginfo
 # from external dependencies entirely (workspace path deps like
-# ntgcalls-sys keep line tables — Cargo ignores package overrides for
+# quill-calls-sys keep line tables — Cargo ignores package overrides for
 # workspace members). Release profile is untouched; use
 # `--profile debugging` (full debuginfo) when real debug info is needed.
 [profile.dev]

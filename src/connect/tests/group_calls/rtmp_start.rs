@@ -286,6 +286,7 @@ fn creating_while_a_one_to_one_call_hangs_up_is_allowed() {
 fn a_join_in_flight_counts_as_being_in_the_call_and_leaving_sends_leave() {
     use crate::calls::group_call_create::CurrentCall;
     let (recorder, mut driver) = driver_with_channel(true);
+    driver.set_call_engine(Box::new(crate::calls::engine::MockEngine::new()));
     // You asked to join another chat's call (77); its answer has not come.
     driver.session.calls.active_group_call = Some(crate::state::ActiveGroupCall::fresh(77));
     assert_eq!(

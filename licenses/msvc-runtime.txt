@@ -3,7 +3,7 @@ Microsoft Visual C++ runtime (Windows package only)
 quill.exe (with ThorVG compiled in) and tdjson.dll are built with Microsoft
 Visual C++ and link the C/C++ runtime statically (/MT; Rust's +crt-static), so
 the Windows package ships no vcruntime140*.dll or msvcp140*.dll and needs no
-Visual C++ Redistributable. ntgcalls.dll (upstream prebuilt) also links it statically.
+Visual C++ Redistributable.
 
 The runtime library code linked into those files is Microsoft's. It is
 distributed as part of the program under the Microsoft Visual Studio license

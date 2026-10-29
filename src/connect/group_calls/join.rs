@@ -91,13 +91,17 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// on the tracked call and consumed by the driver pump to finish the
     /// native handshake.
     /// Phase C2g: the native group transport is created first so the
-    /// join carries the real tgcalls offer (`ntg_create_call`) as its
-    /// payload, with `audio_source_id` parsed from the offer SDP. When
-    /// no engine is available (or the offer fails), the join still goes
-    /// out with the honest no-device params — signaling-only, as before.
+    /// join carries the real tgcalls join payload as its payload, with
+    /// `audio_source_id` read from it. Without an engine nothing is sent
+    /// (`CallsUnavailable`): a join would show you in the call while you
+    /// hear and see nothing. When the offer fails, the join still goes out
+    /// with the honest no-device params.
     pub fn join_video_chat(&mut self, group_call_id: i32) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.has_call_engine() {
+            return Err(ConnectSendError::CallsUnavailable);
         }
         // Never join while a 1:1 call is active. A tracked group call is
         // fine to join when it is the same call and not yet joined (the
@@ -281,7 +285,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .is_some_and(|call| call.id == intent.group_call_id && !call.is_joined);
         if ready {
             self.session.calls.pending_live_story_join = None;
-            self.join_story_stream(intent.group_call_id)?;
+            if !self.refuse_story_stream_in_member_chat(intent.group_call_id) {
+                self.join_story_stream(intent.group_call_id)?;
+            }
             return Ok(());
         }
         // The `getGroupCall` request finished without producing a
@@ -391,6 +397,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        if !self.has_call_engine() {
+            return Err(ConnectSendError::CallsUnavailable);
+        }
         if manual && let Some(call) = self.session.calls.group_call_mut(group_call_id) {
             call.rejoin_attempts = 0;
         }
@@ -417,9 +426,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .is_some_and(|engine| engine.presentation_active(group_call_id));
         // A stream's pending parts are answered, then the old native call
         // stops, before the fresh context replaces it. Without the stop
-        // ntgcalls keeps the old connection for the chat: the new offer
-        // fails and the old stream keeps asking for parts that nobody
-        // serves. The new connect starts a new feeder.
+        // the old instance keeps asking for parts that nobody serves. The
+        // new connect starts a new feeder.
         self.drain_stream_feeder(group_call_id);
         if let Some(engine) = self.call_engine.as_deref_mut()
             && engine.leave_group_call(group_call_id).is_ok()
@@ -482,8 +490,8 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Phase C2g: build `joinVideoChat` params for a (re)join. Creates
     /// the native group context first so the payload is the real tgcalls
-    /// offer; degrades to the honest no-device params when no engine is
-    /// available or the offer fails (the join is never blocked).
+    /// offer; degrades to the honest no-device params when the offer
+    /// fails. The joins that call this refuse first without an engine.
     fn group_join_params(&mut self, group_call_id: i32, is_muted: bool) -> GroupCallJoinParams {
         let is_my_video_enabled = self
             .session
@@ -508,7 +516,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if role == GroupCallRole::Member
             && let Some(chat_id) = chat_id
         {
-            self.yield_story_stream_key(chat_id);
+            self.yield_story_stream_to_chat(chat_id);
         }
         let offer = match (chat_id, self.call_engine.as_deref_mut()) {
             (Some(chat_id), Some(engine)) if engine.is_available() => {

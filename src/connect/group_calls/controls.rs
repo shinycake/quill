@@ -4,12 +4,12 @@ use super::*;
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase C2g: start or stop screen sharing in the tracked group
     /// call. Starting goes through the native presentation handshake:
-    /// `ntg_init_presentation` yields the offer that
+    /// the engine's presentation instance yields the payload that
     /// `startGroupCallScreenSharing` (schema 1.8.67, :14303) carries;
     /// its `Text` answer is consumed by the driver pump
-    /// (`ntg_connect(..., is_presentation=true)` + desktop capture).
-    /// Stopping pairs `endGroupCallScreenSharing` (:14309) with
-    /// `ntg_stop_presentation`. Requires the joined call and an
+    /// (`connect_screen_share` + Quill's screen capture). Stopping pairs
+    /// `endGroupCallScreenSharing` (:14309) with `stop_screen_share`.
+    /// Requires the joined call and an
     /// available engine; without one the toggle is rejected.
     pub fn toggle_group_call_screen_share(&mut self) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {

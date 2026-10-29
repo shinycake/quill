@@ -1,8 +1,10 @@
 name: package-macos
 # Reusable: Quill.app for macOS 14+ on Apple Silicon, built on a GitHub-hosted
 # arm64 runner (never the personal self-hosted Mac). TDLib is built from source
-# (cached), ntgcalls is the pinned upstream library, OpenSSL is bundled from the
-# runner's Homebrew by scripts/macos-package-smoke.sh.
+# (cached), libquill_calls (the call library) comes from quill-calls.yml, which
+# the caller runs first in the same run, with the FFmpeg it links (cached),
+# and OpenSSL is bundled from the runner's Homebrew by
+# scripts/macos-package-smoke.sh.
 # Not notarized: there is no Developer ID (docs/decisions/codex-release-pipeline.md).
 # Signed with the owner's Apple Development identity when the caller passes
 # MACOS_SIGNING_P12, ad-hoc otherwise. The certificate keeps the keychain
@@ -81,8 +83,28 @@ jobs:
         with:
           path: native/prefix
           key: tdlib-macos-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib.sh', 'native/patches/*') }}
-      - name: vendor ntgcalls (checksum pinned)
-        run: bash scripts/vendor-ntgcalls.sh
+      # libquill_calls links FFmpeg dynamically; the app ships the build it
+      # was linked against (same cache key as quill-calls.yml).
+      - name: restore FFmpeg build
+        id: ffmpeg-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: vendor/ffmpeg/prefix
+          key: ffmpeg-macos-${{ runner.arch }}-${{ hashFiles('scripts/build-ffmpeg.sh', 'native/quillvideo/*') }}
+      - name: build FFmpeg
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build-ffmpeg.sh
+      - name: save FFmpeg build
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: vendor/ffmpeg/prefix
+          key: ffmpeg-macos-${{ runner.arch }}-${{ hashFiles('scripts/build-ffmpeg.sh', 'native/quillvideo/*') }}
+      - name: download libquill_calls
+        uses: actions/download-artifact@v8
+        with:
+          name: quill-calls-macos-arm64
+          path: vendor/quill-calls
       # The secrets reach only this step, as compile-time env read by
       # option_env! (src/credentials.rs).
       - name: build release ui
@@ -133,9 +155,19 @@ jobs:
         run: |
           QUILL_BIN="$PWD/target/release/quill" QUILL_TDJSON_PATH="$PWD/native/prefix/lib/libtdjson.dylib" \
             bash scripts/macos-package-smoke.sh
-          for lib in libtdjson.dylib libntgcalls.dylib; do
+          for lib in libtdjson.dylib libquill_calls.dylib libssl.3.dylib libcrypto.3.dylib; do
             test -f "dist/Quill.app/Contents/Frameworks/$lib" || { echo "missing Frameworks/$lib" >&2; exit 1; }
           done
+          ls dist/Quill.app/Contents/Frameworks/libavcodec.*.dylib
+          # The call library loads from the bundle alone: FFmpeg and OpenSSL
+          # through its @loader_path rpath, nothing from Homebrew or the prefix.
+          env -u DYLD_LIBRARY_PATH python3 - dist/Quill.app/Contents/Frameworks/libquill_calls.dylib <<'EOF'
+          import ctypes, sys
+          lib = ctypes.CDLL(sys.argv[1])
+          lib.qc_max_layer.restype = ctypes.c_int32
+          assert lib.qc_max_layer() >= 92, "libquill_calls did not load"
+          print("libquill_calls loads from the bundle, max layer", lib.qc_max_layer())
+          EOF
           codesign --verify --deep --strict --verbose=2 dist/Quill.app
           if [ -n "${QUILL_CODESIGN_IDENTITY:-}" ]; then
             codesign -dv dist/Quill.app 2>&1 | grep -E '^TeamIdentifier=[A-Z0-9]{10}$' \

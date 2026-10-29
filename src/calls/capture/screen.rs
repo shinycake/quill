@@ -76,12 +76,10 @@ pub enum ScreenAccess {
 /// capture starts (see [`ScreenBackend::system_picker`]).
 pub const SYSTEM_PICKER_SOURCE: &str = "system-picker";
 
-/// Whether calls can share a screen here: ntgcalls' desktop capture on
-/// macOS and Windows, and on Linux only Quill's own capture (the portal or
-/// X11), so not under `QUILL_CALL_CAPTURE=native`.
+/// Whether calls can share a screen here: Quill's own capture (on Linux
+/// the portal or X11) feeds the call's external screen source.
 pub fn can_share() -> bool {
-    cfg!(any(target_os = "macos", windows))
-        || crate::calls::engine::external_screen_capture_enabled()
+    crate::calls::engine::external_screen_capture_enabled()
 }
 
 /// The per-OS screen capture. Listing and thumbnails run on a background
@@ -183,7 +181,7 @@ pub fn fit_capture_size(width: u32, height: u32, max_width: u32, max_height: u32
 }
 
 /// NV12 (a Y plane and an interleaved UV plane) to I420 (Y, U, V planes),
-/// the layout `ntg_send_external_frame` takes for screens. `width` and
+/// the layout the engine takes for screens. `width` and
 /// `height` must be even; strides may exceed the width. `None` when the
 /// planes are too short.
 pub fn nv12_to_i420(

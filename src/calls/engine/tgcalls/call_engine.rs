@@ -98,7 +98,7 @@ impl CallEngine for TgcallsEngine {
                 code: -1,
             }
         })?;
-        let config = native_string(&config)?;
+        let config = text("qc_p2p_create", &config)?;
         self.open_sound(call_id)?;
         self.apply_camera(call_id)?;
         let call = self.call_mut(call_id)?;
@@ -302,7 +302,7 @@ impl CallEngine for TgcallsEngine {
         self.group_stream_health(group_call_id)
     }
 
-    fn use_device_playback(&mut self, group_call_id: i32) -> Result<(), EngineError> {
+    fn reopen_stream_sound(&mut self, group_call_id: i32) -> Result<(), EngineError> {
         self.reopen_group_sound(group_call_id)
     }
 
@@ -353,7 +353,7 @@ impl CallEngine for TgcallsEngine {
             .map(|player| player.audio().health())
     }
 
-    fn use_device_call_sound(&mut self, call_id: i32) -> Result<(), EngineError> {
+    fn reopen_call_sound(&mut self, call_id: i32) -> Result<(), EngineError> {
         // There is no device output inside the library: reopen Quill's. A
         // failed open leaves no player, so `call_sound_health` is `None`.
         self.open_sound(call_id)

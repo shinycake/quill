@@ -1,18 +1,27 @@
-# Load tdjson/ntgcalls/quillvideo from the package and assert the FFmpeg DLLs mapped
+# Load tdjson/quill_calls (when shipped)/quillvideo from the package and assert the FFmpeg DLLs mapped
 # into this process came from the package directory, and that no OpenSSL/zlib DLL was
 # loaded at all (tdjson.dll links them statically).
 # Run with the package directory's DLLs not on PATH.   pwsh scripts/check-bundle-load.ps1 <dir>
 param([Parameter(Mandatory)][string]$Dir)
 $ErrorActionPreference = 'Stop'
 $Dir = (Resolve-Path $Dir).Path
-foreach ($name in 'tdjson.dll', 'ntgcalls.dll', 'quillvideo.dll') {
+foreach ($name in 'tdjson.dll', 'quill_calls.dll', 'quillvideo.dll') {
     $path = Join-Path $Dir $name
+    # TODO(tgcalls-windows): quill_calls.dll is optional until the Windows
+    # build joins the packaging (docs/decisions/tgcalls-engine.md).
+    if ($name -eq 'quill_calls.dll' -and -not (Test-Path $path)) { Write-Host "no $name (calls unavailable)"; continue }
     $handle = [System.Runtime.InteropServices.NativeLibrary]::Load($path)
     Write-Host "loaded $name"
     if ($name -eq 'tdjson.dll') {
         foreach ($sym in 'td_create_client_id', 'td_send', 'td_receive', 'td_execute') {
             $addr = [System.Runtime.InteropServices.NativeLibrary]::GetExport($handle, $sym)
             if ($addr -eq [IntPtr]::Zero) { throw "tdjson.dll does not export $sym" }
+        }
+    }
+    if ($name -eq 'quill_calls.dll') {
+        foreach ($sym in 'qc_api_version', 'qc_library_versions', 'qc_max_layer') {
+            $addr = [System.Runtime.InteropServices.NativeLibrary]::GetExport($handle, $sym)
+            if ($addr -eq [IntPtr]::Zero) { throw "quill_calls.dll does not export $sym" }
         }
     }
     if ($name -eq 'quillvideo.dll') {
