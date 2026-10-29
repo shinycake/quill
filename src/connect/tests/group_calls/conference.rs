@@ -311,8 +311,24 @@ fn a_dead_conference_gives_way_to_a_new_join() {
             .join_conference_link("https://t.me/call/new".into()),
         Err(ConnectSendError::InvalidRequest)
     );
-    // Its rejoins are spent: the new link replaces it.
+    // A failed screen share leaves it working: still refused.
+    harness
+        .1
+        .session
+        .calls
+        .active_group_call
+        .as_mut()
+        .unwrap()
+        .transport_error = Some("screen share failed".into());
+    assert_eq!(
+        harness
+            .1
+            .join_conference_link("https://t.me/call/new".into()),
+        Err(ConnectSendError::InvalidRequest)
+    );
+    // Its rejoins are spent: the new link replaces it, and it is left.
     let call = harness.1.session.calls.active_group_call.as_mut().unwrap();
+    call.is_joined = true;
     call.reconnecting = true;
     call.rejoin_attempts = crate::state::MAX_GROUP_CALL_REJOIN_ATTEMPTS;
     harness
@@ -323,6 +339,7 @@ fn a_dead_conference_gives_way_to_a_new_join() {
     assert_eq!(join["input_group_call"]["link"], "https://t.me/call/new");
     assert!(harness.1.session.calls.active_group_call.is_none());
     assert!(harness.3.group_leaves().contains(&555));
+    assert_eq!(sent_count(&harness.2, "leaveGroupCall"), 1);
     assert_eq!(bound_call(&harness.1), Some((-1, None)));
     let _ = std::fs::remove_dir_all(&harness.0);
 }

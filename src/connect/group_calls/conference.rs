@@ -4,7 +4,10 @@
 //! created by "Add people" in a 1:1 call, which then ends with the
 //! conference's link (tdesktop `startOrJoinConferenceCall`).
 use super::*;
-use crate::state::{ConferenceInput, ConferenceOrigin, ConferenceUpgrade};
+use crate::state::{
+    ActiveGroupCall, ConferenceInput, ConferenceOrigin, ConferenceUpgrade,
+    MAX_GROUP_CALL_REJOIN_ATTEMPTS,
+};
 use crate::telegram::envelope::{CallState, CallsPayload, Envelope, EnvelopePayload};
 use crate::telegram::group_call_crypto::GroupCallCrypto;
 use crate::telegram::requests::create_group_call;
@@ -134,8 +137,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .active_group_call
                 .as_ref()
                 .is_some_and(|call| {
-                    (call.is_joined || call.is_conference())
-                        && !(call.is_conference() && call.join_failed())
+                    (call.is_joined || call.is_conference()) && !conference_dead(call)
                 })
         {
             return Err(ConnectSendError::InvalidRequest);
@@ -161,6 +163,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         // A call only looked at, or a dead conference, gives way
         // (tdesktop's single current call).
+        // A dead conference TDLib still counts as joined is left there too.
+        if self
+            .session
+            .calls
+            .active_group_call
+            .as_ref()
+            .is_some_and(|call| call.is_joined)
+        {
+            let _ = self.leave_group_call();
+        }
         if self.session.calls.active_group_call.is_some() {
             self.drop_group_call_locally();
         }
@@ -428,4 +440,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         result
     }
+}
+
+/// A conference that no longer carries the call: its rejoins are spent.
+/// A recorded `transport_error` alone is not enough: a failed screen
+/// share or mute leaves a working call.
+fn conference_dead(call: &ActiveGroupCall) -> bool {
+    call.is_conference()
+        && call.reconnecting
+        && call.rejoin_attempts >= MAX_GROUP_CALL_REJOIN_ATTEMPTS
 }
