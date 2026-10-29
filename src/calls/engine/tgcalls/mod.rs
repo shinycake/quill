@@ -52,6 +52,9 @@ struct P2pCall {
     media: CallMediaConfig,
     muted: bool,
     camera: Option<NonNull<qc_video_capture>>,
+    /// The external source a screen share pushes into, owned by Quill: the
+    /// gate borrows it, so it's freed only after the gate lets go.
+    screen: Option<NonNull<qc_video_capture>>,
     sound: Option<StreamPlayer>,
 }
 
@@ -182,6 +185,16 @@ fn release_camera(api: &Loader, call: &mut P2pCall) {
     }
 }
 
+/// Stops screen pictures and drops Quill's reference to the share's source.
+/// The call must no longer send it (another source, NULL, or destroyed).
+fn release_screen(api: &Loader, call: &mut P2pCall) {
+    call.gate.set_screen(None);
+    if let Some(screen) = call.screen.take() {
+        // SAFETY: Quill's live reference; the gate no longer borrows it.
+        unsafe { (api.qc_video_capture_free)(screen.as_ptr()) };
+    }
+}
+
 /// Ends the call in the library: no callback or feeder reaches it after.
 fn destroy(api: &Loader, call: &mut P2pCall) {
     call.gate.close();
@@ -191,6 +204,7 @@ fn destroy(api: &Loader, call: &mut P2pCall) {
         unsafe { (api.qc_p2p_destroy)(handle.as_ptr()) };
     }
     release_camera(api, call);
+    release_screen(api, call);
     call.context.sound.store(None);
     call.sound = None;
 }
@@ -237,6 +251,7 @@ fn new_call(call_id: i32, shared: &Arc<CallbackShared>) -> P2pCall {
         },
         muted: false,
         camera: None,
+        screen: None,
         sound: None,
     }
 }
@@ -357,11 +372,37 @@ mod tests {
         };
         let picture = vec![128u8; 64 * 48 * 3 / 2];
         sender.send(ExternalDevice::Screen, &picture, meta).unwrap();
+        // Enabling again keeps the same source going.
+        engine.set_screen_share_enabled(3, true).unwrap();
+        sender.send(ExternalDevice::Screen, &picture, meta).unwrap();
         engine.set_screen_share_enabled(3, false).unwrap();
         assert_eq!(
             sender.send(ExternalDevice::Screen, &picture, meta),
             Err(EngineError::Unavailable)
         );
         engine.hangup(3).unwrap();
+    }
+
+    #[test]
+    fn a_share_started_before_connect_survives_a_retry() {
+        let Some(mut engine) = engine() else { return };
+        let params = params(&engine);
+        engine.start_call(4, 77, true).unwrap();
+        engine.set_screen_share_enabled(4, true).unwrap();
+        let meta = ExternalFrameMeta {
+            timestamp_ms: 0,
+            width: 64,
+            height: 48,
+        };
+        let picture = vec![128u8; 64 * 48 * 3 / 2];
+        for _ in 0..2 {
+            engine.connect(4, &params).unwrap();
+            assert!(engine.calls[&4].media.screen_share_on);
+            let sender = engine
+                .external_frame_sender(CaptureTarget::Private(4))
+                .unwrap();
+            sender.send(ExternalDevice::Screen, &picture, meta).unwrap();
+        }
+        engine.hangup(4).unwrap();
     }
 }

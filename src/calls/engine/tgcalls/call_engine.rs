@@ -60,6 +60,8 @@ impl CallEngine for TgcallsEngine {
         set_hook(&self.callback.remote_video_hook, callback);
     }
 
+    /// Never fired for a 1:1 call: tgcalls carries a screen share on the one
+    /// video track, reported through the remote video state.
     fn set_remote_screen_state_callback(&mut self, callback: RemoteVideoStateCallback) {
         set_hook(&self.callback.remote_screen_hook, callback);
     }
@@ -79,7 +81,11 @@ impl CallEngine for TgcallsEngine {
             // SAFETY: a live call destroyed once, not from its callback.
             unsafe { (api.qc_p2p_destroy)(handle.as_ptr()) };
         } else {
-            call.media = retained_call_media(params, None);
+            // A share turned on before connect carries into the call.
+            call.media = retained_call_media(params, Some(&call.media));
+            if call.media.screen_share_on {
+                call.media.camera = None;
+            }
         }
         let config = config::p2p_config(params, max_layer).map_err(|err| {
             crate::advanced::debug_mode::call_log(&format!(
@@ -95,10 +101,13 @@ impl CallEngine for TgcallsEngine {
         self.apply_camera(call_id)?;
         let call = self.call_mut(call_id)?;
         let callbacks = call.context.callbacks();
-        let video = call.camera.map_or(std::ptr::null_mut(), NonNull::as_ptr);
+        let video = call
+            .camera
+            .or(call.screen)
+            .map_or(std::ptr::null_mut(), NonNull::as_ptr);
         // SAFETY: NUL-ended config; the context behind `callbacks.user`
         // lives in `call` until `qc_p2p_destroy` returns; the call takes
-        // its own reference to `video`.
+        // its own reference to `video`, Quill keeps its own.
         let handle = unsafe { (api.qc_p2p_create)(config.as_ptr(), &callbacks, video) };
         crate::advanced::debug_mode::call_log(&format!(
             "[call] {call_id} tgcalls create {:?} servers {} p2p {} -> {}",
@@ -113,6 +122,7 @@ impl CallEngine for TgcallsEngine {
         })?;
         call.handle = Some(handle);
         call.gate.open(api, handle.as_ptr());
+        call.gate.set_screen(call.screen.map(NonNull::as_ptr));
         // SAFETY: a live call.
         unsafe { (api.qc_p2p_set_muted)(handle.as_ptr(), i32::from(call.muted)) };
         for data in std::mem::take(&mut call.pending_signaling) {
@@ -164,47 +174,52 @@ impl CallEngine for TgcallsEngine {
     }
 
     fn set_camera(&mut self, call_id: i32, camera: Option<&str>) -> Result<(), EngineError> {
+        let api = self.api;
         let call = self.call_mut(call_id)?;
         let previous = call.media.camera.clone();
         call.media.camera = camera.map(str::to_owned);
-        if camera.is_some() {
-            // The camera replaces a screen share, as in tdesktop.
-            call.media.screen_share_on = false;
-            call.gate.set_screen(None);
-        }
         if let Err(err) = self.apply_camera(call_id) {
             self.call_mut(call_id)?.media.camera = previous;
             return Err(err);
+        }
+        if camera.is_some() {
+            // The camera replaced a screen share in the call, as in
+            // tdesktop; its source can go now.
+            let call = self.call_mut(call_id)?;
+            call.media.screen_share_on = false;
+            release_screen(api, call);
         }
         Ok(())
     }
 
     fn set_screen_share_enabled(&mut self, call_id: i32, enabled: bool) -> Result<(), EngineError> {
         let api = self.api;
-        if enabled {
-            self.call_mut(call_id)?.media.camera = None;
-            self.apply_camera(call_id)?;
-        }
-        let call = self.call_mut(call_id)?;
-        call.media.screen_share_on = enabled;
-        let Some(handle) = call.handle else {
+        if !enabled {
+            let call = self.call_mut(call_id)?;
+            call.media.screen_share_on = false;
+            if let (Some(handle), Some(_)) = (call.handle, call.screen) {
+                // SAFETY: a live call; NULL stops sending video.
+                unsafe { (api.qc_p2p_set_video_capture)(handle.as_ptr(), std::ptr::null_mut()) };
+            }
+            release_screen(api, call);
             return Ok(());
-        };
-        if enabled {
-            // SAFETY: returns a new external source owned by this scope.
-            let screen = unsafe { (api.qc_video_capture_external)(1) };
-            let screen = NonNull::new(screen).ok_or(EngineError::NoScreenSource)?;
-            // SAFETY: both live; the call keeps its own reference, so
-            // Quill's is released right away and the gate keeps a borrow
-            // that is cleared before the call (and so the source) goes.
+        }
+        if self.call(call_id)?.screen.is_some() {
+            return Ok(());
+        }
+        self.call_mut(call_id)?.media.camera = None;
+        self.apply_camera(call_id)?;
+        let call = self.call_mut(call_id)?;
+        // SAFETY: returns a new external source; Quill keeps the reference
+        // in `call.screen` until `release_screen`.
+        let screen = unsafe { (api.qc_video_capture_external)(1) };
+        let screen = NonNull::new(screen).ok_or(EngineError::NoScreenSource)?;
+        call.screen = Some(screen);
+        call.media.screen_share_on = true;
+        if let Some(handle) = call.handle {
+            // SAFETY: both live; the call takes its own reference.
             unsafe { (api.qc_p2p_set_video_capture)(handle.as_ptr(), screen.as_ptr()) };
             call.gate.set_screen(Some(screen.as_ptr()));
-            // SAFETY: Quill's reference; the call still holds the source.
-            unsafe { (api.qc_video_capture_free)(screen.as_ptr()) };
-        } else {
-            call.gate.set_screen(None);
-            // SAFETY: a live call; NULL stops sending video.
-            unsafe { (api.qc_p2p_set_video_capture)(handle.as_ptr(), std::ptr::null_mut()) };
         }
         Ok(())
     }
@@ -276,7 +291,8 @@ impl CallEngine for TgcallsEngine {
     }
 
     fn use_device_call_sound(&mut self, call_id: i32) -> Result<(), EngineError> {
-        // There is no device output inside the library: reopen Quill's.
+        // There is no device output inside the library: reopen Quill's. A
+        // failed open leaves no player, so `call_sound_health` is `None`.
         self.open_sound(call_id)
     }
 
